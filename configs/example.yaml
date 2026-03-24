@@ -1,0 +1,66 @@
+dataset:
+  name: my_dataset
+
+paths:
+  input_root: ./data/raw/my_dataset
+  output_root: ./data/processed/my_dataset
+  checkpoint_dir: ./data/checkpoints/my_dataset
+
+detection:
+  min_text_coverage: 0.3
+  form_signal_threshold: 0.5
+  table_signal_threshold: 0.4
+
+extraction:
+  native:
+    include_tables: true
+  ocr:
+    engine: paddleocr
+    dpi: 300
+    lang: eng
+
+# Redaction runs as a separate pipeline stage after extraction.
+# mode: flag     — mark records/chunks that contain redacted regions (no text change)
+# mode: blackout — replace affected page text with [REDACTED] markers
+# mode: delete   — remove affected page text entirely
+redaction:
+  enabled: true
+  mode: flag
+  threshold: 50
+  min_area_ratio: 0.001
+  max_area_ratio: 0.9
+  dpi: 150
+
+chunking:
+  tokenizer: "isaacus/kanon-2-tokenizer"
+  chunk_size: 480
+  enabled: true
+  chunk_tables: true
+
+# PII cleaning uses regex pattern recognisers (Presidio-style) validated by
+# a Sentence Transformers context model (all-MiniLM-L6-v2, 22M params).
+# Requires: pip install womblex[pii]
+#
+# pipeline_point: post_extraction — clean page texts before chunking
+#                 post_chunk      — clean individual chunk texts after chunking
+#                 post_enrichment — clean chunks using Isaacus graph entities
+#                                   as high-confidence candidates + regex fallback
+pii:
+  enabled: false
+  entities:
+    - PERSON
+    # - ADDRESS          # street addresses (regex + enrichment)
+    # - EMAIL            # enrichment only
+    # - PHONE_NUMBER     # enrichment only
+    # - ID_NUMBER        # enrichment only
+  person_types:
+    - natural
+    # - corporate        # include corporate entities as PII
+    # - politic          # include government bodies as PII
+  pipeline_point: post_chunk
+  context_similarity_threshold: 0.5
+  model: all-MiniLM-L6-v2
+
+processing:
+  batch_size: 25
+  checkpoint_every: 25

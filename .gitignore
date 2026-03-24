@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Environment
+.env
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Data — fetched datasets contain large binaries
+datasets/FUNSD/
+datasets/FUNSD_plus/
+raw_documents/
+
+# DVC
+*.dvc
+.dvc/
+
+# OS
+.DS_Store

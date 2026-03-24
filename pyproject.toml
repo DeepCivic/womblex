@@ -1,0 +1,71 @@
+[project]
+name = "womblex"
+version = "0.1.0"
+description = "Document extraction pipeline for Australian government documents"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+
+# Core dependencies - extraction works without Isaacus
+dependencies = [
+    "pymupdf>=1.24",
+    "rapidocr-onnxruntime>=1.4",
+    "ultralytics>=8.0",
+    "rapid-table>=3.0",
+    "opencv-python-headless",
+    "semchunk>=3.0",
+    "pandas>=2.0",
+    "openpyxl",
+    "pyarrow",
+    "pydantic>=2.0",
+    "pyyaml",
+    "tqdm",
+    "numpy",
+    "python-dotenv",
+    "python-docx>=1.0",
+    "presidio-anonymizer>=2.2",
+    "sentence-transformers>=3.0",
+]
+
+[project.optional-dependencies]
+# Isaacus enrichment - pip install womblex[isaacus]
+isaacus = ["isaacus>=0.19"]
+
+# Development tools - pip install womblex[dev]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov",
+    "rapidfuzz>=3.0",
+    "ruff",
+    "mypy",
+]
+
+# Full install - pip install womblex[all]
+all = ["womblex[isaacus,dev]"]
+
+[project.scripts]
+womblex = "womblex.cli:main"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-m 'not slow'"
+markers = [
+    "benchmark: OCR accuracy benchmarks (slow, run with -m benchmark)",
+    "slow: tests that invoke EasyOCR and take 30+ seconds each (run with -m slow)",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
