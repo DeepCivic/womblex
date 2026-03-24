@@ -15,7 +15,7 @@ from womblex.ingest.extract import (
     _extract_tables_from_page, _normalise_bbox, _ocr_text_block, _page_to_gray,
 )
 from womblex.ingest.paddle_ocr import (
-    get_layout_analyzer, get_paddle_reader, get_table_recognizer,
+    get_layout_analyzer, get_paddle_reader,
     preprocess_for_ocr,
 )
 
@@ -81,21 +81,6 @@ def _layout_blocks_and_tables(
             pos = _normalise_bbox((rx0, ry0, rx1, ry1), float(pix.width), float(pix.height))
 
             if region.block_type == "table":
-                # Try SLANet table recognition on this region
-                try:
-                    recognizer = get_table_recognizer()
-                    table_result = recognizer.recognize(img, region.bbox)
-                    if table_result and (table_result.headers or table_result.rows):
-                        tables.append(TableData(
-                            headers=table_result.headers,
-                            rows=table_result.rows,
-                            position=pos,
-                            confidence=region.confidence,
-                        ))
-                        continue
-                except (FileNotFoundError, Exception):
-                    pass
-                # Fall through to text block if table recognition unavailable
                 blocks.append(TextBlock(
                     text="[TABLE]",
                     position=pos,

@@ -53,7 +53,6 @@ Processing 1500+ documents takes hours. Checkpoint after each batch so failures 
 - PyMuPDF (`fitz`) for PDF handling
 - rapidocr-onnxruntime for OCR (bundles PaddleOCR v4 ONNX det/rec/cls models, no PaddlePaddle framework)
 - ultralytics for YOLOv8 layout analysis (bundled yolov8n.pt in `models/`)
-- rapid-table for SLANet table recognition (model downloaded on first use)
 - opencv-python-headless for image processing (binarisation, deskew)
 - semchunk for chunking
 - isaacus for analysis

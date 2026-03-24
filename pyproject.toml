@@ -10,7 +10,6 @@ dependencies = [
     "pymupdf>=1.24",
     "rapidocr-onnxruntime>=1.4",
     "ultralytics>=8.0",
-    "rapid-table>=3.0",
     "opencv-python-headless",
     "semchunk>=3.0",
     "pandas>=2.0",

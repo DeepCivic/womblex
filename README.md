@@ -100,7 +100,7 @@ Before extraction, each file is profiled to determine the appropriate strategy:
 | Scanned (machine) | No text layer, regular glyphs | PaddleOCR + YOLO layout |
 | Scanned (handwritten) | No text layer, irregular strokes | PaddleOCR (CRNN+Attention) |
 | Scanned (mixed) | No text layer, mixed regions | PaddleOCR + contour split |
-| Structured | Grid/form layout | PaddleOCR + SLANet tables |
+| Structured | Grid/form layout | PaddleOCR + heuristic tables |
 | Hybrid | Partial text layer | Text + PaddleOCR for gaps |
 | Image | Photos, diagrams | PaddleOCR, flagged for review |
 
@@ -284,6 +284,5 @@ Apache 2.0
 - [PyMuPDF](https://pymupdf.readthedocs.io/) for PDF handling
 - [RapidOCR](https://github.com/RapidAI/RapidOCR) for OCR (bundles PaddleOCR v4 ONNX models, no PaddlePaddle required)
 - [Ultralytics](https://github.com/ultralytics/ultralytics) for YOLOv8 layout analysis
-- [rapid-table](https://github.com/RapidAI/RapidTable) for SLANet table structure recognition
 - [python-docx](https://python-docx.readthedocs.io/) for Word document extraction
 - [pandas](https://pandas.pydata.org/) + [openpyxl](https://openpyxl.readthedocs.io/) for spreadsheet ingestion

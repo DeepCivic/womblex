@@ -7,10 +7,6 @@ required — models ship with the pip package (~15 MB wheel).
 Layout analysis uses YOLOv8 via ``ultralytics`` with the bundled
 ``models/yolov8n.pt`` weight file.  COCO class names are mapped to
 document block types via ``_YOLO_COCO_LABEL_MAP``.
-
-Table recognition uses ``rapid-table`` (SLANet, model downloaded on first use).
-Table recognition degrades gracefully if the SLANet model download fails
-(e.g. air-gapped environments).
 """
 
 from __future__ import annotations
@@ -55,17 +51,6 @@ class LayoutRegion:
     bbox: tuple[float, float, float, float]  # (x0, y0, x1, y1)
     label: str  # raw YOLO class name
     block_type: str  # mapped womblex block_type
-    confidence: float
-
-
-@dataclass
-class TableStructure:
-    """Table structure extracted by SLANet."""
-
-    html: str
-    headers: list[str]
-    rows: list[list[str]]
-    bbox: tuple[float, float, float, float]
     confidence: float
 
 
@@ -115,82 +100,6 @@ class PaddleOCRReader:
             output.append((bbox, text, float(confidence)))
 
         return output
-
-
-class TableRecognizer:
-    """SLANet table structure recognition via rapid-table.
-
-    The rapid-table package downloads its ONNX model on first use.
-    If the download fails (e.g. air-gapped environment), ``recognize()``
-    returns None and callers fall back to heuristic table extraction.
-    """
-
-    def __init__(self) -> None:
-        self._engine: object | None = None
-        self._available: bool | None = None
-
-    def _ensure_loaded(self) -> None:
-        if self._available is not None:
-            return
-
-        try:
-            from rapid_table import RapidTable  # type: ignore[import-untyped]
-
-            self._engine = RapidTable()
-            self._available = True
-            logger.info("rapid-table loaded for SLANet table recognition")
-        except Exception:
-            self._available = False
-            logger.warning(
-                "rapid-table model unavailable (download may have failed) "
-                "— table recognition disabled, falling back to heuristics"
-            )
-
-    def recognize(
-        self, img: np.ndarray, bbox: tuple[float, float, float, float]
-    ) -> TableStructure | None:
-        """Recognise table structure within a bounding box region."""
-        self._ensure_loaded()
-        if not self._available or self._engine is None:
-            return None
-
-        x0, y0, x1, y1 = [int(v) for v in bbox]
-        h, w = img.shape[:2]
-        x0, y0 = max(0, x0), max(0, y0)
-        x1, y1 = min(w, x1), min(h, y1)
-
-        if x1 - x0 < 10 or y1 - y0 < 10:
-            return None
-
-        crop = img[y0:y1, x0:x1]
-        html, _elapse = self._engine(crop)  # type: ignore[union-attr]
-        if not html:
-            return None
-
-        # Parse headers/rows from HTML if available
-        headers, rows = _parse_table_html(html)
-        return TableStructure(
-            html=html, headers=headers, rows=rows, bbox=(float(x0), float(y0), float(x1), float(y1)), confidence=0.8,
-        )
-
-
-def _parse_table_html(html: str) -> tuple[list[str], list[list[str]]]:
-    """Extract headers and rows from a simple HTML table string."""
-    import re
-
-    headers: list[str] = []
-    rows: list[list[str]] = []
-
-    th_matches = re.findall(r"<th[^>]*>(.*?)</th>", html, re.DOTALL)
-    if th_matches:
-        headers = [re.sub(r"<[^>]+>", "", h).strip() for h in th_matches]
-
-    for tr_match in re.finditer(r"<tr[^>]*>(.*?)</tr>", html, re.DOTALL):
-        cells = re.findall(r"<td[^>]*>(.*?)</td>", tr_match.group(1), re.DOTALL)
-        if cells:
-            rows.append([re.sub(r"<[^>]+>", "", c).strip() for c in cells])
-
-    return headers, rows
 
 
 # YOLO COCO class name → womblex block_type mapping.
@@ -298,7 +207,6 @@ class YOLOLayoutAnalyzer:
 
 _paddle_readers: dict[str, PaddleOCRReader] = {}
 _layout_analyzer: YOLOLayoutAnalyzer | None = None
-_table_recognizer: TableRecognizer | None = None
 
 
 def get_paddle_reader(lang: str = "eng", use_int8: bool = True) -> PaddleOCRReader:
@@ -316,14 +224,6 @@ def get_layout_analyzer() -> YOLOLayoutAnalyzer:
     if _layout_analyzer is None:
         _layout_analyzer = YOLOLayoutAnalyzer()
     return _layout_analyzer
-
-
-def get_table_recognizer() -> TableRecognizer:
-    """Return a cached table structure recognizer."""
-    global _table_recognizer
-    if _table_recognizer is None:
-        _table_recognizer = TableRecognizer()
-    return _table_recognizer
 
 
 def preprocess_for_ocr(img: np.ndarray) -> tuple[np.ndarray, list[str]]:

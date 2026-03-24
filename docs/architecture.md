@@ -10,7 +10,7 @@ src/womblex/
 │   ├── detect.py          # Document type detection — drives strategy selection
 │   ├── extract.py         # ExtractionResult schema, extract_text() dispatcher
 │   ├── strategies.py      # PDF/DOCX extractor implementations (one class per type)
-│   ├── paddle_ocr.py      # PaddleOCR wrapper via rapidocr-onnxruntime (det/rec/cls/layout/table)
+│   ├── paddle_ocr.py      # PaddleOCR wrapper via rapidocr-onnxruntime (det/rec/cls/layout)
 │   │                      # Also hosts YOLOLayoutAnalyzer for layout region detection
 │   ├── spreadsheet.py     # CSV/Excel extraction — one ExtractionResult per row/sheet
 │   ├── redaction.py       # Backwards-compatible re-export of redact.detector
@@ -163,7 +163,7 @@ Thin wrappers in `analyse/` call the Isaacus SDK for:
 
 **Config-driven, not hardcoded.** Dataset-specific paths, thresholds, and hypotheses live in YAML. Core modules have no knowledge of specific datasets.
 
-**PaddleOCR via rapidocr-onnxruntime.** The `rapidocr-onnxruntime` package bundles pre-exported PaddleOCR v4 ONNX models (~15 MB wheel) — no PaddlePaddle or PyTorch framework, no separate model download. Layout analysis uses YOLOv8 (`ultralytics` + bundled `yolov8n.pt`). Table recognition uses `rapid-table` (SLANet, model downloads on first use; degrades gracefully in air-gapped environments).
+**PaddleOCR via rapidocr-onnxruntime.** The `rapidocr-onnxruntime` package bundles pre-exported PaddleOCR v4 ONNX models (~15 MB wheel) — no PaddlePaddle or PyTorch framework, no separate model download. Layout analysis uses YOLOv8 (`ultralytics` + bundled `yolov8n.pt`).
 
 **Local model resolution.** `utils/models.py` provides `resolve_local_model_path(name)` which checks a `models/` directory (sibling of `src/`) before falling back to runtime downloads. Handles the HuggingFace hub snapshot layout (`refs/main` → `snapshots/<hash>/`) and bare files (`.pt`). Override location with `WOMBLEX_MODELS_DIR`. Models loaded lazily — no import cost unless the stage actually runs.
 
