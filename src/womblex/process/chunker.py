@@ -1,6 +1,9 @@
 """Text chunking using semchunk.
 
-Wraps semchunk to split extracted text into semantically coherent chunks.
+Wraps semchunk v3+ to split extracted text into semantically coherent
+chunks. Exposes all semchunk parameters (overlap, memoize, max_token_chars,
+processes) through config. Uses semchunk's native offset tracking.
+
 Handles tables (converted to markdown) and preserves ``[REDACTED]``
 markers across chunk boundaries.
 """
@@ -30,6 +33,7 @@ class TextChunk:
     end_char: int
     chunk_index: int
     content_type: str = "narrative"  # "narrative" | "table"
+    has_redaction: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -40,6 +44,9 @@ class TextChunk:
 def create_chunker(
     tokenizer: str | Callable[[str], int],
     chunk_size: int,
+    *,
+    memoize: bool = True,
+    max_token_chars: int | None = None,
 ) -> semchunk.Chunker:
     """Create a semchunk chunker.
 
@@ -47,11 +54,18 @@ def create_chunker(
         tokenizer: HuggingFace tokeniser identifier string, or a callable
             token counter ``(str) -> int``.
         chunk_size: Maximum tokens per chunk.
+        memoize: Cache token counts for repeated substrings.
+        max_token_chars: Max chars per token estimate for optimisation.
 
     Returns:
         A semchunk Chunker instance.
     """
-    return semchunk.chunkerify(tokenizer, chunk_size=chunk_size)
+    return semchunk.chunkerify(
+        tokenizer,
+        chunk_size=chunk_size,
+        memoize=memoize,
+        max_token_chars=max_token_chars,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -80,7 +94,7 @@ def table_to_markdown(headers: list[str], rows: list[list[str]]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Core chunking
+# Core chunking — uses semchunk native offsets
 # ---------------------------------------------------------------------------
 
 
@@ -88,13 +102,18 @@ def chunk_text(
     text: str,
     chunker: semchunk.Chunker,
     content_type: str = "narrative",
+    *,
+    overlap: int | float | None = None,
+    processes: int = 1,
 ) -> list[TextChunk]:
-    """Split text into chunks with Unicode code-point offset tracking.
+    """Split text into chunks using semchunk's native offset tracking.
 
     Args:
         text: The full text to chunk.
         chunker: A semchunk Chunker instance.
         content_type: Label applied to every chunk produced.
+        overlap: Token overlap between adjacent chunks.
+        processes: Number of parallel workers (1 = single-threaded).
 
     Returns:
         List of TextChunk objects with character offsets.
@@ -102,31 +121,35 @@ def chunk_text(
     if not text.strip():
         return []
 
-    raw_chunks: list[str] = chunker(text)
-    result: list[TextChunk] = []
-    search_start = 0
+    result_tuple = chunker(
+        text,
+        offsets=True,
+        overlap=overlap,
+        processes=processes,
+    )
+    # semchunk returns (list[str], list[tuple[int, int]]) when offsets=True
+    raw_chunks: list[str] = result_tuple[0]
+    raw_offsets: list[tuple[int, int]] = result_tuple[1]
 
-    for i, chunk_str in enumerate(raw_chunks):
-        start = text.find(chunk_str, search_start)
-        if start == -1:
-            start = search_start
-        end = start + len(chunk_str)
-        result.append(
-            TextChunk(
-                text=chunk_str,
-                start_char=start,
-                end_char=end,
-                chunk_index=i,
-                content_type=content_type,
-            )
+    return [
+        TextChunk(
+            text=chunk_str,
+            start_char=start,
+            end_char=end,
+            chunk_index=i,
+            content_type=content_type,
         )
-        search_start = start + 1
-
-    return result
+        for i, (chunk_str, (start, end)) in enumerate(zip(raw_chunks, raw_offsets))
+    ]
 
 
 def _repair_redaction_splits(chunks: list[TextChunk]) -> list[TextChunk]:
-    """Merge chunks where a ``[REDACTED]`` marker was split across a boundary."""
+    """Merge chunks where a ``[REDACTED]`` marker was split across a boundary.
+
+    Safe with overlap: if the marker is already complete in both chunks
+    (due to overlap), the repair won't trigger. Only fires when one chunk
+    ends with a prefix of ``[REDACTED]`` and the next starts with the suffix.
+    """
     if not chunks:
         return chunks
 
@@ -137,7 +160,6 @@ def _repair_redaction_splits(chunks: list[TextChunk]) -> list[TextChunk]:
     while i < len(chunks):
         chunk = chunks[i]
 
-        # Check if any prefix of [REDACTED] sits at the end of this chunk
         needs_merge = False
         if i + 1 < len(chunks):
             for length in range(1, len(marker)):
@@ -184,10 +206,13 @@ def chunk_document(
     full_text: str,
     chunker: semchunk.Chunker,
     tables: list[object] | None = None,
+    *,
+    overlap: int | float | None = None,
+    processes: int = 1,
 ) -> list[TextChunk]:
     """Chunk extracted document content, handling tables and redactions.
 
-    1. Chunks narrative text with offset tracking.
+    1. Chunks narrative text using semchunk native offsets.
     2. Converts ``TableData`` objects to markdown and chunks separately.
     3. Appends table chunks after narrative chunks (stable ordering).
     4. Repairs any ``[REDACTED]`` markers split across chunk boundaries.
@@ -196,7 +221,8 @@ def chunk_document(
         full_text: Concatenated page text from ``ExtractionResult.full_text``.
         chunker: A semchunk Chunker instance.
         tables: Optional list of ``TableData`` objects (from extraction).
-            Each must have ``headers`` and ``rows`` attributes.
+        overlap: Token overlap between adjacent chunks.
+        processes: Number of parallel workers.
 
     Returns:
         Ordered list of TextChunk objects.
@@ -204,10 +230,13 @@ def chunk_document(
     all_chunks: list[TextChunk] = []
 
     # Narrative chunks
-    narrative_chunks = chunk_text(full_text, chunker, content_type="narrative")
+    narrative_chunks = chunk_text(
+        full_text, chunker, content_type="narrative",
+        overlap=overlap, processes=processes,
+    )
     all_chunks.extend(narrative_chunks)
 
-    # Table chunks
+    # Table chunks (no overlap — tables are self-contained)
     if tables:
         for tbl in tables:
             md = table_to_markdown(tbl.headers, tbl.rows)  # type: ignore[attr-defined]

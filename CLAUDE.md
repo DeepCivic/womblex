@@ -5,7 +5,7 @@ Womblex extracts text from Australian government PDF document releases and prepa
 1. Government documents are messy (scanned, redacted, mixed formats)
 2. Isaacus models need clean, chunked text as input
 3. Getting text out is hard; analysis after that is easy
-The `raw_documents/` folder contains a curated mix of government document types. This serves as the baseline for testing and refining the extraction → Parquet pipeline.
+The `raw_documents/` folder contains a curated mix of government document types. This serves as the baseline for testing and refining the extraction → Parquet process.
 
 ## Key Design Decisions
 ### Document type detection drives extraction strategy
@@ -16,7 +16,7 @@ The previous Kaggle approach used one-size-fits-all OCR. This failed because:
 - Hybrids need selective OCR
 Detection happens first, then routes to appropriate extractor.
 ### Redaction is a post-extraction concern
-Redaction runs as a separate pipeline stage after extraction via `redact/stage.py`. The redaction detector misfires on form fields, chart regions, and diagram fills when called inside `_ocr_page()`, suppressing legitimate text. Do not call `pre_ocr_mask` from within extraction strategies.
+Redaction runs as a separate operation after extraction via `redact/stage.py`. The redaction detector misfires on form fields, chart regions, and diagram fills when called inside `_ocr_page()`, suppressing legitimate text. Do not call `pre_ocr_mask` from within extraction strategies.
 ### Chunking is generic semchunk integration
 `process/chunker.py` wraps semchunk with no opinion about tokeniser or chunk size — those are dataset-level config choices in `configs/*.yaml`. The chunker accepts any HuggingFace tokeniser identifier or a callable token counter.
 ### Config-driven, not hardcoded
@@ -27,16 +27,21 @@ Processing 1500+ documents takes hours. Checkpoint after each batch so failures 
 | Module | Does | Doesn't |
 |--------|------|---------|
 | `ingest/detect.py` | Profile PDFs for extraction routing (samples text/OCR for classification) | Produce final extracted text |
-| `ingest/extract.py` | Get text out of PDFs | Chunk or analyse |
+| `ingest/extract.py` | Get text out of PDFs, DOCX, and TXT files | Chunk or analyse |
+| `ingest/gnaf.py` | Standalone G-NAF PSV → Parquet ingest (bypasses NLP pipeline) | Run redaction, chunking, PII, or enrichment |
+| `ingest/gnaf_schema.py` | Static, versioned column definitions for all G-NAF table types | Parse SQL at runtime |
+| `ingest/geospatial.py` | Standalone SHP → GeoParquet ingest (bypasses NLP pipeline) | Run redaction, chunking, PII, or enrichment |
 | `ingest/paddle_ocr.py` | Wrap RapidOCR and YOLOv8 layout analysis | Implement extraction strategy logic |
 | `redact/detector.py` | Detect and mask redacted regions | Know about document semantics |
 | `redact/stage.py` | Run redaction at configurable pipeline points (post_chunk, post_enrichment) | Implement detection logic |
 | `pii/cleaner.py` | Detect PERSON candidates via regex; validate with cosine similarity context model; merge enrichment-derived spans | Call Isaacus directly |
 | `pii/stage.py` | Run PII cleaning as an isolated pipeline stage (post_extraction, post_chunk, post_enrichment) | Implement detection logic |
 | `process/chunker.py` | Split text into chunks | Call Isaacus |
-| `analyse/*.py` | Wrap Isaacus API calls | Handle PDFs directly |
+| `analyse/*.py` | Wrap Isaacus API calls; `query.py` loads enrichment graph from Parquet for PII masking | Handle PDFs directly |
 | `utils/models.py` | Resolve local model paths before falling back to downloads | Load models (callers do that) |
-| `pipeline.py` | Orchestrate the flow | Implement extraction logic |
+| `utils/metrics.py` | CER, WER, CER-s (spatial sort), Levenshtein distance | Know about document types or pipeline stages |
+| `utils/tabular_metrics.py` | Structural fidelity, data integrity, key column preservation, schema conformance for tabular extraction | Know about specific datasets or file formats |
+| `operations.py` | Independent operations (extract, redact, chunk, PII, enrich) | Orchestrate or sequence operations |
 ## Coding Conventions
 ### Style
 - Python 3.11+
@@ -137,8 +142,11 @@ Always use `uv run python -m pytest` (not bare `pytest`) to ensure the venv is a
 # Ensure fixtures submodule is present
 git submodule update --init
 
-# Fast unit tests
+# Fast unit tests (slow tests excluded by default via pyproject.toml addopts)
 uv run python -m pytest tests/ -v
+
+# Include slow tests (OCR-dependent tests skip cleanly if rapidocr-onnxruntime is not installed)
+uv run python -m pytest tests/ -v -m ""
 
 # Full accuracy benchmarks (~3 min, regenerates docs/accuracy/*.md)
 uv run python -m pytest tests/test_fixture_accuracy.py tests/test_womblex_collection_accuracy.py -v
@@ -178,7 +186,7 @@ Recommendations should be ordered by impact-to-effort ratio. See `docs/accuracy/
 ## Files to Understand First
 1. `configs/example.yaml` — see what's configurable
 2. `ingest/detect.py` — document type detection logic
-3. `pipeline.py` — how pieces fit together
+3. `operations.py` — independent operations, how they compose
 4. `process/chunker.py` — semchunk integration
 ## Don't
 - Add dataset-specific logic to core modules

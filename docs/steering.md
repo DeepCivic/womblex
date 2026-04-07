@@ -91,7 +91,7 @@ Measured on Throsby fixture (7 GT `<REDACTED>` tags across 3 pages).
 
 ### 2026-03-22: Benchmark test performance + stale findings cleanup
 
-Added `max_pages=30` to `extract_text()` for PDF extraction — tests now evaluate only the first 30 pages of large documents. Replaced pure-Python Levenshtein with `rapidfuzz` C backend for fast CER/WER on large texts. Ground truth is proportionally truncated when page-limited.
+Added `max_pages=30` to `extract_text()` for PDF extraction — tests now evaluate only the first 30 pages of large documents. Replaced `rapidfuzz` C backend with pure-Python Levenshtein for CER/WER (no external dependency). Ground truth is proportionally truncated when page-limited.
 
 Updated layout detection findings: YOLOv8n (COCO) produces 0 predictions across all DocLayNet fixtures. Previous steering entries referencing per-fixture prediction counts and over/under-segmentation modes were stale. Merged items #12 and #13 — both require replacing the COCO model with a document-trained layout model.
 

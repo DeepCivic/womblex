@@ -1,4 +1,4 @@
-"""Redaction pipeline stage.
+"""Redaction operation.
 
 Runs as a separate pass after extraction. Renders PDF pages as images,
 detects black-box redaction regions, and applies the configured mode
@@ -45,7 +45,7 @@ class RedactionReport:
 
 
 def build_detector(config: RedactionConfig) -> RedactionDetector:
-    """Build a RedactionDetector from pipeline config."""
+    """Build a RedactionDetector from config."""
     return RedactionDetector(
         threshold=config.threshold,
         min_area_ratio=config.min_area_ratio,

@@ -1,4 +1,4 @@
-"""Checkpoint management for resumable pipeline runs.
+"""Checkpoint management for resumable batch runs.
 
 Saves progress after each batch so long jobs can resume after interruption.
 Checkpoints are JSON files containing processed document IDs and batch metadata.

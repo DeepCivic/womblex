@@ -1,8 +1,17 @@
 # Data Flow
 
-End-to-end data movement through the Womblex pipeline, from raw PDF to Parquet output.
+End-to-end data movement through Womblex, from raw input to Parquet output.
 
-## Pipeline Overview
+## Overview
+
+The system has two categories of operation:
+
+1. **Ingest** — format-dependent extraction or transformation. Always runs first.
+2. **Operations** — independent functions. Callers compose them directly based on what they need. Each has clear preconditions (e.g. chunk needs an extraction, enrich needs chunks).
+
+Enrichment requires an external Isaacus client.
+
+G-NAF PSV ingest is a standalone path (`womblex ingest-gnaf`) that bypasses extraction entirely — see below.
 
 ```
 Raw files (PDF / DOCX / CSV)
@@ -27,26 +36,56 @@ Raw files (PDF / DOCX / CSV)
         │
         ▼
 ┌───────────────────┐
+│  run_redaction    │  → RedactionReport on ExtractionResult
+│  (redact/stage)   │    (flag / blackout / delete mode)
+└───────────────────┘
+        │
+        ▼
+┌───────────────────┐
 │ chunk_document    │  → list[TextChunk]
-│ (process/chunker) │    (text, offsets, content_type)
+│ (process/chunker) │    (text, offsets, content_type, has_redaction)
 └───────────────────┘
         │
         ▼
 ┌───────────────────┐
-│  isaacus API      │  → embeddings / labels / extractions
-│  (analyse/*.py)   │
+│ run_pii_cleaning  │  → PII spans replaced with <ENTITY_TYPE> tags
+│ (pii/stage)       │    (PERSON, ADDRESS)
+└───────────────────┘
+        │
+  ── extraction complete, caller decides what to do next ──
+        │
+        ▼  (caller composes operations as needed)
+┌───────────────────┐
+│  run_enrichment   │  → EnrichmentResult per document
+│  (analyse/enrich) │    (segments, entities, relationships)
 └───────────────────┘
         │
         ▼
 ┌───────────────────┐
-│  write_parquet    │  → documents.parquet
-│  (store/output)   │     chunks.parquet
-└───────────────────┘     extractions.parquet
+│  build_document   │  → DocumentGraph
+│  _graph           │    (nodes, edges, chunk-level mention links)
+│  (analyse/graph)  │
+└───────────────────┘
+        │
+        ▼
+┌───────────────────┐
+│  write_parquet    │  → documents.parquet, chunks.parquet
+│  (store/output)   │
+│  write_enrichment │  → entity_mentions.parquet, graph_edges.parquet,
+│  (store/enrichment│     enrichment_metadata.parquet
+│  _output)         │
+└───────────────────┘
+        │
+        ▼
+┌───────────────────┐
+│  run_verifications│  → VerificationResult
+│  (verify/engine)  │    (structural checks + weak-signal scan)
+└───────────────────┘
 ```
 
 ## Per-Document Flow
 
-For each file processed by `pipeline.py`:
+For each file processed via `operations.py`:
 
 ```
 1. detect_file_type(path) → DocumentProfile
@@ -56,13 +95,12 @@ For each file processed by `pipeline.py`:
       └── Spreadsheet: reads first 500 rows → _classify_sheet() per sheet
             └── populates DocumentProfile.sheet_meta: list[SheetInfo]
 
-2. get_extractor(profile) → ExtractionStrategy
+2. get_extractor(profile) → ExtractionStrategy | SpreadsheetExtractor | DocxExtractor
 
 3. extract_text(path, profile) → list[ExtractionResult]
       ├── PDF/DOCX path → single-element list
       │     ├── Native pages: page.get_text("text", flags=TEXT_DEHYPHENATE)
       │     ├── Scanned pages: _ocr_page()
-      │     │     ├── detect + mask redactions (CV2 heuristics)
       │     │     ├── deskew (Hough line rotation)
       │     │     ├── binarise: OTSU if bimodal histogram, else adaptive Gaussian
       │     │     └── OCR → (text, avg_confidence, preprocessing_steps)
@@ -73,20 +111,48 @@ For each file processed by `pipeline.py`:
             │     └── document_id = "<stem>:<key_col_value>"
             └── narrative / key_value sheets → one result per sheet
 
-4. For each ExtractionResult:
-      chunk_document(full_text, tables) → list[TextChunk]
-            ├── narrative text → semchunk (480 token budget)
-            ├── tables → markdown conversion → semchunk
-            ├── each chunk tagged with content_type ("narrative" | "table")
-            └── [REDACTED] markers repaired if split across boundaries
+4. Operations (independent — caller composes as needed):
 
-5. For each chunk:
-      ├── embeddings.create(chunk, task="retrieval/document")
-      ├── classifier.create(chunk, hypotheses=[...])
-      └── extractor.create(chunk, questions=[...])
+   redact: run_redaction(results, config) — PDF only
+      ├── render each page as image at configured DPI
+      ├── RedactionDetector.detect() → list[RedactionInfo] per page
+      ├── store RedactionReport on ExtractionResult.redaction_report
+      ├── annotate_extraction() → add warning strings
+      └── apply mode:
+            ├── flag: no text change (annotation only)
+            ├── blackout: prepend [REDACTED] to affected page text
+            └── delete: clear affected page text
 
-6. store.write(document_record, chunk_records, extraction_records)
-      └── checkpoint written after each batch
+   chunk: run_chunking(results, config) → list[TextChunk] per document
+      ├── narrative text → semchunk (configurable token budget)
+      ├── tables → markdown conversion → semchunk
+      ├── each chunk tagged with content_type ("narrative" | "table")
+      ├── [REDACTED] markers repaired if split across boundaries
+      └── if redaction mode is "flag": annotate_chunks() sets has_redaction=True
+
+   pii: run_pii_cleaning(results, config)
+      ├── regex candidates: PERSON (title-case + honorific), ADDRESS (street-type anchor)
+      ├── context validation: cosine similarity with all-MiniLM-L6-v2
+      ├── at post_enrichment: merge enrichment-derived entity spans
+      └── replace PII spans with <ENTITY_TYPE> tags via presidio-anonymizer
+
+   ── caller decides what to do next ──
+
+   enrich: run_enrichment(results, config) — requires chunks
+      ├── for each document: client.enrichments.create(texts=[...])
+      │     └── retry on 429 with exponential backoff
+      ├── convert SDK response → EnrichmentResult (ILGS data models)
+      └── build_document_graph(enrichment, chunks) → DocumentGraph
+            ├── nodes: document, chunks, segments, persons, locations, terms, external docs
+            └── edges: cross-references, contact info, dates, mention-to-chunk links
+
+5. store
+      ├── write_batch_parquet(batch, path) → documents.parquet
+      ├── write_batch_enrichment(batch, dir) →
+      │     ├── entity_mentions.parquet
+      │     ├── graph_edges.parquet
+      │     └── enrichment_metadata.parquet
+      └── checkpoint written after each batch (JSON, resumable)
 ```
 
 ## Data Structures
@@ -123,24 +189,38 @@ For each file processed by `pipeline.py`:
 | `images` | `list[ImageData]` | Image metadata |
 | `text_blocks` | `list[TextBlock]` | Positional text segments with type classification |
 | `metadata` | `ExtractionMetadata` | Strategy, confidence, timing, preprocessing steps |
-| `document_id` | `str \| None` | Set by spreadsheet extractor; used as `doc_id` in pipeline |
+| `warnings` | `list[str]` | Blank page warnings, redaction annotations |
+| `document_id` | `str \| None` | Set by spreadsheet extractor; used as `doc_id` |
+| `redaction_report` | `RedactionReport \| None` | Set by redaction stage; per-page detection results |
+
+### TextChunk (output of chunking)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `text` | `str` | Chunk text content |
+| `start_char` | `int` | Unicode code-point start offset in source text |
+| `end_char` | `int` | Unicode code-point end offset in source text |
+| `chunk_index` | `int` | Sequential index within the document |
+| `content_type` | `str` | `"narrative"` or `"table"` |
+| `has_redaction` | `bool` | True if source pages contain redacted regions (flag mode) |
 
 ### Parquet Output
 
-**documents.parquet** — one row per source file
+**documents.parquet** — one row per source file (via `store/output.py`)
 
 | Column | Description |
 |--------|-------------|
 | `document_id` | Unique identifier |
 | `source_path` | Path to original file |
-| `doc_type` | Detected document type |
-| `extraction_strategy` | Strategy applied |
-| `confidence` | Detection confidence |
-| `page_count` | Total pages |
-| `status` | `success` or `error` |
-| `error` | Error message if failed |
+| `text` | Full extracted text |
+| `metadata` | Struct: `extraction_strategy`, `confidence`, `processing_time`, `page_count`, `text_coverage` |
+| `warnings` | List of warning strings |
+| `tables` | List of table structs (headers, rows, position, confidence) |
+| `forms` | List of form field structs (field_name, value, position, confidence) |
+| `images` | List of image structs (alt_text, position, confidence) |
+| `text_blocks` | List of text block structs (text, position, block_type, confidence) |
 
-**chunks.parquet** — one row per text chunk
+**chunks.parquet** — one row per text chunk (planned; not yet written by `store/output.py`)
 
 | Column | Description |
 |--------|-------------|
@@ -152,21 +232,93 @@ For each file processed by `pipeline.py`:
 | `classification` | Top label from kanon-universal-classifier |
 | `classification_score` | Confidence for top label |
 
-**extractions.parquet** — one row per extracted field per chunk
+**entity_mentions.parquet** — one row per entity mention (from enrichment)
 
 | Column | Description |
 |--------|-------------|
-| `extraction_id` | Unique identifier |
-| `chunk_id` | FK to chunks.parquet |
-| `field` | Question / field name |
-| `value` | Extracted answer |
-| `score` | Extraction confidence |
+| `document_id` | FK to documents.parquet |
+| `entity_type` | Entity category (person, location, term, etc.) |
+| `entity_name` | Resolved entity name |
+| `mention_spans` | List of (start, end) offsets in document text |
+| `chunk_indices` | Chunk indices where the entity appears |
+
+**graph_edges.parquet** — one row per relationship (from enrichment)
+
+| Column | Description |
+|--------|-------------|
+| `document_id` | FK to documents.parquet |
+| `source_id` | Source node identifier |
+| `target_id` | Target node identifier |
+| `relation` | Relationship type |
+
+**enrichment_metadata.parquet** — one row per enriched document
+
+| Column | Description |
+|--------|-------------|
+| `document_id` | FK to documents.parquet |
+| `segment_count` | Number of structural segments |
+| `person_count` | Number of persons identified |
+| `location_count` | Number of locations identified |
+| `term_count` | Number of defined terms |
+
+## G-NAF Standalone Ingest
+
+G-NAF PSV files bypass extraction entirely. The flow is:
+
+```
+.psv files (headerless, pipe-delimited)
+        │
+        ▼
+┌───────────────────┐
+│  discover_psv     │  → list[Path] (recursive .psv glob)
+│  _files           │
+└───────────────────┘
+        │
+        ▼  (per file)
+┌───────────────────┐
+│  _parse_filename  │  → (state, table_name) from filename pattern
+│  (ingest/gnaf)    │
+└───────────────────┘
+        │
+        ▼
+┌───────────────────┐
+│  ingest_psv       │  → Parquet file with provenance metadata
+│  (ingest/gnaf)    │    (schema from gnaf_schema.py, all columns as strings)
+└───────────────────┘
+```
+
+CLI: `womblex ingest-gnaf <root_dir> -o <output_dir>`
+
+## Geospatial Standalone Ingest
+
+SHP files bypass extraction entirely. The flow is:
+
+```
+.shp files (+ sidecar .dbf, .prj, .shx)
+        │
+        ▼
+┌───────────────────┐
+│  ingest_shapefile │  → GeoParquet file with provenance metadata
+│  (ingest/         │    (geometry + CRS + attributes preserved exactly)
+│   geospatial)     │
+└───────────────────┘
+```
+
+CLI: `womblex ingest-geo <root_dir> -o <output_dir>`
 
 ## Batch Processing and Checkpointing
 
-The pipeline processes documents in batches (default: 25). After each batch:
+The `womblex run` CLI command processes documents in batches (default: 100). After each batch:
 
 1. Results are appended to the Parquet files.
-2. A checkpoint record is written noting the last processed document ID.
+2. A checkpoint record is written (`CheckpointManager` in `store/checkpoint.py`) noting processed document IDs, batch number, and success/failure counts.
 
-On resume (`--resume` flag), the pipeline reads the checkpoint and skips already-processed documents. Individual document errors are logged and recorded in `documents.parquet` without stopping the batch.
+On resume (`--resume` flag), the CLI reads the checkpoint JSON and skips already-processed documents via `filter_unprocessed()`. Individual document errors are logged and recorded in `documents.parquet` without stopping the batch.
+
+================================
+# Future State Dataflow
+================================
+
+The remaining unimplemented data flow capabilities. Everything above this line is current state.
+
+1. **AI/Semantic Chunking** — provider-agnostic semantic chunking mode using enrichment spans as boundary hints. Adds `analyse/boundaries.py` for span-to-boundary extraction and `chunk_document_semantic()` to `process/chunker.py`. Enabled via `chunking.semantic: true` in config. Full design in `architecture.md` § AI/Semantic Chunking.

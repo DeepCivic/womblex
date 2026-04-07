@@ -116,10 +116,10 @@ class SpreadsheetExtractor:
                     info = (
                         sheet_infos[i]
                         if sheet_infos and i < len(sheet_infos)
-                        else _classify_sheet(name, df)
+                        else _classify_sheet(str(name), df)
                     )
                     info.row_count = len(df)  # correct sample count from detection
-                    results.extend(self._extract_sheet(path.stem, name, df, info))
+                    results.extend(self._extract_sheet(path.stem, str(name), df, info))
                 if not results:
                     return [self._error_result("No sheets found or all sheets empty")]
                 return results

@@ -215,7 +215,7 @@ womblex/
 ├── src/womblex/
 │   ├── cli.py              # CLI entry point (womblex run / womblex extract)
 │   ├── config.py           # Pydantic config models
-│   ├── pipeline.py         # Stage orchestration
+│   ├── operations.py       # Independent operations (extract, redact, chunk, PII, enrich)
 │   ├── ingest/
 │   │   ├── detect.py        # Document type detection and profiling
 │   │   ├── extract.py       # ExtractionResult schema + strategy dispatch

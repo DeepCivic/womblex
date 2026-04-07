@@ -690,3 +690,25 @@ class NonTextualExtractor:
                 text_coverage=0.0,
             ),
         )
+
+
+class TextExtractor:
+    """Plain text file passthrough — reads the file as-is."""
+
+    def extract_path(self, path: Path) -> ExtractionResult:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            text = path.read_text(encoding="latin-1")
+
+        return ExtractionResult(
+            pages=[PageResult(page_number=0, text=text, method="text")],
+            method="text",
+            metadata=ExtractionMetadata(
+                extraction_strategy="text",
+                confidence=1.0,
+                processing_time=0.0,
+                page_count=1,
+                text_coverage=1.0 if text.strip() else 0.0,
+            ),
+        )

@@ -602,27 +602,11 @@ def _normalise(text: str) -> str:
     return text
 
 
-def _levenshtein(s1: str, s2: str) -> int:
-    from rapidfuzz.distance import Levenshtein
-    return Levenshtein.distance(s1, s2)
-
-
-def _levenshtein_seq(s1: list[str], s2: list[str]) -> int:
-    from rapidfuzz.distance import Levenshtein
-    return Levenshtein.distance(s1, s2)
-
-
 def _char_error_rate(predicted: str, reference: str) -> float:
-    pred = _normalise(predicted)
-    ref = _normalise(reference)
-    if not ref:
-        return 0.0 if not pred else 1.0
-    return _levenshtein(pred, ref) / len(ref)
+    from womblex.utils.metrics import cer
+    return cer(reference, predicted)
 
 
 def _word_error_rate(predicted: str, reference: str) -> float:
-    pred_words = _normalise(predicted).split()
-    ref_words = _normalise(reference).split()
-    if not ref_words:
-        return 0.0 if not pred_words else 1.0
-    return _levenshtein_seq(pred_words, ref_words) / len(ref_words)
+    from womblex.utils.metrics import wer
+    return wer(reference, predicted)

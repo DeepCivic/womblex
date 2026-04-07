@@ -243,6 +243,10 @@ class TestFixtureExtraction:
     cover all 15 fixtures at full A4 resolution.
     """
 
+    @pytest.fixture(autouse=True)
+    def _require_ocr(self):
+        pytest.importorskip("rapidocr_onnxruntime", reason="rapidocr-onnxruntime not installed")
+
     def test_funsd_sparse_form_extraction(self, tmp_path: Path) -> None:
         """85540866 is the smallest FUNSD sample (25 words); OCR should
         return one result with no error.
@@ -334,6 +338,10 @@ class TestFixtureOCRContent:
     These tests verify the OCR path produces real output; accuracy comparisons
     against ground truth are outside scope.
     """
+
+    @pytest.fixture(autouse=True)
+    def _require_ocr(self):
+        pytest.importorskip("rapidocr_onnxruntime", reason="rapidocr-onnxruntime not installed")
 
     def test_funsd_sparse_form_has_some_text(self, tmp_path: Path) -> None:
         """85540866 is a sparse FUNSD form (25 words); OCR should return

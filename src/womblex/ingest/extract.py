@@ -12,12 +12,15 @@ import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 import fitz
 import numpy as np
 
 from womblex.ingest.detect import DocumentProfile, DocumentType
+
+if TYPE_CHECKING:
+    from womblex.redact.stage import RedactionReport
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +120,7 @@ class ExtractionResult:
     metadata: ExtractionMetadata | None = None
     warnings: list[str] = field(default_factory=list)
     document_id: str | None = None  # set by extractors that produce multiple results per file
+    redaction_report: RedactionReport | None = None
 
     @property
     def full_text(self) -> str:
@@ -360,6 +364,7 @@ from womblex.ingest.strategies import (  # noqa: E402
     HybridExtractor,
     ImageExtractor,
     DocxExtractor,
+    TextExtractor,
 )
 from womblex.ingest.spreadsheet import SpreadsheetExtractor  # noqa: E402
 
@@ -368,7 +373,7 @@ def get_extractor(
     profile: DocumentProfile,
     dpi: int = 200,
     lang: str = "eng",
-) -> ExtractionStrategy:
+) -> ExtractionStrategy | SpreadsheetExtractor | DocxExtractor:
     """Select the appropriate extraction strategy for a document profile.
 
     Note: SPREADSHEET and DOCX types return path-based extractors that
@@ -396,6 +401,8 @@ def get_extractor(
             return SpreadsheetExtractor(profile=profile)
         case DocumentType.DOCX:
             return DocxExtractor()
+        case DocumentType.TEXT:
+            return TextExtractor()
         case _:
             return NativeNarrativeExtractor()
 

@@ -173,7 +173,9 @@ def run_weak_signal_scan(
     flagged = []
     
     for _, row in df.iterrows():
-        signals = check_weak_signals(row.to_dict(), config)
+        signals = check_weak_signals(
+            {str(k): v for k, v in row.to_dict().items()}, config
+        )
         if signals:
             doc_id = row.get("document_id", "unknown")
             text = row.get("text", "")

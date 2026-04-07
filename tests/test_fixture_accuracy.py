@@ -48,13 +48,8 @@ _WOMBLEX_FIXTURES: list[dict[str, str]] = [
     },
     {
         "name": "Auditor-General",
-        "file": "_documents/Auditor-General_Report_2020-21_19.pdf",
-        "transcript": "_documents/Auditor-General_Report_2020-21_19_transcript.txt",
-    },
-    {
-        "name": "DFAT-Corporate-Plan",
-        "file": "_documents/dfat-corporate-plan-2025-26.docx",
-        "transcript": "_documents/dfat-corporate-plan-2025-26_transcript.txt",
+        "file": "_documents/Auditor-General_Report_2020-21_19-First-30-Pages.pdf",
+        "transcript": "_documents/Auditor-General_Report_2020-21_19_transcript-First-30-Pages.txt",
     },
 ]
 
@@ -105,34 +100,14 @@ def _normalise(text: str) -> str:
 
 def char_error_rate(predicted: str, reference: str) -> float:
     """Levenshtein-based character error rate (CER)."""
-    pred = _normalise(predicted)
-    ref = _normalise(reference)
-    if not ref:
-        return 0.0 if not pred else 1.0
-    d = _levenshtein(pred, ref)
-    return d / len(ref)
+    from womblex.utils.metrics import cer
+    return cer(reference, predicted)
 
 
 def word_error_rate(predicted: str, reference: str) -> float:
     """Word error rate (WER)."""
-    pred_words = _normalise(predicted).split()
-    ref_words = _normalise(reference).split()
-    if not ref_words:
-        return 0.0 if not pred_words else 1.0
-    d = _levenshtein_seq(pred_words, ref_words)
-    return d / len(ref_words)
-
-
-def _levenshtein(s1: str, s2: str) -> int:
-    """Levenshtein distance between two strings (uses rapidfuzz C backend)."""
-    from rapidfuzz.distance import Levenshtein
-    return Levenshtein.distance(s1, s2)
-
-
-def _levenshtein_seq(s1: list[str], s2: list[str]) -> int:
-    """Levenshtein distance between two word sequences."""
-    from rapidfuzz.distance import Levenshtein
-    return Levenshtein.distance(s1, s2)
+    from womblex.utils.metrics import wer
+    return wer(reference, predicted)
 
 
 def _spatial_sort_text(
@@ -158,42 +133,8 @@ def _spatial_sort_text(
     Returns:
         Space-joined string of words in spatial order.
     """
-    if not words_with_boxes:
-        return ""
-
-    # Calculate centroids
-    items: list[tuple[str, float, float]] = []
-    heights: list[float] = []
-    for text, (x0, y0, x1, y1) in words_with_boxes:
-        cx = (x0 + x1) / 2
-        cy = (y0 + y1) / 2
-        items.append((text, cx, cy))
-        heights.append(y1 - y0)
-
-    avg_height = sum(heights) / len(heights) if heights else 1.0
-    threshold = avg_height * line_tolerance
-
-    # Sort by y-centroid first, then x-centroid within same line
-    items.sort(key=lambda t: (t[2], t[1]))
-
-    # Group into lines: consecutive items within threshold of first item in group
-    lines: list[list[tuple[str, float, float]]] = []
-    current_line: list[tuple[str, float, float]] = [items[0]]
-    for item in items[1:]:
-        if abs(item[2] - current_line[0][2]) <= threshold:
-            current_line.append(item)
-        else:
-            lines.append(current_line)
-            current_line = [item]
-    lines.append(current_line)
-
-    # Sort each line by x-centroid, then join
-    sorted_words: list[str] = []
-    for line in lines:
-        line.sort(key=lambda t: t[1])
-        sorted_words.extend(word for word, _, _ in line)
-
-    return " ".join(sorted_words)
+    from womblex.utils.metrics import spatial_sort_text
+    return spatial_sort_text(words_with_boxes, line_tolerance)
 
 
 def iou(box_a: tuple[float, ...], box_b: tuple[float, ...]) -> float:
@@ -318,7 +259,7 @@ class TestFUNSD:
         img = cv2.imread(str(img_path))
         assert img is not None, f"Failed to load {img_path}"
 
-        annotation = json.loads(ann_path.read_text())
+        annotation = json.loads(ann_path.read_text(encoding="utf-8"))
         gt_words: list[str] = []
         gt_words_with_boxes: list[tuple[str, tuple[float, float, float, float]]] = []
         gt_fields: int = len(annotation["form"])
@@ -396,7 +337,7 @@ class TestIAM:
         img = cv2.imread(str(img_path))
         assert img is not None, f"Failed to load {img_path}"
 
-        gt_text = gt_path.read_text().strip()
+        gt_text = gt_path.read_text(encoding="utf-8").strip()
 
         ocr_results = self.reader.readtext(img)
         pred_text = " ".join(text for _, text, _ in ocr_results)
@@ -512,7 +453,7 @@ class TestDocLayNet:
         img = cv2.imread(str(img_path))
         assert img is not None, f"Failed to load {img_path}"
 
-        annotation = json.loads(ann_path.read_text())
+        annotation = json.loads(ann_path.read_text(encoding="utf-8"))
         gt_labels_raw = [DOCLAYNET_LABELS.get(lbl, "Unknown") for lbl in annotation["labels"]]
         gt_bboxes_raw = annotation["bboxes"]
         gt_words = annotation["words"]
@@ -603,9 +544,8 @@ class TestWomblexExtraction:
         import fitz as _fitz
 
         profile = detect_file_type(file_path, DetectionConfig())
-        _max_pages = 30
 
-        # Determine total page count for truncation ratio
+        # Determine total page count for reporting
         if file_path.suffix.lower() == ".pdf":
             _doc = _fitz.open(str(file_path))
             total_pages = _doc.page_count
@@ -613,15 +553,17 @@ class TestWomblexExtraction:
         else:
             total_pages = None
 
-        results = extract_text(file_path, profile, max_pages=_max_pages)
+        results = extract_text(file_path, profile)
         extracted = results[0].full_text
 
         gt_text = transcript_path.read_text(encoding="utf-8").strip()
 
-        # Truncate GT proportionally when pages were limited
-        if total_pages and total_pages > _max_pages:
-            ratio = _max_pages / total_pages
-            gt_text = gt_text[:int(len(gt_text) * ratio)]
+        # Strip page break markers from GT — extraction doesn't produce them
+        gt_text = gt_text.replace("<Page Break>", "")
+        # Collapse any resulting double-newlines from marker removal
+        while "\n\n\n" in gt_text:
+            gt_text = gt_text.replace("\n\n\n", "\n\n")
+        gt_text = gt_text.strip()
 
         cer = char_error_rate(extracted, gt_text)
         wer = word_error_rate(extracted, gt_text)

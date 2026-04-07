@@ -89,3 +89,127 @@ class TestWER:
         assert wer(ref, hyp) > 0.0
         # CER and WER use different denominators so their values differ
         assert cer(ref, hyp) != pytest.approx(wer(ref, hyp))
+
+
+from womblex.utils.metrics import cer_spatial, spatial_sort_text
+
+
+class TestSpatialSortText:
+    def test_empty_list(self) -> None:
+        assert spatial_sort_text([]) == ""
+
+    def test_single_word(self) -> None:
+        assert spatial_sort_text([("hello", (0, 0, 50, 20))]) == "hello"
+
+    def test_left_to_right_ordering(self) -> None:
+        words = [
+            ("world", (100, 0, 150, 20)),
+            ("hello", (0, 0, 50, 20)),
+        ]
+        assert spatial_sort_text(words) == "hello world"
+
+    def test_top_to_bottom_ordering(self) -> None:
+        words = [
+            ("line2", (0, 50, 50, 70)),
+            ("line1", (0, 0, 50, 20)),
+        ]
+        assert spatial_sort_text(words) == "line1 line2"
+
+    def test_multiline_document(self) -> None:
+        words = [
+            ("c", (200, 0, 250, 20)),
+            ("a", (0, 0, 50, 20)),
+            ("b", (100, 0, 150, 20)),
+            ("d", (0, 50, 50, 70)),
+            ("e", (100, 50, 150, 70)),
+        ]
+        assert spatial_sort_text(words) == "a b c d e"
+
+    def test_same_line_tolerance(self) -> None:
+        # Words with slight vertical offset should be on the same line.
+        words = [
+            ("b", (100, 2, 150, 22)),
+            ("a", (0, 0, 50, 20)),
+        ]
+        assert spatial_sort_text(words) == "a b"
+
+
+class TestCERSpatial:
+    def test_identical_layout(self) -> None:
+        words = [("hello", (0, 0, 50, 20)), ("world", (60, 0, 110, 20))]
+        assert cer_spatial(words, words) == 0.0
+
+    def test_reordered_words_same_text(self) -> None:
+        # Same words, different reading order — CER-s should be 0.
+        ref = [("hello", (0, 0, 50, 20)), ("world", (60, 0, 110, 20))]
+        hyp = [("world", (60, 0, 110, 20)), ("hello", (0, 0, 50, 20))]
+        assert cer_spatial(ref, hyp) == 0.0
+
+    def test_recognition_error_detected(self) -> None:
+        ref = [("hello", (0, 0, 50, 20))]
+        hyp = [("hxllo", (0, 0, 50, 20))]
+        assert cer_spatial(ref, hyp) > 0.0
+
+    def test_empty_inputs(self) -> None:
+        assert cer_spatial([], []) == 0.0
+
+
+from womblex.utils.metrics import reading_order_accuracy
+
+
+class TestReadingOrderAccuracy:
+    def test_perfect_order(self) -> None:
+        # Same words, same boxes, same order.
+        words = [
+            ("hello", (0, 0, 50, 20)),
+            ("world", (60, 0, 110, 20)),
+            ("foo", (0, 30, 50, 50)),
+        ]
+        assert reading_order_accuracy(words, words) == 1.0
+
+    def test_fully_reversed(self) -> None:
+        ref = [
+            ("a", (0, 0, 50, 20)),
+            ("b", (60, 0, 110, 20)),
+            ("c", (0, 30, 50, 50)),
+        ]
+        hyp = list(reversed(ref))
+        assert reading_order_accuracy(ref, hyp) == 0.0
+
+    def test_one_swap(self) -> None:
+        ref = [
+            ("a", (0, 0, 50, 20)),
+            ("b", (60, 0, 110, 20)),
+            ("c", (0, 30, 50, 50)),
+        ]
+        # Swap first two — 1 discordant pair out of 3.
+        hyp = [ref[1], ref[0], ref[2]]
+        assert reading_order_accuracy(ref, hyp) == pytest.approx(2 / 3)
+
+    def test_no_spatial_match(self) -> None:
+        ref = [("a", (0, 0, 10, 10)), ("b", (20, 0, 30, 10))]
+        hyp = [("x", (500, 500, 510, 510)), ("y", (600, 600, 610, 610))]
+        # No IoU overlap → fewer than 2 matches → returns 1.0.
+        assert reading_order_accuracy(ref, hyp) == 1.0
+
+    def test_empty_inputs(self) -> None:
+        assert reading_order_accuracy([], []) == 1.0
+
+    def test_single_word(self) -> None:
+        w = [("a", (0, 0, 50, 20))]
+        assert reading_order_accuracy(w, w) == 1.0
+
+    def test_partial_match(self) -> None:
+        # 3 GT words, only 2 match in hypothesis. Those 2 are in order.
+        ref = [
+            ("a", (0, 0, 50, 20)),
+            ("b", (60, 0, 110, 20)),
+            ("c", (0, 30, 50, 50)),
+        ]
+        hyp = [
+            ("a", (0, 0, 50, 20)),
+            ("c", (0, 30, 50, 50)),
+            # "b" is missing / in a non-overlapping position
+        ]
+        # 2 matched, in correct order → 1.0
+        assert reading_order_accuracy(ref, hyp) == 1.0

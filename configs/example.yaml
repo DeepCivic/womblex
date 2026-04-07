@@ -36,6 +36,10 @@ chunking:
   chunk_size: 480
   enabled: true
   chunk_tables: true
+  # overlap: null          # Token overlap between chunks. <1 = proportion, >=1 = absolute tokens.
+  # memoize: true          # Cache token counts for repeated substrings.
+  # max_token_chars: null   # Max chars per token estimate (optimisation).
+  # processes: 1           # Parallel workers. Default 1 (Chromebook-friendly).
 
 # PII cleaning uses regex pattern recognisers (Presidio-style) validated by
 # a Sentence Transformers context model (all-MiniLM-L6-v2, 22M params).

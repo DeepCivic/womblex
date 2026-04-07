@@ -209,7 +209,7 @@ class PIICleaner:
 
         model = self._load_model()
         embeddings = model.encode(contexts, convert_to_numpy=True, show_progress_bar=False)
-        sims = util.cos_sim(embeddings, self._ref_embeddings)
+        sims = util.cos_sim(embeddings, self._ref_embeddings)  # type: ignore[arg-type]
         return [float(sims[i].max()) for i in range(len(candidates))]
 
     def _find_candidates(self, text: str) -> list[_Candidate]:

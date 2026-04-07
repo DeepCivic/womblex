@@ -38,6 +38,7 @@ class DocumentType(Enum):
     # Non-PDF types
     DOCX = "docx"                                    # Word document (may contain images)
     SPREADSHEET = "spreadsheet"                      # CSV/Excel (may have narrative rows)
+    TEXT = "text"                                     # Plain text file (passthrough)
     
     UNKNOWN = "unknown"                              # failed detection
 
@@ -194,7 +195,7 @@ def _has_ruled_lines(page: fitz.Page, dpi: int = 72) -> bool:
     # Check if spacing is consistent (std dev < 30% of mean)
     mean_spacing = np.mean(spacings)
     std_spacing = np.std(spacings)
-    return mean_spacing > 0 and (std_spacing / mean_spacing) < 0.3
+    return bool(mean_spacing > 0 and (std_spacing / mean_spacing) < 0.3)
 
 
 def _analyze_glyph_regularity(page: fitz.Page, dpi: int = 150) -> float | None:
@@ -258,7 +259,7 @@ def _analyze_glyph_regularity(page: fitz.Page, dpi: int = 150) -> float | None:
     # Handwritten: 30-50% near mode
     regularity = max(0.0, min(1.0, (mode_ratio - 0.3) / 0.4))
     
-    return regularity
+    return float(regularity)
 
 
 def _analyze_stroke_width_variance(page: fitz.Page, dpi: int = 150) -> float | None:
@@ -629,7 +630,7 @@ def _detect_spreadsheet(path: Path) -> DocumentProfile:
             xl = pd.ExcelFile(str(path))
             for name in xl.sheet_names:
                 df = xl.parse(name, dtype=str, keep_default_na=False, nrows=500)
-                sheet_infos.append(_classify_sheet(name, df))
+                sheet_infos.append(_classify_sheet(str(name), df))
     except Exception as e:
         logger.warning("spreadsheet detection failed: path=%s error=%s", path, e)
 
@@ -708,7 +709,7 @@ def detect_file_type(
 ) -> DocumentProfile:
     """Classify any supported file for extraction strategy selection.
 
-    Handles PDFs, Word documents, and spreadsheets.
+    Handles PDFs, Word documents, spreadsheets, and plain text files.
 
     Args:
         path: Path to the file.
@@ -726,6 +727,20 @@ def detect_file_type(
         return _detect_docx(path)
     elif suffix in (".csv", ".xlsx", ".xls"):
         return _detect_spreadsheet(path)
+    elif suffix == ".txt":
+        return DocumentProfile(
+            doc_type=DocumentType.TEXT,
+            page_count=1,
+            has_text_layer=True,
+            text_coverage=1.0,
+            has_images=False,
+            has_tables=False,
+            has_handwriting_signals=False,
+            ocr_confidence=None,
+            glyph_regularity=None,
+            stroke_consistency=None,
+            confidence=1.0,
+        )
     else:
         return DocumentProfile(
             doc_type=DocumentType.UNKNOWN,

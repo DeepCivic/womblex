@@ -1,7 +1,7 @@
 """Redaction utility helpers.
 
 Low-level helpers for redaction pre-processing. Not called by extraction
-strategies directly — use from the redaction pipeline stage only.
+strategies directly — use from the redaction operation only.
 """
 
 from __future__ import annotations

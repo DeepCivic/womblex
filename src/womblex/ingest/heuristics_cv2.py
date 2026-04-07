@@ -182,7 +182,7 @@ def analyze_contour_complexity(gray: np.ndarray, epsilon_ratio: float = 0.02) ->
     # Map CV to regularity score
     regularity = max(0.0, min(1.0, 1.0 - (cv - 0.2) / 0.6))
 
-    return ContourComplexity(regularity=regularity, avg_vertices=avg_vertices)
+    return ContourComplexity(regularity=float(regularity), avg_vertices=float(avg_vertices))
 
 
 def calculate_blur_score(gray: np.ndarray) -> float | None:

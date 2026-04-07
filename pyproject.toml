@@ -33,7 +33,6 @@ isaacus = ["isaacus>=0.19"]
 dev = [
     "pytest>=8.0",
     "pytest-cov",
-    "rapidfuzz>=3.0",
     "ruff",
     "mypy",
 ]
@@ -68,3 +67,16 @@ target-version = "py311"
 python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = [
+    "fitz",
+    "fitz.*",
+    "rapidocr_onnxruntime",
+    "rapidocr_onnxruntime.*",
+    "pyarrow",
+    "pyarrow.*",
+    "sentence_transformers",
+    "sentence_transformers.*",
+]
+ignore_missing_imports = true

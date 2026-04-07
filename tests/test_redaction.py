@@ -339,8 +339,8 @@ class TestAnnotateChunks:
         report = RedactionReport()
         result = annotate_chunks(chunks, report)
         assert result is chunks
-        assert not hasattr(chunks[0], "has_redaction")
-        assert not hasattr(chunks[1], "has_redaction")
+        assert chunks[0].has_redaction is False
+        assert chunks[1].has_redaction is False
 
     def test_flags_chunk_with_source_pages(self) -> None:
         chunk = self._make_chunk(0, source_pages=[0, 1])
@@ -352,7 +352,7 @@ class TestAnnotateChunks:
         chunk = self._make_chunk(0, source_pages=[2, 3])
         report = self._make_report({0: 1})
         annotate_chunks([chunk], report)
-        assert not hasattr(chunk, "has_redaction")
+        assert chunk.has_redaction is False
 
     def test_flags_chunk_with_page_number(self) -> None:
         chunk = self._make_chunk(0, page_number=5)
@@ -364,7 +364,7 @@ class TestAnnotateChunks:
         chunk = self._make_chunk(0, page_number=3)
         report = self._make_report({0: 1})
         annotate_chunks([chunk], report)
-        assert not hasattr(chunk, "has_redaction")
+        assert chunk.has_redaction is False
 
     def test_source_pages_takes_precedence_over_page_number(self) -> None:
         """When both attributes exist, source_pages is checked first."""
@@ -372,13 +372,13 @@ class TestAnnotateChunks:
         report = self._make_report({5: 1})
         annotate_chunks([chunk], report)
         # source_pages=[0] doesn't overlap affected page 5, so no flag
-        assert not hasattr(chunk, "has_redaction")
+        assert chunk.has_redaction is False
 
     def test_chunk_without_page_attrs_is_skipped(self) -> None:
         chunk = self._make_chunk(0)
         report = self._make_report({0: 1})
         annotate_chunks([chunk], report)
-        assert not hasattr(chunk, "has_redaction")
+        assert chunk.has_redaction is False
 
     def test_mixed_chunks(self) -> None:
         c0 = self._make_chunk(0, source_pages=[1])
@@ -388,7 +388,7 @@ class TestAnnotateChunks:
         annotate_chunks([c0, c1, c2], report)
         assert c0.has_redaction is True
         assert c1.has_redaction is True
-        assert not hasattr(c2, "has_redaction")
+        assert c2.has_redaction is False
 
     def test_empty_source_pages_falls_through(self) -> None:
         """source_pages=[] is falsy — should fall through to page_number."""

@@ -319,3 +319,112 @@ class TestChunkDocument:
     def test_none_tables_handled(self) -> None:
         result = chunk_document("Some text.", self.chunker, tables=None)
         assert len(result) >= 1
+
+
+# ---------------------------------------------------------------------------
+# New semchunk v3+ parameter tests
+# ---------------------------------------------------------------------------
+
+
+class TestOverlap:
+    """Tests for overlap parameter."""
+
+    def test_overlap_produces_overlapping_chunks(self) -> None:
+        chunker = _make_test_chunker(chunk_size=10)
+        text = " ".join(f"word{i}" for i in range(30))
+        chunks_no_overlap = chunk_text(text, chunker)
+        chunks_with_overlap = chunk_text(text, chunker, overlap=3)
+
+        # With overlap, chunks share boundary text, so total text coverage
+        # exceeds the source length.
+        total_no = sum(len(c.text) for c in chunks_no_overlap)
+        total_with = sum(len(c.text) for c in chunks_with_overlap)
+        assert total_with > total_no
+
+    def test_overlap_chunks_have_valid_offsets(self) -> None:
+        chunker = _make_test_chunker(chunk_size=10)
+        text = " ".join(f"word{i}" for i in range(30))
+        chunks = chunk_text(text, chunker, overlap=2)
+        for chunk in chunks:
+            assert chunk.start_char >= 0
+            assert chunk.end_char >= chunk.start_char
+            assert text[chunk.start_char:chunk.end_char] == chunk.text
+
+    def test_overlap_float_proportion(self) -> None:
+        chunker = _make_test_chunker(chunk_size=10)
+        text = " ".join(f"word{i}" for i in range(30))
+        # 0.2 = 20% of chunk_size = 2 tokens overlap
+        chunks = chunk_text(text, chunker, overlap=0.2)
+        assert len(chunks) >= 2
+
+    def test_no_overlap_default(self) -> None:
+        chunker = _make_test_chunker(chunk_size=10)
+        text = " ".join(f"word{i}" for i in range(20))
+        chunks = chunk_text(text, chunker)
+        # Without overlap, chunks should not share text.
+        for i in range(len(chunks) - 1):
+            assert chunks[i].end_char <= chunks[i + 1].start_char
+
+
+class TestMemoizeAndMaxTokenChars:
+    """Tests for creation-time parameters."""
+
+    def test_memoize_false(self) -> None:
+        chunker = create_chunker(_word_token_counter, chunk_size=50, memoize=False)
+        result = chunker("hello world", offsets=True)
+        assert len(result[0]) >= 1
+
+    def test_max_token_chars(self) -> None:
+        chunker = create_chunker(_word_token_counter, chunk_size=50, max_token_chars=10)
+        result = chunker("hello world", offsets=True)
+        assert len(result[0]) >= 1
+
+
+class TestRedactionRepairWithOverlap:
+    """Redaction repair remains safe when overlap is active."""
+
+    def test_complete_marker_in_overlap_no_merge(self) -> None:
+        """If [REDACTED] is complete in both chunks (overlap), no merge needed."""
+        chunks = [
+            TextChunk(text="text [REDACTED] more", start_char=0, end_char=20, chunk_index=0),
+            TextChunk(text="[REDACTED] more next", start_char=10, end_char=30, chunk_index=1),
+        ]
+        result = _repair_redaction_splits(chunks)
+        assert len(result) == 2  # No merge — marker is complete in both
+
+    def test_split_marker_still_repaired_with_overlap(self) -> None:
+        """Split marker at overlap boundary is still repaired."""
+        chunks = [
+            TextChunk(text="text [REDAC", start_char=0, end_char=11, chunk_index=0),
+            TextChunk(text="TED] more", start_char=8, end_char=17, chunk_index=1),
+        ]
+        result = _repair_redaction_splits(chunks)
+        assert len(result) == 1
+        assert "[REDACTED]" in result[0].text
+
+
+class TestChunkDocumentWithOverlap:
+    """chunk_document passes overlap through correctly."""
+
+    def test_overlap_passed_to_narrative(self) -> None:
+        chunker = _make_test_chunker(chunk_size=10)
+        text = " ".join(f"word{i}" for i in range(30))
+        chunks = chunk_document(text, chunker, overlap=3)
+        # Should produce more chunks than without overlap due to shared text
+        chunks_no_overlap = chunk_document(text, chunker)
+        assert len(chunks) >= len(chunks_no_overlap)
+
+    def test_tables_not_overlapped(self) -> None:
+        """Table chunks don't get overlap (they're self-contained)."""
+        chunker = _make_test_chunker(chunk_size=10)
+
+        class FakeTable:
+            headers = ["A", "B"]
+            rows = [["1", "2"], ["3", "4"]]
+
+        chunks = chunk_document("short text", chunker, tables=[FakeTable()], overlap=5)
+        table_chunks = [c for c in chunks if c.content_type == "table"]
+        # Table chunks exist and have valid offsets
+        assert len(table_chunks) >= 1
+        for tc in table_chunks:
+            assert tc.start_char >= 0

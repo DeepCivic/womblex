@@ -1,4 +1,4 @@
-"""Redaction detection and masking — standalone pipeline stage.
+"""Redaction detection and masking — standalone operation.
 
 Moved out of ``ingest/`` so redaction can run at configurable points:
 pre-OCR, post-chunk, or post-enrichment.

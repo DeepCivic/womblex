@@ -84,13 +84,13 @@ def _iam_gt(name: str) -> str:
 
 
 def _funsd_gt(name: str) -> str:
-    with open(FUNSD_ANNOTATIONS / f"{name}.json") as f:
+    with open(FUNSD_ANNOTATIONS / f"{name}.json", encoding="utf-8") as f:
         data = json.load(f)
     return " ".join(e["text"].strip() for e in data["form"] if e["text"].strip())
 
 
 def _doclaynet_gt(name: str) -> str:
-    with open(DOCLAYNET_DIR / f"{name}.json") as f:
+    with open(DOCLAYNET_DIR / f"{name}.json", encoding="utf-8") as f:
         data = json.load(f)
     return " ".join(w.strip() for w in data["words"] if w.strip())
 
