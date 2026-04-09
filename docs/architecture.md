@@ -24,18 +24,23 @@ Each operation is a standalone function. Preconditions: chunk needs an extractio
 ```
 src/womblex/
 ├── ingest/
-│   ├── detect.py          # Document type detection — drives strategy selection
-│   ├── extract.py         # ExtractionResult schema, extract_text() dispatcher
-│   ├── strategies.py      # PDF/DOCX extractor implementations (one class per type)
-│   ├── paddle_ocr.py      # PaddleOCR wrapper via rapidocr-onnxruntime (det/rec/cls/layout)
-│   │                      # Also hosts YOLOLayoutAnalyzer for layout region detection
-│   ├── spreadsheet.py     # CSV/Excel extraction — one ExtractionResult per row/sheet
-│   ├── gnaf.py            # G-NAF PSV → Parquet ingest (standalone, bypasses NLP pipeline)
-│   ├── gnaf_schema.py     # G-NAF table schemas — static column definitions
-│   ├── geospatial.py      # SHP → GeoParquet ingest (standalone, bypasses NLP pipeline)
-│   ├── redaction.py       # Backwards-compatible re-export of redact.detector
-│   ├── heuristics_cv2.py  # Image heuristics: skew, blur, table grids, contour analysis
-│   └── heuristics_numpy.py # Signal analysis: Otsu threshold bimodality
+│   ├── detect.py              # Document type detection — drives strategy selection
+│   ├── extract.py             # ExtractionResult schema, extract_text() dispatcher
+│   ├── strategies.py          # Re-export shim — imports from the three strategy modules below
+│   ├── strategies_native.py   # Native text-layer PDF extractors (narrative, structured)
+│   ├── strategies_scanned.py  # OCR-dependent extractors (scanned, hybrid, image)
+│   ├── strategies_file.py     # Non-PDF extractors (DOCX, plain text, non-textual)
+│   ├── interfaces/
+│   │   └── protocols.py       # Backend protocols: OCRReader, LayoutAnalyzer, Preprocessor
+│   ├── paddle_ocr.py          # PaddleOCR wrapper via rapidocr-onnxruntime (det/rec/cls)
+│   │                          # Also hosts YOLOLayoutAnalyzer for layout region detection
+│   ├── spreadsheet.py         # CSV/Excel extraction — one ExtractionResult per row/sheet
+│   ├── gnaf.py                # G-NAF PSV → Parquet ingest (standalone, bypasses NLP pipeline)
+│   ├── gnaf_schema.py         # G-NAF table schemas — static column definitions
+│   ├── geospatial.py          # SHP → GeoParquet ingest (standalone, bypasses NLP pipeline)
+│   ├── redaction.py           # Backwards-compatible re-export of redact.detector
+│   ├── heuristics_cv2.py      # Image heuristics: skew, blur, table grids, contour analysis
+│   └── heuristics_numpy.py    # Signal analysis: Otsu threshold bimodality
 ├── redact/
 │   ├── detector.py        # CV2-based RedactionDetector — detect and mask redacted regions
 │   ├── stage.py           # Redaction operation: detect_redactions, annotate_chunks, annotate_extraction
@@ -129,7 +134,7 @@ Defensive classification: uncertain documents route to `UNKNOWN` rather than a w
 
 ### 2. Ingest — Extraction
 
-`extract.py` defines the `ExtractionStrategy` protocol, shared helpers, and the `extract_text()` dispatcher. `strategies.py` implements one extractor class per PDF/DOCX document type. `spreadsheet.py` handles CSV and Excel files.
+`extract.py` defines the `ExtractionStrategy` and `PathExtractionStrategy` protocols, shared helpers, and the `extract_text()` dispatcher. Extractor implementations are split by document family: `strategies_native.py` (text-layer PDFs), `strategies_scanned.py` (OCR-dependent types), and `strategies_file.py` (DOCX, plain text). `strategies.py` re-exports all classes for backward compatibility. `spreadsheet.py` handles CSV and Excel files.
 
 `extract_text()` logs the strategy selection (`doc, type, confidence, strategy`) at INFO level, then always returns `list[ExtractionResult]`. PDF and DOCX paths return a single-element list. The spreadsheet path returns one result per logical row (for `data` and `glossary` sheets) or one result per sheet (for `narrative` and `key_value` sheets). Each spreadsheet result carries a `document_id` built from the filename and key-column value (e.g. `filename:PR-00006191`).
 
@@ -144,7 +149,7 @@ Defensive classification: uncertain documents route to `UNKNOWN` rather than a w
 
 **`SpreadsheetExtractor`** in `spreadsheet.py` was separated from `strategies.py` to keep both files under the 750-line cap. Callers import `SpreadsheetExtractor` directly from `ingest.spreadsheet`.
 
-**Layout backend** — scanned extractors use `YOLOLayoutAnalyzer` (COCO-pretrained yolov8n) for layout region detection. COCO class names are mapped to document block types via `_YOLO_COCO_LABEL_MAP` (e.g. `dining table` → `table`, `person`/`book` → `paragraph`, screen objects → `figure`). Layout analysis is called from `_layout_blocks_and_tables()` in `strategies.py`.
+**Layout backend** — scanned extractors use `YOLOLayoutAnalyzer` (COCO-pretrained yolov8n) for layout region detection. COCO class names are mapped to document block types via `_YOLO_COCO_LABEL_MAP` (e.g. `dining table` → `table`, `person`/`book` → `paragraph`, screen objects → `figure`). Layout analysis is called from `_layout_blocks_and_tables()` in `strategies_scanned.py`. Backend contracts are formalised as `@runtime_checkable` protocols in `interfaces/protocols.py` (`OCRReader`, `LayoutAnalyzer`, `Preprocessor`).
 
 Scanned PDF strategies (`ScannedMachinewrittenExtractor`, `ScannedHandwrittenExtractor`, `ScannedMixedExtractor`, `HybridExtractor`) all call `_ocr_page()` which:
 
@@ -241,9 +246,9 @@ Wrappers in `analyse/` call the Isaacus SDK:
 
 `store/output.py` writes `documents.parquet` and `chunks.parquet`. `store/enrichment_output.py` writes three additional Parquet files from enrichment results:
 
-- `entity_mentions.parquet` — entity type, name, mentions, chunk mapping
+- `entities.parquet` — entity type, name, mentions, chunk mapping
 - `graph_edges.parquet` — source/target node IDs, relation type, metadata
-- `enrichment_metadata.parquet` — per-document enrichment summary (segment count, entity counts, etc.)
+- `enrichment_meta.parquet` — per-document enrichment summary (segment count, entity counts, etc.)
 
 `store/checkpoint.py` provides `CheckpointManager` for resumable batch runs. Checkpoints are JSON files recording processed document IDs and batch metadata. On resume, already-processed documents are skipped.
 
@@ -272,7 +277,7 @@ Results are classified as `passed`, `warning`, or `failed` based on the ratio of
 
 **PII cleaning is context-validated regex.** `pii/cleaner.py` uses title-case and honorific regex patterns to find PERSON candidates, then validates each against reference contexts using cosine similarity with `all-MiniLM-L6-v2`. ADDRESS detection uses a street-type anchor regex. Current coverage: PERSON and ADDRESS — ORGANISATION, URL, phone, and email are not yet detected. See `docs/accuracy/PII_CLEANING.md` for measured recall/precision baseline.
 
-**750-line hard cap per file.** Signals the need to split before files become unwieldy. `extract.py` delegates strategy implementations to `strategies.py`, and `SpreadsheetExtractor` lives in `spreadsheet.py`, for this reason.
+**750-line hard cap per file.** Signals the need to split before files become unwieldy. Strategy implementations are split across `strategies_native.py`, `strategies_scanned.py`, and `strategies_file.py` (with `strategies.py` as a re-export shim), and `SpreadsheetExtractor` lives in `spreadsheet.py`, for this reason.
 
 **Niche formats get standalone submodules.** Formats with their own structure (e.g. G-NAF's headerless PSV with SQL-defined schemas, ESRI Shapefiles with geometry + CRS) get a dedicated submodule under `ingest/` that reads the format and writes Parquet/GeoParquet directly, bypassing the generic extraction operations. Dependencies (`pyogrio`, `geopandas`, `shapely`) are lazy-imported so they don't affect core pipeline users.
 

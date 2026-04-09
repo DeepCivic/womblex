@@ -36,7 +36,7 @@ For development:
 ```bash
 git clone --recurse-submodules https://github.com/Team-DeepCivic/Womblex.git
 cd Womblex
-pip install -e ".[dev]"
+uv sync --extra dev
 ```
 
 If you already cloned without `--recurse-submodules`, fetch the test fixtures with:
@@ -137,7 +137,7 @@ Extracted text is split into semantically meaningful chunks using [semchunk](htt
 
 An optional PII cleaning stage strips personal identifiers from chunk text before output or enrichment. Operates on chunks post-chunking as an isolated pipeline stage.
 
-Currently detects: **PERSON** (regex + cosine-similarity context validation via `all-MiniLM-L6-v2`). URL, phone, and email regex support is planned. See `docs/accuracy/PII_CLEANING.md` for measured baseline.
+Currently detects: **PERSON** (regex + cosine-similarity context validation via `all-MiniLM-L6-v2`) and **ADDRESS** (street-type anchor regex). See `docs/accuracy/PII_CLEANING.md` for measured baseline.
 
 The `all-MiniLM-L6-v2` model is pre-bundled in `models/` and loaded from disk — no network access required at runtime.
 
@@ -213,15 +213,23 @@ womblex/
 ├── docs/              # Architecture docs, ADRs, accuracy reports
 ├── fixtures/          # Git submodule: test fixtures (FUNSD, IAM-line, DocLayNet, womblex-collection)
 ├── src/womblex/
-│   ├── cli.py              # CLI entry point (womblex run / womblex extract)
+│   ├── cli.py              # CLI entry point (womblex run / extract / ingest-gnaf / ingest-geo)
 │   ├── config.py           # Pydantic config models
 │   ├── operations.py       # Independent operations (extract, redact, chunk, PII, enrich)
 │   ├── ingest/
-│   │   ├── detect.py        # Document type detection and profiling
-│   │   ├── extract.py       # ExtractionResult schema + strategy dispatch
-│   │   ├── strategies.py    # PDF/DOCX extractor implementations
-│   │   ├── paddle_ocr.py    # PaddleOCR wrapper via rapidocr-onnxruntime
-│   │   ├── spreadsheet.py   # CSV/Excel per-row extraction
+│   │   ├── detect.py            # Document type detection and profiling
+│   │   ├── extract.py           # ExtractionResult schema + strategy dispatch
+│   │   ├── strategies.py        # Re-export shim — imports from the three strategy modules below
+│   │   ├── strategies_native.py # Native text-layer PDF extractors (narrative, structured)
+│   │   ├── strategies_scanned.py # OCR-dependent extractors (scanned, hybrid, image)
+│   │   ├── strategies_file.py   # Non-PDF extractors (DOCX, plain text, non-textual)
+│   │   ├── interfaces/
+│   │   │   └── protocols.py     # Backend protocols (OCRReader, LayoutAnalyzer, Preprocessor)
+│   │   ├── paddle_ocr.py        # PaddleOCR wrapper via rapidocr-onnxruntime
+│   │   ├── spreadsheet.py       # CSV/Excel per-row extraction
+│   │   ├── gnaf.py              # G-NAF PSV → Parquet ingest (standalone)
+│   │   ├── gnaf_schema.py       # G-NAF table schemas — static column definitions
+│   │   ├── geospatial.py        # SHP → GeoParquet ingest (standalone)
 │   │   ├── heuristics_cv2.py    # OpenCV-based detection heuristics
 │   │   └── heuristics_numpy.py  # NumPy-based detection heuristics
 │   ├── redact/

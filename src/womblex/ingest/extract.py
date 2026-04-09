@@ -138,14 +138,28 @@ class ExtractionResult:
 
 
 class ExtractionStrategy(Protocol):
-    """Protocol for document extraction strategies."""
+    """Protocol for document extraction strategies (PDF-based)."""
 
     def extract(self, doc: fitz.Document) -> ExtractionResult: ...
+
+
+class PathExtractionStrategy(Protocol):
+    """Protocol for file-path-based extraction (DOCX, spreadsheet, text)."""
+
+    def extract_path(self, path: Path) -> ExtractionResult | list[ExtractionResult]: ...
 
 
 # ---------------------------------------------------------------------------
 # Utility helpers shared by strategies
 # ---------------------------------------------------------------------------
+
+
+def _text_coverage(pages: list[PageResult]) -> float:
+    """Fraction of pages with meaningful text (>50 chars)."""
+    if not pages:
+        return 0.0
+    filled = sum(1 for p in pages if len(p.text.strip()) > 50)
+    return filled / len(pages)
 
 
 def _page_to_gray(page: fitz.Page, dpi: int = 150) -> np.ndarray:
@@ -349,37 +363,40 @@ def _normalise_text(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Strategy implementations
+# Strategy resolution
 # ---------------------------------------------------------------------------
-
-# Imported from strategies module to keep this file under 750 lines.
-# The strategies module uses the helpers above.
-from womblex.ingest.strategies import (  # noqa: E402
-    NativeNarrativeExtractor,
-    NativeWithStructuredExtractor,
-    StructuredExtractor,
-    ScannedMachinewrittenExtractor,
-    ScannedHandwrittenExtractor,
-    ScannedMixedExtractor,
-    HybridExtractor,
-    ImageExtractor,
-    DocxExtractor,
-    TextExtractor,
-)
-from womblex.ingest.spreadsheet import SpreadsheetExtractor  # noqa: E402
 
 
 def get_extractor(
     profile: DocumentProfile,
     dpi: int = 200,
     lang: str = "eng",
-) -> ExtractionStrategy | SpreadsheetExtractor | DocxExtractor:
+) -> ExtractionStrategy | PathExtractionStrategy:
     """Select the appropriate extraction strategy for a document profile.
 
-    Note: SPREADSHEET and DOCX types return path-based extractors that
-    implement ``extract_path(path)`` instead of ``extract(doc)``.
-    Use ``extract_text()`` which handles both protocols.
+    Strategy classes are imported lazily to avoid circular imports between
+    extract.py (data models + helpers) and the strategy modules (which
+    import those models).
+
+    PDF-based types return ``ExtractionStrategy`` (``extract(doc)``).
+    SPREADSHEET, DOCX, and TEXT return ``PathExtractionStrategy``
+    (``extract_path(path)``).  ``extract_text()`` handles both.
     """
+    from womblex.ingest.strategies_native import (
+        NativeNarrativeExtractor,
+        NativeWithStructuredExtractor,
+        StructuredExtractor,
+    )
+    from womblex.ingest.strategies_scanned import (
+        HybridExtractor,
+        ImageExtractor,
+        ScannedHandwrittenExtractor,
+        ScannedMachinewrittenExtractor,
+        ScannedMixedExtractor,
+    )
+    from womblex.ingest.strategies_file import DocxExtractor, TextExtractor
+    from womblex.ingest.spreadsheet import SpreadsheetExtractor
+
     match profile.doc_type:
         case DocumentType.NATIVE_NARRATIVE:
             return NativeNarrativeExtractor()
