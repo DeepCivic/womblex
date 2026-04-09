@@ -1,3 +1,0 @@
-# Isaacus enrichment extra
-# Install with: pip install womblex[isaacus]
-isaacus>=0.19

@@ -213,4 +213,4 @@ Recommendations should be ordered by impact-to-effort ratio. See `docs/accuracy/
 - Keep extraction strategies isolated and swappable
 - Log document IDs with all errors
 - Write checkpoint after each batch
-- Use pip compile and requirements.in for managing dependencies
+- Manage dependencies via `pyproject.toml` + `uv lock`; no separate requirements files
