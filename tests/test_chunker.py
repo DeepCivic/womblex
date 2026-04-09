@@ -16,6 +16,7 @@ from womblex.process.chunker import (
     _repair_redaction_splits,
     chunk_document,
     chunk_text,
+    chunk_texts_batch,
     create_chunker,
     table_to_markdown,
 )
@@ -428,3 +429,113 @@ class TestChunkDocumentWithOverlap:
         assert len(table_chunks) >= 1
         for tc in table_chunks:
             assert tc.start_char >= 0
+
+
+# ---------------------------------------------------------------------------
+# chunk_texts_batch
+# ---------------------------------------------------------------------------
+
+
+class TestChunkTextsBatch:
+    def test_empty_list(self) -> None:
+        assert chunk_texts_batch([], _make_test_chunker()) == []
+
+    def test_single_text(self) -> None:
+        chunker = _make_test_chunker(chunk_size=50)
+        result = chunk_texts_batch(["Hello world."], chunker)
+        assert len(result) == 1
+        assert len(result[0]) >= 1
+        assert result[0][0].text == "Hello world."
+
+    def test_multiple_texts(self) -> None:
+        chunker = _make_test_chunker(chunk_size=50)
+        texts = ["First document.", "Second document here."]
+        result = chunk_texts_batch(texts, chunker)
+        assert len(result) == 2
+        assert result[0][0].text == "First document."
+        assert result[1][0].text == "Second document here."
+
+    def test_content_types_assigned(self) -> None:
+        chunker = _make_test_chunker(chunk_size=50)
+        texts = ["Narrative text.", "| A | B |"]
+        result = chunk_texts_batch(texts, chunker, content_types=["narrative", "table"])
+        assert result[0][0].content_type == "narrative"
+        assert result[1][0].content_type == "table"
+
+    def test_default_content_type_is_narrative(self) -> None:
+        chunker = _make_test_chunker(chunk_size=50)
+        result = chunk_texts_batch(["Some text."], chunker)
+        assert result[0][0].content_type == "narrative"
+
+    def test_offsets_valid(self) -> None:
+        chunker = _make_test_chunker(chunk_size=10)
+        text = " ".join(f"word{i}" for i in range(30))
+        result = chunk_texts_batch([text], chunker)
+        for chunk in result[0]:
+            assert text[chunk.start_char:chunk.end_char] == chunk.text
+
+
+# ---------------------------------------------------------------------------
+# Batch mode via chunk_document
+# ---------------------------------------------------------------------------
+
+
+class TestChunkDocumentBatch:
+    def test_batch_produces_same_content(self) -> None:
+        """Batch and sequential modes produce chunks with the same text content."""
+        chunker = _make_test_chunker(chunk_size=50)
+        text = " ".join(["Government document narrative text."] * 30)
+        tables = [_FakeTable(["Name", "Age"], [["Alice", "30"]])]
+
+        sequential = chunk_document(text, chunker, tables=tables, batch=False)
+        batched = chunk_document(text, chunker, tables=tables, batch=True)
+
+        seq_texts = [c.text for c in sequential]
+        bat_texts = [c.text for c in batched]
+        assert seq_texts == bat_texts
+
+    def test_batch_content_types_preserved(self) -> None:
+        chunker = _make_test_chunker(chunk_size=50)
+        text = "Some narrative."
+        tables = [_FakeTable(["H"], [["v"]])]
+        result = chunk_document(text, chunker, tables=tables, batch=True)
+        types = {c.content_type for c in result}
+        assert "narrative" in types
+        assert "table" in types
+
+    def test_batch_empty_text_with_table(self) -> None:
+        chunker = _make_test_chunker(chunk_size=50)
+        tables = [_FakeTable(["H"], [["val"]])]
+        result = chunk_document("   ", chunker, tables=tables, batch=True)
+        assert len(result) >= 1
+        assert result[0].content_type == "table"
+
+    def test_batch_empty_everything(self) -> None:
+        chunker = _make_test_chunker(chunk_size=50)
+        result = chunk_document("", chunker, batch=True)
+        assert result == []
+
+    def test_batch_indices_sequential(self) -> None:
+        chunker = _make_test_chunker(chunk_size=10)
+        text = " ".join(["Word"] * 100)
+        tables = [_FakeTable(["A", "B"], [["x", "y"]])]
+        result = chunk_document(text, chunker, tables=tables, batch=True)
+        indices = [c.chunk_index for c in result]
+        assert indices == list(range(len(result)))
+
+    def test_batch_progress_does_not_error(self) -> None:
+        chunker = _make_test_chunker(chunk_size=50)
+        result = chunk_document("Some text.", chunker, batch=True, progress=True)
+        assert len(result) >= 1
+
+
+# ---------------------------------------------------------------------------
+# create_chunker with new parameters
+# ---------------------------------------------------------------------------
+
+
+class TestCreateChunkerExtended:
+    def test_cache_maxsize(self) -> None:
+        chunker = create_chunker(_word_token_counter, chunk_size=50, cache_maxsize=100)
+        result = chunker("hello world", offsets=True)
+        assert len(result[0]) >= 1

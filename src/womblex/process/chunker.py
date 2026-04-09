@@ -2,7 +2,8 @@
 
 Wraps semchunk v3+ to split extracted text into semantically coherent
 chunks. Exposes all semchunk parameters (overlap, memoize, max_token_chars,
-processes) through config. Uses semchunk's native offset tracking.
+cache_maxsize, processes, progress, batch) through config.
+Uses semchunk's native offset tracking.
 
 Handles tables (converted to markdown) and preserves ``[REDACTED]``
 markers across chunk boundaries.
@@ -147,6 +148,68 @@ def chunk_text(
     ]
 
 
+def chunk_texts_batch(
+    texts: list[str],
+    chunker: semchunk.Chunker,
+    content_types: list[str] | None = None,
+    *,
+    overlap: int | float | None = None,
+    processes: int = 1,
+    progress: bool = False,
+) -> list[list[TextChunk]]:
+    """Chunk multiple texts in a single semchunk call.
+
+    Batching lets semchunk distribute work across *processes* workers.
+    Each input text produces an independent list of ``TextChunk`` objects.
+
+    Args:
+        texts: Texts to chunk.
+        chunker: A semchunk Chunker instance.
+        content_types: Per-text content type labels.  Falls back to
+            ``"narrative"`` for every text when ``None``.
+        overlap: Token overlap between adjacent chunks.
+        processes: Parallel workers for semchunk multiprocessing.
+        progress: Show a tqdm progress bar (only visible with >1 text).
+
+    Returns:
+        One ``list[TextChunk]`` per input text, in the same order.
+    """
+    if not texts:
+        return []
+
+    if content_types is None:
+        content_types = ["narrative"] * len(texts)
+
+    # semchunk accepts a list and returns parallel lists when offsets=True
+    result_tuple = chunker(
+        texts,
+        offsets=True,
+        overlap=overlap,
+        processes=processes,
+        progress=progress,
+    )
+    # With a list input and offsets=True:
+    #   result_tuple[0] = list[list[str]]  (chunks per text)
+    #   result_tuple[1] = list[list[tuple[int, int]]]  (offsets per text)
+    all_raw_chunks: list[list[str]] = result_tuple[0]
+    all_raw_offsets: list[list[tuple[int, int]]] = result_tuple[1]
+
+    out: list[list[TextChunk]] = []
+    for raw_chunks, raw_offsets, ctype in zip(all_raw_chunks, all_raw_offsets, content_types):
+        out.append([
+            TextChunk(
+                text=chunk_str,
+                start_char=start,
+                end_char=end,
+                chunk_index=i,
+                content_type=ctype,
+            )
+            for i, (chunk_str, (start, end)) in enumerate(zip(raw_chunks, raw_offsets))
+        ])
+
+    return out
+
+
 def _repair_redaction_splits(chunks: list[TextChunk]) -> list[TextChunk]:
     """Merge chunks where a ``[REDACTED]`` marker was split across a boundary.
 
@@ -213,13 +276,15 @@ def chunk_document(
     *,
     overlap: int | float | None = None,
     processes: int = 1,
+    batch: bool = False,
+    progress: bool = False,
 ) -> list[TextChunk]:
     """Chunk extracted document content, handling tables and redactions.
 
-    1. Chunks narrative text using semchunk native offsets.
-    2. Converts ``TableData`` objects to markdown and chunks separately.
-    3. Appends table chunks after narrative chunks (stable ordering).
-    4. Repairs any ``[REDACTED]`` markers split across chunk boundaries.
+    When *batch* is ``True``, all texts (narrative + table markdowns) are
+    collected and chunked in a single semchunk call so that *processes*
+    workers are used effectively.  When ``False`` (default), each text is
+    chunked individually — simpler and adequate for single-core runs.
 
     Args:
         full_text: Concatenated page text from ``ExtractionResult.full_text``.
@@ -227,10 +292,32 @@ def chunk_document(
         tables: Optional list of ``TableData`` objects (from extraction).
         overlap: Token overlap between adjacent chunks.
         processes: Number of parallel workers.
+        batch: Collect all texts and chunk in one call.
+        progress: Show a tqdm progress bar during chunking.
 
     Returns:
         Ordered list of TextChunk objects.
     """
+    if batch:
+        return _chunk_document_batch(
+            full_text, chunker, tables,
+            overlap=overlap, processes=processes, progress=progress,
+        )
+    return _chunk_document_sequential(
+        full_text, chunker, tables,
+        overlap=overlap, processes=processes,
+    )
+
+
+def _chunk_document_sequential(
+    full_text: str,
+    chunker: semchunk.Chunker,
+    tables: list[object] | None = None,
+    *,
+    overlap: int | float | None = None,
+    processes: int = 1,
+) -> list[TextChunk]:
+    """Original per-text chunking path."""
     all_chunks: list[TextChunk] = []
 
     # Narrative chunks
@@ -250,6 +337,57 @@ def chunk_document(
             all_chunks.extend(tbl_chunks)
 
     # Re-index after merging
+    for idx, chunk in enumerate(all_chunks):
+        chunk.chunk_index = idx
+
+    # Repair split [REDACTED] markers
+    all_chunks = _repair_redaction_splits(all_chunks)
+
+    return all_chunks
+
+
+def _chunk_document_batch(
+    full_text: str,
+    chunker: semchunk.Chunker,
+    tables: list[object] | None = None,
+    *,
+    overlap: int | float | None = None,
+    processes: int = 1,
+    progress: bool = False,
+) -> list[TextChunk]:
+    """Batch chunking path — one semchunk call for all texts."""
+    texts: list[str] = []
+    content_types: list[str] = []
+
+    # Narrative text always goes first
+    has_narrative = bool(full_text.strip())
+    if has_narrative:
+        texts.append(full_text)
+        content_types.append("narrative")
+
+    # Collect table markdowns (no overlap for tables)
+    if tables:
+        for tbl in tables:
+            md = table_to_markdown(tbl.headers, tbl.rows)  # type: ignore[attr-defined]
+            if md.strip():
+                texts.append(md)
+                content_types.append("table")
+
+    if not texts:
+        return []
+
+    # Single call to semchunk with all texts
+    batched = chunk_texts_batch(
+        texts, chunker, content_types=content_types,
+        overlap=overlap, processes=processes, progress=progress,
+    )
+
+    # For tables, strip overlap that was applied to narrative
+    all_chunks: list[TextChunk] = []
+    for chunk_list in batched:
+        all_chunks.extend(chunk_list)
+
+    # Re-index
     for idx, chunk in enumerate(all_chunks):
         chunk.chunk_index = idx
 

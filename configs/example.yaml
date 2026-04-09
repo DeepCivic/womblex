@@ -38,8 +38,11 @@ chunking:
   chunk_tables: true
   # overlap: null          # Token overlap between chunks. <1 = proportion, >=1 = absolute tokens.
   # memoize: true          # Cache token counts for repeated substrings.
+  # cache_maxsize: null     # Bound memoization cache. null = unbounded.
   # max_token_chars: null   # Max chars per token estimate (optimisation).
   # processes: 1           # Parallel workers. Default 1 (Chromebook-friendly).
+  # batch: false           # Chunk all texts (narrative + tables) in one call. Pair with processes > 1.
+  # progress: false        # Show a tqdm progress bar during chunking.
 
 # PII cleaning uses regex pattern recognisers (Presidio-style) validated by
 # a Sentence Transformers context model (all-MiniLM-L6-v2, 22M params).

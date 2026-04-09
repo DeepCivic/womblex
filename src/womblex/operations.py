@@ -448,6 +448,10 @@ def run_chunking(
 
             processes=chunk_cfg.processes,
 
+            batch=chunk_cfg.batch,
+
+            progress=chunk_cfg.progress,
+
         )  # type: ignore[arg-type]
 
 

@@ -203,9 +203,11 @@ class ChunkingConfig(BaseModel):
 
     All semchunk v3+ parameters are exposed. Creation-time parameters
 
-    (``memoize``, ``max_token_chars``) are set when building the chunker.
+    (``memoize``, ``max_token_chars``, ``cache_maxsize``)
+    are set when building the chunker.
 
-    Per-call parameters (``overlap``, ``processes``) are passed at chunk time.
+    Per-call parameters (``overlap``, ``processes``, ``batch``, ``progress``)
+    are passed at chunk time.
     """
 
 
@@ -246,6 +248,19 @@ class ChunkingConfig(BaseModel):
 
         description="Parallel chunking workers. Default 1 (single-threaded, suitable for Chromebook deployment).",
 
+    )
+
+    batch: bool = Field(
+        default=False,
+        description=(
+            "Collect all texts (narrative + tables) and chunk in one call. "
+            "Enables real multiprocessing when processes > 1."
+        ),
+    )
+
+    progress: bool = Field(
+        default=False,
+        description="Show a tqdm progress bar during chunking.",
     )
 
 
