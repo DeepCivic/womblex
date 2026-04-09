@@ -43,7 +43,6 @@ chunking:
 
 # PII cleaning uses regex pattern recognisers (Presidio-style) validated by
 # a Sentence Transformers context model (all-MiniLM-L6-v2, 22M params).
-# Requires: pip install womblex[pii]
 #
 # pipeline_point: post_extraction — clean page texts before chunking
 #                 post_chunk      — clean individual chunk texts after chunking
@@ -53,14 +52,14 @@ pii:
   enabled: false
   entities:
     - PERSON
-    # - ADDRESS          # street addresses (regex + enrichment)
-    # - EMAIL            # enrichment only
-    # - PHONE_NUMBER     # enrichment only
-    # - ID_NUMBER        # enrichment only
+    # - ADDRESS          # street addresses (regex, implemented)
+    # - EMAIL            # not yet implemented
+    # - PHONE_NUMBER     # not yet implemented
+    # - ID_NUMBER        # not yet implemented
   person_types:
     - natural
-    # - corporate        # include corporate entities as PII
-    # - politic          # include government bodies as PII
+    # - corporate        # not yet implemented
+    # - politic          # not yet implemented
   pipeline_point: post_chunk
   context_similarity_threshold: 0.5
   model: all-MiniLM-L6-v2

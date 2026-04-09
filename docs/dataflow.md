@@ -71,8 +71,8 @@ Raw files (PDF / DOCX / CSV)
 ┌───────────────────┐
 │  write_parquet    │  → documents.parquet, chunks.parquet
 │  (store/output)   │
-│  write_enrichment │  → entity_mentions.parquet, graph_edges.parquet,
-│  (store/enrichment│     enrichment_metadata.parquet
+│  write_enrichment │  → entities.parquet, graph_edges.parquet,
+│  (store/enrichment│     enrichment_meta.parquet
 │  _output)         │
 └───────────────────┘
         │
@@ -149,9 +149,9 @@ For each file processed via `operations.py`:
 5. store
       ├── write_batch_parquet(batch, path) → documents.parquet
       ├── write_batch_enrichment(batch, dir) →
-      │     ├── entity_mentions.parquet
+      │     ├── entities.parquet
       │     ├── graph_edges.parquet
-      │     └── enrichment_metadata.parquet
+      │     └── enrichment_meta.parquet
       └── checkpoint written after each batch (JSON, resumable)
 ```
 
@@ -232,7 +232,7 @@ For each file processed via `operations.py`:
 | `classification` | Top label from kanon-universal-classifier |
 | `classification_score` | Confidence for top label |
 
-**entity_mentions.parquet** — one row per entity mention (from enrichment)
+**entities.parquet** — one row per entity mention (from enrichment)
 
 | Column | Description |
 |--------|-------------|
@@ -251,7 +251,7 @@ For each file processed via `operations.py`:
 | `target_id` | Target node identifier |
 | `relation` | Relationship type |
 
-**enrichment_metadata.parquet** — one row per enriched document
+**enrichment_meta.parquet** — one row per enriched document
 
 | Column | Description |
 |--------|-------------|

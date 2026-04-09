@@ -171,8 +171,8 @@ Recommendations should be ordered by impact-to-effort ratio. See `docs/accuracy/
 ### Adding a new document type
 1. Add enum value to `DocumentType`
 2. Add detection logic to `detect.py`
-3. Create extractor class in `extract.py`
-4. Register in strategy router
+3. Create extractor class in the appropriate strategy module (`strategies_native.py`, `strategies_scanned.py`, or `strategies_file.py`)
+4. Register in `get_extractor()` in `extract.py` and add to the re-export shim in `strategies.py`
 ### Adding a new Isaacus capability
 1. Add wrapper in `analyse/`
 2. Add config section
