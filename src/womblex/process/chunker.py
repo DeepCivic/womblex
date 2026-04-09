@@ -355,37 +355,40 @@ def _chunk_document_batch(
     processes: int = 1,
     progress: bool = False,
 ) -> list[TextChunk]:
-    """Batch chunking path — one semchunk call for all texts."""
-    texts: list[str] = []
-    content_types: list[str] = []
+    """Batch chunking path — one semchunk call for all texts.
 
-    # Narrative text always goes first
-    has_narrative = bool(full_text.strip())
-    if has_narrative:
-        texts.append(full_text)
-        content_types.append("narrative")
+    Narrative text is batched with overlap; tables are batched separately
+    without overlap (tables are self-contained, matching sequential behaviour).
+    """
+    all_chunks: list[TextChunk] = []
 
-    # Collect table markdowns (no overlap for tables)
+    # Narrative text (with overlap)
+    if full_text.strip():
+        narrative_batch = chunk_texts_batch(
+            [full_text], chunker, content_types=["narrative"],
+            overlap=overlap, processes=processes, progress=progress,
+        )
+        all_chunks.extend(narrative_batch[0])
+
+    # Table markdowns (no overlap — tables are self-contained)
+    table_texts: list[str] = []
     if tables:
         for tbl in tables:
             md = table_to_markdown(tbl.headers, tbl.rows)  # type: ignore[attr-defined]
             if md.strip():
-                texts.append(md)
-                content_types.append("table")
+                table_texts.append(md)
 
-    if not texts:
+    if table_texts:
+        table_batch = chunk_texts_batch(
+            table_texts, chunker,
+            content_types=["table"] * len(table_texts),
+            processes=processes, progress=progress,
+        )
+        for chunk_list in table_batch:
+            all_chunks.extend(chunk_list)
+
+    if not all_chunks:
         return []
-
-    # Single call to semchunk with all texts
-    batched = chunk_texts_batch(
-        texts, chunker, content_types=content_types,
-        overlap=overlap, processes=processes, progress=progress,
-    )
-
-    # For tables, strip overlap that was applied to narrative
-    all_chunks: list[TextChunk] = []
-    for chunk_list in batched:
-        all_chunks.extend(chunk_list)
 
     # Re-index
     for idx, chunk in enumerate(all_chunks):
