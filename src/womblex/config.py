@@ -227,6 +227,11 @@ class ChunkingConfig(BaseModel):
 
     memoize: bool = Field(default=True, description="Cache token counts for repeated substrings")
 
+    cache_maxsize: int | None = Field(
+        default=None,
+        description="Upper bound on memoization cache entries. None = unbounded.",
+    )
+
     max_token_chars: int | None = Field(
 
         default=None,

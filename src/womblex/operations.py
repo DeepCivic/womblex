@@ -419,6 +419,8 @@ def run_chunking(
 
         memoize=config.chunking.memoize,
 
+        cache_maxsize=config.chunking.cache_maxsize,
+
         max_token_chars=config.chunking.max_token_chars,
 
     )

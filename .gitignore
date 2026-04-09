@@ -21,6 +21,9 @@ datasets/FUNSD/
 datasets/FUNSD_plus/
 raw_documents/
 
+# Test fixtures — separate repo, see THIRD_PARTY_DATA.md
+fixtures/
+
 # DVC
 *.dvc
 .dvc/

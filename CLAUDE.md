@@ -132,15 +132,15 @@ for page in doc:
 ### Test fixtures
 All test data comes from real documents in `fixtures/` (FUNSD, IAM-line, DocLayNet, womblex-collection). No synthetic data — see `fixtures/fixtures/README.md` for sample descriptions and ground-truth formats. Real PDF fixtures will be added from the larger document collection as extraction quality improves.
 
-Fixtures live in a separate repository ([womblex-development-fixtures](https://github.com/DeepCivic/womblex-development-fixtures)) and are pulled in as a git submodule at `fixtures/`. After cloning, run:
+Fixtures live in a separate repository ([womblex-development-fixtures](https://github.com/DeepCivic/womblex-development-fixtures)). Clone them into the project root:
 ```bash
-git submodule update --init
+git clone https://github.com/DeepCivic/womblex-development-fixtures.git fixtures
 ```
 ### Running tests
 Always use `uv run python -m pytest` (not bare `pytest`) to ensure the venv is active:
 ```bash
-# Ensure fixtures submodule is present
-git submodule update --init
+# Ensure fixtures are present (see THIRD_PARTY_DATA.md)
+# git clone https://github.com/DeepCivic/womblex-development-fixtures.git fixtures
 
 # Fast unit tests (slow tests excluded by default via pyproject.toml addopts)
 uv run python -m pytest tests/ -v

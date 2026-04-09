@@ -46,6 +46,7 @@ def create_chunker(
     chunk_size: int,
     *,
     memoize: bool = True,
+    cache_maxsize: int | None = None,
     max_token_chars: int | None = None,
 ) -> semchunk.Chunker:
     """Create a semchunk chunker.
@@ -55,6 +56,8 @@ def create_chunker(
             token counter ``(str) -> int``.
         chunk_size: Maximum tokens per chunk.
         memoize: Cache token counts for repeated substrings.
+        cache_maxsize: Upper bound on memoization cache entries.
+            ``None`` = unbounded.
         max_token_chars: Max chars per token estimate for optimisation.
 
     Returns:
@@ -64,6 +67,7 @@ def create_chunker(
         tokenizer,
         chunk_size=chunk_size,
         memoize=memoize,
+        cache_maxsize=cache_maxsize,
         max_token_chars=max_token_chars,
     )
 
