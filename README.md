@@ -34,16 +34,18 @@ pip install womblex[isaacus]
 For development:
 
 ```bash
-git clone --recurse-submodules https://github.com/Team-DeepCivic/Womblex.git
+git clone https://github.com/Team-DeepCivic/Womblex.git
 cd Womblex
 uv sync --extra dev
 ```
 
-If you already cloned without `--recurse-submodules`, fetch the test fixtures with:
+Test fixtures live in a separate repository. Clone them for running benchmarks:
 
 ```bash
-git submodule update --init
+git clone https://github.com/DeepCivic/womblex-development-fixtures.git fixtures
 ```
+
+See [THIRD_PARTY_DATA.md](THIRD_PARTY_DATA.md) for details.
 
 ### System Dependencies
 
@@ -211,7 +213,7 @@ With `womblex[isaacus]` enrichment enabled:
 womblex/
 ├── configs/           # Dataset-specific configurations
 ├── docs/              # Architecture docs, ADRs, accuracy reports
-├── fixtures/          # Git submodule: test fixtures (FUNSD, IAM-line, DocLayNet, womblex-collection)
+├── fixtures/          # Test fixtures (separate repo, see THIRD_PARTY_DATA.md)
 ├── src/womblex/
 │   ├── cli.py              # CLI entry point (womblex run / extract / ingest-gnaf / ingest-geo)
 │   ├── config.py           # Pydantic config models
@@ -263,8 +265,8 @@ womblex/
 # Install with dev dependencies
 uv sync --all-extras
 
-# Fetch test fixtures (git submodule)
-git submodule update --init
+# Fetch test fixtures (separate repo, see THIRD_PARTY_DATA.md)
+git clone https://github.com/DeepCivic/womblex-development-fixtures.git fixtures
 
 # Run unit tests
 uv run python -m pytest

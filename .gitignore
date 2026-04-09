@@ -6,6 +6,11 @@ dist/
 build/
 .eggs/
 
+# Testing
+.coverage
+.pytest_cache/
+htmlcov/
+
 # Environment
 .env
 .venv/
@@ -20,6 +25,9 @@ venv/
 datasets/FUNSD/
 datasets/FUNSD_plus/
 raw_documents/
+
+# Test fixtures — separate repo, see THIRD_PARTY_DATA.md
+fixtures/
 
 # DVC
 *.dvc

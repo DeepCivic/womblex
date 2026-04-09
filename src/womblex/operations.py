@@ -419,6 +419,8 @@ def run_chunking(
 
         memoize=config.chunking.memoize,
 
+        cache_maxsize=config.chunking.cache_maxsize,
+
         max_token_chars=config.chunking.max_token_chars,
 
     )
@@ -445,6 +447,10 @@ def run_chunking(
             overlap=chunk_cfg.overlap,
 
             processes=chunk_cfg.processes,
+
+            batch=chunk_cfg.batch,
+
+            progress=chunk_cfg.progress,
 
         )  # type: ignore[arg-type]
 
