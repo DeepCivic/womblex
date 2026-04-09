@@ -12,10 +12,14 @@ document block types via ``_YOLO_COCO_LABEL_MAP``.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
+
+from womblex.ingest.interfaces.protocols import (
+    LayoutRegionResult,
+    OCRRegionResult,
+)
 
 if TYPE_CHECKING:
     from rapidocr_onnxruntime import RapidOCR
@@ -34,24 +38,9 @@ _LANG_MAP: dict[str, str] = {
     "kor": "korean",
 }
 
-
-@dataclass
-class OCRRegion:
-    """A single text region detected by PaddleOCR."""
-
-    bbox: list[list[int]]  # four corner points [[x1,y1], ...]
-    text: str
-    confidence: float  # 0-1 scale
-
-
-@dataclass
-class LayoutRegion:
-    """A layout region detected by YOLO."""
-
-    bbox: tuple[float, float, float, float]  # (x0, y0, x1, y1)
-    label: str  # raw YOLO class name
-    block_type: str  # mapped womblex block_type
-    confidence: float
+# Backward-compatible aliases — canonical definitions live in interfaces/protocols.py
+OCRRegion = OCRRegionResult
+LayoutRegion = LayoutRegionResult
 
 
 class PaddleOCRReader:

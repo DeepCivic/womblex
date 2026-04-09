@@ -20,17 +20,10 @@ from womblex.ingest.extract import (
     _extract_form_fields,
     _extract_images_from_page,
     _extract_tables_from_page,
+    _text_coverage,
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _text_coverage(pages: list[PageResult]) -> float:
-    """Fraction of pages with meaningful text (>50 chars)."""
-    if not pages:
-        return 0.0
-    filled = sum(1 for p in pages if len(p.text.strip()) > 50)
-    return filled / len(pages)
 
 
 # ---------------------------------------------------------------------------

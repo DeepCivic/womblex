@@ -14,6 +14,7 @@ import numpy as np
 from womblex.ingest.extract import (
     ExtractionMetadata,
     ExtractionResult,
+    FormField,
     ImageData,
     PageResult,
     Position,
@@ -26,6 +27,7 @@ from womblex.ingest.extract import (
     _normalise_bbox,
     _ocr_text_block,
     _page_to_gray,
+    _text_coverage,
 )
 from womblex.ingest.paddle_ocr import (
     get_layout_analyzer,
@@ -47,12 +49,13 @@ def _ocr_page(
     """OCR a page: blur check -> deskew -> binarise -> PaddleOCR. Confidence 0-100."""
     import cv2
 
+    from womblex.ingest.heuristics_cv2 import calculate_blur_score
+
     pix = page.get_pixmap(dpi=dpi)
     img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
 
     # Pre-OCR blur check
     pre_gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY) if pix.n >= 3 else img
-    from womblex.ingest.heuristics_cv2 import calculate_blur_score
     blur = calculate_blur_score(pre_gray)
 
     gray, steps = preprocess_for_ocr(img)
@@ -138,14 +141,6 @@ def _layout_blocks_and_tables(
     return blocks, tables
 
 
-def _text_coverage(pages: list[PageResult]) -> float:
-    """Fraction of pages with meaningful text (>50 chars)."""
-    if not pages:
-        return 0.0
-    filled = sum(1 for p in pages if len(p.text.strip()) > 50)
-    return filled / len(pages)
-
-
 # ---------------------------------------------------------------------------
 # 4. scanned_machinewritten
 # ---------------------------------------------------------------------------
@@ -159,6 +154,8 @@ class ScannedMachinewrittenExtractor:
         self.lang = lang
 
     def extract(self, doc: fitz.Document) -> ExtractionResult:
+        from womblex.ingest.heuristics_cv2 import detect_table_grid
+
         pages: list[PageResult] = []
         all_blocks: list[TextBlock] = []
         all_tables: list[TableData] = []
@@ -179,8 +176,6 @@ class ScannedMachinewrittenExtractor:
 
             if not page_tables:
                 gray = _page_to_gray(page, dpi=self.dpi)
-                from womblex.ingest.heuristics_cv2 import detect_table_grid
-
                 grid = detect_table_grid(gray)
                 if grid.has_grid:
                     all_tables.extend(_extract_tables_from_page(page))
@@ -264,6 +259,8 @@ class ScannedMixedExtractor:
         self.lang = lang
 
     def extract(self, doc: fitz.Document) -> ExtractionResult:
+        from womblex.ingest.heuristics_cv2 import analyze_contour_complexity
+
         pages: list[PageResult] = []
         all_blocks: list[TextBlock] = []
         all_tables: list[TableData] = []
@@ -274,9 +271,6 @@ class ScannedMixedExtractor:
 
         for page in doc:
             gray = _page_to_gray(page, dpi=self.dpi)
-
-            from womblex.ingest.heuristics_cv2 import analyze_contour_complexity
-
             complexity = analyze_contour_complexity(gray)
             is_typed = complexity.regularity > 0.5
 
@@ -348,8 +342,8 @@ class HybridExtractor:
     def extract(self, doc: fitz.Document) -> ExtractionResult:
         pages: list[PageResult] = []
         all_tables: list[TableData] = []
-        all_forms: list = []
-        all_images: list = []
+        all_forms: list[FormField] = []
+        all_images: list[ImageData] = []
         all_blocks: list[TextBlock] = []
         confidences: list[float] = []
         combined_steps: list[str] = []
@@ -421,6 +415,8 @@ class ImageExtractor:
         self.lang = lang
 
     def extract(self, doc: fitz.Document) -> ExtractionResult:
+        from womblex.ingest.heuristics_cv2 import calculate_blur_score
+
         pages: list[PageResult] = []
         all_images: list[ImageData] = []
         all_blocks: list[TextBlock] = []
@@ -431,9 +427,6 @@ class ImageExtractor:
 
         for page in doc:
             gray = _page_to_gray(page, dpi=self.dpi)
-
-            from womblex.ingest.heuristics_cv2 import calculate_blur_score
-
             blur = calculate_blur_score(gray)
             if blur is not None and blur < 50:
                 steps.append("low_blur_warning")

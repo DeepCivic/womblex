@@ -425,31 +425,41 @@ def generate_extraction_report(results: dict[str, list[dict]]) -> str:
         lines.append("*No womblex-collection results collected.*")
     lines.append("")
 
-    # --- DOCX / Spreadsheet formats ---
+    # --- DOCX / Spreadsheet formats (derived from womblex results) ---
+    docx_results = [r for r in womblex if r.get("doc_type") == "docx"]
     lines.append("### DOCX")
     lines.append("")
-    lines.append("| Fixture | Strategy | Module | Notes |")
-    lines.append("|---------|----------|--------|-------|")
-    lines.append("| `dfat-corporate-plan-2025-26` | `DocxExtractor` | `strategies_file` | "
-                 "python-docx; heading detection via style; no OCR |")
-    lines.append("")
-    lines.append("DOCX extraction produces a single text block from paragraphs; "
-                 "no character-level ground truth exists. Evaluation is structural "
-                 "(paragraph count, table detection, heading classification).")
+    if docx_results:
+        lines.append("| Fixture | Pages | CER | WER | Extracted Chars | GT Chars |")
+        lines.append("|---------|-------|-----|-----|-----------------|----------|")
+        for r in docx_results:
+            lines.append(
+                f"| `{r['name']}` | {r['pages']} "
+                f"| {r['cer']:.3f} | {r['wer']:.3f} "
+                f"| {r['extracted_chars']:,} | {r['gt_chars']:,} |"
+            )
+    else:
+        lines.append("*No DOCX fixtures with ground truth yet.* "
+                     "DOCX extraction uses `DocxExtractor` (python-docx); "
+                     "evaluation is structural (paragraph count, table detection, heading classification).")
     lines.append("")
 
+    spreadsheet_results = [r for r in womblex if r.get("doc_type") == "spreadsheet"]
     lines.append("### Spreadsheet (CSV / XLSX)")
     lines.append("")
-    lines.append("| Fixture | Format | Strategy | Extraction Results | Notes |")
-    lines.append("|---------|--------|----------|-------------------|-------|")
-    lines.append("| `Approved-providers-au-export` | CSV | `SpreadsheetExtractor` | "
-                 "1 per row (10,859) | Key-value pairs per row |")
-    lines.append("| `mso-statistics-sept-qtr-2025` | XLSX | `SpreadsheetExtractor` | "
-                 "1 per sheet (34) | Mixed narrative + tabular |")
-    lines.append("")
-    lines.append("Spreadsheet extraction produces one `ExtractionResult` per data row (CSV) "
-                 "or per sheet (XLSX). No OCR involved. Evaluation is structural: "
-                 "row count preservation, header detection, sheet classification.")
+    if spreadsheet_results:
+        lines.append("| Fixture | Pages | CER | WER | Extracted Chars | GT Chars |")
+        lines.append("|---------|-------|-----|-----|-----------------|----------|")
+        for r in spreadsheet_results:
+            lines.append(
+                f"| `{r['name']}` | {r['pages']} "
+                f"| {r['cer']:.3f} | {r['wer']:.3f} "
+                f"| {r['extracted_chars']:,} | {r['gt_chars']:,} |"
+            )
+    else:
+        lines.append("*No spreadsheet fixtures with ground truth yet.* "
+                     "Spreadsheet extraction uses `SpreadsheetExtractor` (pandas); "
+                     "one result per data row (CSV) or per sheet (XLSX). No OCR involved.")
     lines.append("")
 
     # --- Preprocessing pipeline ---

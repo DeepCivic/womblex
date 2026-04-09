@@ -137,8 +137,6 @@ class NonTextualExtractor:
     """Placeholder for documents that cannot be extracted -- flags for manual review."""
 
     def extract(self, doc: "fitz.Document") -> ExtractionResult:
-        import fitz as _fitz  # noqa: F811 — lazy import for type
-
         return ExtractionResult(
             pages=[],
             method="non_textual",

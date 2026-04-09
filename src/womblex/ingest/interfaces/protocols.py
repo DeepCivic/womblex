@@ -86,27 +86,19 @@ class LayoutAnalyzer(Protocol):
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class PreprocessResult:
-    """Output of image preprocessing: the processed image and applied steps."""
-
-    image: np.ndarray  # grayscale processed image
-    steps: list[str]  # e.g. ["deskew", "otsu_binarise"]
-
-
 @runtime_checkable
 class Preprocessor(Protocol):
     """Protocol for image preprocessing backends.
 
-    Any callable with signature ``(img) -> PreprocessResult`` or the
-    module-level ``preprocess_for_ocr`` function (which returns a tuple)
-    satisfies this protocol.
+    Any callable with signature ``(img) -> (grayscale, steps)`` satisfies
+    this protocol.  ``preprocess_for_ocr`` in ``paddle_ocr.py`` is the
+    default implementation.
     """
 
-    def __call__(self, img: np.ndarray) -> PreprocessResult:
+    def __call__(self, img: np.ndarray) -> tuple[np.ndarray, list[str]]:
         """Preprocess *img* for OCR.
 
-        Returns a PreprocessResult with the processed grayscale image
-        and a list of steps applied (for metadata/observability).
+        Returns ``(grayscale_image, steps_applied)`` where *steps_applied*
+        is e.g. ``["deskew", "otsu_binarise"]``.
         """
         ...
