@@ -1,6 +1,7 @@
-# Core dependencies
+# Core dependencies — must match pyproject.toml [project.dependencies]
 pymupdf>=1.24
-onnxruntime>=1.17
+rapidocr-onnxruntime>=1.4
+ultralytics>=8.0
 opencv-python-headless
 semchunk>=3.0
 pandas>=2.0
@@ -11,8 +12,11 @@ pyyaml
 tqdm
 numpy
 python-dotenv
+python-docx>=1.0
+presidio-anonymizer>=2.2
+sentence-transformers>=3.0
 
-# Dev dependencies
+# Dev dependencies — must match pyproject.toml [project.optional-dependencies.dev]
 pytest>=8.0
 pytest-cov
 ruff
