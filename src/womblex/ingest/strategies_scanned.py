@@ -17,7 +17,6 @@ from womblex.ingest.extract import (
     FormField,
     ImageData,
     PageResult,
-    Position,
     TableData,
     TextBlock,
     _build_text_blocks,
@@ -25,6 +24,7 @@ from womblex.ingest.extract import (
     _extract_images_from_page,
     _extract_tables_from_page,
     _normalise_bbox,
+    _normalise_rect,
     _ocr_text_block,
     _page_to_gray,
     _text_coverage,
@@ -83,6 +83,10 @@ def _word_inside(word: tuple, rect: fitz.Rect) -> bool:
     return rect.x0 <= cx <= rect.x1 and rect.y0 <= cy <= rect.y1
 
 
+# max_overlapping_words=2 tolerates incidental native glyphs (e.g. a caption
+# label) inside an image rect; anything more means the text layer already
+# covers the region.  min_rect_size=50 px filters icons/bullets that won't
+# OCR meaningfully at 72 dpi.
 def _ocr_image_regions(
     page: fitz.Page,
     native_words: list,
@@ -151,15 +155,9 @@ def _ocr_image_regions(
         confs = [float(r[2]) for r in results if r[1].strip()]
         avg_conf = sum(confs) / len(confs) if confs else 0.0
 
-        pos = Position(
-            x=rect.x0 / pw,
-            y=rect.y0 / ph,
-            width=rect.width / pw,
-            height=rect.height / ph,
-        )
         blocks.append(TextBlock(
             text=text.strip(),
-            position=pos,
+            position=_normalise_rect(rect, pw, ph),
             block_type="figure",
             confidence=avg_conf,
         ))

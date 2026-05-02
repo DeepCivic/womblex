@@ -17,14 +17,17 @@ from dataclasses import dataclass, field
 from statistics import median
 from typing import TYPE_CHECKING, Sequence
 
+import numpy as np
+
 if TYPE_CHECKING:
     import fitz
 
 logger = logging.getLogger(__name__)
 
-# PyMuPDF word tuple: (x0, y0, x1, y1, text, block_no, line_no, word_no).
-# We accept anything with the first five positions; trailing positions are ignored.
-WordTuple = tuple[float, float, float, float, str, int, int, int]
+# Only the first five positions of PyMuPDF's word tuple are used; trailing
+# fields (block_no, line_no, word_no) are ignored, so callers may pass the
+# full tuple unchanged.
+WordTuple = tuple[float, float, float, float, str]
 
 
 @dataclass
@@ -38,10 +41,6 @@ class ColumnRegion:
     x0: float
     x1: float
     words: list[WordTuple] = field(default_factory=list)
-
-    @property
-    def width(self) -> float:
-        return self.x1 - self.x0
 
 
 def project_to_columns(
@@ -74,29 +73,30 @@ def project_to_columns(
         return [_build_column(words, 0.0, float(page_width))]
 
     bins = max(int(page_width), 1)
-    occupied = bytearray(bins)
+    occupied = np.zeros(bins, dtype=bool)
     for w in words:
         b0 = max(0, int(w[0]))
         b1 = min(bins, int(w[2]) + 1)
-        for i in range(b0, b1):
-            occupied[i] = 1
+        if b1 > b0:
+            occupied[b0:b1] = True
 
     min_gutter_px = max(2, int(min_gutter_width * page_width))
     edge_px = int(edge_margin * page_width)
 
+    # Find runs of unoccupied bins via np.diff on the boolean mask.
+    transitions = np.diff(occupied.astype(np.int8))
+    gap_starts = np.where(transitions == -1)[0] + 1
+    gap_ends = np.where(transitions == 1)[0] + 1
+    if not occupied[0]:
+        gap_starts = np.insert(gap_starts, 0, 0)
+    if not occupied[-1]:
+        gap_ends = np.append(gap_ends, bins)
+
     gutters: list[tuple[int, int]] = []
-    i = 0
-    while i < bins:
-        if occupied[i]:
-            i += 1
-            continue
-        j = i
-        while j < bins and not occupied[j]:
-            j += 1
-        run_len = j - i
-        if run_len >= min_gutter_px and i > edge_px and j < bins - edge_px:
-            gutters.append((i, j))
-        i = j
+    for g_start, g_end in zip(gap_starts, gap_ends):
+        run_len = g_end - g_start
+        if run_len >= min_gutter_px and g_start > edge_px and g_end < bins - edge_px:
+            gutters.append((int(g_start), int(g_end)))
 
     if not gutters:
         return [_build_column(words, 0.0, float(page_width))]
