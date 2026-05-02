@@ -170,74 +170,58 @@ class TestRenderSpatialText:
 # ---------------------------------------------------------------------------
 
 
-def _new_letter_page() -> tuple[fitz.Document, fitz.Page]:
+@pytest.fixture
+def letter_page():
     doc = fitz.open()
     page = doc.new_page(width=612, height=792)
-    return doc, page
+    yield doc, page
+    doc.close()
 
 
 class TestExtractPageText:
-    def test_empty_page_returns_empty_string(self) -> None:
-        doc, _ = _new_letter_page()
-        page = doc[0]
-        try:
-            assert extract_page_text(page) == ""
-        finally:
-            doc.close()
+    def test_empty_page_returns_empty_string(self, letter_page) -> None:
+        doc, _ = letter_page
+        assert extract_page_text(doc[0]) == ""
 
-    def test_single_column_page_falls_back_to_get_text(self) -> None:
-        doc, page = _new_letter_page()
-        try:
-            for i in range(20):
-                page.insert_text((72, 100 + i * 16), f"single column line number {i}", fontsize=11)
-            output = extract_page_text(page)
-            # Falls back to get_text("text") so all lines should be present in order
-            for i in range(20):
-                assert f"line number {i}" in output
-            # Lines should be in document order
-            lines = [f"line number {i}" for i in range(20)]
-            positions = [output.index(line) for line in lines]
-            assert positions == sorted(positions)
-        finally:
-            doc.close()
+    def test_single_column_page_falls_back_to_get_text(self, letter_page) -> None:
+        _, page = letter_page
+        for i in range(20):
+            page.insert_text((72, 100 + i * 16), f"single column line number {i}", fontsize=11)
+        output = extract_page_text(page)
+        for i in range(20):
+            assert f"line number {i}" in output
+        lines = [f"line number {i}" for i in range(20)]
+        positions = [output.index(line) for line in lines]
+        assert positions == sorted(positions)
 
-    def test_two_column_page_uses_grid_projection(self) -> None:
-        doc, page = _new_letter_page()
-        try:
-            # Left column: words at x=72, right column: words at x=340
-            for i in range(10):
-                page.insert_text((72, 100 + i * 18), f"LEFT{i:02d}", fontsize=11)
-                page.insert_text((340, 100 + i * 18), f"RIGHT{i:02d}", fontsize=11)
-            output = extract_page_text(page)
+    def test_two_column_page_uses_grid_projection(self, letter_page) -> None:
+        _, page = letter_page
+        for i in range(10):
+            page.insert_text((72, 100 + i * 18), f"LEFT{i:02d}", fontsize=11)
+            page.insert_text((340, 100 + i * 18), f"RIGHT{i:02d}", fontsize=11)
+        output = extract_page_text(page)
 
-            # All entries present
-            for i in range(10):
-                assert f"LEFT{i:02d}" in output
-                assert f"RIGHT{i:02d}" in output
+        for i in range(10):
+            assert f"LEFT{i:02d}" in output
+            assert f"RIGHT{i:02d}" in output
 
-            # Reading order: ALL of left column should come before ALL of right column
-            last_left = max(output.index(f"LEFT{i:02d}") for i in range(10))
-            first_right = min(output.index(f"RIGHT{i:02d}") for i in range(10))
-            assert last_left < first_right, (
-                "Multi-column reading order incorrect — left column should be "
-                "fully consumed before right column starts"
-            )
-        finally:
-            doc.close()
+        last_left = max(output.index(f"LEFT{i:02d}") for i in range(10))
+        first_right = min(output.index(f"RIGHT{i:02d}") for i in range(10))
+        assert last_left < first_right, (
+            "Multi-column reading order incorrect — left column should be "
+            "fully consumed before right column starts"
+        )
 
-    def test_two_column_page_preserves_within_column_order(self) -> None:
-        doc, page = _new_letter_page()
-        try:
-            for i in range(8):
-                page.insert_text((72, 100 + i * 18), f"L{i}", fontsize=11)
-                page.insert_text((340, 100 + i * 18), f"R{i}", fontsize=11)
-            output = extract_page_text(page)
-            left_positions = [output.index(f"L{i}") for i in range(8)]
-            right_positions = [output.index(f"R{i}") for i in range(8)]
-            assert left_positions == sorted(left_positions)
-            assert right_positions == sorted(right_positions)
-        finally:
-            doc.close()
+    def test_two_column_page_preserves_within_column_order(self, letter_page) -> None:
+        _, page = letter_page
+        for i in range(8):
+            page.insert_text((72, 100 + i * 18), f"L{i}", fontsize=11)
+            page.insert_text((340, 100 + i * 18), f"R{i}", fontsize=11)
+        output = extract_page_text(page)
+        left_positions = [output.index(f"L{i}") for i in range(8)]
+        right_positions = [output.index(f"R{i}") for i in range(8)]
+        assert left_positions == sorted(left_positions)
+        assert right_positions == sorted(right_positions)
 
 
 # ---------------------------------------------------------------------------
@@ -248,41 +232,33 @@ class TestExtractPageText:
 class TestNativeExtractorIntegration:
     """Confirm grid_projection wiring through NativeNarrativeExtractor."""
 
-    def test_native_narrative_extractor_handles_two_column_page(self) -> None:
+    def test_native_narrative_extractor_handles_two_column_page(self, letter_page) -> None:
         from womblex.ingest.strategies_native import NativeNarrativeExtractor
 
-        doc, page = _new_letter_page()
-        try:
-            for i in range(8):
-                page.insert_text((72, 100 + i * 18), f"COL_A_line_{i}", fontsize=11)
-                page.insert_text((340, 100 + i * 18), f"COL_B_line_{i}", fontsize=11)
+        doc, page = letter_page
+        for i in range(8):
+            page.insert_text((72, 100 + i * 18), f"COL_A_line_{i}", fontsize=11)
+            page.insert_text((340, 100 + i * 18), f"COL_B_line_{i}", fontsize=11)
 
-            extractor = NativeNarrativeExtractor()
-            result = extractor.extract(doc)
+        result = NativeNarrativeExtractor().extract(doc)
 
-            assert len(result.pages) == 1
-            text = result.pages[0].text
-            for i in range(8):
-                assert f"COL_A_line_{i}" in text
-                assert f"COL_B_line_{i}" in text
-            last_a = max(text.index(f"COL_A_line_{i}") for i in range(8))
-            first_b = min(text.index(f"COL_B_line_{i}") for i in range(8))
-            assert last_a < first_b
-        finally:
-            doc.close()
+        assert len(result.pages) == 1
+        text = result.pages[0].text
+        for i in range(8):
+            assert f"COL_A_line_{i}" in text
+            assert f"COL_B_line_{i}" in text
+        last_a = max(text.index(f"COL_A_line_{i}") for i in range(8))
+        first_b = min(text.index(f"COL_B_line_{i}") for i in range(8))
+        assert last_a < first_b
 
-    def test_native_narrative_extractor_unchanged_on_single_column(self) -> None:
+    def test_native_narrative_extractor_unchanged_on_single_column(self, letter_page) -> None:
         from womblex.ingest.strategies_native import NativeNarrativeExtractor
 
-        doc, page = _new_letter_page()
-        try:
-            for i in range(10):
-                page.insert_text((72, 100 + i * 16), f"single body line {i}", fontsize=11)
+        doc, page = letter_page
+        for i in range(10):
+            page.insert_text((72, 100 + i * 16), f"single body line {i}", fontsize=11)
 
-            extractor = NativeNarrativeExtractor()
-            result = extractor.extract(doc)
-            text = result.pages[0].text
-            for i in range(10):
-                assert f"single body line {i}" in text
-        finally:
-            doc.close()
+        result = NativeNarrativeExtractor().extract(doc)
+        text = result.pages[0].text
+        for i in range(10):
+            assert f"single body line {i}" in text

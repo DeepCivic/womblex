@@ -9,7 +9,6 @@ from __future__ import annotations
 import logging
 
 import fitz
-import numpy as np
 
 from womblex.ingest.extract import (
     ExtractionMetadata,
@@ -19,6 +18,7 @@ from womblex.ingest.extract import (
     PageResult,
     TableData,
     TextBlock,
+    _avg_ocr_confidence,
     _build_text_blocks,
     _extract_form_fields,
     _extract_images_from_page,
@@ -27,6 +27,7 @@ from womblex.ingest.extract import (
     _normalise_rect,
     _ocr_text_block,
     _page_to_gray,
+    _pixmap_to_array,
     _text_coverage,
 )
 from womblex.ingest.paddle_ocr import (
@@ -52,7 +53,7 @@ def _ocr_page(
     from womblex.ingest.heuristics_cv2 import calculate_blur_score
 
     pix = page.get_pixmap(dpi=dpi)
-    img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
+    img = _pixmap_to_array(pix)
 
     # Pre-OCR blur check
     pre_gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY) if pix.n >= 3 else img
@@ -67,8 +68,7 @@ def _ocr_page(
     reader = get_paddle_reader(lang)
     results = reader.readtext(gray)
     text = "\n".join(r[1] for r in results if r[1].strip())
-    region_confs = [float(r[2]) for r in results if r[1].strip()]
-    avg_conf = (sum(region_confs) / len(region_confs)) * 100 if region_confs else 0.0
+    avg_conf = _avg_ocr_confidence(results, scale=100)
 
     if avg_conf < 40.0:
         logger.warning("low OCR confidence: doc=%s page=%d confidence=%.1f", page.parent.name, page.number, avg_conf)
@@ -132,16 +132,11 @@ def _ocr_image_regions(
         return blocks, steps
 
     reader = get_paddle_reader(lang)
-    scale = dpi / 72.0
 
     for rect in candidate_rects:
         try:
-            pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), clip=rect)
-            img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(
-                pix.height, pix.width, pix.n
-            )
-            if pix.n == 4:
-                img = img[:, :, :3]
+            pix = page.get_pixmap(dpi=dpi, clip=rect)
+            img = _pixmap_to_array(pix, drop_alpha=True)
             results = reader.readtext(img)
         except Exception as exc:
             logger.warning(
@@ -152,8 +147,7 @@ def _ocr_image_regions(
         text = "\n".join(r[1] for r in results if r[1].strip())
         if not text.strip():
             continue
-        confs = [float(r[2]) for r in results if r[1].strip()]
-        avg_conf = sum(confs) / len(confs) if confs else 0.0
+        avg_conf = _avg_ocr_confidence(results)
 
         blocks.append(TextBlock(
             text=text.strip(),
@@ -182,7 +176,7 @@ def _layout_blocks_and_tables(
     try:
         analyzer = get_layout_analyzer()
         pix = page.get_pixmap(dpi=dpi)
-        img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
+        img = _pixmap_to_array(pix)
 
         regions = analyzer.analyze(img)
         if not regions:
@@ -537,11 +531,10 @@ class ImageExtractor:
                 steps.append("low_blur_warning")
 
             pix = page.get_pixmap(dpi=self.dpi)
-            img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
+            img = _pixmap_to_array(pix)
             results = reader.readtext(img)
             text = "\n".join(r[1] for r in results if r[1].strip())
-            confs = [float(r[2]) for r in results if r[1].strip()]
-            avg_conf = (sum(confs) / len(confs)) * 100 if confs else 0.0
+            avg_conf = _avg_ocr_confidence(results, scale=100)
             confidences.append(avg_conf)
 
             pages.append(PageResult(page_number=page.number, text=text, method="ocr"))
