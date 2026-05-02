@@ -14,7 +14,6 @@ from womblex.ingest.extract import (
     ExtractionMetadata,
     ExtractionResult,
     PageResult,
-    TableData,
     TextBlock,
     _build_text_blocks,
     _extract_form_fields,
