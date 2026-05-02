@@ -14,7 +14,6 @@ from womblex.ingest.extract import (
     ExtractionMetadata,
     ExtractionResult,
     PageResult,
-    TableData,
     TextBlock,
     _build_text_blocks,
     _extract_form_fields,
@@ -22,6 +21,7 @@ from womblex.ingest.extract import (
     _extract_tables_from_page,
     _text_coverage,
 )
+from womblex.ingest.grid_projection import extract_page_text
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ class NativeNarrativeExtractor:
         all_blocks: list[TextBlock] = []
 
         for page in doc:
-            text = page.get_text("text", flags=fitz.TEXT_DEHYPHENATE)
+            text = extract_page_text(page)
             pages.append(PageResult(page_number=page.number, text=text, method="native"))
             all_blocks.extend(_build_text_blocks(page))
 
@@ -74,7 +74,7 @@ class NativeWithStructuredExtractor:
         all_blocks: list[TextBlock] = []
 
         for page in doc:
-            text = page.get_text("text", flags=fitz.TEXT_DEHYPHENATE)
+            text = extract_page_text(page)
             pages.append(PageResult(page_number=page.number, text=text, method="native"))
 
             all_tables.extend(_extract_tables_from_page(page))

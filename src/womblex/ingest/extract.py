@@ -165,13 +165,32 @@ def _text_coverage(pages: list[PageResult]) -> float:
 def _page_to_gray(page: fitz.Page, dpi: int = 150) -> np.ndarray:
     """Render a page to a grayscale numpy array."""
     import cv2
-    import numpy as np
 
     pix = page.get_pixmap(dpi=dpi)
-    img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
+    img = _pixmap_to_array(pix, drop_alpha=False)
     if pix.n >= 3:
         return cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
     return img.copy()
+
+
+def _pixmap_to_array(pix: fitz.Pixmap, *, drop_alpha: bool = False) -> np.ndarray:
+    """Convert a PyMuPDF Pixmap to a numpy array, optionally dropping alpha."""
+    img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
+    if drop_alpha and pix.n == 4:
+        return img[:, :, :3]
+    return img
+
+
+def _avg_ocr_confidence(results: list[tuple], *, scale: float = 1.0) -> float:
+    """Mean confidence across non-empty OCR results.
+
+    `results` is an EasyOCR-style ``(bbox, text, confidence)`` list.
+    ``scale=1`` returns 0–1; ``scale=100`` returns 0–100.
+    """
+    confs = [float(r[2]) for r in results if r[1].strip()]
+    if not confs:
+        return 0.0
+    return (sum(confs) / len(confs)) * scale
 
 
 def _normalise_rect(rect: fitz.Rect, page_width: float, page_height: float) -> Position:
