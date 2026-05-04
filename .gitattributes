@@ -1,0 +1,21 @@
+# Normalise line endings on checkin: avoid CRLF corruption from editors/tools
+# on Windows-style filesystems. All text files use LF in the repo.
+* text=auto eol=lf
+
+# Explicit binary types — never normalise these
+*.pt binary
+*.safetensors binary
+*.bin binary
+*.onnx binary
+*.pdf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.zip binary
+*.gz binary
+*.tar binary
+*.parquet binary
+*.xlsx binary
+*.xls binary
+*.docx binary
