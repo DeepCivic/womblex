@@ -1,0 +1,24 @@
+include README.md
+include LICENSE
+include CHANGELOG.md
+include py.typed
+
+recursive-include src/womblex *.py py.typed
+recursive-include src/womblex/_models *
+
+prune tests
+prune fixtures
+prune docs
+prune models
+prune raw_documents
+prune scripts
+prune .github
+prune .venv
+prune .mypy_cache
+prune .pytest_cache
+prune .ruff_cache
+
+global-exclude __pycache__
+global-exclude *.py[cod]
+global-exclude .DS_Store
+global-exclude .coverage
