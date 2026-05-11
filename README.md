@@ -89,22 +89,34 @@ womblex extract dataset.xlsx -o output/
 
 ## How It Works
 
-### 1. Document Type Detection
+### 1. Per-page profiling + plan-driven orchestrator
 
-Before extraction, each file is profiled to determine the appropriate strategy:
+PDFs are profiled per-page (`PageProfile` per page) rather than at
+document level. The orchestrator dispatches operations page-by-page
+based on the profiles, then merges into a single `ExtractionResult`.
+A doc-level summary type still surfaces in metadata.
 
-**PDFs** — routed by content analysis (text layer coverage, morphological features, table patterns):
+**Per-page operations** the orchestrator can apply:
 
-| Document Type | Detection Signal | Extraction Strategy |
-|---------------|------------------|---------------------|
-| Native Prose | Text layer > 100 chars/page | PyMuPDF direct |
-| Native + Tables | Text layer + table patterns | PyMuPDF + structure |
-| Scanned (machine) | No text layer, regular glyphs | PaddleOCR + YOLO layout |
-| Scanned (handwritten) | No text layer, irregular strokes | PaddleOCR (CRNN+Attention) |
-| Scanned (mixed) | No text layer, mixed regions | PaddleOCR + contour split |
-| Structured | Grid/form layout | PaddleOCR + heuristic tables |
-| Hybrid | Partial text layer | Text + PaddleOCR for gaps |
-| Image | Photos, diagrams | PaddleOCR, flagged for review |
+| Page profile | Operation | Notes |
+|---|---|---|
+| `has_text_layer` | Native text + tables + forms + blocks | Per-image OCR fires when the page has embedded image regions |
+| `needs_ocr` | PaddleOCR + layout blocks + form-pair line scan | YOLO layout for blocks; line-based form-pair extraction on assembled text |
+| Mixed-typed | Per-page typed/handwritten classification | Tags blocks as `typed` or `handwritten` |
+
+**Doc-level shape detection** (informs the orchestrator):
+
+| Shape | Detection | Specialised handling |
+|---|---|---|
+| Spreadsheet-print | Native text + table signal + filename hint | Custom multi-page table extractor with metadata-block capture (`ingest/spreadsheet_print.py`) |
+| Hybrid | Mix of native and OCR-needed pages | Per-page dispatch picks the right operation |
+
+**Other formats** — routed by file extension:
+
+| Format | Extensions | Extraction Strategy |
+|--------|-----------|---------------------|
+| Word | `.docx` | python-docx (paragraphs + tables) |
+| Spreadsheet | `.csv`, `.xlsx`, `.xls` | pandas per-row or per-sheet |
 
 **Other formats** — routed by file extension:
 
@@ -219,11 +231,15 @@ womblex/
 │   ├── config.py           # Pydantic config models
 │   ├── operations.py       # Independent operations (extract, redact, chunk, PII, enrich)
 │   ├── ingest/
-│   │   ├── detect.py            # Document type detection and profiling
-│   │   ├── extract.py           # ExtractionResult schema + strategy dispatch
-│   │   ├── strategies.py        # Re-export shim — imports from the three strategy modules below
-│   │   ├── strategies_native.py # Native text-layer PDF extractors (narrative, structured)
-│   │   ├── strategies_scanned.py # OCR-dependent extractors (scanned, hybrid, image)
+│   │   ├── detect.py            # Doc-level type classification (non-PDF dispatch + summary type for PDFs)
+│   │   ├── page_profile.py      # Per-page PageProfile + cheap qualifiers (e.g. spreadsheet-print)
+│   │   ├── orchestrator.py      # Plan-driven PDF extractor — walks per-page profiles, dispatches operations
+│   │   ├── extract.py           # ExtractionResult / TableData / FormField models + page-level primitives
+│   │   ├── forms.py             # Form-pair extraction (AcroForm + spatial + line-based for OCR)
+│   │   ├── spreadsheet_print.py # Multi-page table extractor for spreadsheet-printed PDFs
+│   │   ├── morphology.py        # Page-image morphology helpers (handwriting / glyph regularity)
+│   │   ├── strategies.py        # Re-export shim — non-PDF extractors + legacy ImageExtractor
+│   │   ├── strategies_scanned.py # OCR primitives (_ocr_page, _layout_blocks_and_tables) + ImageExtractor
 │   │   ├── strategies_file.py   # Non-PDF extractors (DOCX, plain text, non-textual)
 │   │   ├── interfaces/
 │   │   │   └── protocols.py     # Backend protocols (OCRReader, LayoutAnalyzer, Preprocessor)

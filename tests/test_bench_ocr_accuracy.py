@@ -10,12 +10,17 @@ Page sizes are computed to preserve each image's aspect ratio at a target
 width of 595 pt (A4 width), so OCR sees the same proportions as the source.
 IAM-line images are ~128px tall, so their pages are very short — correct
 behaviour for single-line recognition.
+
+Each test is parametrised over the OCR engines listed in ``OCR_ENGINES``.
+The ``deepseek-ocr`` engine requires a reachable Ollama instance with the
+``deepseek-ocr:3b`` tag pulled — tests skip cleanly otherwise.
 """
 
 from __future__ import annotations
 
 import io
 import json
+import os
 from pathlib import Path
 
 import fitz
@@ -25,6 +30,37 @@ from PIL import Image
 from womblex.ingest.detect import DocumentProfile, DocumentType
 from womblex.ingest.extract import extract_text
 from womblex.utils.metrics import cer, wer
+
+# Engines exercised by every parametrised test. Add new engines here.
+OCR_ENGINES: list[str] = ["paddleocr", "deepseek-ocr"]
+
+
+def _ollama_base_url() -> str:
+    return os.environ.get("OLLAMA_BASE_URL", "http://localhost:11435/v1").rstrip("/")
+
+
+def _deepseek_available() -> bool:
+    """Return True if Ollama is reachable and the deepseek-ocr tag is present."""
+    try:
+        import httpx
+    except ImportError:
+        return False
+    base = _ollama_base_url().removesuffix("/v1")
+    try:
+        resp = httpx.get(f"{base}/api/tags", timeout=2.0)
+        resp.raise_for_status()
+        names = {m.get("name", "") for m in resp.json().get("models", [])}
+    except Exception:
+        return False
+    return any(n.startswith("deepseek-ocr") for n in names)
+
+
+def _skip_if_unavailable(engine: str) -> None:
+    if engine == "deepseek-ocr" and not _deepseek_available():
+        pytest.skip(
+            f"deepseek-ocr unavailable at {_ollama_base_url()} "
+            "(no Ollama, or model tag not pulled)"
+        )
 
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "fixtures"
 FUNSD_IMAGES = FIXTURES_DIR / "funsd" / "images"
@@ -95,10 +131,10 @@ def _doclaynet_gt(name: str) -> str:
     return " ".join(w.strip() for w in data["words"] if w.strip())
 
 
-def _run_ocr(image_path: Path, tmp_path: Path) -> str:
-    """Return full extracted text for an image fixture."""
+def _run_ocr(image_path: Path, tmp_path: Path, engine: str = "paddleocr") -> str:
+    """Return full extracted text for an image fixture under the given engine."""
     pdf = _image_to_pdf(image_path, tmp_path / f"{image_path.stem}.pdf")
-    results = extract_text(pdf, _scanned_profile())
+    results = extract_text(pdf, _scanned_profile(), engine=engine)
     return results[0].full_text if results else ""
 
 
@@ -130,19 +166,21 @@ IAM_SAMPLES = [
 class TestIAMAccuracy:
     """Single-line handwriting recognition accuracy vs IAM ground truth.
 
-    IAM images are 128px tall single-line strips.  EasyOCR is a general-purpose
+    IAM images are 128px tall single-line strips. PaddleOCR is a general-purpose
     engine, not a specialist HTR model, so WER > 1.0 is expected on handwriting.
-    These numbers establish a baseline; improvements to pre-processing should
-    move them down.
+    These numbers establish a baseline per engine; improvements to pre-processing
+    or engine choice should move them down.
     """
 
+    @pytest.mark.parametrize("engine", OCR_ENGINES)
     @pytest.mark.parametrize("name", IAM_SAMPLES)
-    def test_iam_wer_cer(self, tmp_path: Path, name: str) -> None:
+    def test_iam_wer_cer(self, tmp_path: Path, name: str, engine: str) -> None:
+        _skip_if_unavailable(engine)
         ref = _iam_gt(name)
-        hyp = _run_ocr(IAM_DIR / f"{name}.png", tmp_path)
+        hyp = _run_ocr(IAM_DIR / f"{name}.png", tmp_path, engine=engine)
         w = wer(ref, hyp)
         c = cer(ref, hyp)
-        print(f"\n{_fmt(f'IAM/{name}', hyp, ref)}")
+        print(f"\n{_fmt(f'IAM/{name}[{engine}]', hyp, ref)}")
         print(f"    ref: {ref!r}")
         print(f"    hyp: {hyp!r}")
         # Sanity only — we're measuring, not enforcing accuracy
@@ -172,13 +210,15 @@ class TestFUNSDAccuracy:
     reading-order recovery; WER reflects both recognition errors and ordering.
     """
 
+    @pytest.mark.parametrize("engine", OCR_ENGINES)
     @pytest.mark.parametrize("name", FUNSD_SAMPLES)
-    def test_funsd_wer_cer(self, tmp_path: Path, name: str) -> None:
+    def test_funsd_wer_cer(self, tmp_path: Path, name: str, engine: str) -> None:
+        _skip_if_unavailable(engine)
         ref = _funsd_gt(name)
-        hyp = _run_ocr(FUNSD_IMAGES / f"{name}.png", tmp_path)
+        hyp = _run_ocr(FUNSD_IMAGES / f"{name}.png", tmp_path, engine=engine)
         w = wer(ref, hyp)
         c = cer(ref, hyp)
-        print(f"\n{_fmt(f'FUNSD/{name}', hyp, ref)}")
+        print(f"\n{_fmt(f'FUNSD/{name}[{engine}]', hyp, ref)}")
         assert w >= 0.0
         assert c >= 0.0
 
@@ -205,12 +245,14 @@ class TestDocLayNetAccuracy:
     of the extraction pipeline.
     """
 
+    @pytest.mark.parametrize("engine", OCR_ENGINES)
     @pytest.mark.parametrize("name", DOCLAYNET_SAMPLES)
-    def test_doclaynet_wer_cer(self, tmp_path: Path, name: str) -> None:
+    def test_doclaynet_wer_cer(self, tmp_path: Path, name: str, engine: str) -> None:
+        _skip_if_unavailable(engine)
         ref = _doclaynet_gt(name)
-        hyp = _run_ocr(DOCLAYNET_DIR / f"{name}.png", tmp_path)
+        hyp = _run_ocr(DOCLAYNET_DIR / f"{name}.png", tmp_path, engine=engine)
         w = wer(ref, hyp)
         c = cer(ref, hyp)
-        print(f"\n{_fmt(f'DocLayNet/{name}', hyp, ref)}")
+        print(f"\n{_fmt(f'DocLayNet/{name}[{engine}]', hyp, ref)}")
         assert w >= 0.0
         assert c >= 0.0

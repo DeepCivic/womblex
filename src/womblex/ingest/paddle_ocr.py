@@ -18,6 +18,7 @@ import numpy as np
 
 from womblex.ingest.interfaces.protocols import (
     LayoutRegionResult,
+    OCRPageResult,
     OCRRegionResult,
 )
 
@@ -46,15 +47,38 @@ LayoutRegion = LayoutRegionResult
 class PaddleOCRReader:
     """OCR reader backed by rapidocr-onnxruntime.
 
-    Lazily initialises the RapidOCR engine on first call.  The engine
-    bundles PaddleOCR v4 det + rec + cls ONNX models so no external
-    model files are needed.
+    Prefers PaddleOCR v5 mobile models when found under
+    ``<models_dir>/paddleocr-v5/`` (handwriting + better word segmentation
+    than v4). Falls back to the v4 models bundled inside the
+    ``rapidocr-onnxruntime`` wheel when v5 is not installed.
     """
+
+    _V5_DIR = "paddleocr-v5"
+    _V5_FILES = {
+        "det": "ppocrv5-mobile-det.onnx",
+        "rec": "ppocrv5-mobile-rec.onnx",
+        "cls": "ppocrv5-cls.onnx",
+        "dict": "ppocrv5_dict.txt",
+    }
 
     def __init__(self, lang: str = "en", use_int8: bool = True) -> None:
         self.lang = lang
         self.use_int8 = use_int8
         self._engine: RapidOCR | None = None
+
+    def _resolve_v5_paths(self) -> dict[str, str] | None:
+        from womblex.utils.models import resolve_local_model_path
+        resolved = resolve_local_model_path(self._V5_DIR)
+        if isinstance(resolved, str):
+            return None
+        paths: dict[str, str] = {}
+        for key, fname in self._V5_FILES.items():
+            p = resolved / fname
+            if not p.is_file():
+                logger.warning("PaddleOCR v5 file missing: %s — falling back to v4", p)
+                return None
+            paths[key] = str(p)
+        return paths
 
     def _ensure_loaded(self) -> None:
         """Initialise RapidOCR engine if not already loaded."""
@@ -63,8 +87,18 @@ class PaddleOCRReader:
 
         from rapidocr_onnxruntime import RapidOCR
 
-        self._engine = RapidOCR()
-        logger.info("RapidOCR (PaddleOCR ONNX) loaded for lang=%s", self.lang)
+        v5 = self._resolve_v5_paths()
+        if v5 is not None:
+            self._engine = RapidOCR(
+                det_model_path=v5["det"],
+                rec_model_path=v5["rec"],
+                cls_model_path=v5["cls"],
+                rec_keys_path=v5["dict"],
+            )
+            logger.info("RapidOCR (PaddleOCR v5 mobile) loaded for lang=%s", self.lang)
+        else:
+            self._engine = RapidOCR()
+            logger.info("RapidOCR (PaddleOCR v4 bundled) loaded for lang=%s", self.lang)
 
     def readtext(self, img: np.ndarray) -> list[tuple[list[list[int]], str, float]]:
         """Detect and recognise text, returning EasyOCR-compatible tuples.
@@ -89,6 +123,21 @@ class PaddleOCRReader:
             output.append((bbox, text, float(confidence)))
 
         return output
+
+    def read_page(self, img: np.ndarray) -> OCRPageResult:
+        """OCR an entire page, returning region-based results."""
+        tuples = self.readtext(img)
+        regions = [
+            OCRRegionResult(bbox=bbox, text=text, confidence=conf)
+            for bbox, text, conf in tuples
+        ]
+        avg_conf = sum(r.confidence for r in regions) / len(regions) if regions else 0.0
+        return OCRPageResult(
+            regions=regions,
+            markdown=None,
+            reading_order_native=False,
+            confidence=avg_conf,
+        )
 
 
 # YOLO COCO class name → womblex block_type mapping.
@@ -205,6 +254,48 @@ def get_paddle_reader(lang: str = "eng", use_int8: bool = True) -> PaddleOCRRead
     if key not in _paddle_readers:
         _paddle_readers[key] = PaddleOCRReader(lang=mapped, use_int8=use_int8)
     return _paddle_readers[key]
+
+
+# Engine name aliases — canonical name on the left, accepted aliases on the right.
+_ENGINE_ALIASES: dict[str, str] = {
+    "paddleocr": "paddleocr",
+    "paddle": "paddleocr",
+    "rapidocr": "paddleocr",
+    "deepseek-ocr": "deepseek-ocr",
+    "deepseek": "deepseek-ocr",
+    "deepseekocr": "deepseek-ocr",
+}
+
+
+def get_ocr_reader(
+    engine: str = "paddleocr",
+    lang: str = "eng",
+    model: str | None = None,
+    base_url: str | None = None,
+    prompt: str | None = None,
+):
+    """Return a cached OCR reader for the requested engine.
+
+    ``engine`` accepts canonical names (``paddleocr``, ``deepseek-ocr``)
+    and common aliases. Engine-specific kwargs (``model``, ``base_url``,
+    ``prompt``) are forwarded only to engines that use them — passing
+    them to PaddleOCR is a no-op.
+    """
+    canonical = _ENGINE_ALIASES.get(engine.lower())
+    if canonical is None:
+        raise ValueError(
+            f"unknown OCR engine: {engine!r} "
+            f"(known: {sorted(set(_ENGINE_ALIASES.values()))})"
+        )
+
+    if canonical == "paddleocr":
+        return get_paddle_reader(lang=lang)
+
+    if canonical == "deepseek-ocr":
+        from womblex.ingest.llm_ocr import get_deepseek_reader
+        return get_deepseek_reader(model=model, base_url=base_url, prompt=prompt)
+
+    raise ValueError(f"unhandled engine after alias resolution: {canonical!r}")
 
 
 def get_layout_analyzer() -> YOLOLayoutAnalyzer:

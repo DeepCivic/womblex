@@ -24,14 +24,8 @@ from womblex.ingest.extract import (
 )
 from womblex.ingest.strategies import (
     DocxExtractor,
-    HybridExtractor,
     ImageExtractor,
-    NativeNarrativeExtractor,
-    NativeWithStructuredExtractor,
-    ScannedHandwrittenExtractor,
-    ScannedMachinewrittenExtractor,
-    ScannedMixedExtractor,
-    StructuredExtractor,
+    TextExtractor,
 )
 from womblex.ingest.spreadsheet import SpreadsheetExtractor
 
@@ -144,6 +138,21 @@ class TestNormaliseText:
         text = "Penalty: $11 400"
         assert _normalise_text(text) == text
 
+    # -- RES-003 extended: footer "1lPage" pipe-as-l (ASCII + fullwidth) --
+
+    def test_footer_pipe_ascii(self) -> None:
+        assert _normalise_text("1lPage") == "1 | Page"
+
+    def test_footer_pipe_capital_i(self) -> None:
+        assert _normalise_text("5IPage") == "5 | Page"
+
+    def test_footer_pipe_fullwidth_lowercase(self) -> None:
+        # Source: 00729 p4 — fullwidth Unicode "ｐａge"
+        assert _normalise_text("5lｐａge") == "5 | Page"
+
+    def test_footer_pipe_fullwidth_uppercase(self) -> None:
+        assert _normalise_text("3lＰａｇｅ") == "3 | Page"
+
 
 class TestExtractionResult:
     def test_full_text_concatenation(self) -> None:
@@ -222,6 +231,11 @@ class TestExtractionMetadata:
 
 
 class TestGetExtractor:
+    """`get_extractor` is the legacy non-PDF dispatch. Native and scanned PDFs
+    route through `extract_pdf_with_plan` (orchestrator) — see
+    test_orchestrator-style assertions in test_pipeline.py / test_integration.py
+    for that path."""
+
     def _make_profile(self, doc_type: DocumentType) -> DocumentProfile:
         return DocumentProfile(
             doc_type=doc_type,
@@ -237,34 +251,6 @@ class TestGetExtractor:
             confidence=0.9,
         )
 
-    def test_native_narrative_returns_correct_extractor(self) -> None:
-        ext = get_extractor(self._make_profile(DocumentType.NATIVE_NARRATIVE))
-        assert isinstance(ext, NativeNarrativeExtractor)
-
-    def test_native_with_structured_returns_correct_extractor(self) -> None:
-        ext = get_extractor(self._make_profile(DocumentType.NATIVE_WITH_STRUCTURED))
-        assert isinstance(ext, NativeWithStructuredExtractor)
-
-    def test_structured_returns_correct_extractor(self) -> None:
-        ext = get_extractor(self._make_profile(DocumentType.STRUCTURED))
-        assert isinstance(ext, StructuredExtractor)
-
-    def test_scanned_machinewritten_returns_correct_extractor(self) -> None:
-        ext = get_extractor(self._make_profile(DocumentType.SCANNED_MACHINEWRITTEN))
-        assert isinstance(ext, ScannedMachinewrittenExtractor)
-
-    def test_scanned_handwritten_returns_correct_extractor(self) -> None:
-        ext = get_extractor(self._make_profile(DocumentType.SCANNED_HANDWRITTEN))
-        assert isinstance(ext, ScannedHandwrittenExtractor)
-
-    def test_scanned_mixed_returns_correct_extractor(self) -> None:
-        ext = get_extractor(self._make_profile(DocumentType.SCANNED_MIXED))
-        assert isinstance(ext, ScannedMixedExtractor)
-
-    def test_hybrid_returns_correct_extractor(self) -> None:
-        ext = get_extractor(self._make_profile(DocumentType.HYBRID))
-        assert isinstance(ext, HybridExtractor)
-
     def test_image_returns_correct_extractor(self) -> None:
         ext = get_extractor(self._make_profile(DocumentType.IMAGE))
         assert isinstance(ext, ImageExtractor)
@@ -277,9 +263,13 @@ class TestGetExtractor:
         ext = get_extractor(self._make_profile(DocumentType.DOCX))
         assert isinstance(ext, DocxExtractor)
 
-    def test_unknown_returns_fallback(self) -> None:
-        ext = get_extractor(self._make_profile(DocumentType.UNKNOWN))
-        assert isinstance(ext, NativeNarrativeExtractor)
+    def test_text_returns_correct_extractor(self) -> None:
+        ext = get_extractor(self._make_profile(DocumentType.TEXT))
+        assert isinstance(ext, TextExtractor)
+
+    def test_pdf_type_raises(self) -> None:
+        with pytest.raises(ValueError, match="only handles non-PDF"):
+            get_extractor(self._make_profile(DocumentType.NATIVE_NARRATIVE))
 
 
 # ---------------------------------------------------------------------------

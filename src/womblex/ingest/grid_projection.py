@@ -175,12 +175,22 @@ def _render_column(col: ColumnRegion) -> str:
     return "\n".join(rendered)
 
 
-def extract_page_text(page: "fitz.Page") -> str:
+def extract_page_text(
+    page: "fitz.Page",
+    *,
+    exclude_rects: "Sequence[object] | None" = None,
+) -> str:
     """Extract page text, using grid projection for multi-column layouts.
 
-    Falls back to ``page.get_text("text", flags=TEXT_DEHYPHENATE)`` for
-    single-column or sparse pages so existing behaviour and PyMuPDF's
-    built-in dehyphenation are preserved.
+    For single-column or sparse pages, emits PyMuPDF blocks joined with
+    blank lines so paragraph breaks survive — `page.get_text("text")`
+    flat-joins blocks with single newlines and loses paragraph structure
+    that the block_type classifier later needs.
+
+    ``exclude_rects`` (when supplied) drops words whose midpoint falls
+    inside any rect, and excludes any block whose bbox intersects them.
+    Used by the orchestrator's native path to splice out detected-table
+    regions before prose emission so cells aren't read row-major.
     """
     import fitz
 
@@ -188,7 +198,58 @@ def extract_page_text(page: "fitz.Page") -> str:
     words = page.get_text("words", flags=fitz.TEXT_DEHYPHENATE)
     if not words:
         return ""
+
+    if exclude_rects:
+        words = [w for w in words if not _word_in_any_rect(w, exclude_rects)]
+        if not words:
+            return ""
+
     columns = project_to_columns(words, page_width)
     if len(columns) >= 2:
         return render_spatial_text(columns)
-    return page.get_text("text", flags=fitz.TEXT_DEHYPHENATE)
+    return _render_blocks_with_breaks(page, exclude_rects=exclude_rects)
+
+
+def _word_in_any_rect(
+    word: WordTuple, rects: "Sequence[object]",
+) -> bool:
+    """Test if a word's midpoint falls inside any of the given rects."""
+    cx = (word[0] + word[2]) / 2
+    cy = (word[1] + word[3]) / 2
+    for r in rects:
+        if r.x0 <= cx <= r.x1 and r.y0 <= cy <= r.y1:
+            return True
+    return False
+
+
+def _render_blocks_with_breaks(
+    page: "fitz.Page", *, exclude_rects: "Sequence[object] | None" = None,
+) -> str:
+    """Render single-column page text block-by-block with ``\\n\\n`` separators.
+
+    PyMuPDF `page.get_text("blocks")` returns
+    ``(x0, y0, x1, y1, text, block_no, block_type)`` already split at
+    paragraph-shaped boundaries; joining with blank lines preserves the
+    structure that the downstream block-type classifier later annotates.
+    """
+    import fitz
+
+    blocks = page.get_text("blocks", flags=fitz.TEXT_DEHYPHENATE)
+    parts: list[str] = []
+    for x0, y0, x1, y1, text, _block_no, block_type in blocks:
+        if block_type != 0:
+            continue
+        if exclude_rects:
+            block_rect = fitz.Rect(x0, y0, x1, y1)
+            # Drop block if its centre falls inside any exclusion rect —
+            # using centre rather than full overlap allows narrow text
+            # bands (e.g. the "Section / 165(1)" cell-internal lines)
+            # to still drop while leaving adjacent prose intact.
+            cx = (block_rect.x0 + block_rect.x1) / 2
+            cy = (block_rect.y0 + block_rect.y1) / 2
+            if any(r.x0 <= cx <= r.x1 and r.y0 <= cy <= r.y1 for r in exclude_rects):
+                continue
+        text = text.rstrip()
+        if text:
+            parts.append(text)
+    return "\n\n".join(parts)

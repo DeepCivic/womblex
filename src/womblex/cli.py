@@ -84,6 +84,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     )
 
     from womblex.store.checkpoint import CheckpointManager
+    from womblex.store.output import verify_shard_persistence, ShardVerificationError
 
     config = load_config(args.config)
 
@@ -108,6 +109,10 @@ def cmd_run(args: argparse.Namespace) -> int:
     output_root = config.paths.output_root
 
     output_root.mkdir(parents=True, exist_ok=True)
+
+    shard_dir = output_root / "documents"
+    shard_dir.mkdir(parents=True, exist_ok=True)
+    cumulative_shard_size = sum(s.stat().st_size for s in shard_dir.glob("*.parquet"))
 
     checkpoint_mgr = CheckpointManager(config.paths.checkpoint_dir, config.dataset.name)
 
@@ -182,7 +187,20 @@ def cmd_run(args: argparse.Namespace) -> int:
 
         total_failed += batch.failed
 
-        write_batch_parquet(batch, output_root / "documents.parquet")
+        shard_path = shard_dir / f"batch-{batch_num:04d}.parquet"
+        rows_to_write = sum(
+            1 for r in batch.results if r.status == "completed" and r.extraction is not None
+        )
+        write_batch_parquet(batch, shard_path)
+
+        if rows_to_write > 0:
+            try:
+                cumulative_shard_size = verify_shard_persistence(
+                    shard_path, rows_to_write, cumulative_shard_size,
+                )
+            except ShardVerificationError as e:
+                logger.error("[Batch %d] integrity check failed: %s", batch_num, e)
+                raise
 
         doc_ids = [r.doc_id for r in batch.results]
 

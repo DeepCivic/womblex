@@ -13,14 +13,11 @@ import fitz
 from womblex.ingest.extract import (
     ExtractionMetadata,
     ExtractionResult,
-    FormField,
     ImageData,
     PageResult,
     TableData,
     TextBlock,
-    _avg_ocr_confidence,
     _build_text_blocks,
-    _extract_form_fields,
     _extract_images_from_page,
     _extract_tables_from_page,
     _normalise_bbox,
@@ -32,7 +29,7 @@ from womblex.ingest.extract import (
 )
 from womblex.ingest.paddle_ocr import (
     get_layout_analyzer,
-    get_paddle_reader,
+    get_ocr_reader,
     preprocess_for_ocr,
 )
 
@@ -44,10 +41,184 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+def _spatial_sort_regions(regions, line_tolerance: float = 0.5) -> str:
+    """Order OCR regions row-major and join into newline-delimited text.
+
+    Within a row (regions whose y-centroids cluster within ``line_tolerance``
+    × average height) regions are joined left-to-right with spaces.  Rows are
+    joined with newlines.  Fixes the column-mixing failure mode where paddle
+    returns table cells in detection order.
+    """
+    items: list[tuple[str, float, float]] = []
+    heights: list[float] = []
+    for r in regions:
+        if not r.text.strip():
+            continue
+        xs = [p[0] for p in r.bbox]
+        ys = [p[1] for p in r.bbox]
+        cx = (min(xs) + max(xs)) / 2
+        cy = (min(ys) + max(ys)) / 2
+        items.append((r.text, cx, cy))
+        heights.append(max(ys) - min(ys))
+    if not items:
+        return ""
+
+    avg_h = sum(heights) / len(heights) if heights else 1.0
+    threshold = avg_h * line_tolerance
+    items.sort(key=lambda t: (t[2], t[1]))
+
+    rows: list[list[tuple[str, float, float]]] = [[items[0]]]
+    for item in items[1:]:
+        if abs(item[2] - rows[-1][0][2]) <= threshold:
+            rows[-1].append(item)
+        else:
+            rows.append([item])
+
+    out_lines: list[str] = []
+    for row in rows:
+        row.sort(key=lambda t: t[1])
+        out_lines.append(" ".join(t[0] for t in row))
+    return "\n".join(out_lines)
+
+
+def _table_aware_text(
+    regions,
+    line_tolerance: float = 0.5,
+    table_min_cols: int = 3,
+    table_min_start_rows: int = 2,
+) -> str:
+    """Spatial-sort regions, then re-emit detected table blocks column-major.
+
+    Detection uses a two-phase rule:
+
+    - **Start**: ``table_min_start_rows`` consecutive rows each with
+      ``table_min_cols`` or more items establish the table and its column
+      structure (cluster x-centroids of all items in the start rows).
+    - **Continue**: subsequent rows are absorbed into the table while every
+      item falls near one of the established column centres. A row with a
+      single item, or any item too far from any column centre, ends the run
+      — the next iteration starts re-evaluating from there.
+
+    Detected blocks are emitted column-major (each column joined into its
+    own paragraph). Everything else uses the row-major reading order from
+    ``_spatial_sort_regions``.
+    """
+    items: list[tuple[str, float, float]] = []
+    heights: list[float] = []
+    for r in regions:
+        if not r.text.strip():
+            continue
+        xs = [p[0] for p in r.bbox]
+        ys = [p[1] for p in r.bbox]
+        cx = (min(xs) + max(xs)) / 2
+        cy = (min(ys) + max(ys)) / 2
+        items.append((r.text, cx, cy))
+        heights.append(max(ys) - min(ys))
+    if not items:
+        return ""
+
+    avg_h = sum(heights) / len(heights) if heights else 1.0
+    row_threshold = avg_h * line_tolerance
+    items.sort(key=lambda t: (t[2], t[1]))
+
+    rows: list[list[tuple[str, float, float]]] = [[items[0]]]
+    for item in items[1:]:
+        if abs(item[2] - rows[-1][0][2]) <= row_threshold:
+            rows[-1].append(item)
+        else:
+            rows.append([item])
+    for row in rows:
+        row.sort(key=lambda t: t[1])
+
+    out_blocks: list[str] = []
+    i = 0
+    while i < len(rows):
+        end = _find_table_end(rows, i, table_min_cols, table_min_start_rows, avg_h)
+        if end > i + 1:  # at least 2 rows constitute a meaningful table
+            out_blocks.append(_emit_columns(rows[i:end], avg_h))
+            i = end
+        else:
+            out_blocks.append(" ".join(t[0] for t in rows[i]))
+            i += 1
+    return "\n".join(out_blocks)
+
+
+def _find_table_end(rows, start: int, min_cols: int, min_start_rows: int, avg_h: float) -> int:
+    """Return the row index just past a detected table run, or ``start`` if none."""
+    if start + min_start_rows > len(rows):
+        return start
+    if not all(len(rows[start + k]) >= min_cols for k in range(min_start_rows)):
+        return start
+
+    start_items = [it for k in range(min_start_rows) for it in rows[start + k]]
+    col_gap = max(avg_h * 3.0, 30.0)
+    col_centers = _cluster_x_centroids([it[1] for it in start_items], col_gap)
+    if len(col_centers) < min_cols:
+        return start  # the start rows didn't cluster into enough distinct columns
+
+    fit_dist = max(avg_h * 5.0, 50.0)
+    j = start + min_start_rows
+    while j < len(rows):
+        row = rows[j]
+        # Continuation requires multiple items AND every item near a column.
+        if len(row) < 2:
+            break
+        if not all(min(abs(it[1] - c) for c in col_centers) <= fit_dist for it in row):
+            break
+        j += 1
+    return j
+
+
+def _cluster_x_centroids(xs: list[float], gap_threshold: float) -> list[float]:
+    """1-D agglomerative clustering: items within ``gap_threshold`` group together."""
+    if not xs:
+        return []
+    xs_sorted = sorted(xs)
+    clusters: list[list[float]] = [[xs_sorted[0]]]
+    for x in xs_sorted[1:]:
+        if x - clusters[-1][-1] > gap_threshold:
+            clusters.append([x])
+        else:
+            clusters[-1].append(x)
+    return [sum(c) / len(c) for c in clusters]
+
+
+def _emit_columns(table_rows, avg_h: float) -> str:
+    """Emit a detected table block column-major, with blank lines between columns."""
+    all_items = [it for row in table_rows for it in row]
+    if not all_items:
+        return ""
+    col_gap = max(avg_h * 3.0, 30.0)
+    col_centers = _cluster_x_centroids([it[1] for it in all_items], col_gap)
+    if not col_centers:
+        return " ".join(t[0] for t in all_items)
+
+    columns: list[list[tuple[str, float, float]]] = [[] for _ in col_centers]
+    for it in all_items:
+        idx = min(range(len(col_centers)), key=lambda k: abs(it[1] - col_centers[k]))
+        columns[idx].append(it)
+
+    parts: list[str] = []
+    for col in columns:
+        col.sort(key=lambda t: t[2])
+        parts.append(" ".join(t[0] for t in col))
+    return "\n\n".join(p for p in parts if p)
+
+
 def _ocr_page(
-    page: fitz.Page, dpi: int, lang: str,
-) -> tuple[str, float, list[str]]:
-    """OCR a page: blur check -> deskew -> binarise -> PaddleOCR. Confidence 0-100."""
+    page: fitz.Page,
+    dpi: int,
+    lang: str,
+    engine: str = "paddleocr",
+    engine_options: dict | None = None,
+) -> tuple[str, float, list[str], bool]:
+    """OCR a page and return ``(text, confidence_0_100, steps, reading_order_native)``.
+
+    Region-based engines (paddleocr) get the standard preprocess pipeline
+    (deskew + binarise). LLM-based engines (deepseek-ocr) skip preprocessing
+    because they ingest the colour render directly and resolve reading order
+    themselves.
+    """
     import cv2
 
     from womblex.ingest.heuristics_cv2 import calculate_blur_score
@@ -55,25 +226,37 @@ def _ocr_page(
     pix = page.get_pixmap(dpi=dpi)
     img = _pixmap_to_array(pix)
 
-    # Pre-OCR blur check
+    # Pre-OCR blur check (cheap, useful for any engine)
     pre_gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY) if pix.n >= 3 else img
     blur = calculate_blur_score(pre_gray)
 
-    gray, steps = preprocess_for_ocr(img)
+    reader = get_ocr_reader(engine=engine, lang=lang, **(engine_options or {}))
+
+    # LLM engines work better on the unmodified colour render; binarised
+    # output throws off models trained on natural document images.
+    if engine.lower() in {"paddleocr", "paddle", "rapidocr"}:
+        ocr_input, steps = preprocess_for_ocr(img)
+    else:
+        ocr_input = img
+        steps = ["llm_native_input"]
 
     if blur is not None and blur < 50:
         steps.append("low_blur_warning")
         logger.warning("blurry page: doc=%s page=%d blur_score=%.1f", page.parent.name, page.number, blur)
 
-    reader = get_paddle_reader(lang)
-    results = reader.readtext(gray)
-    text = "\n".join(r[1] for r in results if r[1].strip())
-    avg_conf = _avg_ocr_confidence(results, scale=100)
+    page_result = reader.read_page(ocr_input)
+
+    if page_result.reading_order_native and page_result.markdown is not None:
+        text = page_result.markdown.strip()
+        avg_conf = page_result.confidence * 100.0
+    else:
+        text = _table_aware_text(page_result.regions)
+        avg_conf = page_result.confidence * 100.0
 
     if avg_conf < 40.0:
         logger.warning("low OCR confidence: doc=%s page=%d confidence=%.1f", page.parent.name, page.number, avg_conf)
 
-    return text, avg_conf, steps
+    return text, avg_conf, steps, page_result.reading_order_native
 
 
 def _word_inside(word: tuple, rect: fitz.Rect) -> bool:
@@ -92,6 +275,8 @@ def _ocr_image_regions(
     native_words: list,
     dpi: int,
     lang: str,
+    engine: str = "paddleocr",
+    engine_options: dict | None = None,
     max_overlapping_words: int = 2,
     min_rect_size: int = 50,
 ) -> tuple[list[TextBlock], list[str]]:
@@ -131,33 +316,55 @@ def _ocr_image_regions(
     if not candidate_rects:
         return blocks, steps
 
-    reader = get_paddle_reader(lang)
+    reader = get_ocr_reader(engine=engine, lang=lang, **(engine_options or {}))
 
     for rect in candidate_rects:
         try:
             pix = page.get_pixmap(dpi=dpi, clip=rect)
             img = _pixmap_to_array(pix, drop_alpha=True)
-            results = reader.readtext(img)
+            page_result = reader.read_page(img)
         except Exception as exc:
             logger.warning(
                 "subpage OCR failed: page=%d err=%s", page.number, exc,
             )
             continue
 
-        text = "\n".join(r[1] for r in results if r[1].strip())
+        if page_result.reading_order_native and page_result.markdown is not None:
+            text = page_result.markdown.strip()
+        else:
+            text = "\n".join(r.text for r in page_result.regions if r.text.strip())
         if not text.strip():
             continue
-        avg_conf = _avg_ocr_confidence(results)
 
         blocks.append(TextBlock(
             text=text.strip(),
             position=_normalise_rect(rect, pw, ph),
             block_type="figure",
-            confidence=avg_conf,
+            confidence=page_result.confidence,
         ))
         steps.append("subpage_ocr")
 
     return blocks, steps
+
+
+def _markdown_page_block(
+    page: fitz.Page, text: str, conf: float,
+) -> list[TextBlock]:
+    """Wrap LLM-derived markdown as a single page-spanning paragraph block.
+
+    LLM engines resolve reading order natively, so per-region layout
+    sorting is skipped. The full page text becomes one block at the
+    page rect — downstream chunking/normalisation operates as usual.
+    """
+    if not text.strip():
+        return []
+    pw, ph = page.rect.width, page.rect.height
+    return [TextBlock(
+        text=text.strip(),
+        position=_normalise_bbox((0, 0, pw, ph), pw, ph),
+        block_type="paragraph",
+        confidence=conf / 100.0 if conf > 1.0 else conf,
+    )]
 
 
 def _layout_blocks_and_tables(
@@ -226,282 +433,6 @@ def _layout_blocks_and_tables(
 
 
 # ---------------------------------------------------------------------------
-# 4. scanned_machinewritten
-# ---------------------------------------------------------------------------
-
-
-class ScannedMachinewrittenExtractor:
-    """OCR extraction optimised for machine-typed scanned documents."""
-
-    def __init__(self, dpi: int = 200, lang: str = "eng") -> None:
-        self.dpi = dpi
-        self.lang = lang
-
-    def extract(self, doc: fitz.Document) -> ExtractionResult:
-        from womblex.ingest.heuristics_cv2 import detect_table_grid
-
-        pages: list[PageResult] = []
-        all_blocks: list[TextBlock] = []
-        all_tables: list[TableData] = []
-        confidences: list[float] = []
-        combined_steps: list[str] = []
-
-        for page in doc:
-            text, conf, steps = _ocr_page(page, self.dpi, self.lang)
-            pages.append(PageResult(page_number=page.number, text=text, method="ocr"))
-            confidences.append(conf)
-            combined_steps.extend(steps)
-
-            page_blocks, page_tables = _layout_blocks_and_tables(
-                page, self.dpi, text, conf,
-            )
-            all_blocks.extend(page_blocks)
-            all_tables.extend(page_tables)
-
-            if not page_tables:
-                gray = _page_to_gray(page, dpi=self.dpi)
-                grid = detect_table_grid(gray)
-                if grid.has_grid:
-                    all_tables.extend(_extract_tables_from_page(page))
-
-        avg_conf = sum(confidences) / len(confidences) if confidences else 0.0
-        coverage = _text_coverage(pages)
-        unique_steps = sorted(set(combined_steps))
-
-        return ExtractionResult(
-            pages=pages,
-            method="scanned_machinewritten",
-            tables=all_tables,
-            text_blocks=all_blocks,
-            metadata=ExtractionMetadata(
-                extraction_strategy="scanned_machinewritten",
-                confidence=avg_conf / 100 if avg_conf else 0.0,
-                processing_time=0.0,
-                page_count=len(doc),
-                text_coverage=coverage,
-                preprocessing_steps=unique_steps,
-            ),
-        )
-
-
-# ---------------------------------------------------------------------------
-# 5. scanned_handwritten
-# ---------------------------------------------------------------------------
-
-
-class ScannedHandwrittenExtractor:
-    """OCR extraction for handwritten documents with confidence tracking."""
-
-    def __init__(self, dpi: int = 200, lang: str = "eng") -> None:
-        self.dpi = dpi
-        self.lang = lang
-
-    def extract(self, doc: fitz.Document) -> ExtractionResult:
-        pages: list[PageResult] = []
-        all_blocks: list[TextBlock] = []
-        confidences: list[float] = []
-        combined_steps: list[str] = []
-
-        for page in doc:
-            text, conf, steps = _ocr_page(page, self.dpi, self.lang)
-            pages.append(PageResult(page_number=page.number, text=text, method="ocr"))
-            confidences.append(conf)
-            combined_steps.extend(steps)
-
-            page_blocks, _ = _layout_blocks_and_tables(page, self.dpi, text, conf)
-            all_blocks.extend(page_blocks)
-
-        avg_conf = sum(confidences) / len(confidences) if confidences else 0.0
-        coverage = _text_coverage(pages)
-        unique_steps = sorted(set(combined_steps))
-
-        return ExtractionResult(
-            pages=pages,
-            method="scanned_handwritten",
-            text_blocks=all_blocks,
-            metadata=ExtractionMetadata(
-                extraction_strategy="scanned_handwritten",
-                confidence=avg_conf / 100 if avg_conf else 0.0,
-                processing_time=0.0,
-                page_count=len(doc),
-                text_coverage=coverage,
-                preprocessing_steps=unique_steps,
-            ),
-        )
-
-
-# ---------------------------------------------------------------------------
-# 6. scanned_mixed
-# ---------------------------------------------------------------------------
-
-
-class ScannedMixedExtractor:
-    """Extract text from documents with both typed and handwritten content."""
-
-    def __init__(self, dpi: int = 200, lang: str = "eng") -> None:
-        self.dpi = dpi
-        self.lang = lang
-
-    def extract(self, doc: fitz.Document) -> ExtractionResult:
-        from womblex.ingest.heuristics_cv2 import analyze_contour_complexity
-
-        pages: list[PageResult] = []
-        all_blocks: list[TextBlock] = []
-        all_tables: list[TableData] = []
-        confidences: list[float] = []
-        combined_steps: list[str] = []
-        typed_count = 0
-        handwritten_count = 0
-
-        for page in doc:
-            gray = _page_to_gray(page, dpi=self.dpi)
-            complexity = analyze_contour_complexity(gray)
-            is_typed = complexity.regularity > 0.5
-
-            if is_typed:
-                typed_count += 1
-            else:
-                handwritten_count += 1
-
-            text, conf, steps = _ocr_page(page, self.dpi, self.lang)
-            pages.append(PageResult(page_number=page.number, text=text, method="ocr"))
-            confidences.append(conf)
-            combined_steps.extend(steps)
-
-            page_blocks, page_tables = _layout_blocks_and_tables(
-                page, self.dpi, text, conf,
-            )
-            all_tables.extend(page_tables)
-
-            content_type = "typed" if is_typed else "handwritten"
-            for block in page_blocks:
-                block = TextBlock(
-                    text=block.text,
-                    position=block.position,
-                    block_type=content_type,
-                    confidence=block.confidence,
-                )
-                all_blocks.append(block)
-
-        avg_conf = sum(confidences) / len(confidences) if confidences else 0.0
-        coverage = _text_coverage(pages)
-        unique_steps = sorted(set(combined_steps))
-        total = typed_count + handwritten_count
-        content_mix = {}
-        if total > 0:
-            content_mix = {
-                "typed": typed_count / total,
-                "handwritten": handwritten_count / total,
-            }
-
-        return ExtractionResult(
-            pages=pages,
-            method="scanned_mixed",
-            tables=all_tables,
-            text_blocks=all_blocks,
-            metadata=ExtractionMetadata(
-                extraction_strategy="scanned_mixed",
-                confidence=avg_conf / 100 if avg_conf else 0.0,
-                processing_time=0.0,
-                page_count=len(doc),
-                text_coverage=coverage,
-                preprocessing_steps=unique_steps,
-                content_mix=content_mix,
-            ),
-        )
-
-
-# ---------------------------------------------------------------------------
-# 7. hybrid
-# ---------------------------------------------------------------------------
-
-
-class HybridExtractor:
-    """Extract from documents mixing native text and scanned pages."""
-
-    def __init__(self, dpi: int = 200, lang: str = "eng") -> None:
-        self.dpi = dpi
-        self.lang = lang
-
-    def extract(self, doc: fitz.Document) -> ExtractionResult:
-        pages: list[PageResult] = []
-        all_tables: list[TableData] = []
-        all_forms: list[FormField] = []
-        all_images: list[ImageData] = []
-        all_blocks: list[TextBlock] = []
-        confidences: list[float] = []
-        combined_steps: list[str] = []
-        native_count = 0
-        ocr_count = 0
-
-        for page in doc:
-            native_text = page.get_text("text", flags=fitz.TEXT_DEHYPHENATE).strip()
-            is_native = len(native_text) > 100
-
-            if is_native:
-                native_count += 1
-                page_blocks = _build_text_blocks(page)
-
-                native_words = page.get_text("words")
-                sub_blocks, sub_steps = _ocr_image_regions(
-                    page, native_words, self.dpi, self.lang,
-                )
-
-                page_text = native_text
-                method = "native"
-                if sub_blocks:
-                    page_text = native_text + "\n\n" + "\n\n".join(b.text for b in sub_blocks)
-                    method = "native+ocr"
-                    page_blocks.extend(sub_blocks)
-                    combined_steps.extend(sub_steps)
-
-                pages.append(PageResult(page_number=page.number, text=page_text, method=method))
-                all_tables.extend(_extract_tables_from_page(page))
-                all_forms.extend(_extract_form_fields(page))
-                all_images.extend(_extract_images_from_page(page))
-                all_blocks.extend(page_blocks)
-                confidences.append(95.0)
-            else:
-                ocr_count += 1
-                text, conf, steps = _ocr_page(page, self.dpi, self.lang)
-                pages.append(PageResult(page_number=page.number, text=text, method="ocr"))
-                confidences.append(conf)
-                combined_steps.extend(steps)
-
-                page_blocks, page_tables = _layout_blocks_and_tables(
-                    page, self.dpi, text, conf,
-                )
-                all_blocks.extend(page_blocks)
-                all_tables.extend(page_tables)
-
-        avg_conf = sum(confidences) / len(confidences) if confidences else 0.0
-        coverage = _text_coverage(pages)
-        unique_steps = sorted(set(combined_steps))
-        total = native_count + ocr_count
-        content_mix = {}
-        if total > 0:
-            content_mix = {"native": native_count / total, "scanned": ocr_count / total}
-
-        return ExtractionResult(
-            pages=pages,
-            method="hybrid",
-            tables=all_tables,
-            forms=all_forms,
-            images=all_images,
-            text_blocks=all_blocks,
-            metadata=ExtractionMetadata(
-                extraction_strategy="hybrid",
-                confidence=avg_conf / 100 if avg_conf else 0.0,
-                processing_time=0.0,
-                page_count=len(doc),
-                text_coverage=coverage,
-                preprocessing_steps=unique_steps,
-                content_mix=content_mix,
-            ),
-        )
-
-
-# ---------------------------------------------------------------------------
 # 8. image
 # ---------------------------------------------------------------------------
 
@@ -509,9 +440,17 @@ class HybridExtractor:
 class ImageExtractor:
     """Extract text and metadata from standalone image files / image PDFs."""
 
-    def __init__(self, dpi: int = 200, lang: str = "eng") -> None:
+    def __init__(
+        self,
+        dpi: int = 200,
+        lang: str = "eng",
+        engine: str = "paddleocr",
+        engine_options: dict | None = None,
+    ) -> None:
         self.dpi = dpi
         self.lang = lang
+        self.engine = engine
+        self.engine_options = engine_options or {}
 
     def extract(self, doc: fitz.Document) -> ExtractionResult:
         from womblex.ingest.heuristics_cv2 import calculate_blur_score
@@ -522,7 +461,7 @@ class ImageExtractor:
         confidences: list[float] = []
         steps: list[str] = []
 
-        reader = get_paddle_reader(self.lang)
+        reader = get_ocr_reader(engine=self.engine, lang=self.lang, **self.engine_options)
 
         for page in doc:
             gray = _page_to_gray(page, dpi=self.dpi)
@@ -532,9 +471,12 @@ class ImageExtractor:
 
             pix = page.get_pixmap(dpi=self.dpi)
             img = _pixmap_to_array(pix)
-            results = reader.readtext(img)
-            text = "\n".join(r[1] for r in results if r[1].strip())
-            avg_conf = _avg_ocr_confidence(results, scale=100)
+            page_result = reader.read_page(img)
+            if page_result.reading_order_native and page_result.markdown is not None:
+                text = page_result.markdown.strip()
+            else:
+                text = "\n".join(r.text for r in page_result.regions if r.text.strip())
+            avg_conf = page_result.confidence * 100.0
             confidences.append(avg_conf)
 
             pages.append(PageResult(page_number=page.number, text=text, method="ocr"))

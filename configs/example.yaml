@@ -15,9 +15,17 @@ extraction:
   native:
     include_tables: true
   ocr:
+    # engine: paddleocr      — local rapidocr-onnxruntime (region-based)
+    # engine: deepseek-ocr   — local DeepSeek-OCR via Ollama (markdown, native reading order)
     engine: paddleocr
     dpi: 300
     lang: eng
+    # engine_options forwards engine-specific kwargs.
+    # For deepseek-ocr:
+    #   model:    deepseek-ocr:3b
+    #   base_url: http://localhost:11435/v1   (or set OLLAMA_BASE_URL env)
+    #   prompt:   "<image>\nFree OCR."         (also: "...\n<|grounding|>OCR this image.")
+    engine_options: {}
 
 # Redaction runs as a separate pipeline stage after extraction.
 # mode: flag     — mark records/chunks that contain redacted regions (no text change)

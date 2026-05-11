@@ -177,5 +177,71 @@ def write_results(
 
 
 def read_results(path: Path) -> pa.Table:
-    """Read extraction results from a Parquet file."""
-    return pq.read_table(str(path), schema=EXTRACTION_SCHEMA)
+    """Read extraction results from a Parquet file or shard directory.
+
+    If *path* is a directory, every ``*.parquet`` file inside is read and
+    concatenated. This supports the per-batch shard layout produced by
+    ``cmd_run`` (``output/documents/batch-NNNN.parquet``) as well as legacy
+    single-file outputs.
+    """
+    p = Path(path)
+    if p.is_dir():
+        shards = sorted(p.glob("*.parquet"))
+        if not shards:
+            return pa.table(
+                {f.name: pa.array([], type=f.type) for f in EXTRACTION_SCHEMA},
+                schema=EXTRACTION_SCHEMA,
+            )
+        return pa.concat_tables(
+            [pq.read_table(str(s), schema=EXTRACTION_SCHEMA) for s in shards]
+        )
+    return pq.read_table(str(p), schema=EXTRACTION_SCHEMA)
+
+
+class ShardVerificationError(RuntimeError):
+    """Raised when a per-batch parquet shard fails on-disk verification."""
+
+
+def verify_shard_persistence(
+    shard_path: Path,
+    expected_rows: int,
+    prev_total_size: int,
+) -> int:
+    """Cheap on-disk sanity check after a batch write.
+
+    Catches the obvious silent failures: missing file, row count mismatch,
+    or unexpected file shrinkage (the canonical overwrite-bug signature).
+    Returns the new cumulative on-disk size of the shard directory so the
+    caller can pass it back on the next call.
+
+    Raises ``ShardVerificationError`` on any anomaly.
+    """
+    if not shard_path.exists():
+        raise ShardVerificationError(f"shard missing after write: {shard_path}")
+
+    size = shard_path.stat().st_size
+    if size == 0:
+        raise ShardVerificationError(f"shard is zero bytes: {shard_path}")
+
+    try:
+        actual_rows = pq.ParquetFile(str(shard_path)).metadata.num_rows
+    except Exception as e:
+        raise ShardVerificationError(
+            f"shard is unreadable as parquet: {shard_path}: {e}"
+        ) from e
+
+    if actual_rows != expected_rows:
+        raise ShardVerificationError(
+            f"shard row count mismatch: {shard_path} has {actual_rows} rows, "
+            f"expected {expected_rows}"
+        )
+
+    shard_dir = shard_path.parent
+    cumulative_size = sum(s.stat().st_size for s in shard_dir.glob("*.parquet"))
+    if cumulative_size < prev_total_size:
+        raise ShardVerificationError(
+            f"shard directory shrank: {shard_dir} was {prev_total_size}b, "
+            f"now {cumulative_size}b — likely overwrite"
+        )
+
+    return cumulative_size

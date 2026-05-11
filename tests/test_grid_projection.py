@@ -230,17 +230,34 @@ class TestExtractPageText:
 
 
 class TestNativeExtractorIntegration:
-    """Confirm grid_projection wiring through NativeNarrativeExtractor."""
+    """Confirm grid_projection wiring through the orchestrator's native path."""
 
-    def test_native_narrative_extractor_handles_two_column_page(self, letter_page) -> None:
-        from womblex.ingest.strategies_native import NativeNarrativeExtractor
+    def _extract_native(self, doc):
+        from womblex.ingest.detect import DocumentProfile, DocumentType
+        from womblex.ingest.orchestrator import extract_pdf_with_plan
 
+        profile = DocumentProfile(
+            doc_type=DocumentType.NATIVE_NARRATIVE,
+            page_count=len(doc),
+            has_text_layer=True,
+            text_coverage=1.0,
+            has_images=False,
+            has_tables=False,
+            has_handwriting_signals=False,
+            ocr_confidence=None,
+            glyph_regularity=None,
+            stroke_consistency=None,
+            confidence=0.9,
+        )
+        return extract_pdf_with_plan(doc, profile)
+
+    def test_native_extractor_handles_two_column_page(self, letter_page) -> None:
         doc, page = letter_page
         for i in range(8):
             page.insert_text((72, 100 + i * 18), f"COL_A_line_{i}", fontsize=11)
             page.insert_text((340, 100 + i * 18), f"COL_B_line_{i}", fontsize=11)
 
-        result = NativeNarrativeExtractor().extract(doc)
+        result = self._extract_native(doc)
 
         assert len(result.pages) == 1
         text = result.pages[0].text
@@ -251,14 +268,12 @@ class TestNativeExtractorIntegration:
         first_b = min(text.index(f"COL_B_line_{i}") for i in range(8))
         assert last_a < first_b
 
-    def test_native_narrative_extractor_unchanged_on_single_column(self, letter_page) -> None:
-        from womblex.ingest.strategies_native import NativeNarrativeExtractor
-
+    def test_native_extractor_unchanged_on_single_column(self, letter_page) -> None:
         doc, page = letter_page
         for i in range(10):
             page.insert_text((72, 100 + i * 16), f"single body line {i}", fontsize=11)
 
-        result = NativeNarrativeExtractor().extract(doc)
+        result = self._extract_native(doc)
         text = result.pages[0].text
         for i in range(10):
             assert f"single body line {i}" in text

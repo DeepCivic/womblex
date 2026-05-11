@@ -8,13 +8,25 @@ Womblex extracts text from Australian government PDF document releases and prepa
 The `raw_documents/` folder contains a curated mix of government document types. This serves as the baseline for testing and refining the extraction → Parquet process.
 
 ## Key Design Decisions
-### Document type detection drives extraction strategy
-The previous Kaggle approach used one-size-fits-all OCR. This failed because:
-- Native PDFs don't need OCR
-- Forms need layout-aware extraction
-- Tables need different handling than prose
-- Hybrids need selective OCR
-Detection happens first, then routes to appropriate extractor.
+### Per-page profile + plan-driven orchestrator
+PDFs route via per-page profiling, not document-level strategy. The
+detector profiles every page independently (`ingest/page_profile.py`
+→ `PageProfile`); the orchestrator (`ingest/orchestrator.py`) dispatches
+operations page-by-page based on those profiles.
+
+Government FOI bundles are heterogeneous within a single file — cover
+letter + columnar table + form + signed declaration. Document-level
+routing collapses this to one strategy and loses the per-region
+structure. Page-level routing matches the data.
+
+The doc-level `DocumentType` is now a *summary attribute* on the
+result, not a switch. PDF strategy classes (`Native*`, `Scanned*`,
+`Hybrid`, `Structured`) have been deleted; their bodies are inlined
+into the orchestrator's per-page operations
+(`_apply_native_page`, `_apply_ocr_page`).
+
+`get_extractor()` only handles non-PDF types (DOCX, SPREADSHEET, TEXT,
+IMAGE). For any PDF, `extract_text()` calls `extract_pdf_with_plan()`.
 ### Redaction is a post-extraction concern
 Redaction runs as a separate operation after extraction via `redact/stage.py`. The redaction detector misfires on form fields, chart regions, and diagram fills when called inside `_ocr_page()`, suppressing legitimate text. Do not call `pre_ocr_mask` from within extraction strategies.
 ### Chunking is generic semchunk integration
@@ -26,15 +38,22 @@ Processing 1500+ documents takes hours. Checkpoint after each batch so failures 
 ## Module Responsibilities
 | Module | Does | Doesn't |
 |--------|------|---------|
-| `ingest/detect.py` | Profile PDFs for extraction routing (samples text/OCR for classification) | Produce final extracted text |
-| `ingest/extract.py` | Get text out of PDFs, DOCX, and TXT files | Chunk or analyse |
+| `ingest/detect.py` | Doc-level type classification + non-PDF dispatch (DOCX, spreadsheet, text, image) | Per-page routing or final extracted text |
+| `ingest/page_profile.py` | Per-page `PageProfile` (text layer, table signal, form signal, blur, image count); cheap qualifier for spreadsheet-print | Run any extraction operation |
+| `ingest/orchestrator.py` | Walk per-page profiles, dispatch native or OCR operations, merge results into one `ExtractionResult` | Hold any extractor logic — calls primitives in `extract.py` and `strategies_scanned.py` |
+| `ingest/extract.py` | Page-level primitives (`_apply_native_page` building blocks: text, blocks, tables, images), data models (`ExtractionResult`, `TableData`, `FormField`, `TextBlock`), `extract_text()` entry point | Document-level routing (orchestrator does that) |
+| `ingest/forms.py` | Form-pair extraction: AcroForm widgets, spatial label-value pairs from `page.get_text("dict")`, line-based pairs from OCR'd text | Know about document types |
+| `ingest/spreadsheet_print.py` | Multi-page table extraction for spreadsheet-printed PDFs (FOI manifests, schedules, registers); column inference, row binning, metadata-block capture, rotation handling | Run on every doc — gated by qualifier |
+| `ingest/strategies_scanned.py` | OCR primitives (`_ocr_page`, `_layout_blocks_and_tables`, `_ocr_image_regions`) used by the orchestrator + the legacy `ImageExtractor` | Doc-level extraction strategies (those are gone for PDFs) |
+| `ingest/strategies_file.py` | `DocxExtractor`, `TextExtractor`, `NonTextualExtractor` for non-PDF formats | PDF extraction |
+| `ingest/morphology.py` | Page-image morphology helpers — handwriting / glyph regularity / stroke-width variance / OCR confidence sampling | Know about document semantics |
 | `ingest/gnaf.py` | Standalone G-NAF PSV → Parquet ingest (bypasses NLP pipeline) | Run redaction, chunking, PII, or enrichment |
 | `ingest/gnaf_schema.py` | Static, versioned column definitions for all G-NAF table types | Parse SQL at runtime |
 | `ingest/geospatial.py` | Standalone SHP → GeoParquet ingest (bypasses NLP pipeline) | Run redaction, chunking, PII, or enrichment |
 | `ingest/paddle_ocr.py` | Wrap RapidOCR and YOLOv8 layout analysis | Implement extraction strategy logic |
 | `redact/detector.py` | Detect and mask redacted regions | Know about document semantics |
 | `redact/stage.py` | Run redaction at configurable pipeline points (post_chunk, post_enrichment) | Implement detection logic |
-| `pii/cleaner.py` | Detect PERSON candidates via regex; validate with cosine similarity context model; merge enrichment-derived spans | Call Isaacus directly |
+| `pii/cleaner.py` | Detect PERSON candidates via regex; validate with cosine similarity context model; merge enrichment-derived spans; emit `[ENTITY_TYPE]` (square-bracket) tags | Call Isaacus directly |
 | `pii/stage.py` | Run PII cleaning as an isolated pipeline stage (post_extraction, post_chunk, post_enrichment) | Implement detection logic |
 | `process/chunker.py` | Split text into chunks | Call Isaacus |
 | `analyse/*.py` | Wrap Isaacus API calls; `query.py` loads enrichment graph from Parquet for PII masking | Handle PDFs directly |
@@ -168,11 +187,28 @@ When reviewing accuracy results or recommending improvements, use a systematic c
 Recommendations should be ordered by impact-to-effort ratio. See `docs/accuracy/` for current benchmark numbers and `docs/steering.md` for the priority list.
 
 ## When Modifying
-### Adding a new document type
+### Adding a new PDF shape (sub-mode of an existing DocumentType)
+For new shapes that fit within the existing native/OCR dispatch:
+1. Add detection signals to `PageProfile` if needed (and computation in
+   `profile_pages()`)
+2. Add a cheap qualifier in `page_profile.py` (re-uses existing fields
+   wherever possible — see `qualify_for_spreadsheet_print` for the
+   pattern)
+3. Add the extractor primitive as a self-contained module
+   (`ingest/<shape>.py`) returning the appropriate output type
+4. Wire into `orchestrator.extract_with_plan()` behind the qualifier so
+   it only runs on candidates
+5. Add config under `extraction.native` (or `extraction.ocr`) with a
+   nested `BaseModel` in `config.py`; thread through `operations.py`
+   into `extract_text()` → `extract_pdf_with_plan()`
+
+### Adding a new non-PDF document type
 1. Add enum value to `DocumentType`
 2. Add detection logic to `detect.py`
-3. Create extractor class in the appropriate strategy module (`strategies_native.py`, `strategies_scanned.py`, or `strategies_file.py`)
-4. Register in `get_extractor()` in `extract.py` and add to the re-export shim in `strategies.py`
+3. Create extractor class in `strategies_file.py` (or a new file-based
+   module)
+4. Register in `get_extractor()` in `extract.py` and add to
+   `strategies.py` re-export shim
 ### Adding a new Isaacus capability
 1. Add wrapper in `analyse/`
 2. Add config section

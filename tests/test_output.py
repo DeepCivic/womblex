@@ -15,7 +15,13 @@ from womblex.ingest.extract import (
     TableData,
     TextBlock,
 )
-from womblex.store.output import EXTRACTION_SCHEMA, read_results, write_results
+from womblex.store.output import (
+    EXTRACTION_SCHEMA,
+    ShardVerificationError,
+    read_results,
+    verify_shard_persistence,
+    write_results,
+)
 
 
 def _make_result(text: str = "Sample text", method: str = "native_narrative") -> ExtractionResult:
@@ -123,6 +129,52 @@ class TestReadResults:
         table = read_results(out)
         assert len(table) == 1
         assert table.column("document_id")[0].as_py() == "doc1"
+
+    def test_directory_concatenates_shards(self, tmp_path: Path) -> None:
+        shard_dir = tmp_path / "documents"
+        shard_dir.mkdir()
+        write_results([("doc1", "/a.pdf", _make_result())], shard_dir / "batch-0001.parquet")
+        write_results([("doc2", "/b.pdf", _make_result()), ("doc3", "/c.pdf", _make_result())],
+                      shard_dir / "batch-0002.parquet")
+
+        table = read_results(shard_dir)
+        assert len(table) == 3
+        ids = sorted(table.column("document_id").to_pylist())
+        assert ids == ["doc1", "doc2", "doc3"]
+
+
+class TestShardVerification:
+    def test_passes_on_correct_shard(self, tmp_path: Path) -> None:
+        shard_dir = tmp_path / "documents"
+        shard_dir.mkdir()
+        shard = shard_dir / "batch-0001.parquet"
+        write_results([("doc1", "/a.pdf", _make_result())], shard)
+
+        size = verify_shard_persistence(shard, expected_rows=1, prev_total_size=0)
+        assert size > 0
+
+    def test_raises_on_missing_shard(self, tmp_path: Path) -> None:
+        with pytest.raises(ShardVerificationError, match="missing"):
+            verify_shard_persistence(tmp_path / "ghost.parquet", expected_rows=1, prev_total_size=0)
+
+    def test_raises_on_row_count_mismatch(self, tmp_path: Path) -> None:
+        shard_dir = tmp_path / "documents"
+        shard_dir.mkdir()
+        shard = shard_dir / "batch-0001.parquet"
+        write_results([("doc1", "/a.pdf", _make_result())], shard)
+
+        with pytest.raises(ShardVerificationError, match="row count mismatch"):
+            verify_shard_persistence(shard, expected_rows=5, prev_total_size=0)
+
+    def test_raises_on_directory_shrink(self, tmp_path: Path) -> None:
+        shard_dir = tmp_path / "documents"
+        shard_dir.mkdir()
+        shard = shard_dir / "batch-0001.parquet"
+        write_results([("doc1", "/a.pdf", _make_result())], shard)
+
+        inflated_prev = shard.stat().st_size + 1_000_000
+        with pytest.raises(ShardVerificationError, match="shrank"):
+            verify_shard_persistence(shard, expected_rows=1, prev_total_size=inflated_prev)
 
 
 class TestResultWithoutMetadata:

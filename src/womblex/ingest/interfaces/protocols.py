@@ -9,7 +9,7 @@ dedicated HTR recognisers) can be injected without changing strategy code.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
 import numpy as np
@@ -29,21 +29,41 @@ class OCRRegionResult:
     confidence: float  # 0-1
 
 
+@dataclass
+class OCRPageResult:
+    """Page-level OCR output.
+
+    Region-based engines (PaddleOCR, Tesseract, EasyOCR, cloud APIs that
+    return word/line boxes) populate ``regions``. LLM-based engines
+    (DeepSeek-OCR, Mistral OCR, Gemini) typically return prose/markdown
+    with reading order already resolved — they populate ``markdown`` and
+    set ``reading_order_native=True``.
+
+    Strategies normalise both shapes into the existing TextBlock pipeline.
+    """
+
+    regions: list[OCRRegionResult] = field(default_factory=list)
+    markdown: str | None = None
+    reading_order_native: bool = False
+    confidence: float = 1.0  # page-level confidence, 0-1
+
+
 @runtime_checkable
 class OCRReader(Protocol):
     """Protocol for OCR backends.
 
-    Any class with a ``readtext`` method returning EasyOCR-compatible
-    tuples satisfies this protocol.  PaddleOCRReader is the default.
+    Backends must implement ``read_page``. ``readtext`` is optional —
+    region-based engines provide it for callers that want raw EasyOCR-style
+    tuples (e.g. sub-page OCR in HybridExtractor). LLM-based engines that
+    return only markdown can omit ``readtext`` entirely.
     """
 
-    def readtext(
-        self, img: np.ndarray
-    ) -> list[tuple[list[list[int]], str, float]]:
-        """Detect and recognise text in *img*.
+    def read_page(self, img: np.ndarray) -> OCRPageResult:
+        """OCR an entire page image.
 
-        Returns list of ``(bbox, text, confidence)`` where bbox is
-        four corner points and confidence is 0-1.
+        Returns either region-based output (``regions`` populated) or
+        markdown-based output (``markdown`` populated with
+        ``reading_order_native=True``), depending on the engine.
         """
         ...
 

@@ -42,12 +42,28 @@ class DetectionConfig(BaseModel):
 
 class OCRConfig(BaseModel):
 
-    """OCR engine settings."""
+    """OCR engine settings.
+
+    Supported engines:
+
+    - ``paddleocr`` (default): local rapidocr-onnxruntime, returns regions.
+    - ``deepseek-ocr``: local DeepSeek-OCR via an OpenAI-compatible
+      endpoint (e.g. Ollama at ``OLLAMA_BASE_URL``). Returns markdown
+      with native reading order.
+
+    ``engine_options`` forwards engine-specific kwargs:
+
+    - DeepSeek-OCR: ``model`` (default ``deepseek-ocr:3b``),
+      ``base_url`` (default from ``OLLAMA_BASE_URL`` env or
+      ``http://localhost:11435/v1``), ``prompt`` (default
+      ``"<image>\\nFree OCR."``).
+    """
 
     engine: str = "paddleocr"
 
     dpi: int = Field(default=200, ge=72, le=600)
     lang: str = "eng"
+    engine_options: dict = Field(default_factory=dict)
 
 
 
@@ -176,12 +192,29 @@ class PIIConfig(BaseModel):
 
 
 
+class SpreadsheetPrintConfig(BaseModel):
+    """Spreadsheet-printed-to-PDF extractor settings.
+
+    Triggered when a doc has a native text layer + table signal + either a
+    filename matching one of `filename_hints` or table signal on ≥50 % of
+    pages. Captures a single multi-page TableData with row-by-row data and
+    a metadata block (the label-value fields above the first data row).
+    """
+
+    metadata_location: str = "both"  # "both" | "table" | "document"
+    filename_hints: list[str] = [
+        "schedule", "index", "manifest", "register",
+        "list-of", "table-of", "appendix",
+    ]
+
+
 class NativeExtractionConfig(BaseModel):
 
     """Native text extraction settings."""
 
 
     include_tables: bool = True
+    spreadsheet_print: SpreadsheetPrintConfig = SpreadsheetPrintConfig()
 
 
 
