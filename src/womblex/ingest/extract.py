@@ -18,126 +18,25 @@ import fitz
 import numpy as np
 
 from womblex.ingest.detect import DocumentProfile, DocumentType
+from womblex.ingest.elements import Cell, Element, FieldEntry
+from womblex.ingest.views import (  # re-exported for back-compat
+    ExtractionMetadata,
+    ExtractionResult,
+    FormField,
+    ImageData,
+    PageResult,
+    Position,
+    TableData,
+    TextBlock,
+    _ZERO_POS,
+    _element_to_table_data,
+    _sheets_to_table_data,
+)
 
 if TYPE_CHECKING:
     from womblex.redact.stage import RedactionReport
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Structured content models (Parquet-ready)
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class Position:
-    """Normalised bounding box (0-1 document-relative coordinates)."""
-
-    x: float
-    y: float
-    width: float
-    height: float
-
-
-@dataclass
-class TableData:
-    """Extracted table with structure preserved.
-
-    `context` carries per-table metadata captured immediately above the
-    table on the source page (e.g. report-reference labels, scope tags
-    from spreadsheet-printed-to-PDF docs). Empty for tables without a
-    leading metadata block.
-    """
-
-    headers: list[str]
-    rows: list[list[str]]
-    position: Position
-    confidence: float
-    context: dict[str, str] = field(default_factory=dict)
-
-
-@dataclass
-class FormField:
-    """Extracted form field (label-value pair)."""
-
-    field_name: str
-    value: str
-    position: Position
-    confidence: float
-
-
-@dataclass
-class ImageData:
-    """Image metadata from a document page."""
-
-    alt_text: str
-    position: Position
-    confidence: float
-
-
-@dataclass
-class TextBlock:
-    """A segment of text with positional and type metadata."""
-
-    text: str
-    position: Position
-    block_type: str  # paragraph, heading, list_item, caption, etc.
-    confidence: float
-
-
-# ---------------------------------------------------------------------------
-# Extraction result models
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class PageResult:
-    """Extracted text for a single page."""
-
-    page_number: int
-    text: str
-    method: str
-
-
-@dataclass
-class ExtractionMetadata:
-    """Document-level extraction metadata."""
-
-    extraction_strategy: str
-    confidence: float
-    processing_time: float
-    page_count: int
-    text_coverage: float
-    preprocessing_steps: list[str] = field(default_factory=list)
-    content_mix: dict[str, float] = field(default_factory=dict)
-
-
-@dataclass
-class ExtractionResult:
-    """Result of text extraction from a document."""
-
-    pages: list[PageResult] = field(default_factory=list)
-    method: str = ""
-    error: str | None = None
-    tables: list[TableData] = field(default_factory=list)
-    forms: list[FormField] = field(default_factory=list)
-    images: list[ImageData] = field(default_factory=list)
-    text_blocks: list[TextBlock] = field(default_factory=list)
-    document_metadata: dict[str, str] = field(default_factory=dict)
-    metadata: ExtractionMetadata | None = None
-    warnings: list[str] = field(default_factory=list)
-    document_id: str | None = None  # set by extractors that produce multiple results per file
-    redaction_report: RedactionReport | None = None
-
-    @property
-    def full_text(self) -> str:
-        """Concatenate all page texts."""
-        return "\n\n".join(p.text for p in self.pages if p.text)
-
-    @property
-    def page_count(self) -> int:
-        return len(self.pages)
 
 
 # ---------------------------------------------------------------------------
@@ -224,6 +123,28 @@ def _normalise_bbox(
     )
 
 
+def _count_blocks_in_bbox(page: fitz.Page, bbox: fitz.Rect) -> int:
+    """Count `get_text("dict")` text blocks whose centre falls inside ``bbox``.
+
+    Used as a cross-check against PyMuPDF's `find_tables` over-firing: a
+    real table has at least one natural text block per row (each cell row
+    is its own paragraph in PyMuPDF's decomposition), while a prose-as-
+    table over-claims rows by carving sub-block whitespace into pseudo-
+    rows. The block count here is therefore a structural ceiling on how
+    many real rows the table region can contain.
+    """
+    count = 0
+    raw = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
+    for block in raw.get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        bx0, by0, bx1, by1 = block.get("bbox", (0, 0, 0, 0))
+        cx, cy = (bx0 + bx1) / 2, (by0 + by1) / 2
+        if bbox.x0 <= cx <= bbox.x1 and bbox.y0 <= cy <= bbox.y1:
+            count += 1
+    return count
+
+
 def _find_native_tables(
     page: fitz.Page,
 ) -> list[tuple[TableData, fitz.Rect, list[list]]]:
@@ -238,6 +159,13 @@ def _find_native_tables(
     alignment, ≥3 rows × ≥2 cols). Lines hits require non-zero row/col
     counts only — letter-format compliance notices ship a single 3-col
     ruled rules-of-the-Law table that should be captured here.
+
+    Cross-check gate: a candidate is rejected when fewer natural text
+    blocks fall inside its bbox than the row count it claims. PyMuPDF
+    over-fires on prose-with-indents (text strategy) and on redaction
+    boxes / form rules (lines strategy); both failure modes inflate row
+    count by carving sub-block whitespace into pseudo-rows. Real tables
+    decompose into ≥1 block per row in `get_text("dict")`.
     """
     import sys
     import io as _io
@@ -265,9 +193,12 @@ def _find_native_tables(
             if tbl.row_count < 1 or tbl.col_count < 1:
                 continue
             extracted = tbl.extract()
+            rect = fitz.Rect(tbl.bbox)
+            n_rows = len(extracted)
+            if n_rows and _count_blocks_in_bbox(page, rect) < n_rows:
+                continue
             headers = [str(c) if c else "" for c in extracted[0]] if extracted else []
             rows = [[str(c) if c else "" for c in row] for row in extracted[1:]] if len(extracted) > 1 else []
-            rect = fitz.Rect(tbl.bbox)
             pos = _normalise_rect(rect, pw, ph)
             found.append((
                 TableData(headers=headers, rows=rows, position=pos, confidence=0.8),
@@ -279,9 +210,12 @@ def _find_native_tables(
             if tbl.row_count < 3 or tbl.col_count < 2:
                 continue
             extracted = tbl.extract()
+            rect = fitz.Rect(tbl.bbox)
+            n_rows = len(extracted)
+            if n_rows and _count_blocks_in_bbox(page, rect) < n_rows:
+                continue
             headers = [str(c) if c else "" for c in extracted[0]] if extracted else []
             rows = [[str(c) if c else "" for c in row] for row in extracted[1:]] if len(extracted) > 1 else []
-            rect = fitz.Rect(tbl.bbox)
             pos = _normalise_rect(rect, pw, ph)
             found.append((
                 TableData(headers=headers, rows=rows, position=pos, confidence=0.6),
@@ -451,110 +385,6 @@ def _build_text_blocks(page: fitz.Page) -> list[TextBlock]:
 
 
 # ---------------------------------------------------------------------------
-# Post-extraction text normalisation
-# ---------------------------------------------------------------------------
-
-# Running footer pattern — spaced-out "X | P a g e" from OCR of page footers.
-# OCR frequently corrupts the letters: P→F/F', a→&/0/2, g→&/8/3/<, e→&/€/?/F/P/digit.
-# Anchored to start/end of line to avoid false positives in body text.
-_FOOTER_RE = re.compile(
-    r"(?m)^\s*\d+\s*[|&]\s*[PF]'?\s*[a&02]\s*[g&823<]\s*[e&€PF?\d]\s*$"
-)
-
-# Split footer pattern — footer broken across two lines by OCR.
-# Line 1: bare page number with optional pipe/ampersand.
-# Line 2: spaced-character "P a g e" fragment (requires spaces between positions
-# to distinguish from body text starting with P/F).
-_FOOTER_SPLIT_RE = re.compile(
-    r"(?m)^\s*\d{1,2}\s*[|&]?\s*$\n\s*[PF]'?\s+[a&02]\s+[g&823<]\s*[e&€PF?\d]?\s*$"
-)
-
-# Corrupted '://' in URLs from broken font encoding.
-# OCR renders '//' as combinations of l, L, I, spaces, colons, and underscores.
-# Only fires when followed by 'www' (case-insensitive) to avoid false positives.
-_URL_SCHEME_RE = re.compile(r"http(?!://)([\s:./lLI_]+)(?=[wW])")
-
-# Page-footer artifact "<digit>lPage" / "<digit>IPage" -> "<digit> | Page"
-# (OCR reads the pipe character as lowercase L or capital I). Catches both
-# ASCII "Page" and the fullwidth Unicode variant "ｐａge" / "Ｐａｇｅ" seen
-# on stylised letterheads (e.g. 00729 p4).
-_FOOTER_PIPE_RE = re.compile(
-    r"\b(\d+)\s*[lI]\s*[PＰｐ][aａＡ][gｇＧ][eｅＥ]\b"
-)
-
-# Body-context pipe-as-I in ACT Gov boilerplate footers like
-# "GPO Box 158 Canberra ACT 2601 | phone: 132281 | www.act.gov.au".
-# OCR reads the separator pipe as a capital I when it sits between a
-# space and a lowercase keyword. Restricted to a fixed keyword set to
-# avoid false positives on legitimate sentence-initial "I" + verb.
-_BODY_PIPE_RE = re.compile(r" I (?=(?:phone|email|fax|www|http)\b)", re.IGNORECASE)
-
-# Stylised-letterhead OCR artefacts cataloged from quality_audit.md plus
-# additional patterns surfaced from CER labelling diffs. Substring replacements
-# applied verbatim - list deliberately specific to avoid false positives.
-_LETTERHEAD_FIXES: list[tuple[str, str]] = [
-    ("(AcT)", "(ACT)"),
-    ("Govermment", "Government"),
-    ("Couse", "Cause"),
-    ("OsHC", "OSHC"),
-    ("Asurance", "Assurance"),
-    ("Complionce", "Compliance"),
-    ("Incorperated", "Incorporated"),
-    ("Oofficers", "Officers"),
-    ("ıi.", "ii."),  # italic-i (U+0131) misread as roman numeral
-    ("ıii.", "iii."),
-    ("ıv.", "iv."),
-]
-_DEAR_RE = re.compile(r"\bDeal(?=\s*\n)")
-
-# Word-spacing repair for native PDF text-layer artefacts where space glyphs
-# are missing from the font encoding. Patterns are conservative.
-_MONTH_YEAR_RE = re.compile(
-    r"\b(January|February|March|April|May|June|July|August|"
-    r"September|October|November|December)(\d{4})\b"
-)
-_ACT_POSTCODE_RE = re.compile(r"\b(ACT)(\d{4})\b")
-_COMMA_NOSPACE_RE = re.compile(r"(?<=\w),(?=[A-Za-z])")
-
-
-def _normalise_text(text: str) -> str:
-    """Apply targeted post-extraction corrections to a single page's text.
-
-    Fixes known artefacts from government PDF document sets:
-    - Broken ToUnicode font maps produce '$' or 'E' where 's' follows an apostrophe
-    - Running footers rendered as spaced characters by OCR (single-line and split)
-    - Corrupted '://' in URLs from broken font encoding
-    - Stylised-letterhead OCR errors (Couse -> Cause, etc.)
-    - Word-spacing collapse from PDF text-layer space-glyph gaps
-    """
-    # RES-001 extended: apostrophe + dollar/euro -> apostrophe + s
-    text = text.replace("’ $", "’s")
-    text = text.replace("’$", "’s")
-    text = text.replace("' $", "'s")
-    text = text.replace("'$", "'s")
-    text = text.replace("’€", "’s")
-    text = text.replace("'€", "'s")
-    # RES-002: URL scheme corruption
-    text = _URL_SCHEME_RE.sub("http://", text)
-    # RES-003 extended: running page footers (single-line then split across two lines)
-    text = _FOOTER_RE.sub("", text)
-    text = _FOOTER_SPLIT_RE.sub("", text)
-    # RES-004: page-footer pipe-as-l (1lPage -> 1 | Page)
-    text = _FOOTER_PIPE_RE.sub(r"\1 | Page", text)
-    # RES-004b: body-context pipe-as-I in ACT Gov footer separators
-    text = _BODY_PIPE_RE.sub(" | ", text)
-    # RES-005: stylised letterhead OCR fixes
-    for bad, good in _LETTERHEAD_FIXES:
-        text = text.replace(bad, good)
-    text = _DEAR_RE.sub("Dear", text)
-    # RES-006: word-spacing repair (native PDF text-layer)
-    text = _MONTH_YEAR_RE.sub(r"\1 \2", text)
-    text = _ACT_POSTCODE_RE.sub(r"\1 \2", text)
-    text = _COMMA_NOSPACE_RE.sub(", ", text)
-    return text
-
-
-# ---------------------------------------------------------------------------
 # Strategy resolution
 # ---------------------------------------------------------------------------
 
@@ -604,10 +434,12 @@ def extract_text(
     engine_options: dict | None = None,
     spreadsheet_print: dict | None = None,
 ) -> list[ExtractionResult]:
-    """Extract text from a document using the strategy matching its profile.
+    """Extract a document using the strategy matching its profile.
 
-    Returns one ExtractionResult per logical unit. PDFs and DOCX return a
-    single-element list. Spreadsheets return one element per row or sheet.
+    Returns a list of ExtractionResults wrapped from each extractor's
+    return value. PDFs, DOCX, and spreadsheets each return a single-element
+    list (one result per source). The list shape is retained for call-site
+    symmetry — callers iterate ``for extraction in extractions``.
 
     When *max_pages* is set, PDF extraction is limited to the first N pages.
 
@@ -676,16 +508,17 @@ def _apply_normalisation_and_warnings(
     engine: str = "paddleocr",
     engine_options: dict | None = None,
 ) -> None:
-    """Normalise page text in-place, capture blank page warnings, OCR-fallback.
+    """OCR-fallback for blank native pages; emit blank-page warnings.
 
-    When a page extracted by a native strategy comes back empty (typically an
-    image-only cover page in an otherwise digital PDF), re-render that page
-    and run the configured OCR engine over it. If OCR returns text, splice it
-    back into the PageResult and tag the page method as ``native_ocr_fallback``.
+    Text is verbatim from the producing extractor — no post-processing.
+    When a native-strategy page comes back empty (typically an image-only
+    cover page in an otherwise digital PDF), re-render that page and run
+    the configured OCR engine over it. If OCR returns text, splice it
+    back into the PageResult and tag the page method as
+    ``native_ocr_fallback``.
     """
     for page in result.pages:
         if page.text.strip():
-            page.text = _normalise_text(page.text)
             continue
 
         recovered = False
@@ -697,7 +530,7 @@ def _apply_normalisation_and_warnings(
                     engine=engine, engine_options=engine_options,
                 )
                 if ocr_text.strip():
-                    page.text = _normalise_text(ocr_text)
+                    page.text = ocr_text
                     page.method = "native_ocr_fallback"
                     recovered = True
                     result.warnings.append(

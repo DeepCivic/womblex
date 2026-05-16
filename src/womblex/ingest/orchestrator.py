@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 import fitz
 
 from womblex.ingest.detect import DocumentProfile, DocumentType
+from womblex.ingest.elements import Cell, Element, FieldEntry, TEXT_KINDS
 from womblex.ingest.extract import (
     ExtractionMetadata,
     ExtractionResult,
@@ -204,6 +205,126 @@ def _apply_ocr_page(
             accum.tables.extend(_extract_tables_from_page(page))
 
 
+# Map TextBlock.block_type values onto Element kinds.
+# 'table' and mixed-doc tags become 'paragraph' (the block is text from a
+# table-region or typed/handwritten region — not a structured table or a
+# distinct kind). Unknown values fall through to 'paragraph'.
+_BLOCK_TYPE_TO_KIND: dict[str, str] = {
+    "paragraph": "paragraph",
+    "heading": "heading",
+    "list_item": "list_item",
+    "caption": "caption",
+    "footer": "footer",
+    "signature": "signature",
+    "figure": "figure",
+    "table": "paragraph",
+    "typed": "paragraph",
+    "handwritten": "paragraph",
+}
+
+
+def _block_to_element(b: TextBlock, page: int, extractor: str, order: int) -> Element:
+    kind = _BLOCK_TYPE_TO_KIND.get(b.block_type, "paragraph")
+    meta: dict[str, str] = {}
+    if b.block_type not in TEXT_KINDS and b.block_type not in ("figure",):
+        meta["block_type"] = b.block_type
+    return Element(
+        order=order, kind=kind, extractor=extractor,
+        page=page, bbox=b.position,
+        text=b.text, confidence=b.confidence,
+        meta=meta,
+    )
+
+
+def _table_to_element(t: TableData, page: int | None, extractor: str, order: int) -> Element:
+    """Build a kind='table' element by re-cellifying a legacy TableData.
+
+    Headers become row 0; data rows shift to rows 1..n. Header row index
+    captured in ``header_rows`` so the legacy projection round-trips.
+    """
+    cells: list[Cell] = []
+    n_cols = max(len(t.headers), max((len(r) for r in t.rows), default=0))
+    for col_idx in range(len(t.headers)):
+        cells.append(Cell(row=0, col=col_idx, value=t.headers[col_idx]))
+    for row_idx, row in enumerate(t.rows, start=1):
+        for col_idx in range(len(row)):
+            cells.append(Cell(row=row_idx, col=col_idx, value=row[col_idx]))
+    return Element(
+        order=order, kind="table", extractor=extractor,
+        page=page, bbox=t.position,
+        cells=cells, header_rows=[0] if t.headers else [],
+        confidence=t.confidence,
+        meta={**({"context_" + k: v for k, v in t.context.items()} if t.context else {})},
+    )
+
+
+def _form_to_element(forms: list[FormField], page: int, extractor: str, order: int) -> Element:
+    """Group one page's form fields into a single kind='form' element.
+
+    The element's bbox uses the first field's position as a placeholder;
+    per-field bbox is not preserved on the element model.
+    """
+    fields = [FieldEntry(name=f.field_name, value=f.value) for f in forms]
+    bbox = forms[0].position if forms else None
+    conf = sum(f.confidence for f in forms) / len(forms) if forms else 0.0
+    return Element(
+        order=order, kind="form", extractor=extractor,
+        page=page, bbox=bbox,
+        fields=fields, confidence=conf,
+    )
+
+
+def _image_to_element(im: ImageData, page: int, extractor: str, order: int) -> Element:
+    return Element(
+        order=order, kind="image", extractor=extractor,
+        page=page, bbox=im.position,
+        alt_text=im.alt_text, confidence=im.confidence,
+    )
+
+
+def _accum_to_elements(
+    accum: _PageAccum, start_order: int, *, include_tables: bool,
+) -> tuple[list[Element], int]:
+    """Convert one page's accumulator to ordered elements.
+
+    Blocks, tables and images are sorted by their y, x position so reading
+    order survives within a page. Forms collapse to one form element per
+    page. ``include_tables=False`` is set when spreadsheet-print owns the
+    table column document-wide.
+    """
+    extractor = "native_text" if accum.method.startswith("native") else "ocr_paddle"
+    placed: list[tuple[float, float, str, object]] = []
+    for b in accum.blocks:
+        placed.append((b.position.y, b.position.x, "block", b))
+    if include_tables:
+        for t in accum.tables:
+            placed.append((t.position.y, t.position.x, "table", t))
+    for im in accum.images:
+        placed.append((im.position.y, im.position.x, "image", im))
+    placed.sort(key=lambda r: (r[0], r[1]))
+
+    elements: list[Element] = []
+    order = start_order
+    for _y, _x, kind, obj in placed:
+        if kind == "block":
+            elements.append(_block_to_element(obj, accum.page_number, extractor, order))
+        elif kind == "table":
+            elements.append(_table_to_element(obj, accum.page_number, extractor, order))
+        elif kind == "image":
+            elements.append(_image_to_element(obj, accum.page_number, "figure_image", order))
+        order += 1
+
+    if accum.forms:
+        # Forms attach at the page's first form-field y; sort-place into the
+        # stream by inserting after the last element above that y. Simpler
+        # heuristic: append at the page's end. Downstream cares about page,
+        # not within-page-order of forms.
+        elements.append(_form_to_element(accum.forms, accum.page_number, "form", order))
+        order += 1
+
+    return elements, order
+
+
 def extract_with_plan(
     doc: fitz.Document,
     profiles: list[PageProfile],
@@ -219,9 +340,13 @@ def extract_with_plan(
     """Execute a per-page extraction plan and merge results.
 
     Dispatch is page-level via ``profile.has_text_layer``. The doc-level
-    ``doc_type`` is consumed for two narrow concerns: mixed-typed/handwritten
-    tagging on OCR pages, and the scanned-machinewritten table-grid
-    fallback. All other behaviour is page-driven.
+    ``doc_type`` is consumed for two narrow concerns: mixed-typed /
+    handwritten tagging on OCR pages, and the scanned-machinewritten
+    table-grid fallback. All other behaviour is page-driven.
+
+    Returns an ``ExtractionResult`` with ``elements`` ordered across the
+    whole document (within-page reading order preserved by sorting on
+    ``(y, x)``) plus ``pages`` carrying per-page concatenated text.
 
     ``spreadsheet_print`` config dict (optional):
     - ``metadata_location``: ``"both"`` | ``"table"`` | ``"document"`` (default ``"both"``)
@@ -229,18 +354,15 @@ def extract_with_plan(
     """
     opts = engine_options or {}
     pages: list[PageResult] = []
-    all_blocks: list[TextBlock] = []
-    all_tables: list[TableData] = []
-    all_forms: list[FormField] = []
-    all_images: list[ImageData] = []
+    all_elements: list[Element] = []
+    next_order = 0
     confidences: list[float] = []
     combined_steps: list[str] = []
     native_count = ocr_count = 0
     document_metadata: dict[str, str] = {}
 
-    # Spreadsheet-print fast path: cheap qualifier → structural vet. If the
-    # vet returns rows, those tables replace per-page table extraction (the
-    # text/blocks dispatch still runs page-by-page below).
+    # Spreadsheet-print fast path: if the qualifier hits, manifest-style
+    # tables replace per-page table extraction document-wide.
     sp_cfg = spreadsheet_print or {}
     sp_hints = tuple(sp_cfg.get("filename_hints", ())) or None
     sp_loc = sp_cfg.get("metadata_location", "both")
@@ -276,17 +398,19 @@ def extract_with_plan(
             )
 
         pages.append(PageResult(page_number=page.number, text=accum.text, method=accum.method))
-        all_blocks.extend(accum.blocks)
-        # Skip per-page tables when spreadsheet-print owns the table column.
-        if not is_spreadsheet_print:
-            all_tables.extend(accum.tables)
-        all_forms.extend(accum.forms)
-        all_images.extend(accum.images)
+        page_elements, next_order = _accum_to_elements(
+            accum, next_order, include_tables=not is_spreadsheet_print,
+        )
+        all_elements.extend(page_elements)
         confidences.append(accum.confidence)
         combined_steps.extend(accum.steps)
 
     if is_spreadsheet_print:
-        all_tables = spreadsheet_tables
+        # Manifest tables append after all per-page elements; they have no
+        # natural per-page anchor (they span pages) so they tail the stream.
+        for t in spreadsheet_tables:
+            all_elements.append(_table_to_element(t, None, "spreadsheet_print", next_order))
+            next_order += 1
         combined_steps.append("spreadsheet_print")
 
     avg_conf = sum(confidences) / len(confidences) if confidences else 0.0
@@ -300,18 +424,14 @@ def extract_with_plan(
     if is_spreadsheet_print:
         content_mix["spreadsheet_print"] = 1.0
 
-    # Confidence is reported in 0–1 to match existing strategy behaviour:
-    # native pages contribute 95 (treated as percent); OCR pages contribute
+    # Native pages contribute 95 (treated as percent); OCR pages contribute
     # paddle's 0–100 confidence. Normalise to 0–1 for the metadata field.
     confidence_01 = avg_conf / 100.0 if avg_conf > 1 else avg_conf
 
     return ExtractionResult(
         pages=pages,
+        elements=all_elements,
         method=doc_type.value,
-        tables=all_tables,
-        forms=all_forms,
-        images=all_images,
-        text_blocks=all_blocks,
         document_metadata=document_metadata,
         metadata=ExtractionMetadata(
             extraction_strategy=doc_type.value,

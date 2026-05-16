@@ -206,10 +206,26 @@ See `configs/example.yaml` for a complete example.
 
 ## Output
 
-Processing produces Parquet files:
+Each batch writes four sibling Parquet shards. The shard base name is the
+caller's choice (e.g. `batch-0001`):
 
-**documents.parquet**
-- One row per extraction unit with full text, metadata, tables, forms, and confidence scores
+**`batch-NNNN.elements.parquet`** — one row per structural element
+(paragraph, heading, table, form, image, sheet cell, …). Canonical
+output.
+
+**`batch-NNNN.table_cells.parquet`** — children of `kind='table'`
+elements, one row per cell. Joins back via
+`(source_hash, parent_elem_order)`.
+
+**`batch-NNNN.form_fields.parquet`** — children of `kind='form'`
+elements, one row per field. Same join key.
+
+**`batch-NNNN._manifest.parquet`** — one row per source file with
+provenance, status, and element / cell / field counts.
+
+See [docs/extraction.md](docs/extraction.md) for the canonical schema
+reference, element kinds, the reassembly query, and the verbatim-text
+policy.
 
 With `womblex[isaacus]` enrichment enabled:
 
@@ -234,7 +250,9 @@ womblex/
 │   │   ├── detect.py            # Doc-level type classification (non-PDF dispatch + summary type for PDFs)
 │   │   ├── page_profile.py      # Per-page PageProfile + cheap qualifiers (e.g. spreadsheet-print)
 │   │   ├── orchestrator.py      # Plan-driven PDF extractor — walks per-page profiles, dispatches operations
-│   │   ├── extract.py           # ExtractionResult / TableData / FormField models + page-level primitives
+│   │   ├── elements.py          # Element model + kinds + Cell / FieldEntry / BBox (canonical)
+│   │   ├── views.py             # ExtractionResult + legacy view types (TableData / FormField / TextBlock / ImageData) as read-only projections over elements
+│   │   ├── extract.py           # extract_text() entry point + page-level primitives (re-exports views)
 │   │   ├── forms.py             # Form-pair extraction (AcroForm + spatial + line-based for OCR)
 │   │   ├── spreadsheet_print.py # Multi-page table extractor for spreadsheet-printed PDFs
 │   │   ├── morphology.py        # Page-image morphology helpers (handwriting / glyph regularity)
@@ -244,7 +262,7 @@ womblex/
 │   │   ├── interfaces/
 │   │   │   └── protocols.py     # Backend protocols (OCRReader, LayoutAnalyzer, Preprocessor)
 │   │   ├── paddle_ocr.py        # PaddleOCR wrapper via rapidocr-onnxruntime
-│   │   ├── spreadsheet.py       # CSV/Excel per-row extraction
+│   │   ├── spreadsheet.py       # CSV/Excel extraction — one ExtractionResult per workbook with cells as elements
 │   │   ├── gnaf.py              # G-NAF PSV → Parquet ingest (standalone)
 │   │   ├── gnaf_schema.py       # G-NAF table schemas — static column definitions
 │   │   ├── geospatial.py        # SHP → GeoParquet ingest (standalone)
@@ -264,7 +282,7 @@ womblex/
 │   │   ├── graph.py         # Entity graph construction
 │   │   └── models.py        # Enrichment data models
 │   ├── store/
-│   │   ├── output.py        # Parquet output writer
+│   │   ├── output.py        # Parquet output: elements + table_cells + form_fields + manifest sidecars + integrity check
 │   │   ├── enrichment_output.py  # Enrichment-specific output
 │   │   └── checkpoint.py    # Batch checkpoint management
 │   ├── utils/

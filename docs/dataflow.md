@@ -97,7 +97,7 @@ For each file processed via `operations.py`:
 
 2. get_extractor(profile) → ExtractionStrategy | SpreadsheetExtractor | DocxExtractor
 
-3. extract_text(path, profile) → list[ExtractionResult]
+3. extract_text(path, profile) → list[ExtractionResult]  (single-element list per source)
       ├── PDF/DOCX path → single-element list
       │     ├── Native pages: page.get_text("text", flags=TEXT_DEHYPHENATE)
       │     ├── Scanned pages: _ocr_page()
@@ -177,21 +177,28 @@ For each file processed via `operations.py`:
 
 ### ExtractionResult (output of extract)
 
-`extract_text()` returns `list[ExtractionResult]`. PDFs and DOCX return a single-element list. Spreadsheets return N elements — one per row (data/glossary sheets) or one per sheet (narrative/key_value sheets).
+`extract_text()` returns `list[ExtractionResult]`. PDFs, DOCX, and
+spreadsheets each return a single-element list (one result per
+source). The previous one-result-per-row spreadsheet shape was
+removed — a spreadsheet's cells now live as `kind='sheet_cell'`
+elements on a single result.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `pages` | `list[PageResult]` | Per-page text and extraction method |
-| `method` | `str` | Strategy used (e.g. `native_narrative`, `scanned_machinewritten`, `spreadsheet`) |
+| `pages` | `list[PageResult]` | Per-page text; mutable so PII / redaction can rewrite `page.text` |
+| `elements` | `list[Element]` | Canonical structural stream — what the parquet writer serialises |
+| `method` | `str` | Strategy used (e.g. `native`, `scanned_machinewritten`, `spreadsheet`, `docx`) |
 | `error` | `str \| None` | Error message if extraction failed |
-| `tables` | `list[TableData]` | Structured table content |
-| `forms` | `list[FormField]` | Form field label-value pairs |
-| `images` | `list[ImageData]` | Image metadata |
-| `text_blocks` | `list[TextBlock]` | Positional text segments with type classification |
 | `metadata` | `ExtractionMetadata` | Strategy, confidence, timing, preprocessing steps |
 | `warnings` | `list[str]` | Blank page warnings, redaction annotations |
-| `document_id` | `str \| None` | Set by spreadsheet extractor; used as `doc_id` |
-| `redaction_report` | `RedactionReport \| None` | Set by redaction stage; per-page detection results |
+| `document_id` | `str \| None` | Source identifier used as `doc_id` |
+| `redaction_report` | `RedactionReport \| None` | Set by redaction stage |
+
+Derived read-only views (compat for downstream callers that haven't
+migrated to the element stream): `.text_blocks`, `.tables`, `.forms`,
+`.images`. The `.tables` view also synthesises one `TableData` per
+spreadsheet sheet so the chunker continues to see a unified
+table-shaped surface.
 
 ### TextChunk (output of chunking)
 
@@ -206,19 +213,17 @@ For each file processed via `operations.py`:
 
 ### Parquet Output
 
-**documents.parquet** — one row per source file (via `store/output.py`)
+Each batch writes four sibling parquet shards via `store/output.py`.
+See [`docs/extraction.md`](extraction.md) for the canonical schema
+reference.
 
-| Column | Description |
-|--------|-------------|
-| `document_id` | Unique identifier |
-| `source_path` | Path to original file |
-| `text` | Full extracted text |
-| `metadata` | Struct: `extraction_strategy`, `confidence`, `processing_time`, `page_count`, `text_coverage` |
-| `warnings` | List of warning strings |
-| `tables` | List of table structs (headers, rows, position, confidence) |
-| `forms` | List of form field structs (field_name, value, position, confidence) |
-| `images` | List of image structs (alt_text, position, confidence) |
-| `text_blocks` | List of text block structs (text, position, block_type, confidence) |
+- `batch-NNNN.elements.parquet` — one row per element
+- `batch-NNNN.table_cells.parquet` — children of `kind='table'`
+- `batch-NNNN.form_fields.parquet` — children of `kind='form'`
+- `batch-NNNN._manifest.parquet` — one row per source file
+
+Sidecars join back to elements via `(source_hash, parent_elem_order)`
+matching `(source_hash, elem_order)` with the corresponding kind.
 
 **chunks.parquet** — one row per text chunk (planned; not yet written by `store/output.py`)
 

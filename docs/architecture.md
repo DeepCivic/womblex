@@ -25,7 +25,8 @@ Each operation is a standalone function. Preconditions: chunk needs an extractio
 src/womblex/
 ├── ingest/
 │   ├── detect.py              # Document type detection — drives strategy selection
-│   ├── extract.py             # ExtractionResult schema, extract_text() dispatcher
+│   ├── elements.py            # Element model + kinds + Cell / FieldEntry / BBox
+│   ├── extract.py             # ExtractionResult (elements + pages + derived views), extract_text()
 │   ├── strategies.py          # Re-export shim — imports from the three strategy modules below
 │   ├── strategies_native.py   # Native text-layer PDF extractors (narrative, structured)
 │   ├── strategies_scanned.py  # OCR-dependent extractors (scanned, hybrid, image)
@@ -34,7 +35,7 @@ src/womblex/
 │   │   └── protocols.py       # Backend protocols: OCRReader, LayoutAnalyzer, Preprocessor
 │   ├── paddle_ocr.py          # PaddleOCR wrapper via rapidocr-onnxruntime (det/rec/cls)
 │   │                          # Also hosts YOLOLayoutAnalyzer for layout region detection
-│   ├── spreadsheet.py         # CSV/Excel extraction — one ExtractionResult per row/sheet
+│   ├── spreadsheet.py         # CSV/Excel extraction — one ExtractionResult per workbook, cells as elements
 │   ├── gnaf.py                # G-NAF PSV → Parquet ingest (standalone, bypasses NLP pipeline)
 │   ├── gnaf_schema.py         # G-NAF table schemas — static column definitions
 │   ├── geospatial.py          # SHP → GeoParquet ingest (standalone, bypasses NLP pipeline)
@@ -56,7 +57,7 @@ src/womblex/
 │   ├── models.py          # ILGS data models (Span, Segment, Person, Location, Term, etc.)
 │   └── query.py           # Load enrichment graph from Parquet for PII masking and internal use
 ├── store/
-│   ├── output.py          # Parquet output for documents and chunks
+│   ├── output.py          # Parquet output: elements + table_cells + form_fields + manifest sidecars
 │   ├── enrichment_output.py # Parquet output for entity mentions, graph edges, enrichment metadata
 │   └── checkpoint.py      # JSON-based checkpoint manager for resumable batch runs
 ├── verify/
@@ -136,7 +137,7 @@ Defensive classification: uncertain documents route to `UNKNOWN` rather than a w
 
 `extract.py` defines the `ExtractionStrategy` and `PathExtractionStrategy` protocols, shared helpers, and the `extract_text()` dispatcher. Extractor implementations are split by document family: `strategies_native.py` (text-layer PDFs), `strategies_scanned.py` (OCR-dependent types), and `strategies_file.py` (DOCX, plain text). `strategies.py` re-exports all classes for backward compatibility. `spreadsheet.py` handles CSV and Excel files.
 
-`extract_text()` logs the strategy selection (`doc, type, confidence, strategy`) at INFO level, then always returns `list[ExtractionResult]`. PDF and DOCX paths return a single-element list. The spreadsheet path returns one result per logical row (for `data` and `glossary` sheets) or one result per sheet (for `narrative` and `key_value` sheets). Each spreadsheet result carries a `document_id` built from the filename and key-column value (e.g. `filename:PR-00006191`).
+`extract_text()` logs the strategy selection (`doc, type, confidence, strategy`) at INFO level, then always returns `list[ExtractionResult]`. PDF, DOCX, and spreadsheet paths each return a single-element list (one result per source file). The list shape is retained for call-site symmetry. Spreadsheet cells live as `kind='sheet_cell'` elements on the single result; `_classify_sheet` survives as a detection-time metadata helper but no longer routes extraction.
 
 **Spreadsheet sheet classification** (`_classify_sheet` in `spreadsheet.py`):
 

@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — BREAKING
+- **Extraction output reshaped to element-stream + typed sidecars.**
+  `ExtractionResult` now carries `elements: list[Element]` as the
+  canonical structural stream. Per-batch parquet output is split across
+  four sibling files: `batch-NNNN.elements.parquet` plus
+  `.table_cells.parquet`, `.form_fields.parquet`, `._manifest.parquet`.
+  Sidecars are joinable via `(source_hash, parent_elem_order)`. The
+  previous one-parquet-per-batch shape (`EXTRACTION_SCHEMA` with nested
+  struct lists for tables / forms / images / text_blocks) is removed.
+  See `docs/extraction.md` for the canonical reference.
+- **Narrative ↔ table interleaving preserved.** DOCX bodies are walked
+  in OOXML order so paragraphs and tables emit in their true position;
+  PDF per-page outputs are sorted by `(y, x)` so within-page reading
+  order survives.
+- **Spreadsheets: one ExtractionResult per workbook.** Cells are the
+  element grain (`kind='sheet_cell'`); sheets emit a leading
+  `sheet_meta` element. The previous one-result-per-row shape is
+  removed.
+- **Verbatim text at the schema boundary.** `_normalise_text` no longer
+  runs in the extraction hot path. Page text and element text are
+  emitted verbatim from the producing extractor. Downstream stages may
+  still mutate `pages[i].text`; the on-disk parquet is unaffected.
+- **Legacy view properties remain.** `ExtractionResult.text_blocks` /
+  `.tables` / `.forms` / `.images` are now read-only derived views over
+  `elements` so downstream PII / redact / chunk stages continue working
+  without change.
+- **Sidecar integrity check.** `verify_shard_persistence` now confirms
+  every `(source_hash, parent_elem_order)` in `table_cells` /
+  `form_fields` resolves to an element with the matching kind. Drift
+  raises `ShardVerificationError`.
+
 ### Added
 - **Per-page extraction plan + orchestrator.** PDFs now route via per-page
   profiling (`ingest/page_profile.py`) and a doc-wide orchestrator

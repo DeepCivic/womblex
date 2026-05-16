@@ -8,6 +8,30 @@ Womblex extracts text from Australian government PDF document releases and prepa
 The `raw_documents/` folder contains a curated mix of government document types. This serves as the baseline for testing and refining the extraction → Parquet process.
 
 ## Key Design Decisions
+### Extraction output is an element stream
+Extraction produces an ordered ``elements: list[Element]`` stream on
+``ExtractionResult``. Each element is one structural atom (paragraph,
+heading, table, form, image, page_break, sheet_meta, sheet_cell).
+Tables nest cells and forms nest fields **in memory**; the parquet
+writer denormalises them into sidecar files.
+
+On-disk, each batch writes four sibling parquets:
+``batch-NNNN.elements.parquet`` plus ``.table_cells.parquet`` /
+``.form_fields.parquet`` / ``._manifest.parquet``. Sidecars are
+joinable via ``(source_hash, parent_elem_order)``. See
+[`docs/extraction.md`](docs/extraction.md) for the canonical reference.
+
+The legacy ``.text_blocks`` / ``.tables`` / ``.forms`` / ``.images``
+properties on ``ExtractionResult`` remain as read-only derived views
+over ``elements`` so PII / redact / chunk stages keep working
+unchanged. The chunker still sees one ``TableData`` per real table or
+spreadsheet sheet via this view.
+
+Text is verbatim from the producing extractor — extraction applies no
+post-processing. If an extractor produces wrong bytes due to its own
+bug (broken ToUnicode font maps etc), the fix belongs in the
+extractor, not as a normalisation pass at the schema boundary.
+
 ### Per-page profile + plan-driven orchestrator
 PDFs route via per-page profiling, not document-level strategy. The
 detector profiles every page independently (`ingest/page_profile.py`
@@ -41,7 +65,8 @@ Processing 1500+ documents takes hours. Checkpoint after each batch so failures 
 | `ingest/detect.py` | Doc-level type classification + non-PDF dispatch (DOCX, spreadsheet, text, image) | Per-page routing or final extracted text |
 | `ingest/page_profile.py` | Per-page `PageProfile` (text layer, table signal, form signal, blur, image count); cheap qualifier for spreadsheet-print | Run any extraction operation |
 | `ingest/orchestrator.py` | Walk per-page profiles, dispatch native or OCR operations, merge results into one `ExtractionResult` | Hold any extractor logic — calls primitives in `extract.py` and `strategies_scanned.py` |
-| `ingest/extract.py` | Page-level primitives (`_apply_native_page` building blocks: text, blocks, tables, images), data models (`ExtractionResult`, `TableData`, `FormField`, `TextBlock`), `extract_text()` entry point | Document-level routing (orchestrator does that) |
+| `ingest/elements.py` | Canonical `Element`, `Cell`, `FieldEntry`, `BBox`; kind enumeration | Touch extractor logic or parquet I/O |
+| `ingest/extract.py` | Page-level primitives (text, blocks, tables, images), `ExtractionResult` with `elements` stream + derived views, `extract_text()` entry point | Document-level routing (orchestrator does that); post-processing of text |
 | `ingest/forms.py` | Form-pair extraction: AcroForm widgets, spatial label-value pairs from `page.get_text("dict")`, line-based pairs from OCR'd text | Know about document types |
 | `ingest/spreadsheet_print.py` | Multi-page table extraction for spreadsheet-printed PDFs (FOI manifests, schedules, registers); column inference, row binning, metadata-block capture, rotation handling | Run on every doc — gated by qualifier |
 | `ingest/strategies_scanned.py` | OCR primitives (`_ocr_page`, `_layout_blocks_and_tables`, `_ocr_image_regions`) used by the orchestrator + the legacy `ImageExtractor` | Doc-level extraction strategies (those are gone for PDFs) |

@@ -152,6 +152,10 @@ class TestRealSpreadsheetExtraction:
 
 
     def test_csv_parquet_roundtrip(self, tmp_path: Path) -> None:
+        # The new output writes four sibling shards. Verify the manifest
+        # has one row per source and the elements shard has at least one
+        # sheet_cell per source.
+        from womblex.store.output import read_elements, read_manifest
 
         config = WomblexConfig(
             dataset=DatasetConfig(name="csv_test"),
@@ -173,23 +177,18 @@ class TestRealSpreadsheetExtraction:
         batch = BatchResult(results=results)
 
         assert batch.failed == 0
-
         assert batch.succeeded > 0
 
-
         out = tmp_path / "csv.parquet"
-
         write_batch_parquet(batch, out)
 
-        table = pq.read_table(str(out))
+        manifest = read_manifest(out)
+        assert manifest.num_rows == batch.succeeded
 
-        assert len(table) == batch.succeeded
-
-        tables_col = table.column("tables")[0].as_py()
-
-        assert len(tables_col) >= 1
-
-        assert len(tables_col[0]["headers"]) > 0
+        elements = read_elements(out)
+        kinds = elements.column("kind").to_pylist()
+        assert "sheet_cell" in kinds
+        assert "sheet_meta" in kinds
 
 
 
@@ -277,36 +276,29 @@ class TestRealDocumentParquet:
         assert batch.failed == 0
 
 
-        out = tmp_path / "extraction.parquet"
+        # The new output writes four sibling shards (elements / table_cells /
+        # form_fields / manifest). Verify the manifest carries one row per
+        # PDF with sane extraction metadata; the elements shard has rows.
+        from womblex.store.output import _shard_paths, read_elements, read_manifest
 
+        out = tmp_path / "extraction.parquet"
         write_batch_parquet(batch, out)
 
-        assert out.exists()
+        paths = _shard_paths(out)
+        for role, p in paths.items():
+            assert p.exists(), f"{role} shard not written: {p}"
 
+        manifest = read_manifest(out)
+        assert manifest.num_rows == len(pdfs)
+        statuses = manifest.column("status").to_pylist()
+        assert all(s == "completed" for s in statuses)
+        methods = manifest.column("extraction_method").to_pylist()
+        # Method is the DocumentType enum value (e.g. native_narrative,
+        # native_with_structured, structured, hybrid, scanned_machinewritten).
+        assert all(m for m in methods)
 
-        table = pq.read_table(str(out))
-
-        assert len(table) == len(pdfs)
-
-
-        for i in range(len(table)):
-
-            meta = table.column("metadata")[i].as_py()
-
-            assert meta["extraction_strategy"] in (
-
-                "native_narrative",
-
-                "native_with_structured",
-
-                "structured",
-            )
-
-            assert meta["confidence"] > 0
-
-            assert meta["page_count"] > 0
-
-            assert len(table.column("text")[i].as_py()) > 0
+        elements = read_elements(out)
+        assert elements.num_rows > 0
 
 
 

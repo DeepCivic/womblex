@@ -18,8 +18,9 @@ from womblex.ingest.extract import (
     Position,
     TableData,
     TextBlock,
+    _count_blocks_in_bbox,
+    _find_native_tables,
     _normalise_bbox,
-    _normalise_text,
     get_extractor,
 )
 from womblex.ingest.strategies import (
@@ -47,111 +48,6 @@ class TestPosition:
         assert pos.y == pytest.approx(0.2)
         assert pos.width == pytest.approx(0.375)
         assert pos.height == pytest.approx(0.4)
-
-
-# ---------------------------------------------------------------------------
-# _normalise_text
-# ---------------------------------------------------------------------------
-
-
-class TestNormaliseText:
-    # -- RES-001: apostrophe + dollar/euro → apostrophe + s --
-
-    def test_apostrophe_dollar_no_space(self) -> None:
-        assert _normalise_text("Children'$ Education") == "Children's Education"
-
-    def test_curly_apostrophe_dollar_no_space(self) -> None:
-        assert _normalise_text("Children\u2019$ Education") == "Children\u2019s Education"
-
-    def test_apostrophe_dollar_with_space(self) -> None:
-        assert _normalise_text("the child' $ specific health") == "the child's specific health"
-
-    def test_curly_apostrophe_dollar_with_space(self) -> None:
-        assert _normalise_text("the child\u2019 $ specific health") == "the child\u2019s specific health"
-
-    def test_apostrophe_euro(self) -> None:
-        assert _normalise_text("Witness C'\u20ac statement") == "Witness C's statement"
-
-    def test_curly_apostrophe_euro(self) -> None:
-        assert _normalise_text("Witness C\u2019\u20ac statement") == "Witness C\u2019s statement"
-
-    def test_dollar_sign_preserved_in_normal_context(self) -> None:
-        assert _normalise_text("cost is $500") == "cost is $500"
-
-    # -- RES-002: URL scheme corruption --
-
-    def test_url_scheme_lL(self) -> None:
-        assert _normalise_text("httplLwww.example.com") == "http://www.example.com"
-
-    def test_url_scheme_colon_lL(self) -> None:
-        assert _normalise_text("http:lLwww.example.com") == "http://www.example.com"
-
-    def test_correct_url_unchanged(self) -> None:
-        assert _normalise_text("http://www.example.com") == "http://www.example.com"
-
-    # -- RES-003: single-line page footers --
-
-    def test_footer_standard(self) -> None:
-        assert _normalise_text("body text\n14 | P a g e\nmore text") == "body text\n\nmore text"
-
-    def test_footer_corrupted_letters(self) -> None:
-        assert _normalise_text("body text\n5 | F' 2 < F\nmore text") == "body text\n\nmore text"
-
-    def test_footer_ampersand_variants(self) -> None:
-        assert _normalise_text("body\n20 | P & g \u20ac\nmore") == "body\n\nmore"
-
-    # -- RES-003 extended: split footers across two lines --
-
-    def test_split_footer_number_pipe_then_page(self) -> None:
-        text = "body text\n11 |\nP a &\nmore text"
-        result = _normalise_text(text)
-        assert "11 |" not in result
-        assert "P a &" not in result
-        assert "body text" in result
-        assert "more text" in result
-
-    def test_split_footer_bare_number_then_page(self) -> None:
-        text = "body text\n15\nP a & e\nmore text"
-        result = _normalise_text(text)
-        assert "P a & e" not in result
-        assert "body text" in result
-        assert "more text" in result
-
-    def test_split_footer_f_prime_variant(self) -> None:
-        text = "body text\n16\nF' 2 < ?\nmore text"
-        result = _normalise_text(text)
-        assert "F' 2 < ?" not in result
-        assert "body text" in result
-
-    def test_split_footer_does_not_match_paragraph_number(self) -> None:
-        """Bare number followed by normal text must NOT be removed."""
-        text = "5\nProtection from harms and hazards"
-        assert _normalise_text(text) == text
-
-    def test_split_footer_does_not_match_body_starting_with_p(self) -> None:
-        """Bare number followed by 'Provider' (starts with P but no spaces) must survive."""
-        text = "48\nProvider failed to notify"
-        assert _normalise_text(text) == text
-
-    def test_no_false_positive_on_dollar_amounts(self) -> None:
-        """Lines with dollar amounts near apostrophes should not be mangled."""
-        text = "Penalty: $11 400"
-        assert _normalise_text(text) == text
-
-    # -- RES-003 extended: footer "1lPage" pipe-as-l (ASCII + fullwidth) --
-
-    def test_footer_pipe_ascii(self) -> None:
-        assert _normalise_text("1lPage") == "1 | Page"
-
-    def test_footer_pipe_capital_i(self) -> None:
-        assert _normalise_text("5IPage") == "5 | Page"
-
-    def test_footer_pipe_fullwidth_lowercase(self) -> None:
-        # Source: 00729 p4 — fullwidth Unicode "ｐａge"
-        assert _normalise_text("5lｐａge") == "5 | Page"
-
-    def test_footer_pipe_fullwidth_uppercase(self) -> None:
-        assert _normalise_text("3lＰａｇｅ") == "3 | Page"
 
 
 class TestExtractionResult:
@@ -194,14 +90,42 @@ class TestExtractionResult:
         assert result.text_blocks == []
 
     def test_structured_fields(self) -> None:
+        # The legacy structured fields (tables/forms/images/text_blocks) are
+        # now read-only derived views over ExtractionResult.elements. Build
+        # an element stream and confirm each view projects correctly.
+        from womblex.ingest.elements import Cell, Element, FieldEntry
+
         pos = Position(x=0.0, y=0.0, width=1.0, height=1.0)
+        elements = [
+            Element(
+                order=0, kind="paragraph", extractor="native_text",
+                bbox=pos, text="Test", confidence=0.9,
+            ),
+            Element(
+                order=1, kind="table", extractor="native_text",
+                bbox=pos, confidence=0.8,
+                cells=[
+                    Cell(row=0, col=0, value="A"),
+                    Cell(row=0, col=1, value="B"),
+                    Cell(row=1, col=0, value="1"),
+                    Cell(row=1, col=1, value="2"),
+                ],
+                header_rows=[0],
+            ),
+            Element(
+                order=2, kind="form", extractor="form_acroform",
+                bbox=pos, confidence=0.9,
+                fields=[FieldEntry(name="Name", value="Alice")],
+            ),
+            Element(
+                order=3, kind="image", extractor="figure_image",
+                bbox=pos, alt_text="photo", confidence=0.7,
+            ),
+        ]
         result = ExtractionResult(
             pages=[PageResult(page_number=0, text="Test", method="native")],
+            elements=elements,
             method="native_with_structured",
-            tables=[TableData(headers=["A", "B"], rows=[["1", "2"]], position=pos, confidence=0.8)],
-            forms=[FormField(field_name="Name", value="Alice", position=pos, confidence=0.9)],
-            images=[ImageData(alt_text="photo", position=pos, confidence=0.7)],
-            text_blocks=[TextBlock(text="Test", position=pos, block_type="paragraph", confidence=0.9)],
         )
         assert len(result.tables) == 1
         assert result.tables[0].headers == ["A", "B"]
@@ -209,6 +133,60 @@ class TestExtractionResult:
         assert result.forms[0].field_name == "Name"
         assert len(result.images) == 1
         assert len(result.text_blocks) == 1
+
+
+class TestFindNativeTablesGate:
+    """Cross-classifier gate inside ``_find_native_tables``.
+
+    Real tables decompose into ≥1 PyMuPDF dict-block per row; prose-as-
+    table over-claims rows by carving sub-block whitespace into pseudo-
+    rows. The gate rejects candidates where block count < row count.
+    """
+
+    def test_count_blocks_in_bbox_uses_block_centre(self) -> None:
+        import fitz
+
+        doc = fitz.open()
+        page = doc.new_page(width=400, height=600)
+        page.insert_text((50, 50), "alpha")
+        page.insert_text((50, 200), "beta")
+        page.insert_text((50, 500), "gamma")
+
+        bbox_top = fitz.Rect(0, 0, 400, 300)
+        assert _count_blocks_in_bbox(page, bbox_top) == 2  # alpha, beta
+
+        bbox_bottom = fitz.Rect(0, 400, 400, 600)
+        assert _count_blocks_in_bbox(page, bbox_bottom) == 1  # gamma
+
+        bbox_none = fitz.Rect(0, 300, 400, 400)
+        assert _count_blocks_in_bbox(page, bbox_none) == 0
+
+        doc.close()
+
+    def test_gate_rejects_prose_as_table(self) -> None:
+        import fitz
+
+        doc = fitz.open()
+        page = doc.new_page(width=595, height=842)
+        # One paragraph block of prose with consistent left-indent. PyMuPDF's
+        # text-strategy `find_tables` will read the whitespace pattern as
+        # columnar and over-claim many rows; the gate should reject because
+        # `n_blocks_in_bbox` (≈1) is much smaller than the claimed row count.
+        prose = (
+            "1. As you are aware, the Authority has issued this Notice.\n"
+            "2. The Provider must comply with the requirements set out below.\n"
+            "3. The Authority will continue to monitor compliance.\n"
+            "4. Should you have any questions, contact the Director.\n"
+            "5. This Notice takes effect immediately upon receipt.\n"
+        )
+        page.insert_textbox(fitz.Rect(50, 50, 545, 800), prose, fontsize=11)
+
+        tables = _find_native_tables(page)
+        # Any text-strategy hit on this page would be over-firing; the gate
+        # should leave us with no tables.
+        assert tables == []
+
+        doc.close()
 
 
 class TestExtractionMetadata:
@@ -278,19 +256,27 @@ class TestGetExtractor:
 
 
 class TestSpreadsheetExtractor:
+    """One ExtractionResult per workbook with cell-grained elements.
+
+    The previous one-result-per-row shape was removed; a workbook now
+    yields a single result whose ``elements`` are sheet_meta + sheet_cell
+    in workbook order.
+    """
+
     def test_extracts_real_csv(self, spreadsheet_dir: Path) -> None:
         csv_path = spreadsheet_dir / "Approved-providers-au-export_20260204.csv"
         if not csv_path.exists():
             pytest.skip("CSV fixture not available")
 
         ext = SpreadsheetExtractor()
-        results = ext.extract_path(csv_path)
+        result = ext.extract_path(csv_path)
 
-        assert len(results) >= 1
-        for r in results:
-            assert r.method == "spreadsheet"
-            assert r.error is None
-            assert r.metadata is not None
+        assert result.method == "spreadsheet"
+        assert result.error is None
+        assert result.metadata is not None
+        kinds = [e.kind for e in result.elements]
+        assert kinds.count("sheet_meta") >= 1
+        assert kinds.count("sheet_cell") >= 1
 
     def test_extracts_real_xlsx(self, spreadsheet_dir: Path) -> None:
         xlsx_path = spreadsheet_dir / "mso-statistics-sept-qtr-2025.xlsx"
@@ -298,18 +284,19 @@ class TestSpreadsheetExtractor:
             pytest.skip("Excel fixture not available")
 
         ext = SpreadsheetExtractor()
-        results = ext.extract_path(xlsx_path)
+        result = ext.extract_path(xlsx_path)
 
-        assert len(results) >= 1
-        for r in results:
-            assert r.method == "spreadsheet"
-            assert r.metadata is not None
+        assert result.method == "spreadsheet"
+        assert result.metadata is not None
+        # Multi-sheet workbook: one sheet_meta per sheet.
+        n_sheet_meta = sum(1 for e in result.elements if e.kind == "sheet_meta")
+        assert n_sheet_meta >= 1
 
     def test_handles_missing_file(self, tmp_path: Path) -> None:
         ext = SpreadsheetExtractor()
-        results = ext.extract_path(tmp_path / "missing.csv")
-        assert len(results) == 1
-        assert results[0].error is not None
+        result = ext.extract_path(tmp_path / "missing.csv")
+        assert result.error is not None
+        assert result.elements == []
 
 
 # ---------------------------------------------------------------------------

@@ -28,7 +28,7 @@ See `docs/accuracy/` for measured baselines per stage.
 | **Structural Fidelity** | Validates row count, column count, and column names match between source and extraction output. Reports missing/extra columns. | `utils/tabular_metrics.py → structural_fidelity()` | Source CSV/XLSX files |
 | **Data Integrity Score** | Cell-level exact string match. NaN/None normalised to `""`. Returns score (0.0–1.0) and first N mismatches with row/column/value detail. | `utils/tabular_metrics.py → data_integrity()` | Source spreadsheets |
 | **Key Column Preservation** | Verifies unique IDs are 100% preserved without duplication. Reports missing keys and duplicate keys. | `utils/tabular_metrics.py → key_column_preservation()` | Source key columns (e.g. `Provider Approval Number`) |
-| **Schema Conformance** | `pyarrow.Schema.equals` — Parquet file schema matches `EXTRACTION_SCHEMA` exactly. | `utils/tabular_metrics.py → schema_conformance()` | `store/output.py` schema def |
+| **Schema Conformance** | `pyarrow.Schema.equals` — each shard parquet matches its canonical schema (`ELEMENT_SCHEMA`, `TABLE_CELLS_SCHEMA`, `FORM_FIELDS_SCHEMA`, `MANIFEST_SCHEMA`). | `utils/tabular_metrics.py → schema_conformance()` | `store/output.py` schema defs |
 
 ## 3. Geospatial Extraction Accuracy
 

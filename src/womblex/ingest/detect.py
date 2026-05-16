@@ -124,6 +124,58 @@ def _has_structural_tables(page: fitz.Page, min_cells: int = 4) -> bool:
         sys.stdout = old_stdout
 
 
+def _has_manifest_table(page: fitz.Page, min_non_empty_cells: int = 300) -> bool:
+    """Detect manifest-shape tables: a page dominated by one big table.
+
+    Stricter than `_has_structural_tables`. Discriminates manifests
+    (FOI master index, Schedule-2b: 500+ non-empty cells per page) from
+    prose-as-table over-fires (compliance notices, admin decisions,
+    caution letters: 170-280 non-empty cells per page).
+
+    The discriminator is **non-empty cell count**, not raw cell count
+    or empty-cell fraction. PyMuPDF's text strategy over-fits an
+    oversized grid (adds padding rows/columns) on every multi-paragraph
+    page, so raw cell count and empty fraction both fall in
+    indistinguishable ranges (50-65% empty for both manifests and
+    prose-as-table). The non-empty count is what scales with actual
+    data presence.
+
+    The block-count gate from `_find_native_tables` is *not* used here:
+    real manifests pack many rows into few PyMuPDF `dict` blocks, so
+    the n_blocks ≥ n_rows check that protects against prose-as-table
+    on compliance notices would also reject real manifests.
+
+    Gates the `spreadsheet_print` qualifier — only manifest-shape pages
+    count toward the ≥50%-of-pages rule.
+    """
+    import sys, io  # noqa: E401
+
+    old_stdout = sys.stdout
+    sys.stdout = io.StringIO()
+    try:
+        for strategy in ("lines", "text"):
+            try:
+                tables = page.find_tables(strategy=strategy)
+            except Exception:
+                continue
+            for table in tables.tables:
+                if strategy == "text" and (table.row_count < 3 or table.col_count < 2):
+                    continue
+                extracted = table.extract()
+                if not extracted:
+                    continue
+                non_empty = sum(
+                    1 for row in extracted
+                    for cell in row
+                    if cell and str(cell).strip()
+                )
+                if non_empty >= min_non_empty_cells:
+                    return True
+        return False
+    finally:
+        sys.stdout = old_stdout
+
+
 def _has_form_structure(page: fitz.Page) -> bool:
     """Detect form field structures on a page.
 

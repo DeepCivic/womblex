@@ -89,6 +89,57 @@ class TestQualifier:
         ]
         assert not qualify_for_spreadsheet_print(profiles, "letter.pdf")
 
+    def test_qualifier_rejects_compliance_notice_shape(self) -> None:
+        # Compliance-notice cohort: every page has `has_table_signal=True`
+        # (real rules-of-law tables exist) but `has_manifest_signal=False`
+        # (tables are small, not manifest-shape). Pre-§2 qualifier tripped
+        # on the 50%-of-pages rule and routed the doc through the manifest
+        # extractor, producing conf=0.70 garbage in `tables[0]`.
+        from womblex.ingest.page_profile import PageProfile
+        profiles = [
+            PageProfile(
+                page_number=i, width=595, height=842,
+                char_count=2000, image_count=0, vector_drawings=0,
+                has_text_layer=True, needs_ocr=False,
+                has_table_signal=True, has_form_signal=False,
+                has_handwriting_signal=False,
+                has_manifest_signal=False,
+            )
+            for i in range(3)
+        ]
+        assert not qualify_for_spreadsheet_print(profiles, "compliance-notice.pdf")
+
+    def test_qualifier_accepts_manifest_signal_with_filename_hint(self) -> None:
+        # Filename hint + ≥1 manifest-shape page.
+        from womblex.ingest.page_profile import PageProfile
+        profiles = [
+            PageProfile(
+                page_number=0, width=595, height=842,
+                char_count=10000, image_count=0, vector_drawings=0,
+                has_text_layer=True, needs_ocr=False,
+                has_table_signal=True, has_form_signal=False,
+                has_handwriting_signal=False,
+                has_manifest_signal=True,
+            ),
+        ]
+        assert qualify_for_spreadsheet_print(profiles, "schedule-of-evidence.pdf")
+
+    def test_qualifier_accepts_manifest_signal_majority_pages(self) -> None:
+        # No filename hint but ≥50% of pages are manifest-shape.
+        from womblex.ingest.page_profile import PageProfile
+        profiles = [
+            PageProfile(
+                page_number=i, width=595, height=842,
+                char_count=10000, image_count=0, vector_drawings=0,
+                has_text_layer=True, needs_ocr=False,
+                has_table_signal=True, has_form_signal=False,
+                has_handwriting_signal=False,
+                has_manifest_signal=(i < 2),  # 2/3 pages manifest-shape
+            )
+            for i in range(3)
+        ]
+        assert qualify_for_spreadsheet_print(profiles, "noname.pdf")
+
 
 class TestMasterIndex:
     """The 37-page rotated FOI manifest — the corpus's hardest tabular doc."""

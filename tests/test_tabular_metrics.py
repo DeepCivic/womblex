@@ -289,7 +289,13 @@ class TestCSVFixtureAccuracy:
 
     def extracted_df(self, source_df: pd.DataFrame) -> pd.DataFrame:
 
-        """Reconstruct a DataFrame from SpreadsheetExtractor output."""
+        """Reconstruct a DataFrame from SpreadsheetExtractor's element stream.
+
+        The new shape: one ExtractionResult per workbook, with
+        ``kind='sheet_cell'`` elements giving (sheet, row, col, value).
+        Row 0 is the header row; rows 1..n are data. We rebuild the
+        DataFrame by grouping cells back into (row, col) form.
+        """
 
         from womblex.ingest.detect import DetectionConfig, detect_file_type
 
@@ -300,29 +306,23 @@ class TestCSVFixtureAccuracy:
 
         results = extract_text(_CSV_FILE, profile)
 
+        assert len(results) == 1, f"expected single result for CSV, got {len(results)}"
+        result = results[0]
+        assert result.error is None
 
-        # Each result has one row in its tables[0].
+        cells = [e for e in result.elements if e.kind == "sheet_cell"]
+        assert cells, "no cell elements produced"
 
-        rows = []
+        max_col = max(c.col for c in cells)
+        rows_by_idx: dict[int, list[str]] = {}
+        for c in cells:
+            row = rows_by_idx.setdefault(c.row, [""] * (max_col + 1))
+            row[c.col] = c.value or ""
 
-        headers = None
-
-        for r in results:
-
-            assert r.error is None
-
-            if r.tables:
-
-                t = r.tables[0]
-
-                if headers is None:
-
-                    headers = t.headers
-
-                rows.extend(t.rows)
-
-
-        return pd.DataFrame(rows, columns=headers)
+        sorted_rows = [rows_by_idx[i] for i in sorted(rows_by_idx)]
+        headers = sorted_rows[0]
+        data = sorted_rows[1:]
+        return pd.DataFrame(data, columns=headers)
 
 
     def test_structural_fidelity(self, source_df: pd.DataFrame, extracted_df: pd.DataFrame) -> None:
@@ -361,12 +361,18 @@ class TestCSVFixtureAccuracy:
 
 
     def test_schema_conformance(self, tmp_path: Path) -> None:
+        # The new output writes four sibling shards (elements + table_cells
+        # + form_fields + manifest). Schema conformance checks each shard
+        # matches its canonical schema.
 
         from womblex.config import ChunkingConfig, DatasetConfig, PathsConfig, WomblexConfig
 
         from womblex.operations import run_extraction, write_batch_parquet, BatchResult
 
-        from womblex.store.output import EXTRACTION_SCHEMA
+        from womblex.store.output import (
+            ELEMENT_SCHEMA, TABLE_CELLS_SCHEMA, FORM_FIELDS_SCHEMA,
+            MANIFEST_SCHEMA, _shard_paths,
+        )
 
 
         config = WomblexConfig(
@@ -391,5 +397,9 @@ class TestCSVFixtureAccuracy:
 
         write_batch_parquet(batch, out)
 
-        assert schema_conformance(out, EXTRACTION_SCHEMA)
+        paths = _shard_paths(out)
+        assert schema_conformance(paths["elements"], ELEMENT_SCHEMA)
+        assert schema_conformance(paths["table_cells"], TABLE_CELLS_SCHEMA)
+        assert schema_conformance(paths["form_fields"], FORM_FIELDS_SCHEMA)
+        assert schema_conformance(paths["manifest"], MANIFEST_SCHEMA)
 

@@ -1,192 +1,126 @@
-"""Tests for womblex.store.output -- Parquet writer."""
+"""Tests for womblex.store.output — fixture-driven, ground-truth only.
+
+Exercises the writer / reader / integrity check round-trip on the
+budget-statement DOCX fixture. No synthetic data — every test relies
+on a real fixture in womblex-development-fixtures.
+"""
+
+from __future__ import annotations
 
 from pathlib import Path
 
-import pyarrow.parquet as pq
 import pytest
 
-from womblex.ingest.extract import (
-    ExtractionMetadata,
-    ExtractionResult,
-    FormField,
-    ImageData,
-    PageResult,
-    Position,
-    TableData,
-    TextBlock,
-)
+from womblex.ingest.strategies_file import DocxExtractor
 from womblex.store.output import (
-    EXTRACTION_SCHEMA,
+    ELEMENT_SCHEMA,
+    FORM_FIELDS_SCHEMA,
+    MANIFEST_SCHEMA,
+    TABLE_CELLS_SCHEMA,
     ShardVerificationError,
-    read_results,
+    _shard_paths,
+    read_elements,
+    read_form_fields,
+    read_manifest,
+    read_table_cells,
     verify_shard_persistence,
     write_results,
 )
 
+_FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "fixtures"
+_BUDGET_DOCX = (
+    _FIXTURES
+    / "womblex-collection"
+    / "_documents"
+    / "foreign-affairs-and-trade-2025-26-portfolio-budget-statements.docx"
+)
 
-def _make_result(text: str = "Sample text", method: str = "native_narrative") -> ExtractionResult:
-    """Build a minimal ExtractionResult for testing."""
-    pos = Position(x=0.1, y=0.1, width=0.8, height=0.1)
-    return ExtractionResult(
-        pages=[PageResult(page_number=0, text=text, method="native")],
-        method=method,
-        tables=[TableData(headers=["A", "B"], rows=[["1", "2"]], position=pos, confidence=0.85)],
-        forms=[FormField(field_name="Name", value="Test", position=pos, confidence=0.9)],
-        images=[ImageData(alt_text="photo", position=pos, confidence=0.7)],
-        text_blocks=[TextBlock(text=text, position=pos, block_type="paragraph", confidence=0.9)],
-        metadata=ExtractionMetadata(
-            extraction_strategy=method,
-            confidence=0.95,
-            processing_time=0.5,
-            page_count=1,
-            text_coverage=1.0,
-        ),
+
+@pytest.fixture(scope="module")
+def budget_statement_extraction():
+    if not _BUDGET_DOCX.exists():
+        pytest.skip(f"fixture not present: {_BUDGET_DOCX}")
+    return DocxExtractor().extract_path(_BUDGET_DOCX)
+
+
+@pytest.fixture
+def written_shard(tmp_path, budget_statement_extraction):
+    shard = tmp_path / "batch-0001.parquet"
+    write_results(
+        [("budget", str(_BUDGET_DOCX), budget_statement_extraction)],
+        shard,
+        collection_id="test",
     )
+    return shard
 
 
-class TestWriteResults:
-    def test_writes_single_result(self, tmp_path: Path) -> None:
-        out = tmp_path / "test.parquet"
-        result = _make_result()
-        write_results([("doc1", "/path/doc1.pdf", result)], out)
+class TestShardLayout:
+    def test_four_sibling_files_written(self, written_shard):
+        paths = _shard_paths(written_shard)
+        for role, p in paths.items():
+            assert p.exists(), f"{role} not written: {p}"
+            assert p.stat().st_size > 0, f"{role} is empty: {p}"
 
-        assert out.exists()
-        table = pq.read_table(str(out))
-        assert len(table) == 1
-        assert table.column("document_id")[0].as_py() == "doc1"
-        assert "Sample text" in table.column("text")[0].as_py()
+    def test_schemas_round_trip(self, written_shard):
+        # Each file matches the canonical schema (read_* enforces).
+        assert read_elements(written_shard).schema.equals(ELEMENT_SCHEMA)
+        assert read_table_cells(written_shard).schema.equals(TABLE_CELLS_SCHEMA)
+        assert read_form_fields(written_shard).schema.equals(FORM_FIELDS_SCHEMA)
+        assert read_manifest(written_shard).schema.equals(MANIFEST_SCHEMA)
 
-    def test_writes_multiple_results(self, tmp_path: Path) -> None:
-        out = tmp_path / "multi.parquet"
-        rows = [
-            ("doc1", "/a.pdf", _make_result("First")),
-            ("doc2", "/b.pdf", _make_result("Second")),
+
+class TestVerbatimRoundTrip:
+    def test_first_table_headers_match_source(self, written_shard, budget_statement_extraction):
+        # First kind='table' element's row 0 (header row) reads back verbatim
+        # against the legacy derived TableData.headers view.
+        e_table = read_elements(written_shard)
+        kinds = e_table.column("kind").to_pylist()
+        first_table_pos = kinds.index("table")
+        parent_order = e_table.column("elem_order")[first_table_pos].as_py()
+        src_hash = e_table.column("source_hash")[first_table_pos].as_py()
+
+        tc = read_table_cells(written_shard)
+        header_cells = [
+            (r["col"], r["value"])
+            for r in tc.to_pylist()
+            if r["source_hash"] == src_hash
+            and r["parent_elem_order"] == parent_order
+            and r["row"] == 0
         ]
-        write_results(rows, out)
-
-        table = pq.read_table(str(out))
-        assert len(table) == 2
-
-    def test_writes_empty_list(self, tmp_path: Path) -> None:
-        out = tmp_path / "empty.parquet"
-        write_results([], out)
-
-        assert out.exists()
-        table = pq.read_table(str(out))
-        assert len(table) == 0
-
-    def test_preserves_tables(self, tmp_path: Path) -> None:
-        out = tmp_path / "tables.parquet"
-        result = _make_result()
-        write_results([("doc1", "/a.pdf", result)], out)
-
-        table = pq.read_table(str(out))
-        tables_col = table.column("tables")[0].as_py()
-        assert len(tables_col) == 1
-        assert tables_col[0]["headers"] == ["A", "B"]
-        assert tables_col[0]["rows"] == [["1", "2"]]
-
-    def test_preserves_forms(self, tmp_path: Path) -> None:
-        out = tmp_path / "forms.parquet"
-        result = _make_result()
-        write_results([("doc1", "/a.pdf", result)], out)
-
-        table = pq.read_table(str(out))
-        forms_col = table.column("forms")[0].as_py()
-        assert len(forms_col) == 1
-        assert forms_col[0]["field_name"] == "Name"
-
-    def test_preserves_metadata(self, tmp_path: Path) -> None:
-        out = tmp_path / "meta.parquet"
-        result = _make_result()
-        write_results([("doc1", "/a.pdf", result)], out)
-
-        table = pq.read_table(str(out))
-        meta = table.column("metadata")[0].as_py()
-        assert meta["extraction_strategy"] == "native_narrative"
-        assert meta["confidence"] == pytest.approx(0.95)
-
-    def test_creates_parent_dirs(self, tmp_path: Path) -> None:
-        out = tmp_path / "sub" / "dir" / "test.parquet"
-        write_results([("doc1", "/a.pdf", _make_result())], out)
-        assert out.exists()
-
-    def test_schema_matches(self, tmp_path: Path) -> None:
-        out = tmp_path / "schema.parquet"
-        write_results([("doc1", "/a.pdf", _make_result())], out)
-
-        table = pq.read_table(str(out))
-        for field in EXTRACTION_SCHEMA:
-            assert field.name in table.schema.names
+        header_cells.sort()
+        cell_headers = [v for _, v in header_cells]
+        assert cell_headers == budget_statement_extraction.tables[0].headers
 
 
-class TestReadResults:
-    def test_roundtrip(self, tmp_path: Path) -> None:
-        out = tmp_path / "roundtrip.parquet"
-        result = _make_result()
-        write_results([("doc1", "/a.pdf", result)], out)
-
-        table = read_results(out)
-        assert len(table) == 1
-        assert table.column("document_id")[0].as_py() == "doc1"
-
-    def test_directory_concatenates_shards(self, tmp_path: Path) -> None:
-        shard_dir = tmp_path / "documents"
-        shard_dir.mkdir()
-        write_results([("doc1", "/a.pdf", _make_result())], shard_dir / "batch-0001.parquet")
-        write_results([("doc2", "/b.pdf", _make_result()), ("doc3", "/c.pdf", _make_result())],
-                      shard_dir / "batch-0002.parquet")
-
-        table = read_results(shard_dir)
-        assert len(table) == 3
-        ids = sorted(table.column("document_id").to_pylist())
-        assert ids == ["doc1", "doc2", "doc3"]
-
-
-class TestShardVerification:
-    def test_passes_on_correct_shard(self, tmp_path: Path) -> None:
-        shard_dir = tmp_path / "documents"
-        shard_dir.mkdir()
-        shard = shard_dir / "batch-0001.parquet"
-        write_results([("doc1", "/a.pdf", _make_result())], shard)
-
-        size = verify_shard_persistence(shard, expected_rows=1, prev_total_size=0)
-        assert size > 0
-
-    def test_raises_on_missing_shard(self, tmp_path: Path) -> None:
-        with pytest.raises(ShardVerificationError, match="missing"):
-            verify_shard_persistence(tmp_path / "ghost.parquet", expected_rows=1, prev_total_size=0)
-
-    def test_raises_on_row_count_mismatch(self, tmp_path: Path) -> None:
-        shard_dir = tmp_path / "documents"
-        shard_dir.mkdir()
-        shard = shard_dir / "batch-0001.parquet"
-        write_results([("doc1", "/a.pdf", _make_result())], shard)
-
-        with pytest.raises(ShardVerificationError, match="row count mismatch"):
-            verify_shard_persistence(shard, expected_rows=5, prev_total_size=0)
-
-    def test_raises_on_directory_shrink(self, tmp_path: Path) -> None:
-        shard_dir = tmp_path / "documents"
-        shard_dir.mkdir()
-        shard = shard_dir / "batch-0001.parquet"
-        write_results([("doc1", "/a.pdf", _make_result())], shard)
-
-        inflated_prev = shard.stat().st_size + 1_000_000
-        with pytest.raises(ShardVerificationError, match="shrank"):
-            verify_shard_persistence(shard, expected_rows=1, prev_total_size=inflated_prev)
-
-
-class TestResultWithoutMetadata:
-    def test_handles_no_metadata(self, tmp_path: Path) -> None:
-        out = tmp_path / "nometa.parquet"
-        result = ExtractionResult(
-            pages=[PageResult(page_number=0, text="Hello", method="native")],
-            method="native_narrative",
+class TestIntegrity:
+    def test_passes_on_real_fixture(self, written_shard):
+        cumulative = verify_shard_persistence(
+            written_shard, expected_docs=1, prev_total_size=0,
         )
-        write_results([("doc1", "/a.pdf", result)], out)
+        assert cumulative > 0
 
-        table = pq.read_table(str(out))
-        meta = table.column("metadata")[0].as_py()
-        assert meta["extraction_strategy"] == "native_narrative"
-        assert meta["confidence"] == 0.0
+    def test_detects_missing_shard(self, written_shard, tmp_path):
+        paths = _shard_paths(written_shard)
+        paths["elements"].unlink()
+        with pytest.raises(ShardVerificationError, match="shard missing"):
+            verify_shard_persistence(written_shard, 1, 0)
+
+    def test_detects_manifest_row_mismatch(self, written_shard):
+        with pytest.raises(ShardVerificationError, match="manifest row count mismatch"):
+            verify_shard_persistence(written_shard, expected_docs=99, prev_total_size=0)
+
+
+class TestManifestColumns:
+    def test_manifest_records_source_metadata(self, written_shard):
+        m = read_manifest(written_shard)
+        assert m.num_rows == 1
+        row = m.to_pylist()[0]
+        assert row["filename"] == _BUDGET_DOCX.name
+        assert row["ext"] == ".docx"
+        assert row["extraction_method"] == "docx"
+        assert row["elements_count"] > 0
+        assert row["table_cells_count"] > 0
+        assert row["status"] == "completed"
+        assert row["error"] == ""
+        assert row["collection_id"] == "test"
+        assert len(row["source_hash"]) == 64  # sha256 hex

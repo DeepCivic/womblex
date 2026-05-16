@@ -4,6 +4,16 @@ Codebase changes shipped against the ACT Early Childhood Incidents
 corpus. Pairs with [stories/STATUS.md](../../../stories/STATUS.md) for
 the corpus-side production-readiness view.
 
+> **Note (2026-05-16):** The extraction output shape has since been
+> refactored to an element-stream + typed sidecars layout
+> (`*.elements.parquet`, `*.table_cells.parquet`,
+> `*.form_fields.parquet`, `*._manifest.parquet`). See
+> [CHANGELOG.md](CHANGELOG.md) "Changed — BREAKING" and
+> [docs/extraction.md](docs/extraction.md) for the canonical reference.
+> The `tables[]` / `text_blocks[]` references throughout this document
+> describe the pre-refactor schema; the underlying findings remain
+> valid but the on-disk shape they refer to has changed.
+
 ## Snapshot
 
 | metric | value |
@@ -196,19 +206,68 @@ Four bundled fixes above. Validated against the labels packet and
 the full 2,626-doc corpus. See `stories/STATUS.md` for the
 production-corpus run output and quality audit.
 
+### Open issue — table-element over-firing on form-layout pages
+
+Audit of the 2026-05-11 corpus run (see `stories/STATUS.md` Known
+limitations §1) found that 62% of `structured`-strategy docs ship
+pseudo-tables built from form layouts and shredded prose. Driver:
+`_extract_tables_from_page` / `_layout_blocks_and_tables` triggers
+on regulatory letters whose label-value blocks, rules-of-law
+footers, and multi-column prose visually resemble tabular
+structure. Example: `00609B` table headers
+`['', 'context that is intended to shape a child's behaviour. Likewise, ha', 'rmful physic']`
+— body prose split mid-word across pseudo-cells.
+
+Same OCR primitive runs across all strategies, so contamination
+is also expected on hybrid / scanned_machinewritten docs
+(unaudited at corpus scale). The `text` field on the elements
+shard is unaffected — only `kind='table'` elements (with their
+sidecar `table_cells` rows) are corrupted.
+
+Discriminator: `confidence < 0.7` on a `kind='table'` element
+cleanly separates junk from real tables in the structured sample
+(342 of ~400 junk-table observations were conf 0.60; clean
+rules-of-law tables sit at 0.70+). Two candidate fixes:
+
+- **Writer-time filter in `store/output.py`** — drop both the
+  `kind='table'` element row and its `table_cells` sidecar rows
+  whenever `confidence < 0.7`. The sidecar integrity check
+  (`_verify_sidecar_integrity` in `verify_shard_persistence`) will
+  catch a writer that drops the element but leaves orphan cells, so
+  the filter must run before sidecar emission. ~10 LOC; doesn't
+  require re-running extraction.
+- **Page-profile / table-detector fix** — stop classifying
+  form-heavy letters as table-shaped in the first place. Bigger
+  change; risks regressing real-table detection.
+
+This is the next extraction-correctness item to address (per
+`stories/STATUS.md` Outstanding §1).
+
 ### Deferred / cut
 
+- **Refresh accuracy-report generator + regenerate accuracy docs**
+  (added 2026-05-16) — `tests/accuracy_reports.py` still describes
+  extractor outputs in the pre-refactor language ("tables / forms /
+  blocks"). The generated `docs/accuracy/EXTRACTION.md`,
+  `CHUNKING.md`, `PII_CLEANING.md`, and `REDACTION_HANDLING.md`
+  inherit that language. Refresh the generator strings to describe
+  the element stream (kinds: paragraph / heading / table / form /
+  image / sheet_cell / …), then rerun
+  `tests/test_fixture_accuracy.py` and
+  `tests/test_womblex_collection_accuracy.py` to regenerate the
+  accuracy docs from current behaviour. Out of scope of the
+  schema refactor itself.
 - **OCR-side ruled-table column-major emission** — irreducible
   trade-off documented under fix 5 above. Re-evaluate only with a
   new discriminating signal (e.g. layout-from-image-vision pass)
   that separates real table cells from form-field streams.
 - **Parquet schema for `TableData.context` + `document_metadata`** —
-  Phase 4 captures both in memory but `store/output.py` only
-  flattens `headers / rows / position / confidence` to parquet.
-  Downstream consumers (Isaacus chunking) get table cells but not
-  per-table or per-doc metadata blocks. One-line schema additions
-  needed in the parquet writer; deferred until a consumer
-  demonstrably needs them.
+  Largely resolved by the element-stream refactor (2026-05-16):
+  per-element ``meta`` map carries arbitrary key-value overflow on
+  the elements shard; ``document_metadata`` rides on the manifest.
+  ``TableData.context`` is preserved on a kind='table' element via
+  ``meta`` keys (``context_*``). Original deferral note kept for
+  history.
 - **Letterhead-typo normalisations for `Govemment` / standalone
   `AcT`** — the existing `_LETTERHEAD_FIXES` covers `Govermment`
   (double-m) and `(AcT)` (parenthesised); the variants without

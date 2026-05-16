@@ -453,11 +453,12 @@ class ImageExtractor:
         self.engine_options = engine_options or {}
 
     def extract(self, doc: fitz.Document) -> ExtractionResult:
+        from womblex.ingest.elements import Element
         from womblex.ingest.heuristics_cv2 import calculate_blur_score
 
         pages: list[PageResult] = []
-        all_images: list[ImageData] = []
-        all_blocks: list[TextBlock] = []
+        elements: list[Element] = []
+        order = 0
         confidences: list[float] = []
         steps: list[str] = []
 
@@ -480,18 +481,24 @@ class ImageExtractor:
             confidences.append(avg_conf)
 
             pages.append(PageResult(page_number=page.number, text=text, method="ocr"))
-            all_images.extend(_extract_images_from_page(page))
 
             pw, ph = page.rect.width, page.rect.height
+            page_conf = avg_conf / 100 if avg_conf else 0.0
             if text.strip():
-                all_blocks.append(
-                    TextBlock(
-                        text=text.strip(),
-                        position=_normalise_bbox((0, 0, pw, ph), pw, ph),
-                        block_type="paragraph",
-                        confidence=avg_conf / 100 if avg_conf else 0.0,
-                    )
-                )
+                elements.append(Element(
+                    order=order, kind="paragraph", extractor="ocr_paddle",
+                    page=page.number,
+                    bbox=_normalise_bbox((0, 0, pw, ph), pw, ph),
+                    text=text.strip(), confidence=page_conf,
+                ))
+                order += 1
+            for im in _extract_images_from_page(page):
+                elements.append(Element(
+                    order=order, kind="image", extractor="figure_image",
+                    page=page.number, bbox=im.position,
+                    alt_text=im.alt_text, confidence=im.confidence,
+                ))
+                order += 1
 
         avg_conf_doc = sum(confidences) / len(confidences) if confidences else 0.0
         coverage = _text_coverage(pages)
@@ -499,9 +506,8 @@ class ImageExtractor:
 
         return ExtractionResult(
             pages=pages,
+            elements=elements,
             method="image",
-            images=all_images,
-            text_blocks=all_blocks,
             metadata=ExtractionMetadata(
                 extraction_strategy="image",
                 confidence=avg_conf_doc / 100 if avg_conf_doc else 0.0,

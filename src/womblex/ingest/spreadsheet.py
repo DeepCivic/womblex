@@ -1,7 +1,18 @@
-"""Spreadsheet extraction — one ExtractionResult per logical row or sheet.
+"""Spreadsheet extraction — one ExtractionResult per workbook.
 
-For data and glossary sheets each non-empty row produces a separate ExtractionResult.
-For narrative and key-value sheets the whole sheet becomes one ExtractionResult.
+Cells are the element grain. Every non-empty cell becomes one
+``Element`` of kind ``sheet_cell``; each sheet emits a leading
+``sheet_meta`` element carrying its index and dimensions.
+
+This is the shape change relative to the previous extractor, which
+produced one ExtractionResult per logical row. That shape forced
+spreadsheets to masquerade as documents and made cross-format queries
+awkward; the element-stream model treats cells natively.
+
+Source values are verbatim: pandas reads with ``dtype=str``, so
+"1,234" stays "1,234". ``value_type`` is a hint (currently always
+"text"); formula and number_format remain unset — preserving those
+needs an openpyxl-based reader and is out of scope for this refactor.
 """
 
 from __future__ import annotations
@@ -10,43 +21,43 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from womblex.ingest.detect import SheetInfo
-
 if TYPE_CHECKING:
     import pandas as pd
     from womblex.ingest.detect import DocumentProfile
+
+from womblex.ingest.detect import SheetInfo
+from womblex.ingest.elements import Element
 from womblex.ingest.extract import (
     ExtractionMetadata,
     ExtractionResult,
     PageResult,
-    Position,
-    TableData,
 )
 
 logger = logging.getLogger(__name__)
 
-_POS_FULL = Position(x=0.0, y=0.0, width=1.0, height=1.0)
 
+def _classify_sheet(name: str, df: "pd.DataFrame") -> SheetInfo:
+    """Classify a sheet's structure for detection-time metadata only.
 
-def _classify_sheet(name: str, df: pd.DataFrame) -> SheetInfo:
-    """Classify a sheet's structure to guide extraction routing."""
+    The new extractor emits every cell regardless of sheet shape, so
+    classification no longer routes extraction. It remains useful as a
+    downstream hint on ``DocumentProfile.sheet_meta``.
+
+    Categories: ``narrative`` (single column or very long cells),
+    ``glossary`` (two columns at 50–500 rows), ``key_value`` (two columns
+    under 50 rows), ``data`` (everything else).
+    """
     rows, cols = len(df), len(df.columns)
     if cols == 0:
         return SheetInfo(
             name=name, sheet_type="data", row_count=rows, col_count=0,
             key_column=None, has_sub_headers=False,
         )
-
     try:
         avg_len = float(df.apply(lambda c: c.astype(str).str.len()).stack().mean())
     except Exception:
         avg_len = 0.0
 
-    # Classify by shape and content density.
-    # Single column or very long cells → narrative prose.
-    # Exactly two columns in a glossary-sized range → glossary.
-    # Two columns, small → key-value form.
-    # Everything else defaults to tabular data.
     if cols == 1 or (cols <= 3 and avg_len > 150):
         sheet_type = "narrative"
     elif cols == 2 and 50 <= rows <= 500:
@@ -56,7 +67,6 @@ def _classify_sheet(name: str, df: pd.DataFrame) -> SheetInfo:
     else:
         sheet_type = "data"
 
-    # Prefer a column whose header signals identity; fall back to first column.
     headers_lower = [str(c).lower() for c in df.columns]
     key_column: str | None = None
     for kw in ("id", "name", "code", "key"):
@@ -69,7 +79,6 @@ def _classify_sheet(name: str, df: pd.DataFrame) -> SheetInfo:
     if key_column is None:
         key_column = str(df.columns[0])
 
-    # Sub-headers: rows with only the first column populated, occurring 3+ times.
     has_sub_headers = False
     if cols > 1:
         first_nonempty = df.iloc[:, 0].astype(str).str.strip().str.len() > 0
@@ -85,155 +94,122 @@ def _classify_sheet(name: str, df: pd.DataFrame) -> SheetInfo:
 
 
 class SpreadsheetExtractor:
-    """Extract from CSV/Excel files, yielding one result per logical unit.
+    """Read an XLSX / CSV workbook into a single element stream.
 
-    Data and glossary sheets produce one ExtractionResult per non-empty row.
-    Narrative and key-value sheets produce one result for the whole sheet.
+    Element order is monotonic across the workbook: each sheet's
+    sheet_meta element is followed by its cell elements in (row, col)
+    order. Sheets are emitted in their natural workbook index order.
     """
 
     def __init__(self, profile: DocumentProfile | None = None) -> None:
+        # ``profile`` is accepted for parity with previous call sites
+        # (the document profiler may pre-classify sheets). The new
+        # extractor does not use the classification — every cell becomes
+        # an element regardless of sheet shape.
         self.profile = profile
 
-    def extract_path(self, path: Path) -> list[ExtractionResult]:
+    def extract_path(self, path: Path) -> ExtractionResult:
         import pandas as pd
 
+        elements: list[Element] = []
+        order = 0
         suffix = path.suffix.lower()
-        sheet_infos = (
-            self.profile.sheet_meta if (self.profile and self.profile.sheet_meta) else None
-        )
-
         try:
             if suffix == ".csv":
                 df = pd.read_csv(path, dtype=str, keep_default_na=False)
-                info = sheet_infos[0] if sheet_infos else _classify_sheet("default", df)
-                info.row_count = len(df)  # correct sample count from detection
-                return self._extract_sheet(path.stem, "default", df, info)
+                order = _emit_sheet(elements, order, sheet_name="default", sheet_index=0, df=df)
             else:
                 xl = pd.ExcelFile(str(path))
-                results: list[ExtractionResult] = []
-                for i, name in enumerate(xl.sheet_names):
+                for sheet_idx, name in enumerate(xl.sheet_names):
                     df = xl.parse(name, dtype=str, keep_default_na=False)
-                    info = (
-                        sheet_infos[i]
-                        if sheet_infos and i < len(sheet_infos)
-                        else _classify_sheet(str(name), df)
+                    order = _emit_sheet(
+                        elements, order,
+                        sheet_name=str(name), sheet_index=sheet_idx, df=df,
                     )
-                    info.row_count = len(df)  # correct sample count from detection
-                    results.extend(self._extract_sheet(path.stem, str(name), df, info))
-                if not results:
-                    return [self._error_result("No sheets found or all sheets empty")]
-                return results
         except Exception as e:
-            return [self._error_result(f"Failed to read spreadsheet: {e}")]
+            return _spreadsheet_error(path.stem, f"Failed to read spreadsheet: {e}")
 
-    def _extract_sheet(
-        self, stem: str, sheet_name: str, df: pd.DataFrame, info: SheetInfo
-    ) -> list[ExtractionResult]:
-        if info.sheet_type in ("narrative", "key_value"):
-            return [self._whole_sheet(stem, sheet_name, df, info)]
-        return self._rows(stem, sheet_name, df, info)
+        # Page text: one line per cell, prefixed with sheet/row/col.
+        # Downstream consumers reading ``full_text`` see a flattened view;
+        # the canonical structure is on ``elements``.
+        page_text = "\n".join(
+            f"[{e.sheet}!{e.row},{e.col}] {e.value}"
+            for e in elements
+            if e.kind == "sheet_cell" and e.value
+        )
 
-    def _whole_sheet(
-        self, stem: str, sheet_name: str, df: pd.DataFrame, info: SheetInfo
-    ) -> ExtractionResult:
-        text = df.to_string(index=False)
-        doc_id = f"{stem}:{sheet_name}" if sheet_name != "default" else stem
         return ExtractionResult(
-            pages=[PageResult(page_number=0, text=text, method="spreadsheet")],
+            pages=[PageResult(page_number=0, text=page_text, method="spreadsheet")],
+            elements=elements,
             method="spreadsheet",
-            document_id=doc_id,
-            tables=[TableData(
-                headers=list(df.columns),
-                rows=[list(r) for r in df.values],
-                position=_POS_FULL,
-                confidence=0.95,
-            )],
+            document_id=path.stem,
             metadata=ExtractionMetadata(
                 extraction_strategy="spreadsheet",
                 confidence=0.95,
                 processing_time=0.0,
                 page_count=1,
-                text_coverage=1.0 if text.strip() else 0.0,
+                text_coverage=1.0 if page_text else 0.0,
             ),
         )
 
-    def _rows(
-        self, stem: str, sheet_name: str, df: pd.DataFrame, info: SheetInfo
-    ) -> list[ExtractionResult]:
-        import numpy as np
 
-        headers = list(df.columns)
-        key_col = info.key_column
-        results: list[ExtractionResult] = []
+def _emit_sheet(
+    elements: list[Element],
+    start_order: int,
+    *,
+    sheet_name: str,
+    sheet_index: int,
+    df: "pd.DataFrame",
+) -> int:
+    """Append sheet_meta + sheet_cell elements for one sheet. Return next order."""
+    order = start_order
+    n_rows, n_cols = len(df), len(df.columns)
+    elements.append(Element(
+        order=order, kind="sheet_meta", extractor="xlsx",
+        sheet=sheet_name, confidence=1.0,
+        meta={
+            "sheet_index": str(sheet_index),
+            "rows": str(n_rows),
+            "cols": str(n_cols),
+        },
+    ))
+    order += 1
 
-        # Build a positional boolean mask of sub-header rows to skip.
-        sub_header_mask: np.ndarray | None = None
-        if info.has_sub_headers and len(df.columns) > 1:
-            first_nonempty = df.iloc[:, 0].astype(str).str.strip().str.len() > 0
-            others_empty = ~df.iloc[:, 1:].astype(str).apply(
-                lambda c: c.str.strip().str.len() > 0
-            ).any(axis=1)
-            sub_header_mask = (first_nonempty & others_empty).values
+    # Header row at row=0
+    for col_idx, header in enumerate(df.columns):
+        text = str(header)
+        if not text.strip():
+            continue
+        elements.append(Element(
+            order=order, kind="sheet_cell", extractor="xlsx",
+            sheet=sheet_name, row=0, col=col_idx,
+            value=text, value_type="text", confidence=1.0,
+            meta={"is_header": "true"},
+        ))
+        order += 1
 
-        for row_idx, (_, row) in enumerate(df.iterrows()):
-            if sub_header_mask is not None and sub_header_mask[row_idx]:
+    # Data rows at row=1..n
+    for row_idx, (_, row) in enumerate(df.iterrows(), start=1):
+        for col_idx, val in enumerate(row.values):
+            text = str(val)
+            if not text.strip():
                 continue
-
-            pairs = [(h, str(v).strip()) for h, v in zip(headers, row) if str(v).strip()]
-            if not pairs:
-                continue
-            text = "\n".join(f"{h}: {v}" for h, v in pairs)
-
-            if key_col and key_col in df.columns:
-                key_val = str(row[key_col]).strip().replace("/", "-")[:60]
-                doc_id = (
-                    f"{stem}:{key_val}"
-                    if sheet_name == "default"
-                    else f"{stem}:{sheet_name}:{key_val}"
-                )
-            else:
-                doc_id = (
-                    f"{stem}:row:{row_idx}"
-                    if sheet_name == "default"
-                    else f"{stem}:{sheet_name}:row:{row_idx}"
-                )
-
-            results.append(ExtractionResult(
-                pages=[PageResult(page_number=row_idx, text=text, method="spreadsheet")],
-                method="spreadsheet",
-                document_id=doc_id,
-                tables=[TableData(
-                    headers=headers,
-                    rows=[[str(v) for v in row.values]],
-                    position=_POS_FULL,
-                    confidence=0.95,
-                )],
-                metadata=ExtractionMetadata(
-                    extraction_strategy="spreadsheet",
-                    confidence=0.95,
-                    processing_time=0.0,
-                    page_count=1,
-                    text_coverage=1.0 if text.strip() else 0.0,
-                ),
+            elements.append(Element(
+                order=order, kind="sheet_cell", extractor="xlsx",
+                sheet=sheet_name, row=row_idx, col=col_idx,
+                value=text, value_type="text", confidence=1.0,
             ))
+            order += 1
 
-        if not results:
-            logger.warning(
-                "spreadsheet produced no data rows: stem=%s sheet=%s", stem, sheet_name
-            )
-        return results
+    return order
 
-    @staticmethod
-    def _error_result(msg: str) -> ExtractionResult:
-        return ExtractionResult(
-            pages=[],
-            method="spreadsheet",
-            error=msg,
-            metadata=ExtractionMetadata(
-                extraction_strategy="spreadsheet",
-                confidence=0.0,
-                processing_time=0.0,
-                page_count=0,
-                text_coverage=0.0,
-            ),
-        )
+
+def _spreadsheet_error(stem: str, msg: str) -> ExtractionResult:
+    return ExtractionResult(
+        pages=[], method="spreadsheet", error=msg, document_id=stem,
+        metadata=ExtractionMetadata(
+            extraction_strategy="spreadsheet",
+            confidence=0.0, processing_time=0.0,
+            page_count=0, text_coverage=0.0,
+        ),
+    )

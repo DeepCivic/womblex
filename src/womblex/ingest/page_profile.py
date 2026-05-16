@@ -23,6 +23,7 @@ from womblex.ingest.detect import (
     _MIN_VECTOR_DRAWINGS,
     _has_form_structure,
     _has_handwriting_signals,
+    _has_manifest_table,
     _has_structural_tables,
     _has_table_structure,
 )
@@ -40,9 +41,10 @@ class PageProfile:
     vector_drawings: int
     has_text_layer: bool          # char_count > _MIN_TEXT_LENGTH
     needs_ocr: bool               # no text layer but content exists (images/vectors)
-    has_table_signal: bool        # text-pattern OR PyMuPDF find_tables
+    has_table_signal: bool        # text-pattern OR PyMuPDF find_tables (permissive)
     has_form_signal: bool         # ≥10 short text spans (label-shape) or AcroForm widgets
     has_handwriting_signal: bool  # only computed for non-text-layer pages
+    has_manifest_signal: bool = False  # page dominated by a manifest-shape table (≥30 cells)
 
     @property
     def mode(self) -> str:
@@ -83,8 +85,13 @@ def profile_pages(doc: fitz.Document) -> list[PageProfile]:
         )
 
         has_table_signal = False
+        has_manifest_signal = False
         if has_text_layer:
             has_table_signal = _has_table_structure(text) or _has_structural_tables(page)
+            if has_table_signal:
+                # Stricter check: only count pages dominated by a manifest-
+                # shape table toward the spreadsheet-print qualifier.
+                has_manifest_signal = _has_manifest_table(page)
 
         has_form_signal = False
         if has_text_layer:
@@ -113,6 +120,7 @@ def profile_pages(doc: fitz.Document) -> list[PageProfile]:
                 has_table_signal=has_table_signal,
                 has_form_signal=has_form_signal,
                 has_handwriting_signal=has_handwriting_signal,
+                has_manifest_signal=has_manifest_signal,
             )
         )
     return profiles
@@ -137,21 +145,26 @@ def qualify_for_spreadsheet_print(
     Re-uses fields already on PageProfile — no new computation. Trips
     when:
     - ≥ ``min_native_pages`` pages have a text layer (rules out scanned)
-    - ≥ 1 page has a table signal (existing structural-table detector)
+    - ≥ 1 page has a *manifest-shape* table signal (page dominated by a
+      table with ≥30 cells that survives the block-count gate)
     - The filename matches any of ``filename_hints`` (cheap fast path), OR
-      ≥ 50 % of pages have a table signal (catches manifests without
-      hint-y filenames)
+      ≥ 50 % of pages have a manifest-shape signal (catches manifests
+      without hint-y filenames)
 
-    The structural vet (column count, row coverage) runs only on
-    qualifying docs — see ``spreadsheet_print.extract_spreadsheet_print``.
+    Uses ``has_manifest_signal`` rather than the looser ``has_table_signal``
+    so that compliance notices with embedded rules-of-law tables (small
+    real tables; the rest of the page is letter prose) don't qualify and
+    get fed through the manifest extractor. The structural vet (column
+    count, row coverage) runs only on qualifying docs — see
+    ``spreadsheet_print.extract_spreadsheet_print``.
     """
     if not profiles:
         return False
     n_native = sum(1 for p in profiles if p.has_text_layer)
     if n_native < min_native_pages:
         return False
-    n_table = sum(1 for p in profiles if p.has_table_signal)
-    if n_table < 1:
+    n_manifest = sum(1 for p in profiles if p.has_manifest_signal)
+    if n_manifest < 1:
         return False
 
     filename_lower = filename.lower()
@@ -160,7 +173,7 @@ def qualify_for_spreadsheet_print(
         return True
 
     # No hint match — require a stronger structural signal.
-    return (n_table / len(profiles)) >= 0.5
+    return (n_manifest / len(profiles)) >= 0.5
 
 
 def summarise_doc_type(profiles: list[PageProfile], legacy: DocumentProfile) -> DocumentType:

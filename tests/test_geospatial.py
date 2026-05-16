@@ -1,9 +1,18 @@
-"""Tests for geospatial SHP → GeoParquet ingest."""
+"""Tests for geospatial SHP → GeoParquet ingest.
+
+Geospatial ingest depends on optional ``pyogrio`` + ``geopandas`` +
+``shapely`` packages, which are not in the base install. The whole
+module is skipped when those imports fail.
+"""
 
 from pathlib import Path
 
 import pyarrow.parquet as pq
 import pytest
+
+# Skip the entire module if optional geospatial deps are unavailable.
+pytest.importorskip("pyogrio")
+pytest.importorskip("geopandas")
 
 from womblex.ingest.geospatial import (
     GeospatialIngestResult,
