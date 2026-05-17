@@ -8,7 +8,7 @@ See `docs/accuracy/` for measured baselines per stage.
 
 **Scope:** PDF, DOCX, TXT → narrative text / Parquet
 
-**Status:** Implemented in `utils/metrics.py`. Benchmarked in `docs/accuracy/EXTRACTION.md`.
+**Status:** Implemented in `utils/metrics.py`. Benchmarked in `docs/accuracy/EXTRACTION.md`. End-to-end scoring against a per-page GT packet runs via `womblex score --labels <dir> --shards <dir> [--group-by FIELD]` (CLI) or `womblex.score.score_labels()` (Python); the labels packet convention is `<stem>.gt.md` + `<stem>.meta.json` with `source_file` and `page` keys.
 
 | Metric | Implementation | Location | Ground Truth Source |
 |--------|---------------|----------|---------------------|

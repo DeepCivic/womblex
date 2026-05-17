@@ -135,41 +135,26 @@ Defensive classification: uncertain documents route to `UNKNOWN` rather than a w
 
 ### 2. Ingest — Extraction
 
-`extract.py` defines the `ExtractionStrategy` and `PathExtractionStrategy` protocols, shared helpers, and the `extract_text()` dispatcher. Extractor implementations are split by document family: `strategies_native.py` (text-layer PDFs), `strategies_scanned.py` (OCR-dependent types), and `strategies_file.py` (DOCX, plain text). `strategies.py` re-exports all classes for backward compatibility. `spreadsheet.py` handles CSV and Excel files.
+`extract.py` defines the `ExtractionStrategy` and `PathExtractionStrategy` protocols, shared helpers, and the `extract_text()` dispatcher. PDFs route via the per-page orchestrator (`ingest/orchestrator.py` + `ingest/page_profile.py`); the per-doc `Native*` / `Scanned*` / `Hybrid` / `Structured` strategy classes have been removed and their bodies inlined into the orchestrator's per-page operations (`_apply_native_page`, `_apply_ocr_page`). Non-PDF extractors live in `strategies_scanned.py` (OCR primitives + the legacy `ImageExtractor`) and `strategies_file.py` (DOCX, plain text); `strategies.py` re-exports for back-compat. `spreadsheet.py` handles CSV and Excel files.
 
 `extract_text()` logs the strategy selection (`doc, type, confidence, strategy`) at INFO level, then always returns `list[ExtractionResult]`. PDF, DOCX, and spreadsheet paths each return a single-element list (one result per source file). The list shape is retained for call-site symmetry. Spreadsheet cells live as `kind='sheet_cell'` elements on the single result; `_classify_sheet` survives as a detection-time metadata helper but no longer routes extraction.
 
-**Spreadsheet sheet classification** (`_classify_sheet` in `spreadsheet.py`):
-
-| Sheet type | Detection heuristic | Extraction unit |
-|------------|---------------------|-----------------|
-| `data` | ≥3 columns or short cells | One result per row |
-| `glossary` | 2 columns, 50–500 rows | One result per row |
-| `key_value` | 2 columns, < 50 rows | One result per sheet |
-| `narrative` | 1 column or very long cells | One result per sheet |
+**Spreadsheet sheet classification** (`_classify_sheet` in `spreadsheet.py`) — retained as a detection-time metadata helper, but no longer routes extraction. Every workbook now emits a single `ExtractionResult` whose element stream begins with one `kind='sheet_meta'` element per sheet (dimensions, classification) followed by one `kind='sheet_cell'` element per non-empty cell.
 
 **`SpreadsheetExtractor`** in `spreadsheet.py` was separated from `strategies.py` to keep both files under the 750-line cap. Callers import `SpreadsheetExtractor` directly from `ingest.spreadsheet`.
 
 **Layout backend** — scanned extractors use `YOLOLayoutAnalyzer` (COCO-pretrained yolov8n) for layout region detection. COCO class names are mapped to document block types via `_YOLO_COCO_LABEL_MAP` (e.g. `dining table` → `table`, `person`/`book` → `paragraph`, screen objects → `figure`). Layout analysis is called from `_layout_blocks_and_tables()` in `strategies_scanned.py`. Backend contracts are formalised as `@runtime_checkable` protocols in `interfaces/protocols.py` (`OCRReader`, `LayoutAnalyzer`, `Preprocessor`).
 
-Scanned PDF strategies (`ScannedMachinewrittenExtractor`, `ScannedHandwrittenExtractor`, `ScannedMixedExtractor`, `HybridExtractor`) all call `_ocr_page()` which:
+The orchestrator's OCR per-page path (`_apply_ocr_page`) drives `_ocr_page()` which:
 
 1. Renders the page to a numpy array at the configured DPI
 2. Deskews via Hough-line skew detection
 3. Binarises — skipped for clean digital renders (histogram analysis detects low noise + narrow dynamic range); OTSU if bimodal histogram, adaptive Gaussian otherwise (handles binding shadows and scanner gradients)
 4. Runs OCR and returns `(text, avg_confidence, preprocessing_steps)`; warns if avg confidence < 40%
 
-After extraction, `extract_text()` runs `_normalise_text()` over every page to fix known document artefacts (broken font encoding, OCR footer noise) before returning.
+**Text policy at the extraction boundary is verbatim.** `_normalise_text` no longer runs in the extraction hot path. Whatever the producing extractor (native text layer, paddle OCR, docx, xlsx, spreadsheet_print, figure_image) emits is what lands on the element's `text` field. Downstream stages (PII, redaction, chunking) may rewrite `pages[i].text` in place, but the parquet writer reads `elements`, so on-disk content remains extraction-time verbatim. See `docs/extraction.md`.
 
-**Output schema per page:**
-
-```python
-PageResult(page_number, text, method)        # one per page
-TextBlock(text, position, block_type, confidence)  # semantic blocks
-TableData(headers, rows, position, confidence)     # structured tables
-FormField(field_name, value, position, confidence) # form widgets
-ImageData(alt_text, position, confidence)          # image metadata
-```
+**Output schema** is a single `elements: list[Element]` stream on `ExtractionResult`, persisted to four sibling parquet files per batch (`*.elements.parquet`, `*.table_cells.parquet`, `*.form_fields.parquet`, `*._manifest.parquet`). Element kinds: `paragraph`, `heading`, `list_item`, `caption`, `footer`, `signature`, `figure`, `image`, `table`, `form`, `page_break`, `sheet_meta`, `sheet_cell`. Tables nest cells on `Element.cells` in memory and flatten to `table_cells.parquet` on disk; forms flatten the same way to `form_fields.parquet`. Legacy view properties (`result.text_blocks` / `.tables` / `.forms` / `.images`) remain on `ExtractionResult` as read-only derivations for downstream stages that have not migrated. See `docs/extraction.md` for the canonical reference.
 
 ### 3. Ingest — G-NAF (Standalone)
 

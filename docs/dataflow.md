@@ -98,18 +98,22 @@ For each file processed via `operations.py`:
 2. get_extractor(profile) → ExtractionStrategy | SpreadsheetExtractor | DocxExtractor
 
 3. extract_text(path, profile) → list[ExtractionResult]  (single-element list per source)
-      ├── PDF/DOCX path → single-element list
-      │     ├── Native pages: page.get_text("text", flags=TEXT_DEHYPHENATE)
-      │     ├── Scanned pages: _ocr_page()
+      ├── PDF path → orchestrator (page-by-page dispatch)
+      │     ├── Native pages: _apply_native_page
+      │     │     ├── page.get_text("blocks", flags=TEXT_DEHYPHENATE) + block classifier
+      │     │     └── find_tables / spreadsheet_print (gated) → kind='table' elements
+      │     ├── Scanned pages: _apply_ocr_page → _ocr_page()
       │     │     ├── deskew (Hough line rotation)
       │     │     ├── binarise: OTSU if bimodal histogram, else adaptive Gaussian
       │     │     └── OCR → (text, avg_confidence, preprocessing_steps)
       │     │             └── warn if avg_confidence < 40%
-      │     └── all pages: _normalise_text() — fix font encoding artefacts, strip OCR footers
-      └── Spreadsheet path → one ExtractionResult per logical unit
-            ├── data / glossary sheets → one result per non-empty row
-            │     └── document_id = "<stem>:<key_col_value>"
-            └── narrative / key_value sheets → one result per sheet
+      │     └── verbatim text policy: NO _normalise_text in the hot path; whatever
+      │         the extractor emits lands on the element's text field
+      ├── DOCX path → single-element list, OOXML body walked in order
+      └── Spreadsheet path → one ExtractionResult per workbook
+            ├── leading kind='sheet_meta' element per sheet (dimensions, classification)
+            └── kind='sheet_cell' element per non-empty cell (value, value_type,
+                formula, number_format, merge_range)
 
 4. Operations (independent — caller composes as needed):
 

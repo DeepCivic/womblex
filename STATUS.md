@@ -1,29 +1,28 @@
-# STATUS — Womblex extraction quality, 2026-05-11
+# STATUS — Womblex extraction quality, 2026-05-17
 
 Codebase changes shipped against the ACT Early Childhood Incidents
 corpus. Pairs with [stories/STATUS.md](../../../stories/STATUS.md) for
-the corpus-side production-readiness view.
+the corpus-side extraction-quality view.
 
-> **Note (2026-05-16):** The extraction output shape has since been
+> **Note (2026-05-16 refactor).** The extraction output shape was
 > refactored to an element-stream + typed sidecars layout
 > (`*.elements.parquet`, `*.table_cells.parquet`,
 > `*.form_fields.parquet`, `*._manifest.parquet`). See
 > [CHANGELOG.md](CHANGELOG.md) "Changed — BREAKING" and
 > [docs/extraction.md](docs/extraction.md) for the canonical reference.
-> The `tables[]` / `text_blocks[]` references throughout this document
-> describe the pre-refactor schema; the underlying findings remain
-> valid but the on-disk shape they refer to has changed.
+> The `tables[]` / `text_blocks[]` language in the Phase 5 section
+> below describes the pre-refactor schema; findings still hold, but
+> on-disk shape now lives in the four sibling parquet files above.
 
 ## Snapshot
 
 | metric | value |
 |---|---|
-| unit tests | 532 passed, 20 skipped (3 pre-existing PII assertions on `<>`-vs-`[]` brackets deselected; 1 missing geopandas test deselected) |
-| labels CER, hybrid mean | 0.208 → **0.145** (−30%) |
-| labels CER, scanned_machinewritten mean | 0.044 → 0.044 (parity) |
-| labels CER, scanned_mixed mean | 0.104 → 0.104 (parity) |
-| native-path validation | 00281 p1, 01132 p1 — ruled-table column-major + paragraph breaks confirmed against source |
-| corpus run | 2,626 docs · 5,725 units · 2h 33m · 0 failures |
+| unit tests | 537 passed, 20 skipped, 24 deselected (3 pre-existing PII assertions on `<>`-vs-`[]` brackets, 1 missing-geopandas-deps test, 24 slow-marker accuracy benchmarks deselected by pyproject `addopts`) |
+| labels CER vs production parquet (`womblex score`) | hybrid 0.520 · native_with_structured 0.044 · scanned_machinewritten 0.051 · scanned_mixed 0.217 — element-stream reassembly preserves text fidelity vs pre-refactor pipeline output |
+| corpus re-extraction (2026-05-17) | 2,626 source files · 3h 5m · 0 failed · 424 sibling-parquet files (106 batches × 4) |
+| `kind='table'` contamination | 2,791 elements pre-fix → 172 post-fix (94% reduction); 3 residual conf=0.60 fabrications, ~10% borderline at conf=0.80, real manifests intact |
+| `meta` map carries doc/table context | Verified on all 3 spreadsheet-print manifests (`context_213A reference`, `context_Element #`, `context_Text from motion`, `context_motion`) |
 
 ## What changed
 
@@ -201,47 +200,87 @@ extraction & block-type classifier rewrite (Phase 1), per-image OCR
 extractor (Phase 4). All metrics maintained in the bundle's
 acceptance test against the same random-500 sample.
 
-### Phase 5 — Production hardening (this session, ✅ complete)
+### Phase 5 — Production hardening (✅ complete, prior session)
 Four bundled fixes above. Validated against the labels packet and
 the full 2,626-doc corpus. See `stories/STATUS.md` for the
 production-corpus run output and quality audit.
 
-### Open issue — table-element over-firing on form-layout pages
+### CLI surface
 
-Audit of the 2026-05-11 corpus run (see `stories/STATUS.md` Known
-limitations §1) found that 62% of `structured`-strategy docs ship
-pseudo-tables built from form layouts and shredded prose. Driver:
-`_extract_tables_from_page` / `_layout_blocks_and_tables` triggers
-on regulatory letters whose label-value blocks, rules-of-law
-footers, and multi-column prose visually resemble tabular
-structure. Example: `00609B` table headers
-`['', 'context that is intended to shape a child's behaviour. Likewise, ha', 'rmful physic']`
-— body prose split mid-word across pseudo-cells.
+`womblex score --labels <dir> --shards <dir> [--group-by FIELD] [--report PATH]`
+— promoted from a corpus-local script to first-class CLI in
+2026-05-17. Scores a per-page labels packet (`<stem>.gt.md` +
+`<stem>.meta.json`) against per-page text reassembled from the
+element-stream parquet. See `src/womblex/score.py` for the module API
+(`load_labels`, `build_manifest_index`, `reassemble_page_text`,
+`score_labels`, `format_report_markdown`).
 
-Same OCR primitive runs across all strategies, so contamination
-is also expected on hybrid / scanned_machinewritten docs
-(unaudited at corpus scale). The `text` field on the elements
-shard is unaffected — only `kind='table'` elements (with their
-sidecar `table_cells` rows) are corrupted.
+### Phase 6 — `kind='table'` over-firing (2026-05-17, ✅ resolved)
 
-Discriminator: `confidence < 0.7` on a `kind='table'` element
-cleanly separates junk from real tables in the structured sample
-(342 of ~400 junk-table observations were conf 0.60; clean
-rules-of-law tables sit at 0.70+). Two candidate fixes:
+Audit of the pre-refactor corpus run found 62% of `structured`-strategy
+docs shipping pseudo-tables built from form layouts and shredded prose;
+the same primitive over-fired more broadly across the 2,791 PDF table
+records corpus-wide. Two fixes landed, in source code rather than
+config because Womblex didn't expose the right knobs:
 
-- **Writer-time filter in `store/output.py`** — drop both the
-  `kind='table'` element row and its `table_cells` sidecar rows
-  whenever `confidence < 0.7`. The sidecar integrity check
-  (`_verify_sidecar_integrity` in `verify_shard_persistence`) will
-  catch a writer that drops the element but leaves orphan cells, so
-  the filter must run before sidecar emission. ~10 LOC; doesn't
-  require re-running extraction.
-- **Page-profile / table-detector fix** — stop classifying
-  form-heavy letters as table-shaped in the first place. Bigger
-  change; risks regressing real-table detection.
+- **§1 — `_find_native_tables` block-count gate** (`ingest/extract.py`).
+  Reject any PyMuPDF table candidate where the count of natural
+  `get_text("dict")` blocks inside the table bbox is less than the row
+  count the table claims. Real tables decompose into ≥1 block per row;
+  prose-as-table over-claims rows by carving sub-block whitespace into
+  pseudo-rows. ~15 LOC + the `_count_blocks_in_bbox` helper.
+- **§2 — `_has_manifest_table` + `PageProfile.has_manifest_signal`**
+  (`ingest/detect.py`, `ingest/page_profile.py`). Stricter signal than
+  `has_table_signal`: only fires when a page contains a table with ≥300
+  non-empty cells — the discriminator between real manifests (FOI
+  master 1,713 non-empty cells per page; Schedule-2ai–2av 503 per page)
+  and prose-as-table over-fires (170–280 per page). The
+  `qualify_for_spreadsheet_print` qualifier now gates on this stricter
+  signal, so regulatory letters with embedded rules-of-law tables stop
+  routing through the manifest extractor.
 
-This is the next extraction-correctness item to address (per
-`stories/STATUS.md` Outstanding §1).
+Validated by re-running extraction across the full 2,626-doc corpus
+(2026-05-17) and auditing `kind='table'` elements + cells:
+
+| stratum | pre-fix | post-fix | residual |
+|---|---:|---:|---|
+| conf=0.60 (`native_text` text-strategy) | 2,362 | 3 | 3 known prose-as-table on heavily-redacted pages (added to labels packet for follow-up) |
+| conf=0.70 (`spreadsheet_print`) | 83 | 3 | All real manifests (FOI master, Schedule-2ai–2av, Schedule-2b); regulatory-letter misroutes eliminated |
+| conf=0.80 (`native_text` lines-strategy) | 346 | 166 | ~90% clean rules-of-law tables; ~10% borderline (single-row / mostly-empty) |
+| **total** | **2,791** | **172** | **~3-5% residual** |
+
+The 3 residual conf=0.60 fabrications survive because the §1 gate
+passes on redacted-prose pages: redaction splits paragraphs into many
+small natural dict blocks, so `n_blocks ≥ n_rows` holds even though
+the "table" is prose. Closing this would need a second-layer signal
+(e.g. non-empty-cell-density), tracked under `stories/STATUS.md`
+Outstanding §2. Material impact is small (~0.11% of source docs).
+
+### Redaction & PII marker conventions (agreed 2026-05-17, not actioned)
+
+Two distinct concerns, two distinct markers:
+
+| concern | source | marker | inline per span | metadata home |
+|---|---|---|---|---|
+| Source redaction | rendered black bar in PDF (FOI / publisher) | `<REDACTED>` | yes | `RedactionReport` per-span (bbox, page, method, confidence) |
+| PII redaction | detected in extracted text (regex + cosine + enrichment graph) | `<PERSON>`, `<EMAIL>`, `<ADDRESS>`, … (typed) | yes | enrichment graph + chunk `has_redaction` flag |
+
+The codebase has the right separation conceptually (`redact/` vs
+`pii/`) but three sites disagree on bracket style:
+
+- [pii/cleaner.py:331](src/womblex/pii/cleaner.py#L331) emits
+  `[ENTITY_TYPE]` (square) — the implementation. Module docstrings
+  at lines 141 and 301 already advertise `<ENTITY_TYPE>` (angle).
+- [redact/stage.py:122](src/womblex/redact/stage.py#L122) `blackout`
+  mode prepends `[REDACTED]` once per affected page rather than
+  inserting inline per detected span.
+- Fixtures `_transcript-with-redacted-tags.txt` use `<REDACTED>` inline.
+  3 PII-cleaning tests assert `<PERSON>` angle brackets and are
+  currently deselected because the implementation emits square.
+
+Unification: align all sites on angle brackets, inline per span.
+Re-enables the 3 deselected PII tests as part of the change. Small
+fix; deferred pending wider pipeline work.
 
 ### Deferred / cut
 
@@ -269,11 +308,13 @@ This is the next extraction-correctness item to address (per
   ``meta`` keys (``context_*``). Original deferral note kept for
   history.
 - **Letterhead-typo normalisations for `Govemment` / standalone
-  `AcT`** — the existing `_LETTERHEAD_FIXES` covers `Govermment`
-  (double-m) and `(AcT)` (parenthesised); the variants without
-  parentheses and the single-character-drop `Govemment` are not
-  covered. Trivial to add when a CER labelling diff surfaces them
-  consistently across pages.
+  `AcT`** — the existing `_LETTERHEAD_FIXES` covered the parenthesised
+  `(AcT)` and double-m `Govermment` shapes. Under the post-refactor
+  verbatim-text policy, `_normalise_text` no longer runs in the
+  extraction hot path, so adding entries to `_LETTERHEAD_FIXES` would
+  have no effect on the on-disk parquet. If letterhead-typo correction
+  is required, it now belongs to a downstream cleaning stage that
+  rewrites `pages[i].text`, not the extractor.
 - **`02737`-style cross-cell handwritten forms** — paddle's
   row-major reading is architecturally mismatched with forms that
   humans read by cell, AND the handwriting itself crosses cell

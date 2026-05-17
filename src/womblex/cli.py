@@ -496,6 +496,43 @@ def cmd_ingest_geo(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_score(args: argparse.Namespace) -> int:
+    """Score human-reviewed labels against the parquet extraction output."""
+    from womblex.score import format_report_markdown, score_labels
+
+    labels_dir = Path(args.labels)
+    shards_dir = Path(args.shards)
+    if not labels_dir.is_dir():
+        logger.error("labels dir not found: %s", labels_dir)
+        return 1
+    if not shards_dir.is_dir():
+        logger.error("shards dir not found: %s", shards_dir)
+        return 1
+
+    try:
+        rows = score_labels(labels_dir, shards_dir, group_by=args.group_by)
+    except FileNotFoundError as exc:
+        logger.error("%s", exc)
+        return 1
+
+    if not rows:
+        logger.error("no labels scored — check --labels content and shard manifests")
+        return 1
+
+    group_label = args.group_by or "group"
+    report = format_report_markdown(rows, group_label=group_label)
+
+    if args.report:
+        out = Path(args.report)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(report, encoding="utf-8")
+        logger.info("wrote: %s", out)
+    else:
+        print(report)
+    logger.info("scored: %d pages", len(rows))
+    return 0
+
+
 def cmd_profile(args: argparse.Namespace) -> int:
     """Sample a tabular file and print per-column inferred schema."""
     import json
@@ -617,6 +654,28 @@ def main(argv: list[str] | None = None) -> int:
 
     geo_p.add_argument("--no-md5", action="store_true", help="Skip MD5 checksum computation")
 
+    # womblex score
+    score_p = sub.add_parser(
+        "score",
+        help="Score labels packet (*.gt.md + *.meta.json) against elements parquet",
+    )
+    score_p.add_argument(
+        "--labels", type=Path, required=True,
+        help="Directory containing *.gt.md + *.meta.json label files",
+    )
+    score_p.add_argument(
+        "--shards", type=Path, required=True,
+        help="Directory containing *.elements.parquet + *._manifest.parquet shards",
+    )
+    score_p.add_argument(
+        "--report", type=Path, default=None,
+        help="Output markdown path. Prints to stdout if omitted.",
+    )
+    score_p.add_argument(
+        "--group-by", default=None,
+        help="Meta field used to bucket the per-page summary (e.g. 'strategy')",
+    )
+
     # womblex profile
     prof_p = sub.add_parser(
         "profile",
@@ -652,6 +711,9 @@ def main(argv: list[str] | None = None) -> int:
 
     elif args.command == "ingest-geo":
         return cmd_ingest_geo(args)
+
+    elif args.command == "score":
+        return cmd_score(args)
 
     elif args.command == "profile":
         return cmd_profile(args)
