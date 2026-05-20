@@ -69,8 +69,8 @@ Raw files (PDF / DOCX / CSV)
         │
         ▼
 ┌───────────────────┐
-│  write_parquet    │  → documents.parquet, chunks.parquet
-│  (store/output)   │
+│  write_results    │  → batch-NNNN.{elements, table_cells,
+│  (store/output)   │     form_fields, _manifest}.parquet
 │  write_enrichment │  → entities.parquet, graph_edges.parquet,
 │  (store/enrichment│     enrichment_meta.parquet
 │  _output)         │
@@ -151,7 +151,9 @@ For each file processed via `operations.py`:
             └── edges: cross-references, contact info, dates, mention-to-chunk links
 
 5. store
-      ├── write_batch_parquet(batch, path) → documents.parquet
+      ├── write_batch_parquet(batch, path) → 4 sibling parquets per batch:
+      │     elements.parquet, table_cells.parquet, form_fields.parquet,
+      │     _manifest.parquet (chunks are in-memory only; persistence planned)
       ├── write_batch_enrichment(batch, dir) →
       │     ├── entities.parquet
       │     ├── graph_edges.parquet
@@ -234,7 +236,7 @@ matching `(source_hash, elem_order)` with the corresponding kind.
 | Column | Description |
 |--------|-------------|
 | `chunk_id` | Unique identifier |
-| `document_id` | FK to documents.parquet |
+| `document_id` | FK to `_manifest.parquet` (joined via `source_hash`) |
 | `text` | Chunk text |
 | `token_count` | Tokens in chunk |
 | `embedding` | Float array from kanon-2-embedder |
@@ -245,7 +247,7 @@ matching `(source_hash, elem_order)` with the corresponding kind.
 
 | Column | Description |
 |--------|-------------|
-| `document_id` | FK to documents.parquet |
+| `document_id` | FK to `_manifest.parquet` (joined via `source_hash`) |
 | `entity_type` | Entity category (person, location, term, etc.) |
 | `entity_name` | Resolved entity name |
 | `mention_spans` | List of (start, end) offsets in document text |
@@ -255,7 +257,7 @@ matching `(source_hash, elem_order)` with the corresponding kind.
 
 | Column | Description |
 |--------|-------------|
-| `document_id` | FK to documents.parquet |
+| `document_id` | FK to `_manifest.parquet` (joined via `source_hash`) |
 | `source_id` | Source node identifier |
 | `target_id` | Target node identifier |
 | `relation` | Relationship type |
@@ -264,7 +266,7 @@ matching `(source_hash, elem_order)` with the corresponding kind.
 
 | Column | Description |
 |--------|-------------|
-| `document_id` | FK to documents.parquet |
+| `document_id` | FK to `_manifest.parquet` (joined via `source_hash`) |
 | `segment_count` | Number of structural segments |
 | `person_count` | Number of persons identified |
 | `location_count` | Number of locations identified |
@@ -322,7 +324,7 @@ The `womblex run` CLI command processes documents in batches (default: 100). Aft
 1. Results are appended to the Parquet files.
 2. A checkpoint record is written (`CheckpointManager` in `store/checkpoint.py`) noting processed document IDs, batch number, and success/failure counts.
 
-On resume (`--resume` flag), the CLI reads the checkpoint JSON and skips already-processed documents via `filter_unprocessed()`. Individual document errors are logged and recorded in `documents.parquet` without stopping the batch.
+On resume (`--resume` flag), the CLI reads the checkpoint JSON and skips already-processed documents via `filter_unprocessed()`. Individual document errors are logged and recorded on `_manifest.parquet` (the `status` and `error` columns per the manifest row) without stopping the batch.
 
 ================================
 # Future State Dataflow

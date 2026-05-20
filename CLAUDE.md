@@ -59,6 +59,8 @@ Redaction runs as a separate operation after extraction via `redact/stage.py`. T
 Dataset-specific settings live in YAML configs. The codebase doesn't know about specific datasets — that's all in config files under `configs/`.
 ### Checkpointing for long jobs
 Processing 1500+ documents takes hours. Checkpoint after each batch so failures don't require full restart.
+### Corpus relationship to library
+A corpus exists to mature Womblex capability, not host custom code. Corpus-side scripts in `stories/<corpus>/` are appropriate for *configuration + invocation + output formatting* of library functions; any iteration / aggregation / orchestration logic belongs in Womblex. `score.py` and `redact/batch.py` are precedents — promoted from corpus-local scripts to first-class library. Substantive work should ship library-first, with the corpus as its test case.
 ## Module Responsibilities
 | Module | Does | Doesn't |
 |--------|------|---------|
@@ -275,3 +277,4 @@ For new shapes that fit within the existing native/OCR dispatch:
 - Log document IDs with all errors
 - Write checkpoint after each batch
 - Manage dependencies via `pyproject.toml` + `uv lock`; no separate requirements files
+- Verify mechanism claims against code or measurement before writing STATUS or docs — `grep`/`Read` the file or run a probe, attach the evidence. Inferred descriptions without grounding tend to be wrong and need correcting later.

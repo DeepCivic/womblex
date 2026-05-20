@@ -62,6 +62,13 @@ This is a hard reversal of the prior `_normalise_text` behaviour.
 Downstream stages may apply their own cleaning to `pages[i].text`,
 but the on-disk parquet always reflects extraction-time content.
 
+**Scope of the verbatim guarantee.** The guarantee covers
+`*.elements.parquet` only. Chunks are built from `full_text` (derived
+from `pages[i].text`) after downstream stages have mutated it in
+place — so chunks reflect PII replacement, blackout redaction, and
+any other `pages`-level mutation. They are *post-stage* text, not
+extraction-time verbatim.
+
 ---
 
 ## Parquet output
@@ -130,6 +137,37 @@ One row per source file in the batch.
 | `error` | string — empty on success |
 | `extracted_at_iso` | string |
 | `parser_version` | string |
+
+### *.redactions.parquet (optional sidecar)
+
+Written by `womblex.redact.batch.annotate_redactions_for_shards` as an
+opt-in 5th sibling alongside the four canonical shards. One row per
+element on a page where redactions were detected; elements without nearby
+redactions have no row.
+
+| column | type | notes |
+|---|---|---|
+| `source_hash` | string | FK to elements.parquet |
+| `elem_order` | int32 | FK to elements.parquet |
+| `has_redaction` | bool | always `true` in this artefact; absence-from-table means `false` |
+
+Not part of the `verify_shard_persistence` integrity set. Consumers should
+LEFT JOIN and treat `has_redaction IS NULL` as `false`:
+
+```sql
+SELECT e.*, COALESCE(r.has_redaction, FALSE) AS has_redaction
+FROM elements e
+LEFT JOIN redactions r
+  ON r.source_hash = e.source_hash AND r.elem_order = e.elem_order
+WHERE e.source_hash = :h
+ORDER BY e.elem_order;
+```
+
+**Sidecar pattern.** Future post-extraction operations (PII, chunk
+persistence, etc) can follow the same shape: sparse parquet with
+`(source_hash, elem_order)` as the join key, LEFT-JOIN-with-default
+semantics, opt-in (absence is a valid state). Keeps the elements shards
+canonical and avoids rewriting them when downstream annotations land.
 
 ---
 

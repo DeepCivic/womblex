@@ -230,7 +230,7 @@ Wrappers in `analyse/` call the Isaacus SDK:
 
 ### 9. Store — Output
 
-`store/output.py` writes `documents.parquet` and `chunks.parquet`. `store/enrichment_output.py` writes three additional Parquet files from enrichment results:
+`store/output.py` writes four sibling parquet files per batch — `batch-NNNN.elements.parquet`, `batch-NNNN.table_cells.parquet`, `batch-NNNN.form_fields.parquet`, `batch-NNNN._manifest.parquet`. Chunks remain in-memory on `DocumentResult.chunks`; chunk persistence to parquet is planned but not yet implemented. `store/enrichment_output.py` writes three additional Parquet files from enrichment results:
 
 - `entities.parquet` — entity type, name, mentions, chunk mapping
 - `graph_edges.parquet` — source/target node IDs, relation type, metadata

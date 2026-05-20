@@ -1,4 +1,4 @@
-# STATUS — Womblex extraction quality, 2026-05-17
+# STATUS — Womblex extraction quality, 2026-05-20
 
 Codebase changes shipped against the ACT Early Childhood Incidents
 corpus. Pairs with [stories/STATUS.md](../../../stories/STATUS.md) for
@@ -18,7 +18,7 @@ the corpus-side extraction-quality view.
 
 | metric | value |
 |---|---|
-| unit tests | 537 passed, 20 skipped, 24 deselected (3 pre-existing PII assertions on `<>`-vs-`[]` brackets, 1 missing-geopandas-deps test, 24 slow-marker accuracy benchmarks deselected by pyproject `addopts`) |
+| unit tests | 521 passed, **3 failed**, 21 skipped, 24 deselected. The 3 failures are ADDRESS angle-bracket assertions in `test_pii_enrichment.py` (`TestPIICleanerAddress::test_address_detected_when_entity_enabled`, `::test_person_and_address_both_detected`, `TestEnrichmentAddress::test_enrichment_address_replaces_in_chunk`) against the current square-bracket `[ADDRESS]` implementation — the `<>`-vs-`[]` marker disagreement manifests as active suite failures (not deselected, contrary to earlier STATUS wording). Will resolve with the marker-convention unification PR. 24 deselected = slow-marker accuracy benchmark classes via pyproject `addopts`; skipped include geopandas-deps and spreadsheet-print-fixtures-absent module skips. The 13 passing `[PERSON]` square-bracket assertions in `test_pii.py` track the current implementation. See "Redaction & PII marker conventions". |
 | labels CER vs production parquet (`womblex score`) | hybrid 0.520 · native_with_structured 0.044 · scanned_machinewritten 0.051 · scanned_mixed 0.217 — element-stream reassembly preserves text fidelity vs pre-refactor pipeline output |
 | corpus re-extraction (2026-05-17) | 2,626 source files · 3h 5m · 0 failed · 424 sibling-parquet files (106 batches × 4) |
 | `kind='table'` contamination | 2,791 elements pre-fix → 172 post-fix (94% reduction); 3 residual conf=0.60 fabrications, ~10% borderline at conf=0.80, real manifests intact |
@@ -158,7 +158,8 @@ new discriminating signal.
 
 ### Unit tests
 `tests/test_extract.py` (40), `tests/test_grid_projection.py` (17),
-`tests/test_spreadsheet_print.py` (14), full suite 532 passing.
+`tests/test_spreadsheet_print.py` (14); the full-suite snapshot lives
+in the Snapshot table above (numbers shift as new tests land).
 Two new behaviours not yet covered by tests:
 - `_emit_table_column_major` (covered indirectly via the native
   integration test)
@@ -215,6 +216,80 @@ element-stream parquet. See `src/womblex/score.py` for the module API
 (`load_labels`, `build_manifest_index`, `reassemble_page_text`,
 `score_labels`, `format_report_markdown`).
 
+### Library — `redact/batch.py` (2026-05-19, batch redaction operations)
+
+Promoted from a corpus-local validation script. Two entry points:
+
+- `annotate_redactions_for_shards(shard_dir, pdf_dir, config, output_dir,
+  checkpoint_path)` — batch-detect redactions across extracted parquet
+  shards; write a sparse `*.redactions.parquet` sidecar per batch with
+  `(source_hash, elem_order, has_redaction)` rows for elements on
+  affected pages. Resumable via the optional checkpoint JSON.
+- `validate_redactions_against_labels(labels_dir, pdf_dir, config)` —
+  run detection over PDFs referenced in a labels packet; return per-doc
+  `ValidationSummary` objects. Used for detector tuning / sanity checks.
+
+CLI wrappers landed 2026-05-20 — see CLI restructure below.
+
+### CLI — `cli.py` → `cli/` subpackage (2026-05-20)
+
+Single 728-line `cli.py` (at the 750-line cap) split into a per-topic
+subpackage. Each topic module exposes a ``COMMANDS: list[Command]`` and
+``cli/__init__.py`` aggregates them, wires up argparse subparsers, and
+dispatches by name.
+
+```
+src/womblex/cli/
+├── __init__.py      main() + ALL_COMMANDS aggregation + dispatch
+├── _shared.py       Command NamedTuple, setup_logging, discover_files, format_eta
+├── pipeline.py      run, extract, chunk
+├── redact.py        redact, annotate-redactions, validate-redactions
+├── ingest.py        ingest-gnaf, ingest-geo
+├── score.py         score
+└── profile.py       profile
+```
+
+Two new CLI subcommands landed in `cli/redact.py`:
+
+- `womblex annotate-redactions <shards> <pdfs> [--output DIR] [--checkpoint PATH]`
+  — invokes `redact.batch.annotate_redactions_for_shards`. Resumable.
+- `womblex validate-redactions --labels DIR --pdfs DIR [--report PATH]`
+  — invokes `redact.batch.validate_redactions_against_labels`. JSON or
+  markdown output.
+
+Entry point `womblex = "womblex.cli:main"` unchanged (cli/__init__.py
+exports `main`). All existing subcommand surfaces preserved verbatim
+(args, help text, behaviour). Heavy double-line spacing from the old
+file normalised during the move.
+
+Largest file post-split: `cli/pipeline.py` at 283 lines (38% of cap).
+
+### Detector — vector-first detection (2026-05-19)
+
+`redact/stage.py:detect_redactions` was extended to try
+`page.get_drawings()` first for filled near-black rectangles; falls back
+to the existing CV2 contour detector on rasterised pages when the
+vector path finds nothing. Both paths return `RedactionInfo` with
+bboxes in pixel coordinates at the configured DPI.
+
+Filters (each surfaced by a measured false-positive class during Phase
+2 validation):
+
+- Near-black fill (max channel ≤ 0.1 RGB; CMYK K ≥ 0.9 + others ≤ 0.1) —
+  baseline filter.
+- `min_width ≥ 3pt` — excludes narrow vertical separator lines that
+  appear in manifest-style tables (FOI master regression on 37 pages).
+- `min_height ≥ 8pt` — excludes glyph-rendering small filled rects on
+  PDFs that draw text as filled-path glyphs rather than vector text
+  (01125-class regression: 14,184 false positives → 144 actual).
+
+Closes Outstanding §4(a) in `stories/STATUS.md`. Validated against the
+labels packet: §1 residual recall improved 6→14, 7→13, 3→68 without
+regressing the FOI master manifest (0 regions preserved) or any
+plain-scanned doc. The 02737-class scanned_mixed false-positive cohort
+falls back to the raster path and is unchanged (documented limitation,
+see `stories/STATUS.md` §11).
+
 ### Phase 6 — `kind='table'` over-firing (2026-05-17, ✅ resolved)
 
 Audit of the pre-refactor corpus run found 62% of `structured`-strategy
@@ -249,12 +324,23 @@ Validated by re-running extraction across the full 2,626-doc corpus
 | conf=0.80 (`native_text` lines-strategy) | 346 | 166 | ~90% clean rules-of-law tables; ~10% borderline (single-row / mostly-empty) |
 | **total** | **2,791** | **172** | **~3-5% residual** |
 
-The 3 residual conf=0.60 fabrications survive because the §1 gate
-passes on redacted-prose pages: redaction splits paragraphs into many
-small natural dict blocks, so `n_blocks ≥ n_rows` holds even though
-the "table" is prose. Closing this would need a second-layer signal
-(e.g. non-empty-cell-density), tracked under `stories/STATUS.md`
-Outstanding §2. Material impact is small (~0.11% of source docs).
+The 3 residual conf=0.60 fabrications survive because PyMuPDF's
+text-strategy `find_tables` clusters the text fragments left over
+after large redaction blocks fragment the surrounding prose into
+whitespace-aligned columns. The bars themselves do not register as
+cells (measured cell-vs-fill overlap ≤ 1% across all three pages);
+they cause the misread indirectly via the gap pattern they create.
+The §1 gate's `n_blocks ≥ n_rows` premise is satisfied because the
+count of surviving paragraph dict-blocks happens to match the count
+of synthesised rows. Content impact is contained: text-bearing
+elements on these pages capture the prose verbatim (the
+`kind='table'` element is additive noise, not corruption). A
+region-level black-fill signal could close the strong-signal page
+(01349, 28% bbox coverage) but is on a threshold tightrope for
+01093/01094 (~3.5% coverage) where false-positives on real native
+tables become a real risk. Accepted as documented limitation; see
+`stories/STATUS.md` Outstanding §2. Material impact ~0.11% of source
+docs.
 
 ### Redaction & PII marker conventions (agreed 2026-05-17, not actioned)
 
@@ -275,8 +361,13 @@ The codebase has the right separation conceptually (`redact/` vs
   mode prepends `[REDACTED]` once per affected page rather than
   inserting inline per detected span.
 - Fixtures `_transcript-with-redacted-tags.txt` use `<REDACTED>` inline.
-  3 PII-cleaning tests assert `<PERSON>` angle brackets and are
-  currently deselected because the implementation emits square.
+  Test suite has a mix: 13 passing `[PERSON]` square-bracket assertions
+  (tracking the current implementation), 3 ADDRESS angle-bracket
+  assertions that fail in the default test run (not deselected — see
+  the Snapshot unit-tests row), plus deselected angle-bracket variants.
+  Unification will flip the implementation and the 13 passing
+  assertions to angle brackets, dropping all three failing ADDRESS
+  tests back to passing.
 
 Unification: align all sites on angle brackets, inline per span.
 Re-enables the 3 deselected PII tests as part of the change. Small

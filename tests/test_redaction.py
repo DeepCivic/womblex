@@ -11,18 +11,29 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import json
+
+import fitz  # type: ignore[import-untyped]
 import numpy as np
 import pytest
 from PIL import Image
 
 from womblex.config import RedactionConfig
+from womblex.ingest.elements import Element, ElementKind
 from womblex.redact import RedactionDetector, RedactionInfo
+from womblex.redact.batch import (
+    REDACTIONS_SCHEMA,
+    annotate_redactions_for_shards,
+    validate_redactions_against_labels,
+)
 from womblex.redact.stage import (
     RedactionReport,
     annotate_chunks,
+    annotate_elements,
     annotate_extraction,
     apply_text_redaction,
     build_detector,
+    detect_redactions,
 )
 from womblex.redact.utils import pre_ocr_mask
 
@@ -399,6 +410,57 @@ class TestAnnotateChunks:
 
 
 # ---------------------------------------------------------------------------
+# Stage logic: annotate_elements
+# ---------------------------------------------------------------------------
+
+
+class TestAnnotateElements:
+    def _make_element(self, order: int, page: int | None, kind: ElementKind = "paragraph") -> Element:
+        return Element(order=order, kind=kind, extractor="test", page=page)
+
+    def _make_report(self, pages: dict[int, int]) -> RedactionReport:
+        page_redactions: dict[int, list[RedactionInfo]] = {}
+        for page, count in pages.items():
+            page_redactions[page] = [
+                RedactionInfo(bbox=(0, 0, 100, 50), page=page, area_px=5000)
+                for _ in range(count)
+            ]
+        return RedactionReport(page_redactions=page_redactions)
+
+    def test_empty_report_returns_unchanged(self) -> None:
+        elements = [self._make_element(0, 0), self._make_element(1, 1)]
+        result = annotate_elements(elements, RedactionReport())
+        assert result is elements
+        assert "has_redaction" not in elements[0].meta
+        assert "has_redaction" not in elements[1].meta
+
+    def test_flags_elements_on_affected_page(self) -> None:
+        e = self._make_element(0, page=2)
+        annotate_elements([e], self._make_report({2: 3}))
+        assert e.meta["has_redaction"] == "true"
+
+    def test_skips_elements_on_unaffected_page(self) -> None:
+        e = self._make_element(0, page=1)
+        annotate_elements([e], self._make_report({2: 1}))
+        assert "has_redaction" not in e.meta
+
+    def test_skips_elements_with_no_page(self) -> None:
+        e = self._make_element(0, page=None)
+        annotate_elements([e], self._make_report({0: 1}))
+        assert "has_redaction" not in e.meta
+
+    def test_mixed_elements(self) -> None:
+        e0 = self._make_element(0, page=0)  # affected
+        e1 = self._make_element(1, page=1)  # not affected
+        e2 = self._make_element(2, page=2)  # affected (different page)
+        report = self._make_report({0: 2, 2: 5})
+        annotate_elements([e0, e1, e2], report)
+        assert e0.meta["has_redaction"] == "true"
+        assert "has_redaction" not in e1.meta
+        assert e2.meta["has_redaction"] == "true"
+
+
+# ---------------------------------------------------------------------------
 # Stage logic: annotate_extraction
 # ---------------------------------------------------------------------------
 
@@ -424,3 +486,256 @@ class TestAnnotateExtraction:
 
         annotate_extraction(extraction, report)
         assert len(extraction.warnings) == 0
+
+
+# ---------------------------------------------------------------------------
+# Vector-direct redaction detection (via page.get_drawings())
+# ---------------------------------------------------------------------------
+
+
+class TestVectorRedactionPath:
+    """Vector path catches native-drawn black-fill rectangles without
+    rasterising, and without the area threshold that filters small bars
+    out of the raster contour detector."""
+
+    def _build(self, tmp_path: Path, draw_fn) -> Path:
+        doc = fitz.open()
+        page = doc.new_page(width=595, height=842)  # A4
+        draw_fn(page)
+        pdf_path = tmp_path / "vec.pdf"
+        doc.save(str(pdf_path))
+        doc.close()
+        return pdf_path
+
+    def test_detects_native_vector_black_fill(self, tmp_path: Path) -> None:
+        from womblex.config import RedactionConfig
+        pdf_path = self._build(
+            tmp_path,
+            lambda p: p.draw_rect(fitz.Rect(100, 200, 300, 220), color=(0, 0, 0), fill=(0, 0, 0)),
+        )
+        report = detect_redactions(pdf_path, 1, build_detector(RedactionConfig()))
+        assert 0 in report.page_redactions
+        assert len(report.page_redactions[0]) >= 1
+
+    def test_filters_thin_vector_lines(self, tmp_path: Path) -> None:
+        """A 1pt-tall horizontal underline should not register (min-side filter)."""
+        from womblex.config import RedactionConfig
+        pdf_path = self._build(
+            tmp_path,
+            lambda p: p.draw_rect(fitz.Rect(100, 200, 300, 201), color=(0, 0, 0), fill=(0, 0, 0)),
+        )
+        report = detect_redactions(pdf_path, 1, build_detector(RedactionConfig()))
+        assert 0 not in report.page_redactions
+
+    def test_filters_narrow_vertical_separators(self, tmp_path: Path) -> None:
+        """A 0.4pt-wide vertical line (table column separator) should not register."""
+        from womblex.config import RedactionConfig
+        pdf_path = self._build(
+            tmp_path,
+            lambda p: p.draw_rect(fitz.Rect(150, 100, 150.4, 800), color=(0, 0, 0), fill=(0, 0, 0)),
+        )
+        report = detect_redactions(pdf_path, 1, build_detector(RedactionConfig()))
+        assert 0 not in report.page_redactions
+
+    def test_filters_glyph_sized_fills(self, tmp_path: Path) -> None:
+        """A 5pt × 6pt fill (body-glyph rendering) should not register."""
+        from womblex.config import RedactionConfig
+        pdf_path = self._build(
+            tmp_path,
+            lambda p: p.draw_rect(fitz.Rect(100, 200, 105, 206), color=(0, 0, 0), fill=(0, 0, 0)),
+        )
+        report = detect_redactions(pdf_path, 1, build_detector(RedactionConfig()))
+        assert 0 not in report.page_redactions
+
+    def test_vector_bbox_in_pixel_coords(self, tmp_path: Path) -> None:
+        """Vector path scales PDF coords (72dpi) to detection dpi for consistency."""
+        from womblex.config import RedactionConfig
+        pdf_path = self._build(
+            tmp_path,
+            lambda p: p.draw_rect(fitz.Rect(100, 200, 200, 230), color=(0, 0, 0), fill=(0, 0, 0)),
+        )
+        config = RedactionConfig(dpi=150)
+        report = detect_redactions(pdf_path, 1, build_detector(config), dpi=config.dpi)
+        regions = report.page_redactions[0]
+        assert len(regions) == 1
+        x1, y1, x2, y2 = regions[0].bbox
+        # 100pt * 150/72 ≈ 208; 200pt * 150/72 ≈ 416
+        assert x1 == int(100 * 150 / 72)
+        assert x2 == int(200 * 150 / 72)
+
+    def test_ignores_non_black_fills(self, tmp_path: Path) -> None:
+        """A light-grey filled rectangle should not register (header shading etc)."""
+        from womblex.config import RedactionConfig
+        pdf_path = self._build(
+            tmp_path,
+            lambda p: p.draw_rect(fitz.Rect(100, 200, 300, 220), color=(0.8, 0.8, 0.8), fill=(0.8, 0.8, 0.8)),
+        )
+        report = detect_redactions(pdf_path, 1, build_detector(RedactionConfig()))
+        assert 0 not in report.page_redactions
+
+
+# ---------------------------------------------------------------------------
+# Batch operations: annotate_redactions_for_shards + validate_redactions_against_labels
+# ---------------------------------------------------------------------------
+
+
+class TestRedactionBatch:
+    def test_redactions_schema_columns(self) -> None:
+        names = REDACTIONS_SCHEMA.names
+        assert names == ["source_hash", "elem_order", "has_redaction"]
+
+    def test_annotate_returns_empty_summary_for_empty_shard_dir(self, tmp_path: Path) -> None:
+        shard_dir = tmp_path / "shards"
+        pdf_dir = tmp_path / "pdfs"
+        shard_dir.mkdir()
+        pdf_dir.mkdir()
+
+        summary = annotate_redactions_for_shards(shard_dir, pdf_dir)
+        assert summary == {}
+
+    def test_validate_returns_empty_for_empty_labels_dir(self, tmp_path: Path) -> None:
+        labels_dir = tmp_path / "labels"
+        pdf_dir = tmp_path / "pdfs"
+        labels_dir.mkdir()
+        pdf_dir.mkdir()
+
+        summaries = validate_redactions_against_labels(labels_dir, pdf_dir)
+        assert summaries == []
+
+    def test_annotate_writes_empty_sidecar_when_no_redactions(self, tmp_path: Path) -> None:
+        """A batch whose source PDF has no detectable redactions should still produce
+        a redactions.parquet (empty) so downstream consumers can rely on the file."""
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        shard_dir = tmp_path / "shards"
+        pdf_dir = tmp_path / "pdfs"
+        shard_dir.mkdir()
+        pdf_dir.mkdir()
+
+        # Programmatic PDF with no redactions (a blank page)
+        doc = fitz.open()
+        doc.new_page()
+        pdf_path = pdf_dir / "blank.pdf"
+        doc.save(str(pdf_path))
+        doc.close()
+
+        # Minimal manifest + elements
+        manifest_tbl = pa.table({"source_hash": ["h1"], "filename": ["blank.pdf"]})
+        pq.write_table(manifest_tbl, shard_dir / "batch-0001._manifest.parquet")
+        elements_tbl = pa.table({
+            "source_hash": ["h1"],
+            "elem_order": pa.array([0], type=pa.int32()),
+            "page": pa.array([0], type=pa.int32()),
+        })
+        pq.write_table(elements_tbl, shard_dir / "batch-0001.elements.parquet")
+
+        summary = annotate_redactions_for_shards(shard_dir, pdf_dir)
+
+        out_path = shard_dir / "batch-0001.redactions.parquet"
+        assert out_path.exists()
+        sidecar = pq.read_table(out_path)
+        assert sidecar.num_rows == 0
+        assert sidecar.schema.names == ["source_hash", "elem_order", "has_redaction"]
+        assert summary == {"h1": 0}
+
+    def test_annotate_writes_rows_for_affected_elements(self, tmp_path: Path) -> None:
+        """When a PDF has a detectable redaction and the manifest has elements on that
+        page, the sidecar carries one row per affected element."""
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        shard_dir = tmp_path / "shards"
+        pdf_dir = tmp_path / "pdfs"
+        shard_dir.mkdir()
+        pdf_dir.mkdir()
+
+        # PDF with a fat black rectangle on page 0
+        doc = fitz.open()
+        page = doc.new_page(width=600, height=400)
+        page.draw_rect(fitz.Rect(100, 100, 300, 140), color=(0, 0, 0), fill=(0, 0, 0))
+        pdf_path = pdf_dir / "redacted.pdf"
+        doc.save(str(pdf_path))
+        doc.close()
+
+        manifest_tbl = pa.table({"source_hash": ["h2"], "filename": ["redacted.pdf"]})
+        pq.write_table(manifest_tbl, shard_dir / "batch-0002._manifest.parquet")
+        elements_tbl = pa.table({
+            "source_hash": ["h2", "h2", "h2"],
+            "elem_order": pa.array([0, 1, 2], type=pa.int32()),
+            "page": pa.array([0, 0, 1], type=pa.int32()),  # 2 on affected page, 1 not
+        })
+        pq.write_table(elements_tbl, shard_dir / "batch-0002.elements.parquet")
+
+        summary = annotate_redactions_for_shards(shard_dir, pdf_dir)
+
+        sidecar = pq.read_table(shard_dir / "batch-0002.redactions.parquet")
+        assert sidecar.num_rows == 2  # elem_orders 0 and 1 are on page 0
+        assert set(sidecar.column("elem_order").to_pylist()) == {0, 1}
+        assert all(sidecar.column("has_redaction").to_pylist())
+        assert summary["h2"] >= 1
+
+    def test_annotate_resumes_from_checkpoint(self, tmp_path: Path) -> None:
+        """A batch listed in the checkpoint should be skipped on the second run;
+        new batches should still be processed."""
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        shard_dir = tmp_path / "shards"
+        pdf_dir = tmp_path / "pdfs"
+        shard_dir.mkdir()
+        pdf_dir.mkdir()
+        checkpoint_path = tmp_path / "redactions_checkpoint.json"
+
+        # Build a single batch + matching blank PDF
+        doc = fitz.open()
+        doc.new_page()
+        doc.save(str(pdf_dir / "blank.pdf"))
+        doc.close()
+        pq.write_table(
+            pa.table({"source_hash": ["h1"], "filename": ["blank.pdf"]}),
+            shard_dir / "batch-0001._manifest.parquet",
+        )
+        pq.write_table(
+            pa.table({
+                "source_hash": ["h1"],
+                "elem_order": pa.array([0], type=pa.int32()),
+                "page": pa.array([0], type=pa.int32()),
+            }),
+            shard_dir / "batch-0001.elements.parquet",
+        )
+
+        # First run: processes the batch, writes checkpoint
+        annotate_redactions_for_shards(shard_dir, pdf_dir, checkpoint_path=checkpoint_path)
+        assert checkpoint_path.exists()
+        state = json.loads(checkpoint_path.read_text())
+        assert "batch-0001" in state["processed_batches"]
+
+        # Delete the sidecar to detect re-processing; second run should skip
+        (shard_dir / "batch-0001.redactions.parquet").unlink()
+        annotate_redactions_for_shards(shard_dir, pdf_dir, checkpoint_path=checkpoint_path)
+        assert not (shard_dir / "batch-0001.redactions.parquet").exists()
+
+    def test_annotate_skips_missing_pdf(self, tmp_path: Path) -> None:
+        """A manifest pointing to a non-existent PDF should be skipped gracefully."""
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        shard_dir = tmp_path / "shards"
+        pdf_dir = tmp_path / "pdfs"
+        shard_dir.mkdir()
+        pdf_dir.mkdir()
+
+        manifest_tbl = pa.table({"source_hash": ["h3"], "filename": ["nonexistent.pdf"]})
+        pq.write_table(manifest_tbl, shard_dir / "batch-0003._manifest.parquet")
+        elements_tbl = pa.table({
+            "source_hash": ["h3"],
+            "elem_order": pa.array([0], type=pa.int32()),
+            "page": pa.array([0], type=pa.int32()),
+        })
+        pq.write_table(elements_tbl, shard_dir / "batch-0003.elements.parquet")
+
+        summary = annotate_redactions_for_shards(shard_dir, pdf_dir)
+        # Missing PDF → no summary entry, no crash, empty sidecar still written
+        assert "h3" not in summary
+        assert (shard_dir / "batch-0003.redactions.parquet").exists()

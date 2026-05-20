@@ -23,6 +23,7 @@ from womblex.config import RedactionConfig
 from womblex.redact.detector import RedactionDetector, RedactionInfo
 
 if TYPE_CHECKING:
+    from womblex.ingest.elements import Element
     from womblex.ingest.extract import ExtractionResult, PageResult
     from womblex.process.chunker import TextChunk
 
@@ -53,19 +54,33 @@ def build_detector(config: RedactionConfig) -> RedactionDetector:
     )
 
 
+_VECTOR_MIN_WIDTH_PT = 3.0   # filters narrow vertical separator lines (manifest column rules)
+_VECTOR_MIN_HEIGHT_PT = 8.0  # filters glyph-rendering small filled rects (body glyphs ≤ 7pt tall)
+
+
 def detect_redactions(
     path: Path,
     page_count: int,
     detector: RedactionDetector,
     dpi: int = 150,
 ) -> RedactionReport:
-    """Render each page of a PDF and detect redacted regions.
+    """Detect redacted regions per page; prefer vector ops, fall back to raster.
+
+    For each page:
+
+    - First check ``page.get_drawings()`` for filled near-black rectangles
+      (matches native-PDF vector-drawn redactions; no area threshold).
+    - If none found, rasterise the page at *dpi* and run the CV2 contour
+      detector (handles raster overlays and scanned pages).
+
+    Bboxes are returned in pixel coordinates at *dpi* regardless of which
+    path produced them, so consumers see a single coord system.
 
     Args:
         path: Path to the PDF file.
         page_count: Number of pages to scan (from extraction metadata).
         detector: Configured RedactionDetector instance.
-        dpi: Resolution for page rendering.
+        dpi: Resolution for page rendering / coord scaling.
 
     Returns:
         RedactionReport with per-page detection results.
@@ -76,20 +91,70 @@ def detect_redactions(
     try:
         doc = fitz.open(str(path))
         pages_to_scan = min(page_count, len(doc))
+        scale = dpi / 72.0  # PDF coord (72 DPI) → pixel coord at *dpi*
         for page_num in range(pages_to_scan):
             page = doc[page_num]
+
+            vector_redactions = _detect_vector_redactions(page, page_num, scale)
+            if vector_redactions:
+                report.page_redactions[page_num] = vector_redactions
+                continue
+
             pix = page.get_pixmap(dpi=dpi)
             img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(
                 pix.height, pix.width, pix.n
             )
-            redactions = detector.detect(img, page=page_num)
-            if redactions:
-                report.page_redactions[page_num] = redactions
+            raster_redactions = detector.detect(img, page=page_num)
+            if raster_redactions:
+                report.page_redactions[page_num] = raster_redactions
         doc.close()
     except Exception as e:
         logger.warning("Redaction detection failed for %s: %s", path, e)
 
     return report
+
+
+def _detect_vector_redactions(page, page_num: int, scale: float) -> list[RedactionInfo]:
+    """Enumerate filled near-black rectangles from ``page.get_drawings()``.
+
+    Bboxes converted from PDF coords (72 DPI) to pixel coords using *scale*
+    so all ``RedactionInfo.bbox`` values share one coord system regardless of
+    which detection path produced them.
+    """
+    out: list[RedactionInfo] = []
+    for d in page.get_drawings():
+        if d.get("type") not in ("f", "fs", "sf"):
+            continue
+        if not _is_near_black_fill(d.get("fill")):
+            continue
+        rect = d.get("rect")
+        if rect is None or rect.width < _VECTOR_MIN_WIDTH_PT or rect.height < _VECTOR_MIN_HEIGHT_PT:
+            continue
+        x1 = int(rect.x0 * scale)
+        y1 = int(rect.y0 * scale)
+        x2 = int(rect.x1 * scale)
+        y2 = int(rect.y1 * scale)
+        out.append(RedactionInfo(
+            bbox=(x1, y1, x2, y2),
+            page=page_num,
+            area_px=(x2 - x1) * (y2 - y1),
+        ))
+    return out
+
+
+def _is_near_black_fill(fill) -> bool:
+    """Treat fill as near-black if max channel ≤ 0.1 (CMYK: K ≥ 0.9 + others ≤ 0.1)."""
+    if fill is None:
+        return False
+    if isinstance(fill, (int, float)):
+        return fill <= 0.1
+    if len(fill) == 1:
+        return fill[0] <= 0.1
+    if len(fill) == 3:
+        return max(fill) <= 0.1
+    if len(fill) == 4:
+        return fill[3] >= 0.9 and max(fill[:3]) <= 0.1
+    return False
 
 
 def apply_text_redaction(
@@ -147,6 +212,27 @@ def annotate_chunks(
             chunk.has_redaction = True
 
     return chunks
+
+
+def annotate_elements(
+    elements: list[Element],
+    report: RedactionReport,
+) -> list[Element]:
+    """Set ``meta['has_redaction']='true'`` on elements whose page is in *report*.
+
+    Page-level propagation: every element on an affected page is flagged.
+    Avoids the pixel-coord (report bboxes at detection DPI) vs PDF-coord
+    (element bboxes at 72 DPI) conversion that bbox-level overlap would
+    require. Mutates elements in place; returns the same list.
+    """
+    if not report.total:
+        return elements
+
+    affected = report.page_redactions
+    for element in elements:
+        if element.page is not None and element.page in affected:
+            element.meta["has_redaction"] = "true"
+    return elements
 
 
 def annotate_extraction(

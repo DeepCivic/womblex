@@ -41,7 +41,7 @@ chunk(extraction)       ExtractionResult         list[TextChunk]          extrac
 redact_tag(extraction)  ExtractionResult         ExtractionResult         extraction exists (PDF only)
 pii_clean(extraction)   ExtractionResult         ExtractionResult         extraction exists
 pii_clean(chunks)       list[TextChunk]          list[TextChunk]          chunks exist
-enrich(chunks)          list[TextChunk]          EnrichmentResult         chunks exist
+enrich(extraction)      ExtractionResult         EnrichmentResult         extraction exists
 embed(chunks)           list[TextChunk]          list[Embedding]          chunks exist (TODO)
 build_graph(enrichment) EnrichmentResult         DocumentGraph            enrichment exists
 pii_clean(chunks, graph) list[TextChunk] + graph list[TextChunk]          graph exists
@@ -55,6 +55,7 @@ extract(pdf) → done                                          just get text out
 extract(pdf) → .txt                                          single file text output
 extract(pdf) → chunk → done                                  text + chunks
 extract(pdf) → redact_tag → chunk → pii_clean → done
+extract(pdf) → enrich → build_graph → done                   enrichment of full doc; chunk-level mention map omitted
 extract(pdf) → chunk → enrich → build_graph → pii_clean(advanced) → done
 extract(pdf) → chunk → embed → done
 extract(csv) → .parquet                                      tabular to Parquet
@@ -67,7 +68,7 @@ load_graph(parquet_dir) → pii_clean(chunks, graph) → done    re-run PII from
 
 ```
 chunk without extract — no input
-enrich without chunk — enrichment needs chunks
+enrich without extract — enrichment needs full document text
 build_graph without enrich — graph needs enrichment
 pii_clean(advanced) without build_graph — advanced PII needs graph
 ingest_gnaf → chunk — G-NAF output is Parquet, not ExtractionResult

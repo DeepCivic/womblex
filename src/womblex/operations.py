@@ -47,6 +47,8 @@ from womblex.redact.stage import (
 
     annotate_chunks,
 
+    annotate_elements,
+
     annotate_extraction,
 
     build_detector,
@@ -143,10 +145,13 @@ def run_extraction(paths: list[Path], config: WomblexConfig) -> list[DocumentRes
     """Detect document types and extract text.
 
 
-    One ``DocumentResult`` per logical extraction unit (PDFs and DOCX
+    One ``DocumentResult`` per logical extraction unit. PDFs, DOCX, and
 
-    produce one; spreadsheets produce one per row or sheet).  No chunking
-    or redaction is applied here.
+    spreadsheets each produce a single result per source file — a
+
+    spreadsheet's cells live as ``kind='sheet_cell'`` elements on the
+
+    single result. No chunking or redaction is applied here.
 
 
     Args:
@@ -351,6 +356,8 @@ def run_redaction(
         dr.extraction.redaction_report = report
 
         annotate_extraction(dr.extraction, report)
+
+        annotate_elements(dr.extraction.elements, report)
 
 
         if mode != "flag":

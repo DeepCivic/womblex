@@ -220,6 +220,10 @@ def _repair_redaction_splits(chunks: list[TextChunk]) -> list[TextChunk]:
     if not chunks:
         return chunks
 
+    # Cross-file coupling: this literal MUST match the blackout marker emitted
+    # by redact/stage.py and stay coherent with the PII tag style in
+    # pii/cleaner.py. See Womblex/STATUS.md "Redaction & PII marker
+    # conventions" before changing.
     marker = "[REDACTED]"
     repaired: list[TextChunk] = []
 
