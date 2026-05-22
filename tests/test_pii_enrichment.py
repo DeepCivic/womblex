@@ -107,7 +107,7 @@ class TestCleanWithKnownSpans:
             text, known_spans=[(0, 10, "PERSON")], text_offset=0,
         )
         assert count >= 1
-        assert "[PERSON]" in cleaned
+        assert "<PERSON>" in cleaned
         assert "Jane Smith" not in cleaned
 
     def test_enrichment_plus_regex_deduplicates(self) -> None:
@@ -117,8 +117,8 @@ class TestCleanWithKnownSpans:
         cleaned, count = cleaner.clean_with_known_spans(
             text, known_spans=[(4, 14, "PERSON")], text_offset=0,
         )
-        assert "[PERSON]" in cleaned
-        assert cleaned.count("[PERSON]") == 1
+        assert "<PERSON>" in cleaned
+        assert cleaned.count("<PERSON>") == 1
 
     def test_empty_known_spans_falls_back_to_regex(self) -> None:
         cleaner = PIICleaner(context_similarity_threshold=0.5)
@@ -127,7 +127,7 @@ class TestCleanWithKnownSpans:
             text, known_spans=[], text_offset=0,
         )
         assert count == 1
-        assert "[PERSON]" in cleaned
+        assert "<PERSON>" in cleaned
 
     def test_empty_text(self) -> None:
         cleaner = PIICleaner()
@@ -159,7 +159,7 @@ class TestCleanEnrichedChunks:
             [chunk], enrichment, cleaner, entities={"PERSON"},  # type: ignore[arg-type]
         )
         assert count >= 1
-        assert "[PERSON]" in chunk.text
+        assert "<PERSON>" in chunk.text
         assert "James Wilson" not in chunk.text
 
     def test_corporate_person_excluded_by_default(self) -> None:
@@ -344,7 +344,7 @@ class TestPIICleanerAddress:
         cleaner = PIICleaner(entities=["PERSON", "ADDRESS"])
         text = "Mr. John Smith lives at 42 Collins Street in Melbourne."
         cleaned, count = cleaner.clean(text)
-        assert "[PERSON]" in cleaned
+        assert "<PERSON>" in cleaned
         assert "<ADDRESS>" in cleaned
         assert count == 2
 

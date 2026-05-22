@@ -18,6 +18,7 @@ from womblex.ingest.extract import (
     Position,
     TableData,
     TextBlock,
+    _classify_native_block,
     _count_blocks_in_bbox,
     _find_native_tables,
     _normalise_bbox,
@@ -187,6 +188,142 @@ class TestFindNativeTablesGate:
         assert tables == []
 
         doc.close()
+
+
+class TestClassifyNativeBlock:
+    """Audit-cluster K1, K4, K5 — `_classify_native_block` kind output."""
+
+    def test_yours_sincerely_is_no_longer_signature(self) -> None:
+        # K1: closing phrase should not classify as 'signature'. Falls to paragraph.
+        for phrase in ("Yours sincerely", "Yours faithfully,", "Yours truly"):
+            assert _classify_native_block(phrase, max_font_size=12, is_bold=False, y_norm=0.7) == "paragraph"
+
+    def test_top_of_page_short_text_is_header(self) -> None:
+        # K4: short blocks at y_norm < 0.08 classify as header (not paragraph).
+        assert _classify_native_block("ACT Government", max_font_size=12, is_bold=False, y_norm=0.04) == "header"
+
+    def test_bottom_of_page_short_text_is_footer(self) -> None:
+        assert _classify_native_block("3", max_font_size=10, is_bold=False, y_norm=0.97) == "footer"
+        assert _classify_native_block("2 | P a g e", max_font_size=10, is_bold=False, y_norm=0.97) == "footer"
+
+    def test_letter_subparagraph_is_list_item(self) -> None:
+        # K5: (a) (b) markers classify as list_item.
+        assert _classify_native_block("(a) Any discipline that is unreasonable", max_font_size=12, is_bold=False, y_norm=0.5) == "list_item"
+        assert _classify_native_block("(b) other text here", max_font_size=12, is_bold=False, y_norm=0.5) == "list_item"
+
+    def test_roman_subparagraph_is_list_item(self) -> None:
+        assert _classify_native_block("(i) first item", max_font_size=12, is_bold=False, y_norm=0.5) == "list_item"
+        assert _classify_native_block("(iii) third item", max_font_size=12, is_bold=False, y_norm=0.5) == "list_item"
+
+    def test_numbered_subparagraph_is_list_item(self) -> None:
+        assert _classify_native_block("(1) numbered sub-item", max_font_size=12, is_bold=False, y_norm=0.5) == "list_item"
+
+    def test_bullet_is_list_item(self) -> None:
+        assert _classify_native_block("• bullet point", max_font_size=12, is_bold=False, y_norm=0.5) == "list_item"
+        assert _classify_native_block("- dash bullet", max_font_size=12, is_bold=False, y_norm=0.5) == "list_item"
+
+    def test_bare_numbered_paragraph_is_NOT_list_item(self) -> None:
+        # K5: deliberate scope — "1. " is ambiguous with numbered paragraphs, leave as paragraph.
+        text = "1. As you are aware, Authorised Officers from the ACT Regulatory Authority have completed an investigation."
+        assert _classify_native_block(text, max_font_size=12, is_bold=False, y_norm=0.5) == "paragraph"
+
+    def test_heading_by_font_size(self) -> None:
+        assert _classify_native_block("Compliance Notice", max_font_size=14, is_bold=True, y_norm=0.3) == "heading"
+
+    def test_paragraph_fallback(self) -> None:
+        assert _classify_native_block("Body text in a regulation citation.", max_font_size=11, is_bold=False, y_norm=0.5) == "paragraph"
+
+
+class TestFormLabelDenylist:
+    """K3 — `_looks_like_form_label` denylist for regulatory-letter prose."""
+
+    def test_penalty_label_rejected(self) -> None:
+        # Regulation citation: "Penalty: $10 000, in the case of an individual"
+        from womblex.ingest.forms import _looks_like_form_label
+        assert not _looks_like_form_label("Penalty")
+
+    def test_official_banner_rejected(self) -> None:
+        # Document classification banner: "OFFICIAL: Sensitive - Legislative Secrecy"
+        from womblex.ingest.forms import _looks_like_form_label
+        assert not _looks_like_form_label("OFFICIAL")
+
+    def test_note_aside_rejected(self) -> None:
+        from womblex.ingest.forms import _looks_like_form_label
+        assert not _looks_like_form_label("Note")
+
+    def test_real_form_label_still_accepted(self) -> None:
+        from womblex.ingest.forms import _looks_like_form_label
+        assert _looks_like_form_label("Notification Number")
+        assert _looks_like_form_label("Date generated")
+        assert _looks_like_form_label("Approved provider name")
+
+
+class TestYoloLabelMapDefault:
+    """K7(a) — _YOLO_COCO_LABEL_MAP default class is paragraph, not figure."""
+
+    def test_default_is_paragraph(self) -> None:
+        from womblex.ingest.paddle_ocr import _YOLO_COCO_LABEL_MAP
+        # Default for unknown classes — text-bearing OCR regions on scanned pages
+        # should map to paragraph rather than figure.
+        assert _YOLO_COCO_LABEL_MAP.get("unknown_class", "paragraph") == "paragraph"
+
+    def test_explicit_mappings_preserved(self) -> None:
+        from womblex.ingest.paddle_ocr import _YOLO_COCO_LABEL_MAP
+        assert _YOLO_COCO_LABEL_MAP["person"] == "paragraph"
+        assert _YOLO_COCO_LABEL_MAP["book"] == "paragraph"
+        assert _YOLO_COCO_LABEL_MAP["dining table"] == "table"
+        # Screen objects still map to figure (real embedded image content)
+        assert _YOLO_COCO_LABEL_MAP["tv"] == "figure"
+        assert _YOLO_COCO_LABEL_MAP["laptop"] == "figure"
+
+
+class TestPageBreakEmission:
+    """K8 — orchestrator emits kind='page_break' between consecutive pages."""
+
+    def test_three_page_pdf_emits_two_page_breaks(self, tmp_path: Path) -> None:
+        import fitz
+        from womblex.ingest.orchestrator import extract_with_plan
+        from womblex.ingest.page_profile import profile_pages
+        from womblex.ingest.detect import DocumentType
+
+        doc = fitz.open()
+        for i in range(3):
+            page = doc.new_page(width=595, height=842)
+            page.insert_text((72, 72), f"Page {i} body text")
+        pdf_path = tmp_path / "multi.pdf"
+        doc.save(str(pdf_path))
+        doc.close()
+
+        doc = fitz.open(str(pdf_path))
+        profiles = profile_pages(doc)
+        result = extract_with_plan(doc, profiles, DocumentType.NATIVE_NARRATIVE)
+        doc.close()
+
+        page_breaks = [e for e in result.elements if e.kind == "page_break"]
+        assert len(page_breaks) == 2  # N-1 breaks between N pages
+        # Each page_break is associated with the page it precedes
+        assert page_breaks[0].page == 1
+        assert page_breaks[1].page == 2
+
+    def test_single_page_pdf_emits_no_page_breaks(self, tmp_path: Path) -> None:
+        import fitz
+        from womblex.ingest.orchestrator import extract_with_plan
+        from womblex.ingest.page_profile import profile_pages
+        from womblex.ingest.detect import DocumentType
+
+        doc = fitz.open()
+        page = doc.new_page(width=595, height=842)
+        page.insert_text((72, 72), "single page")
+        pdf_path = tmp_path / "single.pdf"
+        doc.save(str(pdf_path))
+        doc.close()
+
+        doc = fitz.open(str(pdf_path))
+        profiles = profile_pages(doc)
+        result = extract_with_plan(doc, profiles, DocumentType.NATIVE_NARRATIVE)
+        doc.close()
+
+        assert not any(e.kind == "page_break" for e in result.elements)
 
 
 class TestExtractionMetadata:

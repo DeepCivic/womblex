@@ -18,11 +18,101 @@ the corpus-side extraction-quality view.
 
 | metric | value |
 |---|---|
-| unit tests | 521 passed, **3 failed**, 21 skipped, 24 deselected. The 3 failures are ADDRESS angle-bracket assertions in `test_pii_enrichment.py` (`TestPIICleanerAddress::test_address_detected_when_entity_enabled`, `::test_person_and_address_both_detected`, `TestEnrichmentAddress::test_enrichment_address_replaces_in_chunk`) against the current square-bracket `[ADDRESS]` implementation — the `<>`-vs-`[]` marker disagreement manifests as active suite failures (not deselected, contrary to earlier STATUS wording). Will resolve with the marker-convention unification PR. 24 deselected = slow-marker accuracy benchmark classes via pyproject `addopts`; skipped include geopandas-deps and spreadsheet-print-fixtures-absent module skips. The 13 passing `[PERSON]` square-bracket assertions in `test_pii.py` track the current implementation. See "Redaction & PII marker conventions". |
+| unit tests | All unit tests pass. Fast-suite snapshot (excludes long-running accuracy benchmarks `test_fixture_accuracy.py`, `test_integration.py`, `test_womblex_collection_accuracy.py`): 484 passed, 6 skipped, 24 deselected in ~3 min. Headline per-file counts post K-cluster: `test_extract` 37 (was 19; +18 from `TestClassifyNativeBlock` / `TestFormLabelDenylist` / `TestYoloLabelMapDefault` / `TestPageBreakEmission`), `test_chunker` 60, `test_pii` 37, `test_pii_enrichment` 33, `test_redaction` 58 (was 55; +3 from `exclude_rects` coverage). |
 | labels CER vs production parquet (`womblex score`) | hybrid 0.520 · native_with_structured 0.044 · scanned_machinewritten 0.051 · scanned_mixed 0.217 — element-stream reassembly preserves text fidelity vs pre-refactor pipeline output |
 | corpus re-extraction (2026-05-17) | 2,626 source files · 3h 5m · 0 failed · 424 sibling-parquet files (106 batches × 4) |
 | `kind='table'` contamination | 2,791 elements pre-fix → 172 post-fix (94% reduction); 3 residual conf=0.60 fabrications, ~10% borderline at conf=0.80, real manifests intact |
 | `meta` map carries doc/table context | Verified on all 3 spreadsheet-print manifests (`context_213A reference`, `context_Element #`, `context_Text from motion`, `context_motion`) |
+| raster-path layout filter | YOLO COCO regions consumed as exclusion zones via `RedactionConfig.use_layout_filter` (default true). Vector path unchanged. See "Detector — raster-path layout filter (2026-05-22)" for design + cost. |
+| accuracy-doc generators | Refreshed 2026-05-22 to describe orchestrator + element-stream + vector-first detector + YOLO exclusion zones. `EXTRACTION.md` / `REDACTION_HANDLING.md` / `PII_CLEANING.md` regenerated cleanly. |
+| non-`table` element kind audit | Surfaced 2026-05-22 (90,843 elements audited). Eight concrete fixes K1-K8 tracked in "Open follow-ups". Headline: `kind='signature'` 100% mis-classified (442 closing-phrase matches, no signatory blocks); `kind='figure'` 65% mis-classified on scanned pages (1,044 of 1,600); `list_item` / `caption` / `page_break` declared but never produced. (K2's "all-zero bbox" claim turned out to be a probe-formatter artefact — bboxes are populated for all native-text kinds; real narrower issue is OCR-derived forms with no bbox, tracked as K2′.) Full audit in `stories/STATUS.md`. |
+| element-kind audit fix cluster | K1 / K3 / K4 / K5 / K7(a) / K8 landed 2026-05-22. K2 retracted 2026-05-23 as a false finding (probe formatter artefact). K2′ (OCR-form bbox loss) and K7(b) (document-layout YOLO swap) remain open. |
+| post-K-cluster corpus re-extraction | Completed 2026-05-23 (2h 35m · 2,626 succeeded · 0 failed). All K-cluster effects landed cleanly: `signature` 442→0, `list_item` 0→4,015, `page_break` 0→6,561, `header` 0→335, `form` 5,183→4,391 (−792 spurious), `figure` 1,600→1,587 (small — K7(a) was bounded by COCO's explicit screen-class mappings, not just the unknown default). Strategy distribution unchanged, all known limitations preserved (no regressions). Text fidelity preserved: per-strategy mean CER identical to pre-re-extraction (hybrid 0.520, native_with_structured 0.044, scanned_machinewritten 0.051, scanned_mixed 0.217). |
+
+## Open follow-ups
+
+Tracked here so they don't drift back into "Deferred". Update or strike-through when resolved.
+
+### Element-kind audit fix cluster (K1-K8)
+
+Surfaced by the corpus-wide audit completed 2026-05-22 — see `stories/STATUS.md` "Non-`table` element kind audit" for the full data set. **K1, K3, K4, K5, K7(a), K8 landed 2026-05-22 as a single change set; K2 and K7(b) remain as separate larger tracks below.**
+
+| ID | Status | Fix | Code site |
+|---|---|---|---|
+| **K1** ✓ | landed | `_SIGNATURE_RE` removed from `_classify_native_block`. Closing phrases ("Yours sincerely") no longer emit `kind='signature'` — they fall to `paragraph` until a proper signatory-block detector lands. | [extract.py:325-346](src/womblex/ingest/extract.py#L325-L346) |
+| ~~K2~~ | retracted | **Originally "every native-text element bbox is zero" — that was a probe-script formatter artefact (`:.0f` rounding normalised 0-1 floats to "0"). Corpus measurement confirms bbox population at 100% for paragraph / heading / footer / signature / figure / image / table / native_with_structured forms.** The narrower real issue is K2′ below. | (verified 2026-05-23) |
+| **K2′** | open | **OCR-form bbox loss.** `kind='form'` elements from line-based extraction (OCR strategies: `scanned_machinewritten`, `scanned_mixed`, `scanned_handwritten`, and the OCR-page subset of `hybrid`) carry `bbox=(0,0,0,0)` by design — `_extract_form_pairs_from_lines` operates on assembled text without per-word bboxes. Affects 4,184 of 5,183 form elements (80.7%). Fix: wire PaddleOCR per-word bboxes through to the line-based form-pair extractor. Same infrastructure unlocks #C inline-per-span on raster pages. | [forms.py:146](src/womblex/ingest/forms.py#L146) |
+| **K3** ✓ | landed | Label denylist added to `_looks_like_form_label`: `Penalty`, `OFFICIAL`, `Note`, `Caution` — captures the regulation-citation / document-banner patterns that drove ~250-500 spurious forms in hybrid + structured. | [forms.py:38-46](src/womblex/ingest/forms.py#L38-L46) |
+| **K4** ✓ | landed | `header` added to `ElementKind` literal, `TEXT_KINDS` frozenset, and `_BLOCK_TYPE_TO_KIND` mapping. `_classify_native_block` was already returning `"header"`; now it round-trips into `kind='header'` instead of silently demoting to `paragraph`. | [elements.py:26](src/womblex/ingest/elements.py#L26); [orchestrator.py:212](src/womblex/ingest/orchestrator.py#L212) |
+| **K5** ✓ | landed | `_LIST_ITEM_RE` added to `_classify_native_block`: matches `(a)` / `(b)` / `(i)` / `(1)` / bullets `•·-*`. Bare `1. `-prefix excluded (ambiguous with numbered paragraphs in this corpus). | [extract.py:320](src/womblex/ingest/extract.py#L320) |
+| K6 | deferred | Caption detection (image-adjacent). Needs layout-aware adjacency analysis; subsumed by K7(b). | — |
+| **K7(a)** ✓ | landed | `_YOLO_COCO_LABEL_MAP` default changed from `figure` to `paragraph`. Unknown COCO classes (the dominant case on scanned pages, since COCO doesn't have document classes) now bucket to text. Explicit screen/keyboard/etc. mappings preserved. | [paddle_ocr.py:232](src/womblex/ingest/paddle_ocr.py#L232) |
+| **K7(b)** | open | **Document-layout YOLO swap** (DocLayNet / PubLayNet checkpoint). Full fix — same lever closes both `kind='figure'` mis-classification AND the redaction-precision gap on scanned_mixed (#6 cohort measurement showed COCO yields only 5%; 02737 unchanged). One model swap, two precision wins. | `ingest/paddle_ocr.py` |
+| **K8** ✓ | landed | Orchestrator emits `kind='page_break'` between consecutive pages in `extract_with_plan`. N-1 breaks for N pages. | [orchestrator.py:401-406](src/womblex/ingest/orchestrator.py#L401-L406) |
+
+**Validation.** Six landed fixes verified via:
+- Unit tests: `tests/test_extract.py` adds `TestClassifyNativeBlock` (10 cases for K1/K4/K5), `TestFormLabelDenylist` (4 cases for K3), `TestYoloLabelMapDefault` (2 cases for K7(a)), `TestPageBreakEmission` (2 cases for K8). All 37 test_extract pass; broader 484-test fast-suite pass with no regressions.
+- Sample re-extraction on 12 docs (3 per stratum) shows expected per-kind deltas vs the pre-K-cluster production parquet:
+  | kind | sample delta | direction |
+  |---|---:|---|
+  | `page_break` | **+25** | K8 emitting per page transition |
+  | `list_item` | **+20** | K5 picking up regulation sub-paragraph markers |
+  | `paragraph` | **−17** | net reduction from list_item reclassification + signature drops |
+  | `signature` | **−4** | K1 — all 4 sampled signatures were "Yours sincerely" closings, now dropped |
+  | `form` | **−3** | K3 denylist filtering Penalty/OFFICIAL on sampled docs |
+  | `header` | **+1** | K4 round-tripping top-of-page short text into the canonical kind |
+
+**Corpus-scale measured** (post-K-cluster re-extraction 2026-05-23, 2h 35m, 2,626 succeeded, 0 failed):
+
+| kind | pre (2026-05-17) | post (2026-05-23) | Δ | note |
+|---|---:|---:|---:|---|
+| paragraph | 40,980 | 37,107 | −3,873 | net of list_item / header reclassification, partial offset from K1 |
+| sheet_cell | 36,780 | 36,780 | 0 | unchanged |
+| form | 5,183 | 4,391 | **−792** | K3 denylist removed more than projected (~250-500 estimated) |
+| page_break | 0 | **6,561** | +6,561 | K8 — averaging ~2.5/doc (corpus skews to 1-3 page notification forms) |
+| footer | 2,695 | 2,695 | 0 | unchanged |
+| heading | 2,656 | 2,634 | −22 | small reclassification to list_item / header |
+| list_item | 0 | **4,015** | +4,015 | K5 |
+| figure | 1,600 | 1,587 | **−13** | K7(a) impact was small — figure count is driven by explicit COCO screen-class mappings (`tv` / `laptop` / `monitor`), not the unknown-class default. **K7(b) remains the right lever for closing this.** |
+| image | 331 | 331 | 0 | unchanged |
+| signature | **442** | **0** | **−442** | K1 — every closing-phrase mis-classification gone |
+| table | 172 | 172 | 0 | §1 limitations preserved (3 residual conf=0.60 fabrications still present, as documented) |
+| header | 0 | **335** | +335 | K4 |
+| sheet_meta | 4 | 4 | 0 | unchanged |
+| **total** | **90,843** | **96,612** | **+5,769** | net of new kinds + reclassifications |
+
+**Strategy distribution identical** (detection logic unchanged): 1,777 scanned_machinewritten · 628 hybrid · 165 structured · 40 native_with_structured · 11 scanned_mixed · 4 spreadsheet · 1 scanned_handwritten.
+
+**Text fidelity preserved exactly** — per-strategy mean CER on the 18-page labels packet matches 2026-05-21 numbers to 3 decimal places. K-cluster reclassified element kinds without touching text content.
+
+**Spot-check on known limitations**: §1 residual fabrications (01093, 01094, 01349) still carry their 1 junk table each — behaviour preserved, no regressions. §11 02737 unchanged except +1 page_break. FOI master manifest (`Schedule-of-documents-Part-2b`) intact.
+
+**K7(a) impact was smaller than originally projected** (−13 vs expected near-zero on scanned_machinewritten figure count). Root cause: COCO YOLO's explicit screen-class mappings (`tv` / `laptop` / `monitor` / `keyboard` / `mouse` / `scissors` / `clock` → `figure`) catch most scanned-page hits, not the unknown-class default. Closing the remaining 1,587 figure mis-classifications requires K7(b) (document-layout YOLO swap) — confirms the dependency framing.
+
+Previous on-disk parquet preserved at `stories/.../womblex-extract/output-pre-kcluster-2026-05-17/` for historical comparison.
+
+### Larger tracks (separate work)
+
+- **#A — Document-layout YOLO swap (K7(b) above).** Now actionable post-#6 measurement. Joint payoff: redaction precision on scanned_mixed (closes §11) + `kind='figure'` reclassification on scanned pages (closes K7 fully). Model swap + `_YOLO_COCO_LABEL_MAP` rewrite + re-measure on both the 11-doc redaction cohort and a figure-quality sample. External dependency: a public DocLayNet / PubLayNet YOLOv8 checkpoint.
+- **#B — Native-text footer whitespace artefacts** (stories §8). `3|P age` / `3| Page` from sub-glyph kerning. Belongs to a downstream cleaning op that rewrites `pages[i].text` — verbatim-text policy means extraction won't normalise.
+- **#C — Inline-per-span source redactions.** Bracket-only unification (2026-05-21) is page-prefix only. Inline-per-span needs bbox-to-text-position mapping. Two paths with two different requirements:
+  - **Raster pages**: depends on K2′ (wire PaddleOCR per-word bboxes through extraction).
+  - **Native pages**: needs a separate text-to-bbox character-position mapping over `page.get_text("dict")` spans.
+- **#D — Redaction-induced paragraph breaks on native pages** (stories §9). PyMuPDF `blocks` join with `\n\n` either side of a redaction. Fix paths: (a) refine `_render_blocks_with_breaks` adjacent-baseline detection or (b) downstream orphan-line re-join.
+- **#E — CHUNKING.md generator.** Hand-maintained today (numbers from 2026-03-22; framings refreshed 2026-05-22). The other three accuracy docs have generators; this one doesn't. Adding a `generate_chunking_report` closes a quiet drift vector.
+- **#F — Full corpus re-extraction.** Refresh the on-disk production parquet at `stories/.../womblex-extract/output/` with current K-cluster code behaviour. Not blocking anything (nothing downstream consumes the parquet yet), and the 12-doc sample already proved the K-cluster works. Defer until downstream pipeline work starts or until multiple code changes have stacked.
+
+### Closed (this session)
+
+- ~~K2 investigation~~ (2026-05-23; **retracted as a false finding** — bboxes are populated correctly at 100% for all native-text kinds; the audit's all-zero observation came from a `:.0f` formatter rounding 0-1 normalised floats. Narrower real issue surfaced as K2′ above.)
+- ~~K-cluster QA pass~~ (2026-05-23; 33 modified files audited; 6 minor doc/STATUS fixes landed; 484 unit tests pass, 0 regressions)
+- ~~Element-kind audit fix cluster~~ (2026-05-22; K1 / K3 / K4 / K5 / K7(a) / K8 landed — see fix cluster table above)
+- ~~Measure #6 precision gain~~ (2026-05-22; −8 / −5.0% on the 11-doc cohort, 02737 unchanged — see "Detector — raster-path layout filter" cohort measurement section above)
+- ~~Audit non-`table` element kinds at corpus scale~~ (2026-05-22; surfaced K1-K8 above)
+- ~~Decide `use_layout_filter` default~~ (2026-05-22; keep `True` — no doc regressed, modest per-doc cost; full-benchmark 7× slowdown acceptable)
+- ~~Marker convention unification~~ (2026-05-21; see "Redaction & PII marker conventions" section below)
+- ~~PDF annotation read probe~~ (2026-05-21; not viable for this corpus — see `stories/STATUS.md` Outstanding §4(b))
+- ~~Doc-drift audit~~ (2026-05-21; 23 stale claims fixed across CLAUDE.md / README.md / architecture / dataflow / steering / accuracy generators)
 
 ## What changed
 
@@ -342,51 +432,67 @@ tables become a real risk. Accepted as documented limitation; see
 `stories/STATUS.md` Outstanding §2. Material impact ~0.11% of source
 docs.
 
-### Redaction & PII marker conventions (agreed 2026-05-17, not actioned)
+### Redaction & PII marker conventions (✅ unified 2026-05-21, bracket-only)
 
 Two distinct concerns, two distinct markers:
 
 | concern | source | marker | inline per span | metadata home |
 |---|---|---|---|---|
-| Source redaction | rendered black bar in PDF (FOI / publisher) | `<REDACTED>` | yes | `RedactionReport` per-span (bbox, page, method, confidence) |
+| Source redaction | rendered black bar in PDF (FOI / publisher) | `<REDACTED>` | not yet — see below | `RedactionReport` per-span (bbox, page, method, confidence) |
 | PII redaction | detected in extracted text (regex + cosine + enrichment graph) | `<PERSON>`, `<EMAIL>`, `<ADDRESS>`, … (typed) | yes | enrichment graph + chunk `has_redaction` flag |
 
-The codebase has the right separation conceptually (`redact/` vs
-`pii/`) but three sites disagree on bracket style:
+Bracket-style unification on angle brackets landed across:
 
-- [pii/cleaner.py:331](src/womblex/pii/cleaner.py#L331) emits
-  `[ENTITY_TYPE]` (square) — the implementation. Module docstrings
-  at lines 141 and 301 already advertise `<ENTITY_TYPE>` (angle).
-- [redact/stage.py:122](src/womblex/redact/stage.py#L122) `blackout`
-  mode prepends `[REDACTED]` once per affected page rather than
-  inserting inline per detected span.
-- Fixtures `_transcript-with-redacted-tags.txt` use `<REDACTED>` inline.
-  Test suite has a mix: 13 passing `[PERSON]` square-bracket assertions
-  (tracking the current implementation), 3 ADDRESS angle-bracket
-  assertions that fail in the default test run (not deselected — see
-  the Snapshot unit-tests row), plus deselected angle-bracket variants.
-  Unification will flip the implementation and the 13 passing
-  assertions to angle brackets, dropping all three failing ADDRESS
-  tests back to passing.
+- [pii/cleaner.py:331,406](src/womblex/pii/cleaner.py#L331) — emits `<ENTITY_TYPE>` (PII spans). Module docstring rationale rewritten; the prior BPE/SentencePiece tokenisation argument for square brackets didn't survive scrutiny (neither bracket style is single-piece in standard pretrained tokenisers without explicit special-token registration).
+- [redact/stage.py:187](src/womblex/redact/stage.py#L187) — `blackout` mode emits `<REDACTED>` (still page-prefix, not inline per span — see below).
+- [process/chunker.py:227](src/womblex/process/chunker.py#L227) — `_repair_redaction_splits` marker constant flipped to `<REDACTED>`; cross-file coupling comment preserved.
+- [operations.py:298](src/womblex/operations.py#L298), [config.py:86](src/womblex/config.py#L86) — docstrings.
+- [docs/architecture.md](docs/architecture.md), [docs/dataflow.md](docs/dataflow.md) — manual references aligned. [docs/accuracy/REDACTION_HANDLING.md](docs/accuracy/REDACTION_HANDLING.md) is generated by `test_fixture_accuracy.py` and will regenerate on next accuracy-benchmark run.
+- Tests across `test_pii.py`, `test_pii_enrichment.py`, `test_chunker.py`, `test_redaction.py`, `test_womblex_collection_accuracy.py`, `accuracy_reports.py` — all assertions migrated. The 3 previously-failing ADDRESS angle-bracket tests now pass.
 
-Unification: align all sites on angle brackets, inline per span.
-Re-enables the 3 deselected PII tests as part of the change. Small
-fix; deferred pending wider pipeline work.
+**Inline-per-span for source redactions is deferred** — flipping the bracket style alone is bracket-only behaviour-preserving. Going inline-per-span requires a bbox-to-text-position mapping that doesn't exist for raster-path redactions (pixel-only bboxes with no character index). Native-path (PDF vector) detection has PDF coords and could be mapped; OCR/raster path needs word-bbox routing wired through to the redact stage. Tracked as a follow-up.
+
+No on-disk data migration was needed — production runs to date are flag-mode, no `blackout` text mutation has been applied, and PII cleaning hasn't been applied to the corpus.
+
+### Detector — raster-path layout filter (2026-05-22)
+
+`RedactionDetector.detect()` accepts a new `exclude_rects` parameter; candidates whose bbox centre falls inside any rect are dropped. `redact/stage.py:detect_redactions()` runs YOLO layout analysis on raster-fallback pages and passes regions of `_LAYOUT_EXCLUSION_CLASSES` (`tv`, `laptop`, `monitor`, `cell phone`, `keyboard`, `mouse`, `book`, `dining table` — the COCO classes that heuristically land on form-field backgrounds and chart regions) as exclusion zones to the contour detector. Best-effort: try/except, falls back to raw raster pass on any error (missing ultralytics, model weights absent).
+
+Gated by `RedactionConfig.use_layout_filter: bool = True` (default on). Threaded through `operations.py:run_redaction`, `redact/batch.py:annotate_redactions_for_shards`, `redact/batch.py:validate_redactions_against_labels`. CLI / `configs/example.yaml` exposes the flag.
+
+**Cost:** Vector-path detection (native PDFs) is unchanged — YOLO never runs there. Raster-fallback path triggers YOLO inference per page, which materially slowed the accuracy benchmark (3 min → 22 min for `test_womblex_collection_accuracy.py`). For production batch runs on scanned_mixed cohorts the trade is correct (precision over speed).
+
+**Cohort measurement (2026-05-22).** Ran `detect_redactions` on the 11 scanned_mixed docs from the corpus with the filter off vs on (config: `RedactionConfig(max_area_ratio=0.05)`, the corpus tune):
+
+| metric | off | on | Δ |
+|---|---:|---:|---:|
+| total regions across 11 docs | 159 | 151 | **−8 (−5.0%)** |
+| docs with any region | 10 | 10 | 0 |
+| 02737-213A (the signature case) | 10 | 10 | **0** |
+| runtime | 9.5s | 12.6s | +3.1s (1.3×) |
+
+**Interpretation.** The COCO YOLO model produces useful exclusion zones on 6 of 11 docs but at very small magnitudes (−1 to −3 per doc). It does **not** touch the worst case — 02737's 10 regions across 2 pages, the cohort's most egregious false positives, are entirely missed by the COCO classes the filter listens for. The hypothesis that `tv` / `laptop` / `monitor` etc. would heuristically land on dark form-field backgrounds was too weak: YOLO either doesn't detect those classes on rendered CRM-form pages, or detects them but not on the regions where contour detection misfires.
+
+The filter is net-positive (more precise without regressing any doc) but the magnitude is too small to close §11's `scanned_mixed` false-positive gap on its own. A document-layout-trained checkpoint (DocLayNet / PubLayNet, with `Figure` / `Table` / `Form` classes) would be a better fit — see "Open follow-ups" item 8 in this STATUS.
+
+**Default decision.** Keeping `use_layout_filter=True` is defensible (no doc regressed; some precision gain) but the value is modest and the test-suite runtime cost is real. Best path forward is the YOLO swap — see "Open follow-ups" K7(b) / track #A.
+
+### Non-`table` element kind audit (2026-05-22)
+
+Corpus-wide audit of element kinds beyond the resolved `kind='table'` work. Counts (90,843 elements across 2,626 docs) and per-strategy distribution live in `stories/STATUS.md` "Non-`table` element kind audit". Top findings, in summary form (full data + per-fix code-site references in the stories STATUS):
+
+- **`kind='signature'` is 100% semantically wrong.** `_SIGNATURE_RE` matches `Yours sincerely` / `faithfully` / `truly` — i.e. the closing phrase, not the signatory block. All 442 signature elements in the corpus are closing-phrase matches. Actual signatory blocks (name + title + redaction bar) are filed as `paragraph`.
+- **`kind='figure'` is 65% mis-classified on scanned pages** (1,044 of 1,600). Root cause: `_YOLO_COCO_LABEL_MAP` defaults unknown COCO classes to `figure`, and on rendered scanned-page images YOLO finds plenty of unknown classes. These "figures" contain OCR text — they're text-bearing elements filed under a non-text kind.
+- **Three element kinds declared but never produced.** `list_item`, `caption`, `page_break` — schema enum + mapping table both present, no producer. Lists are extremely common in regulatory documents; the capability is silently absent.
+- **`header` block_type falls through to `paragraph`.** `_classify_native_block` returns `"header"` for `y_norm < 0.08`, but `"header"` isn't in `ElementKind` — it gets demoted into `meta['block_type']`, downstream consumers reading `kind` miss it.
+- **`kind='form'` over-fires on regulatory letters.** `Penalty: $10 000, in the case of an individual` (regulation citation) and `OFFICIAL: Sensitive - Legislative Secrecy` (document banner) get matched as form pairs. ~250-500 spurious in hybrid + structured cohorts.
+- **Bboxes for native-text elements serialise as `(0, 0, 0×0)`** — silent data-loss bug. Visible in every native sample but separate from kind classification. Tracked as K2.
+
+Eight concrete fixes K1-K8 written up in "Open follow-ups" above. K1 / K3 / K4 / K5 / K7(a) / K8 land naturally as one low-effort change set. K2 and K7(b) are separate larger tracks.
 
 ### Deferred / cut
 
-- **Refresh accuracy-report generator + regenerate accuracy docs**
-  (added 2026-05-16) — `tests/accuracy_reports.py` still describes
-  extractor outputs in the pre-refactor language ("tables / forms /
-  blocks"). The generated `docs/accuracy/EXTRACTION.md`,
-  `CHUNKING.md`, `PII_CLEANING.md`, and `REDACTION_HANDLING.md`
-  inherit that language. Refresh the generator strings to describe
-  the element stream (kinds: paragraph / heading / table / form /
-  image / sheet_cell / …), then rerun
-  `tests/test_fixture_accuracy.py` and
-  `tests/test_womblex_collection_accuracy.py` to regenerate the
-  accuracy docs from current behaviour. Out of scope of the
-  schema refactor itself.
+- ~~**Refresh accuracy-report generator + regenerate accuracy docs**~~ (resolved 2026-05-22). `tests/accuracy_reports.py` generator strings refreshed: `generate_redaction_report` now describes the vector-first detector + YOLO exclusion zones + `run_redaction` operation; `generate_extraction_report` now describes the per-page orchestrator + element-stream kinds + four sibling parquet shards; the strategy-matrix column reflects per-page dispatch. The four generated accuracy docs (`EXTRACTION.md`, `REDACTION_HANDLING.md`, `PII_CLEANING.md`) were regenerated cleanly. `docs/accuracy/CHUNKING.md` framings updated by hand for the post-refactor spreadsheet shape; a generator for this doc is still to-be-written (numbers still date from 2026-03-22).
 - **OCR-side ruled-table column-major emission** — irreducible
   trade-off documented under fix 5 above. Re-evaluate only with a
   new discriminating signal (e.g. layout-from-image-vision pass)

@@ -82,12 +82,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `StructuredExtractor`) are deleted; `get_extractor()` now only
   dispatches non-PDF types (DOCX, spreadsheet, text, image). The
   orchestrator is the canonical PDF path.
-- **PII tokens swap angle → square brackets** (`<PERSON>` →
-  `[PERSON]`, `<EMAIL>` → `[EMAIL]`) for embedding-friendly
-  tokenisation. Aligns with `redact/stage.py`'s existing `[REDACTED]`
-  convention. BPE/SentencePiece tokenises `[X]` as a single piece;
-  `<X>` splits into `<` `X` `>` and distorts embeddings at every
-  redaction site.
+- **Source redaction and PII tokens unified on angle brackets.**
+  `redact/stage.py` blackout mode emits `<REDACTED>` (was `[REDACTED]`);
+  `pii/cleaner.py` emits `<ENTITY_TYPE>` (e.g. `<PERSON>`, `<ADDRESS>`,
+  `<EMAIL>`). Aligns with the labelling-packet ground-truth fixtures
+  (`_transcript-with-redacted-tags*.txt`). The BPE/SentencePiece
+  tokenisation argument that previously motivated square brackets didn't
+  hold up — neither bracket style is single-piece in standard pretrained
+  tokenisers without explicit special-token registration. Source
+  redactions remain page-prefix (not inline per span) — inline-per-span
+  requires bbox-to-text mapping not currently routed through to the
+  redact stage; tracked as a follow-up.
 
 ### Internal
 - Moved page-image morphology helpers from `detect.py` into

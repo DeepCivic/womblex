@@ -295,7 +295,7 @@ def run_redaction(
 
     - ``flag``:     Annotate chunks/records (no text change).
 
-    - ``blackout``: Prepend ``[REDACTED]`` to affected page text.
+    - ``blackout``: Prepend ``<REDACTED>`` to affected page text.
 
     - ``delete``:   Clear affected page text entirely.
 
@@ -345,6 +345,8 @@ def run_redaction(
             detector,
 
             dpi=config.redaction.dpi,
+
+            use_layout_filter=config.redaction.use_layout_filter,
 
         )
 

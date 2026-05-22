@@ -5,7 +5,7 @@ chunks. Exposes all semchunk parameters (overlap, memoize, max_token_chars,
 cache_maxsize, processes, progress, batch) through config.
 Uses semchunk's native offset tracking.
 
-Handles tables (converted to markdown) and preserves ``[REDACTED]``
+Handles tables (converted to markdown) and preserves ``<REDACTED>``
 markers across chunk boundaries.
 """
 
@@ -211,11 +211,11 @@ def chunk_texts_batch(
 
 
 def _repair_redaction_splits(chunks: list[TextChunk]) -> list[TextChunk]:
-    """Merge chunks where a ``[REDACTED]`` marker was split across a boundary.
+    """Merge chunks where a ``<REDACTED>`` marker was split across a boundary.
 
     Safe with overlap: if the marker is already complete in both chunks
     (due to overlap), the repair won't trigger. Only fires when one chunk
-    ends with a prefix of ``[REDACTED]`` and the next starts with the suffix.
+    ends with a prefix of ``<REDACTED>`` and the next starts with the suffix.
     """
     if not chunks:
         return chunks
@@ -224,7 +224,7 @@ def _repair_redaction_splits(chunks: list[TextChunk]) -> list[TextChunk]:
     # by redact/stage.py and stay coherent with the PII tag style in
     # pii/cleaner.py. See Womblex/STATUS.md "Redaction & PII marker
     # conventions" before changing.
-    marker = "[REDACTED]"
+    marker = "<REDACTED>"
     repaired: list[TextChunk] = []
 
     i = 0
@@ -344,7 +344,7 @@ def _chunk_document_sequential(
     for idx, chunk in enumerate(all_chunks):
         chunk.chunk_index = idx
 
-    # Repair split [REDACTED] markers
+    # Repair split <REDACTED> markers
     all_chunks = _repair_redaction_splits(all_chunks)
 
     return all_chunks
@@ -398,7 +398,7 @@ def _chunk_document_batch(
     for idx, chunk in enumerate(all_chunks):
         chunk.chunk_index = idx
 
-    # Repair split [REDACTED] markers
+    # Repair split <REDACTED> markers
     all_chunks = _repair_redaction_splits(all_chunks)
 
     return all_chunks

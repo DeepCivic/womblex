@@ -54,8 +54,8 @@ class OCRReader(Protocol):
 
     Backends must implement ``read_page``. ``readtext`` is optional —
     region-based engines provide it for callers that want raw EasyOCR-style
-    tuples (e.g. sub-page OCR in HybridExtractor). LLM-based engines that
-    return only markdown can omit ``readtext`` entirely.
+    tuples (e.g. sub-page OCR in the orchestrator's `_apply_native_page`).
+    LLM-based engines that return only markdown can omit ``readtext`` entirely.
     """
 
     def read_page(self, img: np.ndarray) -> OCRPageResult:

@@ -83,7 +83,7 @@ class RedactionConfig(BaseModel):
 
     - ``flag``:    Mark records/chunks that overlap redacted regions (no text change).
 
-    - ``blackout``: Replace affected page text with ``[REDACTED]`` markers.
+    - ``blackout``: Replace affected page text with ``<REDACTED>`` markers.
 
     - ``delete``:   Remove affected page text entirely.
     """
@@ -106,6 +106,16 @@ class RedactionConfig(BaseModel):
     max_area_ratio: float = Field(default=0.9, ge=0.0, le=1.0)
 
     dpi: int = Field(default=150, ge=72, le=600, description="DPI for rendering pages during detection")
+
+    use_layout_filter: bool = Field(
+        default=True,
+        description=(
+            "On raster-fallback pages, run YOLO layout analysis and drop "
+            "contour hits inside figure / chart / form-background regions. "
+            "Suppresses 02737-class scanned_mixed false positives. "
+            "Best-effort: no-op if ultralytics is unavailable."
+        ),
+    )
 
 
 

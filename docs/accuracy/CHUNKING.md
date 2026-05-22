@@ -4,7 +4,7 @@ Chunking behaviour across all fixtures. The chunker wraps `semchunk` with config
 tokeniser and chunk size. No chunking ground truth exists yet — this report documents
 observed behaviour to establish a baseline for future evaluation.
 
-**Date:** 2026-03-22
+**Date:** 2026-03-22 (numbers; framings refreshed 2026-05-21 for post-refactor element-stream schema)
 **Chunker:** semchunk 3.x
 **Config:** word-count tokeniser, chunk_size=200 words (test default)
 
@@ -30,8 +30,8 @@ observed behaviour to establish a baseline for future evaluation.
 | womblex | `Throsby...Redacted` | PDF | None | Yes — 730 words |
 | womblex | `Auditor-General_Report_2020-21_19` | PDF | None | Yes — 193,240 words |
 | womblex | `dfat-corporate-plan-2025-26` | DOCX | None | Yes — 5,836 words |
-| womblex | `Approved-providers-au-export` | CSV | None | Yes — 10,859 rows |
-| womblex | `mso-statistics-sept-qtr-2025` | XLSX | None | Yes — 34 sheet results |
+| womblex | `Approved-providers-au-export` | CSV | None | Yes — 10,859 cell-rows (one workbook → 1 `ExtractionResult` with `kind='sheet_cell'` elements) |
+| womblex | `mso-statistics-sept-qtr-2025` | XLSX | None | Yes — 34 sheets (one workbook → 1 `ExtractionResult` with `kind='sheet_meta'` + `kind='sheet_cell'` elements) |
 
 > The OCR fixtures (FUNSD, IAM, DocLayNet) are image crops and single pages — they
 > produce text below or near the chunk size threshold. Chunking evaluation is
@@ -42,13 +42,13 @@ observed behaviour to establish a baseline for future evaluation.
 Chunked with a word-count tokeniser at 200-word chunk size (test configuration).
 Production uses a HuggingFace tokeniser (e.g. `isaacus/kanon-2-tokenizer`) at 480 tokens.
 
-| Fixture | Extraction Results | Total Chars | Chunks | Avg Chunk (chars) |
-|---------|-------------------|-------------|--------|-------------------|
-| `Throsby...Redacted` | 1 | 4,898 | 5 | 979 |
-| `Auditor-General_Report_2020-21_19` | 1 | 1,326,218 | 1,182 | 1,122 |
-| `dfat-corporate-plan-2025-26` | 1 | 41,451 | 35 | 1,184 |
-| `Approved-providers-au-export` | 10,859 | 2,422,497 | 10,867 | 222 |
-| `mso-statistics-sept-qtr-2025` | 34 | 34,786 | 36 | 966 |
+| Fixture | ExtractionResults | Elements / Cells | Total Chars | Chunks | Avg Chunk (chars) |
+|---------|-------------------|------------------|-------------|--------|-------------------|
+| `Throsby...Redacted` | 1 | — | 4,898 | 5 | 979 |
+| `Auditor-General_Report_2020-21_19` | 1 | — | 1,326,218 | 1,182 | 1,122 |
+| `dfat-corporate-plan-2025-26` | 1 | — | 41,451 | 35 | 1,184 |
+| `Approved-providers-au-export` | 1 | 10,859 `sheet_cell` rows | 2,422,497 | 10,867 | 222 |
+| `mso-statistics-sept-qtr-2025` | 1 | 34 sheets | 34,786 | 36 | 966 |
 
 ### Observations
 
@@ -67,14 +67,20 @@ DOCX extraction produces a single text block; semchunk splits it into 35 chunks.
 Average chunk size of 1,184 chars is close to the Auditor-General, suggesting
 consistent chunking behaviour across document types.
 
-**Approved Providers CSV (10,867 chunks from 10,859 rows):**
-Near 1:1 mapping of rows to chunks. The 8 extra chunks are rows whose text exceeded
-the chunk size (provider records with long address or trading name fields). Average
-chunk size of 222 chars reflects the short per-row text from key-value extraction.
+**Approved Providers CSV (10,867 chunks from 10,859 `sheet_cell` rows):**
+The CSV emits one `ExtractionResult` with 10,859 `kind='sheet_cell'` elements; the
+chunker's table-aware path converts the workbook to markdown rows and feeds them
+through `semchunk`. Near 1:1 mapping of rows to chunks. The 8 extra chunks are
+rows whose text exceeded the chunk size (provider records with long address or
+trading name fields). Average chunk size of 222 chars reflects the short per-row
+text.
 
-**MSO Statistics XLSX (36 chunks from 34 sheet results):**
-Two sheets produced text exceeding the chunk limit, resulting in 2 extra chunks.
-Average chunk size of 966 chars reflects mixed narrative and tabular content.
+**MSO Statistics XLSX (36 chunks from 34 sheets):**
+The workbook emits one `ExtractionResult` with one `kind='sheet_meta'` per sheet
+followed by `kind='sheet_cell'` elements; the chunker treats each sheet's markdown
+table separately. Two sheets produced text exceeding the chunk limit, resulting
+in 2 extra chunks. Average chunk size of 966 chars reflects mixed narrative and
+tabular content.
 
 ### Chunk Size Distribution Characteristics
 
@@ -111,5 +117,6 @@ datasets prevents this.
 4. **Table chunking not evaluated** — `chunk_tables=true` converts tables to markdown
    before chunking, but no fixtures have table-specific chunking ground truth.
 5. **Spreadsheet row-level chunking is trivial** — CSV/XLSX rows are short enough that
-   most become single chunks. The chunker adds little value here; it's the extraction
-   strategy (one result per row) that determines granularity.
+   most become single chunks. The chunker adds little value here; it's the
+   element-stream shape (one `kind='sheet_cell'` element per cell) that determines
+   granularity.

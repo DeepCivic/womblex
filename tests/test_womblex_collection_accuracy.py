@@ -219,7 +219,7 @@ class TestRedactionDetection:
         _redaction["annotation_warnings"] = len(extraction.warnings)
 
     def test_throsby_blackout_mode(self) -> None:
-        """Blackout mode prepends [REDACTED] to affected page text."""
+        """Blackout mode prepends <REDACTED> to affected page text."""
         if not THROSBY_PDF.exists():
             pytest.skip(f"Fixture missing: {THROSBY_PDF}")
 
@@ -241,9 +241,9 @@ class TestRedactionDetection:
         apply_text_redaction(extraction.pages, report, mode="blackout")
 
         redacted_pages = [
-            p for p in extraction.pages if p.text.startswith("[REDACTED]")
+            p for p in extraction.pages if p.text.startswith("<REDACTED>")
         ]
-        assert len(redacted_pages) >= 1, "At least one page should have [REDACTED] prefix"
+        assert len(redacted_pages) >= 1, "At least one page should have <REDACTED> prefix"
         logger.info(
             "Blackout mode: %d/%d pages tagged", len(redacted_pages), len(extraction.pages)
         )

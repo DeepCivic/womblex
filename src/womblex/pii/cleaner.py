@@ -9,10 +9,10 @@ Detection is two-stage:
    using cosine similarity from the all-MiniLM-L6-v2 Sentence Transformers model.
    Candidates below ``context_similarity_threshold`` are discarded.
 
-Replacement is handled by presidio-anonymizer; emitted tags use square
-brackets (``[ENTITY_TYPE]``) so they tokenise as a single piece in BPE/
-SentencePiece models — angle-bracket tags split into ``<`` ``ENTITY``
-``_`` ``TYPE`` ``>`` and distort embeddings at every redaction site.
+Replacement is handled by presidio-anonymizer; emitted tags use angle
+brackets (``<ENTITY_TYPE>``) inline per detected span. This aligns the
+PII marker style with the ``<REDACTED>`` convention used for source
+redactions and matches the labelling-packet ground-truth fixtures.
 The Sentence Transformers model is loaded lazily on first use.
 """
 
@@ -328,7 +328,7 @@ class PIICleaner:
                 for c in candidates
             ]
             operators = {
-                c.entity_type: OperatorConfig("replace", {"new_value": f"[{c.entity_type}]"})
+                c.entity_type: OperatorConfig("replace", {"new_value": f"<{c.entity_type}>"})
                 for c in candidates
             }
             result = engine.anonymize(
@@ -403,7 +403,7 @@ class PIICleaner:
                 for c in deduped
             ]
             operators = {
-                c.entity_type: OperatorConfig("replace", {"new_value": f"[{c.entity_type}]"})
+                c.entity_type: OperatorConfig("replace", {"new_value": f"<{c.entity_type}>"})
                 for c in deduped
             }
             result = engine.anonymize(

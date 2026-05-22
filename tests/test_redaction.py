@@ -130,6 +130,30 @@ class TestRedactionDetect:
         redactions = detector.detect(img, page=0)
         assert len(redactions) == 0
 
+    def test_exclude_rects_drops_centred_candidates(self, redacted_image: np.ndarray) -> None:
+        """A candidate whose centre falls inside an exclude rect is dropped."""
+        # The wide bar in the fixture is at rows 80-120, cols 100-500 → centre (300, 100).
+        # The narrower bar is at rows 200-260, cols 150-350 → centre (250, 230).
+        # Exclude the wide-bar region; expect only the narrower bar to survive.
+        exclude = [(50, 50, 550, 150)]  # covers wide bar's centre, not narrower bar's
+        redactions = self.detector.detect(redacted_image, page=0, exclude_rects=exclude)
+        assert len(redactions) == 1
+        # Surviving bar should be the narrower one (y around 200-260)
+        x1, y1, x2, y2 = redactions[0].bbox
+        assert 180 <= y1 <= 220
+
+    def test_exclude_rects_none_is_noop(self, redacted_image: np.ndarray) -> None:
+        """exclude_rects=None matches the un-filtered detect()."""
+        baseline = self.detector.detect(redacted_image, page=0)
+        with_none = self.detector.detect(redacted_image, page=0, exclude_rects=None)
+        assert len(baseline) == len(with_none) == 2
+
+    def test_exclude_rects_empty_is_noop(self, redacted_image: np.ndarray) -> None:
+        """exclude_rects=[] matches the un-filtered detect()."""
+        baseline = self.detector.detect(redacted_image, page=0)
+        with_empty = self.detector.detect(redacted_image, page=0, exclude_rects=[])
+        assert len(baseline) == len(with_empty) == 2
+
 
 # ---------------------------------------------------------------------------
 # RedactionDetector.mask
@@ -293,14 +317,14 @@ class TestApplyTextRedaction:
         pages = self._make_pages(["sensitive text", "clean text"])
         report = self._make_report(0)
         apply_text_redaction(pages, report, mode="blackout")
-        assert pages[0].text.startswith("[REDACTED]")
+        assert pages[0].text.startswith("<REDACTED>")
         assert pages[1].text == "clean text"
 
     def test_blackout_mode_empty_page(self) -> None:
         pages = self._make_pages([""])
         report = self._make_report(0)
         apply_text_redaction(pages, report, mode="blackout")
-        assert pages[0].text == "[REDACTED]"
+        assert pages[0].text == "<REDACTED>"
 
     def test_delete_mode_clears_page(self) -> None:
         pages = self._make_pages(["sensitive text", "clean text"])

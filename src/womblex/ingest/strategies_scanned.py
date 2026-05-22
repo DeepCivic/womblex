@@ -282,9 +282,10 @@ def _ocr_image_regions(
 ) -> tuple[list[TextBlock], list[str]]:
     """OCR image rects on a native page that have no overlapping native text.
 
-    Sub-page conditional OCR — used by HybridExtractor when a page has a
-    native text layer but also embeds image content (e.g. a redacted form
-    scan inserted into an otherwise-native report).  Only image rects with
+    Sub-page conditional OCR — used by the orchestrator's `_apply_native_page`
+    operation when a page has a native text layer but also embeds image content
+    (e.g. a redacted form scan inserted into an otherwise-native report). Only
+    image rects with
     at most ``max_overlapping_words`` native words inside are OCR'd, so
     pages where the native text layer already covers everything do not
     incur OCR cost.

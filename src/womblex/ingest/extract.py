@@ -314,7 +314,11 @@ def _ocr_text_block(
 
 _FOOTER_PAGE_RE = re.compile(r"^\s*\d+\s*\|?\s*[Pｐ]\s*[aａ]\s*[gｇ]\s*[eｅ]\s*$", re.IGNORECASE)
 _PAGE_NUMBER_RE = re.compile(r"^\s*\d{1,3}\s*$")
-_SIGNATURE_RE = re.compile(r"^\s*Yours\s+(sincerely|faithfully|truly)\b", re.IGNORECASE)
+
+# Bare "1. " prefix excluded — in this corpus it's almost always a numbered
+# paragraph, not a list item.
+_LIST_ITEM_RE = re.compile(r"^\s*(?:\([a-z]\)|\([ivx]+\)|\(\d+\)|[•·]|[-*]\s)")
+
 _SENTENCE_TERMINATORS = (".", "?", "!", ":")
 
 
@@ -323,20 +327,19 @@ def _classify_native_block(
 ) -> str:
     """Classify a native PDF text block by position, typography, and content.
 
-    Reserves `caption` for downstream image-adjacency tagging — emitting
-    `caption` from a font/length heuristic produces overwhelming false
-    positives on letter-style prose (page footers, signatures, dates,
-    section headings, page numbers all looked like captions under the old
-    rule).
+    Reserves `caption` and `signature` — see STATUS.md "Non-`table` element
+    kind audit" for why a font/length heuristic for `caption` and a closing-
+    phrase regex for `signature` were both removed (false-positive heavy on
+    letter-style prose).
     """
     if _FOOTER_PAGE_RE.match(text) or _PAGE_NUMBER_RE.match(text):
         return "footer"
-    if _SIGNATURE_RE.match(text):
-        return "signature"
     if y_norm > 0.92 and len(text) < 100:
         return "footer"
     if y_norm < 0.08 and len(text) < 100:
         return "header"
+    if _LIST_ITEM_RE.match(text):
+        return "list_item"
     # Heading: explicit large size, OR bold short non-sentence text.
     # 14pt threshold lowered from 16 — letter headings are typically 13–14pt.
     if max_font_size >= 14:

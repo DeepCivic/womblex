@@ -36,12 +36,23 @@ _LIST_MARKER_RE = re.compile(r"^([A-Za-z]\)|\(.+\))$")
 _URL_LABEL_LOWER = {"http", "https", "ftp", "file", "ssh", "mailto"}
 _FORM_PAIR_GAP_RE = re.compile(r"^([A-Z]\S?(?:.{0,48}?\S)?)\s{2,}(\S.+?)\s*$")
 
+# Labels that recur in Australian regulatory letter prose and aren't real
+# form fields — see STATUS.md K3 for the audit data.
+_LABEL_DENYLIST: frozenset[str] = frozenset({
+    "Penalty",      # Regulation citation: "Penalty: $10 000, in the case of an individual"
+    "OFFICIAL",     # Document classification banner: "OFFICIAL: Sensitive - Legislative Secrecy"
+    "Note",         # Aside: "Note: ..."
+    "Caution",      # Email warning banner
+})
+
 
 def _looks_like_form_label(text: str) -> bool:
     text = text.strip().rstrip(":")
     if not text or len(text) > 50:
         return False
     if not text[0].isupper():
+        return False
+    if text in _LABEL_DENYLIST:
         return False
     if text.lower() in _URL_LABEL_LOWER:
         return False

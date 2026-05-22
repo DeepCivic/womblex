@@ -143,7 +143,9 @@ class PaddleOCRReader:
 # YOLO COCO class name → womblex block_type mapping.
 # The base YOLOv8n model uses 80 COCO classes, not document-specific labels.
 # This maps COCO detections to the closest document layout equivalent.
-# Classes not listed here default to "figure" (visual/non-text region).
+# Classes not listed here default to "paragraph" — see STATUS.md K7(a) for
+# the audit data behind that default (`figure` was wrong for the ~65% of
+# scanned-page YOLO hits that contain OCR text).
 _YOLO_COCO_LABEL_MAP: dict[str, str] = {
     # Objects that look like text/paragraph regions in document scans
     "person": "paragraph",
@@ -227,7 +229,7 @@ class YOLOLayoutAnalyzer:
                 cls_id = int(box.cls[0])
                 x0, y0, x1, y1 = (float(v) for v in box.xyxy[0])
                 label = result.names.get(cls_id, str(cls_id)) if result.names else str(cls_id)
-                block_type = _YOLO_COCO_LABEL_MAP.get(label, "figure")
+                block_type = _YOLO_COCO_LABEL_MAP.get(label, "paragraph")
                 regions.append(LayoutRegion(
                     bbox=(x0, y0, x1, y1),
                     label=label,

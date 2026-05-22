@@ -133,6 +133,7 @@ def annotate_redactions_for_shards(
             detector=detector,
             dpi=config.dpi,
             summary=summary,
+            use_layout_filter=config.use_layout_filter,
         )
 
         out_path = output_dir / f"{batch_stem}.redactions.parquet"
@@ -163,6 +164,7 @@ def _annotate_one_batch(
     detector,
     dpi: int,
     summary: dict[str, int],
+    use_layout_filter: bool = True,
 ) -> list[tuple[str, int]]:
     """Process a single batch; mutate *summary* and return ``[(source_hash, elem_order), ...]``."""
     manifest_tbl = pq.read_table(manifest_path, columns=["source_hash", "filename"])
@@ -199,7 +201,10 @@ def _annotate_one_batch(
             logger.warning("could not open %s: %s", pdf_path, exc)
             continue
 
-        report = detect_redactions(pdf_path, page_count, detector, dpi=dpi)
+        report = detect_redactions(
+            pdf_path, page_count, detector, dpi=dpi,
+            use_layout_filter=use_layout_filter,
+        )
         summary[source_hash] = report.total
         if not report.total:
             continue
@@ -284,7 +289,10 @@ def validate_redactions_against_labels(
         with fitz.open(str(pdf_path)) as doc:
             n_pages = len(doc)
 
-        report = detect_redactions(pdf_path, n_pages, detector, dpi=config.dpi)
+        report = detect_redactions(
+            pdf_path, n_pages, detector, dpi=config.dpi,
+            use_layout_filter=config.use_layout_filter,
+        )
 
         per_page_bboxes: dict[int, list[tuple[int, int, int, int]]] = {
             p: [r.bbox for r in rs] for p, rs in sorted(report.page_redactions.items())

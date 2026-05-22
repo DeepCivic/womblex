@@ -214,6 +214,7 @@ _BLOCK_TYPE_TO_KIND: dict[str, str] = {
     "heading": "heading",
     "list_item": "list_item",
     "caption": "caption",
+    "header": "header",
     "footer": "footer",
     "signature": "signature",
     "figure": "figure",
@@ -398,6 +399,12 @@ def extract_with_plan(
             )
 
         pages.append(PageResult(page_number=page.number, text=accum.text, method=accum.method))
+        if page.number > 0:
+            all_elements.append(Element(
+                order=next_order, kind="page_break",
+                extractor="orchestrator", page=page.number,
+            ))
+            next_order += 1
         page_elements, next_order = _accum_to_elements(
             accum, next_order, include_tables=not is_spreadsheet_print,
         )

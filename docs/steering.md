@@ -11,7 +11,7 @@ See `accuracy/` for current benchmark numbers. See `architecture.md` for how the
 | 1 | Add sorted CER to FUNSD evaluation | Low | Reveals 65% of CER was reading-order, not recognition | **Done** |
 | 2 | Add per-class layout P/R/F1 to DocLayNet | Low | Makes layout failures actionable | **Done** |
 | 3 | Replace mean threshold with histogram analysis | Medium | DocLayNet avg CER pp −15.5% | **Done** |
-| 4 | Wire `STRUCTURED` detection into `_classify()` | Medium | Routes table-heavy documents to `StructuredExtractor` | **Done** |
+| 4 | Wire `STRUCTURED` detection into `_classify()` | Medium | Surfaces table-heavy documents as a doc-level summary type (per-page routing handles per-region structure) | **Done — superseded by per-page orchestrator** |
 | 5 | Add strategy-selection log line | Low | Enables pipeline path tracing | **Done** |
 | 6 | Integrate local models (all-MiniLM-L6-v2, yolov8n) | Low | No network access at inference time | **Done** |
 | 7 | Programmatic accuracy doc generation | Low | Docs reflect actual last test run | **Done** |
@@ -34,7 +34,7 @@ Two `DocumentType` values are still unreachable:
 - `IMAGE` — no detection path produces it, scanned photos fall to `SCANNED_MACHINEWRITTEN`
 - Forms — `_has_form_structure()` exists in `detect.py` but is never called
 
-`STRUCTURED` is now reachable: documents where ≥80% of sampled pages contain table signals route to `StructuredExtractor`.
+`STRUCTURED` is reachable as a doc-level summary type — documents where ≥80% of sampled pages contain table signals classify as `STRUCTURED`. The doc-level strategy classes (`StructuredExtractor` etc.) have since been removed; the per-page orchestrator (`ingest/orchestrator.py`) dispatches operations page-by-page based on `PageProfile`, and the `spreadsheet_print` extractor runs behind a `qualify_for_spreadsheet_print` gate when the manifest signal fires.
 
 ### Preprocessing
 
@@ -80,12 +80,11 @@ Measured on Throsby fixture (12 GT entities across 6 types). Only PERSON is curr
 
 ### Redaction Handling
 
-Measured on Throsby fixture (7 GT `<REDACTED>` tags across 3 pages).
+Measured on Throsby fixture (7 GT `<REDACTED>` tags across 3 pages); vector-first detection landed 2026-05-19 (see `STATUS.md` "Detector — vector-first detection").
 
-- **Region recall: 57%** — 4/7 GT redactions detected. Page-level recall is 100% (the only affected page is found) but 3 redactions are missed.
-- All 4 detected regions are on page 0 (header and inline name redactions). The 3 missed are on page 2 (signature block).
-- Suspected cause: signature-block redaction has an unusual aspect ratio or falls outside the current area threshold (min 0.1%, max 90%). Worth loosening thresholds and re-testing.
-- High false-positive risk on graphical documents — dark table borders and figure fills trigger the contour detector.
+- **Native cohort recall significantly improved post vector-first detection.** `redact/stage.py:detect_redactions` now tries `page.get_drawings()` for filled near-black rectangles before falling back to the raster CV2 contour detector. On the §1 residual pages (01093 / 01094 / 01349) recall jumped 6→14, 7→13, 3→68 without regressing FOI master (0 regions preserved).
+- **Filters** (each surfaced during validation): near-black RGB/CMYK fill; `min_width ≥ 3pt` excludes narrow vertical separators in manifest tables; `min_height ≥ 8pt` excludes glyph-rendering small filled rects on PDFs that draw text as filled-path glyphs (01125-class regression: 14,184 false positives → 144 actual).
+- **Open — scanned/raster cohort precision.** Direct-Complaint forms with dark form-field backgrounds (02737-class scanned_mixed docs) still trigger the area-threshold contour detector even with `max_area_ratio=0.05`. Higher precision on this cohort would need a different detection signal (e.g. layout-aware classes that distinguish form fields from redaction bars). See `stories/STATUS.md` §11.
 
 ## Changelog
 

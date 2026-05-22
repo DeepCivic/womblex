@@ -129,23 +129,23 @@ A doc-level summary type still surfaces in metadata.
 
 Each document type routes to an appropriate extractor. `extract_text()` always returns a `list[ExtractionResult]`:
 
-- **PDFs** return a single-element list. PaddleOCR returns per-region confidence scores stored in the document profile. YOLO layout analysis populates `TextBlock.block_type` via COCO class mapping (paragraph, table, figure).
-- **DOCX** returns a single-element list with paragraphs and tables.
-- **Spreadsheets** return one `ExtractionResult` per logical row (for `data` and `glossary` sheets) or one per sheet (for `narrative` and `key_value` sheets). Sheet type is auto-classified by column count, cell length, and row count.
+- **PDFs** return a single-element list. The per-page orchestrator dispatches `_apply_native_page` or `_apply_ocr_page` based on each page's `PageProfile`. PaddleOCR returns per-region confidence scores stored in the document profile. YOLO layout analysis (COCO-pretrained `yolov8n.pt`) is called on OCR pages by `_layout_blocks_and_tables` to populate `Element.kind` for the layout regions it detects.
+- **DOCX** returns a single-element list with paragraphs and tables interleaved in OOXML body order.
+- **Spreadsheets** return one `ExtractionResult` per workbook. Each sheet contributes a leading `kind='sheet_meta'` element followed by one `kind='sheet_cell'` element per non-empty cell.
 
-Each result carries a `document_id` (e.g. `filename:PR-00006191`) used as the primary key downstream.
+Each result carries a `document_id` used as the primary key downstream.
 
-Post-extraction normalisation runs automatically, fixing known font encoding artefacts (broken apostrophes, corrupted URLs, running OCR footers).
+Text at the extraction boundary is **verbatim** — `_normalise_text` no longer runs in the extraction hot path. Whatever the producing extractor (native text layer, PaddleOCR, DOCX, spreadsheet-print, …) emits is what lands on the element's `text` field. Downstream stages (PII, redaction, chunking) may rewrite `pages[i].text`, but the parquet writer serialises `elements`, so on-disk content stays extraction-time verbatim. Cleanup (font-encoding artefacts, running OCR footers) belongs to a downstream cleaning stage. See `docs/extraction.md`.
 
 ### 3. Redaction
 
 Redaction runs as a post-extraction stage, separate from extraction. This avoids false positives that occur when running redaction detection inside OCR (form fields, chart regions, and diagram fills trigger the detector).
 
-Redacted regions can be replaced with `[REDACTED]` markers (preserving sentence structure) or deleted entirely. The stage is configurable: apply after chunking, after enrichment, or both.
+Redacted regions can be replaced with `<REDACTED>` markers (preserving sentence structure) or deleted entirely. The stage is configurable: apply after chunking, after enrichment, or both.
 
 ### 4. Chunking
 
-Extracted text is split into semantically meaningful chunks using [semchunk](https://github.com/isaacus-dev/semchunk) with the Kanon tokeniser (default 480 tokens, leaving 32-token headroom for Isaacus 512-token context windows). Tables are converted to markdown and chunked separately, with each chunk tagged as `"narrative"` or `"table"`. `[REDACTED]` markers are preserved across chunk boundaries.
+Extracted text is split into semantically meaningful chunks using [semchunk](https://github.com/isaacus-dev/semchunk) with the Kanon tokeniser (default 480 tokens, leaving 32-token headroom for Isaacus 512-token context windows). Tables are converted to markdown and chunked separately, with each chunk tagged as `"narrative"` or `"table"`. `<REDACTED>` markers are preserved across chunk boundaries.
 
 ### 5. PII Cleaning
 
@@ -243,9 +243,11 @@ womblex/
 ├── docs/              # Architecture docs, ADRs, accuracy reports
 ├── fixtures/          # Test fixtures (separate repo, see THIRD_PARTY_DATA.md)
 ├── src/womblex/
-│   ├── cli.py              # CLI entry point (womblex run / extract / ingest-gnaf / ingest-geo)
+│   ├── cli/                # CLI subpackage — per-topic modules (pipeline, redact, ingest, score, profile)
 │   ├── config.py           # Pydantic config models
 │   ├── operations.py       # Independent operations (extract, redact, chunk, PII, enrich)
+│   ├── score.py            # womblex score subcommand — labels-vs-parquet CER scoring
+│   ├── profile/            # womblex profile subcommand — column schema inference
 │   ├── ingest/
 │   │   ├── detect.py            # Doc-level type classification (non-PDF dispatch + summary type for PDFs)
 │   │   ├── page_profile.py      # Per-page PageProfile + cheap qualifiers (e.g. spreadsheet-print)
@@ -256,21 +258,25 @@ womblex/
 │   │   ├── forms.py             # Form-pair extraction (AcroForm + spatial + line-based for OCR)
 │   │   ├── spreadsheet_print.py # Multi-page table extractor for spreadsheet-printed PDFs
 │   │   ├── morphology.py        # Page-image morphology helpers (handwriting / glyph regularity)
+│   │   ├── grid_projection.py   # Column-aware text reconstruction (block-aware paragraph emission)
 │   │   ├── strategies.py        # Re-export shim — non-PDF extractors + legacy ImageExtractor
 │   │   ├── strategies_scanned.py # OCR primitives (_ocr_page, _layout_blocks_and_tables) + ImageExtractor
 │   │   ├── strategies_file.py   # Non-PDF extractors (DOCX, plain text, non-textual)
 │   │   ├── interfaces/
 │   │   │   └── protocols.py     # Backend protocols (OCRReader, LayoutAnalyzer, Preprocessor)
-│   │   ├── paddle_ocr.py        # PaddleOCR wrapper via rapidocr-onnxruntime
+│   │   ├── paddle_ocr.py        # PaddleOCR wrapper via rapidocr-onnxruntime + YOLOLayoutAnalyzer
+│   │   ├── llm_ocr.py           # Optional LLM-based OCR backend (vision models via OpenAI-compatible API)
 │   │   ├── spreadsheet.py       # CSV/Excel extraction — one ExtractionResult per workbook with cells as elements
 │   │   ├── gnaf.py              # G-NAF PSV → Parquet ingest (standalone)
 │   │   ├── gnaf_schema.py       # G-NAF table schemas — static column definitions
 │   │   ├── geospatial.py        # SHP → GeoParquet ingest (standalone)
+│   │   ├── redaction.py         # Backwards-compatible re-export of redact.detector
 │   │   ├── heuristics_cv2.py    # OpenCV-based detection heuristics
 │   │   └── heuristics_numpy.py  # NumPy-based detection heuristics
 │   ├── redact/
-│   │   ├── detector.py      # Redacted region detection
-│   │   ├── stage.py         # Post-extraction redaction stage
+│   │   ├── detector.py      # CV2 raster + vector-drawing redacted region detection
+│   │   ├── stage.py         # Post-extraction redaction stage (vector-first, raster fallback)
+│   │   ├── batch.py         # Batch redaction: annotate_redactions_for_shards, validate_redactions_against_labels
 │   │   └── utils.py         # Masking utilities
 │   ├── pii/
 │   │   ├── cleaner.py       # PII detection and stripping
@@ -280,13 +286,15 @@ womblex/
 │   ├── analyse/
 │   │   ├── enrich.py        # Isaacus enrichment wrappers
 │   │   ├── graph.py         # Entity graph construction
-│   │   └── models.py        # Enrichment data models
+│   │   ├── models.py        # Enrichment data models
+│   │   └── query.py         # Load enrichment graph from Parquet for PII masking
 │   ├── store/
 │   │   ├── output.py        # Parquet output: elements + table_cells + form_fields + manifest sidecars + integrity check
 │   │   ├── enrichment_output.py  # Enrichment-specific output
 │   │   └── checkpoint.py    # Batch checkpoint management
 │   ├── utils/
 │   │   ├── metrics.py       # WER/CER accuracy metrics
+│   │   ├── tabular_metrics.py # Tabular extraction accuracy (structural fidelity, data integrity)
 │   │   └── models.py        # Local model path resolution (models/ dir, HF snapshot layout)
 │   └── verify/
 │       └── engine.py        # Two-pass extraction quality verification

@@ -6,7 +6,7 @@ to the affected page text.
 
 Modes:
 - ``flag``:     Set ``has_redaction=True`` on affected chunks (no text change).
-- ``blackout``: Replace affected page text with ``[REDACTED]`` markers.
+- ``blackout``: Replace affected page text with ``<REDACTED>`` markers.
 - ``delete``:   Clear affected page text entirely.
 """
 
@@ -57,12 +57,24 @@ def build_detector(config: RedactionConfig) -> RedactionDetector:
 _VECTOR_MIN_WIDTH_PT = 3.0   # filters narrow vertical separator lines (manifest column rules)
 _VECTOR_MIN_HEIGHT_PT = 8.0  # filters glyph-rendering small filled rects (body glyphs ≤ 7pt tall)
 
+# YOLO COCO classes whose regions, when present, typically land on the
+# form-field backgrounds and embedded chart / figure regions where raster-path
+# false positives originate (02737-class scanned_mixed CRM forms). When the
+# raster fallback runs, contour hits whose centre falls inside one of these
+# regions are dropped. See ``_YOLO_COCO_LABEL_MAP`` in ``ingest/paddle_ocr.py``
+# for the mapping rationale.
+_LAYOUT_EXCLUSION_CLASSES = frozenset({
+    "tv", "laptop", "monitor", "cell phone", "keyboard", "mouse",
+    "book", "dining table",
+})
+
 
 def detect_redactions(
     path: Path,
     page_count: int,
     detector: RedactionDetector,
     dpi: int = 150,
+    use_layout_filter: bool = True,
 ) -> RedactionReport:
     """Detect redacted regions per page; prefer vector ops, fall back to raster.
 
@@ -71,7 +83,14 @@ def detect_redactions(
     - First check ``page.get_drawings()`` for filled near-black rectangles
       (matches native-PDF vector-drawn redactions; no area threshold).
     - If none found, rasterise the page at *dpi* and run the CV2 contour
-      detector (handles raster overlays and scanned pages).
+      detector (handles raster overlays and scanned pages). When
+      *use_layout_filter* is true, run YOLO layout analysis on the rasterised
+      image and pass figure/chart/form-background regions as exclusion zones
+      to the contour detector — suppresses raster false positives on dark
+      form-field backgrounds and embedded chart regions (02737-class
+      scanned_mixed CRM forms). The filter is best-effort: if ``ultralytics``
+      isn't installed or layout analysis fails, detection falls back to the
+      raw raster pass with no exclusion.
 
     Bboxes are returned in pixel coordinates at *dpi* regardless of which
     path produced them, so consumers see a single coord system.
@@ -81,6 +100,9 @@ def detect_redactions(
         page_count: Number of pages to scan (from extraction metadata).
         detector: Configured RedactionDetector instance.
         dpi: Resolution for page rendering / coord scaling.
+        use_layout_filter: Run YOLO layout analysis on raster-fallback pages
+            and drop contour hits inside figure / chart / form-background
+            regions. Best-effort; falls back to raw raster pass on error.
 
     Returns:
         RedactionReport with per-page detection results.
@@ -104,7 +126,10 @@ def detect_redactions(
             img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(
                 pix.height, pix.width, pix.n
             )
-            raster_redactions = detector.detect(img, page=page_num)
+            exclude_rects = _layout_exclude_rects(img) if use_layout_filter else None
+            raster_redactions = detector.detect(
+                img, page=page_num, exclude_rects=exclude_rects,
+            )
             if raster_redactions:
                 report.page_redactions[page_num] = raster_redactions
         doc.close()
@@ -112,6 +137,32 @@ def detect_redactions(
         logger.warning("Redaction detection failed for %s: %s", path, e)
 
     return report
+
+
+def _layout_exclude_rects(
+    img: np.ndarray,
+) -> list[tuple[int, int, int, int]] | None:
+    """Return figure/chart/form-background bboxes from YOLO layout analysis.
+
+    Best-effort: returns ``None`` on any failure (missing ultralytics, model
+    weights absent, inference error). Caller treats ``None`` and ``[]``
+    interchangeably — both mean "no exclusion".
+    """
+    try:
+        from womblex.ingest.paddle_ocr import get_layout_analyzer
+        analyzer = get_layout_analyzer()
+        regions = analyzer.analyze(img)
+    except Exception as e:
+        logger.debug("layout filter unavailable; falling back to raw raster: %s", e)
+        return None
+
+    rects: list[tuple[int, int, int, int]] = []
+    for region in regions:
+        if region.label not in _LAYOUT_EXCLUSION_CLASSES:
+            continue
+        x0, y0, x1, y1 = region.bbox
+        rects.append((int(x0), int(y0), int(x1), int(y1)))
+    return rects
 
 
 def _detect_vector_redactions(page, page_num: int, scale: float) -> list[RedactionInfo]:
@@ -165,7 +216,7 @@ def apply_text_redaction(
     """Modify page text based on the redaction mode.
 
     ``flag`` makes no text changes — use ``annotate_chunks`` instead.
-    ``blackout`` prepends ``[REDACTED]`` to affected page text.
+    ``blackout`` prepends ``<REDACTED>`` to affected page text.
     ``delete`` clears affected page text entirely.
 
     Args:
@@ -184,7 +235,7 @@ def apply_text_redaction(
         if page.page_number not in affected:
             continue
         if mode == "blackout":
-            page.text = f"[REDACTED]\n{page.text}" if page.text else "[REDACTED]"
+            page.text = f"<REDACTED>\n{page.text}" if page.text else "<REDACTED>"
         elif mode == "delete":
             page.text = ""
 

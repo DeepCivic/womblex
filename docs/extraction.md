@@ -35,17 +35,18 @@ verbatim text because the writer reads `elements`, not `pages`.
 
 | kind | when |
 |---|---|
-| `paragraph` | prose block |
-| `heading` | heading-styled prose |
-| `list_item` | bullet / numbered list entry |
-| `caption` | figure / table caption |
-| `footer` | running page footer |
-| `signature` | signature block / sign-off |
+| `paragraph` | prose block (default for unclassified text) |
+| `heading` | heading-styled prose (large font, or bold short non-sentence text) |
+| `list_item` | sub-paragraph marker `(a)` / `(i)` / `(1)` / bullet `•·-*` at start of block |
+| `caption` | figure / table caption (reserved; not currently emitted — see STATUS.md K6) |
+| `header` | short text in top 8% of page (letterhead-style content) |
+| `footer` | page-number footer or short text in bottom 8% of page |
+| `signature` | signatory block (reserved; not currently emitted — see STATUS.md K1) |
 | `figure` | layout-detected visual region (no extracted image data) |
 | `image` | extracted image with alt text |
 | `table` | table; cells nest on `Element.cells` in memory, flatten to a sidecar in parquet |
 | `form` | form region; fields nest on `Element.fields`, flatten to a sidecar in parquet |
-| `page_break` | reserved page-boundary marker |
+| `page_break` | one per page transition (N-1 for an N-page document); `text`/`bbox` empty, `page` is the page just begun |
 | `sheet_meta` | one per worksheet in a spreadsheet (carries sheet index, dimensions) |
 | `sheet_cell` | one per non-empty spreadsheet cell |
 

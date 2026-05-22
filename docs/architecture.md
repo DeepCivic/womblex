@@ -24,17 +24,24 @@ Each operation is a standalone function. Preconditions: chunk needs an extractio
 ```
 src/womblex/
 ├── ingest/
-│   ├── detect.py              # Document type detection — drives strategy selection
-│   ├── elements.py            # Element model + kinds + Cell / FieldEntry / BBox
-│   ├── extract.py             # ExtractionResult (elements + pages + derived views), extract_text()
-│   ├── strategies.py          # Re-export shim — imports from the three strategy modules below
-│   ├── strategies_native.py   # Native text-layer PDF extractors (narrative, structured)
-│   ├── strategies_scanned.py  # OCR-dependent extractors (scanned, hybrid, image)
+│   ├── detect.py              # Doc-level type classification + non-PDF dispatch
+│   ├── page_profile.py        # Per-page PageProfile + cheap qualifiers (e.g. spreadsheet-print)
+│   ├── orchestrator.py        # Plan-driven PDF extractor — walks per-page profiles, dispatches operations
+│   ├── elements.py            # Element model + kinds + Cell / FieldEntry / BBox (canonical)
+│   ├── views.py               # ExtractionResult + legacy view types (TableData / FormField / TextBlock / ImageData) as read-only projections over elements
+│   ├── extract.py             # extract_text() entry point + page-level primitives (re-exports views)
+│   ├── forms.py               # Form-pair extraction (AcroForm + spatial + line-based)
+│   ├── spreadsheet_print.py   # Multi-page table extractor for spreadsheet-printed PDFs
+│   ├── morphology.py          # Page-image morphology helpers (handwriting / glyph regularity)
+│   ├── grid_projection.py     # Column-aware text reconstruction (block-aware paragraph emission)
+│   ├── strategies.py          # Re-export shim — non-PDF extractors + legacy ImageExtractor
+│   ├── strategies_scanned.py  # OCR primitives (_ocr_page, _layout_blocks_and_tables) + ImageExtractor
 │   ├── strategies_file.py     # Non-PDF extractors (DOCX, plain text, non-textual)
 │   ├── interfaces/
 │   │   └── protocols.py       # Backend protocols: OCRReader, LayoutAnalyzer, Preprocessor
 │   ├── paddle_ocr.py          # PaddleOCR wrapper via rapidocr-onnxruntime (det/rec/cls)
-│   │                          # Also hosts YOLOLayoutAnalyzer for layout region detection
+│   │                          # Also hosts YOLOLayoutAnalyzer for layout region detection (COCO yolov8n)
+│   ├── llm_ocr.py             # Optional LLM-based OCR backend (vision-capable models via OpenAI-compatible API)
 │   ├── spreadsheet.py         # CSV/Excel extraction — one ExtractionResult per workbook, cells as elements
 │   ├── gnaf.py                # G-NAF PSV → Parquet ingest (standalone, bypasses NLP pipeline)
 │   ├── gnaf_schema.py         # G-NAF table schemas — static column definitions
@@ -44,13 +51,14 @@ src/womblex/
 │   └── heuristics_numpy.py    # Signal analysis: Otsu threshold bimodality
 ├── redact/
 │   ├── detector.py        # CV2-based RedactionDetector — detect and mask redacted regions
-│   ├── stage.py           # Redaction operation: detect_redactions, annotate_chunks, annotate_extraction
+│   ├── stage.py           # Redaction operation: vector-first detect_redactions, apply_text_redaction, annotate_*
+│   ├── batch.py           # Batch redaction operations: annotate_redactions_for_shards, validate_redactions_against_labels
 │   └── utils.py           # Low-level pre-OCR masking helper (not used by extractors)
 ├── pii/
-│   ├── cleaner.py         # PERSON + ADDRESS candidate detection (regex + cosine similarity context)
+│   ├── cleaner.py         # PERSON + ADDRESS candidate detection (regex + cosine similarity context); emits <ENTITY_TYPE> tags
 │   └── stage.py           # PII cleaning operation (post_extraction / post_chunk / post_enrichment)
 ├── process/
-│   └── chunker.py         # semchunk integration with configurable tokeniser
+│   └── chunker.py         # semchunk integration with configurable tokeniser; repairs split <REDACTED> markers
 ├── analyse/
 │   ├── enrich.py          # Isaacus enrichment API wrapper (kanon-2-enricher)
 │   ├── graph.py           # Entity graph construction from enrichment results
@@ -66,8 +74,17 @@ src/womblex/
 │   ├── models.py          # Local model path resolution (models/ dir + HF snapshot layout)
 │   ├── metrics.py         # CER, WER, CER-s accuracy metrics (numpy-accelerated Levenshtein + spatial sort)
 │   └── tabular_metrics.py # Tabular extraction accuracy (structural fidelity, data integrity, key preservation)
+├── profile/               # Column schema inference (womblex profile subcommand)
+├── score.py               # Labels-vs-parquet CER scoring (womblex score subcommand)
+├── cli/                   # CLI subpackage — per-topic modules:
+│   ├── __init__.py        # main() + ALL_COMMANDS aggregation + dispatch
+│   ├── _shared.py         # Command NamedTuple, setup_logging, discover_files
+│   ├── pipeline.py        # run, extract, chunk subcommands
+│   ├── redact.py          # redact, annotate-redactions, validate-redactions subcommands
+│   ├── ingest.py          # ingest-gnaf, ingest-geo subcommands
+│   ├── score.py           # score subcommand
+│   └── profile.py         # profile subcommand
 ├── config.py              # Pydantic config models and YAML loader
-├── cli.py                 # CLI entry point (run, extract, chunk, redact, ingest-gnaf, ingest-geo subcommands)
 └── operations.py          # Independent operations — no orchestrator, callers compose directly
 ```
 
@@ -154,7 +171,7 @@ The orchestrator's OCR per-page path (`_apply_ocr_page`) drives `_ocr_page()` wh
 
 **Text policy at the extraction boundary is verbatim.** `_normalise_text` no longer runs in the extraction hot path. Whatever the producing extractor (native text layer, paddle OCR, docx, xlsx, spreadsheet_print, figure_image) emits is what lands on the element's `text` field. Downstream stages (PII, redaction, chunking) may rewrite `pages[i].text` in place, but the parquet writer reads `elements`, so on-disk content remains extraction-time verbatim. See `docs/extraction.md`.
 
-**Output schema** is a single `elements: list[Element]` stream on `ExtractionResult`, persisted to four sibling parquet files per batch (`*.elements.parquet`, `*.table_cells.parquet`, `*.form_fields.parquet`, `*._manifest.parquet`). Element kinds: `paragraph`, `heading`, `list_item`, `caption`, `footer`, `signature`, `figure`, `image`, `table`, `form`, `page_break`, `sheet_meta`, `sheet_cell`. Tables nest cells on `Element.cells` in memory and flatten to `table_cells.parquet` on disk; forms flatten the same way to `form_fields.parquet`. Legacy view properties (`result.text_blocks` / `.tables` / `.forms` / `.images`) remain on `ExtractionResult` as read-only derivations for downstream stages that have not migrated. See `docs/extraction.md` for the canonical reference.
+**Output schema** is a single `elements: list[Element]` stream on `ExtractionResult`, persisted to four sibling parquet files per batch (`*.elements.parquet`, `*.table_cells.parquet`, `*.form_fields.parquet`, `*._manifest.parquet`). Element kinds: `paragraph`, `heading`, `list_item`, `caption`, `header`, `footer`, `signature`, `figure`, `image`, `table`, `form`, `page_break`, `sheet_meta`, `sheet_cell`. Tables nest cells on `Element.cells` in memory and flatten to `table_cells.parquet` on disk; forms flatten the same way to `form_fields.parquet`. Legacy view properties (`result.text_blocks` / `.tables` / `.forms` / `.images`) remain on `ExtractionResult` as read-only derivations for downstream stages that have not migrated. See `docs/extraction.md` for the canonical reference.
 
 ### 3. Ingest — G-NAF (Standalone)
 
@@ -187,7 +204,7 @@ CLI: `womblex ingest-geo <input_dir> -o <output_dir> [--no-md5]`
 `redact/stage.py` runs as a separate operation after extraction. It renders each PDF page as an image, runs the CV2-based `RedactionDetector` to find black-box regions, and applies the configured mode:
 
 - `flag` — sets `has_redaction=True` on affected chunks (no text change)
-- `blackout` — prepends `[REDACTED]` to affected page text
+- `blackout` — prepends `<REDACTED>` to affected page text
 - `delete` — clears affected page text entirely
 
 The `RedactionReport` is stored on `ExtractionResult.redaction_report` for downstream stages. Non-PDF documents (spreadsheets, DOCX) are skipped — redaction detection requires a rasterisable page source.
@@ -202,7 +219,7 @@ The `chunk_document()` entry point:
 1. Chunks narrative text with native offset tracking (no `text.find()` heuristics)
 2. Converts `TableData` objects to markdown tables and chunks separately (no overlap on tables)
 3. Tags each chunk with a `content_type` (`"narrative"` or `"table"`) and `has_redaction` flag
-4. Repairs `[REDACTED]` markers that were split across chunk boundaries (safe with overlap)
+4. Repairs `<REDACTED>` markers that were split across chunk boundaries (safe with overlap)
 
 Configurable via `config.chunking`: `overlap` (token or proportional), `memoize`, `max_token_chars`, `processes` (default 1 for Chromebook deployment).
 
@@ -263,7 +280,7 @@ Results are classified as `passed`, `warning`, or `failed` based on the ratio of
 
 **PII cleaning is context-validated regex.** `pii/cleaner.py` uses title-case and honorific regex patterns to find PERSON candidates, then validates each against reference contexts using cosine similarity with `all-MiniLM-L6-v2`. ADDRESS detection uses a street-type anchor regex. Current coverage: PERSON and ADDRESS — ORGANISATION, URL, phone, and email are not yet detected. See `docs/accuracy/PII_CLEANING.md` for measured recall/precision baseline.
 
-**750-line hard cap per file.** Signals the need to split before files become unwieldy. Strategy implementations are split across `strategies_native.py`, `strategies_scanned.py`, and `strategies_file.py` (with `strategies.py` as a re-export shim), and `SpreadsheetExtractor` lives in `spreadsheet.py`, for this reason.
+**750-line hard cap per file.** Signals the need to split before files become unwieldy. The PDF dispatcher (`orchestrator.py` + `page_profile.py` + `extract.py`) and the non-PDF strategy modules (`strategies_scanned.py`, `strategies_file.py`, with `strategies.py` as a re-export shim) are split this way; `SpreadsheetExtractor` lives in `spreadsheet.py`; the CLI is split into a `cli/` subpackage of per-topic modules for the same reason.
 
 **Niche formats get standalone submodules.** Formats with their own structure (e.g. G-NAF's headerless PSV with SQL-defined schemas, ESRI Shapefiles with geometry + CRS) get a dedicated submodule under `ingest/` that reads the format and writes Parquet/GeoParquet directly, bypassing the generic extraction operations. Dependencies (`pyogrio`, `geopandas`, `shapely`) are lazy-imported so they don't affect core pipeline users.
 

@@ -7,10 +7,24 @@ OCR to prevent the OCR engine from producing garbage text.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import cv2
 import numpy as np
+
+
+def _bbox_centre_in_any(
+    x: int, y: int, w: int, h: int,
+    rects: Sequence[tuple[int, int, int, int]],
+) -> bool:
+    """Return True if the centre of ``(x, y, w, h)`` falls inside any rect."""
+    cx = x + w / 2
+    cy = y + h / 2
+    for rx0, ry0, rx1, ry1 in rects:
+        if rx0 <= cx <= rx1 and ry0 <= cy <= ry1:
+            return True
+    return False
 
 
 @dataclass
@@ -43,12 +57,23 @@ class RedactionDetector:
         self.min_aspect_ratio = min_aspect_ratio
         self.max_aspect_ratio = max_aspect_ratio
 
-    def detect(self, image: np.ndarray, page: int = 0) -> list[RedactionInfo]:
+    def detect(
+        self,
+        image: np.ndarray,
+        page: int = 0,
+        exclude_rects: Sequence[tuple[int, int, int, int]] | None = None,
+    ) -> list[RedactionInfo]:
         """Detect redacted regions in a page image.
 
         Args:
             image: RGB or grayscale image as numpy array.
             page: Page number (for metadata).
+            exclude_rects: Optional pixel-coord rects ``(x1, y1, x2, y2)`` whose
+                interior is treated as off-limits — candidates whose centre
+                falls inside any rect are dropped. Used by the redaction stage
+                to suppress contour hits inside YOLO-detected figure / chart /
+                form-background regions, which is where the scanned_mixed
+                false-positive cohort (02737-class CRM forms) originates.
 
         Returns:
             List of detected redaction regions.
@@ -65,15 +90,18 @@ class RedactionDetector:
         redactions: list[RedactionInfo] = []
 
         for contour in contours:
-            if self._is_redaction_candidate(contour, image_area):
-                x, y, w, h = cv2.boundingRect(contour)
-                redactions.append(
-                    RedactionInfo(
-                        bbox=(x, y, x + w, y + h),
-                        page=page,
-                        area_px=w * h,
-                    )
+            if not self._is_redaction_candidate(contour, image_area):
+                continue
+            x, y, w, h = cv2.boundingRect(contour)
+            if exclude_rects and _bbox_centre_in_any(x, y, w, h, exclude_rects):
+                continue
+            redactions.append(
+                RedactionInfo(
+                    bbox=(x, y, x + w, y + h),
+                    page=page,
+                    area_px=w * h,
                 )
+            )
 
         return redactions
 

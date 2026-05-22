@@ -191,7 +191,7 @@ class TestPIICleanerHighConfidence:
 
         assert count == 1
 
-        assert "[PERSON]" in cleaned
+        assert "<PERSON>" in cleaned
 
         assert "John Smith" not in cleaned
 
@@ -206,7 +206,7 @@ class TestPIICleanerHighConfidence:
 
         assert count == 2
 
-        assert cleaned.count("[PERSON]") == 2
+        assert cleaned.count("<PERSON>") == 2
 
 
     def test_empty_text_returns_unchanged(self) -> None:
@@ -327,7 +327,7 @@ class TestPIICleanerContextValidation:
 
         assert count == 1
 
-        assert "[PERSON]" in cleaned
+        assert "<PERSON>" in cleaned
 
 
     def test_text_without_names_produces_no_candidates(self) -> None:
@@ -368,7 +368,7 @@ class TestCleanExtraction:
 
         assert count == 1
 
-        assert "[PERSON]" in extraction.pages[0].text
+        assert "<PERSON>" in extraction.pages[0].text
 
         assert extraction.pages[1].text == "No names here."
 
@@ -428,7 +428,7 @@ class TestCleanChunks:
 
         assert count == 1
 
-        assert "[PERSON]" in chunks[0].text
+        assert "<PERSON>" in chunks[0].text
 
         assert chunks[1].text == "No names here."
 
@@ -596,7 +596,7 @@ class TestRunPIICleaning:
 
         run_pii_cleaning([dr], cfg)
 
-        assert "[PERSON]" in dr.chunks[0].text
+        assert "<PERSON>" in dr.chunks[0].text
 
 
     def test_post_extraction_cleans_pages(self) -> None:
@@ -616,7 +616,7 @@ class TestRunPIICleaning:
 
         run_pii_cleaning([dr], cfg)
 
-        assert "[PERSON]" in extraction.pages[0].text
+        assert "<PERSON>" in extraction.pages[0].text
 
 
     def test_error_docs_skipped(self) -> None:

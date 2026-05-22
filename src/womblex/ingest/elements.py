@@ -28,6 +28,7 @@ ElementKind = Literal[
     "heading",
     "list_item",
     "caption",
+    "header",
     "footer",
     "signature",
     "figure",
@@ -40,7 +41,7 @@ ElementKind = Literal[
 ]
 
 TEXT_KINDS: frozenset[str] = frozenset({
-    "paragraph", "heading", "list_item", "caption", "footer", "signature",
+    "paragraph", "heading", "list_item", "caption", "header", "footer", "signature",
 })
 
 
@@ -96,7 +97,7 @@ class Element:
 
     Populated per ``kind``:
 
-    - text kinds (paragraph, heading, list_item, caption, footer, signature):
+    - text kinds (paragraph, heading, list_item, caption, header, footer, signature):
       ``text`` carries the verbatim string.
     - ``table``: ``cells`` holds the dense list of Cell entries;
       ``header_rows`` lists row indices that act as headers.

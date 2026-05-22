@@ -14,25 +14,32 @@ Enrichment requires an external Isaacus client.
 G-NAF PSV ingest is a standalone path (`womblex ingest-gnaf`) that bypasses extraction entirely — see below.
 
 ```
-Raw files (PDF / DOCX / CSV)
+Raw files (PDF / DOCX / CSV / XLSX)
         │
         ▼
 ┌───────────────────┐
 │  detect_file_type │  → DocumentProfile
-│  (ingest/detect)  │    (type, signals, PaddleOCR confidence)
+│  (ingest/detect)  │    (doc-level type, signals, PaddleOCR confidence)
 └───────────────────┘
         │
         ▼
 ┌───────────────────┐
-│   get_extractor   │  → ExtractionStrategy (selected by doc_type)
-│  (ingest/extract) │
+│   extract_text    │  → list[ExtractionResult]  (single-element list per source)
+│  (ingest/extract) │    PDFs route via orchestrator (per-page dispatch);
+│                   │    non-PDFs via get_extractor (DOCX / spreadsheet / text / image).
 └───────────────────┘
         │
         ▼
-┌───────────────────┐
-│  strategy.extract │  → ExtractionResult
-│ (ingest/strategies│    (pages, text_blocks, tables, forms, images)
-└───────────────────┘
+┌───────────────────────────────────────────┐
+│  PDF: extract_pdf_with_plan               │  → ExtractionResult
+│  (ingest/orchestrator)                    │    elements: list[Element]
+│   ├── profile_pages → list[PageProfile]   │    (paragraph / heading / table /
+│   ├── _apply_native_page (page.get_text)  │     form / image / sheet_cell / …)
+│   └── _apply_ocr_page   (PaddleOCR+YOLO)  │    + legacy view properties
+│                                           │      (.pages / .text_blocks / .tables /
+│  Non-PDF: strategy.extract                │       .forms / .images) as read-only
+│  (strategies_file / spreadsheet)          │      derivations over elements.
+└───────────────────────────────────────────┘
         │
         ▼
 ┌───────────────────┐
@@ -124,14 +131,14 @@ For each file processed via `operations.py`:
       ├── annotate_extraction() → add warning strings
       └── apply mode:
             ├── flag: no text change (annotation only)
-            ├── blackout: prepend [REDACTED] to affected page text
+            ├── blackout: prepend <REDACTED> to affected page text
             └── delete: clear affected page text
 
    chunk: run_chunking(results, config) → list[TextChunk] per document
       ├── narrative text → semchunk (configurable token budget)
       ├── tables → markdown conversion → semchunk
       ├── each chunk tagged with content_type ("narrative" | "table")
-      ├── [REDACTED] markers repaired if split across boundaries
+      ├── <REDACTED> markers repaired if split across boundaries
       └── if redaction mode is "flag": annotate_chunks() sets has_redaction=True
 
    pii: run_pii_cleaning(results, config)

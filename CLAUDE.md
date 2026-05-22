@@ -80,7 +80,7 @@ A corpus exists to mature Womblex capability, not host custom code. Corpus-side 
 | `ingest/paddle_ocr.py` | Wrap RapidOCR and YOLOv8 layout analysis | Implement extraction strategy logic |
 | `redact/detector.py` | Detect and mask redacted regions | Know about document semantics |
 | `redact/stage.py` | Run redaction at configurable pipeline points (post_chunk, post_enrichment) | Implement detection logic |
-| `pii/cleaner.py` | Detect PERSON candidates via regex; validate with cosine similarity context model; merge enrichment-derived spans; emit `[ENTITY_TYPE]` (square-bracket) tags | Call Isaacus directly |
+| `pii/cleaner.py` | Detect PERSON candidates via regex; validate with cosine similarity context model; merge enrichment-derived spans; emit `<ENTITY_TYPE>` (angle-bracket) tags inline per span | Call Isaacus directly |
 | `pii/stage.py` | Run PII cleaning as an isolated pipeline stage (post_extraction, post_chunk, post_enrichment) | Implement detection logic |
 | `process/chunker.py` | Split text into chunks | Call Isaacus |
 | `analyse/*.py` | Wrap Isaacus API calls; `query.py` loads enrichment graph from Parquet for PII masking | Handle PDFs directly |
@@ -136,12 +136,10 @@ Always pass `TEXT_DEHYPHENATE` when extracting from native text layers to avoid 
 ```python
 text = page.get_text("text", flags=fitz.TEXT_DEHYPHENATE)
 ```
-### Post-extraction normalisation runs automatically
-`extract_text()` applies `_normalise_text()` to every page after extraction. Known artefacts it fixes:
-- `'$` → `'s` (broken ToUnicode font map producing `$` after curly apostrophes)
-- `http:lL` → `http://` (URL corruption from same font encoding bug)
-- Running OCR footers in spaced-character form (e.g. `1 | P a g e`)
-If you see new systematic artefacts, add them to `_normalise_text()` in `extract.py`.
+### Text policy at the extraction boundary is verbatim
+`_normalise_text` no longer runs in the extraction hot path. Whatever the producing extractor (native text layer, PaddleOCR, DOCX, spreadsheet-print, …) emits is what lands on the element's `text` field, and the parquet writer serialises `elements` — so on-disk content stays extraction-time verbatim. Downstream stages (PII, redaction, chunking) may rewrite `pages[i].text` in place; the parquet is unaffected.
+
+If an extractor is producing wrong bytes due to its own bug (broken ToUnicode font maps producing `$` for `'s`, URL corruption like `http:lL`, spaced-character OCR footers), the fix belongs in the extractor itself, not as a post-extraction normalisation pass. Systematic post-extraction cleanup belongs to a downstream cleaning stage that rewrites `pages[i].text`. See `docs/extraction.md`.
 ### Local model resolution
 `utils/models.py` is the single source of truth for finding pre-downloaded models. Always use `resolve_local_model_path(name)` rather than constructing paths manually:
 ```python

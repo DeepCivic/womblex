@@ -200,7 +200,7 @@ class TestTableToMarkdown:
 class TestRepairRedactionSplits:
     def test_no_split_no_change(self) -> None:
         chunks = [
-            TextChunk(text="before [REDACTED] after", start_char=0, end_char=23, chunk_index=0),
+            TextChunk(text="before <REDACTED> after", start_char=0, end_char=23, chunk_index=0),
         ]
         result = _repair_redaction_splits(chunks)
         assert len(result) == 1
@@ -208,23 +208,23 @@ class TestRepairRedactionSplits:
 
     def test_split_marker_is_merged(self) -> None:
         chunks = [
-            TextChunk(text="some text [REDAC", start_char=0, end_char=16, chunk_index=0),
-            TextChunk(text="TED] more text", start_char=16, end_char=30, chunk_index=1),
+            TextChunk(text="some text <REDAC", start_char=0, end_char=16, chunk_index=0),
+            TextChunk(text="TED> more text", start_char=16, end_char=30, chunk_index=1),
         ]
         result = _repair_redaction_splits(chunks)
         assert len(result) == 1
-        assert "[REDACTED]" in result[0].text
+        assert "<REDACTED>" in result[0].text
         assert result[0].start_char == 0
         assert result[0].end_char == 30
 
     def test_single_char_split(self) -> None:
         chunks = [
-            TextChunk(text="text [", start_char=0, end_char=6, chunk_index=0),
-            TextChunk(text="REDACTED] end", start_char=6, end_char=19, chunk_index=1),
+            TextChunk(text="text <", start_char=0, end_char=6, chunk_index=0),
+            TextChunk(text="REDACTED> end", start_char=6, end_char=19, chunk_index=1),
         ]
         result = _repair_redaction_splits(chunks)
         assert len(result) == 1
-        assert "[REDACTED]" in result[0].text
+        assert "<REDACTED>" in result[0].text
 
     def test_no_redaction_unchanged(self) -> None:
         chunks = [
@@ -239,8 +239,8 @@ class TestRepairRedactionSplits:
 
     def test_indices_resequenced_after_merge(self) -> None:
         chunks = [
-            TextChunk(text="a [REDAC", start_char=0, end_char=8, chunk_index=0),
-            TextChunk(text="TED] b", start_char=8, end_char=14, chunk_index=1),
+            TextChunk(text="a <REDAC", start_char=0, end_char=8, chunk_index=0),
+            TextChunk(text="TED> b", start_char=8, end_char=14, chunk_index=1),
             TextChunk(text="c", start_char=15, end_char=16, chunk_index=2),
         ]
         result = _repair_redaction_splits(chunks)
@@ -305,12 +305,12 @@ class TestChunkDocument:
 
     def test_redaction_preserved(self) -> None:
         text = (
-            "The officer noted that [REDACTED] was present at the facility. "
-            "No further action was taken regarding [REDACTED] involvement."
+            "The officer noted that <REDACTED> was present at the facility. "
+            "No further action was taken regarding <REDACTED> involvement."
         )
         result = chunk_document(text, self.chunker)
         combined = " ".join(c.text for c in result)
-        assert combined.count("[REDACTED]") == 2
+        assert combined.count("<REDACTED>") == 2
 
     def test_empty_table_skipped(self) -> None:
         tables = [_FakeTable([], [])]
@@ -385,10 +385,10 @@ class TestRedactionRepairWithOverlap:
     """Redaction repair remains safe when overlap is active."""
 
     def test_complete_marker_in_overlap_no_merge(self) -> None:
-        """If [REDACTED] is complete in both chunks (overlap), no merge needed."""
+        """If <REDACTED> is complete in both chunks (overlap), no merge needed."""
         chunks = [
-            TextChunk(text="text [REDACTED] more", start_char=0, end_char=20, chunk_index=0),
-            TextChunk(text="[REDACTED] more next", start_char=10, end_char=30, chunk_index=1),
+            TextChunk(text="text <REDACTED> more", start_char=0, end_char=20, chunk_index=0),
+            TextChunk(text="<REDACTED> more next", start_char=10, end_char=30, chunk_index=1),
         ]
         result = _repair_redaction_splits(chunks)
         assert len(result) == 2  # No merge — marker is complete in both
@@ -396,12 +396,12 @@ class TestRedactionRepairWithOverlap:
     def test_split_marker_still_repaired_with_overlap(self) -> None:
         """Split marker at overlap boundary is still repaired."""
         chunks = [
-            TextChunk(text="text [REDAC", start_char=0, end_char=11, chunk_index=0),
-            TextChunk(text="TED] more", start_char=8, end_char=17, chunk_index=1),
+            TextChunk(text="text <REDAC", start_char=0, end_char=11, chunk_index=0),
+            TextChunk(text="TED> more", start_char=8, end_char=17, chunk_index=1),
         ]
         result = _repair_redaction_splits(chunks)
         assert len(result) == 1
-        assert "[REDACTED]" in result[0].text
+        assert "<REDACTED>" in result[0].text
 
 
 class TestChunkDocumentWithOverlap:
