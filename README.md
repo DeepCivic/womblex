@@ -264,7 +264,7 @@ womblex/
 ├── src/womblex/
 │   ├── cli/                # CLI subpackage — per-topic modules (pipeline, redact, ingest, score, profile)
 │   ├── config.py           # Pydantic config models
-│   ├── operations.py       # Independent operations (extract, redact, chunk, PII, enrich)
+│   ├── operations/         # Independent operations (extract/redact/chunk/pii/enrich), one module each
 │   ├── score.py            # womblex score subcommand — labels-vs-parquet CER scoring
 │   ├── profile/            # womblex profile subcommand — column schema inference
 │   ├── ingest/

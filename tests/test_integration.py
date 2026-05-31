@@ -420,7 +420,7 @@ class TestCSVChunkingIntegration:
 
         word_chunker = semchunk.chunkerify(_word_token_counter, chunk_size=100)
 
-        with patch("womblex.operations.create_chunker", return_value=word_chunker):
+        with patch("womblex.operations.chunk.create_chunker", return_value=word_chunker):
 
             doc_results = run_extraction([_CSV_FILE], config)
 
@@ -459,7 +459,7 @@ class TestCSVChunkingIntegration:
 
         word_chunker = semchunk.chunkerify(_word_token_counter, chunk_size=100)
 
-        with patch("womblex.operations.create_chunker", return_value=word_chunker):
+        with patch("womblex.operations.chunk.create_chunker", return_value=word_chunker):
 
             doc_results = run_extraction([_CSV_FILE], config)
 
@@ -555,7 +555,7 @@ class TestRedactedPDFChunkingIntegration:
 
         word_chunker = semchunk.chunkerify(_word_token_counter, chunk_size=80)
 
-        with patch("womblex.operations.create_chunker", return_value=word_chunker):
+        with patch("womblex.operations.chunk.create_chunker", return_value=word_chunker):
 
             doc_results = run_extraction([_REDACTED_PDF], config)
 
@@ -607,7 +607,7 @@ class TestRedactedPDFChunkingIntegration:
 
         word_chunker = semchunk.chunkerify(_word_token_counter, chunk_size=80)
 
-        with patch("womblex.operations.create_chunker", return_value=word_chunker):
+        with patch("womblex.operations.chunk.create_chunker", return_value=word_chunker):
 
             doc_results = run_extraction([_REDACTED_PDF], config)
 

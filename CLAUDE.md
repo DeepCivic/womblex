@@ -99,7 +99,7 @@ A corpus exists to mature Womblex capability, not host custom code. Corpus-side 
 | `utils/models.py` | Resolve local model paths before falling back to downloads | Load models (callers do that) |
 | `utils/metrics.py` | CER, WER, CER-s (spatial sort), Levenshtein distance | Know about document types or pipeline stages |
 | `utils/tabular_metrics.py` | Structural fidelity, data integrity, key column preservation, schema conformance for tabular extraction | Know about specific datasets or file formats |
-| `operations.py` | Independent operations (extract, redact, chunk, PII, enrich) | Orchestrate or sequence operations |
+| `operations/` | Independent operations (extract, redact, chunk, PII, enrich) — one module each under the package, re-exported from `operations/__init__` so `from womblex.operations import run_*` is unchanged | Orchestrate or sequence operations |
 ## Coding Conventions
 ### Style
 - Python 3.11+
@@ -261,7 +261,7 @@ For new shapes that fit within the existing native/OCR dispatch:
 ## Files to Understand First
 1. `configs/example.yaml` — see what's configurable
 2. `ingest/detect.py` — document type detection logic
-3. `operations.py` — independent operations, how they compose
+3. `operations/` — independent operations (one module each), how they compose
 4. `process/chunker.py` — semchunk integration (`chunk_batch` engine, element-stream → ChunkInput helpers)
 5. `process/chunk_stage.py` — per-stage `chunk_shards()` over a shard directory; consumed by `womblex chunk --shards`
 ## Don't

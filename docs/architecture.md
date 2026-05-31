@@ -85,7 +85,7 @@ src/womblex/
 │   ├── score.py           # score subcommand
 │   └── profile.py         # profile subcommand
 ├── config.py              # Pydantic config models and YAML loader
-└── operations.py          # Independent operations — no orchestrator, callers compose directly
+└── operations/            # Independent operations (one module each) — no orchestrator, callers compose directly
 ```
 
 ## Stage Detail
