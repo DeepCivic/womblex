@@ -18,9 +18,22 @@ logger = logging.getLogger("womblex")
 def _register_run(p: argparse.ArgumentParser) -> None:
     p.add_argument("--config", type=Path, required=True, help="Path to config YAML")
     p.add_argument("--resume", action="store_true", help="Resume from last checkpoint")
+    p.add_argument(
+        "--no-verify-resume", action="store_true",
+        help="Skip the resume-time shard integrity scan (advanced — only use "
+             "if you've already verified shards yourself).",
+    )
     p.add_argument("--limit", type=int, default=None, help="Max documents to process")
     p.add_argument("--skip", type=int, default=0, help="Skip first N documents")
     p.add_argument("--batch-size", type=int, default=None, help="Override config batch size")
+    p.add_argument(
+        "--run-id", type=str, default=None,
+        help=(
+            "Identifier for this run instance (overrides dataset.run_id in config). "
+            "Outputs land under <output_root>/<run_id>/documents/. "
+            "If omitted, config value or an auto-generated timestamp is used."
+        ),
+    )
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -36,6 +49,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     )
     from womblex.store.checkpoint import CheckpointManager
     from womblex.store.output import ShardVerificationError, verify_shard_persistence
+    from womblex.store.retention import apply_retention, generate_run_id, most_recent_run
+    from womblex.store.shard_audit import reconcile_checkpoint_with_shards
 
     config = load_config(args.config)
     logger.info("Loaded config: %s", config.dataset.name)
@@ -53,15 +68,68 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     output_root = config.paths.output_root
     output_root.mkdir(parents=True, exist_ok=True)
-    shard_dir = output_root / "documents"
+
+    # Resolve run_id: CLI > config > (resume: most-recent existing) > auto-generated
+    explicit_run_id = args.run_id or config.dataset.run_id
+    if explicit_run_id:
+        run_id = explicit_run_id
+    elif args.resume:
+        prev = most_recent_run(output_root)
+        if prev is None:
+            logger.error("--resume given but no existing run dir found under %s", output_root)
+            return 1
+        run_id = prev.name
+        logger.info("--resume: picked most-recent run %s", run_id)
+    else:
+        run_id = generate_run_id()
+    logger.info("run_id: %s", run_id)
+
+    run_root = output_root / run_id
+    shard_dir = run_root / "documents"
     shard_dir.mkdir(parents=True, exist_ok=True)
     cumulative_shard_size = sum(s.stat().st_size for s in shard_dir.glob("*.parquet"))
 
-    checkpoint_mgr = CheckpointManager(config.paths.checkpoint_dir, config.dataset.name)
+    # Apply retention before processing (only on fresh runs — never on resume,
+    # which would risk purging newer runs the user is intentionally bypassing).
+    if not args.resume:
+        purged = apply_retention(
+            output_root,
+            config.paths.checkpoint_dir,
+            current_run_id=run_id,
+            policy=config.processing.retention.policy,
+            keep=config.processing.retention.keep,
+        )
+        if purged:
+            logger.info(
+                "retention(%s, keep=%d): purged %d old run(s)",
+                config.processing.retention.policy,
+                config.processing.retention.keep,
+                len(purged),
+            )
+
+    checkpoint_root = config.paths.checkpoint_dir / run_id
+    checkpoint_mgr = CheckpointManager(checkpoint_root, config.dataset.name)
+    # Offset the batch counter when resuming so the shard path
+    # (batch-NNNN.parquet) continues from where the prior invocation left
+    # off — otherwise resumed batches overwrite earlier shards.
+    batch_num_offset = 0
     if args.resume:
         checkpoint_mgr.load()
+        if not args.no_verify_resume:
+            dropped = reconcile_checkpoint_with_shards(checkpoint_mgr, shard_dir)
+            if dropped:
+                logger.warning(
+                    "Resume integrity scan: dropped %d doc(s) with corrupted shards; "
+                    "they will be re-extracted.", len(dropped),
+                )
+                # Recompute cumulative size after archive renames so the
+                # post-write shrink check doesn't trip on the archived files.
+                cumulative_shard_size = sum(
+                    s.stat().st_size for s in shard_dir.glob("*.parquet")
+                )
+        batch_num_offset = checkpoint_mgr.state.last_batch
         all_files = checkpoint_mgr.filter_unprocessed(all_files)
-        logger.info("Resuming: %d documents remaining", len(all_files))
+        logger.info("Resuming: %d documents remaining (next batch=%d)", len(all_files), batch_num_offset + 1)
     else:
         checkpoint_mgr.clear()
 
@@ -87,7 +155,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         total_files, batch_size, ", ".join(stages),
     )
 
-    for batch_num, i in enumerate(range(0, total_files, batch_size), start=1):
+    for batch_idx, i in enumerate(range(0, total_files, batch_size), start=1):
+        batch_num = batch_idx + batch_num_offset
         batch_files = all_files[i : i + batch_size]
         batch_start = time.time()
         logger.info(
@@ -232,12 +301,99 @@ def cmd_extract(args: argparse.Namespace) -> int:
 
 
 def _register_chunk(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--config", type=Path, required=True, help="Path to config YAML")
-    p.add_argument("--limit", type=int, default=None, help="Max documents to process")
+    mode = p.add_mutually_exclusive_group(required=True)
+    mode.add_argument(
+        "--shards", type=Path,
+        help=(
+            "Per-stage mode: chunk an existing shard directory "
+            "(``<run_id>/documents/`` containing ``*.elements.parquet``). "
+            "Writes ``*.chunks.parquet`` siblings in place."
+        ),
+    )
+    mode.add_argument(
+        "--config", type=Path,
+        help="E2E composition mode: run extraction + chunking from config YAML.",
+    )
+    p.add_argument(
+        "--checkpoint-dir", type=Path, default=None,
+        help=(
+            "Per-stage checkpoint root (default: ``<shard_dir>/../.chunk-checkpoint/``). "
+            "Only used with --shards."
+        ),
+    )
+    p.add_argument(
+        "--dataset", type=str, default="chunk",
+        help="Checkpoint dataset name (only used with --shards). Default: 'chunk'.",
+    )
+    p.add_argument(
+        "--no-resume", action="store_true",
+        help="Clear chunk-stage checkpoint before running (re-chunk every batch).",
+    )
+    p.add_argument(
+        "--no-verify-resume", action="store_true",
+        help=(
+            "Skip the resume-time *.chunks.parquet integrity scan (advanced — "
+            "only use if you've already verified the chunks files yourself)."
+        ),
+    )
+    p.add_argument("--limit", type=int, default=None, help="Max documents to process (--config only)")
 
 
 def cmd_chunk(args: argparse.Namespace) -> int:
-    """Chunk a directory of documents (extraction + chunking stages)."""
+    """Chunk a shard directory (per-stage) or a config-described corpus (E2E)."""
+    if args.shards is not None:
+        return _cmd_chunk_shards(args)
+    return _cmd_chunk_config(args)
+
+
+def _cmd_chunk_shards(args: argparse.Namespace) -> int:
+    from womblex.config import ChunkingConfig, load_config
+    from womblex.process.chunk_stage import chunk_shards
+    from womblex.store.checkpoint import CheckpointManager
+    from womblex.store.shard_audit import reconcile_chunk_checkpoint_with_shards
+
+    shard_dir: Path = args.shards
+    if not shard_dir.is_dir():
+        logger.error("--shards path is not a directory: %s", shard_dir)
+        return 1
+    if not any(shard_dir.glob("*._manifest.parquet")):
+        logger.error("--shards directory has no `*._manifest.parquet`: %s", shard_dir)
+        return 1
+
+    if args.config is not None:
+        chunking_config = load_config(args.config).chunking
+    else:
+        chunking_config = ChunkingConfig()
+
+    checkpoint_root = args.checkpoint_dir or shard_dir.parent / ".chunk-checkpoint"
+    ckpt = CheckpointManager(checkpoint_root, f"{args.dataset}_chunk")
+    if args.no_resume:
+        ckpt.clear()
+    else:
+        ckpt.load()
+        if not args.no_verify_resume:
+            dropped = reconcile_chunk_checkpoint_with_shards(ckpt, shard_dir)
+            if dropped:
+                logger.warning(
+                    "Resume integrity scan: dropped %d doc(s) with corrupted "
+                    "chunks shards; they will be re-chunked.", len(dropped),
+                )
+
+    logger.info(
+        "chunk --shards: dir=%s tokenizer=%s chunk_size=%d processes=%d",
+        shard_dir, chunking_config.tokenizer, chunking_config.chunk_size,
+        chunking_config.processes,
+    )
+    result = chunk_shards(shard_dir, chunking_config, checkpoint_mgr=ckpt)
+    logger.info(
+        "Done: %d batches written, %d docs chunked, %d total chunks",
+        result.batches_written, result.docs_chunked, result.total_chunks,
+    )
+    return 0
+
+
+def _cmd_chunk_config(args: argparse.Namespace) -> int:
+    """E2E composition: extract + chunk in one pass (back-compat path)."""
     from womblex.config import load_config
     from womblex.operations import BatchResult, run_chunking, run_extraction, write_batch_parquet
 

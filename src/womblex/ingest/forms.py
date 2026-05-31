@@ -1,15 +1,20 @@
 """Form field extraction.
 
-Three sources, in priority order:
+Four sources, in priority order:
 1. PDF AcroForm widgets (`_extract_form_fields`) — interactive form
    fields native to the PDF, highest confidence.
 2. Spatial text-pair extraction (`_extract_form_pairs_from_text`) —
    walks `page.get_text("dict")` looking for label/value pairs by span
    alignment. Catches text-only forms in native PDFs (NQA notifications,
    provider/service field blocks).
-3. Line-based extraction (`_extract_form_pairs_from_lines`) — scans
-   assembled plain text (OCR output) for label/value pairs. Used by
-   scanned extractors where the native text layer is empty.
+3. Region-based extraction (`_extract_form_pairs_from_regions`) — scans
+   per-region OCR output for label/value pairs, preserving each
+   region's bbox as the pair's position. Preferred OCR path when the
+   engine returns per-region detections (PaddleOCR / RapidOCR).
+4. Line-based extraction (`_extract_form_pairs_from_lines`) — scans
+   assembled plain text. Bbox is zero (no positional info). Used as a
+   fallback when no per-region detections are available (LLM-OCR
+   engines that resolve reading order natively and only emit markdown).
 
 Label heuristics: 1–6 words, must start with uppercase, no sentence
 punctuation, no list-marker shapes (`A)`, `(i)`), no URL-prefix labels
@@ -27,6 +32,7 @@ from womblex.ingest.extract import (
     _normalise_bbox,
     _normalise_rect,
 )
+from womblex.ingest.interfaces.protocols import OCRRegionResult
 
 
 # Label heuristics: 1–6 words, must start with uppercase, no sentence
@@ -146,11 +152,12 @@ def _extract_forms(page: fitz.Page) -> list[FormField]:
 
 
 def _extract_form_pairs_from_lines(text: str) -> list[FormField]:
-    """Scan plain text (e.g. assembled OCR output) for label/value pairs.
+    """Scan plain text for label/value pairs without positional info.
 
-    Used by scanned extractors where `page.get_text("dict")` is empty —
-    NQA notification forms in the corpus carry their structure only in the
-    OCR'd text. Position is zero (no bbox available from line-only scan).
+    Fallback used only when no per-region OCR detections are available
+    (LLM-OCR engines that return markdown / reading-order-resolved text).
+    Bbox is zero — callers wanting per-pair locality should prefer
+    `_extract_form_pairs_from_regions`.
     Detects same-line pairs separated by ≥2-space gap or by a colon.
     """
     fields: list[FormField] = []
@@ -183,6 +190,65 @@ def _extract_form_pairs_from_lines(text: str) -> list[FormField]:
             ):
                 fields.append(
                     FormField(field_name=label, value=value, position=zero_pos, confidence=0.65)
+                )
+
+    return fields
+
+
+def _extract_form_pairs_from_regions(
+    regions: list[OCRRegionResult],
+    pix_width: float,
+    pix_height: float,
+) -> list[FormField]:
+    """Scan per-region OCR results for label/value pairs.
+
+    Preferred OCR path: each region's polygon bbox becomes the pair's
+    position (normalised by the OCR-input image dimensions). Closes the
+    OCR-form bbox-loss issue tracked as K2′ in `stories/STATUS.md`.
+
+    Regions are treated independently — multi-region pairs (label and
+    value on adjacent detections) are not joined here, since PaddleOCR
+    typically yields one detection per visible text line which already
+    contains both halves of a `Label: value` or `Label    value` pair.
+    """
+    fields: list[FormField] = []
+    if pix_width <= 0 or pix_height <= 0:
+        return fields
+
+    for region in regions:
+        line = region.text.strip()
+        if not line or len(line) < 4:
+            continue
+
+        # Polygon → axis-aligned extent → normalised Position.
+        xs = [p[0] for p in region.bbox]
+        ys = [p[1] for p in region.bbox]
+        pos = _normalise_bbox(
+            (min(xs), min(ys), max(xs), max(ys)), pix_width, pix_height,
+        )
+
+        m = _FORM_PAIR_GAP_RE.match(line)
+        if m:
+            label = m.group(1).strip().rstrip(":")
+            value = m.group(2).strip()
+            if value and _looks_like_form_label(label):
+                fields.append(
+                    FormField(field_name=label, value=value, position=pos, confidence=0.6)
+                )
+                continue
+
+        if ":" in line:
+            label, _, value = line.partition(":")
+            label = label.strip()
+            value = value.strip()
+            if (
+                label
+                and value
+                and not value.startswith("//")
+                and _looks_like_form_label(label)
+            ):
+                fields.append(
+                    FormField(field_name=label, value=value, position=pos, confidence=0.65)
                 )
 
     return fields

@@ -314,3 +314,91 @@ def write_enrichment_metadata(
     pq.write_table(table, str(output_path))
     logger.info("Wrote %d enrichment metadata rows to %s", len(rows), output_path)
     return output_path
+
+
+# ---------------------------------------------------------------------------
+# Per-batch sharded siblings (enrich stage, mirrors store.output chunk siblings)
+# ---------------------------------------------------------------------------
+#
+# The sharded enrich stage (``analyse.enrich_stage``) writes one sibling
+# parquet per extraction batch, joinable to ``*.elements.parquet`` /
+# ``*.chunks.parquet`` on ``source_hash``. The flat ``ENTITY_SCHEMA`` /
+# ``ENRICHMENT_META_SCHEMA`` are reused unchanged; the existing
+# ``document_id`` column carries the **source_hash** in the sharded layout
+# so joins line up with the other sidecars without forking the schema.
+
+ENRICHMENT_ENTITIES_SUFFIX = ".enrichment_entities.parquet"
+ENRICHMENT_META_SUFFIX = ".enrichment_meta.parquet"
+
+
+def enrichment_entities_path_for(base_path: Path) -> Path:
+    """Return ``<base>.enrichment_entities.parquet`` sibling for a shard base."""
+    return base_path.parent / f"{base_path.stem}{ENRICHMENT_ENTITIES_SUFFIX}"
+
+
+def enrichment_meta_path_for(base_path: Path) -> Path:
+    """Return ``<base>.enrichment_meta.parquet`` sibling for a shard base."""
+    return base_path.parent / f"{base_path.stem}{ENRICHMENT_META_SUFFIX}"
+
+
+def write_enrichment_entities_shard(
+    results: list[tuple[str, EnrichmentResult]], base_path: Path,
+) -> Path:
+    """Write a batch's entity mentions to ``<base>.enrichment_entities.parquet``.
+
+    ``results`` is ``(source_hash, EnrichmentResult)``; the source_hash is
+    written into ``ENTITY_SCHEMA``'s ``document_id`` column. Empty input
+    produces an empty-but-schema-correct file so downstream globs are safe.
+    """
+    rows: list[dict[str, Any]] = []
+    for source_hash, enrichment in results:
+        rows.extend(_entity_mentions_from_enrichment(source_hash, enrichment, None))
+    target = enrichment_entities_path_for(base_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    _write_enrichment_rows(rows, target, ENTITY_SCHEMA)
+    logger.info("Wrote enrichment entities shard %s: rows=%d", target.name, len(rows))
+    return target
+
+
+def write_enrichment_meta_shard(
+    results: list[tuple[str, EnrichmentResult]], base_path: Path,
+) -> Path:
+    """Write a batch's per-doc enrichment metadata to ``<base>.enrichment_meta.parquet``."""
+    rows = [_enrichment_meta_row(src, enr) for src, enr in results]
+    target = enrichment_meta_path_for(base_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    _write_enrichment_rows(rows, target, ENRICHMENT_META_SCHEMA)
+    return target
+
+
+def read_enrichment_entities(path: Path) -> "pa.Table":
+    """Read entity mentions from a single sibling file or a shard-dir glob."""
+    p = Path(path)
+    if p.is_dir():
+        shards = sorted(p.glob(f"*{ENRICHMENT_ENTITIES_SUFFIX}"))
+        if not shards:
+            return pa.table(
+                {f.name: pa.array([], type=f.type) for f in ENTITY_SCHEMA},
+                schema=ENTITY_SCHEMA,
+            )
+        return pa.concat_tables([_read_enrichment_shard(s, ENTITY_SCHEMA) for s in shards])
+    target = p if p.name.endswith(ENRICHMENT_ENTITIES_SUFFIX) else enrichment_entities_path_for(p)
+    return _read_enrichment_shard(target, ENTITY_SCHEMA)
+
+
+def _write_enrichment_rows(rows: list[dict[str, Any]], path: Path, schema: "pa.Schema") -> None:
+    if rows:
+        table = pa.Table.from_pylist(rows, schema=schema)
+    else:
+        table = pa.table({f.name: pa.array([], type=f.type) for f in schema}, schema=schema)
+    pq.write_table(table, str(path), compression="zstd", compression_level=3)
+
+
+def _read_enrichment_shard(path: Path, schema: "pa.Schema") -> "pa.Table":
+    raw = pq.read_table(str(path))
+    missing = [f.name for f in schema if f.name not in raw.schema.names]
+    if missing:
+        raise ValueError(
+            f"enrichment shard {path} missing columns {missing}; schema bump without compat shim?"
+        )
+    return raw.select([f.name for f in schema]).cast(schema)

@@ -96,6 +96,27 @@ class CheckpointManager:
         self.state.last_batch = batch_num
         self.save()
 
+    def drop(self, doc_ids: list[str] | set[str]) -> None:
+        """Remove ``doc_ids`` from the processed set and save.
+
+        ``last_batch`` is intentionally left alone — batch numbers are
+        identifiers, not array slots. Re-extracted docs land in new
+        batches past the high-water mark.
+
+        ``total_succeeded`` is decremented optimistically; we can't tell
+        from the checkpoint whether a dropped doc originally succeeded
+        or failed (the manifest knows but it's the thing we're dropping
+        because of). Counters are observability, not load-bearing.
+        """
+        to_drop = set(doc_ids) & self.state.processed_ids
+        if not to_drop:
+            return
+        self.state.processed_ids.difference_update(to_drop)
+        self.state.total_processed = max(0, self.state.total_processed - len(to_drop))
+        self.state.total_succeeded = max(0, self.state.total_succeeded - len(to_drop))
+        self.save()
+        logger.info("Checkpoint: dropped %d doc_id(s) for re-extraction", len(to_drop))
+
     def filter_unprocessed(self, paths: list[Path]) -> list[Path]:
         """Filter out already-processed documents."""
         return [p for p in paths if p.stem not in self.state.processed_ids]

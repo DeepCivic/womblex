@@ -27,6 +27,7 @@ from womblex.ingest.extract import (
     _pixmap_to_array,
     _text_coverage,
 )
+from womblex.ingest.elements import TEXT_KINDS
 from womblex.ingest.paddle_ocr import (
     get_layout_analyzer,
     get_ocr_reader,
@@ -34,6 +35,13 @@ from womblex.ingest.paddle_ocr import (
 )
 
 logger = logging.getLogger(__name__)
+
+# A full-page OCR block whose layout kind is a non-text region (figure,
+# caption, …) is reclassified to a text paragraph once its OCR yields at
+# least this many words.  Full-page document scans produce a paragraph+ of
+# coherent text and must reach chunking (the non-text kinds are excluded
+# from TEXT_KINDS); genuine figures yield only incidental words.  See K9-fig.
+_OCR_TEXT_KIND_MIN_WORDS = 5
 
 
 # ---------------------------------------------------------------------------
@@ -211,8 +219,15 @@ def _ocr_page(
     lang: str,
     engine: str = "paddleocr",
     engine_options: dict | None = None,
-) -> tuple[str, float, list[str], bool]:
-    """OCR a page and return ``(text, confidence_0_100, steps, reading_order_native)``.
+) -> tuple[str, float, list[str], bool, list, tuple[int, int]]:
+    """OCR a page and return text plus per-region detections.
+
+    Returns ``(text, confidence_0_100, steps, reading_order_native,
+    regions, (pix_width, pix_height))`` where ``regions`` is the
+    per-detection list from the OCR engine (empty for LLM-OCR engines
+    that resolve reading order natively and only emit markdown). Region
+    bboxes are in image-pixel coords at *dpi*; callers normalise by the
+    returned ``pix_width`` / ``pix_height`` to get 0-1 floats.
 
     Region-based engines (paddleocr) get the standard preprocess pipeline
     (deskew + binarise). LLM-based engines (deepseek-ocr) skip preprocessing
@@ -225,6 +240,7 @@ def _ocr_page(
 
     pix = page.get_pixmap(dpi=dpi)
     img = _pixmap_to_array(pix)
+    pix_dims = (int(pix.width), int(pix.height))
 
     # Pre-OCR blur check (cheap, useful for any engine)
     pre_gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY) if pix.n >= 3 else img
@@ -256,7 +272,10 @@ def _ocr_page(
     if avg_conf < 40.0:
         logger.warning("low OCR confidence: doc=%s page=%d confidence=%.1f", page.parent.name, page.number, avg_conf)
 
-    return text, avg_conf, steps, page_result.reading_order_native
+    return (
+        text, avg_conf, steps, page_result.reading_order_native,
+        page_result.regions, pix_dims,
+    )
 
 
 def _word_inside(word: tuple, rect: fitz.Rect) -> bool:
@@ -264,6 +283,26 @@ def _word_inside(word: tuple, rect: fitz.Rect) -> bool:
     cx = (word[0] + word[2]) / 2
     cy = (word[1] + word[3]) / 2
     return rect.x0 <= cx <= rect.x1 and rect.y0 <= cy <= rect.y1
+
+
+def _ocr_region_block_type(
+    text: str,
+    layout_kind: str = "figure",
+    min_words: int = _OCR_TEXT_KIND_MIN_WORDS,
+) -> str:
+    """Reclassify an OCR'd region by text volume when its layout kind is non-text.
+
+    Full-page scans collapse a whole page's OCR into one block whose kind is the
+    dominant layout region's — sometimes ``figure``. A figure block holds a
+    paragraph+ of coherent text yet is excluded from chunking (figure ∉
+    TEXT_KINDS), silently losing document content. When the OCR yields >=
+    ``min_words`` words the block is promoted to ``paragraph``; sparser output
+    (page numbers, bare logos) keeps its ``layout_kind``. Text kinds (incl.
+    ``caption``) and ``table`` pass through unchanged.
+    """
+    if layout_kind in TEXT_KINDS or layout_kind == "table":
+        return layout_kind
+    return "paragraph" if len(text.split()) >= min_words else layout_kind
 
 
 # max_overlapping_words=2 tolerates incidental native glyphs (e.g. a caption
@@ -334,13 +373,14 @@ def _ocr_image_regions(
             text = page_result.markdown.strip()
         else:
             text = "\n".join(r.text for r in page_result.regions if r.text.strip())
-        if not text.strip():
+        text = text.strip()
+        if not text:
             continue
 
         blocks.append(TextBlock(
-            text=text.strip(),
+            text=text,
             position=_normalise_rect(rect, pw, ph),
-            block_type="figure",
+            block_type=_ocr_region_block_type(text),
             confidence=page_result.confidence,
         ))
         steps.append("subpage_ocr")
@@ -414,10 +454,15 @@ def _layout_blocks_and_tables(
             block = _ocr_text_block(page, text, conf)
             if block:
                 dominant = max(regions, key=lambda r: (r.bbox[2] - r.bbox[0]) * (r.bbox[3] - r.bbox[1]))
+                # The whole page's OCR text is being collapsed into this one
+                # block. If the dominant region is a non-text kind (figure) but
+                # the page yielded substantial prose, it is a full-page scan,
+                # not a figure — tag it paragraph so it is not silently dropped
+                # from chunking. K9-fig.
                 block = TextBlock(
                     text=block.text,
                     position=block.position,
-                    block_type=dominant.block_type,
+                    block_type=_ocr_region_block_type(block.text, dominant.block_type),
                     confidence=block.confidence,
                 )
                 return [block], tables

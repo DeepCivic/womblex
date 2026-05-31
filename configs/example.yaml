@@ -1,5 +1,9 @@
 dataset:
   name: my_dataset
+  # run_id: my-named-run        # Optional. Per-run identifier; outputs land under
+                                 # <output_root>/<run_id>/documents/. If omitted, an
+                                 # auto-generated timestamp (run-YYYYMMDDTHHMMSSZ) is used.
+                                 # CLI: pass --run-id to override.
 
 paths:
   input_root: ./data/raw/my_dataset
@@ -46,7 +50,7 @@ redaction:
 
 chunking:
   tokenizer: "isaacus/kanon-2-tokenizer"
-  chunk_size: 480
+  chunk_size: 480       # Max tokens/chunk. null = auto-derive from tokeniser's model_max_length.
   enabled: true
   chunk_tables: true
   # overlap: null          # Token overlap between chunks. <1 = proportion, >=1 = absolute tokens.
@@ -54,7 +58,6 @@ chunking:
   # cache_maxsize: null     # Bound memoization cache. null = unbounded.
   # max_token_chars: null   # Max chars per token estimate (optimisation).
   # processes: 1           # Parallel workers. Default 1 (Chromebook-friendly).
-  # batch: false           # Chunk all texts (narrative + tables) in one call. Pair with processes > 1.
   # progress: false        # Show a tqdm progress bar during chunking.
 
 # PII cleaning uses regex pattern recognisers (Presidio-style) validated by
@@ -80,6 +83,47 @@ pii:
   context_similarity_threshold: 0.5
   model: all-MiniLM-L6-v2
 
+# Entity linking (`womblex enrich --shards` then `womblex link --shards`).
+# Resolves document mentions to canonical reference-register entities. The
+# library is corpus-agnostic: the corpus declares which register columns play
+# which role. Below is the ACT childcare register mapping as a worked example.
+linking:
+  enabled: false
+  # candidate_kinds: enrichment entity_type values treated as link candidates
+  # (pass-through to the Kanon-2 taxonomy — corporate persons + address locations).
+  candidate_kinds:
+    - corporate
+    - address
+  name_threshold: 0.85        # min difflib similarity for a name match
+  reference:
+    path: Registers/Education-services-act-export.csv
+    format: csv               # only csv implemented (bundle/geospatial seam reserved)
+    id_col: ServiceApprovalNumber          # canonical id -> entity_id (SE-*)
+    name_col: ServiceName                  # canonical display name
+    entity_type: service                   # constant tag for matches
+    parent_id_col: "Provider Approval Number"   # hierarchy FK (PR-*)
+    match_exact_cols:                      # concatenated + normalised => address key
+      - ServiceAddress
+      - Suburb
+      - Postcode
+    match_fuzzy_cols:                      # scored by normalised fuzzy similarity
+      - ServiceName
+      - ProviderLegalName
+    # alias_table: aliases.csv             # optional: alias,entity_id overrides (prior trustees)
+
+# Embedding (`womblex embed --shards`) — vectorise chunks for retrieval/analysis.
+# Thin pass-through to the Kanon-2 embedder; consumes *.chunks.parquet.
+embedding:
+  enabled: false
+  model: kanon-2-embedder
+  task: retrieval/document        # retrieval/document (index) | retrieval/query | null
+  # dimensions: null              # model default unless set
+
 processing:
   batch_size: 25
   checkpoint_every: 25
+  # Run-output retention controls how many prior run dirs survive under
+  # <output_root>/. The current run is always preserved.
+  retention:
+    policy: rolling            # rolling | keep_all
+    keep: 2                    # number of runs to retain under rolling (current + previous)

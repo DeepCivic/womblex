@@ -30,6 +30,7 @@ ElementKind = Literal[
     "caption",
     "header",
     "footer",
+    "footnote",
     "signature",
     "figure",
     "table",
@@ -41,7 +42,8 @@ ElementKind = Literal[
 ]
 
 TEXT_KINDS: frozenset[str] = frozenset({
-    "paragraph", "heading", "list_item", "caption", "header", "footer", "signature",
+    "paragraph", "heading", "list_item", "caption",
+    "header", "footer", "footnote", "signature",
 })
 
 

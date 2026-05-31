@@ -53,8 +53,12 @@ into the orchestrator's per-page operations
 IMAGE). For any PDF, `extract_text()` calls `extract_pdf_with_plan()`.
 ### Redaction is a post-extraction concern
 Redaction runs as a separate operation after extraction via `redact/stage.py`. The redaction detector misfires on form fields, chart regions, and diagram fills when called inside `_ocr_page()`, suppressing legitimate text. Do not call `pre_ocr_mask` from within extraction strategies.
+### Thin adapters over mature libraries
+For mature, widely-used dependencies (`semchunk`, `rapidocr-onnxruntime`, `presidio-anonymizer`, `sentence-transformers`, the Isaacus SDK), Womblex's role is a thin adapter that handles only the integration concerns the library can't know about — parquet I/O, element-stream projection, source-hash plumbing, corpus-specific wrinkles (e.g. `<REDACTED>` cross-boundary repair). The library's full surface is reached via pass-through (its parameters *are* the feature flags); Womblex defaults track upstream defaults except where the corpus has a measured reason to diverge. Anti-patterns: a Womblex toggle for a library feature, a wrapper that re-implements something the library does natively, hardcoded defaults that shadow upstream without justification. When a library absorbs a concern Womblex previously handled, delete the Womblex code rather than carrying a parallel implementation.
 ### Chunking is generic semchunk integration
-`process/chunker.py` wraps semchunk with no opinion about tokeniser or chunk size — those are dataset-level config choices in `configs/*.yaml`. The chunker accepts any HuggingFace tokeniser identifier or a callable token counter.
+`process/chunker.py` exposes `create_chunker` (wraps `semchunk.chunkerify`) and one entry point `chunk_batch(inputs, chunker, *, overlap, processes, progress)`. Every caller flattens all docs' narratives into one semchunk call and all docs' table markdowns into another, so `processes` and the progress bar parallelise across the whole batch. The chunker accepts any HuggingFace tokeniser identifier or a callable token counter — tokeniser and chunk size are dataset-level config choices in `configs/*.yaml`.
+
+`process/chunk_stage.py` provides `chunk_shards(shard_dir, config)` — the per-stage entry point that walks an existing extraction shard directory, reassembles narrative + tables from each `*.elements.parquet` via `build_chunk_input(source_hash, elements)`, calls `chunk_batch`, and writes a `*.chunks.parquet` sibling. The same `build_chunk_input` powers the in-memory `operations.run_chunking` path, so per-stage and E2E modes feed semchunk identical inputs by construction.
 ### Config-driven, not hardcoded
 Dataset-specific settings live in YAML configs. The codebase doesn't know about specific datasets — that's all in config files under `configs/`.
 ### Checkpointing for long jobs
@@ -82,8 +86,16 @@ A corpus exists to mature Womblex capability, not host custom code. Corpus-side 
 | `redact/stage.py` | Run redaction at configurable pipeline points (post_chunk, post_enrichment) | Implement detection logic |
 | `pii/cleaner.py` | Detect PERSON candidates via regex; validate with cosine similarity context model; merge enrichment-derived spans; emit `<ENTITY_TYPE>` (angle-bracket) tags inline per span | Call Isaacus directly |
 | `pii/stage.py` | Run PII cleaning as an isolated pipeline stage (post_extraction, post_chunk, post_enrichment) | Implement detection logic |
-| `process/chunker.py` | Split text into chunks | Call Isaacus |
+| `process/chunker.py` | `chunk_batch` engine + `create_chunker` + element-stream → ChunkInput projection helpers (`reassemble_narrative`, `collect_tables_from_elements`, `build_chunk_input`); `_repair_redaction_splits` for cross-boundary `<REDACTED>` markers | Call Isaacus; read/write parquet |
+| `process/chunk_stage.py` | `chunk_shards()` over a shard dir — read `*.elements.parquet` + `*.table_cells.parquet` + `*._manifest.parquet`, build ChunkInputs per source_hash, call `chunk_batch`, write `*.chunks.parquet`. Per-stage `CheckpointManager` integration | Implement chunking primitives (those are in `process/chunker.py`) |
 | `analyse/*.py` | Wrap Isaacus API calls; `query.py` loads enrichment graph from Parquet for PII masking | Handle PDFs directly |
+| `analyse/enrich_stage.py` | `enrich_shards()` over a shard dir — reassemble narrative via `reassemble_narrative`, call Kanon-2 per doc, write `*.enrichment_entities.parquet` + `*.enrichment_meta.parquet` siblings. Per-stage `CheckpointManager`, per-doc failure isolation | Implement matching/linking; know about registers |
+| `link/normalise.py` | Minimal name/address normalisation for matching (casefold, punctuation, street-abbrev, drop state/PO-box tokens) | Address *validation* (G-NAF is a separate, corpus-dependent concern) |
+| `link/reference.py` | Bundle-aware reference-register consumption → normalised `ReferenceTable` via corpus-declared column-roles (CSV implemented; multi-file/geospatial seam reserved) | Know about specific registers (corpus declares roles) |
+| `link/matcher.py` | Generic record-linkage: `resolve(candidates, reference, …)` → links via alias / address-exact / token-set name-fuzzy (stdlib `difflib`, no rapidfuzz). No rules DSL | Load data or read/write parquet |
+| `link/stage.py` | `link_shards()` over a shard dir — read `*.enrichment_entities.parquet`, select candidate kinds, match to register, write `*.entity_links.parquet` (mention grain; doc grain is a derived read view). Per-stage `CheckpointManager` | Implement match primitives (those are in `link/matcher.py`) |
+| `analyse/embed.py` | Thin wrapper over Isaacus `embeddings.create` (kanon-2-embedder); batches to the 128-text limit, 429 retry, preserves order. Task-aware (`retrieval/document` vs `retrieval/query`) | Read/write parquet; pick granularity |
+| `analyse/embed_stage.py` | `embed_shards()` over a shard dir — embed `*.chunks.parquet` texts, write `*.embeddings.parquet` siblings (vector per chunk). Per-stage `CheckpointManager`, batch-level failure isolation | Implement the API wrapper (that's `analyse/embed.py`) |
 | `utils/models.py` | Resolve local model paths before falling back to downloads | Load models (callers do that) |
 | `utils/metrics.py` | CER, WER, CER-s (spatial sort), Levenshtein distance | Know about document types or pipeline stages |
 | `utils/tabular_metrics.py` | Structural fidelity, data integrity, key column preservation, schema conformance for tabular extraction | Know about specific datasets or file formats |
@@ -137,9 +149,11 @@ Always pass `TEXT_DEHYPHENATE` when extracting from native text layers to avoid 
 text = page.get_text("text", flags=fitz.TEXT_DEHYPHENATE)
 ```
 ### Text policy at the extraction boundary is verbatim
-`_normalise_text` no longer runs in the extraction hot path. Whatever the producing extractor (native text layer, PaddleOCR, DOCX, spreadsheet-print, …) emits is what lands on the element's `text` field, and the parquet writer serialises `elements` — so on-disk content stays extraction-time verbatim. Downstream stages (PII, redaction, chunking) may rewrite `pages[i].text` in place; the parquet is unaffected.
+`_normalise_text` no longer runs in the extraction hot path. Whatever the producing extractor (native text layer, PaddleOCR, DOCX, spreadsheet-print, …) emits is what lands on the element's `text` field, and the parquet writer serialises `elements` — so on-disk content stays extraction-time verbatim. PII and redaction stages may still rewrite `pages[i].text` in place for their own internal use; the parquet is unaffected.
 
-If an extractor is producing wrong bytes due to its own bug (broken ToUnicode font maps producing `$` for `'s`, URL corruption like `http:lL`, spaced-character OCR footers), the fix belongs in the extractor itself, not as a post-extraction normalisation pass. Systematic post-extraction cleanup belongs to a downstream cleaning stage that rewrites `pages[i].text`. See `docs/extraction.md`.
+**Chunking reads `elements`, not `pages[i].text`** (as of I2, 2026-05-27). `chunk_batch` consumes `ChunkInput`s built from the element stream via `reassemble_narrative` + `collect_tables_from_elements`. In-memory `pages[i].text` mutations from PII / redact-blackout no longer flow to chunks under `womblex run`; downstream stages that want post-rewrite text will consume the `*.clean_text.parquet` sidecar (P1, not yet written).
+
+If an extractor is producing wrong bytes due to its own bug (broken ToUnicode font maps producing `$` for `'s`, URL corruption like `http:lL`, spaced-character OCR footers), the fix belongs in the extractor itself, not as a post-extraction normalisation pass. Systematic post-extraction cleanup belongs to a downstream cleaning stage that rewrites element text. See `docs/extraction.md`.
 ### Local model resolution
 `utils/models.py` is the single source of truth for finding pre-downloaded models. Always use `resolve_local_model_path(name)` rather than constructing paths manually:
 ```python
@@ -248,7 +262,8 @@ For new shapes that fit within the existing native/OCR dispatch:
 1. `configs/example.yaml` — see what's configurable
 2. `ingest/detect.py` — document type detection logic
 3. `operations.py` — independent operations, how they compose
-4. `process/chunker.py` — semchunk integration
+4. `process/chunker.py` — semchunk integration (`chunk_batch` engine, element-stream → ChunkInput helpers)
+5. `process/chunk_stage.py` — per-stage `chunk_shards()` over a shard directory; consumed by `womblex chunk --shards`
 ## Don't
 - Add dataset-specific logic to core modules
 - Assume documents have text layers

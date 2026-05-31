@@ -140,24 +140,40 @@ class PaddleOCRReader:
         )
 
 
-# YOLO COCO class name → womblex block_type mapping.
-# The base YOLOv8n model uses 80 COCO classes, not document-specific labels.
-# This maps COCO detections to the closest document layout equivalent.
-# Classes not listed here default to "paragraph" — see STATUS.md K7(a) for
-# the audit data behind that default (`figure` was wrong for the ~65% of
-# scanned-page YOLO hits that contain OCR text).
+# DocLayNet class name → womblex block_type mapping.
+# Primary mapping. The 11-class DocLayNet taxonomy aligns directly with
+# ElementKind: Picture → figure, Section-header / Title → heading, etc.
+# Formula has no dedicated kind so it collapses to paragraph (text is
+# preserved on the element; downstream consumers can read the original
+# label via meta).
+_YOLO_DOCLAYNET_LABEL_MAP: dict[str, str] = {
+    "Caption": "caption",
+    "Footnote": "footnote",
+    "Formula": "paragraph",
+    "List-item": "list_item",
+    "Page-footer": "footer",
+    "Page-header": "header",
+    "Picture": "figure",
+    "Section-header": "heading",
+    "Table": "table",
+    "Text": "paragraph",
+    "Title": "heading",
+}
+
+# Legacy COCO class name → womblex block_type mapping.
+# Retained for the fallback path only — when the DocLayNet checkpoint is
+# unavailable, the COCO-trained yolov8n.pt produces detections whose
+# class names have no document meaning. These mappings are best-effort
+# guesses and produce mostly noise on real document pages (see K7(b) in
+# STATUS.md). Prefer the DocLayNet path whenever possible.
 _YOLO_COCO_LABEL_MAP: dict[str, str] = {
-    # Objects that look like text/paragraph regions in document scans
     "person": "paragraph",
     "book": "paragraph",
-    # Tabular structures
     "dining table": "table",
-    # Screen/display objects → figure (likely embedded images or charts)
     "tv": "figure",
     "laptop": "figure",
     "cell phone": "figure",
     "monitor": "figure",
-    # Office/print objects → figure
     "keyboard": "figure",
     "mouse": "figure",
     "scissors": "figure",
@@ -165,14 +181,43 @@ _YOLO_COCO_LABEL_MAP: dict[str, str] = {
 }
 
 
-class YOLOLayoutAnalyzer:
-    """Layout region detection via a local YOLOv8 model.
+def _select_label_map(model_names: dict[int, str]) -> tuple[dict[str, str], str]:
+    """Pick a label map based on the loaded model's class names.
 
-    Loads the pre-downloaded ``models/yolov8n.pt`` weight file to avoid
-    runtime downloads.  Detected bounding boxes are mapped to womblex
-    ``LayoutRegion`` objects using ``_YOLO_COCO_LABEL_MAP`` which translates
-    COCO class names to document block types (e.g. ``dining table`` → ``table``,
-    ``person``/``book`` → ``paragraph``, screen objects → ``figure``).
+    Returns ``(label_map, taxonomy_name)``. DocLayNet is detected by the
+    presence of any DocLayNet-unique class (e.g. ``Section-header``);
+    everything else falls back to COCO. ``taxonomy_name`` is used in logs
+    and downstream telemetry.
+    """
+    classes = set(model_names.values())
+    if "Section-header" in classes or "Page-footer" in classes:
+        return _YOLO_DOCLAYNET_LABEL_MAP, "doclaynet"
+    return _YOLO_COCO_LABEL_MAP, "coco"
+
+
+# Recommended inference resolution per taxonomy. DocLayNet was trained at
+# 1280×1280 — the model card recommends that resolution for small-class
+# recall (Caption / Footnote). Empirically on government FOI documents
+# (the ACT_EarlyChildhoodIncidents cohort) 832 matches or beats 1280 on
+# the dominant text classes at ~3× the speed. The few real Caption /
+# Footnote regions present are missed by the model at any resolution,
+# so the 1280 cost isn't paying for itself on this corpus. Override to
+# 1280 when running against documents with heavy small-class content.
+_TAXONOMY_IMGSZ: dict[str, int] = {
+    "doclaynet": 832,
+    "coco": 640,
+}
+
+
+class YOLOLayoutAnalyzer:
+    """Layout region detection via a local YOLO model.
+
+    Resolves the DocLayNet-trained ``yolo11n_doc_layout.pt`` first, falling
+    back to the COCO-trained ``yolov8n.pt`` only if the DocLayNet
+    checkpoint is missing. The fallback exists to keep the layout path
+    functional in partial installs — its output has no real document
+    semantics. Class names from the loaded model select the matching
+    label map at first use.
 
     Requires ``ultralytics`` to be installed (optional dependency).
     """
@@ -182,12 +227,21 @@ class YOLOLayoutAnalyzer:
 
         if model_path is None:
             from womblex.utils.models import resolve_local_model_path
-            resolved = resolve_local_model_path("yolov8n.pt")
+            # DocLayNet-trained checkpoint is the primary path.
+            resolved = resolve_local_model_path("yolo11n_doc_layout.pt")
+            if isinstance(resolved, str):
+                # Not present locally; fall back to COCO so the layout path
+                # stays functional (predictions are mostly noise, but the
+                # plumbing keeps working).
+                resolved = resolve_local_model_path("yolov8n.pt")
             self._model_path = str(resolved)
         else:
             self._model_path = str(_Path(model_path))
 
         self._engine: object | None = None
+        self._label_map: dict[str, str] = _YOLO_COCO_LABEL_MAP
+        self._taxonomy: str = "coco"
+        self._imgsz: int = _TAXONOMY_IMGSZ["coco"]
 
     def _ensure_loaded(self) -> None:
         if self._engine is not None:
@@ -196,7 +250,13 @@ class YOLOLayoutAnalyzer:
             from ultralytics import YOLO  # type: ignore[import-untyped]
 
             self._engine = YOLO(self._model_path)
-            logger.info("YOLOv8 layout model loaded from %s", self._model_path)
+            names = getattr(self._engine, "names", {}) or {}
+            self._label_map, self._taxonomy = _select_label_map(names)
+            self._imgsz = _TAXONOMY_IMGSZ[self._taxonomy]
+            logger.info(
+                "YOLO layout model loaded from %s (taxonomy=%s, imgsz=%d)",
+                self._model_path, self._taxonomy, self._imgsz,
+            )
         except ImportError as exc:
             raise ImportError(
                 "YOLOLayoutAnalyzer requires 'ultralytics'. "
@@ -204,19 +264,18 @@ class YOLOLayoutAnalyzer:
             ) from exc
 
     def analyze(self, img: np.ndarray, conf_threshold: float = 0.3) -> list[LayoutRegion]:
-        """Detect layout regions using YOLOv8 inference.
+        """Detect layout regions, returning sorted ``LayoutRegion`` objects.
 
-        Args:
-            img: RGB image as a numpy array.
-            conf_threshold: Minimum detection confidence to include.
-
-        Returns:
-            List of detected layout regions sorted top-to-bottom.
+        Inference resolution defaults to the per-taxonomy value in
+        ``_TAXONOMY_IMGSZ`` (DocLayNet: 832, COCO: 640). Detected class
+        names map through the loaded model's selected label map.
         """
         self._ensure_loaded()
         assert self._engine is not None
 
-        results = self._engine(img, conf=conf_threshold, verbose=False)  # type: ignore[operator]
+        results = self._engine(  # type: ignore[operator]
+            img, conf=conf_threshold, verbose=False, imgsz=self._imgsz,
+        )
         regions: list[LayoutRegion] = []
 
         for result in results:
@@ -229,7 +288,7 @@ class YOLOLayoutAnalyzer:
                 cls_id = int(box.cls[0])
                 x0, y0, x1, y1 = (float(v) for v in box.xyxy[0])
                 label = result.names.get(cls_id, str(cls_id)) if result.names else str(cls_id)
-                block_type = _YOLO_COCO_LABEL_MAP.get(label, "paragraph")
+                block_type = self._label_map.get(label, "paragraph")
                 regions.append(LayoutRegion(
                     bbox=(x0, y0, x1, y1),
                     label=label,

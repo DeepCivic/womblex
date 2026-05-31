@@ -243,20 +243,44 @@ class ChunkingConfig(BaseModel):
 
     """Chunking configuration for semchunk.
 
+    Thin pass-through to semchunk 3.x — every field below either maps
+    directly to a semchunk parameter or is a Womblex-only integration
+    concern semchunk can't own. There are no Womblex toggles that
+    re-expose a semchunk feature under a different name.
 
-    All semchunk v3+ parameters are exposed. Creation-time parameters
+    Maps to ``semchunk.chunkerify`` (creation-time): ``tokenizer``
+    (→ ``tokenizer_or_token_counter``), ``chunk_size``, ``memoize``,
+    ``cache_maxsize``, ``max_token_chars``.
 
-    (``memoize``, ``max_token_chars``, ``cache_maxsize``)
-    are set when building the chunker.
+    Maps to ``semchunk.Chunker.__call__`` (per-call): ``overlap``,
+    ``processes``, ``progress``. (``offsets`` is pinned ``True`` in the
+    adapter — Womblex always needs char offsets for page mapping.)
 
-    Per-call parameters (``overlap``, ``processes``, ``batch``, ``progress``)
-    are passed at chunk time.
+    Womblex-only (no semchunk equivalent): ``enabled`` (stage gate),
+    ``chunk_tables`` (element-stream → markdown projection).
+
+    Default divergences from semchunk upstream, each with a corpus
+    reason: ``tokenizer="isaacus/kanon-2-tokenizer"`` matches the
+    analysis side; ``chunk_size=480`` is the Kanon-2 window (upstream
+    defaults to ``None`` = auto-derive from the tokeniser's
+    ``model_max_length``, which this field still accepts as a
+    pass-through); ``processes=1`` keeps single-thread Chromebook
+    portability.
     """
 
 
     tokenizer: str = "isaacus/kanon-2-tokenizer"
 
-    chunk_size: int = Field(default=480, ge=1)
+    chunk_size: int | None = Field(
+        default=480,
+        ge=1,
+        description=(
+            "Maximum tokens per chunk. None passes through to semchunk, "
+            "which derives the size from the tokeniser's model_max_length. "
+            "Defaults to 480 (the Kanon-2 window) rather than upstream's "
+            "None auto-derive — see class docstring."
+        ),
+    )
 
     enabled: bool = Field(default=True, description="Run chunking stage")
 
@@ -291,14 +315,6 @@ class ChunkingConfig(BaseModel):
 
         description="Parallel chunking workers. Default 1 (single-threaded, suitable for Chromebook deployment).",
 
-    )
-
-    batch: bool = Field(
-        default=False,
-        description=(
-            "Collect all texts (narrative + tables) and chunk in one call. "
-            "Enables real multiprocessing when processes > 1."
-        ),
     )
 
     progress: bool = Field(
@@ -339,6 +355,35 @@ class DatasetConfig(BaseModel):
 
     name: str
 
+    run_id: str | None = Field(
+        default=None,
+        description=(
+            "Identifier for this run instance. Multiple runs co-exist under "
+            "<output_root>/<run_id>/documents/. If None, an ISO timestamp "
+            "(run-YYYYMMDDTHHMMSSZ) is generated when the run starts."
+        ),
+    )
+
+
+
+class RetentionConfig(BaseModel):
+    """Run-output retention policy.
+
+    Controls whether older run directories under ``<output_root>/`` are
+    auto-purged when a new run starts. The current run is always preserved.
+    """
+
+    policy: str = Field(
+        default="rolling",
+        description=(
+            "rolling = keep `keep` most-recent runs (including current), "
+            "purge older. keep_all = no auto-purge; user manages purges manually."
+        ),
+    )
+    keep: int = Field(
+        default=2, ge=1,
+        description="Number of runs to retain under `rolling`. Ignored when policy=keep_all.",
+    )
 
 
 class ProcessingConfig(BaseModel):
@@ -349,6 +394,87 @@ class ProcessingConfig(BaseModel):
     batch_size: int = Field(default=100, ge=1)
 
     checkpoint_every: int = Field(default=100, ge=1)
+
+    retention: RetentionConfig = RetentionConfig()
+
+
+class ReferenceConfig(BaseModel):
+    """Declares how a corpus reference register maps onto the generic matcher.
+
+    The library knows nothing about specific registers; the corpus declares
+    which columns play which role. The matcher resolves a document mention
+    to a canonical entity via:
+
+    - ``match_exact_cols`` — normalised equality = definitive match
+      (confidence 1.0). For ACT childcare this is the service address
+      columns; concatenated + normalised, it survives OCR noise on names.
+    - ``match_fuzzy_cols`` — difflib similarity; best ``>= name_threshold``
+      matches. Typically the legal/trading/service name columns.
+    """
+
+    path: Path = Field(description="Reference table file (CSV for v1).")
+    format: str = Field(default="csv", description="Reference format. Only 'csv' implemented.")
+    id_col: str = Field(description="Column holding the canonical entity id (e.g. SE-/PR-).")
+    name_col: str = Field(description="Column holding the canonical display name.")
+    entity_type: str = Field(
+        default="entity",
+        description="Constant entity_type tag for matches (e.g. 'service').",
+    )
+    parent_id_col: str | None = Field(
+        default=None, description="Optional hierarchy FK column (e.g. provider id of a service).",
+    )
+    match_exact_cols: list[str] = Field(
+        default_factory=list,
+        description="Columns concatenated+normalised for definitive equality matching.",
+    )
+    match_fuzzy_cols: list[str] = Field(
+        default_factory=list, description="Columns scored by normalised fuzzy similarity.",
+    )
+    alias_table: Path | None = Field(
+        default=None,
+        description=(
+            "Optional CSV of corpus-curated alias -> entity_id overrides for "
+            "entities the register doesn't carry (e.g. prior trustees). "
+            "Columns: alias, entity_id."
+        ),
+    )
+
+
+class LinkingConfig(BaseModel):
+    """Entity-link stage settings. Generic; corpus supplies the reference."""
+
+    enabled: bool = Field(default=False, description="Run the entity-link stage")
+    reference: ReferenceConfig | None = Field(
+        default=None, description="Reference register mapping (required when enabled).",
+    )
+    candidate_kinds: list[str] = Field(
+        default_factory=lambda: ["corporate", "address"],
+        description=(
+            "Enrichment entity_type values treated as link candidates. "
+            "Pass-through to the Kanon-2 taxonomy — corporate persons + "
+            "address locations by default."
+        ),
+    )
+    name_threshold: float = Field(
+        default=0.85, ge=0.0, le=1.0,
+        description="Minimum normalised fuzzy similarity for a name match.",
+    )
+
+
+class EmbeddingConfig(BaseModel):
+    """Isaacus embedding settings (kanon-2-embedder). Thin pass-through."""
+
+    enabled: bool = Field(default=False, description="Run the embed stage")
+    model: str = Field(default="kanon-2-embedder", description="Isaacus embedding model")
+    task: str | None = Field(
+        default="retrieval/document",
+        description="Embedding task: retrieval/document (index) | retrieval/query | null.",
+    )
+    dimensions: int | None = Field(
+        default=None, description="Optional output dimensionality (model default if null).",
+    )
+    max_retries: int = Field(default=3, ge=0)
+    retry_base_delay: float = Field(default=2.0, ge=0.0)
 
 
 class WomblexConfig(BaseModel):
@@ -361,6 +487,8 @@ class WomblexConfig(BaseModel):
     redaction: RedactionConfig = RedactionConfig()
     chunking: ChunkingConfig = ChunkingConfig()
     enrichment: EnrichmentConfig = EnrichmentConfig()
+    embedding: EmbeddingConfig = EmbeddingConfig()
+    linking: LinkingConfig = LinkingConfig()
     pii: PIIConfig = PIIConfig()
     processing: ProcessingConfig = ProcessingConfig()
 

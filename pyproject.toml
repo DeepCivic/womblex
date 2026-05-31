@@ -53,10 +53,9 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "-m 'not slow'"
 markers = [
     "benchmark: OCR accuracy benchmarks (slow, run with -m benchmark)",
-    "slow: tests that invoke EasyOCR and take 30+ seconds each (run with -m slow)",
+    "slow: OCR-fixture tests, historically slow under EasyOCR. Now fast under rapidocr-onnxruntime (~7s for the whole cohort) so they run by default; the marker is retained for ad-hoc filtering via -m slow / -m 'not slow'.",
 ]
 
 [tool.ruff]

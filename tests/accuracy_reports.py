@@ -263,14 +263,15 @@ def generate_extraction_report(results: dict[str, list[dict]]) -> str:
     lines.append("")
     lines.append(f"**Date:** {date.today().isoformat()}")
     lines.append("**Engine:** rapidocr-onnxruntime (PaddleOCR v4 ONNX)")
-    lines.append("**Layout:** YOLOv8n (COCO) via ultralytics")
+    lines.append("**Layout:** YOLO11n DocLayNet (yolo11n_doc_layout.pt) via ultralytics; "
+                 "COCO yolov8n.pt retained as fallback")
     lines.append("**Architecture:** Per-page orchestrator for PDFs "
                  "(`ingest/orchestrator.py` + `ingest/page_profile.py`); "
                  "format dispatch for non-PDFs; pluggable backend protocols "
                  "in `ingest/interfaces/protocols.py`. Output is an element "
                  "stream with kinds (paragraph / heading / list_item / "
-                 "caption / header / footer / signature / figure / image / "
-                 "table / form / page_break / sheet_meta / sheet_cell) "
+                 "caption / header / footer / footnote / signature / figure / "
+                 "image / table / form / page_break / sheet_meta / sheet_cell) "
                  "serialised to four sibling parquet files per batch.")
     lines.append("")
 
@@ -306,7 +307,7 @@ def generate_extraction_report(results: dict[str, list[dict]]) -> str:
     lines.append("| Protocol | Default Implementation | Notes |")
     lines.append("|----------|----------------------|-------|")
     lines.append("| `OCRReader` | `PaddleOCRReader` (rapidocr-onnxruntime) | Lazy-loaded, cached per lang |")
-    lines.append("| `LayoutAnalyzer` | `YOLOLayoutAnalyzer` (yolov8n.pt COCO) | COCO classes (heuristically mapped to document block types); also consumed by `redact/stage.py` as exclusion regions on raster-fallback redaction detection (suppresses 02737-class scanned_mixed false positives). Document-layout-trained checkpoint (DocLayNet / PubLayNet) would give better per-class P/R/F1. |")
+    lines.append("| `LayoutAnalyzer` | `YOLOLayoutAnalyzer` (yolo11n_doc_layout.pt — DocLayNet, MIT) | DocLayNet's 11 document classes map directly into womblex `ElementKind` via `_YOLO_DOCLAYNET_LABEL_MAP`. Inference imgsz follows a per-taxonomy default (DocLayNet 832, COCO 640) — the model card recommends 1280 for small-class recall (Caption / Footnote) but on this corpus 832 is empirically equivalent at ~3× the per-call speed; override to 1280 for document genres where small classes matter. Also consumed by `redact/stage.py` as exclusion regions on raster-fallback redaction detection — taxonomy-agnostic match on `block_type ∈ {figure, table}`. COCO `yolov8n.pt` retained as fallback if the DocLayNet checkpoint isn't resolvable. |")
     lines.append("| `Preprocessor` | `preprocess_for_ocr()` | Deskew + histogram-gated binarisation |")
     lines.append("")
 

@@ -68,11 +68,13 @@ DOCLAYNET_LABELS: dict[int, str] = {
     11: "Title",
 }
 
-# Map DocLayNet labels to womblex block_type equivalents
+# Map DocLayNet labels to womblex block_type equivalents.
+# Must match `_YOLO_DOCLAYNET_LABEL_MAP` in `ingest/paddle_ocr.py` so the
+# layout F1 measurement credits the analyzer for correct predictions.
 DOCLAYNET_TO_WOMBLEX: dict[str, str] = {
     "Caption": "caption",
-    "Footnote": "paragraph",
-    "Formula": "formula",
+    "Footnote": "footnote",
+    "Formula": "paragraph",
     "List-item": "list_item",
     "Page-footer": "footer",
     "Page-header": "header",

@@ -35,3 +35,6 @@ fixtures/
 
 # OS
 .DS_Store
+
+# Local agent state
+.claude/

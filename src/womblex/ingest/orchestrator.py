@@ -41,6 +41,7 @@ from womblex.ingest.extract import (
     _build_text_blocks,
     _emit_table_column_major,
     _extract_form_pairs_from_lines,
+    _extract_form_pairs_from_regions,
     _extract_forms,
     _extract_images_from_page,
     _extract_tables_from_page,
@@ -158,14 +159,21 @@ def _apply_ocr_page(
         _ocr_page,
     )
 
-    text, conf, steps, native_order = _ocr_page(
+    text, conf, steps, native_order, regions, pix_dims = _ocr_page(
         page, dpi, lang, engine, engine_options,
     )
     accum.text = text
     accum.method = "ocr"
     accum.confidence = conf
     accum.steps.extend(steps)
-    accum.forms.extend(_extract_form_pairs_from_lines(text))
+    # K2′: prefer per-region extraction (preserves bbox) when the OCR engine
+    # returned per-detection results. LLM engines that resolve reading order
+    # natively yield no regions — fall back to bbox-less line extraction.
+    if regions:
+        pw, ph = pix_dims
+        accum.forms.extend(_extract_form_pairs_from_regions(regions, float(pw), float(ph)))
+    else:
+        accum.forms.extend(_extract_form_pairs_from_lines(text))
 
     if native_order:
         accum.blocks.extend(_markdown_page_block(page, text, conf))
@@ -216,6 +224,7 @@ _BLOCK_TYPE_TO_KIND: dict[str, str] = {
     "caption": "caption",
     "header": "header",
     "footer": "footer",
+    "footnote": "footnote",
     "signature": "signature",
     "figure": "figure",
     "table": "paragraph",

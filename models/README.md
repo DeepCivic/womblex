@@ -13,12 +13,23 @@ automatically via `utils/models.py` — no manual path configuration required.
 - **Used by:** `pii/cleaner.py` — context-similarity validation for PERSON candidate spans
 - **Layout:** HuggingFace hub snapshot layout (`refs/main` → `snapshots/<hash>/`)
 
+### yolo11n_doc_layout.pt
+
+- **Type:** YOLO11 nano object-detection weights (DocLayNet-finetuned)
+- **Source:** [Armaggheddon/yolo11-document-layout](https://huggingface.co/Armaggheddon/yolo11-document-layout) (HF), MIT license
+- **Size:** 5.37 MB
+- **SHA-256:** `3629fc7abe8cca55ff490e16cccad7a100cbd814881163258815513e0a37881f`
+- **Classes:** 11 DocLayNet — `Caption`, `Footnote`, `Formula`, `List-item`, `Page-footer`, `Page-header`, `Picture`, `Section-header`, `Table`, `Text`, `Title`
+- **Recommended inference resolution:** 832 default. The model card recommends 1280, but on the ACT FOI corpus 832 matches or beats 1280 on dominant text classes at ~3× the speed, and small-class recall (Caption / Footnote) is poor at any resolution on this corpus. Increase to 1280 for document genres where small classes matter.
+- **Used by:** `ingest/paddle_ocr.py` — primary layout backend via `YOLOLayoutAnalyzer`; also consumed by `redact/stage.py` as exclusion regions on raster-fallback redaction detection
+- **Layout:** Bare `.pt` file
+
 ### yolov8n.pt
 
 - **Type:** YOLOv8 nano object-detection weights (COCO-pretrained)
 - **Source:** Ultralytics
 - **Size:** ~6 MB
-- **Used by:** `ingest/paddle_ocr.py` — primary layout backend via `YOLOLayoutAnalyzer`
+- **Used by:** `ingest/paddle_ocr.py` — fallback layout backend if the DocLayNet checkpoint is unavailable (e.g. partial installs). COCO classes have no document semantics; the fallback exists only to keep the layout path functional, not to produce useful predictions.
 - **Layout:** Bare `.pt` file
 
 ## How path resolution works

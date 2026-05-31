@@ -41,7 +41,12 @@ from womblex.ingest.detect import DocumentProfile, detect_file_type
 
 from womblex.ingest.extract import ExtractionResult, extract_text
 
-from womblex.process.chunker import TextChunk, chunk_document, create_chunker
+from womblex.process.chunker import (
+    TextChunk,
+    build_chunk_input,
+    chunk_batch,
+    create_chunker,
+)
 
 from womblex.redact.stage import (
 
@@ -394,110 +399,68 @@ def run_redaction(
 
 
 def run_chunking(
-
-    results: list[DocumentResult], config: WomblexConfig
-
+    results: list[DocumentResult], config: WomblexConfig,
 ) -> list[DocumentResult]:
-
     """Split extracted text into token-bounded chunks.
 
-
-    Chunks narrative text and (optionally) tables separately. Applies
-
-    ``flag``-mode redaction annotation to chunks when a redaction report
-
-    exists on the extraction.
-
-
-    Args:
-
-        results: DocumentResults from extraction (and optionally redaction).
-
-        config: Pipeline configuration (uses ``config.chunking``).
-
-
-    Returns:
-
-        The same list with ``chunks`` populated on each result.
-
+    Reassembles narrative + tables from each result's element stream
+    (the canonical source of truth) and feeds every result into a
+    single :func:`chunk_batch` call so semchunk's ``processes`` and
+    progress arguments parallelise across the whole batch. Applies
+    ``flag``-mode redaction annotation to chunks when a redaction
+    report exists on the extraction.
     """
-
     if not config.chunking.enabled:
         return results
 
-
     chunker = create_chunker(
-
         tokenizer=config.chunking.tokenizer,
-
         chunk_size=config.chunking.chunk_size,
-
         memoize=config.chunking.memoize,
-
         cache_maxsize=config.chunking.cache_maxsize,
-
         max_token_chars=config.chunking.max_token_chars,
-
     )
 
-
     chunk_cfg = config.chunking
+    eligible: list[DocumentResult] = [
+        dr for dr in results
+        if dr.status == "completed" and dr.extraction is not None
+    ]
+    if not eligible:
+        return results
 
-    for dr in results:
+    inputs = [
+        build_chunk_input(
+            source_hash=dr.doc_id,
+            elements=dr.extraction.elements,
+            include_tables=chunk_cfg.chunk_tables,
+        )
+        for dr in eligible
+    ]
 
-        if dr.status != "completed" or not dr.extraction:
-            continue
+    chunks_by_doc = chunk_batch(
+        inputs,
+        chunker,
+        overlap=chunk_cfg.overlap,
+        processes=chunk_cfg.processes,
+        progress=chunk_cfg.progress,
+    )
 
-
-        tables = dr.extraction.tables if chunk_cfg.chunk_tables else None
-
-        dr.chunks = chunk_document(
-
-            dr.extraction.full_text,
-
-            chunker,
-
-            tables=tables,
-
-            overlap=chunk_cfg.overlap,
-
-            processes=chunk_cfg.processes,
-
-            batch=chunk_cfg.batch,
-
-            progress=chunk_cfg.progress,
-
-        )  # type: ignore[arg-type]
-
-
-        # Flag-mode redaction annotation on chunks
-
+    for dr in eligible:
+        dr.chunks = chunks_by_doc.get(dr.doc_id, [])
         redaction_report = dr.extraction.redaction_report
-
         if (
-
             config.redaction.enabled
-
             and config.redaction.mode == "flag"
             and redaction_report
-
         ):
-
             dr.chunks = annotate_chunks(dr.chunks, redaction_report)
-
-
         logger.debug(
-
             "chunked: doc=%s chunks=%d narrative=%d table=%d",
-
             dr.doc_id,
-
             len(dr.chunks),
-
             sum(1 for c in dr.chunks if c.content_type == "narrative"),
-
             sum(1 for c in dr.chunks if c.content_type == "table"),
-
         )
 
     return results

@@ -234,6 +234,47 @@ class TestClassifyNativeBlock:
         assert _classify_native_block("Body text in a regulation citation.", max_font_size=11, is_bold=False, y_norm=0.5) == "paragraph"
 
 
+class TestOcrRegionBlockType:
+    """K9-fig — full-page OCR collapsed onto a non-text layout kind.
+
+    A full-page scan OCR's to substantial prose but is tagged with the dominant
+    region's kind. When that kind is `figure` (∉ TEXT_KINDS) the block is
+    excluded from chunking and its content is silently lost. The helper promotes
+    such a block to `paragraph` by text volume; page-furniture (page numbers,
+    bare logos) keeps its `figure` kind. Text kinds (incl. `caption`) and
+    `table` already reach the right consumer and pass through unchanged.
+    """
+
+    def test_substantial_text_promotes_figure_to_paragraph(self) -> None:
+        from womblex.ingest.strategies_scanned import _ocr_region_block_type
+
+        scan = (
+            "13. Relevant extracts from Witness B's statement include the "
+            "following observations made during the incident."
+        )
+        assert _ocr_region_block_type(scan, "figure") == "paragraph"
+
+    def test_sparse_text_keeps_figure_kind(self) -> None:
+        from womblex.ingest.strategies_scanned import _ocr_region_block_type
+
+        for furniture in ("8lPage", "4l Page", "ACT\nGovernment\nEducation"):
+            assert _ocr_region_block_type(furniture, "figure") == "figure"
+
+    def test_text_kinds_and_tables_pass_through(self) -> None:
+        from womblex.ingest.strategies_scanned import _ocr_region_block_type
+
+        # A text kind (caption ∈ TEXT_KINDS) or table is never reclassified.
+        assert _ocr_region_block_type("short", "heading") == "heading"
+        assert _ocr_region_block_type("Figure 1 caption text here", "caption") == "caption"
+        assert _ocr_region_block_type("a much longer block of prose here", "table") == "table"
+
+    def test_threshold_boundary_is_inclusive(self) -> None:
+        from womblex.ingest.strategies_scanned import _ocr_region_block_type
+
+        assert _ocr_region_block_type("one two three four", "figure") == "figure"
+        assert _ocr_region_block_type("one two three four five", "figure") == "paragraph"
+
+
 class TestFormLabelDenylist:
     """K3 — `_looks_like_form_label` denylist for regulatory-letter prose."""
 
@@ -258,23 +299,132 @@ class TestFormLabelDenylist:
         assert _looks_like_form_label("Approved provider name")
 
 
-class TestYoloLabelMapDefault:
-    """K7(a) — _YOLO_COCO_LABEL_MAP default class is paragraph, not figure."""
+class TestYoloLabelMapSelection:
+    """K7(b) — DocLayNet vs COCO label-map selection from loaded class names."""
 
-    def test_default_is_paragraph(self) -> None:
-        from womblex.ingest.paddle_ocr import _YOLO_COCO_LABEL_MAP
-        # Default for unknown classes — text-bearing OCR regions on scanned pages
-        # should map to paragraph rather than figure.
+    def test_doclaynet_selected_by_section_header(self) -> None:
+        from womblex.ingest.paddle_ocr import _YOLO_DOCLAYNET_LABEL_MAP, _select_label_map
+        m, t = _select_label_map({0: "Section-header", 1: "Text", 2: "Title"})
+        assert t == "doclaynet"
+        assert m is _YOLO_DOCLAYNET_LABEL_MAP
+
+    def test_doclaynet_selected_by_page_footer(self) -> None:
+        from womblex.ingest.paddle_ocr import _select_label_map
+        _, t = _select_label_map({0: "Page-footer", 1: "Text"})
+        assert t == "doclaynet"
+
+    def test_coco_fallback_for_unknown_classes(self) -> None:
+        from womblex.ingest.paddle_ocr import _YOLO_COCO_LABEL_MAP, _select_label_map
+        m, t = _select_label_map({0: "person", 1: "book", 2: "tv"})
+        assert t == "coco"
+        assert m is _YOLO_COCO_LABEL_MAP
+
+    def test_unknown_class_defaults_to_paragraph(self) -> None:
+        # K7(a) invariant preserved: unknown classes default to paragraph, not figure.
+        from womblex.ingest.paddle_ocr import _YOLO_COCO_LABEL_MAP, _YOLO_DOCLAYNET_LABEL_MAP
         assert _YOLO_COCO_LABEL_MAP.get("unknown_class", "paragraph") == "paragraph"
+        assert _YOLO_DOCLAYNET_LABEL_MAP.get("unknown_class", "paragraph") == "paragraph"
 
-    def test_explicit_mappings_preserved(self) -> None:
-        from womblex.ingest.paddle_ocr import _YOLO_COCO_LABEL_MAP
-        assert _YOLO_COCO_LABEL_MAP["person"] == "paragraph"
-        assert _YOLO_COCO_LABEL_MAP["book"] == "paragraph"
-        assert _YOLO_COCO_LABEL_MAP["dining table"] == "table"
-        # Screen objects still map to figure (real embedded image content)
-        assert _YOLO_COCO_LABEL_MAP["tv"] == "figure"
-        assert _YOLO_COCO_LABEL_MAP["laptop"] == "figure"
+
+class TestYoloDocLayNetMap:
+    """K7(b) — DocLayNet class names map to expected element kinds."""
+
+    def test_text_classes_map_to_text_kinds(self) -> None:
+        from womblex.ingest.paddle_ocr import _YOLO_DOCLAYNET_LABEL_MAP
+        assert _YOLO_DOCLAYNET_LABEL_MAP["Text"] == "paragraph"
+        assert _YOLO_DOCLAYNET_LABEL_MAP["Title"] == "heading"
+        assert _YOLO_DOCLAYNET_LABEL_MAP["Section-header"] == "heading"
+        assert _YOLO_DOCLAYNET_LABEL_MAP["List-item"] == "list_item"
+        assert _YOLO_DOCLAYNET_LABEL_MAP["Caption"] == "caption"
+
+    def test_structural_classes(self) -> None:
+        from womblex.ingest.paddle_ocr import _YOLO_DOCLAYNET_LABEL_MAP
+        assert _YOLO_DOCLAYNET_LABEL_MAP["Page-header"] == "header"
+        assert _YOLO_DOCLAYNET_LABEL_MAP["Page-footer"] == "footer"
+        assert _YOLO_DOCLAYNET_LABEL_MAP["Footnote"] == "footnote"
+
+    def test_visual_classes(self) -> None:
+        from womblex.ingest.paddle_ocr import _YOLO_DOCLAYNET_LABEL_MAP
+        assert _YOLO_DOCLAYNET_LABEL_MAP["Picture"] == "figure"
+        assert _YOLO_DOCLAYNET_LABEL_MAP["Table"] == "table"
+
+    def test_formula_collapses_to_paragraph(self) -> None:
+        # No dedicated formula kind — text is preserved, label collapses.
+        from womblex.ingest.paddle_ocr import _YOLO_DOCLAYNET_LABEL_MAP
+        assert _YOLO_DOCLAYNET_LABEL_MAP["Formula"] == "paragraph"
+
+
+class TestFootnoteKind:
+    """K7(b) — `footnote` is a real ElementKind, in TEXT_KINDS and block-type map."""
+
+    def test_footnote_in_text_kinds(self) -> None:
+        from womblex.ingest.elements import TEXT_KINDS
+        assert "footnote" in TEXT_KINDS
+
+    def test_footnote_in_block_type_to_kind(self) -> None:
+        from womblex.ingest.orchestrator import _BLOCK_TYPE_TO_KIND
+        assert _BLOCK_TYPE_TO_KIND["footnote"] == "footnote"
+
+
+class TestK2PrimeOcrFormBboxes:
+    """K2′ — OCR form-pair extractor preserves per-region bbox."""
+
+    def test_region_bbox_normalised_to_position(self) -> None:
+        from womblex.ingest.forms import _extract_form_pairs_from_regions
+        from womblex.ingest.interfaces.protocols import OCRRegionResult
+
+        regions = [
+            OCRRegionResult(
+                bbox=[[100, 200], [400, 200], [400, 230], [100, 230]],
+                text="Notification Number: ABC-1234",
+                confidence=0.95,
+            ),
+        ]
+        fields = _extract_form_pairs_from_regions(regions, pix_width=600, pix_height=800)
+        assert len(fields) == 1
+        f = fields[0]
+        assert f.field_name == "Notification Number"
+        assert f.value == "ABC-1234"
+        # The defining K2′ check: bbox must be a real position, not (0,0,0,0).
+        assert f.position.x > 0
+        assert f.position.y > 0
+        assert f.position.width > 0
+        assert f.position.height > 0
+
+    def test_gap_pattern_pair(self) -> None:
+        from womblex.ingest.forms import _extract_form_pairs_from_regions
+        from womblex.ingest.interfaces.protocols import OCRRegionResult
+
+        regions = [
+            OCRRegionResult(
+                bbox=[[50, 100], [550, 100], [550, 130], [50, 130]],
+                text="Provider Name    Wonderschool",
+                confidence=0.92,
+            ),
+        ]
+        fields = _extract_form_pairs_from_regions(regions, pix_width=600, pix_height=800)
+        assert len(fields) == 1
+        assert fields[0].field_name == "Provider Name"
+        assert fields[0].value == "Wonderschool"
+
+    def test_denylist_still_applies(self) -> None:
+        # K3 label denylist must be respected in the region-based path too.
+        from womblex.ingest.forms import _extract_form_pairs_from_regions
+        from womblex.ingest.interfaces.protocols import OCRRegionResult
+
+        regions = [
+            OCRRegionResult(
+                bbox=[[50, 100], [400, 100], [400, 130], [50, 130]],
+                text="OFFICIAL: Sensitive",
+                confidence=0.90,
+            ),
+        ]
+        fields = _extract_form_pairs_from_regions(regions, pix_width=600, pix_height=800)
+        assert len(fields) == 0
+
+    def test_empty_dims_returns_empty(self) -> None:
+        from womblex.ingest.forms import _extract_form_pairs_from_regions
+        assert _extract_form_pairs_from_regions([], 0, 0) == []
 
 
 class TestPageBreakEmission:

@@ -7,6 +7,266 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **K9-fig — full-page scans no longer dropped from chunking as `figure`.**
+  The dominant-region fallback in `_layout_blocks_and_tables` collapsed a
+  whole page's OCR onto one block tagged with the largest layout region's
+  kind; when that was DocLayNet `Picture` → `figure`, a full-page scanned
+  document became a single `figure` element, which is excluded from the
+  chunk narrative (`figure` ∉ `TEXT_KINDS`) — silently losing the document.
+  New shared helper `_ocr_region_block_type(text, layout_kind)` promotes a
+  non-text fallback kind to `paragraph` when the OCR yields ≥5 words; sparse
+  output (page-number stamps, bare logos) keeps `figure`. (The original E4
+  audit mis-attributed this to `_ocr_image_regions`; that path now routes
+  through the same helper.) On the ACT-ECI corpus: `figure` 1,200→154,
+  `paragraph` +1,046, and all 16 previously zero-chunk complaint documents
+  now produce chunks (docs-with-chunks 2,610→2,626). The existing extraction
+  shards were corrected by an in-place `kind` relabel (verified equivalent to
+  a full re-extraction), so no re-OCR was required. 4 new unit tests.
+
+### Added
+- **I7 — entity-link sidecar: `womblex enrich` + `womblex link` per-stage CLIs.**
+  Two new per-stage stages mirroring `womblex chunk --shards`, each with an
+  independent `CheckpointManager` and per-batch sibling parquets.
+  `womblex enrich --shards <dir>` reassembles each doc's narrative
+  (`reassemble_narrative`), calls the Kanon-2 enricher one doc at a time
+  (per-doc failure isolation), and writes `*.enrichment_entities.parquet` +
+  `*.enrichment_meta.parquet` (reusing `store/enrichment_output.py` schemas,
+  keyed on `source_hash`). `womblex link --shards <dir> --config <yaml>`
+  resolves enrichment candidates (corporate persons + address locations) to a
+  reference register and writes `*.entity_links.parquet`. **Generic by design:**
+  the schema uses an `entity_type` discriminator (no domain columns), the
+  matcher (`link/matcher.py`) is generic record-linkage (alias → address-exact
+  → token-set name-fuzzy, stdlib `difflib`, no new dependency), and the corpus
+  declares register column-roles via the new `linking`/`reference` config — the
+  library knows nothing about specific registers. Reference loading
+  (`link/reference.py`) is bundle-aware by interface (CSV implemented; the
+  multi-file/geospatial seam is reserved, not built). Doc-grain attribution is
+  a derived read view over the persisted mention-grain rows, not a second file.
+  New `isaacus` is the optional extra (`uv sync --extra isaacus`). Live smoke
+  over the 17-doc Artemis set attributed 15/17 to the correct canonical service
+  (`SE-40002132`); the 2 misses are an enrichment-recall gap and an
+  OCR-typo+no-address doc, not matcher faults. New `tests/test_link.py` (23) +
+  `tests/test_enrich_stage.py`; full fast suite green.
+  - **Matcher** uses stdlib `difflib` only (no rapidfuzz dependency): alias →
+    address-exact → name-fuzzy, where name-fuzzy combines a token-set ratio
+    (suburb-suffix recall, cross-brand precision) with OCR-tolerant per-token
+    char similarity (folds "Earty"→"Early" while still rejecting a different
+    brand). With OCR tolerance the Artemis smoke reaches **16/17**.
+  - **`enrich`** isolates per-doc failures and, critically, does **not**
+    checkpoint a doc whose enrichment errored — a transient/connection failure
+    stays unprocessed so a resume retries it (regression-tested).
+- **`womblex embed --shards` — chunk embeddings stage (Kanon-2 embedder).**
+  `analyse/embed.py` (thin `embeddings.create` wrapper: 128-text batching, 429
+  retry, order-preserving, `retrieval/document`/`query` task-aware) +
+  `analyse/embed_stage.py` (`embed_shards` over `*.chunks.parquet` →
+  `*.embeddings.parquet`, one vector per chunk, per-stage `CheckpointManager`,
+  batch-level failure isolation) + `cli/embed.py` + `EmbeddingConfig` +
+  `EMBEDDINGS_SCHEMA`/IO. The substrate for downstream search/clustering and a
+  doc→entity attribution backstop for no-extraction docs. `tests/test_embed_stage.py`.
+- **I3 — `womblex redact --shards` per-stage CLI.** `womblex redact` is
+  now dual-mode, mirroring `womblex chunk`: `--shards <dir> --pdfs <dir>`
+  runs per-stage redaction detection over an existing extraction shard
+  directory and writes `*.redactions.parquet` siblings; `--config <yaml>`
+  runs the E2E extract+redact path unchanged. The `--shards`/`--config`
+  group is mutually exclusive and required. `--pdfs` is mandatory in
+  `--shards` mode because detection rasterises the source pages (unlike
+  chunking, which works purely from the element stream). The per-stage
+  path calls the existing `redact.batch.annotate_redactions_for_shards`
+  engine via a shared `_run_redact_shards` helper. 8 new CLI tests.
+
+### Changed
+- **I5 — SemChunk wrapper audit (P2).** Audited `process/chunker.py`
+  against semchunk 3.2.5: `create_chunker` exposes every `chunkerify`
+  creation parameter and `chunk_batch` passes every relevant
+  `Chunker.__call__` parameter through (`offsets=True` pinned because
+  Womblex needs char offsets for page mapping). No semchunk-native
+  surface is reimplemented or shadowed. **Removed the dead
+  `ChunkingConfig.batch` flag** — it mapped to no semchunk parameter,
+  was consumed by no code path, and its description referred to the
+  pre-I2 per-document-vs-batch behaviour that I2 deleted (chunk_batch
+  always batches the whole input list). **Widened `chunk_size` to
+  `int | None`** so semchunk's auto-derive path (`None` → size from the
+  tokeniser's `model_max_length`) passes through faithfully; the default
+  stays `480` (the Kanon-2 window), so behaviour is unchanged unless a
+  config explicitly sets `chunk_size: null`. Documented the adapter
+  boundary explicitly in the `chunker.py` module docstring, the
+  `ChunkingConfig` docstring, and `docs/extraction.md`; the three
+  default divergences from upstream (`tokenizer`, `chunk_size=480`,
+  `processes=1`) are each annotated with their corpus reason. Pure
+  thin-adapter cleanup — chunk output is byte-identical to I2 by
+  construction (the removed field was never read; the new `None` path is
+  opt-in). 98 chunker/config/pipeline/output tests pass; 79 integration
+  tests pass.
+- **`annotate-redactions` is now a deprecated back-compat alias** for
+  `redact --shards <dir> --pdfs <dir>`. Its positional-argument surface
+  (`annotate-redactions <shards> <pdfs>`) is preserved verbatim and routes
+  through the same `_run_redact_shards` helper, so existing scripts keep
+  working with byte-identical output. New callers should prefer
+  `redact --shards`. The redact stage retains the engine's JSON
+  `--checkpoint` rather than the `CheckpointManager` used by `chunk`;
+  unifying the two is a deferred P1 follow-up.
+
+### Added
+- **I2 — `womblex chunk --shards` per-stage CLI + `chunks.parquet`
+  sidecar.** New `CHUNKS_SCHEMA` (source_hash, chunk_index, text,
+  start_char/end_char, content_type, has_redaction, page_start /
+  page_end) in `store/output.py` with `write_chunks` / `read_chunks` /
+  `verify_chunks_persistence`. New `process/chunk_stage.py` walks a
+  shard directory, reassembles narrative + tables from the element
+  stream per source_hash, calls the single `chunk_batch` engine, and
+  writes a `*.chunks.parquet` sibling per batch. Per-stage
+  `CheckpointManager` keyed `<dataset>_chunk_checkpoint.json`;
+  chunks-side resume integrity in `shard_audit.scan_chunks_directory`
+  / `reconcile_chunk_checkpoint_with_shards` archives corrupt
+  `*.chunks.parquet` independently of the element-stream files. The
+  shared `chunk_batch` powers both per-stage `chunk_shards` and E2E
+  `operations.run_chunking`, so `--shards` and `--config` modes feed
+  semchunk identical inputs.
+
+### Changed
+- **`process/chunker.py` collapsed against semchunk v3+ surface.**
+  Deleted per-doc wrappers `chunk_text`, `chunk_texts_batch`,
+  `chunk_document` (+ `_chunk_document_sequential` /
+  `_chunk_document_batch` dispatchers) — semchunk already batches
+  across a list of texts and parallelises over `processes` workers
+  when handed one. The new single entry point `chunk_batch(inputs,
+  chunker, ...)` flattens every doc's narrative into one semchunk
+  call (with `overlap`) and every doc's table markdowns into another
+  (no overlap), so `processes` and the progress bar parallelise
+  across the entire batch instead of being thrown away per-document.
+  `TextChunk` gained `page_start` / `page_end` (nullable); the
+  redaction-split repair pass propagates page spans across a merge.
+  New helpers `reassemble_narrative`, `collect_tables_from_elements`,
+  `build_chunk_input` formalise the "element stream → ChunkInput"
+  projection shared by both invocation paths.
+- **`operations.run_chunking` rewired through `chunk_batch`.** Builds
+  one `ChunkInput` per completed result from
+  `dr.extraction.elements` (canonical), not `dr.extraction.full_text`
+  (which is derived from `pages` and reflects in-memory mutations).
+  Behaviour change: in-memory PII / redact-blackout mutations to
+  `pages[i].text` no longer flow to chunks under `womblex run`.
+  Aligns the E2E path with the per-stage one (both consume the
+  element stream); future PII / redact stages will reattach via
+  their sidecars per P1.
+
+### Added
+- **Shard integrity scan on `--resume` (E1).** New
+  `womblex.store.shard_audit.reconcile_checkpoint_with_shards` runs at
+  the top of `cmd_run` when `--resume` is given. Walks every batch's
+  four sibling parquet files: confirms presence + non-empty + parquet-
+  readable, and that manifest `elements_count` / `table_cells_count` /
+  `form_fields_count` sums match the actual sidecar row counts. Any
+  batch failing a check has its `doc_id`s dropped from the checkpoint
+  and its files renamed with a `.corrupt` suffix so reader globs
+  (`*.elements.parquet` etc.) skip them; the dropped docs get re-
+  extracted into new batches past the high-water mark. Batches whose
+  manifest is itself unreadable can't be reconciled automatically (no
+  way to enumerate `doc_id`s) — they're logged loudly and the operator
+  is told to re-run without `--resume`. Defaults on; opt out with
+  `--no-verify-resume`. Closes the silent-failure class of post-write
+  filesystem corruption (drive glitch, partial sync, manual deletion)
+  that motivated the i1b batch-0087 0-byte incident.
+
+- **`womblex verify-shards` CLI (E2).** Audits a run / shard directory
+  for corruption + cross-batch consistency; takes a shard dir or a run
+  root (auto-detects `documents/`). Reports per-batch integrity, total
+  elements / methods / kind counts, dupe and empty hashes. With
+  `--compare-to <other>` produces a side-by-side diff against another
+  run (useful for K-cluster-style "what changed between two
+  extractions" investigations — promotes the ad-hoc `i1b_audit.py`
+  pattern to first-class library + CLI). Optional `--input-dir <pdfs>`
+  surfaces source-vs-manifest count drift. Exits 2 when corruption is
+  detected so CI / cron pipelines can fail loudly. New module:
+  `womblex.store.shard_audit`. New tests in `tests/test_shard_audit.py`
+  (19).
+
+### Changed
+- **Manifest schema gains `doc_id` column.** `MANIFEST_SCHEMA` now
+  carries the extraction's `doc_id` directly, removing the implicit
+  `Path(filename).stem == checkpoint.doc_id` coincidence that previously
+  bound the resume reconcile join. The reader (`read_manifest`) is
+  backward-compatible: manifests written before the bump derive
+  `doc_id` from `Path(filename).stem` on read so existing runs reconcile
+  without re-extraction. Parser version bump is intentionally deferred
+  — the schema is additive and reads gracefully.
+
+### Added
+- **K7(b) — Document-layout YOLO model (DocLayNet).** New default layout
+  checkpoint `yolo11n_doc_layout.pt` (5.37 MB,
+  [Armaggheddon/yolo11-document-layout](https://huggingface.co/Armaggheddon/yolo11-document-layout),
+  MIT) replaces the COCO-trained `yolov8n.pt` as the primary layout
+  backend. `YOLOLayoutAnalyzer` detects the loaded model's taxonomy from
+  its class names: DocLayNet's 11 document classes (Caption, Footnote,
+  Formula, List-item, Page-footer, Page-header, Picture, Section-header,
+  Table, Text, Title) map directly into womblex `ElementKind` values
+  via the new `_YOLO_DOCLAYNET_LABEL_MAP`. COCO weights remain as a
+  best-effort fallback when the DocLayNet checkpoint isn't resolvable.
+  Inference imgsz follows a per-taxonomy default (DocLayNet: 832, COCO:
+  640) — empirically equivalent on this corpus to the model card's 1280
+  recommendation while matching COCO speed; override to 1280 when
+  small-class (Caption / Footnote) recall matters. Closes the
+  1,587-element `kind='figure'` mis-classification on scanned pages
+  tracked in STATUS.md K7(b); unlocks Caption / Footnote producers
+  (K6 closes as a side effect).
+
+- **`footnote` ElementKind.** New text-bearing kind added to
+  `ElementKind`, `TEXT_KINDS`, and `_BLOCK_TYPE_TO_KIND`. Primary
+  producer is the DocLayNet `Footnote` class via the new label map.
+  Downstream stages (PII / redact / chunk) operate on text kinds and
+  pick up the new kind automatically through `TEXT_KINDS`. Future
+  iterations may refine signatory / footnote separation now that the
+  distinction is preserved.
+
+- **K2′ — OCR form-pair bboxes.** New `_extract_form_pairs_from_regions`
+  in `ingest/forms.py` walks per-region OCR detections (PaddleOCR /
+  RapidOCR per-line bboxes) and produces `FormField` entries with real
+  positions. `_apply_ocr_page` prefers this path; the legacy
+  `_extract_form_pairs_from_lines` survives as a fallback for LLM-OCR
+  engines that resolve reading order natively and don't emit per-region
+  bboxes. Closes the K2′ silent-zero-bbox issue on 4,184 of 5,183 OCR
+  form elements (80.7%). Same plumbing unblocks inline-per-span
+  redaction markers on raster pages (P6 option (c) in STATUS.md).
+
+### Changed
+- **`@pytest.mark.slow` tests now run by default.** Removed the
+  `-m 'not slow'` default from `[tool.pytest.ini_options].addopts`. The
+  24 OCR-fixture tests in `tests/test_fixtures.py` were originally marked
+  slow because they invoked EasyOCR (30+ seconds each). The backend has
+  since moved to rapidocr-onnxruntime and the whole cohort completes in
+  ~7 seconds, so excluding them was costing coverage without saving
+  meaningful time. The `slow` marker is retained (description updated)
+  so users can still pass `-m 'not slow'` or `-m slow` for ad-hoc
+  filtering.
+
+### Added
+- **`run_id` + retention plumbing (I1 of publishable-corpus track).**
+  Pipeline runs now write outputs to `<output_root>/<run_id>/documents/`
+  rather than `<output_root>/documents/`. Run id resolution order:
+  `--run-id` CLI flag → `dataset.run_id` in config → auto-generated
+  `run-YYYYMMDDTHHMMSSZ` timestamp. `--resume` without a run id picks
+  the most-recent existing run dir. Checkpoints follow under
+  `<checkpoint_dir>/<run_id>/`.
+
+  New `processing.retention` config block: `policy: rolling | keep_all`
+  (default `rolling`) and `keep: int` (default `2`). On fresh runs (not
+  `--resume`), old run dirs beyond the retention window are purged in
+  lockstep with their checkpoint dirs. The current run is always
+  preserved regardless of position.
+
+  Foundation for stage-aware sidecar persistence (I2+); no extraction
+  output content has changed.
+
+  New module: `womblex.store.retention` (`generate_run_id`, `list_runs`,
+  `most_recent_run`, `apply_retention`). New tests in
+  `tests/test_retention.py` (20) and `tests/test_config.py` (8).
+
+  Retention only considers subdirectories whose name starts with `run-`
+  — legacy / hand-named output dirs (e.g. `output/documents/` from a
+  pre-run_id layout) are preserved unconditionally and must be removed
+  manually if no longer wanted. To bring a hand-named run under the
+  policy, name it with a `run-` prefix.
+
 ### Changed — BREAKING
 - **Extraction output reshaped to element-stream + typed sidecars.**
   `ExtractionResult` now carries `elements: list[Element]` as the
@@ -112,6 +372,423 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - semchunk-based chunking with table-aware splitting.
 - Optional Isaacus enrichment via the `[isaacus]` extra.
 - Local model resolution via `WOMBLEX_MODELS_DIR` for offline / edge deployment.
+
+## Historical engineering notes (migrated from STATUS.md 2026-05-28)
+
+> These sections were moved verbatim from `STATUS.md` to keep the live
+> status doc focused on current and forward-looking state. They record
+> the point-in-time engineering detail behind the structured
+> `[Unreleased]` / `[0.1.0]` entries above: the extraction-quality
+> session bundle (native-page tables, block-aware paragraphs, footer
+> pipe-as-I, the reverted OCR-table relaxation), the Phase 1–6 roadmap
+> history, the CLI restructure, the detector evolution (vector-first +
+> raster-path layout filter), and the redaction/PII marker-convention
+> unification. Forward-looking tracks (P1–P7, the I-sequence, the
+> K-cluster, and open items #B–#F) remain in `STATUS.md`.
+
+## What changed
+
+The session bundled four production-hardening fixes addressing
+distinct quality gaps surfaced by per-page GT comparison against the
+labels packet at `stories/ACT_EarlyChildhoodIncidents/womblex-extract/labels/`.
+A fifth proposed fix was tried, validated against labels, and
+reverted on evidence of irreducible regression elsewhere.
+
+### 1. Native-page table column-major emission (`extract.py` + `orchestrator.py`)
+
+**Problem.** Native PDFs with ruled tables (Compliance Notice rules-of-
+the-Law pages, e.g. 00281 page 1) had their cells correctly detected
+into `tables[]` by `_extract_tables_from_page` but the prose `text`
+field still read the same cells row-major via
+`page.get_text("text")`, producing garble like
+`"Provision of the Description Steps to be taken Law Section The
+approved provider of The Provider to is to submit evidence..."` —
+the data was present in `tables[]` but the prose field that
+downstream chunking consumes was scrambled.
+
+**Fix.**
+- New `_find_native_tables(page)` returning
+  `list[tuple[TableData, fitz.Rect, list[list]]]` — exposes per-table
+  bbox + raw cell grid alongside the existing `TableData`.
+- New `_emit_table_column_major(cells)` — emits each column as its
+  own paragraph (cells joined by `\n` within a column, columns
+  separated by `\n\n`). Mirrors the OCR-side `_table_aware_text` shape.
+- `_extract_tables_from_page` is now a thin wrapper around
+  `_find_native_tables` — preserves the legacy `list[TableData]`
+  signature for callers that don't need bboxes.
+- `_apply_native_page` calls `_find_native_tables`, partitions table
+  rects out of the prose call via `extract_page_text(page,
+  exclude_rects=…)`, and appends the column-major emissions
+  in y-order.
+
+**Gating.** Only `confidence ≥ 0.8` (lines-strategy hits, ruled cells)
+drive prose-region exclusion. Text-strategy hits (whitespace-aligned
+columns, conf ≈ 0.6) stay in `tables` but **do not** partition the
+prose, because text-strategy false-positives on ordinary multi-column
+prose (e.g. 2-column layouts with regular x-spacing) — caught by
+`test_native_extractor_handles_two_column_page` in the test suite
+before the gating was added.
+
+The spreadsheet-print path (Phase 4) handles whitespace-aligned
+manifests separately via `extract_spreadsheet_print`, so the gating
+doesn't lose that case.
+
+### 2. Block-aware paragraph emission (`grid_projection.py`)
+
+**Problem.** For single-column native pages, `extract_page_text` fell
+back to `page.get_text("text", flags=TEXT_DEHYPHENATE)`, which joins
+adjacent blocks with a single `\n`. Paragraph breaks between numbered
+list items, bullets, headings, and footers were lost — `01132 page 1`
+extracted as one continuous paragraph with section breaks invisible to
+downstream chunking.
+
+**Fix.**
+- `extract_page_text` accepts `exclude_rects: Sequence[fitz.Rect] |
+  None`. Words whose midpoint falls inside any rect are filtered
+  before column projection.
+- Single-column path now routes through `_render_blocks_with_breaks`,
+  which iterates `page.get_text("blocks", flags=TEXT_DEHYPHENATE)`
+  and joins blocks with `\n\n`. Blocks whose centre falls inside an
+  exclude rect are dropped (used in concert with fix 1 to suppress
+  table-region prose).
+- New `_word_in_any_rect(word, rects)` helper for the word-level
+  filter.
+
+The multi-column path (≥2 columns from `project_to_columns`)
+continues to use `render_spatial_text(columns)` unchanged.
+
+### 3. Body-context pipe-as-I (`extract.py` `_normalise_text`)
+
+**Problem.** ACT Gov letter footers (`GPO Box 158 Canberra ACT 2601 |
+phone: 132281 | www.act.gov.au`) OCR the `|` separator as a capital
+`I` when it sits between a space and a lowercase keyword:
+`2601 I phone:`. The existing `_FOOTER_PIPE_RE` only catches the
+page-marker shape `<digit>lPage`.
+
+**Fix.** `_BODY_PIPE_RE = re.compile(r" I (?=(?:phone|email|fax|www|http)\b)",
+re.IGNORECASE)` — restricted to a fixed keyword set to avoid false
+positives on legitimate sentence-initial `I` + verb. Applied
+alongside the existing footer rule in `_normalise_text` (RES-004b).
+
+### 4. `format_labels.TITLE_PATTERNS` regex anchor bug *(stories-side
+script, not Womblex code)*
+
+**Problem.** In
+`stories/.../womblex-extract/format_labels.py`, the title patterns
+embed `^` at the start (`r"^(SHOW CAUSE NOTICE|COMPLIANCE NOTICE|…)"`).
+That works for `TITLE_RE.search`, but the same patterns were also
+substituted in-string via `re.sub(rf"\s*({pat})", …)`, where `^`
+restricted the match to position 0 — silently no-op'd for the same
+title appearing mid-string. So `Dear COMPLIANCE NOTICE Section 177…`
+never got the `\n\n` break inserted before `COMPLIANCE NOTICE`.
+
+**Fix.** Removed `^` from `TITLE_PATTERNS`; dropped `re.IGNORECASE`
+from the title substitution loop so body-text mentions like *"this
+compliance notice"* don't false-trigger paragraph breaks.
+
+Drives the **hybrid mean CER 0.208 → 0.145** result in the labels
+retest — affects every label page where a known title appears
+mid-stream after a redacted name.
+
+### 5. *(reverted)* OCR-side `_table_aware_text` relaxation
+
+**Tried.** Relax start condition from `min_start_rows=2` consecutive
+≥3-item rows to a single 3+-item row, and allow 1-item continuation
+rows (which OCR produces for multi-line cell wraps).
+
+**Why reverted.** Helped table-shaped pages (R-01313F 0.080 → 0.018,
+00281 0.27 → 0.22) but caused matching regression on form-shaped
+pages (R-04060 0.020 → 0.157) — CRM-style screenshots where many
+1-item label/value rows look like a multi-line cell wrap, get
+absorbed into a "table", emitted column-major as one blob.
+
+Tried four progressively stricter discriminators (2-row start,
+consecutive-singleton cap, single-column-only singleton absorption,
+column-spread minimums). None recovered baseline for both classes
+of page. The signature of a real multi-line cell wrap and a form
+field stream is structurally similar at the per-region level; we
+couldn't separate them without page-image context the OCR pipeline
+doesn't carry.
+
+**Decision.** Revert to baseline. The native-path fix above already
+handles the ruled-table case on the production native code path;
+OCR-side ruled-table detection on rendered images stays at original
+conservative behaviour. Trade-off documented; do not retry without
+new discriminating signal.
+
+## Verification
+
+### Unit tests
+`tests/test_extract.py` (40), `tests/test_grid_projection.py` (17),
+`tests/test_spreadsheet_print.py` (14); the full-suite snapshot lives
+in the Snapshot table above (numbers shift as new tests land).
+Two new behaviours not yet covered by tests:
+- `_emit_table_column_major` (covered indirectly via the native
+  integration test)
+- `_render_blocks_with_breaks` paragraph-separator output
+  (covered indirectly via fixture accuracy)
+
+### Labels retest
+`stories/.../womblex-extract/cer_results.md` (18 reviewed pages):
+
+| strategy | n | baseline mean CER | bundle mean CER |
+|---|---:|---:|---:|
+| hybrid | 2 | 0.208 | **0.145** |
+| native_with_structured | 3 → 6 | 0.020 | 0.051 (+3 new pages) |
+| scanned_machinewritten | 7 | 0.044 | 0.044 |
+| scanned_mixed | 3 | 0.104 | 0.104 |
+
+Newly-reviewed pages (no prior baseline):
+- `02424A p4`: 0.000 — true-blank page, predicted empty matches GT empty
+- `01132 p0`: 0.014 — body pipe-as-I + TITLE_PATTERNS fix visible
+- `00281 p0`: 0.233 — OCR-quality residue (`Govemment` typo not in
+  normaliser; mid-sentence drop in the "satisfied that" clause).
+  Documented as OCR-character-level limit, not pipeline gap.
+
+### Native-path source-PDF validation
+Real `00281.pdf` page 1 (native_with_structured): ruled rules-of-the-
+Law table extracts as 1 detected table; prose section emits
+block-by-block with `\n\n` between `Time for Compliance / You are
+required… / Failure to comply / It is an offence…`; table content
+follows column-major: column 1 (`Section / 167(1) / Section / 174(2)`),
+column 2 (the approved-provider description), column 3 (steps).
+Behaviour matches design intent.
+
+## Roadmap
+
+### Phases 1–4 (✅ complete, prior session)
+Per-page profile + plan-driven orchestrator (Phase 2), form-pair
+extraction & block-type classifier rewrite (Phase 1), per-image OCR
+& PII token swap & fullwidth footer (Phase 3), spreadsheet-print
+extractor (Phase 4). All metrics maintained in the bundle's
+acceptance test against the same random-500 sample.
+
+### Phase 5 — Production hardening (✅ complete, prior session)
+Four bundled fixes above. Validated against the labels packet and
+the full 2,626-doc corpus. See `stories/STATUS.md` for the
+production-corpus run output and quality audit.
+
+### CLI surface
+
+`womblex score --labels <dir> --shards <dir> [--group-by FIELD] [--report PATH]`
+— promoted from a corpus-local script to first-class CLI in
+2026-05-17. Scores a per-page labels packet (`<stem>.gt.md` +
+`<stem>.meta.json`) against per-page text reassembled from the
+element-stream parquet. See `src/womblex/score.py` for the module API
+(`load_labels`, `build_manifest_index`, `reassemble_page_text`,
+`score_labels`, `format_report_markdown`).
+
+### Library — `redact/batch.py` (2026-05-19, batch redaction operations)
+
+Promoted from a corpus-local validation script. Two entry points:
+
+- `annotate_redactions_for_shards(shard_dir, pdf_dir, config, output_dir,
+  checkpoint_path)` — batch-detect redactions across extracted parquet
+  shards; write a sparse `*.redactions.parquet` sidecar per batch with
+  `(source_hash, elem_order, has_redaction)` rows for elements on
+  affected pages. Resumable via the optional checkpoint JSON.
+- `validate_redactions_against_labels(labels_dir, pdf_dir, config)` —
+  run detection over PDFs referenced in a labels packet; return per-doc
+  `ValidationSummary` objects. Used for detector tuning / sanity checks.
+
+CLI wrappers landed 2026-05-20 — see CLI restructure below.
+
+### CLI — `cli.py` → `cli/` subpackage (2026-05-20)
+
+Single 728-line `cli.py` (at the 750-line cap) split into a per-topic
+subpackage. Each topic module exposes a ``COMMANDS: list[Command]`` and
+``cli/__init__.py`` aggregates them, wires up argparse subparsers, and
+dispatches by name.
+
+```
+src/womblex/cli/
+├── __init__.py      main() + ALL_COMMANDS aggregation + dispatch
+├── _shared.py       Command NamedTuple, setup_logging, discover_files, format_eta
+├── pipeline.py      run, extract, chunk
+├── redact.py        redact, annotate-redactions, validate-redactions
+├── ingest.py        ingest-gnaf, ingest-geo
+├── score.py         score
+└── profile.py       profile
+```
+
+Two new CLI subcommands landed in `cli/redact.py`:
+
+- `womblex annotate-redactions <shards> <pdfs> [--output DIR] [--checkpoint PATH]`
+  — invokes `redact.batch.annotate_redactions_for_shards`. Resumable.
+- `womblex validate-redactions --labels DIR --pdfs DIR [--report PATH]`
+  — invokes `redact.batch.validate_redactions_against_labels`. JSON or
+  markdown output.
+
+Entry point `womblex = "womblex.cli:main"` unchanged (cli/__init__.py
+exports `main`). All existing subcommand surfaces preserved verbatim
+(args, help text, behaviour). Heavy double-line spacing from the old
+file normalised during the move.
+
+Largest file post-split: `cli/pipeline.py` at 283 lines (38% of cap).
+
+### Detector — vector-first detection (2026-05-19)
+
+`redact/stage.py:detect_redactions` was extended to try
+`page.get_drawings()` first for filled near-black rectangles; falls back
+to the existing CV2 contour detector on rasterised pages when the
+vector path finds nothing. Both paths return `RedactionInfo` with
+bboxes in pixel coordinates at the configured DPI.
+
+Filters (each surfaced by a measured false-positive class during Phase
+2 validation):
+
+- Near-black fill (max channel ≤ 0.1 RGB; CMYK K ≥ 0.9 + others ≤ 0.1) —
+  baseline filter.
+- `min_width ≥ 3pt` — excludes narrow vertical separator lines that
+  appear in manifest-style tables (FOI master regression on 37 pages).
+- `min_height ≥ 8pt` — excludes glyph-rendering small filled rects on
+  PDFs that draw text as filled-path glyphs rather than vector text
+  (01125-class regression: 14,184 false positives → 144 actual).
+
+Closes Outstanding §4(a) in `stories/STATUS.md`. Validated against the
+labels packet: §1 residual recall improved 6→14, 7→13, 3→68 without
+regressing the FOI master manifest (0 regions preserved) or any
+plain-scanned doc. The 02737-class scanned_mixed false-positive cohort
+falls back to the raster path and is unchanged (documented limitation,
+see `stories/STATUS.md` §11).
+
+### Phase 6 — `kind='table'` over-firing (2026-05-17, ✅ resolved)
+
+Audit of the pre-refactor corpus run found 62% of `structured`-strategy
+docs shipping pseudo-tables built from form layouts and shredded prose;
+the same primitive over-fired more broadly across the 2,791 PDF table
+records corpus-wide. Two fixes landed, in source code rather than
+config because Womblex didn't expose the right knobs:
+
+- **§1 — `_find_native_tables` block-count gate** (`ingest/extract.py`).
+  Reject any PyMuPDF table candidate where the count of natural
+  `get_text("dict")` blocks inside the table bbox is less than the row
+  count the table claims. Real tables decompose into ≥1 block per row;
+  prose-as-table over-claims rows by carving sub-block whitespace into
+  pseudo-rows. ~15 LOC + the `_count_blocks_in_bbox` helper.
+- **§2 — `_has_manifest_table` + `PageProfile.has_manifest_signal`**
+  (`ingest/detect.py`, `ingest/page_profile.py`). Stricter signal than
+  `has_table_signal`: only fires when a page contains a table with ≥300
+  non-empty cells — the discriminator between real manifests (FOI
+  master 1,713 non-empty cells per page; Schedule-2ai–2av 503 per page)
+  and prose-as-table over-fires (170–280 per page). The
+  `qualify_for_spreadsheet_print` qualifier now gates on this stricter
+  signal, so regulatory letters with embedded rules-of-law tables stop
+  routing through the manifest extractor.
+
+Validated by re-running extraction across the full 2,626-doc corpus
+(2026-05-17) and auditing `kind='table'` elements + cells:
+
+| stratum | pre-fix | post-fix | residual |
+|---|---:|---:|---|
+| conf=0.60 (`native_text` text-strategy) | 2,362 | 3 | 3 known prose-as-table on heavily-redacted pages (added to labels packet for follow-up) |
+| conf=0.70 (`spreadsheet_print`) | 83 | 3 | All real manifests (FOI master, Schedule-2ai–2av, Schedule-2b); regulatory-letter misroutes eliminated |
+| conf=0.80 (`native_text` lines-strategy) | 346 | 166 | ~90% clean rules-of-law tables; ~10% borderline (single-row / mostly-empty) |
+| **total** | **2,791** | **172** | **~3-5% residual** |
+
+The 3 residual conf=0.60 fabrications survive because PyMuPDF's
+text-strategy `find_tables` clusters the text fragments left over
+after large redaction blocks fragment the surrounding prose into
+whitespace-aligned columns. The bars themselves do not register as
+cells (measured cell-vs-fill overlap ≤ 1% across all three pages);
+they cause the misread indirectly via the gap pattern they create.
+The §1 gate's `n_blocks ≥ n_rows` premise is satisfied because the
+count of surviving paragraph dict-blocks happens to match the count
+of synthesised rows. Content impact is contained: text-bearing
+elements on these pages capture the prose verbatim (the
+`kind='table'` element is additive noise, not corruption). A
+region-level black-fill signal could close the strong-signal page
+(01349, 28% bbox coverage) but is on a threshold tightrope for
+01093/01094 (~3.5% coverage) where false-positives on real native
+tables become a real risk. Accepted as documented limitation; see
+`stories/STATUS.md` Outstanding §2. Material impact ~0.11% of source
+docs.
+
+### Redaction & PII marker conventions (✅ unified 2026-05-21, bracket-only)
+
+Two distinct concerns, two distinct markers:
+
+| concern | source | marker | inline per span | metadata home |
+|---|---|---|---|---|
+| Source redaction | rendered black bar in PDF (FOI / publisher) | `<REDACTED>` | not yet — see below | `RedactionReport` per-span (bbox, page, method, confidence) |
+| PII redaction | detected in extracted text (regex + cosine + enrichment graph) | `<PERSON>`, `<EMAIL>`, `<ADDRESS>`, … (typed) | yes | enrichment graph + chunk `has_redaction` flag |
+
+Bracket-style unification on angle brackets landed across:
+
+- [pii/cleaner.py:331,406](src/womblex/pii/cleaner.py#L331) — emits `<ENTITY_TYPE>` (PII spans). Module docstring rationale rewritten; the prior BPE/SentencePiece tokenisation argument for square brackets didn't survive scrutiny (neither bracket style is single-piece in standard pretrained tokenisers without explicit special-token registration).
+- [redact/stage.py:187](src/womblex/redact/stage.py#L187) — `blackout` mode emits `<REDACTED>` (still page-prefix, not inline per span — see below).
+- [process/chunker.py:227](src/womblex/process/chunker.py#L227) — `_repair_redaction_splits` marker constant flipped to `<REDACTED>`; cross-file coupling comment preserved.
+- [operations.py:298](src/womblex/operations.py#L298), [config.py:86](src/womblex/config.py#L86) — docstrings.
+- [docs/architecture.md](docs/architecture.md), [docs/dataflow.md](docs/dataflow.md) — manual references aligned. [docs/accuracy/REDACTION_HANDLING.md](docs/accuracy/REDACTION_HANDLING.md) is generated by `test_fixture_accuracy.py` and will regenerate on next accuracy-benchmark run.
+- Tests across `test_pii.py`, `test_pii_enrichment.py`, `test_chunker.py`, `test_redaction.py`, `test_womblex_collection_accuracy.py`, `accuracy_reports.py` — all assertions migrated. The 3 previously-failing ADDRESS angle-bracket tests now pass.
+
+**Inline-per-span for source redactions is deferred** — flipping the bracket style alone is bracket-only behaviour-preserving. Going inline-per-span requires a bbox-to-text-position mapping that doesn't exist for raster-path redactions (pixel-only bboxes with no character index). Native-path (PDF vector) detection has PDF coords and could be mapped; OCR/raster path needs word-bbox routing wired through to the redact stage. Tracked as a follow-up.
+
+No on-disk data migration was needed — production runs to date are flag-mode, no `blackout` text mutation has been applied, and PII cleaning hasn't been applied to the corpus.
+
+### Detector — raster-path layout filter (2026-05-22)
+
+`RedactionDetector.detect()` accepts a new `exclude_rects` parameter; candidates whose bbox centre falls inside any rect are dropped. `redact/stage.py:detect_redactions()` runs YOLO layout analysis on raster-fallback pages and passes regions of `_LAYOUT_EXCLUSION_CLASSES` (`tv`, `laptop`, `monitor`, `cell phone`, `keyboard`, `mouse`, `book`, `dining table` — the COCO classes that heuristically land on form-field backgrounds and chart regions) as exclusion zones to the contour detector. Best-effort: try/except, falls back to raw raster pass on any error (missing ultralytics, model weights absent).
+
+Gated by `RedactionConfig.use_layout_filter: bool = True` (default on). Threaded through `operations.py:run_redaction`, `redact/batch.py:annotate_redactions_for_shards`, `redact/batch.py:validate_redactions_against_labels`. CLI / `configs/example.yaml` exposes the flag.
+
+**Cost:** Vector-path detection (native PDFs) is unchanged — YOLO never runs there. Raster-fallback path triggers YOLO inference per page, which materially slowed the accuracy benchmark (3 min → 22 min for `test_womblex_collection_accuracy.py`). For production batch runs on scanned_mixed cohorts the trade is correct (precision over speed).
+
+**Cohort measurement (2026-05-22).** Ran `detect_redactions` on the 11 scanned_mixed docs from the corpus with the filter off vs on (config: `RedactionConfig(max_area_ratio=0.05)`, the corpus tune):
+
+| metric | off | on | Δ |
+|---|---:|---:|---:|
+| total regions across 11 docs | 159 | 151 | **−8 (−5.0%)** |
+| docs with any region | 10 | 10 | 0 |
+| 02737-213A (the signature case) | 10 | 10 | **0** |
+| runtime | 9.5s | 12.6s | +3.1s (1.3×) |
+
+**Interpretation.** The COCO YOLO model produces useful exclusion zones on 6 of 11 docs but at very small magnitudes (−1 to −3 per doc). It does **not** touch the worst case — 02737's 10 regions across 2 pages, the cohort's most egregious false positives, are entirely missed by the COCO classes the filter listens for. The hypothesis that `tv` / `laptop` / `monitor` etc. would heuristically land on dark form-field backgrounds was too weak: YOLO either doesn't detect those classes on rendered CRM-form pages, or detects them but not on the regions where contour detection misfires.
+
+The filter is net-positive (more precise without regressing any doc) but the magnitude is too small to close §11's `scanned_mixed` false-positive gap on its own. A document-layout-trained checkpoint (DocLayNet / PubLayNet, with `Figure` / `Table` / `Form` classes) would be a better fit — see "Open follow-ups" item 8 in this STATUS.
+
+**Default decision.** Keeping `use_layout_filter=True` is defensible (no doc regressed; some precision gain) but the value is modest and the test-suite runtime cost is real. Best path forward is the YOLO swap — see "Open follow-ups" K7(b) / track #A.
+
+### Non-`table` element kind audit (2026-05-22)
+
+Corpus-wide audit of element kinds beyond the resolved `kind='table'` work. Counts (90,843 elements across 2,626 docs) and per-strategy distribution live in `stories/STATUS.md` "Non-`table` element kind audit". Top findings, in summary form (full data + per-fix code-site references in the stories STATUS):
+
+- **`kind='signature'` is 100% semantically wrong.** `_SIGNATURE_RE` matches `Yours sincerely` / `faithfully` / `truly` — i.e. the closing phrase, not the signatory block. All 442 signature elements in the corpus are closing-phrase matches. Actual signatory blocks (name + title + redaction bar) are filed as `paragraph`.
+- **`kind='figure'` is 65% mis-classified on scanned pages** (1,044 of 1,600). Root cause: `_YOLO_COCO_LABEL_MAP` defaults unknown COCO classes to `figure`, and on rendered scanned-page images YOLO finds plenty of unknown classes. These "figures" contain OCR text — they're text-bearing elements filed under a non-text kind.
+- **Three element kinds declared but never produced.** `list_item`, `caption`, `page_break` — schema enum + mapping table both present, no producer. Lists are extremely common in regulatory documents; the capability is silently absent.
+- **`header` block_type falls through to `paragraph`.** `_classify_native_block` returns `"header"` for `y_norm < 0.08`, but `"header"` isn't in `ElementKind` — it gets demoted into `meta['block_type']`, downstream consumers reading `kind` miss it.
+- **`kind='form'` over-fires on regulatory letters.** `Penalty: $10 000, in the case of an individual` (regulation citation) and `OFFICIAL: Sensitive - Legislative Secrecy` (document banner) get matched as form pairs. ~250-500 spurious in hybrid + structured cohorts.
+- **Bboxes for native-text elements serialise as `(0, 0, 0×0)`** — silent data-loss bug. Visible in every native sample but separate from kind classification. Tracked as K2.
+
+Eight concrete fixes K1-K8 written up in "Open follow-ups" above. K1 / K3 / K4 / K5 / K7(a) / K8 land naturally as one low-effort change set. K2 and K7(b) are separate larger tracks.
+
+### Deferred / cut
+
+- ~~**Refresh accuracy-report generator + regenerate accuracy docs**~~ (resolved 2026-05-22). `tests/accuracy_reports.py` generator strings refreshed: `generate_redaction_report` now describes the vector-first detector + YOLO exclusion zones + `run_redaction` operation; `generate_extraction_report` now describes the per-page orchestrator + element-stream kinds + four sibling parquet shards; the strategy-matrix column reflects per-page dispatch. The four generated accuracy docs (`EXTRACTION.md`, `REDACTION_HANDLING.md`, `PII_CLEANING.md`) were regenerated cleanly. `docs/accuracy/CHUNKING.md` framings updated by hand for the post-refactor spreadsheet shape; a generator for this doc is still to-be-written (numbers still date from 2026-03-22).
+- **OCR-side ruled-table column-major emission** — irreducible
+  trade-off documented under fix 5 above. Re-evaluate only with a
+  new discriminating signal (e.g. layout-from-image-vision pass)
+  that separates real table cells from form-field streams.
+- **Parquet schema for `TableData.context` + `document_metadata`** —
+  Largely resolved by the element-stream refactor (2026-05-16):
+  per-element ``meta`` map carries arbitrary key-value overflow on
+  the elements shard; ``document_metadata`` rides on the manifest.
+  ``TableData.context`` is preserved on a kind='table' element via
+  ``meta`` keys (``context_*``). Original deferral note kept for
+  history.
+- **Letterhead-typo normalisations for `Govemment` / standalone
+  `AcT`** — the existing `_LETTERHEAD_FIXES` covered the parenthesised
+  `(AcT)` and double-m `Govermment` shapes. Under the post-refactor
+  verbatim-text policy, `_normalise_text` no longer runs in the
+  extraction hot path, so adding entries to `_LETTERHEAD_FIXES` would
+  have no effect on the on-disk parquet. If letterhead-typo correction
+  is required, it now belongs to a downstream cleaning stage that
+  rewrites `pages[i].text`, not the extractor.
+- **`02737`-style cross-cell handwritten forms** — paddle's
+  row-major reading is architecturally mismatched with forms that
+  humans read by cell, AND the handwriting itself crosses cell
+  boundaries. Structural OCR-engine limit; not addressable in
+  Womblex without a layout-aware OCR backend.
 
 [Unreleased]: https://github.com/DeepCivic/womblex/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/DeepCivic/womblex/releases/tag/v0.1.0

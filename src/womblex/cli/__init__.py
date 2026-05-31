@@ -9,10 +9,12 @@ Usage:
     womblex run                  --config configs/example.yaml
     womblex extract              document.pdf -o output/
     womblex chunk                --config configs/example.yaml
+    womblex redact               --shards <dir> --pdfs <dir> [--checkpoint PATH]
     womblex redact               --config configs/example.yaml
-    womblex annotate-redactions  <shards> <pdfs> [--checkpoint PATH]
+    womblex annotate-redactions  <shards> <pdfs> [--checkpoint PATH]   (deprecated alias)
     womblex validate-redactions  --labels DIR --pdfs DIR [--report PATH]
     womblex score                --labels DIR --shards DIR
+    womblex verify-shards        <run-or-shard-dir> [--compare-to <other>]
     womblex profile              <file> [--sample-rows N]
     womblex ingest-gnaf          <input> -o output/gnaf
     womblex ingest-geo           <input> -o output/geo
@@ -23,7 +25,7 @@ import argparse
 import logging
 import sys
 
-from womblex.cli import ingest, pipeline, profile, redact, score
+from womblex.cli import embed, ingest, link, pipeline, profile, redact, score, verify
 from womblex.cli._shared import setup_logging
 
 logger = logging.getLogger("womblex")
@@ -32,9 +34,12 @@ logger = logging.getLogger("womblex")
 ALL_COMMANDS = [
     *pipeline.COMMANDS,
     *redact.COMMANDS,
+    *link.COMMANDS,
+    *embed.COMMANDS,
     *ingest.COMMANDS,
     *score.COMMANDS,
     *profile.COMMANDS,
+    *verify.COMMANDS,
 ]
 
 

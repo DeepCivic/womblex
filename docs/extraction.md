@@ -38,11 +38,11 @@ verbatim text because the writer reads `elements`, not `pages`.
 | `paragraph` | prose block (default for unclassified text) |
 | `heading` | heading-styled prose (large font, or bold short non-sentence text) |
 | `list_item` | sub-paragraph marker `(a)` / `(i)` / `(1)` / bullet `•·-*` at start of block |
-| `caption` | figure / table caption (reserved; not currently emitted — see STATUS.md K6) |
+| `caption` | figure / table caption — emitted by the DocLayNet layout model's `Caption` class on OCR'd pages (see STATUS.md K6) |
 | `header` | short text in top 8% of page (letterhead-style content) |
 | `footer` | page-number footer or short text in bottom 8% of page |
 | `signature` | signatory block (reserved; not currently emitted — see STATUS.md K1) |
-| `figure` | layout-detected visual region (no extracted image data) |
+| `figure` | layout-detected visual region (no extracted image data). A full-page scan whose dominant layout region is a figure but which OCR's to substantial text (≥5 words) is reclassified to `paragraph` so its content reaches chunking — only sparse regions (page-number stamps, bare logos) stay `figure`. See STATUS.md K9-fig |
 | `image` | extracted image with alt text |
 | `table` | table; cells nest on `Element.cells` in memory, flatten to a sidecar in parquet |
 | `form` | form region; fields nest on `Element.fields`, flatten to a sidecar in parquet |
@@ -64,18 +64,20 @@ Downstream stages may apply their own cleaning to `pages[i].text`,
 but the on-disk parquet always reflects extraction-time content.
 
 **Scope of the verbatim guarantee.** The guarantee covers
-`*.elements.parquet` only. Chunks are built from `full_text` (derived
-from `pages[i].text`) after downstream stages have mutated it in
-place — so chunks reflect PII replacement, blackout redaction, and
-any other `pages`-level mutation. They are *post-stage* text, not
-extraction-time verbatim.
+`*.elements.parquet` only. As of I2 (2026-05-27), chunks are also
+built from `elements` (via `reassemble_narrative` over TEXT_KINDS
+elements joined with `\n\n`), so `*.chunks.parquet` text is
+*extraction-verbatim* too. In-memory `pages[i].text` mutations from
+PII / redact-blackout under `womblex run` no longer flow to chunks;
+downstream consumers that need post-rewrite text will read it from
+a future `*.clean_text.parquet` sidecar (P1, not yet written).
 
 ---
 
 ## Parquet output
 
-Each batch writes four sibling parquet files. The shard base name
-is the caller's choice (e.g. `batch-0001`):
+The extraction stage writes four sibling parquet files per batch. The
+shard base name is the caller's choice (e.g. `batch-0001`):
 
 ```
 batch-0001.elements.parquet     # one row per element
@@ -83,6 +85,31 @@ batch-0001.table_cells.parquet  # children of kind='table' elements
 batch-0001.form_fields.parquet  # children of kind='form' elements
 batch-0001._manifest.parquet    # one row per source file
 ```
+
+Downstream stages add their own siblings — the chunking stage
+(`womblex chunk --shards`) writes a fifth file `batch-0001.chunks.parquet`.
+See [dataflow.md](dataflow.md) for the chunks schema.
+
+#### Chunking adapter boundary
+
+`process/chunker.py` is a thin adapter over **semchunk 3.x** (audited
+I5, 2026-05-30). semchunk owns all chunking; Womblex handles only what
+semchunk can't — parquet I/O, element-stream → `ChunkInput` projection,
+source-hash plumbing, and `<REDACTED>` cross-boundary repair. Every
+`ChunkingConfig` field either maps directly to a semchunk parameter
+(`tokenizer`, `chunk_size`, `memoize`, `cache_maxsize`,
+`max_token_chars` → `chunkerify`; `overlap`, `processes`, `progress` →
+`Chunker.__call__`) or is a Womblex-only concern (`enabled` stage gate,
+`chunk_tables` projection). There is **no** Womblex toggle that
+re-exposes a semchunk feature under a different name — semchunk's
+parameters *are* the feature surface. Three defaults diverge from
+upstream, each for a measured corpus reason:
+`tokenizer="isaacus/kanon-2-tokenizer"` (matches the analysis side),
+`chunk_size=480` (Kanon-2 window — upstream defaults to `None`, which
+auto-derives the size from the tokeniser's `model_max_length`; that
+path still passes through if `chunk_size` is set to `null`),
+`processes=1` (Chromebook portability). `offsets=True` is pinned in the
+adapter because Womblex always needs char offsets for page mapping.
 
 ### elements.parquet
 
@@ -164,11 +191,15 @@ WHERE e.source_hash = :h
 ORDER BY e.elem_order;
 ```
 
-**Sidecar pattern.** Future post-extraction operations (PII, chunk
-persistence, etc) can follow the same shape: sparse parquet with
-`(source_hash, elem_order)` as the join key, LEFT-JOIN-with-default
-semantics, opt-in (absence is a valid state). Keeps the elements shards
-canonical and avoids rewriting them when downstream annotations land.
+**Sidecar pattern.** Post-extraction operations follow the same shape:
+sparse parquet keyed by `source_hash` (plus `elem_order` for
+element-level sidecars, or offset ranges for chunk-level), LEFT-JOIN-
+with-default semantics, opt-in (absence is a valid state). Keeps the
+elements shards canonical and avoids rewriting them when downstream
+annotations land. As of I2 (2026-05-27), chunks land via this pattern
+(`batch-NNNN.chunks.parquet`, schema in
+[dataflow.md](dataflow.md)). PII / `clean_text` sidecars (P1) are
+next.
 
 ---
 

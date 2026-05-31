@@ -238,17 +238,28 @@ reference.
 Sidecars join back to elements via `(source_hash, parent_elem_order)`
 matching `(source_hash, elem_order)` with the corresponding kind.
 
-**chunks.parquet** — one row per text chunk (planned; not yet written by `store/output.py`)
+**batch-NNNN.chunks.parquet** — one row per chunk (landed I2, 2026-05-27)
 
-| Column | Description |
-|--------|-------------|
-| `chunk_id` | Unique identifier |
-| `document_id` | FK to `_manifest.parquet` (joined via `source_hash`) |
-| `text` | Chunk text |
-| `token_count` | Tokens in chunk |
-| `embedding` | Float array from kanon-2-embedder |
-| `classification` | Top label from kanon-universal-classifier |
-| `classification_score` | Confidence for top label |
+Written as a fifth sibling next to the four extraction shards. Joins
+back to elements on `source_hash` plus offset-range overlap with the
+reassembled element-stream text — not via `elem_order`, because a
+chunk straddles multiple elements.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `source_hash` | string | FK to `_manifest.parquet` |
+| `chunk_index` | int32 | 0-based, per source_hash |
+| `text` | string | Chunk text |
+| `start_char` | int32 | Offset into the reassembled element-stream narrative (for `content_type='narrative'`) or table markdown (for `content_type='table'`) |
+| `end_char` | int32 | Exclusive end offset |
+| `content_type` | string | `"narrative"` \| `"table"` |
+| `has_redaction` | bool | True if the chunk text contains the `<REDACTED>` marker (set by chunk_batch). Flag-mode redaction may flip this later. |
+| `page_start` | int32 (nullable) | Page covering `start_char`; `null` for sources without page semantics (DOCX, spreadsheets) |
+| `page_end` | int32 (nullable) | Page covering `end_char-1`; `null` for sources without page semantics |
+
+Embedding, classification, and classification_score were deferred from
+the original sketch — they belong to the enrichment / P4 layer, not
+the chunking stage.
 
 **entities.parquet** — one row per entity mention (from enrichment)
 

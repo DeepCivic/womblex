@@ -22,8 +22,12 @@ from PIL import Image
 
 from womblex.ingest.detect import DocumentProfile, DocumentType, detect_document_type
 from womblex.ingest.extract import extract_text
-from womblex.process.chunker import TextChunk, chunk_text, create_chunker
+from womblex.process.chunker import ChunkInput, TextChunk, chunk_batch, create_chunker
 from womblex.redact import RedactionDetector
+
+
+def _chunk(text: str, chunker) -> list[TextChunk]:
+    return chunk_batch([ChunkInput(source_hash="d", narrative=text)], chunker).get("d", [])
 
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "fixtures"
 FUNSD_IMAGES = FIXTURES_DIR / "funsd" / "images"
@@ -486,7 +490,7 @@ class TestFixtureChunking:
     def test_iam_long_line_single_chunk(self) -> None:
         """IAM long_4 is a 22-word sentence; at chunk_size=30 words it fits in one chunk."""
         gt = _iam_ground_truth("long_4")
-        chunks = chunk_text(gt, self.chunker)
+        chunks = _chunk(gt, self.chunker)
 
         assert len(chunks) == 1
         assert isinstance(chunks[0], TextChunk)
@@ -495,7 +499,7 @@ class TestFixtureChunking:
     def test_iam_median_single_chunk(self) -> None:
         """IAM median_15 is a short 9-word sentence; must be exactly one chunk."""
         gt = _iam_ground_truth("median_15")
-        chunks = chunk_text(gt, self.chunker)
+        chunks = _chunk(gt, self.chunker)
 
         assert len(chunks) == 1
         assert chunks[0].chunk_index == 0
@@ -505,7 +509,7 @@ class TestFixtureChunking:
         is long enough to produce multiple chunks at chunk_size=30 words."""
         words = _doclaynet_ground_truth("dense_text_548")
         full_text = " ".join(words)
-        chunks = chunk_text(full_text, self.chunker)
+        chunks = _chunk(full_text, self.chunker)
 
         assert len(chunks) > 1, "Expected multiple chunks for dense DocLayNet text"
 
@@ -513,7 +517,7 @@ class TestFixtureChunking:
         """chunk_index must be 0, 1, 2, … with no gaps."""
         words = _doclaynet_ground_truth("dense_text_548")
         full_text = " ".join(words)
-        chunks = chunk_text(full_text, self.chunker)
+        chunks = _chunk(full_text, self.chunker)
 
         indices = [c.chunk_index for c in chunks]
         assert indices == list(range(len(chunks)))
@@ -524,7 +528,7 @@ class TestFixtureChunking:
         gt_texts = _funsd_ground_truth("82200067_0069")
         # Join all form field texts into a single document body
         full_text = " ".join(gt_texts)
-        chunks = chunk_text(full_text, self.chunker)
+        chunks = _chunk(full_text, self.chunker)
 
         assert len(chunks) >= 1
         combined = " ".join(c.text for c in chunks)
@@ -536,7 +540,7 @@ class TestFixtureChunking:
 
     def test_empty_ground_truth_yields_no_chunks(self) -> None:
         """Empty input must produce an empty chunk list (not crash)."""
-        chunks = chunk_text("", self.chunker)
+        chunks = _chunk("", self.chunker)
         assert chunks == []
 
     def test_sparse_doclaynet_chunks_at_small_size(self) -> None:
@@ -545,7 +549,7 @@ class TestFixtureChunking:
         small_chunker = create_chunker(tokenizer=_word_token_counter, chunk_size=5)
         words = _doclaynet_ground_truth("sparse_text_344")
         full_text = " ".join(words)
-        chunks = chunk_text(full_text, small_chunker)
+        chunks = _chunk(full_text, small_chunker)
 
         assert len(chunks) >= 1
         combined = " ".join(c.text for c in chunks)
@@ -556,7 +560,7 @@ class TestFixtureChunking:
         """start_char and end_char must span non-overlapping, contiguous regions."""
         gt = _iam_ground_truth("long_4")
         large_chunker = create_chunker(tokenizer=_word_token_counter, chunk_size=5)
-        chunks = chunk_text(gt, large_chunker)
+        chunks = _chunk(gt, large_chunker)
 
         for chunk in chunks:
             assert chunk.start_char >= 0

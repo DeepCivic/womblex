@@ -290,6 +290,7 @@ def _extract_images_from_page(page: fitz.Page) -> list[ImageData]:
 from womblex.ingest.forms import (  # noqa: E402,F401
     _extract_form_fields,
     _extract_form_pairs_from_lines,
+    _extract_form_pairs_from_regions,
     _extract_form_pairs_from_text,
     _extract_forms,
     _looks_like_form_label,

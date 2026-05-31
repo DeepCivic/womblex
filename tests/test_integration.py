@@ -37,7 +37,22 @@ from womblex.ingest.extract import extract_text
 
 from womblex.operations import run_extraction, run_chunking, write_batch_parquet, BatchResult
 
-from womblex.process.chunker import chunk_document, create_chunker, table_to_markdown
+from womblex.process.chunker import (
+    ChunkInput,
+    chunk_batch,
+    create_chunker,
+    table_to_markdown,
+)
+
+
+def _chunk_doc(full_text, chunker, tables=None):
+    """Test-only shim mimicking the deleted chunk_document via chunk_batch."""
+    ci = ChunkInput(
+        source_hash="d",
+        narrative=full_text or "",
+        tables=[(None, table_to_markdown(t.headers, t.rows)) for t in (tables or [])],
+    )
+    return chunk_batch([ci], chunker).get("d", [])
 
 
 FIXTURE_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "fixtures" / "womblex-collection"
@@ -341,7 +356,7 @@ class TestCSVChunkingIntegration:
 
         full_text = "\n\n".join(r.full_text for r in results if r.full_text.strip())
 
-        chunks = chunk_document(full_text, chunker, tables=all_tables)
+        chunks = _chunk_doc(full_text, chunker, tables=all_tables)
 
         assert len(chunks) > 0
 
@@ -491,7 +506,7 @@ class TestRedactedPDFChunkingIntegration:
 
         chunker = create_chunker(tokenizer=_word_token_counter, chunk_size=80)
 
-        chunks = chunk_document(result.full_text, chunker, tables=result.tables)
+        chunks = _chunk_doc(result.full_text, chunker, tables=result.tables)
 
 
         assert len(chunks) > 0

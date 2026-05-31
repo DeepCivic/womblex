@@ -20,7 +20,11 @@ from womblex.config import (
     ExtractionConfig,
     WomblexConfig,
 
+    ProcessingConfig,
+
     RedactionConfig,
+
+    RetentionConfig,
 
     load_config,
 )
@@ -295,4 +299,58 @@ class TestPipelineConfig:
         )
 
         assert cfg.detection.min_text_coverage == 0.5
+
+
+# ---------------------------------------------------------------------------
+# DatasetConfig run_id
+# ---------------------------------------------------------------------------
+
+
+class TestDatasetConfigRunId:
+    def test_run_id_defaults_to_none(self) -> None:
+        cfg = DatasetConfig(name="x")
+        assert cfg.run_id is None
+
+    def test_run_id_accepts_string(self) -> None:
+        cfg = DatasetConfig(name="x", run_id="my-run-2026")
+        assert cfg.run_id == "my-run-2026"
+
+
+# ---------------------------------------------------------------------------
+# RetentionConfig
+# ---------------------------------------------------------------------------
+
+
+class TestRetentionConfigDefaults:
+    def test_default_policy_is_rolling(self) -> None:
+        cfg = RetentionConfig()
+        assert cfg.policy == "rolling"
+
+    def test_default_keep_is_2(self) -> None:
+        cfg = RetentionConfig()
+        assert cfg.keep == 2
+
+    def test_accepts_keep_all(self) -> None:
+        cfg = RetentionConfig(policy="keep_all")
+        assert cfg.policy == "keep_all"
+
+    def test_rejects_keep_zero(self) -> None:
+        with pytest.raises(ValidationError):
+            RetentionConfig(keep=0)
+
+    def test_rejects_keep_negative(self) -> None:
+        with pytest.raises(ValidationError):
+            RetentionConfig(keep=-1)
+
+
+class TestProcessingConfigRetention:
+    def test_default_retention_present(self) -> None:
+        cfg = ProcessingConfig()
+        assert cfg.retention.policy == "rolling"
+        assert cfg.retention.keep == 2
+
+    def test_retention_override(self) -> None:
+        cfg = ProcessingConfig(retention=RetentionConfig(policy="keep_all", keep=5))
+        assert cfg.retention.policy == "keep_all"
+        assert cfg.retention.keep == 5
 

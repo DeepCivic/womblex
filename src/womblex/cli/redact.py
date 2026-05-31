@@ -1,5 +1,6 @@
-"""Redaction CLI subcommands: ``redact`` (extract + redact in-memory),
-``annotate-redactions`` (batch detection over extracted shards),
+"""Redaction CLI subcommands: ``redact`` (per-stage ``--shards`` over an
+existing shard dir, or E2E ``--config`` extract+redact),
+``annotate-redactions`` (back-compat alias for the per-stage path),
 ``validate-redactions`` (detector sanity check vs a labels packet)."""
 from __future__ import annotations
 
@@ -13,16 +14,107 @@ from womblex.cli._shared import Command, discover_files
 logger = logging.getLogger("womblex")
 
 
-# --- redact (extract + redact in-memory; legacy single-batch CLI) ----------
+# --- redact (dual-mode: --shards per-stage | --config E2E) ------------------
 
 
 def _register_redact(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--config", type=Path, required=True, help="Path to config YAML")
-    p.add_argument("--limit", type=int, default=None, help="Max documents to process")
+    mode = p.add_mutually_exclusive_group(required=True)
+    mode.add_argument(
+        "--shards", type=Path,
+        help=(
+            "Per-stage mode: detect redactions over an existing shard directory "
+            "(``<run_id>/documents/`` containing ``*.elements.parquet`` + "
+            "``*._manifest.parquet``). Writes ``*.redactions.parquet`` siblings. "
+            "Requires --pdfs (detection rasterises the source pages)."
+        ),
+    )
+    mode.add_argument(
+        "--config", type=Path,
+        help="E2E composition mode: run extraction + redaction from config YAML.",
+    )
+    p.add_argument(
+        "--pdfs", type=Path, default=None,
+        help="Source PDF directory, resolved via manifest filename. Required with --shards.",
+    )
+    p.add_argument(
+        "-o", "--output", type=Path, default=None,
+        help="Output directory for *.redactions.parquet sidecars (default: same as --shards). --shards only.",
+    )
+    p.add_argument(
+        "--checkpoint", type=Path, default=None,
+        help="JSON checkpoint path for resumable runs (skips already-processed batches). --shards only.",
+    )
+    p.add_argument("--dpi", type=int, default=150, help="Page render DPI for raster fallback. --shards only.")
+    p.add_argument(
+        "--max-area-ratio", type=float, default=0.05,
+        help="Reject candidate regions larger than this fraction of the page. --shards only.",
+    )
+    p.add_argument("--limit", type=int, default=None, help="Max documents to process. --config only.")
 
 
 def cmd_redact(args: argparse.Namespace) -> int:
-    """Run extraction + redaction on a document directory."""
+    """Detect redactions over a shard directory (per-stage) or a config-described corpus (E2E)."""
+    if args.shards is not None:
+        return _cmd_redact_shards(args)
+    return _cmd_redact_config(args)
+
+
+def _cmd_redact_shards(args: argparse.Namespace) -> int:
+    shard_dir: Path = args.shards
+    if not shard_dir.is_dir():
+        logger.error("--shards path is not a directory: %s", shard_dir)
+        return 1
+    if args.pdfs is None:
+        logger.error("--pdfs is required with --shards (detection rasterises source pages)")
+        return 1
+    if not args.pdfs.is_dir():
+        logger.error("--pdfs path is not a directory: %s", args.pdfs)
+        return 1
+    if not any(shard_dir.glob("*._manifest.parquet")):
+        logger.error("--shards directory has no `*._manifest.parquet`: %s", shard_dir)
+        return 1
+    return _run_redact_shards(
+        shard_dir=shard_dir,
+        pdf_dir=args.pdfs,
+        output_dir=args.output,
+        checkpoint_path=args.checkpoint,
+        dpi=args.dpi,
+        max_area_ratio=args.max_area_ratio,
+    )
+
+
+def _run_redact_shards(
+    shard_dir: Path,
+    pdf_dir: Path,
+    output_dir: Path | None,
+    checkpoint_path: Path | None,
+    dpi: int,
+    max_area_ratio: float,
+) -> int:
+    """Shared per-stage path used by ``redact --shards`` and the
+    ``annotate-redactions`` back-compat alias."""
+    from womblex.config import RedactionConfig
+    from womblex.redact.batch import annotate_redactions_for_shards
+
+    config = RedactionConfig(dpi=dpi, max_area_ratio=max_area_ratio)
+    summary = annotate_redactions_for_shards(
+        shard_dir=shard_dir,
+        pdf_dir=pdf_dir,
+        config=config,
+        output_dir=output_dir,
+        checkpoint_path=checkpoint_path,
+    )
+    n_with = sum(1 for v in summary.values() if v > 0)
+    total = sum(summary.values())
+    logger.info(
+        "annotated %d docs, %d with redactions, %d total regions",
+        len(summary), n_with, total,
+    )
+    return 0
+
+
+def _cmd_redact_config(args: argparse.Namespace) -> int:
+    """E2E composition: extract + redact in-memory from a config YAML."""
     from womblex.config import load_config
     from womblex.operations import BatchResult, run_extraction, run_redaction, write_batch_parquet
 
@@ -69,7 +161,7 @@ def cmd_redact(args: argparse.Namespace) -> int:
     return 0
 
 
-# --- annotate-redactions (batch over extracted shards) ----------------------
+# --- annotate-redactions (back-compat alias for `redact --shards`) ----------
 
 
 def _register_annotate_redactions(p: argparse.ArgumentParser) -> None:
@@ -91,32 +183,25 @@ def _register_annotate_redactions(p: argparse.ArgumentParser) -> None:
 
 
 def cmd_annotate_redactions(args: argparse.Namespace) -> int:
-    """Detect redactions across extracted shards; persist sparse sidecar parquets."""
-    from womblex.config import RedactionConfig
-    from womblex.redact.batch import annotate_redactions_for_shards
+    """Deprecated alias for ``womblex redact --shards <dir> --pdfs <dir>``.
 
+    Retained so existing scripts keep working; new callers should prefer the
+    per-stage ``redact --shards`` surface. Both route through the same engine.
+    """
     if not args.shards.is_dir():
         logger.error("shards dir not found: %s", args.shards)
         return 1
     if not args.pdfs.is_dir():
         logger.error("pdfs dir not found: %s", args.pdfs)
         return 1
-
-    config = RedactionConfig(dpi=args.dpi, max_area_ratio=args.max_area_ratio)
-    summary = annotate_redactions_for_shards(
+    return _run_redact_shards(
         shard_dir=args.shards,
         pdf_dir=args.pdfs,
-        config=config,
         output_dir=args.output,
         checkpoint_path=args.checkpoint,
+        dpi=args.dpi,
+        max_area_ratio=args.max_area_ratio,
     )
-    n_with = sum(1 for v in summary.values() if v > 0)
-    total = sum(summary.values())
-    logger.info(
-        "annotated %d docs, %d with redactions, %d total regions",
-        len(summary), n_with, total,
-    )
-    return 0
 
 
 # --- validate-redactions (detector sanity check vs labels packet) -----------
@@ -184,10 +269,15 @@ def cmd_validate_redactions(args: argparse.Namespace) -> int:
 
 
 COMMANDS = [
-    Command("redact", "Extract and apply redaction handling", _register_redact, cmd_redact),
+    Command(
+        "redact",
+        "Detect redactions over a shard dir (--shards) or extract+redact a corpus (--config)",
+        _register_redact,
+        cmd_redact,
+    ),
     Command(
         "annotate-redactions",
-        "Detect redactions across extracted shards; write sidecar parquets",
+        "Deprecated alias for `redact --shards <dir> --pdfs <dir>`",
         _register_annotate_redactions,
         cmd_annotate_redactions,
     ),

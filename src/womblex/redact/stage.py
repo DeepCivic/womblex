@@ -57,16 +57,13 @@ def build_detector(config: RedactionConfig) -> RedactionDetector:
 _VECTOR_MIN_WIDTH_PT = 3.0   # filters narrow vertical separator lines (manifest column rules)
 _VECTOR_MIN_HEIGHT_PT = 8.0  # filters glyph-rendering small filled rects (body glyphs ≤ 7pt tall)
 
-# YOLO COCO classes whose regions, when present, typically land on the
-# form-field backgrounds and embedded chart / figure regions where raster-path
-# false positives originate (02737-class scanned_mixed CRM forms). When the
-# raster fallback runs, contour hits whose centre falls inside one of these
-# regions are dropped. See ``_YOLO_COCO_LABEL_MAP`` in ``ingest/paddle_ocr.py``
-# for the mapping rationale.
-_LAYOUT_EXCLUSION_CLASSES = frozenset({
-    "tv", "laptop", "monitor", "cell phone", "keyboard", "mouse",
-    "book", "dining table",
-})
+# Layout regions whose ``block_type`` indicates image / tabular content
+# where raster contour redaction false-positives originate (02737-class
+# scanned_mixed CRM forms with dark form-field backgrounds and embedded
+# chart regions). Taxonomy-agnostic — works for both DocLayNet
+# (Picture / Table) and the legacy COCO fallback (tv / laptop / etc.
+# get mapped to figure / table by ``_YOLO_COCO_LABEL_MAP``).
+_LAYOUT_EXCLUSION_BLOCK_TYPES = frozenset({"figure", "table"})
 
 
 def detect_redactions(
@@ -158,7 +155,7 @@ def _layout_exclude_rects(
 
     rects: list[tuple[int, int, int, int]] = []
     for region in regions:
-        if region.label not in _LAYOUT_EXCLUSION_CLASSES:
+        if region.block_type not in _LAYOUT_EXCLUSION_BLOCK_TYPES:
             continue
         x0, y0, x1, y1 = region.bbox
         rects.append((int(x0), int(y0), int(x1), int(y1)))

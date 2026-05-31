@@ -75,7 +75,7 @@ export ISAACUS_API_KEY="your-key-here"
 ## Quick Start
 
 ```bash
-# Process a document set using a config
+# Process a document set using a config (E2E composition)
 womblex run --config configs/example.yaml
 
 # Resume from checkpoint after interruption
@@ -85,6 +85,14 @@ womblex run --config configs/example.yaml --resume
 womblex extract document.pdf -o output/
 womblex extract report.docx -o output/
 womblex extract dataset.xlsx -o output/
+
+# Per-stage chunking (primary workflow for staged corpora): consumes an
+# existing extraction shard directory, writes *.chunks.parquet siblings
+womblex chunk --shards output/<run_id>/documents/
+womblex chunk --shards output/<run_id>/documents/ --config configs/example.yaml
+
+# Audit shard integrity (extraction stage)
+womblex verify-shards output/<run_id>/
 ```
 
 ## How It Works
@@ -129,7 +137,7 @@ A doc-level summary type still surfaces in metadata.
 
 Each document type routes to an appropriate extractor. `extract_text()` always returns a `list[ExtractionResult]`:
 
-- **PDFs** return a single-element list. The per-page orchestrator dispatches `_apply_native_page` or `_apply_ocr_page` based on each page's `PageProfile`. PaddleOCR returns per-region confidence scores stored in the document profile. YOLO layout analysis (COCO-pretrained `yolov8n.pt`) is called on OCR pages by `_layout_blocks_and_tables` to populate `Element.kind` for the layout regions it detects.
+- **PDFs** return a single-element list. The per-page orchestrator dispatches `_apply_native_page` or `_apply_ocr_page` based on each page's `PageProfile`. PaddleOCR returns per-region confidence scores stored in the document profile. YOLO layout analysis (DocLayNet `yolo11n_doc_layout.pt`, with COCO `yolov8n.pt` as fallback) is called on OCR pages by `_layout_blocks_and_tables` to populate `Element.kind` for the layout regions it detects; a full-page scan whose dominant region is a figure but which OCR's to substantial text is tagged `paragraph` rather than `figure` so its content reaches chunking.
 - **DOCX** returns a single-element list with paragraphs and tables interleaved in OOXML body order.
 - **Spreadsheets** return one `ExtractionResult` per workbook. Each sheet contributes a leading `kind='sheet_meta'` element followed by one `kind='sheet_cell'` element per non-empty cell.
 
@@ -146,6 +154,13 @@ Redacted regions can be replaced with `<REDACTED>` markers (preserving sentence 
 ### 4. Chunking
 
 Extracted text is split into semantically meaningful chunks using [semchunk](https://github.com/isaacus-dev/semchunk) with the Kanon tokeniser (default 480 tokens, leaving 32-token headroom for Isaacus 512-token context windows). Tables are converted to markdown and chunked separately, with each chunk tagged as `"narrative"` or `"table"`. `<REDACTED>` markers are preserved across chunk boundaries.
+
+Chunking has two invocation modes that share one engine (`chunk_batch`):
+
+- **Per-stage:** `womblex chunk --shards <run_dir>/documents/` consumes the extraction-stage shards directly and writes `*.chunks.parquet` siblings. Independent `CheckpointManager` so the chunk stage resumes without re-extracting. This is the primary workflow for staged corpus runs.
+- **E2E composition:** `womblex run --config <yaml>` extracts and chunks in one process (kept for users with simpler corpora).
+
+Both modes reassemble narrative + tables from each source's element stream, then feed every doc's narratives into a single semchunk call (with overlap) and every doc's table markdowns into another (no overlap), so `processes` parallelises across the whole batch. Chunks carry `(start_char, end_char, page_start, page_end, has_redaction, content_type)`; they join back to `elements` via `source_hash` plus offset-range overlap.
 
 ### 5. PII Cleaning
 
@@ -282,16 +297,19 @@ womblex/
 │   │   ├── cleaner.py       # PII detection and stripping
 │   │   └── stage.py         # PII cleaning pipeline stage
 │   ├── process/
-│   │   └── chunker.py       # semchunk integration
+│   │   ├── chunker.py       # semchunk integration — chunk_batch engine + element-stream → ChunkInput helpers
+│   │   └── chunk_stage.py   # chunk_shards() over a shard dir — drives `womblex chunk --shards`
 │   ├── analyse/
 │   │   ├── enrich.py        # Isaacus enrichment wrappers
 │   │   ├── graph.py         # Entity graph construction
 │   │   ├── models.py        # Enrichment data models
 │   │   └── query.py         # Load enrichment graph from Parquet for PII masking
 │   ├── store/
-│   │   ├── output.py        # Parquet output: elements + table_cells + form_fields + manifest sidecars + integrity check
+│   │   ├── output.py        # Parquet output: elements + table_cells + form_fields + manifest + chunks sidecars + integrity checks
+│   │   ├── shard_audit.py   # Directory-level shard integrity + chunks-side audit + reconcile-with-checkpoint
 │   │   ├── enrichment_output.py  # Enrichment-specific output
-│   │   └── checkpoint.py    # Batch checkpoint management
+│   │   ├── retention.py     # run_id-based retention policy
+│   │   └── checkpoint.py    # Per-stage CheckpointManager
 │   ├── utils/
 │   │   ├── metrics.py       # WER/CER accuracy metrics
 │   │   ├── tabular_metrics.py # Tabular extraction accuracy (structural fidelity, data integrity)
