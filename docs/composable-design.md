@@ -42,7 +42,8 @@ redact_tag(extraction)  ExtractionResult         ExtractionResult         extrac
 pii_clean(extraction)   ExtractionResult         ExtractionResult         extraction exists
 pii_clean(chunks)       list[TextChunk]          list[TextChunk]          chunks exist
 enrich(extraction)      ExtractionResult         EnrichmentResult         extraction exists
-embed(chunks)           list[TextChunk]          list[Embedding]          chunks exist (TODO)
+embed(chunks)           list[TextChunk]          list[Embedding]          chunks exist (impl: analyse/embed_stage.py, I7)
+link(enrich entities)   entity mentions          entity_links             enrichment exists (impl: link/stage.py, I7)
 build_graph(enrichment) EnrichmentResult         DocumentGraph            enrichment exists
 pii_clean(chunks, graph) list[TextChunk] + graph list[TextChunk]          graph exists
 load_graph(parquet_dir) Parquet files            EntityMention + Edge     enrichment Parquet exists

@@ -86,10 +86,14 @@ womblex extract document.pdf -o output/
 womblex extract report.docx -o output/
 womblex extract dataset.xlsx -o output/
 
-# Per-stage chunking (primary workflow for staged corpora): consumes an
-# existing extraction shard directory, writes *.chunks.parquet siblings
-womblex chunk --shards output/<run_id>/documents/
-womblex chunk --shards output/<run_id>/documents/ --config configs/example.yaml
+# Per-stage commands (primary workflow for staged corpora): each consumes the
+# prior stage's shard directory and writes its own sidecar in place, with an
+# independent resumable CheckpointManager.
+womblex chunk  --shards output/<run_id>/documents/                  # *.chunks.parquet
+womblex redact --shards output/<run_id>/documents/ --pdfs <pdf_dir> # *.redactions.parquet
+womblex enrich --shards output/<run_id>/documents/                  # *.enrichment_entities.parquet (Kanon-2; needs ISAACUS_API_KEY)
+womblex link   --shards output/<run_id>/documents/ --config <yaml>  # *.entity_links.parquet (register match)
+womblex embed  --shards output/<run_id>/documents/                  # *.embeddings.parquet (Kanon-2 chunk embeddings)
 
 # Audit shard integrity (extraction stage)
 womblex verify-shards output/<run_id>/

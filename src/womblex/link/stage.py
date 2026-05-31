@@ -15,11 +15,10 @@ from pathlib import Path
 
 from womblex.config import LinkingConfig
 from womblex.link.matcher import Candidate, Link, resolve
-from womblex.link.reference import ReferenceTable, load_reference
+from womblex.link.reference import load_reference
 from womblex.process.chunk_stage import _batch_bases
 from womblex.store.checkpoint import CheckpointManager
 from womblex.store.enrichment_output import (
-    enrichment_entities_path_for,
     read_enrichment_entities,
 )
 from womblex.store.output import entity_links_path_for, read_manifest, write_entity_links

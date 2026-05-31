@@ -247,7 +247,7 @@ Wrappers in `analyse/` call the Isaacus SDK:
 
 ### 9. Store — Output
 
-`store/output.py` writes four sibling parquet files per batch — `batch-NNNN.elements.parquet`, `batch-NNNN.table_cells.parquet`, `batch-NNNN.form_fields.parquet`, `batch-NNNN._manifest.parquet`. Chunks remain in-memory on `DocumentResult.chunks`; chunk persistence to parquet is planned but not yet implemented. `store/enrichment_output.py` writes three additional Parquet files from enrichment results:
+`store/output.py` writes four sibling parquet files per batch — `batch-NNNN.elements.parquet`, `batch-NNNN.table_cells.parquet`, `batch-NNNN.form_fields.parquet`, `batch-NNNN._manifest.parquet`. Downstream stages add their own per-batch sidecars over the same shard dir, each via a `womblex <stage> --shards` command and joinable on `source_hash`: `*.chunks.parquet` (chunk, I2), `*.redactions.parquet` (redact, I3), `*.enrichment_entities.parquet` + `*.enrichment_meta.parquet` (enrich, I7), `*.entity_links.parquet` (link, I7), `*.embeddings.parquet` (embed, I7). `store/enrichment_output.py` also has a legacy E2E writer that emits three Parquet files from enrichment results:
 
 - `entities.parquet` — entity type, name, mentions, chunk mapping
 - `graph_edges.parquet` — source/target node IDs, relation type, metadata

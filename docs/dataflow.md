@@ -159,13 +159,19 @@ For each file processed via `operations.py`:
 
 5. store
       ├── write_batch_parquet(batch, path) → 4 sibling parquets per batch:
-      │     elements.parquet, table_cells.parquet, form_fields.parquet,
-      │     _manifest.parquet (chunks are in-memory only; persistence planned)
-      ├── write_batch_enrichment(batch, dir) →
-      │     ├── entities.parquet
-      │     ├── graph_edges.parquet
-      │     └── enrichment_meta.parquet
-      └── checkpoint written after each batch (JSON, resumable)
+      │     elements.parquet, table_cells.parquet, form_fields.parquet, _manifest.parquet
+      ├── per-stage sidecars (each written by its own `womblex <stage> --shards`
+      │   command over the shard dir; joinable on source_hash):
+      │     ├── *.chunks.parquet                                    (chunk — I2)
+      │     ├── *.redactions.parquet                                (redact — I3)
+      │     ├── *.enrichment_entities.parquet + *.enrichment_meta.parquet (enrich — I7)
+      │     ├── *.entity_links.parquet                              (link — I7)
+      │     └── *.embeddings.parquet                                (embed — I7)
+      ├── write_batch_enrichment(batch, dir) → entities/graph_edges/enrichment_meta
+      │     (legacy E2E single-file writer; the per-stage enrich shards above
+      │      reuse the same ENTITY/GRAPH schemas, keyed on source_hash)
+      └── per-stage CheckpointManager (JSON, resumable; self-healing on resume
+          via reconcile_stage_checkpoint_with_shards)
 ```
 
 ## Data Structures
