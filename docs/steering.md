@@ -6,6 +6,14 @@ See `accuracy/` for current benchmark numbers. See `architecture.md` for how the
 
 ## Priority List
 
+> **Scope note (2026-06-01).** This is the *extraction-quality* track. The
+> project's active roadmap is now the **publishable-corpus per-stage iteration
+> sequence (I1–I10+) in [STATUS.md](../STATUS.md)** — chunk/redact/enrich/link/
+> embed stages, of which I1–I7 have landed. The immediate next step is the
+> full corpus **re-extraction** to apply the committed K9-fig fix (see STATUS
+> "Next steps"). Items below are the older accuracy track; completed ones are
+> marked.
+
 | # | Change | Effort | Impact | Status |
 |---|--------|--------|--------|--------|
 | 1 | Add sorted CER to FUNSD evaluation | Low | Reveals 65% of CER was reading-order, not recognition | **Done** |
@@ -19,10 +27,10 @@ See `accuracy/` for current benchmark numbers. See `architecture.md` for how the
 | 9 | Adaptive binarisation second signal | Medium | CER-s shows binarisation hurts FUNSD by +39%; histogram alone is insufficient | |
 | 10 | NER-based PII (Presidio Analyzer + spaCy) | Medium | Covers ORGANISATION (4 GT) + improves PERSON precision (currently 16.7%) | |
 | 11 | Redaction threshold tuning for signature blocks | Low | 3/7 GT redactions missed on page 2 Throsby; aspect-ratio filter likely culprit | |
-| 12 | Replace YOLO COCO model with document-specific layout model | High | YOLOv8n produces 0 predictions on all DocLayNet fixtures — general COCO model has no document layout classes | |
+| 12 | Replace YOLO COCO model with document-specific layout model | High | YOLOv8n produces 0 predictions on all DocLayNet fixtures — general COCO model has no document layout classes | **Done — K7(b) DocLayNet `yolo11n_doc_layout.pt` swap, 2026-05-25** |
 | 13 | ~~Layout class coverage (heading, footer, caption, figure)~~ | — | Subsumed by #12 — entire layout pipeline needs a document-trained model | **Merged into #12** |
 | 14 | Per-document-type config overrides | High | Enables type-specific DPI, thresholds | |
-| 15 | End-to-end task metrics (Isaacus integration) | High | Measures actual application success | |
+| 15 | End-to-end task metrics (Isaacus integration) | High | Measures actual application success | **In progress — I6/I7 landed Isaacus enrich/link/embed stages; PII (I8) + coverage metrics next** |
 | 16 | Handwriting via dedicated HTR model | High | Only if handwritten docs are in scope | |
 
 ## Findings by Component

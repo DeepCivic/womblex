@@ -74,8 +74,8 @@ OCR, layout analysis, and preprocessing are accessed via typed protocols defined
 |-------|----|----|-----|-----------|--------|-----|
 | paragraph | 7 | 24 | 5 | 22.6% | 58.3% | 32.6% |
 | table | 1 | 0 | 3 | 100.0% | 25.0% | 40.0% |
-| footer | 0 | 5 | 4 | 0.0% | 0.0% | 0.0% |
 | heading | 2 | 2 | 2 | 50.0% | 50.0% | 50.0% |
+| footer | 0 | 5 | 4 | 0.0% | 0.0% | 0.0% |
 | header | 3 | 1 | 0 | 75.0% | 100.0% | 85.7% |
 | caption | 0 | 2 | 2 | 0.0% | 0.0% | 0.0% |
 | list_item | 1 | 10 | 1 | 9.1% | 50.0% | 15.4% |

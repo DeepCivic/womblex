@@ -14,6 +14,29 @@ the corpus-side extraction-quality view.
 > below describes the pre-refactor schema; findings still hold, but
 > on-disk shape now lives in the four sibling parquet files above.
 
+## Next steps (2026-06-01)
+
+The code for the full per-stage pipeline (extract → chunk → redact → enrich →
+link → embed) is committed on `feat/i1-i7-per-stage-pipeline` and green (747
+tests). The **live corpus run `run-20260525T214943Z` is pre-K9-fig** (still
+`figure=1,200`, `chunks=11,797`), so the data lags the code. Ordered next
+actions:
+
+1. **Full re-extraction** of the corpus with the committed code — applies
+   K9-fig (recovers ~1,046 figure-trapped text regions, incl. R-03247's
+   provider name). This is the immediate next-thread task. Offline (OCR), no
+   network needed; resumable via the extraction checkpoint.
+2. **Re-chunk** (`womblex chunk --shards`) — narrative now includes the
+   recovered text; expect docs-with-chunks 2,610 → 2,626.
+3. **Enrich → link → embed** (`womblex enrich/link/embed --shards`) — needs
+   `ISAACUS_API_KEY` + network (note: only short *foreground* calls reach the
+   API in the sandbox — a long run must be chunked or run from a real shell).
+4. **I8 — PII** (the next iteration in the sequence below), gated on the I7
+   link output.
+
+Also pending: push `e71c119` + `c34e27a` to GitHub (branch currently at
+`d1d66d6` on the remote).
+
 ## Snapshot
 
 | metric | value |

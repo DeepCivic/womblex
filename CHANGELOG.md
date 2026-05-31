@@ -76,6 +76,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   engine via a shared `_run_redact_shards` helper. 8 new CLI tests.
 
 ### Changed
+- **`operations.py` split into an `operations/` package.** The 902-line module
+  (over the 750-line cap) became one module per independent operation
+  (`models`/`extract`/`redact`/`chunk`/`pii`/`enrich`/`persist`), each ≤90
+  lines. The flat import surface (`from womblex.operations import run_extraction`,
+  …) is preserved by `operations/__init__` re-exports — no caller changes.
+  Behaviour-neutral; `test_integration.py` patch targets for `create_chunker`
+  moved to `womblex.operations.chunk`.
+- **Resume-integrity self-heal generalised across stages.** `store/shard_audit.py`
+  gains `reconcile_stage_checkpoint_with_shards(mgr, dir, *, suffix)`; the chunk
+  reconcile now delegates to it, and `enrich`/`link`/`embed` wire it (+
+  `--no-verify-resume`) — so every `CheckpointManager`-backed stage drops +
+  re-does batches with corrupt sidecars on resume, identically.
 - **I5 — SemChunk wrapper audit (P2).** Audited `process/chunker.py`
   against semchunk 3.2.5: `create_chunker` exposes every `chunkerify`
   creation parameter and `chunk_batch` passes every relevant
