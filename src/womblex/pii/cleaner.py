@@ -130,6 +130,8 @@ class _Candidate:
     end: int
     entity_type: str
     score: float
+    detector: str = ""  # enrichment | regex_high | regex_context
+    entity_id: str = ""  # graph entity id for enrichment spans ("" for regex)
 
 
 # ---------------------------------------------------------------------------
@@ -223,13 +225,17 @@ class PIICleaner:
         # Address detection (high confidence — requires street type anchor)
         if "ADDRESS" in self._entities:
             for m in _ADDRESS_RE.finditer(text):
-                candidates.append(_Candidate(m.start(), m.end(), "ADDRESS", self._HIGH_CONFIDENCE))
+                candidates.append(
+                    _Candidate(m.start(), m.end(), "ADDRESS", self._HIGH_CONFIDENCE, "regex_high")
+                )
                 high_spans.append((m.start(), m.end()))
 
         if "PERSON" in self._entities:
             # Stage 1: high-confidence honorific matches
             for m in _HONORIFIC_RE.finditer(text):
-                candidates.append(_Candidate(m.start(), m.end(), "PERSON", self._HIGH_CONFIDENCE))
+                candidates.append(
+                    _Candidate(m.start(), m.end(), "PERSON", self._HIGH_CONFIDENCE, "regex_high")
+                )
                 high_spans.append((m.start(), m.end()))
 
             # Stage 2: low-confidence title-case candidates
@@ -247,7 +253,9 @@ class PIICleaner:
                 scores = self._score_context_batch(text, low)
                 for m, score in zip(low, scores):
                     if score >= self._threshold:
-                        candidates.append(_Candidate(m.start(), m.end(), "PERSON", score))
+                        candidates.append(
+                            _Candidate(m.start(), m.end(), "PERSON", score, "regex_context")
+                        )
 
         # Sort by position; resolve overlaps (keep first)
         candidates.sort(key=lambda c: c.start)
@@ -272,26 +280,96 @@ class PIICleaner:
     ) -> list[_Candidate]:
         """Convert enrichment-derived spans to local-offset candidates.
 
-        ``known_spans`` are ``(start, end, entity_type)`` tuples in
-        full-document coordinates.  ``text_offset`` is where the current
-        text block begins in the full document, used to compute local
-        positions within the block.
+        ``known_spans`` are ``(start, end, entity_type)`` or
+        ``(start, end, entity_type, entity_id)`` tuples in full-document
+        coordinates.  ``text_offset`` is where the current text block begins
+        in the full document, used to compute local positions within the block.
 
         Spans that do not overlap the current text block are discarded.
         Spans are clipped to text boundaries.
         """
         candidates: list[_Candidate] = []
         text_end = text_offset + text_len
-        for start, end, entity_type in known_spans:
+        for span in known_spans:
+            start, end, entity_type = span[0], span[1], span[2]
+            entity_id = span[3] if len(span) > 3 else ""
             if start >= text_end or end <= text_offset:
                 continue
             local_start = max(0, start - text_offset)
             local_end = min(text_len, end - text_offset)
             if local_end > local_start:
                 candidates.append(
-                    _Candidate(local_start, local_end, entity_type, 0.95)
+                    _Candidate(local_start, local_end, entity_type, 0.95, "enrichment", entity_id)
                 )
         return candidates
+
+    # ------------------------------------------------------------------
+    # Span detection (no rewrite) — used by the per-stage pii sidecar
+    # ------------------------------------------------------------------
+
+    def detect_spans(
+        self,
+        text: str,
+        known_spans: list[tuple[int, int, str]] | None = None,
+        text_offset: int = 0,
+        *,
+        use_regex: bool = True,
+    ) -> list[_Candidate]:
+        """Return merged, overlap-resolved PII candidates for ``text``.
+
+        Combines enrichment-derived spans (high confidence, pre-validated by
+        Isaacus — passed via ``known_spans`` in full-document coordinates) with
+        the local regex/context detector. Set ``use_regex=False`` to rely on
+        the graph alone (isolates graph-only recall for measurement). Returns
+        candidates with chunk-local offsets; does NOT rewrite the text.
+        """
+        if not text:
+            return []
+        candidates: list[_Candidate] = []
+        if use_regex:
+            candidates.extend(self._find_candidates(text))
+        if known_spans:
+            candidates.extend(
+                self._enrichment_candidates(len(text), text_offset, known_spans)
+            )
+        # Sort by position, prefer higher score on overlap, keep first
+        candidates.sort(key=lambda c: (c.start, -c.score))
+        deduped: list[_Candidate] = []
+        last_end = -1
+        for cand in candidates:
+            if cand.start >= last_end:
+                deduped.append(cand)
+                last_end = cand.end
+        return deduped
+
+    def _anonymize(self, text: str, candidates: list[_Candidate]) -> tuple[str, int]:
+        """Replace ``candidates`` in ``text`` with ``<ENTITY_TYPE>`` tags."""
+        if not candidates:
+            return text, 0
+        try:
+            from presidio_anonymizer import AnonymizerEngine
+            from presidio_anonymizer.entities import OperatorConfig, RecognizerResult
+        except ImportError as exc:
+            raise ImportError(
+                "PII replacement requires 'presidio-anonymizer'. "
+                "Install with: pip install womblex[pii]"
+            ) from exc
+
+        engine = AnonymizerEngine()
+        analyzer_results = [
+            RecognizerResult(
+                entity_type=c.entity_type, start=c.start, end=c.end, score=c.score
+            )
+            for c in candidates
+        ]
+        operators = {
+            c.entity_type: OperatorConfig("replace", {"new_value": f"<{c.entity_type}>"})
+            for c in candidates
+        }
+        result = engine.anonymize(
+            text=text, analyzer_results=analyzer_results, operators=operators
+        )
+        return result.text, len(candidates)
 
     # ------------------------------------------------------------------
     # Public API
@@ -308,40 +386,7 @@ class PIICleaner:
         """
         if not text:
             return text, 0
-
-        candidates = self._find_candidates(text)
-        if not candidates:
-            return text, 0
-
-        try:
-            from presidio_anonymizer import AnonymizerEngine
-            from presidio_anonymizer.entities import OperatorConfig, RecognizerResult
-
-            engine = AnonymizerEngine()
-            analyzer_results = [
-                RecognizerResult(
-                    entity_type=c.entity_type,
-                    start=c.start,
-                    end=c.end,
-                    score=c.score,
-                )
-                for c in candidates
-            ]
-            operators = {
-                c.entity_type: OperatorConfig("replace", {"new_value": f"<{c.entity_type}>"})
-                for c in candidates
-            }
-            result = engine.anonymize(
-                text=text,
-                analyzer_results=analyzer_results,
-                operators=operators,
-            )
-            return result.text, len(candidates)
-        except ImportError as exc:
-            raise ImportError(
-                "PII replacement requires 'presidio-anonymizer'. "
-                "Install with: pip install womblex[pii]"
-            ) from exc
+        return self._anonymize(text, self.detect_spans(text))
 
     def clean_with_known_spans(
         self,
@@ -366,54 +411,5 @@ class PIICleaner:
         """
         if not text:
             return text, 0
-
-        # Regex-based candidates (existing two-stage detection)
-        regex_candidates = self._find_candidates(text)
-
-        # Enrichment-derived candidates (high confidence, pre-validated by Isaacus)
-        enrichment_candidates = self._enrichment_candidates(
-            len(text), text_offset, known_spans
-        )
-
-        # Merge, sort by position, resolve overlaps
-        all_candidates = regex_candidates + enrichment_candidates
-        all_candidates.sort(key=lambda c: (c.start, -c.score))
-        deduped: list[_Candidate] = []
-        last_end = -1
-        for cand in all_candidates:
-            if cand.start >= last_end:
-                deduped.append(cand)
-                last_end = cand.end
-
-        if not deduped:
-            return text, 0
-
-        try:
-            from presidio_anonymizer import AnonymizerEngine
-            from presidio_anonymizer.entities import OperatorConfig, RecognizerResult
-
-            engine = AnonymizerEngine()
-            analyzer_results = [
-                RecognizerResult(
-                    entity_type=c.entity_type,
-                    start=c.start,
-                    end=c.end,
-                    score=c.score,
-                )
-                for c in deduped
-            ]
-            operators = {
-                c.entity_type: OperatorConfig("replace", {"new_value": f"<{c.entity_type}>"})
-                for c in deduped
-            }
-            result = engine.anonymize(
-                text=text,
-                analyzer_results=analyzer_results,
-                operators=operators,
-            )
-            return result.text, len(deduped)
-        except ImportError as exc:
-            raise ImportError(
-                "PII replacement requires 'presidio-anonymizer'. "
-                "Install with: pip install womblex[pii]"
-            ) from exc
+        candidates = self.detect_spans(text, known_spans, text_offset)
+        return self._anonymize(text, candidates)

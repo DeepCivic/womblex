@@ -164,8 +164,8 @@ _YOLO_DOCLAYNET_LABEL_MAP: dict[str, str] = {
 # Retained for the fallback path only — when the DocLayNet checkpoint is
 # unavailable, the COCO-trained yolov8n.pt produces detections whose
 # class names have no document meaning. These mappings are best-effort
-# guesses and produce mostly noise on real document pages (see K7(b) in
-# STATUS.md). Prefer the DocLayNet path whenever possible.
+# guesses and produce mostly noise on real document pages (see
+# docs/decisions.md "Element-kind classification"). Prefer the DocLayNet path.
 _YOLO_COCO_LABEL_MAP: dict[str, str] = {
     "person": "paragraph",
     "book": "paragraph",

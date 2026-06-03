@@ -59,6 +59,12 @@ For mature, widely-used dependencies (`semchunk`, `rapidocr-onnxruntime`, `presi
 `process/chunker.py` exposes `create_chunker` (wraps `semchunk.chunkerify`) and one entry point `chunk_batch(inputs, chunker, *, overlap, processes, progress)`. Every caller flattens all docs' narratives into one semchunk call and all docs' table markdowns into another, so `processes` and the progress bar parallelise across the whole batch. The chunker accepts any HuggingFace tokeniser identifier or a callable token counter — tokeniser and chunk size are dataset-level config choices in `configs/*.yaml`.
 
 `process/chunk_stage.py` provides `chunk_shards(shard_dir, config)` — the per-stage entry point that walks an existing extraction shard directory, reassembles narrative + tables from each `*.elements.parquet` via `build_chunk_input(source_hash, elements)`, calls `chunk_batch`, and writes a `*.chunks.parquet` sibling. The same `build_chunk_input` powers the in-memory `operations.run_chunking` path, so per-stage and E2E modes feed semchunk identical inputs by construction.
+### PII is graph-driven and masked after Isaacus
+PII detection consumes the Kanon-2 enrichment graph: PII-typed entities (`natural`→PERSON, `address`→ADDRESS) are the candidates, mapped onto chunks via mention offsets. There is no separate detector and no second enrichment pass — the optional regex/cosine backstop (`pii.use_regex_backstop`, default off) is low-precision and opt-in only; recall is flexed by enrichment *granularity/duration*, not by the backstop. Masking is **terminal**: the `pii` stage writes a masked `*.clean_text.parquet` (`<PERSON_n>`, typed + numbered off the graph entity) *after* enrich + embed and never rewrites the raw chunks that feed Isaacus (the enricher strips `<…>` tags as OCR noise). See [docs/decisions.md](docs/decisions.md).
+
+### Decisions, dead-ends & limitations live in docs/decisions.md
+The "why" behind the library — design decisions and rejected alternatives, approaches tried and abandoned (don't re-attempt), library-general limitations, and the deferred backlog — is recorded in [docs/decisions.md](docs/decisions.md). Shipped state is in [CHANGELOG.md](CHANGELOG.md). Read those before re-litigating a settled call or retrying a known dead-end.
+
 ### Config-driven, not hardcoded
 Dataset-specific settings live in YAML configs. The codebase doesn't know about specific datasets — that's all in config files under `configs/`.
 ### Checkpointing for long jobs
@@ -84,8 +90,10 @@ A corpus exists to mature Womblex capability, not host custom code. Corpus-side 
 | `ingest/paddle_ocr.py` | Wrap RapidOCR and YOLOv8 layout analysis | Implement extraction strategy logic |
 | `redact/detector.py` | Detect and mask redacted regions | Know about document semantics |
 | `redact/stage.py` | Run redaction at configurable pipeline points (post_chunk, post_enrichment) | Implement detection logic |
-| `pii/cleaner.py` | Detect PERSON candidates via regex; validate with cosine similarity context model; merge enrichment-derived spans; emit `<ENTITY_TYPE>` (angle-bracket) tags inline per span | Call Isaacus directly |
-| `pii/stage.py` | Run PII cleaning as an isolated pipeline stage (post_extraction, post_chunk, post_enrichment) | Implement detection logic |
+| `pii/cleaner.py` | Detect PII candidates: `detect_spans()` merges enrichment-graph spans (high-confidence) with the opt-in regex/cosine-context detector; `_anonymize()` applies `<ENTITY_TYPE>` tags. Graph is the primary source | Call Isaacus directly |
+| `pii/stage.py` | In-memory PII helpers for the E2E `run` path (post_extraction, post_chunk, post_enrichment) | Implement detection logic |
+| `pii/pii_stage.py` | `pii_shards()` over a shard dir — read `*.chunks.parquet` + `*.enrichment_entities.parquet`, detect PII per chunk (graph spans on narrative chunks; regex backstop opt-in), write `*.pii_spans.parquet` (audit) + masked `*.clean_text.parquet` (`<PERSON_n>`, terminal — after enrich/embed). Per-stage `CheckpointManager` | Detect before Isaacus; rewrite the raw chunks |
+| `store/pii_output.py` | `pii_spans` + `clean_text` parquet schemas + IO (self-contained, like `store/enrichment_output.py`) | Implement detection/masking |
 | `process/chunker.py` | `chunk_batch` engine + `create_chunker` + element-stream → ChunkInput projection helpers (`reassemble_narrative`, `collect_tables_from_elements`, `build_chunk_input`); `_repair_redaction_splits` for cross-boundary `<REDACTED>` markers | Call Isaacus; read/write parquet |
 | `process/chunk_stage.py` | `chunk_shards()` over a shard dir — read `*.elements.parquet` + `*.table_cells.parquet` + `*._manifest.parquet`, build ChunkInputs per source_hash, call `chunk_batch`, write `*.chunks.parquet`. Per-stage `CheckpointManager` integration | Implement chunking primitives (those are in `process/chunker.py`) |
 | `analyse/*.py` | Wrap Isaacus API calls; `query.py` loads enrichment graph from Parquet for PII masking | Handle PDFs directly |
@@ -290,4 +298,4 @@ For new shapes that fit within the existing native/OCR dispatch:
 - Log document IDs with all errors
 - Write checkpoint after each batch
 - Manage dependencies via `pyproject.toml` + `uv lock`; no separate requirements files
-- Verify mechanism claims against code or measurement before writing STATUS or docs — `grep`/`Read` the file or run a probe, attach the evidence. Inferred descriptions without grounding tend to be wrong and need correcting later.
+- Verify mechanism claims against code or measurement before writing docs — `grep`/`Read` the file or run a probe, attach the evidence. Inferred descriptions without grounding tend to be wrong and need correcting later.

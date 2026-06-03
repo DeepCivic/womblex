@@ -25,7 +25,7 @@ import argparse
 import logging
 import sys
 
-from womblex.cli import embed, ingest, link, pipeline, profile, redact, score, verify
+from womblex.cli import embed, ingest, link, pii, pipeline, profile, redact, score, verify
 from womblex.cli._shared import setup_logging
 
 logger = logging.getLogger("womblex")
@@ -36,6 +36,7 @@ ALL_COMMANDS = [
     *redact.COMMANDS,
     *link.COMMANDS,
     *embed.COMMANDS,
+    *pii.COMMANDS,
     *ingest.COMMANDS,
     *score.COMMANDS,
     *profile.COMMANDS,

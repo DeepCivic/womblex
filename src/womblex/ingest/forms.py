@@ -43,7 +43,7 @@ _URL_LABEL_LOWER = {"http", "https", "ftp", "file", "ssh", "mailto"}
 _FORM_PAIR_GAP_RE = re.compile(r"^([A-Z]\S?(?:.{0,48}?\S)?)\s{2,}(\S.+?)\s*$")
 
 # Labels that recur in Australian regulatory letter prose and aren't real
-# form fields — see STATUS.md K3 for the audit data.
+# form fields — see docs/decisions.md "Element-kind classification".
 _LABEL_DENYLIST: frozenset[str] = frozenset({
     "Penalty",      # Regulation citation: "Penalty: $10 000, in the case of an individual"
     "OFFICIAL",     # Document classification banner: "OFFICIAL: Sensitive - Legislative Secrecy"
@@ -204,7 +204,7 @@ def _extract_form_pairs_from_regions(
 
     Preferred OCR path: each region's polygon bbox becomes the pair's
     position (normalised by the OCR-input image dimensions). Closes the
-    OCR-form bbox-loss issue tracked as K2′ in `stories/STATUS.md`.
+    OCR-form bbox-loss issue (see docs/decisions.md "Element-kind classification").
 
     Regions are treated independently — multi-region pairs (label and
     value on adjacent detections) are not joined here, since PaddleOCR

@@ -20,9 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   audit mis-attributed this to `_ocr_image_regions`; that path now routes
   through the same helper.) On the ACT-ECI corpus: `figure` 1,200→154,
   `paragraph` +1,046, and all 16 previously zero-chunk complaint documents
-  now produce chunks (docs-with-chunks 2,610→2,626). The existing extraction
-  shards were corrected by an in-place `kind` relabel (verified equivalent to
-  a full re-extraction), so no re-OCR was required. 4 new unit tests.
+  now produce chunks (docs-with-chunks 2,610→2,626). 4 new unit tests.
 
 ### Added
 - **I7 — entity-link sidecar: `womblex enrich` + `womblex link` per-stage CLIs.**
@@ -64,6 +62,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   batch-level failure isolation) + `cli/embed.py` + `EmbeddingConfig` +
   `EMBEDDINGS_SCHEMA`/IO. The substrate for downstream search/clustering and a
   doc→entity attribution backstop for no-extraction docs. `tests/test_embed_stage.py`.
+- **I8–I10 — `womblex pii --shards` per-stage CLI: graph-driven detection +
+  `<PERSON_n>` masking.** Reads `*.chunks.parquet` + `*.enrichment_entities.parquet`
+  and writes `*.pii_spans.parquet` (audit; one row per span with `entity_id` +
+  `replacement`) plus a masked `*.clean_text.parquet` (publishable text layer,
+  drop-in for chunks). The Kanon-2 graph is the primary entity source
+  (`natural`→PERSON, `address`→ADDRESS); graph spans map onto narrative chunks
+  via `chunk.start_char`. Masking is **terminal** — applied after enrich + embed,
+  never rewriting the raw chunks that feed Isaacus. Tags are typed + numbered per
+  document off the graph entity (`<PERSON_1>`…). `pii/cleaner.py` refactored to a
+  span-returning `detect_spans()` + shared `_anonymize()`; the regex/cosine
+  backstop is now opt-in (`PIIConfig.use_regex_backstop`, default off — low
+  precision). New `store/pii_output.py`, `pii/pii_stage.py`, `cli/pii.py`,
+  `PIIConfig.write_clean_text`. `tests/test_pii_stage.py`.
 - **I3 — `womblex redact --shards` per-stage CLI.** `womblex redact` is
   now dual-mode, mirroring `womblex chunk`: `--shards <dir> --pdfs <dir>`
   runs per-stage redaction detection over an existing extraction shard
@@ -219,7 +230,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   recommendation while matching COCO speed; override to 1280 when
   small-class (Caption / Footnote) recall matters. Closes the
   1,587-element `kind='figure'` mis-classification on scanned pages
-  tracked in STATUS.md K7(b); unlocks Caption / Footnote producers
+  tracked in docs/decisions.md; unlocks Caption / Footnote producers
   (K6 closes as a side effect).
 
 - **`footnote` ElementKind.** New text-bearing kind added to
@@ -238,7 +249,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   engines that resolve reading order natively and don't emit per-region
   bboxes. Closes the K2′ silent-zero-bbox issue on 4,184 of 5,183 OCR
   form elements (80.7%). Same plumbing unblocks inline-per-span
-  redaction markers on raster pages (P6 option (c) in STATUS.md).
+  redaction markers on raster pages (P6 option (c); see docs/decisions.md).
 
 ### Changed
 - **`@pytest.mark.slow` tests now run by default.** Removed the
@@ -387,16 +398,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Historical engineering notes (migrated from STATUS.md 2026-05-28)
 
-> These sections were moved verbatim from `STATUS.md` to keep the live
-> status doc focused on current and forward-looking state. They record
-> the point-in-time engineering detail behind the structured
-> `[Unreleased]` / `[0.1.0]` entries above: the extraction-quality
+> These sections record the point-in-time engineering detail behind the
+> structured `[Unreleased]` / `[0.1.0]` entries above: the extraction-quality
 > session bundle (native-page tables, block-aware paragraphs, footer
 > pipe-as-I, the reverted OCR-table relaxation), the Phase 1–6 roadmap
 > history, the CLI restructure, the detector evolution (vector-first +
 > raster-path layout filter), and the redaction/PII marker-convention
-> unification. Forward-looking tracks (P1–P7, the I-sequence, the
-> K-cluster, and open items #B–#F) remain in `STATUS.md`.
+> unification. The durable decisions, dead-ends, limitations and deferred
+> backlog now live in [docs/decisions.md](docs/decisions.md); corpus-specific
+> run history is a corpus concern (see the corpus's own status notes).
+> (These notes were originally migrated from a now-removed `STATUS.md`.)
 
 ## What changed
 
@@ -757,7 +768,7 @@ Gated by `RedactionConfig.use_layout_filter: bool = True` (default on). Threaded
 
 **Interpretation.** The COCO YOLO model produces useful exclusion zones on 6 of 11 docs but at very small magnitudes (−1 to −3 per doc). It does **not** touch the worst case — 02737's 10 regions across 2 pages, the cohort's most egregious false positives, are entirely missed by the COCO classes the filter listens for. The hypothesis that `tv` / `laptop` / `monitor` etc. would heuristically land on dark form-field backgrounds was too weak: YOLO either doesn't detect those classes on rendered CRM-form pages, or detects them but not on the regions where contour detection misfires.
 
-The filter is net-positive (more precise without regressing any doc) but the magnitude is too small to close §11's `scanned_mixed` false-positive gap on its own. A document-layout-trained checkpoint (DocLayNet / PubLayNet, with `Figure` / `Table` / `Form` classes) would be a better fit — see "Open follow-ups" item 8 in this STATUS.
+The filter is net-positive (more precise without regressing any doc) but the magnitude is too small to close §11's `scanned_mixed` false-positive gap on its own. A document-layout-trained checkpoint (DocLayNet / PubLayNet, with `Figure` / `Table` / `Form` classes) would be a better fit (the DocLayNet swap later landed — see CHANGELOG `[Unreleased]`).
 
 **Default decision.** Keeping `use_layout_filter=True` is defensible (no doc regressed; some precision gain) but the value is modest and the test-suite runtime cost is real. Best path forward is the YOLO swap — see "Open follow-ups" K7(b) / track #A.
 

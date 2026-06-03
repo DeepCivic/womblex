@@ -328,8 +328,8 @@ def _classify_native_block(
 ) -> str:
     """Classify a native PDF text block by position, typography, and content.
 
-    Reserves `caption` and `signature` — see STATUS.md "Non-`table` element
-    kind audit" for why a font/length heuristic for `caption` and a closing-
+    Reserves `caption` and `signature` — see docs/decisions.md "Element-kind
+    classification" for why a font/length heuristic for `caption` and a closing-
     phrase regex for `signature` were both removed (false-positive heavy on
     letter-style prose).
     """

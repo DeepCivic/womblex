@@ -38,11 +38,11 @@ verbatim text because the writer reads `elements`, not `pages`.
 | `paragraph` | prose block (default for unclassified text) |
 | `heading` | heading-styled prose (large font, or bold short non-sentence text) |
 | `list_item` | sub-paragraph marker `(a)` / `(i)` / `(1)` / bullet `•·-*` at start of block |
-| `caption` | figure / table caption — emitted by the DocLayNet layout model's `Caption` class on OCR'd pages (see STATUS.md K6) |
+| `caption` | figure / table caption — emitted by the DocLayNet layout model's `Caption` class on OCR'd pages |
 | `header` | short text in top 8% of page (letterhead-style content) |
 | `footer` | page-number footer or short text in bottom 8% of page |
-| `signature` | signatory block (reserved; not currently emitted — see STATUS.md K1) |
-| `figure` | layout-detected visual region (no extracted image data). A full-page scan whose dominant layout region is a figure but which OCR's to substantial text (≥5 words) is reclassified to `paragraph` so its content reaches chunking — only sparse regions (page-number stamps, bare logos) stay `figure`. See STATUS.md K9-fig |
+| `signature` | signatory block (reserved; not currently emitted) |
+| `figure` | layout-detected visual region (no extracted image data). A full-page scan whose dominant layout region is a figure but which OCR's to substantial text (≥5 words) is reclassified to `paragraph` so its content reaches chunking — only sparse regions (page-number stamps, bare logos) stay `figure`. See [decisions.md](decisions.md) "Element-kind classification" |
 | `image` | extracted image with alt text |
 | `table` | table; cells nest on `Element.cells` in memory, flatten to a sidecar in parquet |
 | `form` | form region; fields nest on `Element.fields`, flatten to a sidecar in parquet |

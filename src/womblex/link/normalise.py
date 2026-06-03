@@ -8,7 +8,7 @@ improve.
 
 This is deliberately *minimal*. It is NOT address validation — there is
 no G-NAF lookup here; canonical address resolution is a separate,
-corpus-dependent concern (see STATUS.md I7 / the user's (3) decision).
+corpus-dependent concern (see docs/decisions.md "Entity linking").
 """
 
 from __future__ import annotations

@@ -200,6 +200,37 @@ class PIIConfig(BaseModel):
 
     )
 
+    use_regex_backstop: bool = Field(
+
+        default=False,
+
+        description=(
+
+            "Run the local regex+context detector alongside the enrichment "
+            "graph spans. Default False: the Kanon-2 graph is the high-precision "
+            "entity source; the regex/context backstop is noisy on this corpus "
+            "(~15% precision — orgs/headings tagged PERSON), so it is opt-in for "
+            "recall experiments only."
+
+        ),
+
+    )
+
+    write_clean_text: bool = Field(
+
+        default=True,
+
+        description=(
+
+            "Also write the masked `*.clean_text.parquet` sidecar (the "
+            "publishable text layer) alongside `*.pii_spans.parquet`. Spans are "
+            "replaced with typed+numbered tags (`<PERSON_1>`, …) keyed to the "
+            "graph entity. Set False for a spans-only (measurement) run."
+
+        ),
+
+    )
+
 
 
 class SpreadsheetPrintConfig(BaseModel):

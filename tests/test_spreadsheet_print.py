@@ -1,8 +1,8 @@
 """Integration tests for the spreadsheet-print extractor.
 
-Uses the real ACT FOI manifest fixtures from
-`stories/ACT_EarlyChildhoodIncidents/Index Files/`. Tests skip gracefully
-if those fixtures are unavailable.
+Uses real ACT FOI manifest fixtures from the womblex-development-fixtures repo
+(`fixtures/fixtures/womblex-collection/_documents/`). Tests skip gracefully if
+those fixtures are unavailable.
 """
 from __future__ import annotations
 
@@ -16,9 +16,9 @@ from womblex.ingest.spreadsheet_print import extract_spreadsheet_print
 from womblex.ingest.page_profile import qualify_for_spreadsheet_print, profile_pages
 
 
-_FIXTURES = Path(
-    "/run/media/toothy/DeepCivic_1/projects/stories/"
-    "ACT_EarlyChildhoodIncidents/Index Files"
+_FIXTURES = (
+    Path(__file__).resolve().parent.parent
+    / "fixtures" / "fixtures" / "womblex-collection" / "_documents"
 )
 _MASTER_INDEX = _FIXTURES / (
     "Early-childhood-education-and-care-incident-recordsOrder-to-"

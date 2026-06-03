@@ -6,13 +6,12 @@ See `accuracy/` for current benchmark numbers. See `architecture.md` for how the
 
 ## Priority List
 
-> **Scope note (2026-06-01).** This is the *extraction-quality* track. The
-> project's active roadmap is now the **publishable-corpus per-stage iteration
-> sequence (I1–I10+) in [STATUS.md](../STATUS.md)** — chunk/redact/enrich/link/
-> embed stages, of which I1–I7 have landed. The immediate next step is the
-> full corpus **re-extraction** to apply the committed K9-fig fix (see STATUS
-> "Next steps"). Items below are the older accuracy track; completed ones are
-> marked.
+> **Scope note.** This is the *extraction-quality* track. The per-stage
+> pipeline (extract → chunk → redact → enrich → link → embed → PII) has landed;
+> the durable design decisions, dead-ends, limitations and deferred backlog are
+> in [decisions.md](decisions.md). The one remaining pipeline iteration is the
+> downstream text-cleaning op (#B/#D in decisions.md). Items below are the older
+> accuracy track; completed ones are marked.
 
 | # | Change | Effort | Impact | Status |
 |---|--------|--------|--------|--------|
@@ -88,7 +87,7 @@ Measured on Throsby fixture (12 GT entities across 6 types). Only PERSON is curr
 
 ### Redaction Handling
 
-Measured on Throsby fixture (7 GT `<REDACTED>` tags across 3 pages); vector-first detection landed 2026-05-19 (see `STATUS.md` "Detector — vector-first detection").
+Measured on Throsby fixture (7 GT `<REDACTED>` tags across 3 pages); vector-first detection is described in [decisions.md](decisions.md) "Redaction detection" and [CHANGELOG.md](../CHANGELOG.md).
 
 - **Native cohort recall significantly improved post vector-first detection.** `redact/stage.py:detect_redactions` now tries `page.get_drawings()` for filled near-black rectangles before falling back to the raster CV2 contour detector. On the §1 residual pages (01093 / 01094 / 01349) recall jumped 6→14, 7→13, 3→68 without regressing FOI master (0 regions preserved).
 - **Filters** (each surfaced during validation): near-black RGB/CMYK fill; `min_width ≥ 3pt` excludes narrow vertical separators in manifest tables; `min_height ≥ 8pt` excludes glyph-rendering small filled rects on PDFs that draw text as filled-path glyphs (01125-class regression: 14,184 false positives → 144 actual).
