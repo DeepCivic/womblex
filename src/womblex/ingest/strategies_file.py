@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from womblex.ingest.elements import Cell, Element
 from womblex.ingest.extract import (
@@ -20,6 +21,9 @@ from womblex.ingest.extract import (
     ExtractionResult,
     PageResult,
 )
+
+if TYPE_CHECKING:
+    import fitz
 
 logger = logging.getLogger(__name__)
 

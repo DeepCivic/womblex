@@ -253,7 +253,6 @@ def _table_to_element(t: TableData, page: int | None, extractor: str, order: int
     captured in ``header_rows`` so the legacy projection round-trips.
     """
     cells: list[Cell] = []
-    n_cols = max(len(t.headers), max((len(r) for r in t.rows), default=0))
     for col_idx in range(len(t.headers)):
         cells.append(Cell(row=0, col=col_idx, value=t.headers[col_idx]))
     for row_idx, row in enumerate(t.rows, start=1):

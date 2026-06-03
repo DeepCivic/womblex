@@ -13,13 +13,10 @@ import fitz
 from womblex.ingest.extract import (
     ExtractionMetadata,
     ExtractionResult,
-    ImageData,
     PageResult,
     TableData,
     TextBlock,
-    _build_text_blocks,
     _extract_images_from_page,
-    _extract_tables_from_page,
     _normalise_bbox,
     _normalise_rect,
     _ocr_text_block,

@@ -10,31 +10,24 @@ from __future__ import annotations
 import logging
 import re
 import time
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import Protocol
 
 import fitz
 import numpy as np
 
 from womblex.ingest.detect import DocumentProfile, DocumentType
-from womblex.ingest.elements import Cell, Element, FieldEntry
+from womblex.ingest.elements import Cell, Element, FieldEntry  # noqa: F401 (re-exported)
 from womblex.ingest.views import (  # re-exported for back-compat
-    ExtractionMetadata,
+    ExtractionMetadata,  # noqa: F401
     ExtractionResult,
-    FormField,
+    FormField,  # noqa: F401
     ImageData,
     PageResult,
     Position,
     TableData,
     TextBlock,
-    _ZERO_POS,
-    _element_to_table_data,
-    _sheets_to_table_data,
 )
-
-if TYPE_CHECKING:
-    from womblex.redact.stage import RedactionReport
 
 logger = logging.getLogger(__name__)
 

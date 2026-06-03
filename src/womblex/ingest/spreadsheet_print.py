@@ -34,7 +34,7 @@ from dataclasses import dataclass
 
 import fitz
 
-from womblex.ingest.extract import Position, TableData, _normalise_bbox
+from womblex.ingest.extract import TableData, _normalise_bbox
 
 # Minimum columns the page must expose for spreadsheet-print routing.
 MIN_COLUMNS = 3
