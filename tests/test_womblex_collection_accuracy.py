@@ -264,6 +264,8 @@ class TestPIITagging:
     @pytest.fixture()
     def gt_entities(self) -> dict[str, list[str]]:
         """Parse PII entity spans from ground truth for all supported types."""
+        if not THROSBY_GT_PII.exists():
+            pytest.skip(f"Fixture missing: {THROSBY_GT_PII}")
         gt_pii = THROSBY_GT_PII.read_text(encoding="utf-8")
         gt_redacted = THROSBY_GT_REDACTED.read_text(encoding="utf-8")
         tags = _count_tags(gt_pii)

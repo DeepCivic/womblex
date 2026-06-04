@@ -56,6 +56,8 @@ def redacted_image() -> np.ndarray:
 def clean_image() -> np.ndarray:
     """Real FUNSD benchmark image (sparse form, 25 words) as grayscale — no redaction boxes."""
     path = _FIXTURES_DIR / "funsd" / "images" / "85540866.png"
+    if not path.exists():
+        pytest.skip("womblex-development-fixtures not cloned (see THIRD_PARTY_DATA.md)")
     return np.array(Image.open(path).convert("L"))
 
 
