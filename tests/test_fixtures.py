@@ -35,6 +35,13 @@ FUNSD_ANNOTATIONS = FIXTURES_DIR / "funsd" / "annotations"
 IAM_DIR = FIXTURES_DIR / "iam_line"
 DOCLAYNET_DIR = FIXTURES_DIR / "doclaynet"
 
+# Every test in this module reads a real fixture file. Skip cleanly when the
+# fixtures repo is not cloned (e.g. CI). See THIRD_PARTY_DATA.md.
+pytestmark = pytest.mark.skipif(
+    not FIXTURES_DIR.exists(),
+    reason="womblex-development-fixtures not cloned (see THIRD_PARTY_DATA.md)",
+)
+
 
 # ---------------------------------------------------------------------------
 # Helpers

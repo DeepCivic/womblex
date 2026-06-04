@@ -277,6 +277,13 @@ class TestCSVFixtureAccuracy:
 
     """Validate the spreadsheet extractor against the real CSV fixture."""
 
+    # Skip cleanly when the fixtures repo is not cloned (e.g. CI); the other
+    # classes in this module use synthetic frames. See THIRD_PARTY_DATA.md.
+    pytestmark = pytest.mark.skipif(
+        not _CSV_FILE.exists(),
+        reason="womblex-development-fixtures not cloned (see THIRD_PARTY_DATA.md)",
+    )
+
 
     @pytest.fixture()
 

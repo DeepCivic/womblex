@@ -68,6 +68,13 @@ FUNSD_ANNOTATIONS = FIXTURES_DIR / "funsd" / "annotations"
 IAM_DIR = FIXTURES_DIR / "iam_line"
 DOCLAYNET_DIR = FIXTURES_DIR / "doclaynet"
 
+# Every benchmark here reads a real fixture image. Skip cleanly when the
+# fixtures repo is not cloned (e.g. CI). See THIRD_PARTY_DATA.md.
+pytestmark = pytest.mark.skipif(
+    not FIXTURES_DIR.exists(),
+    reason="womblex-development-fixtures not cloned (see THIRD_PARTY_DATA.md)",
+)
+
 # Standard page width in points — height is computed per image to preserve AR.
 _TARGET_W = 595
 
