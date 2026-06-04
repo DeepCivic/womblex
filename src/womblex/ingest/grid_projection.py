@@ -211,7 +211,7 @@ def extract_page_text(
 
 
 def _word_in_any_rect(
-    word: WordTuple, rects: "Sequence[object]",
+    word: WordTuple, rects: "Sequence[fitz.Rect]",
 ) -> bool:
     """Test if a word's midpoint falls inside any of the given rects."""
     cx = (word[0] + word[2]) / 2
@@ -223,7 +223,7 @@ def _word_in_any_rect(
 
 
 def _render_blocks_with_breaks(
-    page: "fitz.Page", *, exclude_rects: "Sequence[object] | None" = None,
+    page: "fitz.Page", *, exclude_rects: "Sequence[fitz.Rect] | None" = None,
 ) -> str:
     """Render single-column page text block-by-block with ``\\n\\n`` separators.
 

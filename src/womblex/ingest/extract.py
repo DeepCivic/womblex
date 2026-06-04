@@ -522,7 +522,7 @@ def _apply_normalisation_and_warnings(
         if doc is not None and page.method == "native" and 0 <= page.page_number < doc.page_count:
             try:
                 from womblex.ingest.strategies_scanned import _ocr_page
-                ocr_text, _conf, _steps, _native_order = _ocr_page(
+                ocr_text, _conf, _steps, _native_order, _regions, _pix = _ocr_page(
                     doc[page.page_number], dpi=dpi, lang=lang,
                     engine=engine, engine_options=engine_options,
                 )

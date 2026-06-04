@@ -25,11 +25,12 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from typing import cast
 
 import fitz
 
 from womblex.ingest.detect import DocumentProfile, DocumentType
-from womblex.ingest.elements import Cell, Element, FieldEntry, TEXT_KINDS
+from womblex.ingest.elements import Cell, Element, ElementKind, FieldEntry, TEXT_KINDS
 from womblex.ingest.extract import (
     ExtractionMetadata,
     ExtractionResult,
@@ -217,7 +218,7 @@ def _apply_ocr_page(
 # 'table' and mixed-doc tags become 'paragraph' (the block is text from a
 # table-region or typed/handwritten region — not a structured table or a
 # distinct kind). Unknown values fall through to 'paragraph'.
-_BLOCK_TYPE_TO_KIND: dict[str, str] = {
+_BLOCK_TYPE_TO_KIND: dict[str, ElementKind] = {
     "paragraph": "paragraph",
     "heading": "heading",
     "list_item": "list_item",
@@ -316,11 +317,11 @@ def _accum_to_elements(
     order = start_order
     for _y, _x, kind, obj in placed:
         if kind == "block":
-            elements.append(_block_to_element(obj, accum.page_number, extractor, order))
+            elements.append(_block_to_element(cast("TextBlock", obj), accum.page_number, extractor, order))
         elif kind == "table":
-            elements.append(_table_to_element(obj, accum.page_number, extractor, order))
+            elements.append(_table_to_element(cast("TableData", obj), accum.page_number, extractor, order))
         elif kind == "image":
-            elements.append(_image_to_element(obj, accum.page_number, "figure_image", order))
+            elements.append(_image_to_element(cast("ImageData", obj), accum.page_number, "figure_image", order))
         order += 1
 
     if accum.forms:

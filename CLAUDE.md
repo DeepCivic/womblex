@@ -217,6 +217,27 @@ uv run python -m pytest tests/ -v -m ""
 # Full accuracy benchmarks (~3 min, regenerates docs/accuracy/*.md)
 uv run python -m pytest tests/test_fixture_accuracy.py tests/test_womblex_collection_accuracy.py -v
 ```
+
+### Expected conditional skips
+A full run reports ~17 skips on a typical dev box — all gated on an optional
+dependency, an external service, or an absent fixture, none on broken code.
+Run with `-rs` to see live reasons. The recurring ones:
+
+- **~15 — DeepSeek-OCR VLM benchmark** (`test_bench_ocr_accuracy.py`): needs a
+  local **Ollama** server (default `http://localhost:11435/v1`) with the
+  deepseek-ocr model pulled. Skips cleanly when absent.
+- **geospatial** (`test_geospatial.py`): needs the optional `geopandas` /
+  `pyogrio` extras.
+- **isaacus** (`test_enrich.py` / `test_graph.py` / `test_query.py`): module-level
+  `importorskip("isaacus")` — skip without the `[isaacus]` extra.
+- **rapidocr** OCR paths (`test_fixtures.py`): `importorskip("rapidocr_onnxruntime")`.
+- **fixture-gated** tests (`test_text_extractor.py`, `test_extract.py`,
+  `test_spreadsheet_print.py`, the accuracy suites): skip when the specific
+  fixture (transcript / Excel / ACT FOI Index files / benchmark image) is not in
+  the fixtures clone.
+
+Skips don't fail the build; CI sees the same set minus whatever it installs.
+
 ## Analysing Accuracy and Pipeline Performance
 When reviewing accuracy results or recommending improvements, use a systematic component-level analysis rather than jumping to isolated fixes. Walk through each layer of the pipeline and ask:
 

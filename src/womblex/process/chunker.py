@@ -41,6 +41,7 @@ import bisect
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import cast
 
 import semchunk
 
@@ -318,8 +319,8 @@ def chunk_batch(
                     )
                 )
 
-    for src, chunks in out.items():
-        out[src] = _repair_redaction_splits(chunks)
+    for src, doc_chunks in out.items():
+        out[src] = _repair_redaction_splits(doc_chunks)
 
     return out
 
@@ -340,7 +341,9 @@ def _chunker_batch(
         processes=processes,
         progress=progress,
     )
-    return chunks, offsets
+    return cast(
+        "tuple[list[list[str]], list[list[tuple[int, int]]]]", (chunks, offsets),
+    )
 
 
 def _build_narrative_chunk(

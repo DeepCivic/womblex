@@ -165,7 +165,7 @@ def _link_to_row(source_hash: str, link: Link) -> dict:
 
 def _doc_ids(base_path: Path) -> list[str]:
     try:
-        return read_manifest(base_path).column("doc_id").to_pylist()
+        return list(read_manifest(base_path).column("doc_id").to_pylist())
     except Exception:
         return []
 

@@ -30,6 +30,7 @@ import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import cast
 
 import fitz  # type: ignore[import-untyped]
 import pyarrow as pa
@@ -297,7 +298,7 @@ def validate_redactions_against_labels(
         per_page_bboxes: dict[int, list[tuple[int, int, int, int]]] = {
             p: [r.bbox for r in rs] for p, rs in sorted(report.page_redactions.items())
         }
-        labelled_pages = sorted({int(e["page"]) for e in entries if e.get("page") is not None})
+        labelled_pages = sorted({int(cast("str | int", e["page"])) for e in entries if e.get("page") is not None})
 
         summaries.append(
             ValidationSummary(

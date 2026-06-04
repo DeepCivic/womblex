@@ -16,10 +16,14 @@ import base64
 import io
 import logging
 import os
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from womblex.ingest.interfaces.protocols import OCRPageResult
+
+if TYPE_CHECKING:
+    import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +84,7 @@ class DeepSeekOCRReader:
             self.base_url = f"{self.base_url}/v1"
         self.prompt = prompt or DEEPSEEK_PROMPTS[self.DEFAULT_PROMPT_KEY]
         self.timeout_s = timeout_s
-        self._client = None  # lazy httpx.Client
+        self._client: httpx.Client | None = None  # lazy
 
     def _ensure_client(self) -> None:
         if self._client is not None:

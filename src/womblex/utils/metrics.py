@@ -55,30 +55,25 @@ def _levenshtein_chars(s1: str, s2: str) -> int:
     b = np.frombuffer(s2.encode("utf-32-le"), dtype=np.int32)
 
     # Two-row DP with vectorised min operations
-    prev = np.arange(n + 1, dtype=np.int32)
+    # Distinct names from the pure-Python branch above (which uses list[int])
+    # so the array dtype flows cleanly.
+    dp = np.arange(n + 1, dtype=np.int32)
     for i in range(m):
-        # substitution cost vector
         cost = (b != a[i]).astype(np.int32)
-        # deletion: prev[1:] + 1
-        # substitution: prev[:-1] + cost
-        sub = prev[:-1] + cost
-        dele = prev[1:] + 1
+        sub = dp[:-1] + cost
+        dele = dp[1:] + 1
         best_no_ins = np.minimum(sub, dele)
 
-        # Insertion depends on curr[j-1], so we need a sequential pass.
-        # But we can bound: curr[j] <= best_no_ins[j] and curr[j] <= curr[j-1]+1.
-        # Start with best_no_ins, then propagate insertion constraint left-to-right.
-        curr = np.empty(n + 1, dtype=np.int32)
-        curr[0] = i + 1
-        curr[1:] = best_no_ins
+        # Insertion depends on dp_next[j-1]: seed with best_no_ins, then
+        # propagate the curr[j] <= curr[j-1]+1 constraint left-to-right.
+        dp_next = np.empty(n + 1, dtype=np.int32)
+        dp_next[0] = i + 1
+        dp_next[1:] = best_no_ins
+        _propagate_insertion(dp_next)
 
-        # Propagate insertion: curr[j] = min(curr[j], curr[j-1] + 1)
-        # This is a prefix-min-plus-offset scan. We unroll in chunks.
-        _propagate_insertion(curr)
+        dp = dp_next
 
-        prev = curr
-
-    return int(prev[n])
+    return int(dp[n])
 
 
 def _propagate_insertion(curr: np.ndarray) -> None:

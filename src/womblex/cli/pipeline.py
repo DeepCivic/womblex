@@ -271,6 +271,7 @@ def cmd_extract(args: argparse.Namespace) -> int:
             )
             return 1
         r = completed[0]
+        assert r.extraction is not None  # a completed unit always carries extraction
         out_path = output_dir / f"{r.doc_id}.txt"
         out_path.write_text(r.extraction.full_text, encoding="utf-8")
         logger.info("  %s -> %s (%d chars)", r.doc_id, out_path, len(r.extraction.full_text))

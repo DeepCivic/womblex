@@ -206,4 +206,4 @@ def schema_conformance(
         True if schemas match.
     """
     actual = pq.read_schema(str(parquet_path))
-    return actual.equals(expected_schema)
+    return bool(actual.equals(expected_schema))

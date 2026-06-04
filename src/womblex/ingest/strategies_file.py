@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
-from womblex.ingest.elements import Cell, Element
+from womblex.ingest.elements import Cell, Element, ElementKind
 from womblex.ingest.extract import (
     ExtractionMetadata,
     ExtractionResult,
@@ -67,11 +67,11 @@ class DocxExtractor:
                 para = paras_by_xml.get(child)
                 if para is None or not para.text.strip():
                     continue
-                kind = (
+                kind = cast("ElementKind", (
                     "heading"
                     if para.style and "heading" in para.style.name.lower()
                     else "paragraph"
-                )
+                ))
                 elements.append(Element(
                     order=order, kind=kind, extractor="docx",
                     text=para.text, confidence=0.9,

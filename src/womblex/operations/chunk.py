@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 from womblex.config import WomblexConfig
 from womblex.operations.models import DocumentResult
 from womblex.process.chunker import build_chunk_input, chunk_batch, create_chunker
 from womblex.redact.stage import annotate_chunks
+
+if TYPE_CHECKING:
+    from womblex.ingest.extract import ExtractionResult
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +40,8 @@ def run_chunking(
     )
 
     chunk_cfg = config.chunking
-    eligible: list[DocumentResult] = [
-        dr for dr in results
+    eligible: list[tuple[DocumentResult, ExtractionResult]] = [
+        (dr, dr.extraction) for dr in results
         if dr.status == "completed" and dr.extraction is not None
     ]
     if not eligible:
@@ -46,10 +50,10 @@ def run_chunking(
     inputs = [
         build_chunk_input(
             source_hash=dr.doc_id,
-            elements=dr.extraction.elements,
+            elements=extraction.elements,
             include_tables=chunk_cfg.chunk_tables,
         )
-        for dr in eligible
+        for dr, extraction in eligible
     ]
 
     chunks_by_doc = chunk_batch(
@@ -60,9 +64,9 @@ def run_chunking(
         progress=chunk_cfg.progress,
     )
 
-    for dr in eligible:
+    for dr, extraction in eligible:
         dr.chunks = chunks_by_doc.get(dr.doc_id, [])
-        redaction_report = dr.extraction.redaction_report
+        redaction_report = extraction.redaction_report
         if (
             config.redaction.enabled
             and config.redaction.mode == "flag"

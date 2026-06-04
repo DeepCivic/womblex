@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -28,6 +29,9 @@ if TYPE_CHECKING:
     from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger(__name__)
+
+# Enrichment-derived span: (start, end, entity_type), optionally + entity_id.
+_KnownSpan = tuple[int, int, str] | tuple[int, int, str, str]
 
 
 # ---------------------------------------------------------------------------
@@ -276,7 +280,7 @@ class PIICleaner:
     def _enrichment_candidates(
         text_len: int,
         text_offset: int,
-        known_spans: list[tuple[int, int, str]],
+        known_spans: Sequence[_KnownSpan],
     ) -> list[_Candidate]:
         """Convert enrichment-derived spans to local-offset candidates.
 
@@ -291,8 +295,8 @@ class PIICleaner:
         candidates: list[_Candidate] = []
         text_end = text_offset + text_len
         for span in known_spans:
-            start, end, entity_type = span[0], span[1], span[2]
-            entity_id = span[3] if len(span) > 3 else ""
+            start, end, entity_type, *rest = span
+            entity_id = rest[0] if rest else ""
             if start >= text_end or end <= text_offset:
                 continue
             local_start = max(0, start - text_offset)
@@ -310,7 +314,7 @@ class PIICleaner:
     def detect_spans(
         self,
         text: str,
-        known_spans: list[tuple[int, int, str]] | None = None,
+        known_spans: Sequence[_KnownSpan] | None = None,
         text_offset: int = 0,
         *,
         use_regex: bool = True,
@@ -391,7 +395,7 @@ class PIICleaner:
     def clean_with_known_spans(
         self,
         text: str,
-        known_spans: list[tuple[int, int, str]],
+        known_spans: Sequence[_KnownSpan],
         text_offset: int = 0,
     ) -> tuple[str, int]:
         """Replace PII spans using both regex detection and enrichment-derived spans.

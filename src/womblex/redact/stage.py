@@ -197,11 +197,11 @@ def _is_near_black_fill(fill) -> bool:
     if isinstance(fill, (int, float)):
         return fill <= 0.1
     if len(fill) == 1:
-        return fill[0] <= 0.1
+        return bool(fill[0] <= 0.1)
     if len(fill) == 3:
-        return max(fill) <= 0.1
+        return bool(max(fill) <= 0.1)
     if len(fill) == 4:
-        return fill[3] >= 0.9 and max(fill[:3]) <= 0.1
+        return bool(fill[3] >= 0.9 and max(fill[:3]) <= 0.1)
     return False
 
 

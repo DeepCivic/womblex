@@ -279,7 +279,7 @@ def _word_inside(word: tuple, rect: fitz.Rect) -> bool:
     """Check if a PyMuPDF word tuple's midpoint falls inside a rect."""
     cx = (word[0] + word[2]) / 2
     cy = (word[1] + word[3]) / 2
-    return rect.x0 <= cx <= rect.x1 and rect.y0 <= cy <= rect.y1
+    return bool(rect.x0 <= cx <= rect.x1 and rect.y0 <= cy <= rect.y1)
 
 
 def _ocr_region_block_type(

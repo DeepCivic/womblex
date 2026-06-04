@@ -117,7 +117,7 @@ def _chunk_rows(base_path: Path) -> list[dict]:
 
 def _doc_ids(base_path: Path) -> list[str]:
     try:
-        return read_manifest(base_path).column("doc_id").to_pylist()
+        return list(read_manifest(base_path).column("doc_id").to_pylist())
     except Exception:
         return []
 
