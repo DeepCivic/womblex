@@ -12,6 +12,7 @@ document block types via ``_YOLO_COCO_LABEL_MAP``.
 from __future__ import annotations
 
 import logging
+import os
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -26,6 +27,58 @@ if TYPE_CHECKING:
     from rapidocr_onnxruntime import RapidOCR
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Inference thread capping
+# ---------------------------------------------------------------------------
+#
+# RapidOCR (onnxruntime) and the YOLO layout filter (torch) each default their
+# thread pools to the full core count (onnxruntime config ships
+# ``intra_op_num_threads = -1``; torch sizes to cpu_count). Loaded together in a
+# per-page loop they spin up ~100 threads but contend for the cores, yielding
+# little real parallelism (~1.2 cores of useful work) while thrashing on a
+# low-core deployment target (the Chromebook profile this corpus targets).
+#
+# Capping makes CPU usage a deliberate, bounded choice. Default 4; override via
+# the ``WOMBLEX_INFERENCE_THREADS`` env var or ``extraction.ocr.num_threads``
+# (threaded in through :func:`set_inference_threads`). See docs/decisions.md.
+
+_DEFAULT_INFERENCE_THREADS = 4
+_inference_threads: int = int(
+    os.environ.get("WOMBLEX_INFERENCE_THREADS", _DEFAULT_INFERENCE_THREADS)
+)
+
+
+def set_inference_threads(n: int | None) -> None:
+    """Set the process-wide cap on OCR/layout inference threads.
+
+    ``None`` (or a non-positive value) leaves the current value unchanged. The
+    cap is applied lazily at model-construction time, so call this before the
+    first OCR/layout op (extraction entry points do).
+    """
+    global _inference_threads
+    if n is not None and n >= 1:
+        _inference_threads = int(n)
+
+
+def get_inference_threads() -> int:
+    """Return the current inference thread cap."""
+    return _inference_threads
+
+
+def _apply_thread_env(n: int) -> None:
+    """Cap BLAS / OpenMP thread pools (numpy, OpenCV, OMP-built onnxruntime).
+
+    Sets the standard ``*_NUM_THREADS`` env vars unless the user already set
+    them (an explicit user value wins). Must run *before* the heavy import so
+    the pools size correctly at load.
+    """
+    for var in (
+        "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS",
+        "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS",
+    ):
+        os.environ.setdefault(var, str(n))
 
 # Tesseract-style lang code → RapidOCR language mapping.
 _LANG_MAP: dict[str, str] = {
@@ -85,7 +138,18 @@ class PaddleOCRReader:
         if self._engine is not None:
             return
 
+        n = get_inference_threads()
+        _apply_thread_env(n)
         from rapidocr_onnxruntime import RapidOCR
+
+        # Cap each onnxruntime session (det/cls/rec) — RapidOCR routes
+        # `<model>_`-prefixed kwargs to that model's SessionOptions. Without
+        # this each session defaults to intra_op_num_threads = all cores.
+        thread_opts = {
+            f"{m}_{opt}": v
+            for m in ("det", "cls", "rec")
+            for opt, v in (("intra_op_num_threads", n), ("inter_op_num_threads", 1))
+        }
 
         v5 = self._resolve_v5_paths()
         if v5 is not None:
@@ -94,11 +158,18 @@ class PaddleOCRReader:
                 rec_model_path=v5["rec"],
                 cls_model_path=v5["cls"],
                 rec_keys_path=v5["dict"],
+                **thread_opts,
             )
-            logger.info("RapidOCR (PaddleOCR v5 mobile) loaded for lang=%s", self.lang)
+            logger.info(
+                "RapidOCR (PaddleOCR v5 mobile) loaded for lang=%s (threads=%d)",
+                self.lang, n,
+            )
         else:
-            self._engine = RapidOCR()
-            logger.info("RapidOCR (PaddleOCR v4 bundled) loaded for lang=%s", self.lang)
+            self._engine = RapidOCR(**thread_opts)
+            logger.info(
+                "RapidOCR (PaddleOCR v4 bundled) loaded for lang=%s (threads=%d)",
+                self.lang, n,
+            )
 
     def readtext(self, img: np.ndarray) -> list[tuple[list[list[int]], str, float]]:
         """Detect and recognise text, returning EasyOCR-compatible tuples.
@@ -247,7 +318,19 @@ class YOLOLayoutAnalyzer:
         if self._engine is not None:
             return
         try:
+            n = get_inference_threads()
+            _apply_thread_env(n)
             from ultralytics import YOLO  # type: ignore[import-untyped]
+
+            # Cap torch's intra-op pool (defaults to cpu_count). interop must be
+            # set before any parallel work — best-effort, ignore if already used.
+            import torch
+
+            torch.set_num_threads(n)
+            try:
+                torch.set_num_interop_threads(1)
+            except RuntimeError:
+                pass
 
             self._engine = YOLO(self._model_path)
             names = getattr(self._engine, "names", {}) or {}

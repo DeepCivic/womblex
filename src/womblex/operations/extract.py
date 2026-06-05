@@ -30,6 +30,11 @@ def run_extraction(paths: list[Path], config: WomblexConfig) -> list[DocumentRes
     """
     results: list[DocumentResult] = []
 
+    # Cap OCR/layout inference threads once, before any engine is constructed,
+    # so onnxruntime and torch don't each grab every core (oversubscription).
+    from womblex.ingest.paddle_ocr import set_inference_threads
+    set_inference_threads(config.extraction.ocr.num_threads)
+
     for path in paths:
         try:
             profile = detect_file_type(path, config.detection)

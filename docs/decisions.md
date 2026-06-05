@@ -166,11 +166,21 @@ classification decisions:
 
 ## Deferred / backlog
 
-- **Downstream text-cleaning op (#B/#D)** — normalise footer-whitespace
-  artefacts and re-join redaction-induced paragraph breaks (plus letterhead
-  typo fixes). **Naming collision to resolve first:** the PII stage already owns
-  `*.clean_text.parquet`; this normalisation op needs a distinct sidecar (e.g.
-  `*.normalised_text.parquet`) or an explicit compose order with PII masking.
+- **Downstream text-cleaning op (#B/#D)** — *v1 shipped* as `womblex normalise
+  --shards` (`process/normalise.py` transforms + `process/normalise_stage.py`
+  driver). Writes a `*.normalised_text.parquet` text layer over the narrative
+  elements (distinct sidecar, resolving the `*.clean_text.parquet` collision —
+  this is the *cleaning* layer, PII's is the *masking* layer). v1 covers
+  intra-element transforms: inline-whitespace collapse, `3|P age` footer-glyph
+  despacing, and config-driven letterhead/font-map substitutions. **Still
+  deferred:**
+  - *Re-joining redaction-induced paragraph breaks* — a cross-element op; needs
+    a reassembly join-hint (`reassemble_narrative` decides the `\n\n` boundary),
+    not an intra-element text edit. Not yet wired.
+  - *Consumption* — the sidecar is written but no downstream stage reads it yet
+    (chunking still consumes raw `elements`). Same write-first / consume-later
+    shape the PII stage used (`pii_spans` then `clean_text`); wiring chunking to
+    prefer normalised text behind a flag is the next step.
 - **Inline-per-span source redactions (#C).** Page-prefix `<REDACTED>` is in
   place; inline-per-span placement needs bbox-to-text character mapping (raster
   path now has per-word bboxes; native path needs a text-to-bbox map).

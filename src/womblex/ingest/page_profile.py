@@ -23,9 +23,8 @@ from womblex.ingest.detect import (
     _MIN_VECTOR_DRAWINGS,
     _has_form_structure,
     _has_handwriting_signals,
-    _has_manifest_table,
-    _has_structural_tables,
     _has_table_structure,
+    _table_signals,
 )
 
 
@@ -87,11 +86,12 @@ def profile_pages(doc: fitz.Document) -> list[PageProfile]:
         has_table_signal = False
         has_manifest_signal = False
         if has_text_layer:
-            has_table_signal = _has_table_structure(text) or _has_structural_tables(page)
-            if has_table_signal:
-                # Stricter check: only count pages dominated by a manifest-
-                # shape table toward the spreadsheet-print qualifier.
-                has_manifest_signal = _has_manifest_table(page)
+            # One find_tables pass per page yields both signals (the structural
+            # table check and the stricter manifest-shape check that gates the
+            # spreadsheet-print qualifier) — see detect._table_signals. The
+            # cheap text-regex still short-circuits the structural half.
+            struct_table, has_manifest_signal = _table_signals(page)
+            has_table_signal = _has_table_structure(text) or struct_table
 
         has_form_signal = False
         if has_text_layer:

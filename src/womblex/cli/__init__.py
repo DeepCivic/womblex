@@ -9,6 +9,7 @@ Usage:
     womblex run                  --config configs/example.yaml
     womblex extract              document.pdf -o output/
     womblex chunk                --config configs/example.yaml
+    womblex normalise            --shards <dir> [--config configs/example.yaml]
     womblex redact               --shards <dir> --pdfs <dir> [--checkpoint PATH]
     womblex redact               --config configs/example.yaml
     womblex annotate-redactions  <shards> <pdfs> [--checkpoint PATH]   (deprecated alias)
@@ -25,7 +26,18 @@ import argparse
 import logging
 import sys
 
-from womblex.cli import embed, ingest, link, pii, pipeline, profile, redact, score, verify
+from womblex.cli import (
+    embed,
+    ingest,
+    link,
+    normalise,
+    pii,
+    pipeline,
+    profile,
+    redact,
+    score,
+    verify,
+)
 from womblex.cli._shared import setup_logging
 
 logger = logging.getLogger("womblex")
@@ -36,6 +48,7 @@ ALL_COMMANDS = [
     *redact.COMMANDS,
     *link.COMMANDS,
     *embed.COMMANDS,
+    *normalise.COMMANDS,
     *pii.COMMANDS,
     *ingest.COMMANDS,
     *score.COMMANDS,

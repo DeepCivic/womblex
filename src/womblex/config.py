@@ -64,6 +64,14 @@ class OCRConfig(BaseModel):
     dpi: int = Field(default=200, ge=72, le=600)
     lang: str = "eng"
     engine_options: dict = Field(default_factory=dict)
+    num_threads: int = Field(
+        default=4, ge=1,
+        description="Cap on OCR (onnxruntime) + layout (torch) inference threads. "
+                    "Prevents the two engines each grabbing every core "
+                    "(oversubscription); keep low for Chromebook-class targets, "
+                    "raise on many-core servers. Also settable via "
+                    "WOMBLEX_INFERENCE_THREADS.",
+    )
 
 
 
@@ -355,6 +363,31 @@ class ChunkingConfig(BaseModel):
 
 
 
+class NormaliseConfig(BaseModel):
+    """Downstream text-cleaning op (``womblex normalise``).
+
+    Applies verbatim-policy-respecting cleanup *after* extraction and writes
+    a ``*.normalised_text.parquet`` text layer over the narrative elements.
+    Each toggle maps to a pure transform in :mod:`womblex.process.normalise`.
+    """
+
+    collapse_whitespace: bool = Field(
+        default=True,
+        description="Collapse inline space/tab runs to one and strip per-line "
+                    "trailing whitespace (newlines preserved).",
+    )
+    despace_page_marker: bool = Field(
+        default=True,
+        description="Heal sub-glyph-kerning '3|P age' footers back to '3|Page' "
+                    "(footer/header kinds only).",
+    )
+    substitutions: dict[str, str] = Field(
+        default_factory=dict,
+        description="Literal {find: replace} fixes for known letterhead / font-map "
+                    "typos. Empty by default — corpus-driven, never hardcoded in core.",
+    )
+
+
 class EnrichmentConfig(BaseModel):
 
     """Isaacus enrichment settings."""
@@ -517,6 +550,7 @@ class WomblexConfig(BaseModel):
     extraction: ExtractionConfig = ExtractionConfig()
     redaction: RedactionConfig = RedactionConfig()
     chunking: ChunkingConfig = ChunkingConfig()
+    normalise: NormaliseConfig = NormaliseConfig()
     enrichment: EnrichmentConfig = EnrichmentConfig()
     embedding: EmbeddingConfig = EmbeddingConfig()
     linking: LinkingConfig = LinkingConfig()

@@ -96,84 +96,92 @@ def _has_table_structure(text: str) -> bool:
     return bool(_TABLE_PATTERN.search(text))
 
 
+def _table_signals(
+    page: fitz.Page,
+    *,
+    min_cells: int = 4,
+    min_non_empty_cells: int = 300,
+    need_manifest: bool = True,
+) -> tuple[bool, bool]:
+    """Compute ``(has_structural_table, has_manifest_table)`` in one scan.
+
+    PyMuPDF ``find_tables(strategy="text")`` does a full layout analysis and
+    costs ~2-3 s on dense pages *regardless of whether it finds a table*.
+    ``_has_structural_tables`` and ``_has_manifest_table`` each scan with two
+    strategies, so calling both — as the per-page profiler does on every
+    table-bearing page — re-runs ``find_tables`` up to 4×. This combined pass
+    runs each strategy once and derives both signals, roughly halving per-page
+    profiling cost on table-heavy documents (FOI manifests etc.).
+
+    Set ``need_manifest=False`` to skip the per-table ``extract()`` when only
+    the structural signal is wanted.
+
+    - Structural: any table (``lines`` or ``text`` strategy) with
+      ``row_count * col_count >= min_cells``; the ``text`` strategy needs a
+      stricter shape (``rows >= 3, cols >= 2``) to avoid letterhead noise.
+    - Manifest: a page dominated by one big table —
+      ``extract()`` non-empty cell count ``>= min_non_empty_cells``. Non-empty
+      count (not raw cells / empty fraction) is the discriminator that
+      separates real manifests (500+ cells/page) from prose-as-table over-fires
+      (170-280 cells/page), since the text strategy pads an oversized grid on
+      every multi-paragraph page.
+    """
+    import io
+    import sys
+
+    old_stdout = sys.stdout
+    sys.stdout = io.StringIO()
+    try:
+        has_structural = False
+        has_manifest = False
+        for strategy in ("lines", "text"):
+            try:
+                tables = page.find_tables(strategy=strategy)
+            except Exception:
+                continue
+            for table in tables.tables:
+                # Text-strategy needs stricter shape to avoid letterhead noise.
+                if strategy == "text" and (table.row_count < 3 or table.col_count < 2):
+                    continue
+                if not has_structural and table.row_count * table.col_count >= min_cells:
+                    has_structural = True
+                if need_manifest and not has_manifest:
+                    extracted = table.extract()
+                    if extracted:
+                        non_empty = sum(
+                            1 for row in extracted
+                            for cell in row
+                            if cell and str(cell).strip()
+                        )
+                        if non_empty >= min_non_empty_cells:
+                            has_manifest = True
+                if has_structural and (has_manifest or not need_manifest):
+                    return has_structural, has_manifest
+        return has_structural, has_manifest
+    finally:
+        sys.stdout = old_stdout
+
+
 def _has_structural_tables(page: fitz.Page, min_cells: int = 4) -> bool:
     """Detect tables using PyMuPDF's structural table finder.
 
     Tries strategy="lines" first (ruled cells), falls back to strategy="text"
     (text-block alignment) so whitespace-aligned columnar layouts like the
     FOI master index get routed through table-aware strategies rather than
-    flattened to native_narrative.
+    flattened to native_narrative. Thin wrapper over :func:`_table_signals`.
     """
-    import sys, io  # noqa: E401
-    old_stdout = sys.stdout
-    sys.stdout = io.StringIO()
-    try:
-        for strategy in ("lines", "text"):
-            try:
-                tables = page.find_tables(strategy=strategy)
-            except Exception:
-                continue
-            for table in tables.tables:
-                # Text-strategy needs stricter shape to avoid letterhead noise
-                if strategy == "text" and (table.row_count < 3 or table.col_count < 2):
-                    continue
-                if table.row_count * table.col_count >= min_cells:
-                    return True
-        return False
-    finally:
-        sys.stdout = old_stdout
+    return _table_signals(page, min_cells=min_cells, need_manifest=False)[0]
 
 
 def _has_manifest_table(page: fitz.Page, min_non_empty_cells: int = 300) -> bool:
     """Detect manifest-shape tables: a page dominated by one big table.
 
-    Stricter than `_has_structural_tables`. Discriminates manifests
-    (FOI master index, Schedule-2b: 500+ non-empty cells per page) from
-    prose-as-table over-fires (compliance notices, admin decisions,
-    caution letters: 170-280 non-empty cells per page).
-
-    The discriminator is **non-empty cell count**, not raw cell count
-    or empty-cell fraction. PyMuPDF's text strategy over-fits an
-    oversized grid (adds padding rows/columns) on every multi-paragraph
-    page, so raw cell count and empty fraction both fall in
-    indistinguishable ranges (50-65% empty for both manifests and
-    prose-as-table). The non-empty count is what scales with actual
-    data presence.
-
-    The block-count gate from `_find_native_tables` is *not* used here:
-    real manifests pack many rows into few PyMuPDF `dict` blocks, so
-    the n_blocks ≥ n_rows check that protects against prose-as-table
-    on compliance notices would also reject real manifests.
-
-    Gates the `spreadsheet_print` qualifier — only manifest-shape pages
-    count toward the ≥50%-of-pages rule.
+    Stricter than :func:`_has_structural_tables` — gates the
+    ``spreadsheet_print`` qualifier (only manifest-shape pages count toward the
+    ≥50%-of-pages rule). Thin wrapper over :func:`_table_signals`; see there for
+    the non-empty-cell discriminator rationale.
     """
-    import sys, io  # noqa: E401
-
-    old_stdout = sys.stdout
-    sys.stdout = io.StringIO()
-    try:
-        for strategy in ("lines", "text"):
-            try:
-                tables = page.find_tables(strategy=strategy)
-            except Exception:
-                continue
-            for table in tables.tables:
-                if strategy == "text" and (table.row_count < 3 or table.col_count < 2):
-                    continue
-                extracted = table.extract()
-                if not extracted:
-                    continue
-                non_empty = sum(
-                    1 for row in extracted
-                    for cell in row
-                    if cell and str(cell).strip()
-                )
-                if non_empty >= min_non_empty_cells:
-                    return True
-        return False
-    finally:
-        sys.stdout = old_stdout
+    return _table_signals(page, min_non_empty_cells=min_non_empty_cells)[1]
 
 
 def _has_form_structure(page: fitz.Page) -> bool:

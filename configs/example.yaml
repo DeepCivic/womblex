@@ -60,6 +60,15 @@ chunking:
   # processes: 1           # Parallel workers. Default 1 (Chromebook-friendly).
   # progress: false        # Show a tqdm progress bar during chunking.
 
+# Downstream text-cleaning op (`womblex normalise --shards`). Verbatim-policy
+# cleanup applied AFTER extraction; writes a `*.normalised_text.parquet` text
+# layer over the narrative elements (a cleaning layer, distinct from the PII
+# stage's masking `*.clean_text.parquet`).
+normalise:
+  collapse_whitespace: true   # Collapse space/tab runs to one; strip trailing (newlines kept).
+  despace_page_marker: true   # Heal '3|P age' footers → '3|Page' (footer/header kinds only).
+  # substitutions: {}         # Literal {find: replace} for known letterhead/font-map typos.
+
 # PII cleaning uses regex pattern recognisers (Presidio-style) validated by
 # a Sentence Transformers context model (all-MiniLM-L6-v2, 22M params).
 #
