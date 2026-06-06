@@ -19,6 +19,7 @@ from womblex.process.normalise import (
     collapse_whitespace,
     despace_page_marker,
     normalise_text,
+    normalise_unicode,
 )
 from womblex.process.normalise_stage import normalise_shards
 from womblex.store.checkpoint import CheckpointManager
@@ -51,6 +52,31 @@ def test_collapse_whitespace_preserves_newlines():
 def test_collapse_whitespace_noop():
     text, n = collapse_whitespace("already clean text")
     assert text == "already clean text"
+    assert n == 0
+
+
+def test_normalise_unicode_folds_spaces_and_separators():
+    text, n = normalise_unicode("a b c d")  # NBSP, em-space, line sep
+    assert text == "a b c\nd"
+    assert n == 3
+
+
+def test_normalise_unicode_removes_zero_width_and_bom():
+    text, n = normalise_unicode("foo​﻿bar")
+    assert text == "foobar"
+    assert n == 2
+
+
+def test_normalise_unicode_preserves_typography():
+    s = "‘q’ “d” – — •"
+    text, n = normalise_unicode(s)
+    assert text == s  # smart quotes, en/em dash, bullet untouched
+    assert n == 0
+
+
+def test_normalise_unicode_noop_on_ascii():
+    text, n = normalise_unicode("plain ascii\ntext\twith tab")
+    assert text == "plain ascii\ntext\twith tab"
     assert n == 0
 
 

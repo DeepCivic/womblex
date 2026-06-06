@@ -1,0 +1,40 @@
+### GRANTS OF PLAN-BASED AWARDS
+
+The following table presents information about grants of awards during the year ended December 31, 2019, under the 2019 ICP, the 2019 LTI and the 2019 MIP grants that are subject to performance-vesting conditions.
+
+| Name (a) | Threshold ($) | Target ($) | Maximum ($) | Threshold (#) | Target (#) | Maximum (#) | All Other Stock Awards: Number of Shares or Stock Units (#) | All Other Option Awards: Number of Securities Underlying Options (#) | Exercise or Base Price of Option Awards ($/share) | Grant Date Fair Value of Stock Option Awards ($) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| **Craig A. Rogerson** | | | | | | | | | | |
+| 2019 ICP | 32,031 | 1,281,250 | 2,562,500 | — | — | — | — | — | — | — |
+| 2019 LTI | — | 2,000,000 | 4,000,000 | — | — | — | — | — | — | — |
+| 2019 MIP | | | | | | | | | | |
+| RSUs | — | — | — | — | — | — | 550,000 | — | — | 8,453,500 |
+| PSUs | — | — | — | — | — | — | — | 550,000 | — | — |
+| **George F. Knight** | | | | | | | | | | |
+| 2019 ICP | 9,180 | 367,205 | 734,410 | — | — | — | — | — | — | — |
+| 2019 LTI | — | 300,000 | 600,000 | — | — | — | — | — | — | — |
+| 2019 MIP | | | | | | | | | | |
+| RSUs | — | — | — | — | — | — | 37,000 | — | — | 568,690 |
+| PSUs | — | — | — | — | — | — | — | 23,000 | — | — |
+| **Ann Frederix** | | | | | | | | | | |
+| 2019 ICP | 5,439 | 217,557 | 435,114 | — | — | — | — | — | — | — |
+| 2019 LTI | — | 140,324 | 280,647 | — | — | — | — | — | — | — |
+| 2019 MIP | | | | | | | | | | |
+| RSUs | — | — | — | — | — | — | 22,500 | — | — | 345,825 |
+| PSUs | — | — | — | — | — | — | — | 22,500 | — | — |
+| **Douglas A. Johns** | | | | | | | | | | |
+| 2019 ICP | 9,287 | 371,462 | 742,924 | — | — | — | — | — | — | — |
+| 2019 LTI | — | 250,000 | 500,000 | — | — | — | — | — | — | — |
+| 2019 MIP | | | | | | | | | | |
+| RSUs | — | — | — | — | — | — | 29,000 | — | — | 445,730 |
+| PSUs | — | — | — | — | — | — | — | 22,000 | — | — |
+| **Matthew Sokol** | | | | | | | | | | |
+| 2019 ICP | 5,625 | 225,000 | 450,000 | — | — | — | — | — | — | — |
+| 2019 LTI | — | 250,000 | 500,000 | — | — | — | — | — | — | — |
+| 2019 MIP | | | | | | | | | | |
+| RSUs | — | — | — | — | — | — | 22,000 | — | — | 338,140 |
+| PSUs | — | — | — | — | — | — | — | 22,000 | — | — |
+
+**(1)** The number of units shown reflects the time-based award. The aggregate Target Award value was converted into a time-based award (30%) and a performance-based award (70%) based on a Hexion Holdings Corporation stock price of $15 per share.
+
+**(2)** The values shown are based on a fair value of $15.37 per share for the time-based restricted stock units and a fair value of $11.97 per share for the performance based stock units at Target.

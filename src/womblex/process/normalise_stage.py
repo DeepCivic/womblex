@@ -55,6 +55,7 @@ def normalise_shards(
         return NormaliseStageResult(0, 0, 0)
 
     transforms = NormaliseTransforms(
+        unicode_hygiene=config.unicode_hygiene,
         collapse_whitespace=config.collapse_whitespace,
         despace_page_marker=config.despace_page_marker,
         substitutions=dict(config.substitutions),

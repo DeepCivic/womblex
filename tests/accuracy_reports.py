@@ -439,6 +439,39 @@ def generate_extraction_report(results: dict[str, list[dict]]) -> str:
         lines.append("*No womblex-collection results collected.*")
     lines.append("")
 
+    # --- ACT-ECI labelled cohort: extraction vs normalisation ---
+    lines.append("## ACT-ECI Labelled Pages — Extraction vs Normalisation CER")
+    lines.append("")
+    act_eci = results.get("act_eci", [])
+    if act_eci:
+        lines.append(
+            "Per-page CER of the masked/cleaned text layer. **Raw** = verbatim "
+            "extraction; **Norm** = after the `normalise` stage (unicode hygiene + "
+            "whitespace + OCR-confusion substitutions). Degenerate GT (<20 chars) "
+            "excluded. A negative Δ means normalisation improved fidelity.")
+        lines.append("")
+        groups: dict[str, list[dict]] = {}
+        for r in act_eci:
+            groups.setdefault(r["strategy"], []).append(r)
+        lines.append("| Strategy | n | Raw CER | Norm CER | Δ CER |")
+        lines.append("|---|---:|---:|---:|---:|")
+        for strat, items in sorted(groups.items()):
+            raw = _avg("raw_cer", items)
+            norm = _avg("norm_cer", items)
+            lines.append(
+                f"| {strat} | {len(items)} | {raw:.3f} | {norm:.3f} | {norm - raw:+.3f} |"
+            )
+        raw_all = _avg("raw_cer", act_eci)
+        norm_all = _avg("norm_cer", act_eci)
+        lines.append(
+            f"| **All** | {len(act_eci)} | **{raw_all:.3f}** | **{norm_all:.3f}** "
+            f"| **{norm_all - raw_all:+.3f}** |"
+        )
+    else:
+        lines.append("*No ACT-ECI labelled-cohort results collected "
+                     "(run `pytest -m benchmark`).*")
+    lines.append("")
+
     # --- DOCX / Spreadsheet formats (derived from womblex results) ---
     docx_results = [r for r in womblex if r.get("doc_type") == "docx"]
     lines.append("### DOCX")

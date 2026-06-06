@@ -27,6 +27,12 @@ def _register_score(p: argparse.ArgumentParser) -> None:
         "--group-by", default=None,
         help="Meta field used to bucket the per-page summary (e.g. 'strategy')",
     )
+    p.add_argument(
+        "--text-source", default="elements", choices=("elements", "normalised"),
+        help="Text layer to score: 'elements' (verbatim extraction) or "
+             "'normalised' (the *.normalised_text.parquet sidecar). Use the "
+             "latter to measure how cleanup/normalisation changes CER.",
+    )
 
 
 def cmd_score(args: argparse.Namespace) -> int:
@@ -43,7 +49,8 @@ def cmd_score(args: argparse.Namespace) -> int:
         return 1
 
     try:
-        rows = score_labels(labels_dir, shards_dir, group_by=args.group_by)
+        rows = score_labels(labels_dir, shards_dir, group_by=args.group_by,
+                            text_source=args.text_source)
     except FileNotFoundError as exc:
         logger.error("%s", exc)
         return 1

@@ -183,6 +183,7 @@ def score_labels(
     *,
     group_by: str | None = None,
     text_kinds: tuple[str, ...] = DEFAULT_TEXT_KINDS,
+    text_source: str = "elements",
 ) -> list[ScoreRow]:
     """Score every label entry in *labels_dir* against the parquet shards
     in *shards_dir*.
@@ -190,7 +191,17 @@ def score_labels(
     *group_by* names a meta-field used to bucket the per-page results in
     the report (e.g. `"strategy"`). Falls back to `"<no group>"` when the
     meta lacks the field. Pass `None` to skip grouping (single bucket).
+
+    *text_source* selects the text layer to score: ``"elements"`` (verbatim
+    extraction, default) or ``"normalised"`` (the `*.normalised_text.parquet`
+    sidecar written by the normalise stage). The normalised sidecar mirrors
+    the element stream's `(source_hash, page, elem_order, kind, text)` shape,
+    so reassembly is identical — this lets a caller measure how cleanup /
+    normalisation changes CER vs raw extraction. Pages without a normalised
+    sidecar are skipped with a warning.
     """
+    if text_source not in ("elements", "normalised"):
+        raise ValueError(f"text_source must be 'elements' or 'normalised', got {text_source!r}")
     entries = load_labels(labels_dir)
     if not entries:
         return []
@@ -205,8 +216,19 @@ def score_labels(
             )
             continue
         source_hash, elements_path = hit
+        read_path = elements_path
+        if text_source == "normalised":
+            read_path = elements_path.with_name(
+                elements_path.name.replace(".elements.parquet", ".normalised_text.parquet")
+            )
+            if not read_path.is_file():
+                logger.warning(
+                    "skip %s: no normalised_text sidecar (run `womblex normalise`)",
+                    entry.stem,
+                )
+                continue
         pred = reassemble_page_text(
-            elements_path, source_hash, entry.page, text_kinds,
+            read_path, source_hash, entry.page, text_kinds,
         )
         group = "<no group>" if group_by is None else str(entry.meta.get(group_by, "<missing>"))
         rows.append(ScoreRow(
