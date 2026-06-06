@@ -57,6 +57,18 @@ markers = [
     "benchmark: OCR accuracy benchmarks (slow, run with -m benchmark)",
     "slow: OCR-fixture tests, historically slow under EasyOCR. Now fast under rapidocr-onnxruntime (~7s for the whole cohort) so they run by default; the marker is retained for ad-hoc filtering via -m slow / -m 'not slow'.",
 ]
+# Live console stays quiet (WARNING+) so the slow-test/hang monitor's alerts
+# (conftest.py `pytest.monitor`) surface during a run without flooding normal
+# output. Full INFO progress (extraction/OCR/orchestrator loggers) is captured
+# to pytest.log for post-hoc debugging. Tune the hang threshold with the
+# PYTEST_SLOW_ALERT env var (seconds, default 60).
+log_cli = true
+log_cli_level = "WARNING"
+log_cli_format = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+log_cli_date_format = "%H:%M:%S"
+log_file = "pytest.log"
+log_file_level = "INFO"
+log_file_format = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 
 [tool.ruff]
 line-length = 120

@@ -1,0 +1,1403 @@
+The Auditor-General
+Auditor-General Report No.19 2020–21
+2019–20 Major Projects Report
+Department of Defence
+Australian National Audit Office
+
+<Page Break>
+
+© Commonwealth of Australia 2020
+ISSN 1036–7632 (Print)
+ISSN 2203–0352 (Online)
+ISBN 978-1-76033-605-9 (Print)
+ISBN 978-1-76033-606-6 (Online)
+Except for the content in this document supplied by third parties, the Australian National
+Audit Office logo, the Commonwealth Coat of Arms, and any material protected by a trade
+mark, this document is licensed by the Australian National Audit Office for use under the
+terms of a Creative Commons Attribution-NonCommercial-NoDerivatives 3.0 Australia licence.
+To view a copy of this licence, visit http://creativecommons.org/licenses/by-nc-nd/3.0/au/.
+You are free to copy and communicate the document in its current form for non-commercial
+purposes, as long as you attribute the document to the Australian National Audit Office and
+abide by the other licence terms. You may not alter or adapt the work in any way.
+Permission to use material for which the copyright is owned by a third party must be sought
+from the relevant copyright owner. As far as practicable, such material will be clearly labelled.
+For terms of use of the Commonwealth Coat of Arms, visit the It’s an Honour website at
+https://www.pmc.gov.au/government/its-honour.
+Requests and inquiries concerning reproduction and rights should be addressed to:
+Senior Executive Director
+Corporate Management Branch
+Australian National Audit Office
+19 National Circuit
+BARTON ACT 2600
+Or via email:
+communication@anao.gov.au.
+Auditor-General Report No.19 2020–21
+2019–20 Major Projects Report
+ii
+
+<Page Break>
+
+Australian National Audit Office
+
+Canberra ACT
+30 November 2020
+Dear Mr President
+Dear Mr Speaker
+In accordance with the authority contained in the Auditor-General Act 1997, I have
+undertaken a review of the status of selected major Defence equipment acquisition
+projects, as at 30 June 2020, as presented by the Department of Defence. The report is
+titled 2019–20 Major Projects Report. I present the report of this review to the Parliament.
+Following its presentation and receipt, the report will be placed on the Australian National
+Audit Office’s website — http://www.anao.gov.au.
+Yours sincerely
+Grant Hehir
+Auditor-General
+The Honourable the President of the Senate
+The Honourable the Speaker of the House of Representatives
+Parliament House
+Canberra ACT
+Auditor-General Report No.19 2020–21
+2019–20 Major Projects Report
+iii
+
+<Page Break>
+
+AUDITING FOR AUSTRALIA
+The Auditor-General is head of the
+Australian National Audit Office
+(ANAO). The ANAO assists the
+Auditor-General to carry out his duties
+under the Auditor-General Act 1997 to
+undertake performance audits,
+financial statement audits and
+assurance reviews of Commonwealth
+public sector bodies and to provide
+independent reports and advice for
+the Parliament, the Australian
+Government and the community. The
+aim is to improve Commonwealth
+public sector administration and
+accountability.
+For further information contact:
+Australian National Audit Office
+GPO Box 707
+Canberra ACT 2601
+Phone:(02) 6203 7300
+Fax: (02) 6203 7777
+Email: ag1@anao.gov.au
+Auditor-General reports and
+information about the ANAO are
+available on our website:
+http://www.anao.gov.au
+ Assurance Review Team
+Michelle Page
+Philip Rebula
+Wira Wibowo
+Jocelyn Watts
+David Retnam
+Erica Welton
+Anora Harris
+Sara Casey
+David Van Schoten
+Katarina Ivanovic-Likic
+Auditor-General Report No.19 2020–21
+2019–20 Major Projects Report
+iv
+
+<Page Break>
+
+Contents
+Australian National Audit Office
+Glossary .....................................................................................................................................................ix
+Part 1. ANAO Review and Analysis........................................................................................................1
+Summary and Review Conclusion................................................................................................................3
+About the Major Projects Report.........................................................................................................3
+Major Projects selected for review......................................................................................................3
+Engagement objective and scope.......................................................................................................6
+Review methodology...........................................................................................................................6
+Report structure ..................................................................................................................................7
+The role of the Joint Committee of Public Accounts and Audit................................................................9
+Overall outcomes ....................................................................................................................................9
+Statement by the Secretary of Defence..............................................................................................9
+Conclusion by the Auditor-General .....................................................................................................9
+Key observations from the review.....................................................................................................10
+ANAO’s analysis of project performance ..............................................................................................11
+Cost...................................................................................................................................................13
+Schedule...........................................................................................................................................14
+Capability ..........................................................................................................................................17
+Impact of COVID-19 on the Major Projects...........................................................................................17
+Cost...................................................................................................................................................17
+Schedule...........................................................................................................................................18
+Capability ..........................................................................................................................................18
+1. The Major Projects Review....................................................................................................................19
+Review scope and approach.................................................................................................................19
+Review methodology.........................................................................................................................20
+Acquisition governance.....................................................................................................................21
+Results of the review.........................................................................................................................27
+2. Analysis of Projects’ Performance .........................................................................................................37
+Project performance analysis by the ANAO......................................................................................37
+Cost performance analysis....................................................................................................................40
+Budget Expended and Project Maturity ............................................................................................40
+Second Pass Approval and 30 June 2020 approved budget............................................................41
+Budget performance .........................................................................................................................48
+Schedule performance analysis............................................................................................................52
+Time Elapsed and Project Maturity ...................................................................................................52
+Schedule slippage and acquisition type by approval date ................................................................54
+Schedule performance......................................................................................................................61
+Capability performance analysis ...........................................................................................................67
+Auditor-General Report No.19 2020–21
+2019–20 Major Projects Report
+v
+
+<Page Break>
+
+Department of Defence
+Part 2. Defence Major Projects Report.................................................................................................71
+Secretary’s Foreword .................................................................................................................................73
+Overview.....................................................................................................................................................75
+Key Achievements................................................................................................................................75
+Governance, Audit and Continuous Improvement......................................................................................76
+Key Findings from Audits......................................................................................................................76
+Entry to and exit from the 2019-20 Major Projects Report ...................................................................76
+Overall Annual Performance.......................................................................................................................77
+COVID-19 Impacts on MPR projects....................................................................................................78
+Defence Strategic Environment..................................................................................................................78
+2020 Defence Strategic Update and 2020 Force Structure Plan .........................................................78
+Defence Assistance to the Civil Community: 2019-20 Bushfire Crisis & COVID-19 Pandemic............79
+Defence Review of Project Performance....................................................................................................80
+Cost ......................................................................................................................................................80
+Understanding Budget Variation...........................................................................................................80
+In-Year Cost..........................................................................................................................................84
+Project Progress...................................................................................................................................84
+Schedule...............................................................................................................................................86
+Schedule Variation in Context ..............................................................................................................86
+Materiel Scope and Capability....................................................................................................................90
+Acceptance into Service.............................................................................................................................91
+Acquisition Governance..............................................................................................................................91
+CASG Independent Assurance Reviews..............................................................................................91
+Smart Buyer..........................................................................................................................................92
+Enterprise Project Performance Framework ..............................................................................................93
+Enterprise Project Performance Reporting...........................................................................................93
+Agreements ..........................................................................................................................................94
+Quarterly Performance Report .............................................................................................................94
+Projects of Interest................................................................................................................................94
+Projects of Concern..............................................................................................................................95
+Defence’s consideration of Projects of Concern...................................................................................95
+Enterprise Reform Program..................................................................................................................95
+Cost of Producing the MPR..................................................................................................................96
+Improvement Initiatives...............................................................................................................................96
+Risk Reform..........................................................................................................................................96
+Monthly Reporting Module & Project Performance Review..................................................................97
+Project Maturity Scores ........................................................................................................................97
+System Program Office Reform............................................................................................................98
+Improved Contract Management..........................................................................................................98
+Australian Industry Capability...............................................................................................................99
+Defence Finance Reform....................................................................................................................101
+Auditor-General Report No.19 2020–21
+2019–20 Major Projects Report
+vi
+
+<Page Break>
+
+Appendices...............................................................................................................................................102
+Appendix 1: List of Projects Removed from the Major Projects Report Since Inception..........102
+Appendix 2: Acquisitions categories.........................................................................................104
+Appendix 3: Project Maturity.....................................................................................................105
+Appendix 4: Capability Life Cycle.............................................................................................109
+Appendix 5: Glossary ...............................................................................................................110
+Appendix 6: Lessons learned ...................................................................................................113
+Project Data Summary Sheets
+Part 3. Assurance by the Auditor-General and the Secretary of Defence ......................................117
+Independent Assurance Report by the Auditor-General...........................................................................119
+Statement by the Secretary of Defence....................................................................................................121
+Project Data Summary Sheets ..............................................................................................................125
+2019–20 Major Projects Report Guidelines
+Part 4. JCPAA 2019–20 Major Projects Report Guidelines ..............................................................369
+
+Auditor-General Report No.19 2020–21
+2019–20 Major Projects Report
+vii
+
+<Page Break>
+
+Report Snapshot
+
+Auditor-General Report No.19 2020–21
+2019–20 Major Projects Report (MPR)
+
+What is the purpose of the MPR?
+ The MPR is an annual review of the
+Department of Defence’s major defence
+equipment acquisitions, undertaken at the
+request of the Parliament’s Joint Committee of
+Public Accounts and Audit (JCPAA).
+ Its purpose is to provide information and
+assurance to the Parliament on the
+performance of selected acquisitions.
+ This year, it includes 25 major projects.
+ This is the 13th Major Projects Report since its
+commencement in 2007–08.
+
+What did we find?
+ The Auditor–General concluded:
+Based on the procedures I have performed
+and the evidence I have obtained, nothing
+has come to my attention that causes me
+to believe that the information in the 25
+Project Data Summary Sheets in Part 3
+(PDSSs) and the Statement by the Secretary
+of Defence, excluding the forecast
+information, has not been prepared in all
+material respects in accordance with the
+2019–20 Major Projects Report Guidelines,
+as endorsed by the JCPAA.
+
+What is reviewed?
+The Department of Defence prepares Project Data Summary Sheets (PDSS) on selected major defence
+equipment acquisition projects in accordance with guidelines endorsed by the Joint Committee of
+Public Accounts and Audit.
+The ANAO reviews the information in the PDSSs in accordance with the ANAO Auditing Standards
+specified by the Auditor-General under the Auditor-General Act 1997.
+The PDSSs cover:
+1. Project background and government approvals
+2. Financial performance
+3. Schedule performance
+4. Delivery against agreed scope
+5. Risks and issues
+6. Project maturity
+7. Lessons learned by the project
+8. Management accountability for the project
+$78.7bn
+is the value of the 25
+Defence Major Projects
+reviewed.
+5 of 25
+Defence Major Projects
+experienced in-year
+schedule slippage.
+98%
+is the expected delivery against
+agreed scope across the 25
+Major Projects.
+
+<Page Break>
+
+Glossary
+First Pass Approval (if required) is the Government decision to select a specific option(s) and
+proceed with agreed timeframes, technical requirements and financial
+commitments to Second Pass Approval.
+Initial Materiel
+Release (IMR)
+is a milestone that marks the completion and initial release of Acquisition
+Project supplies required to support the achievement of Initial
+Operational Capability.
+Initial Operational
+Capability (IOC)
+is the capability state relating to the in-service realisation of the first
+subset of a capability system that can be employed operationally.
+Declaration of initial operating capability is made by the Capability
+Manager, supported by the results of operational test and evaluation
+and declaration by the Delivery Group(s) that the fundamental inputs to
+capability have been delivered.
+Second Pass
+Approval
+is the Government decision to acquire a fully defined and costed
+capability.
+Final Materiel
+Release (FMR)
+is a milestone that marks the completion and final release of Acquisition
+Project supplies required to support the achievement of Final
+Operational Capability.
+Final Operational
+Capability (FOC)
+is the capability state relating to the in-service realisation of the final
+subset of a capability system that can be employed operationally.
+Declaration of final operational capability is made by the Capability
+Manager, supported by the results of operational test and evaluation
+and declaration by the Delivery Group(s) that the fundamental inputs to
+capability have been delivered.
+
+Auditor-General Report No.19 2020–21
+2019–20 Major Projects Report
+
+ix
+
+<Page Break>
+
+Auditor-General Report No.19 2020–21
+2019–20 Major Projects Report
+
+x
+
+<Page Break>
+
+Part 1. ANAO Review and Analysis
+Part 1. ANAO Review and Analysis
+
+ANAO Review and Analysis
+Auditor-General Report No.19 2020–21
+2019–20 Major Projects Report
+
+2018–19 MPR
+
+1
+
+<Page Break>
+
+Part 1. ANAO Review and Analysis
+
+ANAO Review and Analysis
+Auditor-General Report No.19 2020–21
+2019–20 Major Projects Report
+
+2018–19 MPR
+
+2
+
+<Page Break>
+
+Summary and Review Conclusion
+About the Major Projects Report
+1. The Department of Defence’s (Defence) major defence equipment acquisition projects
+(Major Projects) continue to be the subject of parliamentary and public interest. This is due to
+their high cost and contribution to national security, the challenges involved in completing them
+within the specified budget and schedule, and to the required capability, and their contribution
+to industrial and employment policy objectives.
+2. The Major Projects Report (MPR) comprises Defence information and commentary on
+selected Major Projects, and assurance and analysis of that information by the Australian National
+Audit Office (ANAO). The objective of the MPR is ‘to improve the accountability and transparency
+of Defence acquisitions for the benefit of Parliament and other stakeholders.’ 1
+3. The ANAO has reviewed information provided by Defence regarding 25 of its Major
+Projects in this thirteenth annual report (2018–19: 26). In February 2012, the Parliament’s Joint
+Committee of Public Accounts and Audit (JCPAA) identified this review as a ‘Priority Assurance
+Review’, under subsection 19A(5) of the Auditor-General Act 1997 (the Act), allowing the ANAO
+full access to the information gathering powers under the Act.
+4. Defence’s Capability Acquisition and Sustainment Group (CASG) manages the process of
+bringing new defence capabilities into service and providing information for ANAO review as part
+of the MPR process. As at 30 June 2020, CASG was managing 206 active major and minor capital
+equipment projects worth $130.5 billion2, with an in-year budget of $8.7 billion.3 Defence
+capitalised some $8.8 billion from these projects in 2019–20.4
+5. The 2020 Defence Strategic Update adjusted some of the strategic policy objectives of the
+2016 Defence White Paper and foreshadowed that the Defence Budget will grow over the next
+ten years to $73.7 billion in 2029–30, with total funding over the decade of $575 billion (including
+approximately $270 billion of investment in Defence capability).5 6
+Major Projects selected for review
+6. Major Projects are selected for inclusion in the MPR based on the criteria included in the
+2019–20 Major Projects Report Guidelines (the Guidelines), as endorsed by the JCPAA.7 They
+represent a selection of the most significant Major Projects managed by CASG.
+
+1 Joint Committee of Public Accounts and Audit, Parliament of the Commonwealth of Australia, Report
+473: Defence Major Projects Report (2016–17), (2018), Executive Summary, p. 1.
+2 Department of Defence, Defence Annual Report 2019–20, Defence, Canberra, Chapter 3, Annual Performance
+Statements, 2020, p. 42.
+3 Department of Defence, Defence Portfolio Budget Statements 2019–20, Defence, Canberra, 2019, p. 20.
+4 Department of Defence, Defence Annual Report 2019–20, Defence, Canberra, Chapter 3, Annual Performance
+Statements, 2020, Appendix A Financial Statements, Note 3.2A, p. 204.
+5 Department of Defence, 2020 Defence Strategic Update, p. 7.
+6 Department of Defence, Defence Portfolio Budget Statements 2020–21, Defence, Canberra, 2020, p. 5.
+7 The 2019–20 Major Projects Report Guidelines were endorsed by the JCPAA in September 2019 and are
+included in Part 4 of this report.
+
+ANAO Review and Analysis
+Auditor-General Report No.19 2020–21
+2019–20 Major Projects Report
+
+2018–19 MPR
+
+3
+
+Part 1. ANAO Review and Analysis
+
+<Page Break>
+
+Part 1. ANAO Review and Analysis
+
+7. The total approved budget for the Major Projects included in this report is approximately
+$78.7 billion, covering 60 per cent of the total budget of active major and minor capital
+equipment projects of $130.5 billion.8 The selected projects are listed in Table 1.
+
+8 Department of Defence, Defence Annual Report 2019–20, Defence, Canberra, Chapter 3, Annual Performance
+Statements, 2020, p. 42.
+
+ANAO Review and Analysis
+Auditor-General Report No.19 2020–21
+2019–20 Major Projects Report
+
+2018–19 MPR
+
+4
+
+<Page Break>
+
+Table 1: 2019–20 MPR projects and approved budgets at 30 June 2020 1, 2
+Project Number
+(Defence Capability
+Plan)
+Project Name
+(on Defence advice)
+Abbreviation
+(on Defence advice)
+Approved
+Budget $m
+AIR 6000 Phase 2A/2B New Air Combat Capability 3 Joint Strike Fighter 16,631.3
+SEA 4000 Phase 3 Air Warfare Destroyer Build 3 AWD Ships 9108.9
+SEA 5000 Phase 1 Future Frigates Future Frigates 6291.8
+SEA 1000 Phase 1B Future Submarines Design Acquisition 3 Future Subs 5925.8
+LAND 400 Phase 2 Combat Reconnaissance Vehicles 3 Combat Recon. Vehicles 5761.7
+AIR 7000 Phase 2B Maritime Patrol and Response Aircraft System P-8A Poseidon 5362.4
+AIR 9000 Phase 2/4/6 Multi-Role Helicopter 3 MRH90 Helicopters 3773.9
+SEA 1180 Phase 1 Offshore Patrol Vessel 3 Offshore Patrol Vessel 3701.4
+AIR 5349 Phase 3 EA-18G Growler Airborne Electronic Attack
+Capability Growler 3505.9
+LAND 121 Phase 3B Medium Heavy Capability, Field Vehicles,
+Modules and Trailers 3
+Overlander
+Medium/Heavy 3398.6
+AIR 9000 Phase 8 Future Naval Aviation Combat System Helicopter MH-60R Seahawk 3219.3
+LAND 121 Phase 4 Protected Mobility Vehicle – Light (PMV-L) 3 Hawkei 1987.5
+AIR 8000 Phase 2 Battlefield Airlift – Caribou Replacement 3 Battlefield Airlifter 1439.2
+AIR 7000 Phase 1B MQ-4C Triton Remotely Piloted Aircraft System MQ-4C Triton 1311.4
+SEA 1654 Phase 3 Maritime Operational Support Capability Repl Replenishment
+Ships 1084.7
+AIR 5431 Phase 3 Civil Military Air Management System 3 CMATS 975.6
+LAND 200 Tranche 2 Battlefield Command System 3 Battlefield Command
+System 969.7
+JP 2072 Phase 2B Battlespace Communications System Phase 2B Battle Comm. Sys.
+(Land) 2B 947.1
+SEA 1439 Phase 5B2 Collins Class Communications and Electronic
+Warfare Improvement Program Collins Comms and EW 610.7
+SEA 3036 Phase 1 Pacific Patrol Boat Replacement Pacific Patrol Boat Repl 504.3
+LAND 53 Phase 1BR Night Fighting Equipment Replacement Night Fighting Equip
+Repl 446.7
+SEA 1439 Phase 3 Collins Class Submarine Reliability and
+Sustainability 4 Collins R&S 445.8
+SEA 1442 Phase 4 Maritime Communications Modernisation Maritime Comms 444.0
+SEA 1448 Phase 4B ANZAC Air Search Radar Replacement ANZAC Air Search
+Radar Repl 429.4
+JP 2008 Phase 5A Indian Ocean Region UHF SATCOM UHF SATCOM 422.1
+Total 25 78,699.2
+Note 1: The 2019–20 MPR Guidelines, at Part 4 of this report, include 30 projects. Subsequent to endorsement of the
+2019–20 MPR Guidelines in September 2020, five projects were removed from the MPR based on the low-risk
+nature of the remaining activities to FOC. Once a project is selected for review, it remains within the portfolio
+of projects under review until the JCPAA endorses its removal, normally once it has met the capability
+requirements of Defence.
+Note 2: SEA 5000 Phase 1 Future Frigates, SEA 1000 Phase 1B Future Submarines Design Acquisition, LAND 400
+Phase 2 Combat Reconnaissance Vehicles, AIR 7000 Phase 1B and LAND 200 Tranche 2 Battlefield
+Command System are included in the MPR for the first time in 2019–20.
+Note 3: These projects have been the subject of individual performance audits. See Table 7 for more information.
+Note 4: SEA 1439 Phase 3 Collins Class Submarine Reliability and Sustainability is a group of 24 activities primarily
+sustainment in nature. While not an acquisition project, it has been included at the JCPAA’s request.
+Source: The Project Data Summary Sheets in Part 3 of this report.
+
+ANAO Review and Analysis
+Auditor-General Report No.19 2020–21
+2019–20 Major Projects Report
+
+2018–19 MPR
+
+5
+
+Part 1. ANAO Review and Analysis
+
+<Page Break>
+
+Part 1. ANAO Review and Analysis
+
+Engagement objective and scope
+8. The objective of this assurance engagement and related procedures is to provide the
+Auditor-General’s independent assurance over the status of the selected Major Projects. The
+status of the selected Major Projects is reported in the Statement by the Secretary of Defence (see
+Part 3 of this report) and the Project Data Summary Sheets (PDSSs) prepared by Defence (see
+Part 3 of this report). Assurance from the ANAO’s review is conveyed in the Independent
+Assurance Report by the Auditor-General (see Part 3 of this report).
+9. The following forecast information found in the PDSSs is excluded from the scope of the
+ANAO’s review:
+• Section 1.2 Current Status—Materiel Capability Delivery Performance, and Section 4.1—
+Measures of Materiel Capability Delivery Performance;
+• Section 1.3 Project Context—Major Risks and Issues, and Section 5—Major Risks and
+Issues; and
+• forecast dates where included in each PDSS.
+10. Accordingly, the Auditor-General’s Independent Assurance Report does not provide any
+assurance in relation to this information. However, material inconsistencies identified in relation
+to this information are required to be considered in forming the Auditor-General’s conclusion.
+11. The exclusions to the scope of the review, noted above, are due to a lack of Defence systems
+from which to provide complete and accurate evidence9 in a sufficiently timely manner to facilitate
+the review. This has been an area of focus of the JCPAA over a number of years10, and it is intended
+that all components of the PDSSs will eventually be included within the scope of the ANAO’s review.
+12. Separate to the formal assurance review, the ANAO has undertaken an analysis of key
+elements of the PDSSs—including cost, schedule, progress towards delivery of required capability,
+project maturity, and risks and issues. Longitudinal analysis across these key elements of projects
+has also been undertaken.
+13. Defence provides further insights and context in its commentary and analysis contained in
+Part 2. This commentary and analysis is not included within the scope of the ANAO’s review.
+Review methodology
+14. The criteria for Defence’s preparation of information for ANAO review are provided by the
+Guidelines approved by the JCPAA. There is an expectation that Defence has procedures in place
+designed to ensure that project information and data was recorded in a complete and accurate
+manner, for all 25 projects.
+15. The ANAO has reviewed the PDSSs prepared by Defence as a priority assurance review
+under subsection 19A(5) of the Auditor-General Act 1997 (the Act), allowing the ANAO full access
+to the information gathering powers under the Act. The ANAO’s review provides limited assurance
+and was undertaken in accordance with the applicable Auditing Standards. The ANAO’s review
+
+9 For example, Defence project risk management records can be managed in spreadsheets, where the risk to the
+completeness and accuracy of records is too high to be included within the scope of the review.
+10 Joint Committee of Public Accounts and Audit, Parliament of the Commonwealth of Australia, Report 473:
+Defence Major Projects Report (2016–17), (2018), Recommendation 2, p. vii.
+
+ANAO Review and Analysis
+Auditor-General Report No.19 2020–21
+2019–20 Major Projects Report
+
+2018–19 MPR
+
+6
+
+<Page Break>
+
+included an assessment of Defence’s systems and controls, including the governance and
+oversight in place, to ensure appropriate project management. The ANAO also sought
+representations and confirmations from Defence senior management and industry (through
+Defence) in relation to the status of the Major Projects in this report.
+Report structure
+16. The report is organised into four parts:
+• Part 1 comprises the ANAO’s review and analysis (pp. 1–70);
+• Part 2 comprises Defence’s commentary, analysis and appendices (not included within the
+scope of the Independent Assurance Report by the Auditor-General) (pp. 71–116);
+• Part 3 incorporates the Independent Assurance Report by the Auditor-General, the
+Statement by the Secretary of Defence, and the PDSSs prepared by Defence as part of the
+assurance review process (pp. 117–368); and
+• Part 4 reproduces the 2018–19 Major Projects Report Guidelines endorsed by the JCPAA,
+which provide the criteria for the compilation of PDSSs by Defence (pp. 369–396).
+Figure 1, below, depicts the four parts of this report.
+Figure 1: 2019–20 Report structure
+2019–20 Major Projects Report
+Part 1 Part 2 Part 3
+ANAO Defence Prepared by Defence and
+reviewed by the ANAO
+ANAO
+Review and
+Analysis
+Pages 1–70
+Defence MPR:
+Commentary
+and
+Analysis
+Pages 71–116
+AuditorGeneral’s
+Independent
+Assurance
+Report
+Pages 119–120
+Part 4
+Statement
+by the
+Secretary of
+Defence
+Pages 121–124
+Endorsed by the
+JCPAA
+Project Data
+Summary
+Sheets
+1–25
+Pages 125–368
+Prepared by the
+ANAO
+2019–20
+Major
+Projects
+Report
+Guidelines
+Pages 369–396
+Note: To assist in conducting inter-report analysis, the presentation of data in the PDSSs remains largely consistent
+and comparable with the 2018–19 MPR. 
+
+ANAO Review and Analysis
+Auditor-General Report No.19 2020–21
+2019–20 Major Projects Report
+
+2018–19 MPR
+
+7
+
+Part 1. ANAO Review and Analysis
+
+<Page Break>
+
+Part 1. ANAO Review and Analysis
+
+Project Data Summary Sheets
+17. The PDSSs include unclassified information on project performance, prepared by
+Defence.11 As projects generally appear in the MPR for multiple years, changes to the PDSS from
+the previous year are depicted in bold orange text in the PDSS.
+18. Each PDSS comprises:
+• Project Header: including name; capability and acquisition type; Capability Manager;
+approval dates; total approved and in-year budgets; stage; complexity; and an image;
+• Section 1—Project Summary: including description; current status including financial
+assurance and contingency statement; and context, including background, uniqueness,
+major risks and issues, and other current sub-projects;
+• Section 2—Financial Performance: including budgets and expenditure; variances; and
+major contracts in place (in addition to quantities delivered as at 30 June 2020);
+• Section 3—Schedule Performance: providing information on design development; test
+and evaluation; and forecasts and achievements against key project milestones, including
+Initial Materiel Release (IMR), Final Materiel Release (FMR)12, Initial Operational Capability
+(IOC) and Final Operational Capability (FOC)13;
+• Section 4—Materiel Capability Delivery Performance: provides a summary of Defence’s
+assessment of its expected delivery of key capabilities, the extent to which milestones were
+achieved (particularly where caveats are placed on the Capability Manager's declaration of
+significant milestones), and a description of the constitution of each key milestone;
+• Section 5—Major Risks and Issues: outlines the major risks and issues of the project and
+remedial actions undertaken for each;
+• Section 6—Project Maturity: provides a summary of the project’s maturity, as defined by
+Defence14, and a comparison against the benchmark score;
+• Section 7—Lessons Learned: outlines the key lessons that have been learned at the project
+level (further information on lessons learned by Defence isincluded in Defence’s Appendix
+6 in Part 2 of this report); and
+• Section 8—Project Line Management: details current project management responsibilities
+within Defence.
+
+11 The MPR Guidelines provide that data of a classified nature is to be prepared in such a way as to allow for
+unclassified publication.
+12 IMR and FMR are milestones that Defence utilises to mark the completion and release of acquisition project
+supplies required to support the achievement of IOC and FOC respectively. They are defined in the relevant MAA
+(Materiel Acquisition Agreement). See Department of Defence, Defence Materiel Standard Procedure (Project
+Management) DMSP (PROJ) 11-0-008, Initial Materiel Release And Final Materiel Release Across The Project
+Lifecycle, Defence, Canberra, 2013, p. 2. See also the Glossary at p. ix of this report.
+13 Initial Operational Capability is the capability state relating to the in-service realisation of the first subset of a
+capability system that can be employed operationally. Final Operational Capability is the capability state relating
+to the in-service realisation of the final subset of a capability system that can be employed operationally.
+Declaration of IOC and FOC is made by the Capability Manager, supported by the results of operational test and
+evaluation and declaration by the Delivery Group(s) that the fundamental inputs to capability have been
+delivered. See Defence’s Appendix 4 in Part 2 of this report.
+14 The project maturity framework — outlined in the Department of Defence’s CASG Procedure (PM) 001 – Project
+Maturity Scores, Defence, Canberra, 2020 — is a methodology used to quantify the maturity of projects as they
+progress through the acquisition life cycle. See further explanation in paragraphs 1.69–1.72 of this report.
+
+ANAO Review and Analysis
+Auditor-General Report No.19 2020–21
+2019–20 Major Projects Report
+
+2018–19 MPR
+
+8
+
+<Page Break>
+
+The role of the Joint Committee of Public Accounts and Audit
+19. The JCPAA has taken an active role in the development and review of the MPR program. Each
+year, the Committee considers the draft Guidelines, incorporating the selection of projects for
+review, and provides the Committee’s views in relation to the Guidelines’ content and development,
+prior to their endorsement. Following endorsement by the Committee, the Guidelines provide the
+criteria for Defence’s preparation of PDSSs for ANAO review. The main changes to the MPR
+Guidelines have tended to follow on from the JCPAA’s recommendations.
+15
+20. The main change to the MPR Guidelines this year was amending the entry criteria to include
+the Future Subs project.16 This was in response to the JCPAA’s interest in including major naval
+shipbuilding projects in the MPR due to their large size and complexity.
+Overall outcomes
+Statement by the Secretary of Defence
+21. The Statement by the Secretary of Defence was signed on 20 November 2020. The Secretary’s
+statement provides his opinion that the PDSSs for the 25 selected projects ‘comply in all material
+respects with the Guidelines and reflect the status of the projects as at 30 June 2020’.
+22. In addition, the Statement by the Secretary of Defence details significant events occurring
+post 30 June 2020, which materially impact the projects included in the report, and which should
+be read in conjunction with the individual PDSSs. These include: Joint Strike Fighter, Future Subs,
+Combat Recon. Vehicles, P-8A Poseidon, MRH90 Helicopters, Hawkei, Repl Replenishment Ships,
+Battlefield Command System, Battle Comm. Sys. (Land) 2B, Collins Comms and EW, Pacific Patrol
+Boat Repl, Night Fighting Equip Repl, Maritime Comms, and ANZAC Air Search Radar Repl.
+23. The 2019–20 MPR Guidelines require Defence to report in the Statement by the Secretary
+of Defence on projects which have been removed from the MPR which still have outstanding
+caveats, significant remaining materiel capability or milestones to be delivered. Defence has
+reported on outstanding caveats in the 2019–20 Statement by the Secretary of Defence.
+Conclusion by the Auditor-General
+24. The Auditor-General has concluded in the Independent Assurance Report for 2019–20 that
+‘nothing has come to my attention that causes me to believe that the information in the 25 Project
+Data Summary Sheets in Part 3 (PDSSs) and the Statement by the Secretary of Defence, excluding
+the forecast information, has not been prepared in all material respects in accordance with the
+2019–20 Major Projects Report Guidelines (the Guidelines), as endorsed by the Joint Committee of
+Public Accounts and Audit.’
+
+15 Under subsection 8(1) of the legislation establishing the JCPAA, the Public Accounts and Audit Committee Act
+1951, one of the duties of the Committee is to ‘examine all reports of the Auditor-General (including reports of
+the results of performance audits) that are tabled in each House of the Parliament’ and ‘report to both Houses of
+the Parliament, with any comment it thinks fit, on any items or matters in those reports, or any circumstances
+connected with them, that the Committee thinks should be drawn to the attention of the Parliament’.
+16 While still in the design phase and not yet having received second pass government approval, the Future
+Submarine project has nonetheless incurred significant expenditure of public money. See Auditor-General
+Report No.22 2019–20 Future Submarine Program—Transition to Design. 
+
+ANAO Review and Analysis
+Auditor-General Report No.19 2020–21
+2019–20 Major Projects Report
+
+2018–19 MPR
+
+9
+
+Part 1. ANAO Review and Analysis
+
+<Page Break>
+
+Part 1. ANAO Review and Analysis
+
+Key observations from the review
+25. The ANAO’s review includes Defence’s project management and reporting arrangements
+contributing to the overall governance of Major Projects. The ANAO has made observations
+regarding the following areas:
+Status of JCPAA Recommendations and Requests
+• Following a JCPAA recommendation made in September 201817, Defence advised the
+Committee in May 2020 that Predict! will be mandated as the risk management system.18
+Defence advised the ANAO in October 2020 that there have been no updates to Defence
+policy to reflect that Predict! is now the mandated risk management tool. An update to
+Defence’s policy is expected in May 2021 (see paragraphs 1.66 to 1.68).
+• Following JCPAA recommendations made in May 2016 and October 201719, Defence
+considered updates to the Project Maturity Score policy, but did not implement changes.
+Defence advised the ANAO in August 2020 that the Project Maturity Score will no longer
+be required as an input to the management of project performance. Defence further
+advised that an alternative to replace the Project Maturity Score in the PDSS will not be
+implemented. Therefore project maturity will not be reported in future MPRs (see
+paragraphs 1.71 to 1.72).
+• Following JCPAA recommendations made in May 2014 and May 201620, Defence is yet to
+implement a system of materiel capability delivery performance/scope reporting, with a
+robust methodology applicable to materiel acquisition (see paragraphs 2.54 to 2.59).
+• Following a JCPAA request made in 201821 ‘on how Defence major project cost variations
+and the costs of retaining project staff over time might be reported annually in future
+Major Projects Reports,’ Defence advised that it is not yet in a position to provide the staff
+cost component of projects and its systems are not capable of calculating the cost of
+retaining project staff over time (see paragraph 1.51 and paragraphs 1.53 to 1.56).
+Status of Auditor-General Report Recommendations
+• In July 2020 Defence closed both recommendations from Auditor-General Report No. 31
+2018–19 Defence’s Management of its Projects of Concern (see paragraphs 1.15 to 1.16).
+
+17 Joint Committee of Public Accounts and Audit, Parliament of the Commonwealth of Australia, Report 473:
+Defence Major Projects Report (2016–17), (2018), List of Recommendations, p. vii.
+18 Department of Defence, written supplementary submission 7 to the Joint Committee of Public Accounts and
+Audit, Inquiry into the 2018–19 Major Projects Report and Future Submarines Project – Transition to Design,
+p 11.
+19 Joint Committee of Public Accounts and Audit, Parliament of the Commonwealth of Australia, Report 458:
+Defence Major Projects Report (2014–15), (2016), Recommendation 3, p. 50.
+Joint Committee of Public Accounts and Audit, Parliament of the Commonwealth of Australia, Report 468:
+Defence Major Projects Report (2015–16), (2017), Recommendation 2, p. vii.
+20 Joint Committee of Public Accounts and Audit, Parliament of the Commonwealth of Australia, Report 442: Inquiry
+into the 2012–13 Defence Materiel Organisation Major Projects Report, (2014), pp. 37–39.
+Joint Committee of Public Accounts and Audit, Parliament of the Commonwealth of Australia, Report 458:
+Defence Major Projects Report (2014-15), (2016), pp. 48–49.
+21 The reporting of cost variations was also raised at the JCPAA’s public hearing into the 2016–17 MPR on 23
+March 2018 and at estimates hearings of the Finance and Public Administration Legislation Committee on 27
+February 2018.
+
+ANAO Review and Analysis
+Auditor-General Report No.19 2020–21
+2019–20 Major Projects Report
+
+2018–19 MPR
+
+10
+
+<Page Break>
+
+Defence closed the recommendation from Auditor-General Report No. 3 2019–20
+Defence’s Quarterly Performance Report on Acquisition and Sustainment in March 2020
+(see paragraphs 1.18 to 1.19).
+Defence Acquisition Governance
+• The importance of capturing Government decisions in internal Defence documentation
+and ensuring that Materiel Acquisition Agreements are appropriately aligned with these
+decisions (see paragraphs 1.23 to 1.28).
+• Defence’s implementation of the Smart Buyer Framework to support strategic decision
+making in the acquisition of major projects. The framework was not utilised at the Second
+Pass government approval stage for projects in the current MPR (see paragraphs 1.29 to
+1.30).
+• Defence has advised that it is transitioning to a different reporting system for reporting on
+the status of acquisition projects from August 2020 (see paragraphs 1.31 to 1.33).
+• Projects’ use of contingency funds (see paragraph 1.45). One project in the MPR, MRH90
+Helicopters, committed contingency funds of $26.3 million in 2019–20 for supportability
+and performance risks.
+• The status of CASG’s Risk Management Reform Program (initiated by Deputy Secretary
+CASG in 2017) and establishment of the CASG Risk Management Framework (see
+paragraphs 1.59 to 1.62).
+• A number of projects had not fully met the requirements of Defence’s Project Risk
+Management Manual Version 2.5 (PRMM V2.5) (see paragraph 1.64).
+• Defence updated its policy on Lessons Learned in May 2020. Compliance is not expected
+until May 2021 (see paragraphs 1.73 to 1.75).
+• Defence has not defined, in its internal policies and procedures, the terms ‘caveat’ or
+‘deficiency’ relating to the declaration of significant capability milestones. The ANAO has
+observed use of these terms by Defence to represent exceptions to the achievement of
+significant milestones (see paragraphs 1.76 to 1.80).
+ANAO’s analysis of project performance
+26. In addition to its limited assurance review, the ANAO has undertaken an analysis of key
+elements of the Defence PDSSs—relating to cost, schedule, progress towards delivery of required
+capability, project maturity, risks and issues, and longitudinal analysis across these key elements of
+projects.
+27. Table 2 provides:summary data on Defence’s progress toward delivering the capabilities for
+the Major Projects covered in this report; and compares current data against that reported in
+previous editions of the MPR. This section also contains a summary analysis of the three principal
+components of project performance: cost, schedule and capability.
+
+ANAO Review and Analysis
+Auditor-General Report No.19 2020–21
+2019–20 Major Projects Report
+
+2018–19 MPR
+
+Part 1. ANAO Review and Analysis
+
+11
+
+<Page Break>
+
+Part 1. ANAO Review and Analysis
+
+Table 2: Summary longitudinal analysis1
+2017–18
+MPR
+2018–19
+MPR
+2019–20
+MPR
+Number of Projects 26 26 25
+Total Approved Budget at 30 June $59.4 billion $64.1 billion $78.7 billion
+Total Approved Budget at final Second Pass Approval $50.2 billion $53.9 billion $68.9 billion
+Total Expenditure
+Against Total Approved Budget
+$32.4 billion
+(54.5%)
+$36.3 billion
+(56.6%)
+$38.9 billion
+(49.4%)
+Total In-year Expenditure
+Against In-year Budget
+$4.6 billion
+(98.6%)
+$4.8 billion
+(93.4%)
+$5.7 billion
+(92.5%)
+Total Budget Variation since initial Second Pass
+Approval 2
+$23.0 billion
+(38.7%)
+$24.4 billion
+(38.0%)
+$24.2 billion
+(30.7%)
+Total Budget Variation since final Second Pass
+Approval 3
+$9.2 billion
+(15.5%)
+$10.2 billion
+(15.9%)
+$9.8 billion
+(12.5%)
+In-year Approved Budget Variation -$0.3 billion
+(-0.5%)
+$1.2 billion
+(1.9%)
+$0.1 billion
+(0.1%)
+Total Schedule Slippage 4 771 months
+(31%)
+651 months
+(25%)
+507 months
+(21%)
+Average Schedule Slippage across Projects 4a 31 months 25 months 22 months
+In-year Schedule Slippage 103 months
+(4%)
+92 months
+(4%)
+68 months
+(3%)
+Total Project Maturity 5 1484 / 1820
+(82%)
+1485 / 1820
+(82%)
+1301 / 1750
+(74%)
+Total Reported Risks and Issues 6, 7 138 138 142
+Expected Capability (Defence Reporting) 8
+• High level of confidence of delivery (Green) 98% 98% 98%
+• Under threat, considered manageable (Amber) 2% 2% 2%
+• Unlikely to be met (Red) 0% 0% 9 0% 9
+Refer to paragraphs 26 to 41 in Part 1 of this report.
+Note 1: The data for the 25 Major Projects in the 2019–20 MPR compares the data from projects in the 2018–19 MPR
+and 2017–18 MPR. The Major Projects included within each MPR are based on entry and exit criteria in the
+Guidelines, which have been included in Part 4 of this report. The entry and exit of projects should be
+considered when comparing data across years.
+Note 2: Where a project has multiple Second Pass Approvals, the MPR has historically reported budget variations from
+the initial Second Pass Approval. The figures in this row are consistent with prior year reporting. See Table 3
+for a breakdown of the major components of this variance, and Table 7 for all real variations.
+Note 3: Where a project has multiple Second Pass Approvals, the budget at Second Pass Approval reported in the
+Header refers to the total budget as at the final Second Pass Approval. The figures in this row use this
+methodology.
+Note 4: Slippage refers to a delay in the current forecast date compared to the original government approved date of
+FOC. Slippage can occur due to late delivery, increases in scope or at times can be a deliberate management
+decision. In 2019–20, these figures have been adjusted to exclude delays to a project’s schedule that do not
+result in slippage past the original government approved date, and to exclude schedule reductions over the life
+of the project. However, paragraph 2.40 reports total schedule reductions over the life of the projects.
+Note 4a: As shown in Table 4 below and Table 10 on p. 66 of this report, for the fourteen 2019–20 major projects which
+have experienced slippage, the range is 1 to 108 months of total slippage.
+Note 5: The figures represent the total of the reported maturity scores divided by the total benchmark maturity score,
+in the PDSSs across all projects.
+Note 6: The grey section of the table is excluded from the scope of the ANAO’s priority assurance review, due to a lack
+of systems from which to obtain complete and accurate evidence in a sufficiently timely manner to facilitate the
+review.
+Note 7: The figures represent the combined number of open ‘high’ and ‘extreme’ risks and issues reported in the
+PDSSs across all projects. Risks and issues may be aggregated at a strategic level
+
+ANAO Review and Analysis
+Auditor-General Report No.19 2020–21
+2019–20 Major Projects Report
+
+2018–19 MPR
+
+12
+
+<Page Break>
+
+Note 8: These figures represent the average predicted capability delivery across all of the Major Projects. This method
+reduces the effect of any individual project’s size on the aggregate figure. Previously, these figures were
+calculated based on the number of distinct capability measures defined by each project and therefore projects
+with more capability measures had more of an effect on the aggregate figure.
+Note 9: Defence advised in these years that AWD Ships would not deliver one element of capability at FOC (which equated
+to approximately one per cent). However, across all the Major Projects this percentage rounded to zero per cent.
+Cost
+28. Cost management is an ongoing process in Defence’s administration of the Major Projects.
+While all projects reported that they could continue to operate within the total approved budget of
+$78.7 billion, the MRH90 Helicopters project was required to draw upon contingency funds to
+complete project activities.
+29. The approved budget for Major Projects included in this MPR has increased by $24.2 billion
+(30.7 per cent) since initial Second Pass Approval. Budget variations greater than $500 million are
+detailed in Table 3, below.22 However, as the MPR predominantly focusses on the approved capital
+budget for acquisition, the ongoing costs of Project Offices23, training, replacement capability, etc.,
+are not reported here.
+Table 3: Budget variation over $500m post initial Second Pass Approval by variation
+type 1, 2
+Project Variation Type Explanation Year Amount $b
+Scope Increases 14.1
+MRH90
+Helicopters
+34 additional aircraft at Phase 4/6
+Second Pass Approval
+2005–06 2.3
+Joint Strike
+Fighter
+58 additional aircraft at Stage 2
+Second Pass Approval
+2013–14 10.5
+P-8A Poseidon Four additional aircraft 2015–16 1.3
+Real Cost and
+other Increases
+1.8
+AWD Ships Real Cost Increase of $1.2b offset by
+$0.1b transfer for facilities in 2014
+2013–14 and
+2015–16
+1.1
+Overlander
+Medium/Heavy
+Project supplementation3 ($684.2m)
+and additional vehicles, trailers and
+equipment ($28.0m) at Revised
+Second Pass Approval
+2013–14 0.7
+Other budget
+movements
+1.2
+Other Scope
+increase/budget
+transfers (net)
+Other scope changes and transfers Various 1.2
+Price Indexation – materials and labour (net) (to July 2010) 4 2.3
+Exchange Variation – foreign exchange (net) (to 30 June 2020) 5.0
+Total 24.2 5
+Note 1: For the variations related to all projects and their value, refer to Table 7 of this report. For the breakdown of inyear variation, refer to Table 8 of this report.
+
+22 Individual PDSSs also report on budget variations.
+23 The JCPAA requested in May 2018 that the ANAO report back to the Committee on how Defence Major Projects
+cost variations and the costs of retaining project staff over time might be reported in future MPRs. See
+paragraphs 1.53 to 1.56 for the outcomes of this consideration.
+
+ANAO Review and Analysis
+Auditor-General Report No.19 2020–21
+2019–20 Major Projects Report
+
+2018–19 MPR
+
+13
+
+Part 1. ANAO Review and Analysis
+
+<Page Break>
+
+Part 1. ANAO Review and Analysis
+
+Note 2: For projects with multiple Second Pass Approvals, this table shows variations from the initial approval.
+Note 3: Defence has advised that ‘project supplementation’ is a unique term used to describe the approvals history of
+this project as follows: ‘The original amount of $2549.2, was the Government decision to split Phase 3 into
+Phase 3A and 3B. In 2011, Government approved Second Pass approval of Phase 3A and the ‘Interim Pass’
+Government approval for Phase 3B. The decision to grant Phase 3B ‘Interim Pass’ was to allow greater
+bargaining power for Defence while negotiating Phase 3A. Phase 3B was always going to return to Government
+for formal Second Pass approval, which occurred in July 2013, once contract negotiations were complete.’
+Note 4: Prior to 1 July 2010, projects were periodically supplemented for price indexation, whereas the allocation for
+price indexation is now provided for on an out-turned basis at Second Pass Approval.
+Note 5: Figures do not add precisely due to rounding.
+Source: ANAO analysis of the 2019–20 PDSSs.
+Schedule
+30. Delivering Major Projects on schedule continues to present challenges for Defence,
+affecting when the capability is made available for operational release and deployment by the
+Australian Defence Force, as well as the cost of delivery.
+31. The total schedule slippage for the 25 selected Major Projects, as at 30 June 2020, was 507
+months when compared to the initial schedule.24 This represents a 21 per cent increase since
+Second Pass Approval. Across MPR projects that have experienced slippage (14 of 23 projects with
+approved FOC dates25), the average slippage is 36.2 months (3.0 years). Table 4 below includes
+details of in-year and total schedule slippage by project. The table shows an increase of 68 months
+of in-year slippage during 2019–20.
+32. The total slippage of 507 months in 2019–20 is 144 months lower than the total in 2018–19
+of 651 months. This is due to:
+• the exclusion of projects which have exited the MPR (LHD Ships, Additional MRTT, ANZAC
+ASMD 2B, HATS, Battle Comm. Sys. (Land) 2A, and LHD Landing Craft) removing 218 months
+of slippage from the total reported in 2018–19 (see Table 5);
+• a reduction of 6 months of slippage due to the Collins Comms and EW project recovering
+this slippage in 2019–20;
+• the addition of 68 months of in-year slippage described above; and
+• the Battlefield Command System project adding 12 months of slippage to the total of 507
+months. The slippage occurred prior to the project entering the MPR in 2019–20.
+
+24 As noted in Note 4 of Table 2, slippage refers to a delay in the current forecast date compared to the original
+government approved date of FOC. These figures exclude delays to a project’s schedule that do not result in
+slippage past the original government approved date and schedule reductions over the life of the project. In
+November 2017, Defence raised with the ANAO, for the purposes of calculating total schedule slippage, the
+feasibility of identifying what the proportion of slippage represented by the expanded scope of projects is (for
+example with respect to the P-8A Poseidon and Collins Comms and EW projects). See Note 2 of Figure 8 of this
+report which shows that the slippage attributable to increases in project scope is 69 months.
+25 Future Frigates and Future Subs are excluded as these projects do not yet have FOC milestones approved by
+Government.
+
+ANAO Review and Analysis
+Auditor-General Report No.19 2020–21
+2019–20 Major Projects Report
+
+2018–19 MPR
+
+14
+
+<Page Break>
+
+Table 4: Schedule slippage from original planned Final Operational Capability 1
+Project In-year
+(months)
+Total
+(months)
+Project In-year
+(months)
+Total
+(months)
+Joint Strike Fighter 2 0 0 MQ-4C Triton 2 43 43
+AWD Ships 0 37 Repl Replenishment Ships 2 0 0
+Future Frigates 2, 3 N/A N/A CMATS 2 6 34
+Future Subs 3 N/A N/A Battlefield Command
+System 2
+4 16
+Combat Recon. Vehicles 0 0 Battle Comm. Sys. (Land)
+2B
+0 24
+P-8A Poseidon 0 29 Collins Comms and EW 0 30
+MRH90 Helicopters 0 89 Pacific Patrol Boat Repl 0 2
+Offshore Patrol Vessel 0 0 Night Fighting Equip Repl 0 0
+Growler 0 1 Collins R&S 0 108
+Overlander Medium/Heavy 0 0 Maritime Comms 3 16
+MH-60R Seahawk 0 0 ANZAC Air Search Radar
+Repl
+0 0
+Hawkei 2 0 0 UHF SATCOM 2 0 42
+Battlefield Airlifter 2 12 36
+Total (months) 68 507
+Total (%) 3 21
+Note 1: Refer to footnote 24.
+Note 2: These projects have been identified by Defence as Projects of Interest (see paragraph 1.21 in Part 1).
+Note 3: These projects’ FOC milestones are yet to be approved by Government.
+Source: ANAO analysis of the 2019–20 PDSSs.
+33. Platform availability has contributed to the slippage experienced within some projects. For
+example, Maritime Comms and Collins R&S have been impacted by changes to docking schedules
+of the Anzac Class frigates and Collins Class submarines respectively. Significant delays have also
+been experienced by those projects with the most developmental content: AWD Ships, MRH90
+Helicopters, CMATS, MQ-4C Triton, and Battle Comm. Sys. (Land) 2B.
+34. Table 5, below, provides details of total schedule slippage by project, for projects which
+have exited the MPR. Compared to the 507 months total schedule slippage for the current 23
+Major Projects26, the 27 projects which have exited the MPR27 have reported accumulated
+schedule slippage of 1146 months, as at their respective exit dates. Table 5 indicates that schedule
+slippage for projects which have exited the MPR was more pronounced in projects with the most
+developmental content.
+
+26 Future Frigates and Future Subs are excluded from this analysis as they do not yet have FOC milestones
+approved by Government.
+27 Hornet Refurb and BMS are excluded from this analysis as they did not have FOC milestones approved by
+Government. 
+
+
+ANAO Review and Analysis
+Auditor-General Report No.19 2020–21
+2019–20 Major Projects Report
+
+2018–19 MPR
+
+15
+
+Part 1. ANAO Review and Analysis
+
+<Page Break>
+
+Part 1. ANAO Review and Analysis
+
+Table 5: Schedule slippage for projects which have exited the MPR 1
+Project Total
+(months)
+Project Total
+(months)
+Wedgetail (Developmental) 77 HF Modernisation (Developmental) 136
+Super Hornet (MOTS) 0 Armidales (Australianised MOTS) 43
+LHD Ships (Australianised MOTS) 37 HATS (Australianised COTS) 0
+Hornet Upgrade (Australianised MOTS) 39 Collins RCS (Australianised MOTS) 107
+ARH Tiger Helicopters (Australianised
+MOTS)
+82 Battle Comm. Sys. (Land) 2A (MOTS) 39
+C-17 Heavy Airlift (MOTS) 0 Hw Torpedo (MOTS) 61
+Air to Air Refuel (Developmental) 64 SM-2 Missile (Australianised MOTS) 26
+FFG Upgrade (Developmental) 132 ANZAC ASMD 2A (Australianised MOTS) 80
+Bushmaster Vehicles (Australianised
+MOTS)
+1 155mm Howitzer (MOTS) 7
+Overlander Light (Australianised MOTS) 4 Stand Off Weapon (Australianised MOTS) 37
+Additional MRTT (Australianised MOTS) 21 Battle Comm. Sys. (Australianised MOTS) 24
+Next Gen Satellite 2 (MOTS) 0 C-RAM (MOTS) 2
+ANZAC ASMD 2B (Developmental) 75 LHD Landing Craft (Australianised MOTS) 46
+Additional Chinook (MOTS) 6
+Total 1146
+Note 1: The Hornet Refurb and Battle Management System (BMS) projects are not included in this table as they did
+not have FOC milestones.
+Note 2: Next Gen Satellite shows slippage in Figure 9, which related to the final capability milestones at the time. By
+the time it reached FOC, a new final capability milestone had been introduced and slippage was reduced.
+Source: PDSSs in Major Projects Reports and ANAO analysis.
+35. Additional ANAO analysis (refer to Figure 8, on page 59) has compared project slippage
+against the Defence classification of projects as Military Off-The-Shelf (MOTS), Australianised
+MOTS or developmental. These classifications are a general indicator of the difficulty associated
+with the procurement process.
+36. Figure 9 (on page 60) provides analysis of projects either completed, or removed from the
+MPR review, and shows that a focus on MOTS28 acquisitions has assisted in reducing schedule
+slippage. Prima facie, the more developmental in nature a project is, the more likely it will result
+in a greater degree of project slippage. Figure 9 was requested by the JCPAA in May 2014.29
+37. Longitudinal analysis indicates that while the reasons for schedule slippage vary, it
+primarily reflects the underestimation of both the scope and complexity of work, particularly for
+Australianised MOTS and developmental projects (see paragraphs 2.27 to 2.34).
+
+28 Off-The-Shelf: Systems, hardware or software that already exists or is confirmed in service for an equivalent
+purpose and requires no, or minimal change. Sometimes expressed as commercial off-the-shelf or military offthe-shelf. Department of Defence, Defence Test and Evaluation Policy, Defence, Canberra, 2019, Annex 1A,
+Definitions, p. ii.
+29 Joint Committee of Public Accounts and Audit, Parliament of the Commonwealth of Australia, Report 442: Inquiry
+into the 2012–13 Defence Materiel Organisation Major Projects Report, (2014), Recommendation 5, p. 31.
+
+ANAO Review and Analysis
+Auditor-General Report No.19 2020–21
+2019–20 Major Projects Report
+
+2018–19 MPR
+
+16
+
+<Page Break>
+
+Capability
+38. The third principal component of project performance examined in this report is progress
+towards the delivery of capability required by government. While the assessment of expected
+capability delivery by Defence is outside the scope of the Auditor-General’s formal review
+conclusion, it is included in the analysis to provide an overall perspective of the three principal
+components of project performance.
+39. The Defence PDSSs report that 19 projects in this year’s report will deliver all of their key
+capability requirements. Defence’s assessment indicates that some elements of the capability
+required may be ‘under threat’, but the risk is assessed as ‘manageable’. The five project offices
+experiencing challenges with expected capability delivery (2018–19: five) are Joint Strike Fighter,
+MRH90 Helicopters, Hawkei, Battlefield Command System and Battlefield Airlifter. One project
+office (AWD Ships) reports that it is unable to deliver all of the required capability by FOC.
+40. Table 6, below, summarises expected capability delivery as at 30 June 2020, as reported
+by Defence.
+Table 6: Capability delivery
+Expected Capability
+(Defence Reporting)
+2017–18
+MPR (%)
+2018–19
+MPR (%)
+2019–20
+MPR (%)
+High Confidence (Green) 98 98 98
+Under Threat, considered manageable (Amber) 2 2 2
+Unlikely (Red) 0 0 1 0 1
+Total 100 100 100
+Note 1: Defence advised in these years that AWD Ships would not deliver one element of capability at FOC (which
+equates to approximately one per cent of elements required). However, across all the Major Projects this
+percentage rounds to zero.
+Source: PDSSs in Major Projects Reports and ANAO analysis.
+41. In addition to reporting on expected capability delivery, Defence has continued the
+practice of including in the PDSSs declassified information on contractual remedies for projects,
+including stop payments and liquidated damages. During 2019–20, Combat Recon. Vehicles,
+Hawkei and UHF SATCOM had negotiated contractual remedies involving stop payments or
+liquidated damages. Prior settlements for projects within this report related to MRH90
+Helicopters, Hawkei, Pacific Patrol Boat Repl, Maritime Comms, and UHF SATCOM.
+Impact of COVID-19 on the Major Projects
+42. Sixteen of the 25 projects have reported experiencing an impact as a result of the COVID19 pandemic in their PDSSs. The pandemic has seen projects reporting impacts to cost and
+schedule.
+Cost
+43. Six projects reported an impact on project budget as a result of the COVID-19 pandemic.
+A further two projects highlighted an impact to the budget as an emerging issue. Of the six
+projectsthat have reported impact to the budget, four experienced an underspend, citing varying
+reasons for this (delay to training and support, overseas suppliers, shipyard closures and
+international travel restrictions). Two projects experienced an overspend – one due to
+
+ANAO Review and Analysis
+Auditor-General Report No.19 2020–21
+2019–20 Major Projects Report
+
+2018–19 MPR
+
+17
+
+Part 1. ANAO Review and Analysis
+
+<Page Break>
+
+Part 1. ANAO Review and Analysis
+
+accelerated payment terms and the other citing FOREX losses. The remaining 19 projects did not
+report an impact to the project budget.
+Schedule
+44. Fifteen projects reported an impact on scheduling as a result of the COVID-19 pandemic,
+relating to:
+i) supplier disruption (supplier production and/or shipping delays);
+ii) workforce limitations – travel (specialists and crew were due to travel both
+interstate and from other countries to work with/on the projects); and/or
+iii) contractor delays (scope, delivery and certification delays).
+45. Some projects identified multiple impacts across these three areas. Ten projects reported
+nil impacts to scheduling.
+Capability
+46. No projects reported an impact relating to capability.
+47. Further information on COVID-19 impacts is reported in the Statement by the Secretary of
+Defence.
+
+ANAO Review and Analysis
+Auditor-General Report No.19 2020–21
+2019–20 Major Projects Report
+
+2018–19 MPR
+
+18
+
+<Page Break>
+
+1. The Major Projects Review
+1.1 This chapter provides the Australian National Audit Office’s (ANAO) overview of the scope
+and approach adopted for its limited assurance review of the 25 Project Data Summary Sheets
+(PDSSs) prepared by the Department of Defence (Defence). The chapter also includes information
+and commentary on developments in Defence’s acquisition governance processes, based on the
+ANAO’s review.
+Review scope and approach
+1.2 In 2012 the Parliament’s Joint Committee of Public Accounts and Audit (JCPAA) identified
+the ANAO’s review of Defence PDSSs as a priority assurance review, under subsection 19A(5) of
+the Auditor-General Act 1997 (the Act). This provided the ANAO with full access to the
+information gathering powers under the Act. The ANAO’s review of the individual project PDSSs,
+which are reproduced in Part 3 of the Major Projects Report (MPR), was conducted in accordance
+with the auditing standards set by the Auditor-General under section 24 of the Act through its
+incorporation of the Australian Standard on Assurance Engagements (ASAE) 3000 Assurance
+Engagements Other than Audits or Reviews of Historical Financial Information, issued by the
+Australian Auditing and Assurance Standards Board.
+1.3 The following forecast information is excluded from the scope of the ANAO’s review:
+capability delivery, risks and issues, and forecast dates. These exclusions are due to the lack of
+Defence systems from which to provide complete and accurate evidence30, in a sufficiently timely
+manner to complete the review. Accordingly, the Independent Assurance Report by the
+Auditor-General does not provide any assurance in relation to this information. However,
+material inconsistencies identified in relation to this information are required to be considered in
+forming the conclusion.
+1.4 The ANAO’s work is appropriate for the purpose of providing an Independent Assurance
+Report in accordance with the ANAO Auditing Standards. However, the review of individual PDSSs
+is based on a limited assurance approach and is not as extensive as individual performance and
+financial statement audits conducted by the ANAO, in terms of the nature and scope of issues
+covered, and the extent to which evidence is required by the ANAO. Consequently, the level of
+assurance provided by this review, in relation to the 25 major Defence equipment acquisition
+projects (Major Projects), is less than that provided by the ANAO’s program of performance and
+financial statement audits.
+1.5 Separately, the ANAO reviews: developments in Defence’s acquisition governance
+processes (information and commentary on governance issues appears in this chapter); and
+undertakes analysis of key elements of the PDSSs (information and commentary on systemic issues
+and longitudinal analysis for the 25 projects reviewed appears in the next chapter).
+
+30 Joint Committee of Public Accounts and Audit, Parliament of the Commonwealth of Australia, Report 473:
+Defence Major Projects Report (2016–17), (2018), Recommendation 2, p. vii, which recommended transitioning
+to risk registers with better version control measures than spreadsheets. Defence is transitioning its risk
+management system to Predict! for all projects in this report, the implementation of which will be reviewed by the
+ANAO in the next MPR.
+
+ANAO Review and Analysis
+Auditor-General Report No.19 2020–21
+2019–20 Major Projects Report
+
+2018–19 MPR
+
+19
+
+Part 1. ANAO Review and Analysis
+
+<Page Break>
+
+Part 1. ANAO Review and Analysis
+
+1.6 The ANAO’s review was conducted in accordance with the ANAO Auditing Standards at a
+cost to the ANAO of approximately $2.0 million.31
+Review methodology
+1.7 The ANAO’s review of the information presented in the individual Defence PDSSs included:
+• examination and assessment of the governance and oversight in place to ensure
+appropriate project management;
+• an assessment of the systems and controls that support project financial management, risk
+management and project status reporting, within Defence;
+• an examination of each PDSS and the documents and information relevant to them;
+• a review of relevant processes and procedures used by Defence in the preparation of the
+PDSSs;
+• discussions with persons responsible for the preparation of the PDSSs and management
+of the projects;
+• analysis of project information, for example, cost and schedule variances;
+• taking account of industry contractor comments provided on draft PDSS information;
+• assessing the assurance by Defence managers attesting to the accuracy and completeness
+of the PDSSs;
+• examination of the representations by the Chief Finance Officer supporting the project
+financial assurance and contingency statements;
+• examination of confirmations, provided by the Capability Managers, relating to each
+project’s progress toward Initial Materiel Release (IMR), Final Materiel Release (FMR),
+Initial Operational Capability (IOC) and Final Operational Capability (FOC); and
+• examination of the Statement by the Secretary of Defence, including significant events
+occurring post 30 June, and management representations by the Secretary of Defence.
+1.8 The ANAO’s review of PDSSs also focused on project management and reporting
+arrangements contributing to the overall governance of the Major Projects. The ANAO considered:
+• developments in acquisition governance (see paragraphs 1.10 to 1.33, below);
+• the financial framework, particularly as it applies to the project financial assurance and
+contingency statements, and Defence’s advice that project financial reporting during
+2019–20 would be prepared on the same basis as project approvals and expenditure
+represented in the Portfolio Budget Statements and the Defence Annual Report (i.e. on a
+cash basis) (see Section 2 of the PDSSs);
+• schedule management and test and evaluation processes (see Section 3 of the PDSSs);
+• materiel capability / scope delivery forecast assessments, including Defence statements
+of the likelihood of delivering key capabilities, particularly where caveats are placed on
+the Capability Manager's declaration of significant milestones (see Section 4 of the PDSSs); 
+
+
+31 In 2018–19 Defence reported that its estimated cost of contributing to the MPR was $2.4 million. Defence has
+not identified the estimated cost of its contribution to the 2019–20 MPR. See also page 96 at Part 2 of this report.
+
+ANAO Review and Analysis
+Auditor-General Report No.19 2020–21
+2019–20 Major Projects Report
+
+2018–19 MPR
+
+20
+
+<Page Break>

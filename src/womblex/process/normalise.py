@@ -16,6 +16,9 @@ sidecar the PII stage writes.
 
 v1 scope (intra-element):
 
+- :func:`normalise_unicode` — fold unicode whitespace (NBSP, en/em spaces,
+  U+2028/9 separators) to ASCII space/newline and strip zero-width marks,
+  BOM and stray control chars. Smart quotes / dashes are preserved.
 - :func:`collapse_whitespace` — collapse runs of spaces/tabs to one and
   strip per-line trailing whitespace, without touching newlines.
 - :func:`despace_page_marker` — heal sub-glyph-kerning ``3|P age`` footers
@@ -33,6 +36,7 @@ a mid-paragraph redaction bar as separate blocks. See
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 
 # Horizontal-whitespace runs (never newlines — line structure is meaningful
@@ -47,11 +51,25 @@ _TRAILING_WS_RE = re.compile(r"[^\S\n]+(?=\n|$)")
 # the documented "3|P age" native-text footer case only.
 _PAGE_MARKER_RE = re.compile(r"\bP\s*a\s*g\s*e\b", re.IGNORECASE)
 
+# Unicode whitespace hygiene (see `normalise_unicode`). Visible unicode spaces
+# fold to an ASCII space; line/paragraph separators fold to a newline;
+# zero-width marks and the BOM are removed. Punctuation (smart quotes, em/en
+# dashes, bullets) is deliberately NOT touched — it is valid, tokeniser-safe
+# typography. The producing code points are kept explicit so the transform is
+# auditable and the codebook can enumerate them.
+_UC_SPACE = frozenset({
+    0x00A0, 0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006,
+    0x2007, 0x2008, 0x2009, 0x200A, 0x202F, 0x205F, 0x3000,
+})
+_UC_NEWLINE = frozenset({0x2028, 0x2029})
+_UC_REMOVE = frozenset({0x200B, 0x200C, 0x200D, 0xFEFF})  # zero-width / BOM
+
 
 @dataclass
 class NormaliseTransforms:
     """Which transforms run, in fixed compose order. Mirrors config toggles."""
 
+    unicode_hygiene: bool = True
     collapse_whitespace: bool = True
     despace_page_marker: bool = True
     substitutions: dict[str, str] = field(default_factory=dict)
@@ -95,6 +113,35 @@ def despace_page_marker(text: str) -> tuple[str, int]:
     return _PAGE_MARKER_RE.subn(_repl, text)
 
 
+def normalise_unicode(text: str) -> tuple[str, int]:
+    """Fold unicode whitespace to ASCII; strip stray control chars.
+
+    Visible unicode spaces (NBSP, en/em spaces, ideographic space, …) become a
+    single ASCII space; line/paragraph separators (U+2028/U+2029) become a
+    newline; zero-width marks and the BOM are removed; other control chars
+    (except newline/tab) are dropped. Punctuation such as smart quotes and
+    em/en dashes is preserved — it is valid, tokeniser-safe typography.
+    Returns ``(text, n_changes)`` counting each char folded or removed.
+    """
+    out: list[str] = []
+    n = 0
+    for ch in text:
+        cp = ord(ch)
+        if cp in _UC_SPACE:
+            out.append(" ")
+            n += 1
+        elif cp in _UC_NEWLINE:
+            out.append("\n")
+            n += 1
+        elif cp in _UC_REMOVE:
+            n += 1
+        elif ch in "\n\t" or unicodedata.category(ch)[0] != "C":
+            out.append(ch)
+        else:
+            n += 1  # stray control char
+    return "".join(out), n
+
+
 def apply_substitutions(text: str, substitutions: dict[str, str]) -> tuple[str, int]:
     """Apply literal ``{find: replace}`` substitutions (longest find first).
 
@@ -124,6 +171,9 @@ def normalise_text(text: str, kind: str, transforms: NormaliseTransforms) -> tup
         return text, 0
 
     total = 0
+    if transforms.unicode_hygiene:
+        text, n = normalise_unicode(text)
+        total += n
     if transforms.substitutions:
         text, n = apply_substitutions(text, transforms.substitutions)
         total += n
@@ -142,4 +192,5 @@ __all__ = [
     "collapse_whitespace",
     "despace_page_marker",
     "normalise_text",
+    "normalise_unicode",
 ]

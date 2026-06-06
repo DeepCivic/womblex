@@ -26,8 +26,11 @@ datasets/FUNSD/
 datasets/FUNSD_plus/
 raw_documents/
 
-# Test fixtures — separate repo, see THIRD_PARTY_DATA.md
-fixtures/
+# Test fixtures (see THIRD_PARTY_DATA.md): a minimal *redistributable* set is
+# vendored under fixtures/fixtures/ for a self-contained dev run. The full set —
+# including the research-use-only ACT FOI 213A documents, which are NOT vendored
+# here — lives only in the external womblex-development-fixtures repo. Tests that
+# need the non-vendored documents skip cleanly in a fresh clone.
 
 # DVC
 *.dvc
@@ -38,3 +41,6 @@ fixtures/
 
 # Local agent state
 .claude/
+
+# pytest logging (slow-test monitor + lib progress)
+pytest.log

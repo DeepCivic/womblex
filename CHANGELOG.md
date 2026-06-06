@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`score --text-source` — CER of extraction vs normalisation.** `womblex
+  score` (and `score_labels`) now accept `text_source={elements,normalised}`:
+  `normalised` reassembles the labelled page from the `*.normalised_text.parquet`
+  sidecar instead of the verbatim element stream, so a caller can measure how
+  the cleanup/normalisation stage changes CER against the same GT.
+- **Benchmark: ACT-ECI labelled-pages raw-vs-normalised CER.** New
+  `TestActEciLabelledPages` (`-m benchmark`) extracts each labelled page, scores
+  raw extraction and normalise-stage output against the per-page GT, and reports
+  a per-strategy `Raw CER / Norm CER / Δ` table in `docs/accuracy/EXTRACTION.md`.
+  Degenerate GT (<20 chars) excluded; a regression guard asserts normalisation
+  never worsens CER. (Fixtures cohort expanded 7→19 labelled pages.)
+- **`quality` stage — chunk-quality annotation sidecar (`womblex quality`).**
+  Reads `*.chunks.parquet` and writes a `*.chunk_quality.parquet` sibling
+  (joined on `(source_hash, chunk_index)`) with ML-readiness flags
+  (`char_len`, `alpha_frac`, `is_short`, `boilerplate_flag`) and cross-batch
+  duplicate cluster ids (`exact_dup_id`, `near_dup_id`). Duplicate clustering
+  is self-contained (no datasketch dep): `exact_dup_id` over
+  whitespace/case/punctuation-normalised text, `near_dup_id` via a fixed-seed
+  MinHash+LSH (default 64 perms / 4 bands ≈ Jaccard 0.92). Annotation only —
+  chunk text is never mutated; runs as a single global pass since dedup is
+  corpus-wide. `boilerplate_patterns` are corpus-driven config, never
+  hardcoded. New `QualityConfig`; 5 unit tests.
+- **`normalise` stage — `unicode_hygiene` transform.** Folds unicode
+  whitespace (NBSP, en/em spaces, ideographic space, U+2028/9 separators) to
+  ASCII space/newline and strips zero-width marks, BOM and stray control
+  chars; smart quotes and em/en dashes are preserved. New `unicode_hygiene`
+  toggle on `NormaliseConfig` (default on), composed ahead of the existing
+  transforms. 4 new unit tests.
+
 ### Fixed
 - **K9-fig — full-page scans no longer dropped from chunking as `figure`.**
   The dominant-region fallback in `_layout_blocks_and_tables` collapsed a

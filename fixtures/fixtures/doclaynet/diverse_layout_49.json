@@ -1,0 +1,881 @@
+{
+  "bboxes": [
+    [
+      105.0,
+      48.0,
+      403.0,
+      61.0
+    ],
+    [
+      103.0,
+      49.0,
+      407.0,
+      62.0
+    ],
+    [
+      103.0,
+      76.0,
+      464.0,
+      92.0
+    ],
+    [
+      103.0,
+      90.0,
+      450.0,
+      106.0
+    ],
+    [
+      103.0,
+      104.0,
+      357.0,
+      120.0
+    ],
+    [
+      103.0,
+      131.0,
+      316.0,
+      148.0
+    ],
+    [
+      321.0,
+      131.0,
+      450.0,
+      147.0
+    ],
+    [
+      103.0,
+      145.0,
+      423.0,
+      161.0
+    ],
+    [
+      103.0,
+      159.0,
+      468.0,
+      175.0
+    ],
+    [
+      103.0,
+      173.0,
+      431.0,
+      189.0
+    ],
+    [
+      103.0,
+      186.0,
+      438.0,
+      202.0
+    ],
+    [
+      103.0,
+      200.0,
+      463.0,
+      216.0
+    ],
+    [
+      103.0,
+      214.0,
+      415.0,
+      230.0
+    ],
+    [
+      103.0,
+      241.0,
+      153.0,
+      258.0
+    ],
+    [
+      158.0,
+      241.0,
+      438.0,
+      257.0
+    ],
+    [
+      103.0,
+      255.0,
+      466.0,
+      271.0
+    ],
+    [
+      103.0,
+      269.0,
+      470.0,
+      285.0
+    ],
+    [
+      103.0,
+      283.0,
+      443.0,
+      299.0
+    ],
+    [
+      103.0,
+      296.0,
+      456.0,
+      312.0
+    ],
+    [
+      103.0,
+      324.0,
+      442.0,
+      340.0
+    ],
+    [
+      103.0,
+      338.0,
+      435.0,
+      354.0
+    ],
+    [
+      103.0,
+      351.0,
+      438.0,
+      367.0
+    ],
+    [
+      103.0,
+      365.0,
+      139.0,
+      381.0
+    ],
+    [
+      103.0,
+      393.0,
+      151.0,
+      411.0
+    ],
+    [
+      156.0,
+      393.0,
+      409.0,
+      411.0
+    ],
+    [
+      670.0,
+      403.0,
+      760.0,
+      419.0
+    ],
+    [
+      103.0,
+      422.0,
+      443.0,
+      438.0
+    ],
+    [
+      529.0,
+      430.0,
+      880.0,
+      446.0
+    ],
+    [
+      103.0,
+      435.0,
+      413.0,
+      451.0
+    ],
+    [
+      529.0,
+      444.0,
+      899.0,
+      460.0
+    ],
+    [
+      103.0,
+      449.0,
+      419.0,
+      465.0
+    ],
+    [
+      529.0,
+      458.0,
+      863.0,
+      474.0
+    ],
+    [
+      103.0,
+      463.0,
+      412.0,
+      479.0
+    ],
+    [
+      529.0,
+      471.0,
+      899.0,
+      487.0
+    ],
+    [
+      103.0,
+      477.0,
+      464.0,
+      493.0
+    ],
+    [
+      529.0,
+      485.0,
+      897.0,
+      501.0
+    ],
+    [
+      103.0,
+      490.0,
+      401.0,
+      506.0
+    ],
+    [
+      529.0,
+      499.0,
+      885.0,
+      515.0
+    ],
+    [
+      103.0,
+      504.0,
+      411.0,
+      520.0
+    ],
+    [
+      529.0,
+      513.0,
+      832.0,
+      529.0
+    ],
+    [
+      103.0,
+      518.0,
+      389.0,
+      534.0
+    ],
+    [
+      529.0,
+      526.0,
+      619.0,
+      542.0
+    ],
+    [
+      546.0,
+      555.0,
+      739.0,
+      571.0
+    ],
+    [
+      546.0,
+      555.0,
+      739.0,
+      571.0
+    ],
+    [
+      529.0,
+      555.0,
+      537.0,
+      569.0
+    ],
+    [
+      580.0,
+      568.0,
+      867.0,
+      584.0
+    ],
+    [
+      580.0,
+      568.0,
+      867.0,
+      584.0
+    ],
+    [
+      551.0,
+      570.0,
+      564.0,
+      583.0
+    ],
+    [
+      551.0,
+      570.0,
+      564.0,
+      583.0
+    ],
+    [
+      580.0,
+      582.0,
+      898.0,
+      598.0
+    ],
+    [
+      580.0,
+      596.0,
+      674.0,
+      612.0
+    ],
+    [
+      580.0,
+      596.0,
+      674.0,
+      612.0
+    ],
+    [
+      580.0,
+      610.0,
+      876.0,
+      626.0
+    ],
+    [
+      580.0,
+      610.0,
+      876.0,
+      626.0
+    ],
+    [
+      551.0,
+      611.0,
+      564.0,
+      624.0
+    ],
+    [
+      551.0,
+      611.0,
+      564.0,
+      624.0
+    ],
+    [
+      580.0,
+      623.0,
+      875.0,
+      639.0
+    ],
+    [
+      580.0,
+      637.0,
+      738.0,
+      653.0
+    ],
+    [
+      580.0,
+      637.0,
+      738.0,
+      653.0
+    ],
+    [
+      580.0,
+      651.0,
+      858.0,
+      667.0
+    ],
+    [
+      580.0,
+      651.0,
+      858.0,
+      667.0
+    ],
+    [
+      551.0,
+      652.0,
+      564.0,
+      666.0
+    ],
+    [
+      551.0,
+      652.0,
+      564.0,
+      666.0
+    ],
+    [
+      580.0,
+      665.0,
+      708.0,
+      681.0
+    ],
+    [
+      580.0,
+      665.0,
+      708.0,
+      681.0
+    ],
+    [
+      580.0,
+      678.0,
+      890.0,
+      694.0
+    ],
+    [
+      580.0,
+      678.0,
+      890.0,
+      694.0
+    ],
+    [
+      580.0,
+      678.0,
+      890.0,
+      694.0
+    ],
+    [
+      551.0,
+      680.0,
+      564.0,
+      693.0
+    ],
+    [
+      551.0,
+      680.0,
+      564.0,
+      693.0
+    ],
+    [
+      551.0,
+      680.0,
+      564.0,
+      693.0
+    ],
+    [
+      580.0,
+      692.0,
+      881.0,
+      708.0
+    ],
+    [
+      580.0,
+      692.0,
+      881.0,
+      708.0
+    ],
+    [
+      551.0,
+      694.0,
+      564.0,
+      707.0
+    ],
+    [
+      551.0,
+      694.0,
+      564.0,
+      707.0
+    ],
+    [
+      580.0,
+      706.0,
+      852.0,
+      722.0
+    ],
+    [
+      546.0,
+      734.0,
+      664.0,
+      750.0
+    ],
+    [
+      546.0,
+      734.0,
+      664.0,
+      750.0
+    ],
+    [
+      529.0,
+      734.0,
+      537.0,
+      749.0
+    ],
+    [
+      580.0,
+      748.0,
+      884.0,
+      764.0
+    ],
+    [
+      580.0,
+      748.0,
+      884.0,
+      764.0
+    ],
+    [
+      551.0,
+      749.0,
+      564.0,
+      763.0
+    ],
+    [
+      551.0,
+      749.0,
+      564.0,
+      763.0
+    ],
+    [
+      580.0,
+      762.0,
+      872.0,
+      778.0
+    ],
+    [
+      580.0,
+      776.0,
+      847.0,
+      792.0
+    ],
+    [
+      580.0,
+      776.0,
+      847.0,
+      792.0
+    ],
+    [
+      580.0,
+      789.0,
+      896.0,
+      805.0
+    ],
+    [
+      580.0,
+      789.0,
+      896.0,
+      805.0
+    ],
+    [
+      551.0,
+      791.0,
+      564.0,
+      804.0
+    ],
+    [
+      551.0,
+      791.0,
+      564.0,
+      804.0
+    ],
+    [
+      580.0,
+      803.0,
+      869.0,
+      819.0
+    ],
+    [
+      580.0,
+      817.0,
+      846.0,
+      833.0
+    ],
+    [
+      580.0,
+      831.0,
+      696.0,
+      847.0
+    ],
+    [
+      580.0,
+      831.0,
+      696.0,
+      847.0
+    ],
+    [
+      580.0,
+      844.0,
+      900.0,
+      860.0
+    ],
+    [
+      580.0,
+      844.0,
+      900.0,
+      860.0
+    ],
+    [
+      551.0,
+      846.0,
+      564.0,
+      859.0
+    ],
+    [
+      551.0,
+      846.0,
+      564.0,
+      859.0
+    ],
+    [
+      244.0,
+      848.0,
+      334.0,
+      864.0
+    ],
+    [
+      244.0,
+      848.0,
+      334.0,
+      864.0
+    ],
+    [
+      580.0,
+      858.0,
+      755.0,
+      874.0
+    ],
+    [
+      580.0,
+      858.0,
+      755.0,
+      874.0
+    ],
+    [
+      580.0,
+      872.0,
+      896.0,
+      888.0
+    ],
+    [
+      580.0,
+      872.0,
+      896.0,
+      888.0
+    ],
+    [
+      551.0,
+      873.0,
+      564.0,
+      887.0
+    ],
+    [
+      551.0,
+      873.0,
+      564.0,
+      887.0
+    ],
+    [
+      580.0,
+      886.0,
+      874.0,
+      902.0
+    ],
+    [
+      103.0,
+      940.0,
+      167.0,
+      953.0
+    ],
+    [
+      736.0,
+      940.0,
+      891.0,
+      953.0
+    ]
+  ],
+  "labels": [
+    6,
+    6,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    8,
+    8,
+    1,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    1,
+    7,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    5,
+    5
+  ],
+  "words": [
+    "2005 Model Commercial Driver’s License Manual",
+    "2005 Model Commercial Driver’s License Manual ",
+    "When the road crosses over more than one set of ",
+    "tracks, a sign below the crossbuck indicates the ",
+    "number of tracks. See Figure 10.7. ",
+    "Flashing Red Light Signals.",
+    "At many highway-",
+    "rail grade crossings, the crossbuck sign has ",
+    "flashing red lights and bells. When the lights begin ",
+    "to flash, stop! A train is approaching. You are ",
+    "required to yield the right-of-way to the train. If ",
+    "there is more than one track, make sure all tracks ",
+    "are clear before crossing. See Figure 10.8. ",
+    "Gates.",
+    "Many railroad-highway crossings have ",
+    "gates with flashing red lights and bells. Stop when ",
+    "the lights begin to flash and before the gate lowers ",
+    "across the road lane. Remain stopped until the ",
+    "gates go up and the lights have stopped flashing.",
+    "Proceed when it is safe. If the gate stays down ",
+    "after the train passes, do not drive around the ",
+    "gate. Instead, call your dispatcher. See Figure ",
+    "10.8.",
+    "10.4.3",
+    "– Recommended Procedures ",
+    "Figure 10.8 ",
+    "Each state has laws and regulations governing ",
+    "A school bus is one of the safest vehicles on the ",
+    "how school buses must operate at railroad-",
+    "highway. However, a school bus does not have the ",
+    "highway crossings. It is important for you to ",
+    "slightest edge when involved in a crash with a ",
+    "understand and obey these state laws and ",
+    "train. Because of a train’s size and weight it cannot ",
+    "regulations. In general, school buses must stop at ",
+    "stop quickly. An emergency escape route does not ",
+    "all crossings, and ensure it is safe before ",
+    "exist for a train. You can prevent school bus/train ",
+    "proceeding across the tracks. The specific ",
+    "crashes by following these recommended ",
+    "procedures required in each state vary. ",
+    "procedures. ",
+    "Approaching the Crossing: ",
+    "Approaching the Crossing: ",
+    "•",
+    "Slow down, including shifting to a lower ",
+    "Slow down, including shifting to a lower ",
+    "¾ ",
+    "¾ ",
+    "gear in a manual transmission bus, and test ",
+    "your brakes. ",
+    "your brakes. ",
+    "Activate hazard lights approximately 200 ",
+    "Activate hazard lights approximately 200 ",
+    "¾ ",
+    "¾ ",
+    "feet before the crossing. Make sure your ",
+    "intentions are known. ",
+    "intentions are known. ",
+    "Scan your surroundings and check for ",
+    "Scan your surroundings and check for ",
+    "¾ ",
+    "¾ ",
+    "traffic behind you.",
+    "traffic behind you.",
+    "Stay to the right of the roadway if possible. ",
+    "Stay to the right of the roadway if possible. ",
+    "Stay to the right of the roadway if possible. ",
+    "¾ ",
+    "¾ ",
+    "¾ ",
+    "Choose an escape route in the event of a ",
+    "Choose an escape route in the event of a ",
+    "¾ ",
+    "¾ ",
+    "brake failure or problems behind you. ",
+    "At the Crossing: ",
+    "At the Crossing: ",
+    "•",
+    "Stop no closer than 15 feet and no farther ",
+    "Stop no closer than 15 feet and no farther ",
+    "¾ ",
+    "¾ ",
+    "than 50 feet from the nearest rail, where ",
+    "you have the best view of the tracks. ",
+    "you have the best view of the tracks. ",
+    "Place the transmission in Park, or if there is ",
+    "Place the transmission in Park, or if there is ",
+    "¾ ",
+    "¾ ",
+    "no Park shift point, in Neutral and press ",
+    "down on the service brake or set the ",
+    "parking brakes. ",
+    "parking brakes. ",
+    "Turn off all radios and noisy equipment, and ",
+    "Turn off all radios and noisy equipment, and ",
+    "¾ ",
+    "¾ ",
+    "Figure 10.7 ",
+    "Figure 10.7 ",
+    "silence the passengers. ",
+    "silence the passengers. ",
+    "Open the service door and driver’s window. ",
+    "Open the service door and driver’s window. ",
+    "¾ ",
+    "¾ ",
+    "Look and listen for an approaching train. ",
+    "Page 10-8 ",
+    "Section 10 – School Buses"
+  ],
+  "split": "train"
+}

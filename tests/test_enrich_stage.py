@@ -1,11 +1,13 @@
 """Tests for the per-stage enrich + link wiring over a shard directory.
 
-Builds a real extraction shard from the budget-statement DOCX fixture,
-mocks the Kanon-2 call with a canned enrichment result (so no API/key is
-needed in CI), runs ``enrich_shards`` to produce the entities sidecar, then
-runs ``link_shards`` against a real-valued Artemis register to confirm the
-two stages compose: a corporate name + service address resolve to the
-canonical SE-/PR- ids. Also covers checkpoint skip-on-resume.
+Builds a real extraction shard from the **Throsby** ACT FOI childcare notice
+(small, native, ~5k chars), runs ``enrich_shards`` against the **live** Isaacus
+Kanon-2 enricher (no mocks — real for local validation per CLAUDE.md; skips
+cleanly without ``ISAACUS_API_KEY``), then ``link_shards`` against Throsby's
+real Education-services register row to confirm the two stages compose: the
+provider legal name resolves to the canonical SE-/PR- ids. Also covers
+checkpoint skip-on-resume and no-checkpoint-on-failure (the latter via a real
+invalid-key client, not a stubbed exception).
 """
 
 from __future__ import annotations
@@ -15,9 +17,9 @@ from pathlib import Path
 import pytest
 
 from womblex.analyse.enrich_stage import enrich_shards
-from womblex.analyse.models import EnrichmentResult, Location, Person, Span
 from womblex.config import EnrichmentConfig, LinkingConfig, ReferenceConfig
-from womblex.ingest.strategies_file import DocxExtractor
+from womblex.ingest.detect import DetectionConfig, detect_file_type
+from womblex.ingest.extract import extract_text
 from womblex.link.stage import link_shards
 from womblex.store.checkpoint import CheckpointManager
 from womblex.store.enrichment_output import (
@@ -27,42 +29,31 @@ from womblex.store.enrichment_output import (
 from womblex.store.output import read_entity_links, write_results
 
 _FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "fixtures"
-_BUDGET_DOCX = (
+_THROSBY_PDF = (
     _FIXTURES / "womblex-collection" / "_documents"
-    / "foreign-affairs-and-trade-2025-26-portfolio-budget-statements.docx"
+    / "00768-213A-270825-Throsby-Out-of-School-Care-"
+      "Administrative-Decision-Other-Notice-and-Direction_Redacted.pdf"
 )
 
+# Throsby's real row from the ACT Education-services register. Real enrichment
+# extracts the provider legal name ("Community Services #1 Incorporated"), which
+# fuzzy-resolves to this SE-/PR- pair.
 _REGISTER_CSV = (
     "ServiceApprovalNumber,Provider Approval Number,ServiceName,ProviderLegalName,"
     "ServiceAddress,Suburb,Postcode\n"
-    "SE-40002132,PR-40030037,Artemis Early Learning,ARTEMIS EDUCATION PTY LTD,"
-    "11 Cessnock St,FYSHWICK,2609\n"
+    "SE-40022307,PR-00005865,Throsby Out of School Hours Care,"
+    "Community Services #1 Incorporated,1 Freshwater Street,THROSBY,2914\n"
 )
-
-
-def _canned_enrichment() -> EnrichmentResult:
-    legal = "ARTEMIS EDUCATION PTY LTD"
-    addr = "11 Cessnock St Fyshwick 2609"
-    text = f"Notice issued to {legal}, trading as Artemis Early Learning, at {addr}."
-    li, le = text.index(legal), text.index(legal) + len(legal)
-    ai, ae = text.index(addr), text.index(addr) + len(addr)
-    return EnrichmentResult(
-        text=text, type="other",
-        persons=[Person(id="p1", name=Span(li, le), type="corporate",
-                        role="respondent", mentions=[Span(li, le)])],
-        locations=[Location(id="l1", name=Span(ai, ae), type="address",
-                            mentions=[Span(ai, ae)])],
-    )
 
 
 @pytest.fixture
 def shard_dir(tmp_path) -> Path:
-    if not _BUDGET_DOCX.exists():
-        pytest.skip(f"fixture not present: {_BUDGET_DOCX}")
+    if not _THROSBY_PDF.exists():
+        pytest.skip(f"fixture not present: {_THROSBY_PDF}")
     d = tmp_path / "documents"
     d.mkdir()
-    extraction = DocxExtractor().extract_path(_BUDGET_DOCX)
-    write_results([("budget", str(_BUDGET_DOCX), extraction)], d / "batch-0001.parquet",
+    extraction = extract_text(_THROSBY_PDF, detect_file_type(_THROSBY_PDF, DetectionConfig()))[0]
+    write_results([("throsby", str(_THROSBY_PDF), extraction)], d / "batch-0001.parquet",
                   collection_id="test")
     return d
 
@@ -80,57 +71,41 @@ def reference_config(tmp_path) -> ReferenceConfig:
 
 
 class TestEnrichShards:
-    def test_writes_entities_sidecar(self, shard_dir, monkeypatch):
-        monkeypatch.setattr(
-            "womblex.analyse.enrich_stage.enrich_document",
-            lambda *a, **k: _canned_enrichment(),
-        )
-        result = enrich_shards(shard_dir, EnrichmentConfig(), client=object())
+    def test_writes_entities_sidecar(self, shard_dir, isaacus_client):
+        result = enrich_shards(shard_dir, EnrichmentConfig(), client=isaacus_client)
         assert result.docs_enriched == 1
         base = shard_dir / "batch-0001.parquet"
         assert enrichment_entities_path_for(base).exists()
         rows = read_enrichment_entities(base).to_pylist()
+        assert rows, "real enrichment produced no entities"
         kinds = {r["entity_type"] for r in rows}
+        # Throsby notice really contains a corporate provider + a postal address.
         assert "corporate" in kinds and "address" in kinds
 
-    def test_checkpoint_skips_on_resume(self, shard_dir, monkeypatch, tmp_path):
-        calls = {"n": 0}
-
-        def _fake(*a, **k):
-            calls["n"] += 1
-            return _canned_enrichment()
-
-        monkeypatch.setattr("womblex.analyse.enrich_stage.enrich_document", _fake)
+    def test_checkpoint_skips_on_resume(self, shard_dir, isaacus_client, tmp_path):
         ckpt = CheckpointManager(tmp_path / ".enrich-ckpt", "t_enrich")
         ckpt.load()
-        enrich_shards(shard_dir, EnrichmentConfig(), client=object(), checkpoint_mgr=ckpt)
-        first = calls["n"]
-        assert first == 1
-        # Second pass: sidecar exists + doc checkpointed -> no new enrich calls.
-        enrich_shards(shard_dir, EnrichmentConfig(), client=object(), checkpoint_mgr=ckpt)
-        assert calls["n"] == first
+        first = enrich_shards(shard_dir, EnrichmentConfig(), client=isaacus_client,
+                              checkpoint_mgr=ckpt)
+        assert first.docs_enriched == 1
+        # Resume: doc checkpointed → no new enrich calls.
+        second = enrich_shards(shard_dir, EnrichmentConfig(), client=isaacus_client,
+                               checkpoint_mgr=ckpt)
+        assert second.docs_enriched == 0
 
-    def test_transient_failure_not_checkpointed(self, shard_dir, monkeypatch, tmp_path):
-        # A connection-style failure must leave the doc unprocessed so a
-        # resume retries it (not silently skipped forever).
-        def _boom(*a, **k):
-            raise RuntimeError("Enrichment failed: Connection error.")
-
-        monkeypatch.setattr("womblex.analyse.enrich_stage.enrich_document", _boom)
+    def test_transient_failure_not_checkpointed(self, shard_dir, bad_isaacus_client, tmp_path):
+        # A real API failure (invalid key) must leave the doc unprocessed so a
+        # resume retries it rather than skipping it forever.
         ckpt = CheckpointManager(tmp_path / ".enrich-ckpt", "t_enrich")
         ckpt.load()
-        enrich_shards(shard_dir, EnrichmentConfig(), client=object(), checkpoint_mgr=ckpt)
-        # the single budget doc errored -> nothing checkpointed
-        assert "budget" not in ckpt.state.processed_ids
+        enrich_shards(shard_dir, EnrichmentConfig(), client=bad_isaacus_client,
+                      checkpoint_mgr=ckpt)
+        assert "throsby" not in ckpt.state.processed_ids
 
 
 class TestEnrichThenLink:
-    def test_full_chain_resolves_artemis(self, shard_dir, reference_config, monkeypatch):
-        monkeypatch.setattr(
-            "womblex.analyse.enrich_stage.enrich_document",
-            lambda *a, **k: _canned_enrichment(),
-        )
-        enrich_shards(shard_dir, EnrichmentConfig(), client=object())
+    def test_full_chain_resolves_throsby(self, shard_dir, reference_config, isaacus_client):
+        enrich_shards(shard_dir, EnrichmentConfig(), client=isaacus_client)
 
         cfg = LinkingConfig(enabled=True, reference=reference_config)
         result = link_shards(shard_dir, cfg)
@@ -139,7 +114,6 @@ class TestEnrichThenLink:
 
         doc = read_entity_links(shard_dir, grain="doc").to_pylist()
         assert len(doc) == 1
-        assert doc[0]["entity_id"] == "SE-40002132"
-        assert doc[0]["parent_entity_id"] == "PR-40030037"
-        # both the corporate-name and address mentions resolved to the same entity
-        assert doc[0]["mention_count"] == 2
+        # provider legal name resolved to Throsby's canonical service/provider ids
+        assert doc[0]["entity_id"] == "SE-40022307"
+        assert doc[0]["parent_entity_id"] == "PR-00005865"

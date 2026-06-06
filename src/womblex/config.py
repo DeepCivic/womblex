@@ -8,7 +8,7 @@ from typing import Any
 
 import yaml
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 
@@ -371,6 +371,13 @@ class NormaliseConfig(BaseModel):
     Each toggle maps to a pure transform in :mod:`womblex.process.normalise`.
     """
 
+    unicode_hygiene: bool = Field(
+        default=True,
+        description="Fold unicode whitespace (NBSP, en/em spaces, ideographic "
+                    "space, U+2028/9 separators) to ASCII space/newline and strip "
+                    "zero-width marks, BOM and stray control chars. Smart quotes "
+                    "and em/en dashes are preserved.",
+    )
     collapse_whitespace: bool = Field(
         default=True,
         description="Collapse inline space/tab runs to one and strip per-line "
@@ -386,6 +393,44 @@ class NormaliseConfig(BaseModel):
         description="Literal {find: replace} fixes for known letterhead / font-map "
                     "typos. Empty by default — corpus-driven, never hardcoded in core.",
     )
+
+
+class QualityConfig(BaseModel):
+    """Chunk-quality annotation op (``womblex quality``).
+
+    Reads ``*.chunks.parquet`` and writes a ``*.chunk_quality.parquet`` sidecar
+    (joined on ``source_hash``/``chunk_index``) with ML-readiness flags and
+    cross-batch duplicate cluster ids. Annotation only — never mutates chunks.
+    """
+
+    enabled: bool = Field(default=True, description="Run the quality stage.")
+    short_chars: int = Field(
+        default=50, ge=1,
+        description="char_len below this marks `is_short` (footer/page-number noise).",
+    )
+    boilerplate_patterns: list[str] = Field(
+        default_factory=list,
+        description="Regexes flagging boilerplate (letterhead footer, scope text). "
+                    "Empty by default — corpus-driven, never hardcoded in core.",
+    )
+    dedup: bool = Field(default=True, description="Compute exact_dup_id / near_dup_id.")
+    minhash_permutations: int = Field(default=64, ge=8)
+    minhash_bands: int = Field(
+        default=4, ge=1,
+        description="LSH bands; with N permutations the near-dup Jaccard threshold "
+                    "is ~ (1/bands)**(bands/N). 4 bands / 64 perms ≈ 0.92.",
+    )
+    shingle_words: int = Field(default=5, ge=1, description="Word-shingle size for MinHash.")
+
+    @model_validator(mode="after")
+    def _bands_divide_permutations(self) -> "QualityConfig":
+        if self.minhash_permutations % self.minhash_bands != 0:
+            raise ValueError(
+                f"minhash_bands ({self.minhash_bands}) must divide "
+                f"minhash_permutations ({self.minhash_permutations}); otherwise "
+                "trailing permutations are silently unused."
+            )
+        return self
 
 
 class EnrichmentConfig(BaseModel):
@@ -551,6 +596,7 @@ class WomblexConfig(BaseModel):
     redaction: RedactionConfig = RedactionConfig()
     chunking: ChunkingConfig = ChunkingConfig()
     normalise: NormaliseConfig = NormaliseConfig()
+    quality: QualityConfig = QualityConfig()
     enrichment: EnrichmentConfig = EnrichmentConfig()
     embedding: EmbeddingConfig = EmbeddingConfig()
     linking: LinkingConfig = LinkingConfig()

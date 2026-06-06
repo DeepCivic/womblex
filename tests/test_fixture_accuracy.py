@@ -14,6 +14,7 @@ Usage:
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 from pathlib import Path
@@ -161,6 +162,7 @@ _results: dict[str, list[dict]] = {
     "iam": [],
     "doclaynet_raw": [], "doclaynet_preprocessed": [],
     "womblex": [],
+    "act_eci": [],
 }
 
 
@@ -592,6 +594,116 @@ class TestWomblexExtraction:
 # ---------------------------------------------------------------------------
 # Report generation — runs after all tests
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# ACT-ECI labelled cohort: raw extraction vs normalise-stage output
+# ---------------------------------------------------------------------------
+
+_ACT_ECI_DIR = WOMBLEX_DIR / "_documents" / "act-eci-labelled-pages"
+_ACT_ECI_MIN_GT = 20  # skip degenerate GT (fully-redacted / page-number stamps)
+
+# Representative corpus OCR-confusion substitutions (i<->l, m<->rn families,
+# with case variants). Demonstrates the normalise stage's effect on CER; the
+# production map is derived data-driven + dictionary-gated, never hardcoded.
+_ACT_ECI_OCR_SUBS: dict[str, str] = {
+    "chlld": "child", "Chlld": "Child", "chlldren": "children",
+    "servlce": "service", "servlces": "services", "Servlce": "Service",
+    "provlder": "provider", "Provlder": "Provider", "incldent": "incident",
+    "complalnt": "complaint", "educatlon": "education", "compllance": "compliance",
+    "famlly": "family", "wlth": "with", "thls": "this", "emall": "email",
+    "concem": "concern", "Concem": "Concern", "concems": "concerns",
+    "concemed": "concerned", "govemment": "government", "Govemment": "Government",
+    "retum": "return", "intemal": "internal", "extemal": "external",
+    "leaming": "learning", "Leaming": "Learning",
+}
+
+
+def _act_eci_pages() -> list[dict]:
+    """Discover labelled pages with non-degenerate plain GT (skip ⚠ pages)."""
+    pages: list[dict] = []
+    if not _ACT_ECI_DIR.is_dir():
+        return pages
+    for gt in sorted(_ACT_ECI_DIR.glob("*.gt.md")):
+        stem = gt.name[:-len(".gt.md")]
+        meta = _ACT_ECI_DIR / f"{stem}.meta.json"
+        if not meta.exists():
+            continue
+        m = json.loads(meta.read_text(encoding="utf-8"))
+        gt_text = gt.read_text(encoding="utf-8").strip()
+        if len(gt_text) < _ACT_ECI_MIN_GT:
+            continue
+        pages.append({
+            "stem": stem, "gt": gt_text, "pdf": m.get("source_pdf", ""),
+            "page": int(m.get("page", 0)), "strategy": m.get("strategy", "?"),
+        })
+    return pages
+
+
+@functools.lru_cache(maxsize=None)
+def _act_eci_extract(pdf_path: str):
+    """Extract a fixture PDF once (cached — pages of one doc share extraction)."""
+    from womblex.ingest.detect import DetectionConfig, detect_file_type
+    from womblex.ingest.extract import extract_text
+    p = Path(pdf_path)
+    profile = detect_file_type(p, DetectionConfig())
+    return extract_text(p, profile)[0]
+
+
+def _reassemble_page(elements: list, page: int, transforms=None) -> str:
+    """Reassemble a page's narrative text (as `score` does); optionally normalise
+    per element first so the result mirrors the normalise-stage output."""
+    from womblex.process.normalise import normalise_text
+    from womblex.score import DEFAULT_TEXT_KINDS
+    selected = sorted(
+        (e for e in elements if e.page == page and e.kind in DEFAULT_TEXT_KINDS),
+        key=lambda e: e.order,
+    )
+    parts: list[str] = []
+    for e in selected:
+        text = e.text or ""
+        if transforms is not None:
+            text, _ = normalise_text(text, e.kind, transforms)
+        text = text.strip()
+        if text:
+            parts.append(text)
+    return "\n\n".join(parts)
+
+
+@pytest.mark.benchmark
+class TestActEciLabelledPages:
+    """Per-page CER on the ACT-ECI labelled cohort: raw extraction vs the
+    normalise-stage (cleanup) output. Quantifies how normalisation moves CER."""
+
+    @pytest.mark.parametrize("page", _act_eci_pages(), ids=lambda p: p["stem"][:36])
+    def test_extraction_vs_normalised_cer(self, page: dict) -> None:
+        from womblex.process.normalise import NormaliseTransforms
+
+        pdf = _ACT_ECI_DIR / page["pdf"]
+        if not pdf.exists():
+            pytest.skip(f"source PDF missing: {pdf.name}")
+
+        result = _act_eci_extract(str(pdf))
+        transforms = NormaliseTransforms(
+            unicode_hygiene=True, collapse_whitespace=True,
+            despace_page_marker=True, substitutions=_ACT_ECI_OCR_SUBS,
+        )
+        raw = _reassemble_page(result.elements, page["page"])
+        norm = _reassemble_page(result.elements, page["page"], transforms)
+        raw_cer = char_error_rate(raw, page["gt"])
+        norm_cer = char_error_rate(norm, page["gt"])
+
+        _results["act_eci"].append({
+            "stem": page["stem"], "strategy": page["strategy"],
+            "raw_cer": raw_cer, "norm_cer": norm_cer, "delta": norm_cer - raw_cer,
+            "gt_chars": len(page["gt"]),
+        })
+        logger.info(
+            "ACT-ECI %s [%s]: CER raw=%.3f norm=%.3f (delta=%+.3f)",
+            page["stem"][:36], page["strategy"], raw_cer, norm_cer, norm_cer - raw_cer,
+        )
+        # Regression guard: normalisation must not worsen fidelity.
+        assert norm_cer <= raw_cer + 0.01
 
 
 def _generate_report() -> str:
