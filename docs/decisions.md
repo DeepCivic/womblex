@@ -181,6 +181,19 @@ classification decisions:
     (chunking still consumes raw `elements`). Same write-first / consume-later
     shape the PII stage used (`pii_spans` then `clean_text`); wiring chunking to
     prefer normalised text behind a flag is the next step.
+
+  **Scope — fidelity-neutral, not OCR-error correction (measured 2026-06).** The
+  normalise op cleans *formatting* (whitespace, footer glyphs, known typos); it
+  is **not** an OCR-error corrector and does not move CER/WER. Two reasons,
+  both measured: (1) `cer()`/`wer()` already collapse whitespace internally, so
+  the dominant transform is invisible to those metrics (Throsby ΔCER = +0.0000);
+  (2) real OCR errors are *non-systematic* — across 18 labelled production pages
+  the only recurring char confusion is `c`↔`C`; the rest are one-off,
+  context-dependent misreads that no substitution rule can target. Rule-based
+  OCR correction is therefore a **dead end** — do not re-attempt. OCR-error work
+  belongs at the *engine/resolution* level (see the OCR-quality plan: recognition
+  input resolution, preprocessing gate, confidence-gated VLM escalation), not in
+  a post-extraction text rewrite.
 - **Inline-per-span source redactions (#C).** Page-prefix `<REDACTED>` is in
   place; inline-per-span placement needs bbox-to-text character mapping (raster
   path now has per-word bboxes; native path needs a text-to-bbox map).
