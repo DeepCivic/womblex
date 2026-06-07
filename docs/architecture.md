@@ -410,7 +410,7 @@ YAML usage:
 
 ```yaml
 chunking:
-  tokenizer: "word"   # offline counter ('word'/'char') or local tokeniser path; no HuggingFace (kanon-2 is API-only)
+  tokenizer: "isaacus/kanon-2-tokenizer"
   chunk_size: 480
   semantic: true
   semantic_min_split_weight: 0.7

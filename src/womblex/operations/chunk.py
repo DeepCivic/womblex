@@ -9,6 +9,7 @@ from womblex.config import WomblexConfig
 from womblex.operations.models import DocumentResult
 from womblex.process.chunker import build_chunk_input, chunk_batch, create_chunker
 from womblex.redact.stage import annotate_chunks
+from womblex.utils.availability import isaacus_available
 
 if TYPE_CHECKING:
     from womblex.ingest.extract import ExtractionResult
@@ -29,6 +30,14 @@ def run_chunking(
     report exists on the extraction.
     """
     if not config.chunking.enabled:
+        return results
+
+    if not isaacus_available():
+        logger.warning(
+            "run_chunking: Isaacus API not available (needs the isaacus SDK + "
+            "ISAACUS_API_KEY) — skipping chunking. The chunk-size tokeniser is "
+            "the Kanon-2 tokeniser, obtainable only via the API."
+        )
         return results
 
     chunker = create_chunker(

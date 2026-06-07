@@ -40,8 +40,7 @@ observed behaviour to establish a baseline for future evaluation.
 ## Womblex Collection — Chunking Results
 
 Chunked with a word-count tokeniser at 200-word chunk size (test configuration).
-Production uses a built-in offline token counter (`word`/`char`) or a locally
-vendored tokeniser — never HuggingFace, since kanon-2 is API-only.
+Production uses a HuggingFace tokeniser (e.g. `isaacus/kanon-2-tokenizer`) at 480 tokens.
 
 | Fixture | ExtractionResults | Elements / Cells | Total Chars | Chunks | Avg Chunk (chars) |
 |---------|-------------------|------------------|-------------|--------|-------------------|

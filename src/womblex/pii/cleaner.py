@@ -22,7 +22,6 @@ import logging
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -175,10 +174,8 @@ class PIICleaner:
     def _load_model(self) -> SentenceTransformer:
         """Load Sentence Transformers model on first use.
 
-        Loads a pre-downloaded copy resolved under ``models/`` (or
-        ``WOMBLEX_MODELS_DIR``).  Womblex runs offline and never downloads
-        from HuggingFace, so a missing local model is a hard error rather
-        than a silent network fetch.
+        Prefers a pre-downloaded copy under ``models/`` to avoid runtime
+        network access.  Falls back to the HuggingFace hub identifier.
         """
         if self._model is None:
             try:
@@ -192,13 +189,6 @@ class PIICleaner:
             from womblex.utils.models import resolve_local_model_path
 
             model_path = resolve_local_model_path(self._model_name)
-            if not Path(str(model_path)).exists():
-                raise FileNotFoundError(
-                    f"PII context model {self._model_name!r} is not available "
-                    f"locally ({model_path}). Womblex runs offline and does not "
-                    "download from HuggingFace; vendor it under models/ or set "
-                    "WOMBLEX_MODELS_DIR."
-                )
             logger.info("Loading PII context model: %s", model_path)
             self._model = SentenceTransformer(str(model_path))
             self._ref_embeddings = self._model.encode(

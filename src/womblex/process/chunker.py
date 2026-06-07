@@ -41,7 +41,6 @@ import bisect
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import cast
 
 import semchunk
@@ -95,46 +94,6 @@ class ChunkInput:
 # Chunker factory
 # ---------------------------------------------------------------------------
 
-# Named offline token counters. The chunker counts tokens only to *size*
-# chunks; the production embedder (kanon-2) is API-only and its tokeniser is
-# not downloadable, so chunk sizing uses a local, network-free counter rather
-# than a HuggingFace tokeniser. "word" counts whitespace-delimited tokens;
-# "char" counts characters.
-TOKEN_COUNTERS: dict[str, Callable[[str], int]] = {
-    "word": lambda text: len(text.split()),
-    "char": len,
-}
-
-
-def _resolve_token_counter(
-    tokenizer: str | Callable[[str], int],
-) -> str | Callable[[str], int]:
-    """Resolve a configured tokeniser to something semchunk can use offline.
-
-    - a callable is returned unchanged;
-    - a built-in counter name (see :data:`TOKEN_COUNTERS`) maps to its callable;
-    - any other string is treated as a *local* tokeniser directory and resolved
-      via :func:`resolve_local_model_path`; if it does not resolve to an on-disk
-      path a ``ValueError`` is raised rather than letting semchunk fall back to
-      a network HuggingFace fetch — Womblex runs fully offline.
-    """
-    if callable(tokenizer):
-        return tokenizer
-    if tokenizer in TOKEN_COUNTERS:
-        return TOKEN_COUNTERS[tokenizer]
-
-    from womblex.utils.models import resolve_local_model_path
-
-    resolved = resolve_local_model_path(tokenizer)
-    if isinstance(resolved, Path) or Path(resolved).exists():
-        return str(resolved)
-    raise ValueError(
-        f"Tokeniser {tokenizer!r} is neither a built-in counter "
-        f"({', '.join(sorted(TOKEN_COUNTERS))}) nor a local tokeniser directory. "
-        "Womblex does not fetch tokenisers from HuggingFace; vendor it under "
-        "models/ or use a built-in counter."
-    )
-
 
 def create_chunker(
     tokenizer: str | Callable[[str], int],
@@ -147,11 +106,8 @@ def create_chunker(
     """Construct a semchunk chunker.
 
     Args:
-        tokenizer: a built-in offline token-counter name (``"word"`` or
-            ``"char"``), a path to a locally vendored tokeniser directory, or
-            a callable token counter ``(str) -> int``. Womblex never fetches a
-            tokeniser from HuggingFace (kanon-2 is API-only); a bare name that
-            does not resolve to a local path raises ``ValueError``.
+        tokenizer: HuggingFace tokeniser identifier string, or a callable
+            token counter ``(str) -> int``.
         chunk_size: Maximum tokens per chunk. ``None`` passes through to
             semchunk, which derives the size from the tokeniser's
             ``model_max_length`` (only valid for a real tokeniser, not a
@@ -162,7 +118,7 @@ def create_chunker(
         max_token_chars: Max chars per token estimate for optimisation.
     """
     return semchunk.chunkerify(
-        _resolve_token_counter(tokenizer),
+        tokenizer,
         chunk_size=chunk_size,
         memoize=memoize,
         cache_maxsize=cache_maxsize,

@@ -44,6 +44,7 @@ from womblex.store.output import (
     read_table_cells,
     write_chunks,
 )
+from womblex.utils.availability import isaacus_available
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +83,15 @@ def chunk_shards(
     bases = _batch_bases(shard_dir)
     if not bases:
         logger.warning("chunk_shards: no batches found in %s", shard_dir)
+        return ChunkStageResult(0, 0, 0)
+
+    if not isaacus_available():
+        logger.warning(
+            "chunk_shards: Isaacus API not available (needs the isaacus SDK + "
+            "ISAACUS_API_KEY) — skipping chunking for %s. The chunk-size "
+            "tokeniser is the Kanon-2 tokeniser, obtainable only via the API; "
+            "no *.chunks.parquet written.", shard_dir,
+        )
         return ChunkStageResult(0, 0, 0)
 
     chunker = create_chunker(

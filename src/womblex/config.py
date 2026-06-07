@@ -299,25 +299,22 @@ class ChunkingConfig(BaseModel):
     ``chunk_tables`` (element-stream → markdown projection).
 
     Default divergences from semchunk upstream, each with a corpus
-    reason: ``tokenizer="word"`` is a built-in offline token counter —
-    the production embedder (kanon-2) is API-only and its tokeniser is not
-    downloadable, so Womblex never fetches a tokeniser from HuggingFace
-    (see :func:`womblex.process.chunker.create_chunker`); ``chunk_size=480``
-    sizes chunks in the configured counter's units (upstream defaults to
-    ``None`` = auto-derive from a real tokeniser's ``model_max_length``,
-    which this field still accepts as a pass-through); ``processes=1`` keeps
-    single-thread Chromebook portability.
+    reason: ``tokenizer="isaacus/kanon-2-tokenizer"`` matches the
+    analysis side; ``chunk_size=480`` is the Kanon-2 window (upstream
+    defaults to ``None`` = auto-derive from the tokeniser's
+    ``model_max_length``, which this field still accepts as a
+    pass-through); ``processes=1`` keeps single-thread Chromebook
+    portability.
+
+    The Kanon-2 tokeniser is obtainable only through the Isaacus API, so
+    the chunk stage is gated on it: when the Isaacus SDK + ``ISAACUS_API_KEY``
+    aren't available the stage logs and skips (see
+    ``womblex.utils.availability.isaacus_available``). Chunking therefore
+    runs alongside the rest of the Isaacus-dependent analysis, not offline.
     """
 
 
-    tokenizer: str = Field(
-        default="word",
-        description=(
-            "Built-in offline token counter ('word' or 'char'), or a path to a "
-            "locally vendored tokeniser directory. Womblex never fetches "
-            "tokenisers from HuggingFace; kanon-2 is API-only."
-        ),
-    )
+    tokenizer: str = "isaacus/kanon-2-tokenizer"
 
     chunk_size: int | None = Field(
         default=480,

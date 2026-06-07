@@ -44,6 +44,15 @@ from womblex.process.chunker import (
     create_chunker,
     table_to_markdown,
 )
+from womblex.utils.availability import isaacus_available
+
+# run_chunking sizes chunks with the Kanon-2 tokeniser (Isaacus API only) and
+# skips when the API isn't configured; tests asserting it produced chunks
+# require Isaacus. Direct create_chunker(callable) tests are unaffected.
+requires_isaacus = pytest.mark.skipif(
+    not isaacus_available(),
+    reason="run_chunking needs the Kanon-2 tokeniser (isaacus SDK + ISAACUS_API_KEY)",
+)
 
 
 def _chunk_doc(full_text, chunker, tables=None):
@@ -397,6 +406,7 @@ class TestCSVChunkingIntegration:
         assert len(lines) >= 2 + min(len(tbl.rows), 10)
 
 
+    @requires_isaacus
     def test_csv_pipeline_with_chunking(self, tmp_path: Path) -> None:
 
         """Full run: CSV → detect → extract → chunk."""
@@ -532,6 +542,7 @@ class TestRedactedPDFChunkingIntegration:
             assert chunk.end_char >= chunk.start_char
 
 
+    @requires_isaacus
     def test_redacted_pdf_pipeline_produces_chunks(self, tmp_path: Path) -> None:
 
         """Full pipeline run on a redacted PDF produces chunks."""
@@ -584,6 +595,7 @@ class TestRedactedPDFChunkingIntegration:
             assert len(chunk.text.strip()) > 0
 
 
+    @requires_isaacus
     def test_redacted_pdf_chunk_tables_flag(self, tmp_path: Path) -> None:
 
         """When chunk_tables=False, only narrative chunks are produced."""

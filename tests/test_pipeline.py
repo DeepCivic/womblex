@@ -18,7 +18,16 @@ from womblex.cli.pipeline import cmd_chunk, cmd_run
 from womblex.config import ChunkingConfig, DatasetConfig, PathsConfig, WomblexConfig, load_config
 
 from womblex.operations import BatchResult, DocumentResult, run_extraction, run_chunking
+from womblex.utils.availability import isaacus_available
 
+
+# Chunking sizes chunks with the Kanon-2 tokeniser, available only via the
+# Isaacus API; the chunk stage skips when it isn't configured (no SDK / key).
+# Tests that assert chunks were produced therefore require Isaacus.
+requires_isaacus = pytest.mark.skipif(
+    not isaacus_available(),
+    reason="chunking needs the Kanon-2 tokeniser (isaacus SDK + ISAACUS_API_KEY)",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -167,6 +176,7 @@ class TestComposition:
     """Operations compose correctly when called in sequence."""
 
 
+    @requires_isaacus
     def test_extract_then_chunk(self) -> None:
 
         if not _CSV_FILE.exists():
@@ -404,6 +414,7 @@ def _seed_run_with_extraction(tmp_path: Path, run_id: str = "i2-test") -> Path:
 
 
 class TestCmdChunkShards:
+    @requires_isaacus
     def test_writes_chunks_sidecar_for_each_batch(self, tmp_path: Path) -> None:
         if not _CSV_FILE.exists():
             pytest.skip("CSV fixture not available")
@@ -424,6 +435,7 @@ class TestCmdChunkShards:
         for f in chunks_files:
             assert f.stat().st_size > 0
 
+    @requires_isaacus
     def test_chunks_join_back_to_elements_via_source_hash(self, tmp_path: Path) -> None:
         if not _CSV_FILE.exists():
             pytest.skip("CSV fixture not available")
@@ -461,6 +473,7 @@ class TestCmdChunkShards:
         )
         assert cmd_chunk(args) == 1
 
+    @requires_isaacus
     def test_no_resume_clears_checkpoint(self, tmp_path: Path) -> None:
         if not _CSV_FILE.exists():
             pytest.skip("CSV fixture not available")
@@ -483,6 +496,7 @@ class TestCmdChunkShards:
         )
         assert cmd_chunk(args2) == 0
 
+    @requires_isaacus
     def test_resume_recovers_corrupt_chunks_shard(self, tmp_path: Path) -> None:
         """Wire-up test: a corrupt *.chunks.parquet on resume drops the affected
         docs from the chunk checkpoint and re-writes a clean sidecar."""
