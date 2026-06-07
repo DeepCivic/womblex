@@ -261,6 +261,32 @@ processing:
     return cfg
 
 
+def test_run_rejects_post_enrichment_pii(tmp_path: Path) -> None:
+    """`womblex run` has no enrichment stage, so post_enrichment PII can never
+    satisfy its precondition — cmd_run rejects it up front (returns 1) instead
+    of raising PreconditionError mid-run."""
+    input_root = tmp_path / "in"
+    input_root.mkdir()
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(
+        f"""\
+dataset:
+  name: t
+paths:
+  input_root: {input_root}
+  output_root: {tmp_path / "out"}
+  checkpoint_dir: {tmp_path / "ckpt"}
+pii:
+  enabled: true
+  pipeline_point: post_enrichment
+"""
+    )
+    args = argparse.Namespace(
+        config=cfg, resume=False, limit=None, skip=0, batch_size=None, run_id="t",
+    )
+    assert cmd_run(args) == 1
+
+
 class TestCmdRunRunIdLayout:
     """End-to-end CLI-level verification of the I1 run_id + retention plumbing."""
 

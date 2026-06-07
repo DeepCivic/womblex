@@ -51,9 +51,22 @@ def cmd_run(args: argparse.Namespace) -> int:
     from womblex.store.output import ShardVerificationError, verify_shard_persistence
     from womblex.store.retention import apply_retention, generate_run_id, most_recent_run
     from womblex.store.shard_audit import reconcile_checkpoint_with_shards
+    from womblex.utils.availability import isaacus_available
 
     config = load_config(args.config)
     logger.info("Loaded config: %s", config.dataset.name)
+
+    # Pre-flight composition check: `run` has no enrichment stage, so graph-driven
+    # (post_enrichment) PII can never satisfy its precondition here and would raise
+    # PreconditionError mid-run. Fail fast with guidance instead of crashing later.
+    if config.pii.enabled and config.pii.pipeline_point == "post_enrichment":
+        logger.error(
+            "pii.pipeline_point='post_enrichment' is unsupported in `womblex run` "
+            "(this path has no enrichment stage). Use the per-stage flow "
+            "(`womblex enrich --shards` then `womblex pii --shards`), or set "
+            "pii.pipeline_point to 'post_chunk' / 'post_extraction'."
+        )
+        return 1
 
     input_root = config.paths.input_root
     if not input_root.exists():
@@ -143,17 +156,24 @@ def cmd_run(args: argparse.Namespace) -> int:
     total_failed = 0
     start_time = time.time()
 
+    chunk_will_skip = config.chunking.enabled and not isaacus_available()
     stages = ["extraction"]
     if config.redaction.enabled:
         stages.append(f"redaction({config.redaction.mode})")
     if config.pii.enabled:
         stages.append("pii")
     if config.chunking.enabled:
-        stages.append("chunking")
+        stages.append("chunking(skipped: no Isaacus)" if chunk_will_skip else "chunking")
     logger.info(
         "Starting pipeline: %d documents, batch_size=%d, stages=[%s]",
         total_files, batch_size, ", ".join(stages),
     )
+    if chunk_will_skip:
+        logger.warning(
+            "chunking.enabled but the Isaacus API is unavailable (needs the isaacus "
+            "SDK + ISAACUS_API_KEY) — the chunk stage will be skipped for every batch; "
+            "no chunks will be written."
+        )
 
     for batch_idx, i in enumerate(range(0, total_files, batch_size), start=1):
         batch_num = batch_idx + batch_num_offset
