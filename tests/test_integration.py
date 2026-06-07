@@ -500,6 +500,14 @@ class TestRedactedPDFChunkingIntegration:
 
     """End-to-end: redacted PDF detection → extraction → chunking."""
 
+    # The Throsby redacted PDF is a womblex-benchmark fixture, not part of the
+    # vendored minimal set (the womblex-collection dir exists via _spreadsheets,
+    # so the module-level guard passes — this needs the specific file). Skip
+    # cleanly on a bare checkout. See THIRD_PARTY_DATA.md.
+    pytestmark = pytest.mark.skipif(
+        not _REDACTED_PDF.exists(),
+        reason="redacted PDF fixture (Throsby) needs womblex-benchmark (see THIRD_PARTY_DATA.md)",
+    )
 
     def test_redacted_pdf_extracts_text(self) -> None:
 
