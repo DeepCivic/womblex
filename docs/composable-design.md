@@ -4,7 +4,7 @@ This document describes Womblex's architecture for composable operations.
 
 ## Completed Refactor
 
-`pipeline.py` has been renamed to `operations.py`. The orchestrator (`run_pipeline`, `STAGE_REGISTRY`, `_resolve_stages`, `process_file`, `process_batch`) and `config.stages` have been removed. Operations are independent functions that callers compose directly.
+`pipeline.py` has been split into the `operations/` package (one module per operation, re-exported from `operations/__init__.py`); the thin CLI command layer lives in `cli/pipeline.py`. The orchestrator (`run_pipeline`, `STAGE_REGISTRY`, `_resolve_stages`, `process_file`, `process_batch`) and `config.stages` have been removed. Operations are independent functions (`run_extraction`, `run_chunking`, …) that callers compose directly.
 
 ## Target Model
 

@@ -39,13 +39,10 @@ cd Womblex
 uv sync --extra dev
 ```
 
-Test fixtures live in a separate repository. Clone them for running benchmarks:
-
-```bash
-git clone https://github.com/DeepCivic/womblex-development-fixtures.git fixtures
-```
-
-See [THIRD_PARTY_DATA.md](THIRD_PARTY_DATA.md) for details.
+A minimal test-fixture set is vendored in this repo (`fixtures/fixtures/`), so a
+fresh clone runs most of the suite with no extra setup. The full benchmark set
+lives in a separate repository — see [THIRD_PARTY_DATA.md](THIRD_PARTY_DATA.md)
+for how to obtain it.
 
 ### System Dependencies
 
@@ -326,16 +323,17 @@ womblex/
 ## Development
 
 ```bash
-# Install with dev dependencies
+# Install with dev dependencies (pytest, ruff, mypy live in the extras)
 uv sync --all-extras
 
-# Fetch test fixtures (separate repo, see THIRD_PARTY_DATA.md)
-git clone https://github.com/DeepCivic/womblex-development-fixtures.git fixtures
+# A minimal fixture set is vendored; the full benchmark set is optional —
+# see THIRD_PARTY_DATA.md.
 
-# Run unit tests
+# Run the suite (no addopts filter — runs everything; heavy tests skip on a
+# bare checkout). Use -m "not slow and not benchmark" for the fast subset.
 uv run python -m pytest
 
-# Run OCR and accuracy benchmarks (requires fixture images — takes ~3 min)
+# Run OCR and accuracy benchmarks (need the full fixtures; minutes-long)
 uv run python -m pytest tests/test_fixture_accuracy.py tests/test_womblex_collection_accuracy.py -v
 
 # Type checking

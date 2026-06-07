@@ -237,7 +237,7 @@ class TestFixtureDetection:
 # ---------------------------------------------------------------------------
 
 
-# Page size used for OCR extraction tests — small enough that EasyOCR runs
+# Page size used for OCR extraction tests — small enough that OCR (rapidocr) runs
 # in a few seconds on CPU.  At 200 DPI a 150×150 pt page renders to ~417×417 px.
 _OCR_TEST_PAGE_W = 150
 _OCR_TEST_PAGE_H = 150
@@ -248,7 +248,7 @@ class TestFixtureExtraction:
     """extract_text() should complete without raising for one representative
     fixture from each dataset.
 
-    Pages are created at a small size (150×150 pt) so that EasyOCR processes
+    Pages are created at a small size (150×150 pt) so that OCR (rapidocr) processes
     ~417×417 pixel rasters rather than full A4 bitmaps.  This keeps wall time
     to a few seconds per test on CPU-only machines.  Detection tests already
     cover all 15 fixtures at full A4 resolution.

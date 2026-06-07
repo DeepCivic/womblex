@@ -199,31 +199,34 @@ for page in doc:
 - Full pipeline on small document set
 - Isaacus calls (mocked for CI, real for local validation)
 ### Test fixtures
-All test data comes from real documents in `fixtures/` (FUNSD, IAM-line, DocLayNet, womblex-collection). No synthetic data — see `fixtures/fixtures/README.md` for sample descriptions and ground-truth formats. Real PDF fixtures will be added from the larger document collection as extraction quality improves.
+All test data comes from real documents resolved at `fixtures/fixtures/` (FUNSD, IAM-line, DocLayNet, womblex-collection). A minimal, redistributable subset is vendored in this repo so a bare clone runs most of the suite; the full benchmark set lives in a separate repository. See [THIRD_PARTY_DATA.md](THIRD_PARTY_DATA.md) for the vendored-vs-full split, the resolution path, and per-dataset attribution. Real PDF fixtures are added from the larger document collection as extraction quality improves.
 
-Fixtures live in a separate repository ([womblex-development-fixtures](https://github.com/DeepCivic/womblex-development-fixtures)). Clone them into the project root:
-```bash
-git clone https://github.com/DeepCivic/womblex-development-fixtures.git fixtures
-```
+The minimal set is vendored under `fixtures/fixtures/`, so a bare checkout runs most of the suite with no extra setup. The full benchmark set is optional and obtained per [THIRD_PARTY_DATA.md](THIRD_PARTY_DATA.md) (tests resolve fixtures at `fixtures/fixtures/`).
 ### Running tests
-Always use `uv run python -m pytest` (not bare `pytest`) to ensure the venv is active:
+`pytest` lives in the `[dev]` extra, not the base deps, so install it first, then
+run via `uv run` (not bare `pytest`) to keep the project venv active:
 ```bash
-# Ensure fixtures are present (see THIRD_PARTY_DATA.md)
-# git clone https://github.com/DeepCivic/womblex-development-fixtures.git fixtures
+uv sync --extra dev            # one-time: installs pytest, ruff, mypy
 
-# Fast unit tests (slow tests excluded by default via pyproject.toml addopts)
+# Default run. NOTE: there is NO addopts filter — this runs the WHOLE suite,
+# including the OCR-fixture (`slow`) and accuracy/`benchmark` tests. On a bare
+# checkout most heavy tests skip (see below); with the full fixtures and an
+# Isaacus key they run, and the suite is slow (tens of minutes).
 uv run python -m pytest tests/ -v
 
-# Include slow tests (OCR-dependent tests skip cleanly if rapidocr-onnxruntime is not installed)
-uv run python -m pytest tests/ -v -m ""
+# Fast subset — skip the OCR-fixture and benchmark tests:
+uv run python -m pytest tests/ -v -m "not slow and not benchmark"
 
-# Full accuracy benchmarks (~3 min, regenerates docs/accuracy/*.md)
+# Full accuracy benchmarks (regenerates docs/accuracy/*.md; needs the full
+# fixtures set; minutes-long):
 uv run python -m pytest tests/test_fixture_accuracy.py tests/test_womblex_collection_accuracy.py -v
 ```
 
 ### Expected conditional skips
-A full run reports ~17 skips on a typical dev box — all gated on an optional
-dependency, an external service, or an absent fixture, none on broken code.
+The skip count is environment-dependent (which optional deps, services, and
+fixtures are present) — none are on broken code. On a bare checkout (no Isaacus
+key, no Ollama, vendored fixtures only) a full `pytest tests/` reports ~50 skips;
+on a dev box with the full fixtures, an Isaacus key, and Ollama, far fewer skip.
 Run with `-rs` to see live reasons. The recurring ones:
 
 - **~15 — DeepSeek-OCR VLM benchmark** (`test_bench_ocr_accuracy.py`): needs a
@@ -231,8 +234,12 @@ Run with `-rs` to see live reasons. The recurring ones:
   deepseek-ocr model pulled. Skips cleanly when absent.
 - **geospatial** (`test_geospatial.py`): needs the optional `geopandas` /
   `pyogrio` extras.
-- **isaacus** (`test_enrich.py` / `test_graph.py` / `test_query.py`): module-level
-  `importorskip("isaacus")` — skip without the `[isaacus]` extra.
+- **isaacus SDK** (`test_enrich.py` / `test_graph.py` / `test_query.py` /
+  `test_enrichment_output.py`): module-level `importorskip("isaacus")` — skip
+  without the `[isaacus]` extra.
+- **isaacus API key** (`test_embed_stage.py` / `test_enrich_stage.py`): the
+  `isaacus_client` fixture skips without `ISAACUS_API_KEY` (these make real
+  Kanon-2 calls when a key is present).
 - **rapidocr** OCR paths (`test_fixtures.py`): `importorskip("rapidocr_onnxruntime")`.
 - **fixture-gated** tests (`test_text_extractor.py`, `test_extract.py`,
   `test_spreadsheet_print.py`, the accuracy suites): skip when the specific
