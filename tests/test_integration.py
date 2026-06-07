@@ -14,7 +14,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 
-import pyarrow.parquet as pq
 
 import pytest
 

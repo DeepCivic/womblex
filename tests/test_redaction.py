@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import argparse
 import json
 
 import fitz  # type: ignore[import-untyped]
@@ -18,6 +19,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
+from womblex.cli.redact import cmd_annotate_redactions, cmd_redact
 from womblex.config import RedactionConfig
 from womblex.ingest.elements import Element, ElementKind
 from womblex.redact import RedactionDetector, RedactionInfo
@@ -770,11 +772,6 @@ class TestRedactionBatch:
 # ---------------------------------------------------------------------------
 # CLI surface: `womblex redact --shards` (I3) + `annotate-redactions` alias
 # ---------------------------------------------------------------------------
-
-
-import argparse
-
-from womblex.cli.redact import cmd_annotate_redactions, cmd_redact
 
 
 def _seed_redaction_shards(tmp_path: Path) -> tuple[Path, Path]:

@@ -14,12 +14,6 @@ import pytest
 
 from womblex.utils.tabular_metrics import (
 
-    DataIntegrityResult,
-
-    KeyColumnResult,
-
-    StructuralFidelityResult,
-
     data_integrity,
 
     key_column_preservation,

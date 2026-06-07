@@ -12,12 +12,8 @@ from womblex.ingest.detect import DocumentProfile, DocumentType
 from womblex.ingest.extract import (
     ExtractionMetadata,
     ExtractionResult,
-    FormField,
-    ImageData,
     PageResult,
     Position,
-    TableData,
-    TextBlock,
     _classify_native_block,
     _count_blocks_in_bbox,
     _find_native_tables,

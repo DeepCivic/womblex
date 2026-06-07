@@ -9,7 +9,6 @@ import pyarrow.parquet as pq
 import pytest
 
 from womblex.score import (
-    LabelEntry,
     build_manifest_index,
     format_report_markdown,
     load_labels,

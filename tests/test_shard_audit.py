@@ -15,10 +15,13 @@ import pytest
 
 from womblex.ingest.strategies_file import DocxExtractor
 from womblex.store.checkpoint import CheckpointManager
+from womblex.store.enrichment_output import ENRICHMENT_ENTITIES_SUFFIX
 from womblex.store.output import (
     MANIFEST_SCHEMA,
     _shard_paths,
+    chunks_path_for,
     read_manifest,
+    write_chunks,
     write_results,
 )
 from womblex.store.shard_audit import (
@@ -27,7 +30,11 @@ from womblex.store.shard_audit import (
     format_audit_diff,
     format_audit_text,
     reconcile_checkpoint_with_shards,
+    reconcile_chunk_checkpoint_with_shards,
+    reconcile_stage_checkpoint_with_shards,
+    scan_chunks_directory,
     scan_shard_directory,
+    scan_sidecar_directory,
 )
 
 _FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "fixtures"
@@ -312,13 +319,6 @@ class TestFormatters:
 # ---------------------------------------------------------------------------
 
 
-from womblex.store.output import CHUNKS_SUFFIX, chunks_path_for, write_chunks
-from womblex.store.shard_audit import (
-    reconcile_chunk_checkpoint_with_shards,
-    scan_chunks_directory,
-)
-
-
 def _seed_chunks_for_batch(batch_base: Path, source_hash: str) -> Path:
     rows = [{
         "source_hash": source_hash,
@@ -423,13 +423,6 @@ class TestChunksReconcile:
 # ---------------------------------------------------------------------------
 # Generic stage reconcile (shared by enrich / embed / link)
 # ---------------------------------------------------------------------------
-
-
-from womblex.store.enrichment_output import ENRICHMENT_ENTITIES_SUFFIX
-from womblex.store.shard_audit import (
-    reconcile_stage_checkpoint_with_shards,
-    scan_sidecar_directory,
-)
 
 
 class TestGenericStageReconcile:

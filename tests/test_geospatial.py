@@ -15,7 +15,6 @@ pytest.importorskip("pyogrio")
 pytest.importorskip("geopandas")
 
 from womblex.ingest.geospatial import (
-    GeospatialIngestResult,
     discover_shapefiles,
     ingest_geospatial_directory,
     ingest_shapefile,

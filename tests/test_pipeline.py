@@ -5,15 +5,19 @@ Tests use real fixtures. No synthetic data.
 """
 
 
+import argparse
+import shutil
 from pathlib import Path
 
 
 import pytest
 
 
-from womblex.config import WomblexConfig, load_config
+from womblex.cli.pipeline import cmd_chunk, cmd_run
 
-from womblex.operations import BatchResult, DocumentResult, run_extraction, run_chunking, write_batch_parquet
+from womblex.config import ChunkingConfig, DatasetConfig, PathsConfig, WomblexConfig, load_config
+
+from womblex.operations import BatchResult, DocumentResult, run_extraction, run_chunking
 
 
 
@@ -152,9 +156,6 @@ class TestBatchResult:
 # ---------------------------------------------------------------------------
 
 
-from womblex.config import ChunkingConfig, DatasetConfig, PathsConfig
-
-
 FIXTURE_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "fixtures" / "womblex-collection"
 
 _CSV_FILE = FIXTURE_DIR / "_spreadsheets" / "Approved-providers-au-export_20260204.csv"
@@ -215,12 +216,6 @@ class TestComposition:
 # ---------------------------------------------------------------------------
 # cmd_run — CLI-level run_id + retention layout
 # ---------------------------------------------------------------------------
-
-
-import argparse
-import shutil
-
-from womblex.cli.pipeline import cmd_run
 
 
 def _write_minimal_config(tmp_path: Path, input_root: Path) -> Path:
@@ -393,9 +388,6 @@ class TestCmdRunRunIdLayout:
 # ---------------------------------------------------------------------------
 
 
-from womblex.cli.pipeline import cmd_chunk
-
-
 def _seed_run_with_extraction(tmp_path: Path, run_id: str = "i2-test") -> Path:
     """Run cmd_run against a small fixture and return the shard dir."""
     input_root = tmp_path / "in"
@@ -497,7 +489,6 @@ class TestCmdChunkShards:
         if not _CSV_FILE.exists():
             pytest.skip("CSV fixture not available")
 
-        from womblex.store.output import chunks_path_for
 
         shard_dir = _seed_run_with_extraction(tmp_path, run_id="i2-recover")
         ckpt_dir = tmp_path / "ckpt-chunk"

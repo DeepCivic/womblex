@@ -11,11 +11,10 @@ enrichment sidecar.
 
 from __future__ import annotations
 
-from pathlib import Path
 
 import pytest
 
-from womblex.config import LinkingConfig, ReferenceConfig
+from womblex.config import ReferenceConfig
 from womblex.link.matcher import Candidate, resolve
 from womblex.link.normalise import normalise_address, normalise_name
 from womblex.link.reference import load_reference

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from womblex.utils.metrics import cer, wer
+from womblex.utils.metrics import cer, cer_spatial, reading_order_accuracy, spatial_sort_text, wer
 
 
 class TestCER:
@@ -91,9 +91,6 @@ class TestWER:
         assert cer(ref, hyp) != pytest.approx(wer(ref, hyp))
 
 
-from womblex.utils.metrics import cer_spatial, spatial_sort_text
-
-
 class TestSpatialSortText:
     def test_empty_list(self) -> None:
         assert spatial_sort_text([]) == ""
@@ -152,9 +149,6 @@ class TestCERSpatial:
 
     def test_empty_inputs(self) -> None:
         assert cer_spatial([], []) == 0.0
-
-
-from womblex.utils.metrics import reading_order_accuracy
 
 
 class TestReadingOrderAccuracy:
