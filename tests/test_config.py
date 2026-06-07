@@ -69,7 +69,7 @@ class TestChunkingConfigDefaults:
 
         cfg = ChunkingConfig()
 
-        assert cfg.tokenizer == "isaacus/kanon-2-tokenizer"
+        assert cfg.tokenizer == "word"
 
 
     def test_default_chunk_size(self) -> None:
@@ -246,7 +246,7 @@ class TestLoadConfig:
 
             assert cfg.dataset.name == "my_dataset"
 
-            assert cfg.chunking.tokenizer == "isaacus/kanon-2-tokenizer"
+            assert cfg.chunking.tokenizer == "word"
 
 
 

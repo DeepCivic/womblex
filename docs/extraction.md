@@ -104,9 +104,11 @@ source-hash plumbing, and `<REDACTED>` cross-boundary repair. Every
 re-exposes a semchunk feature under a different name — semchunk's
 parameters *are* the feature surface. Three defaults diverge from
 upstream, each for a measured corpus reason:
-`tokenizer="isaacus/kanon-2-tokenizer"` (matches the analysis side),
-`chunk_size=480` (Kanon-2 window — upstream defaults to `None`, which
-auto-derives the size from the tokeniser's `model_max_length`; that
+`tokenizer="word"` (a built-in offline token counter — kanon-2 is
+API-only and not downloadable, so Womblex never fetches a tokeniser from
+HuggingFace), `chunk_size=480` (units of the configured counter — upstream
+defaults to `None`, which auto-derives the size from a real tokeniser's
+`model_max_length`; that
 path still passes through if `chunk_size` is set to `null`),
 `processes=1` (Chromebook portability). `offsets=True` is pinned in the
 adapter because Womblex always needs char offsets for page mapping.

@@ -299,16 +299,25 @@ class ChunkingConfig(BaseModel):
     ``chunk_tables`` (element-stream → markdown projection).
 
     Default divergences from semchunk upstream, each with a corpus
-    reason: ``tokenizer="isaacus/kanon-2-tokenizer"`` matches the
-    analysis side; ``chunk_size=480`` is the Kanon-2 window (upstream
-    defaults to ``None`` = auto-derive from the tokeniser's
-    ``model_max_length``, which this field still accepts as a
-    pass-through); ``processes=1`` keeps single-thread Chromebook
-    portability.
+    reason: ``tokenizer="word"`` is a built-in offline token counter —
+    the production embedder (kanon-2) is API-only and its tokeniser is not
+    downloadable, so Womblex never fetches a tokeniser from HuggingFace
+    (see :func:`womblex.process.chunker.create_chunker`); ``chunk_size=480``
+    sizes chunks in the configured counter's units (upstream defaults to
+    ``None`` = auto-derive from a real tokeniser's ``model_max_length``,
+    which this field still accepts as a pass-through); ``processes=1`` keeps
+    single-thread Chromebook portability.
     """
 
 
-    tokenizer: str = "isaacus/kanon-2-tokenizer"
+    tokenizer: str = Field(
+        default="word",
+        description=(
+            "Built-in offline token counter ('word' or 'char'), or a path to a "
+            "locally vendored tokeniser directory. Womblex never fetches "
+            "tokenisers from HuggingFace; kanon-2 is API-only."
+        ),
+    )
 
     chunk_size: int | None = Field(
         default=480,

@@ -208,7 +208,7 @@ extraction:
     dpi: 200
 
 chunking:
-  tokenizer: "isaacus/kanon-2-tokenizer"
+  tokenizer: "word"   # offline counter ('word'/'char') or a local tokeniser path; no HuggingFace (kanon-2 is API-only)
   chunk_size: 480
   enabled: true
   chunk_tables: true

@@ -49,8 +49,8 @@ redaction:
   use_layout_filter: true
 
 chunking:
-  tokenizer: "isaacus/kanon-2-tokenizer"
-  chunk_size: 480       # Max tokens/chunk. null = auto-derive from tokeniser's model_max_length.
+  tokenizer: "word"     # built-in offline counter ('word'/'char') or a local tokeniser path; no HuggingFace (kanon-2 is API-only)
+  chunk_size: 480       # Max units/chunk in the configured counter (e.g. words). null = auto-derive (real tokeniser only).
   enabled: true
   chunk_tables: true
   # overlap: null          # Token overlap between chunks. <1 = proportion, >=1 = absolute tokens.

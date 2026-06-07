@@ -120,7 +120,7 @@ redaction:
   dpi: 150
 
 chunking:
-  tokenizer: "isaacus/kanon-2-tokenizer"
+  tokenizer: "word"
   chunk_size: 480
   enabled: false
   chunk_tables: true
