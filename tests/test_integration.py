@@ -487,6 +487,10 @@ class TestCSVChunkingIntegration:
 
 
 
+@pytest.mark.skipif(
+    not _REDACTED_PDF.exists(),
+    reason="Throsby 213A redacted PDF not vendored (research-use only; lives in the external womblex-development-fixtures repo — see THIRD_PARTY_DATA.md)",
+)
 class TestRedactedPDFChunkingIntegration:
 
     """End-to-end: redacted PDF detection → extraction → chunking."""
