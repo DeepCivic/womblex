@@ -2,7 +2,7 @@
 
 Test fixtures used by this project are maintained in a separate repository:
 
-- **Repository:** [DeepCivic/womblex-development-fixtures](https://github.com/DeepCivic/womblex-development-fixtures)
+- **Repository:** [DeepCivic/womblex-benchmark](https://github.com/DeepCivic/womblex-benchmark) (formerly `womblex-development-fixtures`)
 - **Contents:** FUNSD form images, IAM handwriting lines, DocLayNet layout pages, womblex-collection documents
 - **Purpose:** Real-document test data for extraction accuracy benchmarks
 
@@ -19,7 +19,7 @@ labelled pages, etc.) lives in the external repo and is used by the accuracy
 benchmarks:
 
 ```bash
-git clone https://github.com/DeepCivic/womblex-development-fixtures.git fixtures
+git clone https://github.com/DeepCivic/womblex-benchmark.git fixtures
 ```
 
 **ACT FOI 213A documents** (Throsby notice, the returned-documents Index, the

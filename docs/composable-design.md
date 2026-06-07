@@ -4,7 +4,7 @@ This document describes Womblex's architecture for composable operations.
 
 ## Completed Refactor
 
-`pipeline.py` has been renamed to `operations.py`. The orchestrator (`run_pipeline`, `STAGE_REGISTRY`, `_resolve_stages`, `process_file`, `process_batch`) and `config.stages` have been removed. Operations are independent functions that callers compose directly.
+`pipeline.py` has been split into the `operations/` package (one module per operation, re-exported from `operations/__init__.py`); the thin CLI command layer lives in `cli/pipeline.py`. The orchestrator (`run_pipeline`, `STAGE_REGISTRY`, `_resolve_stages`, `process_file`, `process_batch`) and `config.stages` have been removed. Operations are independent functions (`run_extraction`, `run_chunking`, …) that callers compose directly.
 
 ## Target Model
 
@@ -76,6 +76,16 @@ ingest_gnaf → chunk — G-NAF output is Parquet, not ExtractionResult
 ingest_geo → pii_clean — GeoParquet is geometry, not text
 extract(csv, 10k rows) → .txt — multi-unit, must use .parquet
 ```
+
+Enforcement is **pragmatic**, not blanket: a config-disabled stage passes
+through (`enabled=False` → return unchanged) and a per-document data gap in an
+otherwise-valid batch is skipped — neither is an error. Genuine *misuse* raises
+`operations.PreconditionError`. The enforced case today is graph-driven PII
+without a graph: `run_pii_cleaning(pipeline_point="post_enrichment")` when no
+completed document carries enrichment (the `pii_clean(advanced) without
+build_graph` row above). A partially-enriched batch is tolerated — un-enriched
+docs fall back per-document. The remaining rows are structural impossibilities
+(wrong output type) that fail naturally at the type boundary.
 
 ## CLI
 

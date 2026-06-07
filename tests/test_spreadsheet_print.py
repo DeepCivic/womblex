@@ -1,6 +1,6 @@
 """Integration tests for the spreadsheet-print extractor.
 
-Uses real ACT FOI manifest fixtures from the womblex-development-fixtures repo
+Uses real ACT FOI manifest fixtures from the womblex-benchmark repo
 (`fixtures/fixtures/womblex-collection/_documents/`). Tests skip gracefully if
 those fixtures are unavailable.
 """

@@ -5,16 +5,29 @@ Tests use real fixtures. No synthetic data.
 """
 
 
+import argparse
+import shutil
 from pathlib import Path
 
 
 import pytest
 
 
-from womblex.config import WomblexConfig, load_config
+from womblex.cli.pipeline import cmd_chunk, cmd_run
 
-from womblex.operations import BatchResult, DocumentResult, run_extraction, run_chunking, write_batch_parquet
+from womblex.config import ChunkingConfig, DatasetConfig, PathsConfig, WomblexConfig, load_config
 
+from womblex.operations import BatchResult, DocumentResult, run_extraction, run_chunking
+from womblex.utils.availability import isaacus_available
+
+
+# Chunking sizes chunks with the Kanon-2 tokeniser, available only via the
+# Isaacus API; the chunk stage skips when it isn't configured (no SDK / key).
+# Tests that assert chunks were produced therefore require Isaacus.
+requires_isaacus = pytest.mark.skipif(
+    not isaacus_available(),
+    reason="chunking needs the Kanon-2 tokeniser (isaacus SDK + ISAACUS_API_KEY)",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -152,9 +165,6 @@ class TestBatchResult:
 # ---------------------------------------------------------------------------
 
 
-from womblex.config import ChunkingConfig, DatasetConfig, PathsConfig
-
-
 FIXTURE_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "fixtures" / "womblex-collection"
 
 _CSV_FILE = FIXTURE_DIR / "_spreadsheets" / "Approved-providers-au-export_20260204.csv"
@@ -166,6 +176,7 @@ class TestComposition:
     """Operations compose correctly when called in sequence."""
 
 
+    @requires_isaacus
     def test_extract_then_chunk(self) -> None:
 
         if not _CSV_FILE.exists():
@@ -217,12 +228,6 @@ class TestComposition:
 # ---------------------------------------------------------------------------
 
 
-import argparse
-import shutil
-
-from womblex.cli.pipeline import cmd_run
-
-
 def _write_minimal_config(tmp_path: Path, input_root: Path) -> Path:
     cfg = tmp_path / "cfg.yaml"
     cfg.write_text(
@@ -254,6 +259,32 @@ processing:
 """
     )
     return cfg
+
+
+def test_run_rejects_post_enrichment_pii(tmp_path: Path) -> None:
+    """`womblex run` has no enrichment stage, so post_enrichment PII can never
+    satisfy its precondition — cmd_run rejects it up front (returns 1) instead
+    of raising PreconditionError mid-run."""
+    input_root = tmp_path / "in"
+    input_root.mkdir()
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(
+        f"""\
+dataset:
+  name: t
+paths:
+  input_root: {input_root}
+  output_root: {tmp_path / "out"}
+  checkpoint_dir: {tmp_path / "ckpt"}
+pii:
+  enabled: true
+  pipeline_point: post_enrichment
+"""
+    )
+    args = argparse.Namespace(
+        config=cfg, resume=False, limit=None, skip=0, batch_size=None, run_id="t",
+    )
+    assert cmd_run(args) == 1
 
 
 class TestCmdRunRunIdLayout:
@@ -393,9 +424,6 @@ class TestCmdRunRunIdLayout:
 # ---------------------------------------------------------------------------
 
 
-from womblex.cli.pipeline import cmd_chunk
-
-
 def _seed_run_with_extraction(tmp_path: Path, run_id: str = "i2-test") -> Path:
     """Run cmd_run against a small fixture and return the shard dir."""
     input_root = tmp_path / "in"
@@ -412,6 +440,7 @@ def _seed_run_with_extraction(tmp_path: Path, run_id: str = "i2-test") -> Path:
 
 
 class TestCmdChunkShards:
+    @requires_isaacus
     def test_writes_chunks_sidecar_for_each_batch(self, tmp_path: Path) -> None:
         if not _CSV_FILE.exists():
             pytest.skip("CSV fixture not available")
@@ -432,6 +461,7 @@ class TestCmdChunkShards:
         for f in chunks_files:
             assert f.stat().st_size > 0
 
+    @requires_isaacus
     def test_chunks_join_back_to_elements_via_source_hash(self, tmp_path: Path) -> None:
         if not _CSV_FILE.exists():
             pytest.skip("CSV fixture not available")
@@ -469,6 +499,7 @@ class TestCmdChunkShards:
         )
         assert cmd_chunk(args) == 1
 
+    @requires_isaacus
     def test_no_resume_clears_checkpoint(self, tmp_path: Path) -> None:
         if not _CSV_FILE.exists():
             pytest.skip("CSV fixture not available")
@@ -491,13 +522,13 @@ class TestCmdChunkShards:
         )
         assert cmd_chunk(args2) == 0
 
+    @requires_isaacus
     def test_resume_recovers_corrupt_chunks_shard(self, tmp_path: Path) -> None:
         """Wire-up test: a corrupt *.chunks.parquet on resume drops the affected
         docs from the chunk checkpoint and re-writes a clean sidecar."""
         if not _CSV_FILE.exists():
             pytest.skip("CSV fixture not available")
 
-        from womblex.store.output import chunks_path_for
 
         shard_dir = _seed_run_with_extraction(tmp_path, run_id="i2-recover")
         ckpt_dir = tmp_path / "ckpt-chunk"

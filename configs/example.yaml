@@ -49,6 +49,8 @@ redaction:
   use_layout_filter: true
 
 chunking:
+  # The Kanon-2 tokeniser is API-only, so the chunk stage is skipped unless the
+  # Isaacus SDK + ISAACUS_API_KEY are available (it runs with the analysis side).
   tokenizer: "isaacus/kanon-2-tokenizer"
   chunk_size: 480       # Max tokens/chunk. null = auto-derive from tokeniser's model_max_length.
   enabled: true

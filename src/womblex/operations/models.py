@@ -11,6 +11,17 @@ from womblex.ingest.extract import ExtractionResult
 from womblex.process.chunker import TextChunk
 
 
+class PreconditionError(Exception):
+    """An operation was invoked without its upstream precondition met.
+
+    Operations compose independently but have documented data preconditions
+    (see docs/composable-design.md). This flags genuine misuse — e.g.
+    graph-driven (``post_enrichment``) PII requested before any enrichment ran
+    — as distinct from a config-disabled stage (which passes through) or a
+    per-document data gap in an otherwise-valid batch (which is skipped).
+    """
+
+
 @dataclass
 class DocumentResult:
     """Processing result for a single document."""

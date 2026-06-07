@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 
 from womblex.config import WomblexConfig
-from womblex.operations.models import DocumentResult
+from womblex.operations.models import DocumentResult, PreconditionError
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +33,20 @@ def run_pii_cleaning(
     """
     if not config.pii.enabled:
         return results
+
+    # Precondition (pragmatic): graph-driven PII needs an enrichment graph. If
+    # post_enrichment is requested but no completed document carries enrichment,
+    # the enrichment stage never ran — a composition error, not a per-doc gap.
+    # A partially-enriched batch (some docs have enrichment) is tolerated: the
+    # per-doc path below handles the un-enriched ones.
+    if config.pii.pipeline_point == "post_enrichment" and not any(
+        dr.enrichment for dr in results if dr.status == "completed"
+    ):
+        raise PreconditionError(
+            "run_pii_cleaning(pipeline_point='post_enrichment') needs the enrichment "
+            "graph, but no completed document carries enrichment — run run_enrichment "
+            "first, or use pipeline_point='post_chunk'/'post_extraction'."
+        )
 
     try:
         from womblex.pii.cleaner import PIICleaner

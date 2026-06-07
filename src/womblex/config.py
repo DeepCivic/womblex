@@ -305,6 +305,12 @@ class ChunkingConfig(BaseModel):
     ``model_max_length``, which this field still accepts as a
     pass-through); ``processes=1`` keeps single-thread Chromebook
     portability.
+
+    The Kanon-2 tokeniser is obtainable only through the Isaacus API, so
+    the chunk stage is gated on it: when the Isaacus SDK + ``ISAACUS_API_KEY``
+    aren't available the stage logs and skips (see
+    ``womblex.utils.availability.isaacus_available``). Chunking therefore
+    runs alongside the rest of the Isaacus-dependent analysis, not offline.
     """
 
 

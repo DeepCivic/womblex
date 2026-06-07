@@ -20,6 +20,12 @@ from tests.accuracy_reports import generate_pii_report, generate_redaction_repor
 
 logger = logging.getLogger(__name__)
 
+# Tier 2 (womblex-benchmark). Runs the real extraction / PII / redaction
+# pipeline over benchmark fixtures and regenerates docs/accuracy/*. Mark the
+# whole module `benchmark` so the fast tier (`-m "not slow and not benchmark"`)
+# excludes it; run explicitly via `-m benchmark` or by naming the file.
+pytestmark = pytest.mark.benchmark
+
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "fixtures"
 WOMBLEX_DIR = FIXTURES / "womblex-collection"
 THROSBY_PDF = WOMBLEX_DIR / "_documents" / (

@@ -72,7 +72,7 @@ DOCLAYNET_DIR = FIXTURES_DIR / "doclaynet"
 # fixtures repo is not cloned (e.g. CI). See THIRD_PARTY_DATA.md.
 pytestmark = pytest.mark.skipif(
     not FIXTURES_DIR.exists(),
-    reason="womblex-development-fixtures not cloned (see THIRD_PARTY_DATA.md)",
+    reason="womblex-benchmark not cloned (see THIRD_PARTY_DATA.md)",
 )
 
 # Standard page width in points — height is computed per image to preserve AR.

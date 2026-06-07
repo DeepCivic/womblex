@@ -12,7 +12,6 @@ HuggingFace tokeniser. semchunk treats it as any other token counter.
 
 from __future__ import annotations
 
-import pytest
 import semchunk
 
 from womblex.ingest.elements import BBox, Cell, Element

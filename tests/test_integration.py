@@ -14,7 +14,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 
-import pyarrow.parquet as pq
 
 import pytest
 
@@ -45,6 +44,15 @@ from womblex.process.chunker import (
     create_chunker,
     table_to_markdown,
 )
+from womblex.utils.availability import isaacus_available
+
+# run_chunking sizes chunks with the Kanon-2 tokeniser (Isaacus API only) and
+# skips when the API isn't configured; tests asserting it produced chunks
+# require Isaacus. Direct create_chunker(callable) tests are unaffected.
+requires_isaacus = pytest.mark.skipif(
+    not isaacus_available(),
+    reason="run_chunking needs the Kanon-2 tokeniser (isaacus SDK + ISAACUS_API_KEY)",
+)
 
 
 def _chunk_doc(full_text, chunker, tables=None):
@@ -70,7 +78,7 @@ _CSV_FILE = CSV_DIR / "Approved-providers-au-export_20260204.csv"
 # the fixtures repo is not cloned (e.g. CI). See THIRD_PARTY_DATA.md.
 pytestmark = pytest.mark.skipif(
     not FIXTURE_DIR.exists(),
-    reason="womblex-development-fixtures not cloned (see THIRD_PARTY_DATA.md)",
+    reason="womblex-benchmark not cloned (see THIRD_PARTY_DATA.md)",
 )
 
 _REDACTED_PDF = PDF_DIR / "00768-213A-270825-Throsby-Out-of-School-Care-Administrative-Decision-Other-Notice-and-Direction_Redacted.pdf"
@@ -85,9 +93,17 @@ def _word_token_counter(text: str) -> int:
 
 
 
+# Fast-tier page bound. Native extraction OCRs embedded image regions and
+# detects tables per page (~0.8s/page on these government PDFs), so the full
+# 406-page Auditor-General report takes minutes — a benchmark-scale input, not
+# a fast-tier unit. Its vendored `-First-30-Pages` truncation is the fast-tier
+# proxy; the full report is exercised by the benchmark accuracy suite.
+_FAST_TIER_MAX_PAGES = 60
+
+
 def _native_pdfs() -> list[Path]:
 
-    """Return PDFs detected as native types (no OCR required)."""
+    """Native-typed PDFs small enough for the fast tier (see _FAST_TIER_MAX_PAGES)."""
 
     config = DetectionConfig()
 
@@ -110,7 +126,7 @@ def _native_pdfs() -> list[Path]:
 
         profile = detect_file_type(f, config)
 
-        if profile.doc_type in native_types:
+        if profile.doc_type in native_types and profile.page_count <= _FAST_TIER_MAX_PAGES:
 
             found.append(f)
     return found
@@ -398,6 +414,7 @@ class TestCSVChunkingIntegration:
         assert len(lines) >= 2 + min(len(tbl.rows), 10)
 
 
+    @requires_isaacus
     def test_csv_pipeline_with_chunking(self, tmp_path: Path) -> None:
 
         """Full run: CSV → detect → extract → chunk."""
@@ -495,6 +512,14 @@ class TestRedactedPDFChunkingIntegration:
 
     """End-to-end: redacted PDF detection → extraction → chunking."""
 
+    # The Throsby redacted PDF is a womblex-benchmark fixture, not part of the
+    # vendored minimal set (the womblex-collection dir exists via _spreadsheets,
+    # so the module-level guard passes — this needs the specific file). Skip
+    # cleanly on a bare checkout. See THIRD_PARTY_DATA.md.
+    pytestmark = pytest.mark.skipif(
+        not _REDACTED_PDF.exists(),
+        reason="redacted PDF fixture (Throsby) needs womblex-benchmark (see THIRD_PARTY_DATA.md)",
+    )
 
     def test_redacted_pdf_extracts_text(self) -> None:
 
@@ -537,6 +562,7 @@ class TestRedactedPDFChunkingIntegration:
             assert chunk.end_char >= chunk.start_char
 
 
+    @requires_isaacus
     def test_redacted_pdf_pipeline_produces_chunks(self, tmp_path: Path) -> None:
 
         """Full pipeline run on a redacted PDF produces chunks."""
@@ -589,6 +615,7 @@ class TestRedactedPDFChunkingIntegration:
             assert len(chunk.text.strip()) > 0
 
 
+    @requires_isaacus
     def test_redacted_pdf_chunk_tables_flag(self, tmp_path: Path) -> None:
 
         """When chunk_tables=False, only narrative chunks are produced."""

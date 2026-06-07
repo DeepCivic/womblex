@@ -40,8 +40,15 @@ def isaacus_client():
 @pytest.fixture(scope="session")
 def bad_isaacus_client():
     """Live client with an invalid key — induces a *real* API auth failure for
-    error-path tests (checkpoint-not-written-on-failure) without mocking."""
+    error-path tests (checkpoint-not-written-on-failure) without mocking.
+
+    These tests still reach the live API (to get a real auth rejection), so they
+    need a configured Isaacus environment. Skip without ISAACUS_API_KEY, exactly
+    like ``isaacus_client`` — otherwise, in an env with the SDK but no key/network
+    the call fails with a connection error instead of the auth error under test."""
     isaacus = pytest.importorskip("isaacus")
+    if not os.environ.get("ISAACUS_API_KEY"):
+        pytest.skip("ISAACUS_API_KEY not set — error-path tests need a live Isaacus endpoint")
     return isaacus.Isaacus(api_key="iuak_invalid_key_for_failure_path_testing")
 
 

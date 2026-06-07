@@ -24,7 +24,7 @@ Standalone ingest paths (G-NAF PSV, SHP) have their own modules under
 from womblex.operations.chunk import run_chunking
 from womblex.operations.enrich import enrich_batch, run_enrichment
 from womblex.operations.extract import run_extraction
-from womblex.operations.models import BatchResult, DocumentResult
+from womblex.operations.models import BatchResult, DocumentResult, PreconditionError
 from womblex.operations.persist import write_batch_enrichment, write_batch_parquet
 from womblex.operations.pii import run_pii_cleaning
 from womblex.operations.redact import run_redaction
@@ -32,6 +32,7 @@ from womblex.operations.redact import run_redaction
 __all__ = [
     "DocumentResult",
     "BatchResult",
+    "PreconditionError",
     "run_extraction",
     "run_redaction",
     "run_chunking",
