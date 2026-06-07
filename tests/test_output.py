@@ -2,7 +2,7 @@
 
 Exercises the writer / reader / integrity check round-trip on the
 budget-statement DOCX fixture. No synthetic data — every test relies
-on a real fixture in womblex-development-fixtures.
+on a real fixture in womblex-benchmark.
 """
 
 from __future__ import annotations

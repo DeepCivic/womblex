@@ -281,7 +281,7 @@ class TestCSVFixtureAccuracy:
     # classes in this module use synthetic frames. See THIRD_PARTY_DATA.md.
     pytestmark = pytest.mark.skipif(
         not _CSV_FILE.exists(),
-        reason="womblex-development-fixtures not cloned (see THIRD_PARTY_DATA.md)",
+        reason="womblex-benchmark not cloned (see THIRD_PARTY_DATA.md)",
     )
 
 

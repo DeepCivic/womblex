@@ -70,7 +70,7 @@ _CSV_FILE = CSV_DIR / "Approved-providers-au-export_20260204.csv"
 # the fixtures repo is not cloned (e.g. CI). See THIRD_PARTY_DATA.md.
 pytestmark = pytest.mark.skipif(
     not FIXTURE_DIR.exists(),
-    reason="womblex-development-fixtures not cloned (see THIRD_PARTY_DATA.md)",
+    reason="womblex-benchmark not cloned (see THIRD_PARTY_DATA.md)",
 )
 
 _REDACTED_PDF = PDF_DIR / "00768-213A-270825-Throsby-Out-of-School-Care-Administrative-Decision-Other-Notice-and-Direction_Redacted.pdf"
