@@ -77,6 +77,16 @@ ingest_geo → pii_clean — GeoParquet is geometry, not text
 extract(csv, 10k rows) → .txt — multi-unit, must use .parquet
 ```
 
+Enforcement is **pragmatic**, not blanket: a config-disabled stage passes
+through (`enabled=False` → return unchanged) and a per-document data gap in an
+otherwise-valid batch is skipped — neither is an error. Genuine *misuse* raises
+`operations.PreconditionError`. The enforced case today is graph-driven PII
+without a graph: `run_pii_cleaning(pipeline_point="post_enrichment")` when no
+completed document carries enrichment (the `pii_clean(advanced) without
+build_graph` row above). A partially-enriched batch is tolerated — un-enriched
+docs fall back per-document. The remaining rows are structural impossibilities
+(wrong output type) that fail naturally at the type boundary.
+
 ## CLI
 
 - `womblex run --config` calls operations directly based on enabled flags in config

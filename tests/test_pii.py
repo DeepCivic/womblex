@@ -632,5 +632,24 @@ class TestRunPIICleaning:
 
         assert len(out) == 1
 
+    def test_post_enrichment_without_enrichment_raises(self) -> None:
+
+        from womblex.operations import DocumentResult, PreconditionError, run_pii_cleaning
+
+
+        cfg = self._make_config("post_enrichment")
+
+        dr = DocumentResult(path=Path("/tmp/a.pdf"), doc_id="a", status="completed")
+
+        dr.extraction = _Extraction(pages=[_Page(0, "text")])  # type: ignore[assignment]
+
+        dr.chunks = [_Chunk("Mr. John Smith attended.")]
+
+
+        # Graph-driven PII requested but enrichment never ran → misuse, not a no-op.
+        with pytest.raises(PreconditionError, match="post_enrichment"):
+
+            run_pii_cleaning([dr], cfg)
+
     # post_enrichment pipeline routing tests are in test_pii_enrichment.py
 
