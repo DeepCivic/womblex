@@ -93,9 +93,17 @@ def _word_token_counter(text: str) -> int:
 
 
 
+# Fast-tier page bound. Native extraction OCRs embedded image regions and
+# detects tables per page (~0.8s/page on these government PDFs), so the full
+# 406-page Auditor-General report takes minutes — a benchmark-scale input, not
+# a fast-tier unit. Its vendored `-First-30-Pages` truncation is the fast-tier
+# proxy; the full report is exercised by the benchmark accuracy suite.
+_FAST_TIER_MAX_PAGES = 60
+
+
 def _native_pdfs() -> list[Path]:
 
-    """Return PDFs detected as native types (no OCR required)."""
+    """Native-typed PDFs small enough for the fast tier (see _FAST_TIER_MAX_PAGES)."""
 
     config = DetectionConfig()
 
@@ -118,7 +126,7 @@ def _native_pdfs() -> list[Path]:
 
         profile = detect_file_type(f, config)
 
-        if profile.doc_type in native_types:
+        if profile.doc_type in native_types and profile.page_count <= _FAST_TIER_MAX_PAGES:
 
             found.append(f)
     return found
