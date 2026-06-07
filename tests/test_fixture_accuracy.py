@@ -32,6 +32,15 @@ from womblex.ingest.paddle_ocr import (
 
 logger = logging.getLogger(__name__)
 
+# Tier 2 (womblex-benchmark). Every test here runs the real OCR / layout /
+# extraction pipeline over benchmark fixtures (the Auditor-General CER case
+# alone OCRs a 30-page PDF, >5 min), and the suite regenerates docs/accuracy/*.
+# Mark the whole module `benchmark` so the fast tier (`-m "not slow and not
+# benchmark"`) excludes it; run it explicitly via `-m benchmark` or by naming
+# the file (per CLAUDE.md). The per-class @pytest.mark.benchmark below are now
+# redundant but harmless.
+pytestmark = pytest.mark.benchmark
+
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "fixtures"
 FUNSD_DIR = FIXTURES / "funsd"
 IAM_DIR = FIXTURES / "iam_line"
