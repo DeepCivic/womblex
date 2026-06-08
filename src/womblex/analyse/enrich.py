@@ -261,6 +261,7 @@ def enrich_document(
     client: object,
     *,
     model: str = DEFAULT_MODEL,
+    overflow_strategy: str = "auto",
     max_retries: int = DEFAULT_MAX_RETRIES,
     retry_base_delay: float = DEFAULT_RETRY_BASE_DELAY,
 ) -> EnrichmentResult:
@@ -280,6 +281,7 @@ def enrich_document(
         RuntimeError: If enrichment fails after all retries.
     """
     return enrich_documents([text], client, model=model,
+                            overflow_strategy=overflow_strategy,
                             max_retries=max_retries,
                             retry_base_delay=retry_base_delay)[0]
 
@@ -289,6 +291,7 @@ def enrich_documents(
     client: object,
     *,
     model: str = DEFAULT_MODEL,
+    overflow_strategy: str = "auto",
     max_retries: int = DEFAULT_MAX_RETRIES,
     retry_base_delay: float = DEFAULT_RETRY_BASE_DELAY,
 ) -> list[EnrichmentResult]:
@@ -300,6 +303,9 @@ def enrich_documents(
         texts: List of full document texts.
         client: An ``isaacus.Isaacus`` client instance.
         model: Enrichment model identifier.
+        overflow_strategy: How Kanon-2 handles input beyond its context window
+            ("auto"/"chunk"/"drop_end"/"null"). "auto" chunks + stitches into one
+            prediction; returned span offsets still index the full source text.
         max_retries: Maximum retry attempts for rate-limit errors.
         retry_base_delay: Base delay in seconds for exponential backoff.
 
@@ -316,6 +322,7 @@ def enrich_documents(
             response = client.enrichments.create(  # type: ignore[attr-defined]
                 model=model,
                 texts=texts,
+                overflow_strategy=overflow_strategy,
             )
             # Convert SDK response to our models
             results: list[EnrichmentResult] = []

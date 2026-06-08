@@ -36,11 +36,15 @@ _SUFFIX = {
 }
 
 
-def load_overlay(base_path: Path, text_source: str) -> dict[tuple[str, int], str] | None:
+def load_overlay(
+    base_path: Path, text_source: str, *, warn_if_missing: bool = True,
+) -> dict[tuple[str, int], str] | None:
     """Return ``{(source_hash, elem_order): text}`` for *text_source*, or ``None``.
 
     ``None`` means "use verbatim element text": either ``text_source='elements'``
-    or the selected overlay sidecar isn't present for this batch.
+    or the selected overlay sidecar isn't present for this batch. Pass
+    ``warn_if_missing=False`` when a missing overlay is expected (e.g. spellfix
+    chaining off a normalise layer that may not have been run).
     """
     if text_source == "elements":
         return None
@@ -49,10 +53,11 @@ def load_overlay(base_path: Path, text_source: str) -> dict[tuple[str, int], str
 
     path = base_path.parent / f"{base_path.stem}{_SUFFIX[text_source]}"
     if not path.exists():
-        logger.warning(
-            "text_source=%r selected but %s missing — using verbatim element text. "
-            "Run the %s stage first.", text_source, path.name, text_source,
-        )
+        if warn_if_missing:
+            logger.warning(
+                "text_source=%r selected but %s missing — using verbatim element text. "
+                "Run the %s stage first.", text_source, path.name, text_source,
+            )
         return None
 
     table = pq.read_table(str(path), columns=["source_hash", "elem_order", "text"])

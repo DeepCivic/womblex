@@ -211,13 +211,32 @@ is opt-in and carries a proper-noun corruption risk, so it is flag-gated.
 What it does **not** catch: valid-word misreads (`com`→`corn`) — the wrong word
 is in the dictionary, so nothing fires; those still belong to the engine/
 resolution level. Implemented as `process/spellfix.py` (corrector) +
-`process/spellfix_stage.py` (driver) + `store/spellfix_output.py`. Runs at the
-**chunk** level, *before* the Isaacus-facing consumers (opposite ordering to PII
-masking, which is terminal): writes a `*.chunks_repaired.parquet` layer plus a
-`*.spellfix_corrections.parquet` audit — the raw `*.chunks.parquet` is never
-modified. **Deferred:** wiring the chunk consumers (embed / quality) to prefer
-the repaired layer behind a flag — same write-first / consume-later shape as the
-normalise and PII clean_text sidecars.
+`process/spellfix_stage.py` (driver) + `store/spellfix_output.py`.
+
+**Repair lives at the element layer, not the chunk layer — dictated by how
+Kanon-2 is designed to be used.** The enricher (`kanon-2-enricher`) ingests the
+*whole document* as one string and does its own internal chunking/segmentation
+(`overflow_strategy='auto'` stitches long docs back into a single prediction);
+its returned ILGS spans are Unicode code-point offsets into *that* source string.
+PII then maps those mention offsets onto our chunks via `chunk.start_char`. So
+the enricher input and the chunk source must be the **same string** in **one
+coordinate space**. Repairing at the chunk layer could never feed enrichment (it
+reassembles from elements, not chunks) and would split that coordinate space.
+Therefore spellfix writes an **element-text overlay** (`*.spellfix_text.parquet`,
+same shape as `*.normalised_text.parquet`) plus a `*.spellfix_corrections.parquet`
+audit; the raw `*.elements.parquet` is never modified.
+
+**Composition is a linear cleaning chain, selected by one setting.** Cleaning ops
+chain — `elements → normalised_text → spellfix_text` (spellfix overlays the
+normalise layer when present) — each a full passthrough layer; the last one
+produced is the canonical text. Consumers select it via a **single** pipeline
+setting, `processing.text_source` (`elements` | `normalised` | `spellfix`),
+resolved by `process/text_overlay.py` and applied before reassembly at *both*
+sites (`chunk_stage`, `enrich_stage`). It is deliberately one knob, not per-stage:
+divergent layers would desync the Kanon-2 mention↔chunk offset mapping. Embeddings
+and PII then inherit the repaired text for free (chunks derive from the same
+overlaid elements). A missing overlay falls back to verbatim, so stage *ordering*
+is the only requirement, not a hard dependency.
 - **Inline-per-span source redactions (#C).** Page-prefix `<REDACTED>` is in
   place; inline-per-span placement needs bbox-to-text character mapping (raster
   path now has per-word bboxes; native path needs a text-to-bbox map).

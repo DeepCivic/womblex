@@ -71,6 +71,7 @@ def chunk_shards(
     shard_dir: Path,
     chunking_config: ChunkingConfig,
     *,
+    text_source: str = "elements",
     checkpoint_mgr: CheckpointManager | None = None,
 ) -> ChunkStageResult:
     """Chunk every batch in ``shard_dir`` and write ``*.chunks.parquet`` siblings.
@@ -113,7 +114,7 @@ def chunk_shards(
             continue
 
         inputs, doc_ids_by_hash = _build_inputs_for_batch(
-            base, chunking_config.chunk_tables, chunking_config.text_source,
+            base, chunking_config.chunk_tables, text_source,
         )
 
         if inputs:

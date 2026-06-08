@@ -331,22 +331,6 @@ class ChunkingConfig(BaseModel):
 
     chunk_tables: bool = Field(default=True, description="Convert tables to markdown and chunk separately")
 
-    text_source: str = Field(
-        default="elements",
-        description="Element-text layer to chunk: 'elements' (verbatim, default), "
-                    "'normalised' (*.normalised_text.parquet) or 'spellfix' "
-                    "(*.spellfix_text.parquet). Overlay applied before reassembly so "
-                    "chunks/embeddings/PII inherit the repaired text. Missing overlay "
-                    "falls back to verbatim. See process.text_overlay.",
-    )
-
-    @field_validator("text_source")
-    @classmethod
-    def _check_text_source(cls, v: str) -> str:
-        if v not in ("elements", "normalised", "spellfix"):
-            raise ValueError(f"text_source must be elements|normalised|spellfix, got {v!r}")
-        return v
-
     overlap: int | float | None = Field(
 
         default=None,
@@ -421,11 +405,13 @@ class SpellfixConfig(BaseModel):
     """Dictionary-gated OCR character-confusion repair (``womblex spellfix``).
 
     A separate, opt-in cleaning op (distinct from ``normalise``, which is
-    fidelity-neutral formatting only). Reads ``*.chunks.parquet`` and writes a
-    repaired ``*.chunks_repaired.parquet`` layer plus a ``*.spellfix_corrections.
-    parquet`` audit trail — the raw chunks are never modified. Only out-of-
-    dictionary tokens with a single unambiguous in-dictionary candidate are
-    rewritten. See ``docs/decisions.md`` "Dictionary-gated OCR repair".
+    fidelity-neutral formatting only). Reads ``*.elements.parquet`` (chaining on
+    top of the normalise layer when present) and writes a repaired
+    ``*.spellfix_text.parquet`` element-text overlay plus a
+    ``*.spellfix_corrections.parquet`` audit trail — the raw elements are never
+    modified. Consumers opt in by setting ``processing.text_source='spellfix'``.
+    Only out-of-dictionary tokens with a single unambiguous in-dictionary
+    candidate are rewritten. See ``docs/decisions.md`` "Dictionary-gated OCR repair".
     """
 
     enabled: bool = Field(default=False, description="Run the spellfix stage.")
@@ -488,23 +474,23 @@ class EnrichmentConfig(BaseModel):
 
     enabled: bool = Field(default=False, description="Run enrichment stage")
 
-    text_source: str = Field(
-        default="elements",
-        description="Element-text layer to reassemble the narrative from: 'elements' "
-                    "(verbatim, default), 'normalised' or 'spellfix'. Use 'spellfix' so "
-                    "Kanon-2 entity extraction reads OCR-repaired text; keep it identical "
-                    "to chunking.text_source so mention offsets stay aligned with chunk "
-                    "offsets. Missing overlay falls back to verbatim.",
+    model: str = Field(default="kanon-2-enricher", description="Isaacus enrichment model")
+
+    overflow_strategy: str = Field(
+        default="auto",
+        description="How Kanon-2 handles documents exceeding its 16k-token context: "
+                    "'auto'/'chunk' chunk internally and stitch back into one prediction "
+                    "(offsets still index the full source); 'drop_end' truncates; 'null' "
+                    "errors. Pass-through to enrichments.create. Defaults to 'auto' (vs "
+                    "upstream 'null') because FOI bundles routinely exceed 16k tokens.",
     )
 
-    @field_validator("text_source")
+    @field_validator("overflow_strategy")
     @classmethod
-    def _check_text_source(cls, v: str) -> str:
-        if v not in ("elements", "normalised", "spellfix"):
-            raise ValueError(f"text_source must be elements|normalised|spellfix, got {v!r}")
+    def _check_overflow(cls, v: str) -> str:
+        if v not in ("auto", "chunk", "drop_end", "null"):
+            raise ValueError(f"overflow_strategy must be auto|chunk|drop_end|null, got {v!r}")
         return v
-
-    model: str = Field(default="kanon-2-enricher", description="Isaacus enrichment model")
 
     max_retries: int = Field(default=3, ge=0, description="Max retries for rate-limit errors")
 
@@ -569,6 +555,26 @@ class ProcessingConfig(BaseModel):
     checkpoint_every: int = Field(default=100, ge=1)
 
     retention: RetentionConfig = RetentionConfig()
+
+    text_source: str = Field(
+        default="elements",
+        description="Single pipeline-level selector for the element-text layer that "
+                    "BOTH chunking and enrichment reassemble from: 'elements' (verbatim, "
+                    "default), 'normalised' (*.normalised_text.parquet) or 'spellfix' "
+                    "(*.spellfix_text.parquet, which chains on top of normalised). It is "
+                    "deliberately one setting, not per-stage: enrichment runs on the whole "
+                    "document and PII maps Kanon-2 mention offsets onto chunks via "
+                    "chunk.start_char, so the enricher input and the chunk source must be "
+                    "the same string. A missing overlay falls back to verbatim. See "
+                    "process.text_overlay.",
+    )
+
+    @field_validator("text_source")
+    @classmethod
+    def _check_text_source(cls, v: str) -> str:
+        if v not in ("elements", "normalised", "spellfix"):
+            raise ValueError(f"text_source must be elements|normalised|spellfix, got {v!r}")
+        return v
 
 
 class ReferenceConfig(BaseModel):

@@ -94,14 +94,22 @@ def spellfix_shards(
 
 
 def _repair_batch(base_path: Path, config: SpellfixConfig) -> tuple[list[dict], list[dict], int]:
-    """Read a batch's elements; return ``(text_rows, audit_rows, n_changed)``."""
+    """Read a batch's elements; return ``(text_rows, audit_rows, n_changed)``.
+
+    Chains on top of the normalise layer: if ``*.normalised_text.parquet`` exists
+    it is overlaid onto the elements before repair, so the resulting
+    ``*.spellfix_text.parquet`` is the terminal cleaned+repaired layer.
+    """
     from womblex.process.spellfix import repair_text
+    from womblex.process.text_overlay import apply_overlay, load_overlay
 
     elements_by_hash = _load_elements(base_path)
+    normalised = load_overlay(base_path, "normalised", warn_if_missing=False)
     text_rows: list[dict] = []
     audit_rows: list[dict] = []
     n_changed = 0
     for source_hash, elements in elements_by_hash.items():
+        apply_overlay(source_hash, elements, normalised)
         for e in elements:
             if e.kind not in TEXT_KINDS or not e.text:
                 continue

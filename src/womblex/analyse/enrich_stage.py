@@ -29,6 +29,7 @@ from womblex.config import EnrichmentConfig
 from womblex.ingest.elements import Element
 from womblex.process.chunk_stage import _batch_bases
 from womblex.process.chunker import reassemble_narrative
+from womblex.process.text_overlay import apply_overlay, load_overlay
 from womblex.store.checkpoint import CheckpointManager
 from womblex.store.enrichment_output import (
     enrichment_entities_path_for,
@@ -52,6 +53,7 @@ def enrich_shards(
     enrichment_config: EnrichmentConfig,
     *,
     client: object,
+    text_source: str = "elements",
     checkpoint_mgr: CheckpointManager | None = None,
 ) -> EnrichStageResult:
     """Enrich every batch in ``shard_dir`` and write enrichment siblings.
@@ -77,7 +79,7 @@ def enrich_shards(
             logger.info("enrich_shards: skipping %s (all docs checkpointed)", base.stem)
             continue
 
-        narratives, doc_ids_by_hash = _load_narratives(base, enrichment_config.text_source)
+        narratives, doc_ids_by_hash = _load_narratives(base, text_source)
         results: list[tuple[str, EnrichmentResult]] = []
         errored: set[str] = set()
 
@@ -88,6 +90,7 @@ def enrich_shards(
                 enr = enrich_document(
                     text, client,
                     model=enrichment_config.model,
+                    overflow_strategy=enrichment_config.overflow_strategy,
                     max_retries=enrichment_config.max_retries,
                     retry_base_delay=enrichment_config.retry_base_delay,
                 )
@@ -141,8 +144,15 @@ def enrich_shards(
 # ---------------------------------------------------------------------------
 
 
-def _load_narratives(base_path: Path) -> tuple[dict[str, str], dict[str, str]]:
-    """Return ``({source_hash: narrative}, {source_hash: doc_id})`` for a batch."""
+def _load_narratives(
+    base_path: Path, text_source: str = "elements",
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Return ``({source_hash: narrative}, {source_hash: doc_id})`` for a batch.
+
+    When ``text_source`` is not ``'elements'`` the matching element-text overlay
+    (normalise / spellfix) is applied before reassembly, so Kanon-2 enriches the
+    same repaired text the chunker chunks — keeping mention/chunk offsets aligned.
+    """
     try:
         manifest = read_manifest(base_path)
     except Exception:
@@ -166,9 +176,11 @@ def _load_narratives(base_path: Path) -> tuple[dict[str, str], dict[str, str]]:
             text=row["text"],
         ))
 
+    overrides = load_overlay(base_path, text_source)
     narratives: dict[str, str] = {}
     for src, elems in by_hash.items():
         elems.sort(key=lambda e: e.order)
+        apply_overlay(src, elems, overrides)
         text, _ = reassemble_narrative(elems)
         narratives[src] = text
     return narratives, src_to_doc

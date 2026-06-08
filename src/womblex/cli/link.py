@@ -57,7 +57,13 @@ def cmd_enrich(args: argparse.Namespace) -> int:
         logger.error("--shards directory has no `*._manifest.parquet`: %s", shard_dir)
         return 1
 
-    enrichment_config = load_config(args.config).enrichment if args.config else EnrichmentConfig()
+    if args.config:
+        _cfg = load_config(args.config)
+        enrichment_config = _cfg.enrichment
+        text_source = _cfg.processing.text_source
+    else:
+        enrichment_config = EnrichmentConfig()
+        text_source = "elements"
 
     try:
         import isaacus
@@ -83,8 +89,11 @@ def cmd_enrich(args: argparse.Namespace) -> int:
                 logger.warning("Resume integrity scan: dropped %d doc(s) with corrupted "
                                "enrichment shards; they will be re-enriched.", len(dropped))
 
-    logger.info("enrich --shards: dir=%s model=%s", shard_dir, enrichment_config.model)
-    result = enrich_shards(shard_dir, enrichment_config, client=client, checkpoint_mgr=ckpt)
+    logger.info("enrich --shards: dir=%s model=%s text_source=%s overflow=%s",
+                shard_dir, enrichment_config.model, text_source,
+                enrichment_config.overflow_strategy)
+    result = enrich_shards(shard_dir, enrichment_config, client=client,
+                           text_source=text_source, checkpoint_mgr=ckpt)
     logger.info(
         "Done: %d batches written, %d docs enriched, %d entities",
         result.batches_written, result.docs_enriched, result.total_entities,

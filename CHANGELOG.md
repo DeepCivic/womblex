@@ -11,17 +11,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`spellfix` stage — dictionary-gated OCR character-confusion repair
   (`womblex spellfix`).** A separate, opt-in cleaning op (distinct from the
   fidelity-neutral `normalise`) that fixes digit/letter glyph confusions
-  surviving into chunks (`chi1d`→`child`). Validates candidates against the
-  bundled en_AU Hunspell dictionary (`spylls`, harvested from the Australian
-  Writing MCP; MIT/SCOWL) and rewrites a token only on three gates:
-  out-of-dictionary trigger, single-character in-dictionary candidate, and a
-  *unique* such candidate. Default Tier A swaps only OCR digit→letter homoglyphs
-  (length-preserving); Tier B general edit-distance-1 is opt-in (`--general` /
-  `general_edits`, carries proper-noun risk). Reads `*.chunks.parquet`; writes
-  `*.chunks_repaired.parquet` (repaired layer) + `*.spellfix_corrections.parquet`
-  (audit) — raw chunks are never modified. New deps: `spylls`; bundled dict under
-  `_models/en_AU`. (`process/spellfix.py`, `process/spellfix_stage.py`,
-  `store/spellfix_output.py`, `cli/spellfix.py`, `SpellfixConfig`.)
+  (`chi1d`→`child`). Validates candidates against the bundled en_AU Hunspell
+  dictionary (`spylls`, harvested from the Australian Writing MCP; MIT/SCOWL) and
+  rewrites a token only on three gates: out-of-dictionary trigger,
+  single-character in-dictionary candidate, and a *unique* such candidate.
+  Default Tier A swaps only OCR digit→letter homoglyphs (length-preserving);
+  Tier B general edit-distance-1 is opt-in (`--general` / `general_edits`,
+  carries proper-noun risk). Repairs at the **element layer** (reads
+  `*.elements.parquet`, chaining off the normalise overlay when present) and
+  writes a `*.spellfix_text.parquet` element-text overlay + a
+  `*.spellfix_corrections.parquet` audit — raw elements untouched. New deps:
+  `spylls`; bundled dict under `_models/en_AU`. (`process/spellfix.py`,
+  `process/spellfix_stage.py`, `store/spellfix_output.py`, `cli/spellfix.py`,
+  `SpellfixConfig`.)
+- **Composable element-text overlays via one `processing.text_source`.** New
+  `process/text_overlay.py` resolves the normalise / spellfix element-text layer
+  selected by a single pipeline setting (`elements` | `normalised` | `spellfix`)
+  and applies it before reassembly at **both** the chunk and enrich sites, so
+  chunking, embeddings, Kanon-2 enrichment and PII all consume the same repaired
+  text in one offset coordinate space. Deliberately one knob (not per-stage):
+  enrichment runs on the whole document and PII maps mention offsets onto chunks
+  via `chunk.start_char`, so the enricher input and chunk source must match.
+- **Enricher `overflow_strategy` (default `auto`).** `enrich_documents` /
+  `EnrichmentConfig` now pass `overflow_strategy` to `enrichments.create`,
+  defaulting to `auto` (vs upstream `null`, which errors on >16k-token inputs).
+  Kanon-2 chunks long documents internally and stitches the ILGS graph back into
+  a single prediction; returned span offsets still index the full source, so the
+  PII offset mapping is unaffected. Fixes long FOI bundles erroring on enrichment.
 - **`score --text-source` — CER of extraction vs normalisation.** `womblex
   score` (and `score_labels`) now accept `text_source={elements,normalised}`:
   `normalised` reassembles the labelled page from the `*.normalised_text.parquet`

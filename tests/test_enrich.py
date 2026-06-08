@@ -234,6 +234,7 @@ class TestEnrichDocument:
         client.enrichments.create.assert_called_once_with(
             model="kanon-2-enricher",
             texts=["Hello world. This is a test document."],
+            overflow_strategy="auto",
         )
 
     def test_enrich_multiple_documents(self) -> None:
