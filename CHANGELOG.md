@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **AI chunking pass-through (semchunk 4).** `ChunkingConfig.chunking_model`
+  (default `null`) enables semchunk 4's AI chunking — chunk boundaries follow
+  the Isaacus enricher's (`kanon-2-enricher`) structure spans instead of the
+  offline token/recursive split. Opt-in and off by default, so callers using a
+  non-Kanon tokeniser keep purely offline chunking (composable). `create_chunker`
+  now forwards `chunking_model`, `isaacus_client`, and `tokenizer_kwargs`
+  straight to `semchunk.chunkerify` (thin-adapter doctrine — semchunk's params
+  are the feature surface); threaded through both the E2E `run_chunking` path and
+  the per-stage `chunk_shards`. A `WomblexConfig` validator warns when AI chunking
+  and the separate enrich stage are both on (the same narrative would be enriched
+  twice — graph-reuse is a deferred optimisation; see `docs/decisions.md`).
+  Bumps `semchunk>=3.0` → `>=4.0`. (`process/chunker.py`, `config.py`,
+  `process/chunk_stage.py`, `operations/chunk.py`.)
 - **`spellfix` stage — dictionary-gated OCR character-confusion repair
   (`womblex spellfix`).** A separate, opt-in cleaning op (distinct from the
   fidelity-neutral `normalise`) that fixes digit/letter glyph confusions

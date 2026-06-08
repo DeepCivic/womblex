@@ -99,6 +99,8 @@ def chunk_shards(
     chunker = create_chunker(
         tokenizer=chunking_config.tokenizer,
         chunk_size=chunking_config.chunk_size,
+        chunking_model=chunking_config.chunking_model,
+        tokenizer_kwargs=chunking_config.tokenizer_kwargs,
         memoize=chunking_config.memoize,
         cache_maxsize=chunking_config.cache_maxsize,
         max_token_chars=chunking_config.max_token_chars,

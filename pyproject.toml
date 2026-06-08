@@ -11,7 +11,7 @@ dependencies = [
     "rapidocr-onnxruntime>=1.4",
     "ultralytics>=8.0",
     "opencv-python-headless",
-    "semchunk>=3.0",
+    "semchunk>=4.0",
     "pandas>=2.0",
     "openpyxl",
     "pyarrow",

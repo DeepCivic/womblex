@@ -43,6 +43,8 @@ def run_chunking(
     chunker = create_chunker(
         tokenizer=config.chunking.tokenizer,
         chunk_size=config.chunking.chunk_size,
+        chunking_model=config.chunking.chunking_model,
+        tokenizer_kwargs=config.chunking.tokenizer_kwargs,
         memoize=config.chunking.memoize,
         cache_maxsize=config.chunking.cache_maxsize,
         max_token_chars=config.chunking.max_token_chars,

@@ -1,6 +1,8 @@
 """Configuration loading and validation for womblex pipelines."""
 
 
+import logging
+
 from pathlib import Path
 
 from typing import Any
@@ -288,8 +290,9 @@ class ChunkingConfig(BaseModel):
     re-expose a semchunk feature under a different name.
 
     Maps to ``semchunk.chunkerify`` (creation-time): ``tokenizer``
-    (→ ``tokenizer_or_token_counter``), ``chunk_size``, ``memoize``,
-    ``cache_maxsize``, ``max_token_chars``.
+    (→ ``tokenizer_or_token_counter``), ``chunk_size``, ``chunking_model``,
+    ``tokenizer_kwargs``, ``memoize``, ``cache_maxsize``,
+    ``max_token_chars``.
 
     Maps to ``semchunk.Chunker.__call__`` (per-call): ``overlap``,
     ``processes``, ``progress``. (``offsets`` is pinned ``True`` in the
@@ -315,6 +318,26 @@ class ChunkingConfig(BaseModel):
 
 
     tokenizer: str = "isaacus/kanon-2-tokenizer"
+
+    chunking_model: str | None = Field(
+        default=None,
+        description=(
+            "semchunk 4 AI-chunking model (e.g. 'kanon-2-enricher'). When set, "
+            "chunk boundaries follow the Isaacus enricher's structure spans "
+            "instead of the offline token/recursive split, calling the Isaacus "
+            "API per document at chunk time. None (default) keeps offline "
+            "token-based chunking — composable, leaving non-Kanon tokeniser "
+            "users unaffected. NOTE: enabling this alongside the separate "
+            "enrich stage enriches the same narrative twice (see "
+            "process/chunker.py module docstring)."
+        ),
+    )
+
+    tokenizer_kwargs: dict | None = Field(
+        default=None,
+        description="Extra keyword arguments forwarded to the tokeniser / token "
+                    "counter (semchunk 4 pass-through). None = no extras.",
+    )
 
     chunk_size: int | None = Field(
         default=480,
@@ -673,6 +696,25 @@ class WomblexConfig(BaseModel):
     linking: LinkingConfig = LinkingConfig()
     pii: PIIConfig = PIIConfig()
     processing: ProcessingConfig = ProcessingConfig()
+
+    @model_validator(mode="after")
+    def _warn_double_enrichment(self) -> "WomblexConfig":
+        """Warn when AI chunking + the enrich stage both enrich the same text.
+
+        semchunk 4 AI chunking (``chunking.chunking_model``) enriches each
+        document to pick boundaries; the enrich stage enriches the same
+        reassembled narrative. Running both pays for Kanon-2 enrichment twice
+        — surface it rather than silently double-billing.
+        """
+        if self.chunking.chunking_model and self.enrichment.enabled:
+            logging.getLogger(__name__).warning(
+                "chunking.chunking_model=%r enables AI chunking AND "
+                "enrichment.enabled is true: the same narrative is enriched "
+                "twice (once at chunk time, once in the enrich stage). See "
+                "process/chunker.py for the deferred graph-reuse optimisation.",
+                self.chunking.chunking_model,
+            )
+        return self
 
 
 def load_config(path: Path) -> WomblexConfig:

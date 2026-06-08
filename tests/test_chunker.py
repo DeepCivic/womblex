@@ -55,6 +55,34 @@ class TestCreateChunker:
         assert isinstance(result, tuple)
         assert len(result) == 2
 
+    def test_default_chunking_model_none_is_offline(self) -> None:
+        # Default (no chunking_model) must stay fully offline: a callable
+        # token counter and no Isaacus client, yet chunking succeeds.
+        chunker = create_chunker(_word_token_counter, chunk_size=50)
+        chunks = chunker("alpha beta gamma delta")
+        assert chunks  # produced offline, no API touched
+
+    def test_ai_chunking_params_forwarded_to_chunkerify(self, monkeypatch) -> None:
+        captured: dict = {}
+        real_chunkerify = semchunk.chunkerify
+
+        def _fake_chunkerify(tokenizer, **kwargs):
+            captured["tokenizer"] = tokenizer
+            captured.update(kwargs)
+            return real_chunkerify(_word_token_counter, chunk_size=50)
+
+        monkeypatch.setattr("womblex.process.chunker.semchunk.chunkerify", _fake_chunkerify)
+        sentinel_client = object()
+        create_chunker(
+            _word_token_counter, chunk_size=50,
+            chunking_model="kanon-2-enricher",
+            isaacus_client=sentinel_client,
+            tokenizer_kwargs={"add_special_tokens": False},
+        )
+        assert captured["chunking_model"] == "kanon-2-enricher"
+        assert captured["isaacus_client"] is sentinel_client
+        assert captured["tokenizer_kwargs"] == {"add_special_tokens": False}
+
 
 # ---------------------------------------------------------------------------
 # TextChunk

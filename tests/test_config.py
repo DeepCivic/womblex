@@ -93,6 +93,15 @@ class TestChunkingConfigDefaults:
         assert cfg.chunk_tables is True
 
 
+    def test_default_chunking_model_is_none(self) -> None:
+        # AI chunking is opt-in: default off keeps offline token chunking,
+        # so non-Kanon tokeniser users are unaffected.
+        cfg = ChunkingConfig()
+
+        assert cfg.chunking_model is None
+        assert cfg.tokenizer_kwargs is None
+
+
 
 # ---------------------------------------------------------------------------
 
@@ -278,6 +287,43 @@ class TestPipelineConfig:
         assert cfg.dataset.name == "test"
 
         assert cfg.detection.min_text_coverage == 0.3  # default
+
+
+    def test_warns_when_ai_chunking_and_enrichment_both_on(self, caplog) -> None:
+        import logging
+
+        from womblex.config import ChunkingConfig, EnrichmentConfig
+
+        with caplog.at_level(logging.WARNING):
+            WomblexConfig(
+                dataset=DatasetConfig(name="test"),
+                paths={
+                    "input_root": "/tmp/in",
+                    "output_root": "/tmp/out",
+                    "checkpoint_dir": "/tmp/ckpt",
+                },
+                chunking=ChunkingConfig(chunking_model="kanon-2-enricher"),
+                enrichment=EnrichmentConfig(enabled=True),
+            )
+        assert any("enriched" in r.message for r in caplog.records)
+
+
+    def test_no_warning_when_ai_chunking_off(self, caplog) -> None:
+        import logging
+
+        from womblex.config import EnrichmentConfig
+
+        with caplog.at_level(logging.WARNING):
+            WomblexConfig(
+                dataset=DatasetConfig(name="test"),
+                paths={
+                    "input_root": "/tmp/in",
+                    "output_root": "/tmp/out",
+                    "checkpoint_dir": "/tmp/ckpt",
+                },
+                enrichment=EnrichmentConfig(enabled=True),
+            )
+        assert not any("enriched" in r.message for r in caplog.records)
 
 
     def test_override_detection(self) -> None:

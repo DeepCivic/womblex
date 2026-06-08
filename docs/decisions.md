@@ -166,6 +166,23 @@ classification decisions:
 
 ## Deferred / backlog
 
+- **AI chunking (semchunk 4) — single-enrichment orchestration.** The
+  `chunking.chunking_model` pass-through (shipped 2026-06) lets semchunk pick
+  chunk boundaries from the Kanon-2 enricher's structure spans; it is **opt-in
+  and off by default** so non-Kanon tokeniser users keep the offline
+  token/recursive split (composability). The open work is *cost*: AI chunking
+  enriches each document at chunk time, and the separate `enrich` stage
+  enriches the *same* reassembled narrative again — running both pays Kanon-2
+  twice (a `WomblexConfig` validator warns on this combination). semchunk 4
+  accepts a pre-enriched `ILGSDocument` as chunk input, so the fix is to enrich
+  once and feed that graph to both stages. That needs (a) the enrich store to
+  persist a rehydratable `ILGSDocument` (today `analyse/enrich.py` converts the
+  SDK object to Womblex dataclasses and discards the original) and (b) the
+  pipeline order flipped to enrich-before-chunk when AI chunking is on. Deferred
+  until the reuse path is verified against the installed semchunk 4 API rather
+  than built blind. Do not enable `chunking_model` alongside the enrich stage in
+  a shipped config until this lands.
+
 - **Downstream text-cleaning op (#B/#D)** — *v1 shipped* as `womblex normalise
   --shards` (`process/normalise.py` transforms + `process/normalise_stage.py`
   driver). Writes a `*.normalised_text.parquet` text layer over the narrative
