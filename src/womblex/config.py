@@ -8,7 +8,7 @@ from typing import Any
 
 import yaml
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 
@@ -331,6 +331,22 @@ class ChunkingConfig(BaseModel):
 
     chunk_tables: bool = Field(default=True, description="Convert tables to markdown and chunk separately")
 
+    text_source: str = Field(
+        default="elements",
+        description="Element-text layer to chunk: 'elements' (verbatim, default), "
+                    "'normalised' (*.normalised_text.parquet) or 'spellfix' "
+                    "(*.spellfix_text.parquet). Overlay applied before reassembly so "
+                    "chunks/embeddings/PII inherit the repaired text. Missing overlay "
+                    "falls back to verbatim. See process.text_overlay.",
+    )
+
+    @field_validator("text_source")
+    @classmethod
+    def _check_text_source(cls, v: str) -> str:
+        if v not in ("elements", "normalised", "spellfix"):
+            raise ValueError(f"text_source must be elements|normalised|spellfix, got {v!r}")
+        return v
+
     overlap: int | float | None = Field(
 
         default=None,
@@ -471,6 +487,22 @@ class EnrichmentConfig(BaseModel):
 
 
     enabled: bool = Field(default=False, description="Run enrichment stage")
+
+    text_source: str = Field(
+        default="elements",
+        description="Element-text layer to reassemble the narrative from: 'elements' "
+                    "(verbatim, default), 'normalised' or 'spellfix'. Use 'spellfix' so "
+                    "Kanon-2 entity extraction reads OCR-repaired text; keep it identical "
+                    "to chunking.text_source so mention offsets stay aligned with chunk "
+                    "offsets. Missing overlay falls back to verbatim.",
+    )
+
+    @field_validator("text_source")
+    @classmethod
+    def _check_text_source(cls, v: str) -> str:
+        if v not in ("elements", "normalised", "spellfix"):
+            raise ValueError(f"text_source must be elements|normalised|spellfix, got {v!r}")
+        return v
 
     model: str = Field(default="kanon-2-enricher", description="Isaacus enrichment model")
 

@@ -77,7 +77,7 @@ def enrich_shards(
             logger.info("enrich_shards: skipping %s (all docs checkpointed)", base.stem)
             continue
 
-        narratives, doc_ids_by_hash = _load_narratives(base)
+        narratives, doc_ids_by_hash = _load_narratives(base, enrichment_config.text_source)
         results: list[tuple[str, EnrichmentResult]] = []
         errored: set[str] = set()
 

@@ -1,18 +1,22 @@
 """Parquet IO for the OCR-repair stage (``womblex spellfix``).
 
-Two siblings per batch, both self-contained like :mod:`womblex.store.pii_output`:
+Two siblings per batch, both self-contained like :mod:`womblex.store.normalise_output`:
 
-- ``*.chunks_repaired.parquet`` — the repaired chunk layer. Reuses the chunk
-  schema (:data:`womblex.store.output.CHUNKS_SCHEMA`); a complete passthrough
-  layer (verbatim where nothing fired), parallel to ``*.chunks.parquet`` which
-  is left untouched. Downstream consumers opt in to the repaired layer.
+- ``*.spellfix_text.parquet`` — the repaired **element-text overlay**. One row
+  per ``TEXT_KINDS`` element (``source_hash``, ``elem_order``, ``kind``,
+  ``page``, ``text``, ``n_changes``), identical in shape to the normalise
+  stage's ``*.normalised_text.parquet`` so both are consumable through the one
+  ``process.text_overlay`` resolver. A complete narrative layer (verbatim
+  passthrough where nothing fired), joinable on ``(source_hash, elem_order)``.
 - ``*.spellfix_corrections.parquet`` — the audit trail: one row per applied
   rewrite (original → corrected), so every change is reviewable and the raw
-  chunk text remains recoverable.
+  element text remains recoverable.
 
-OCR repair runs *before* the Isaacus-facing chunk consumers (so the model sees
-real words, not ``chi1d``) — the opposite ordering to PII masking, which is
-terminal. See ``docs/decisions.md`` "Dictionary-gated OCR repair".
+Repair lands at the **element** layer — the shared source both the chunk branch
+(``build_chunk_input``) and the enrichment branch (``reassemble_narrative``)
+fork from — so the repaired text composes across chunking, embeddings, Kanon-2
+enrichment and PII in a single coordinate space (mention offsets stay aligned
+with chunk offsets). See ``docs/decisions.md`` "Dictionary-gated OCR repair".
 """
 
 from __future__ import annotations
@@ -23,41 +27,48 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from womblex.store.output import CHUNKS_SCHEMA, _write_rows
+from womblex.store.output import _write_rows
 
 logger = logging.getLogger(__name__)
 
-CHUNKS_REPAIRED_SUFFIX = ".chunks_repaired.parquet"
+SPELLFIX_TEXT_SUFFIX = ".spellfix_text.parquet"
 SPELLFIX_CORRECTIONS_SUFFIX = ".spellfix_corrections.parquet"
 
-# Repaired chunks share the chunk schema exactly — it is a drop-in layer.
-CHUNKS_REPAIRED_SCHEMA = CHUNKS_SCHEMA
+# Same shape as NORMALISED_TEXT_SCHEMA so both overlays share one resolver.
+SPELLFIX_TEXT_SCHEMA = pa.schema([
+    ("source_hash", pa.string()),
+    ("elem_order", pa.int32()),
+    ("kind", pa.string()),
+    ("page", pa.int32()),       # nullable — sources without page semantics
+    ("text", pa.string()),      # repaired text (verbatim passthrough if unchanged)
+    ("n_changes", pa.int32()),  # rewrites applied to this element
+])
 
 SPELLFIX_CORRECTIONS_SCHEMA = pa.schema([
     ("source_hash", pa.string()),
-    ("chunk_index", pa.int32()),
-    ("content_type", pa.string()),
-    ("offset", pa.int32()),       # char offset of the token within the chunk text
+    ("elem_order", pa.int32()),
+    ("kind", pa.string()),
+    ("offset", pa.int32()),       # char offset of the token within the element text
     ("original", pa.string()),
     ("corrected", pa.string()),
     ("method", pa.string()),      # homoglyph | edit1
 ])
 
 
-def chunks_repaired_path_for(base_path: Path) -> Path:
-    return base_path.parent / f"{base_path.stem}{CHUNKS_REPAIRED_SUFFIX}"
+def spellfix_text_path_for(base_path: Path) -> Path:
+    return base_path.parent / f"{base_path.stem}{SPELLFIX_TEXT_SUFFIX}"
 
 
 def spellfix_corrections_path_for(base_path: Path) -> Path:
     return base_path.parent / f"{base_path.stem}{SPELLFIX_CORRECTIONS_SUFFIX}"
 
 
-def write_repaired_chunks(rows: list[dict], output_path: Path) -> Path:
-    """Write a batch's repaired chunk rows (match :data:`CHUNKS_REPAIRED_SCHEMA`)."""
-    target = chunks_repaired_path_for(output_path)
+def write_spellfix_text(rows: list[dict], output_path: Path) -> Path:
+    """Write a batch's repaired element-text rows (match :data:`SPELLFIX_TEXT_SCHEMA`)."""
+    target = spellfix_text_path_for(output_path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    _write_rows(rows, target, CHUNKS_REPAIRED_SCHEMA)
-    logger.info("Wrote repaired chunks shard %s: rows=%d", target.name, len(rows))
+    _write_rows(rows, target, SPELLFIX_TEXT_SCHEMA)
+    logger.info("Wrote spellfix_text shard %s: rows=%d", target.name, len(rows))
     return target
 
 
@@ -70,28 +81,28 @@ def write_spellfix_corrections(rows: list[dict], output_path: Path) -> Path:
     return target
 
 
-def read_repaired_chunks(path: Path) -> pa.Table:
-    """Read repaired chunks from a single shard file or a shard-directory glob."""
-    p = Path(path)
-    if p.is_dir():
-        shards = sorted(p.glob(f"*{CHUNKS_REPAIRED_SUFFIX}"))
-        if not shards:
-            return _empty(CHUNKS_REPAIRED_SCHEMA)
-        return pa.concat_tables([_read_shard(s, CHUNKS_REPAIRED_SCHEMA) for s in shards])
-    rp = p if p.name.endswith(CHUNKS_REPAIRED_SUFFIX) else chunks_repaired_path_for(p)
-    return _read_shard(rp, CHUNKS_REPAIRED_SCHEMA)
+def read_spellfix_text(path: Path) -> pa.Table:
+    """Read repaired element text from a single shard file or a directory glob."""
+    return _read(path, SPELLFIX_TEXT_SUFFIX, SPELLFIX_TEXT_SCHEMA, spellfix_text_path_for)
 
 
 def read_spellfix_corrections(path: Path) -> pa.Table:
     """Read correction-audit rows from a single shard file or a directory glob."""
+    return _read(
+        path, SPELLFIX_CORRECTIONS_SUFFIX, SPELLFIX_CORRECTIONS_SCHEMA,
+        spellfix_corrections_path_for,
+    )
+
+
+def _read(path: Path, suffix: str, schema: pa.Schema, path_for) -> pa.Table:
     p = Path(path)
     if p.is_dir():
-        shards = sorted(p.glob(f"*{SPELLFIX_CORRECTIONS_SUFFIX}"))
+        shards = sorted(p.glob(f"*{suffix}"))
         if not shards:
-            return _empty(SPELLFIX_CORRECTIONS_SCHEMA)
-        return pa.concat_tables([_read_shard(s, SPELLFIX_CORRECTIONS_SCHEMA) for s in shards])
-    cp = p if p.name.endswith(SPELLFIX_CORRECTIONS_SUFFIX) else spellfix_corrections_path_for(p)
-    return _read_shard(cp, SPELLFIX_CORRECTIONS_SCHEMA)
+            return _empty(schema)
+        return pa.concat_tables([_read_shard(s, schema) for s in shards])
+    target = p if p.name.endswith(suffix) else path_for(p)
+    return _read_shard(target, schema)
 
 
 def _empty(schema: pa.Schema) -> pa.Table:
@@ -107,14 +118,14 @@ def _read_shard(path: Path, schema: pa.Schema) -> pa.Table:
 
 
 __all__ = [
-    "CHUNKS_REPAIRED_SCHEMA",
-    "CHUNKS_REPAIRED_SUFFIX",
     "SPELLFIX_CORRECTIONS_SCHEMA",
     "SPELLFIX_CORRECTIONS_SUFFIX",
-    "chunks_repaired_path_for",
-    "read_repaired_chunks",
+    "SPELLFIX_TEXT_SCHEMA",
+    "SPELLFIX_TEXT_SUFFIX",
     "read_spellfix_corrections",
+    "read_spellfix_text",
     "spellfix_corrections_path_for",
-    "write_repaired_chunks",
+    "spellfix_text_path_for",
     "write_spellfix_corrections",
+    "write_spellfix_text",
 ]

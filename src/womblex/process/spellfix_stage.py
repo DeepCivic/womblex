@@ -1,13 +1,14 @@
 """Per-stage OCR character-confusion repair over a shard directory.
 
-Consumes ``*.chunks.parquet`` (written by the chunk stage) and writes two
-siblings per batch: ``*.chunks_repaired.parquet`` (the repaired chunk layer,
-verbatim passthrough where nothing fired) and ``*.spellfix_corrections.parquet``
-(the audit trail). The raw ``*.chunks.parquet`` is never modified.
+Consumes ``*.elements.parquet`` and writes two siblings per batch:
+``*.spellfix_text.parquet`` (the repaired element-text overlay, verbatim
+passthrough where nothing fired) and ``*.spellfix_corrections.parquet`` (the
+audit trail). The raw ``*.elements.parquet`` is never modified.
 
-Chunk-level post-fix: the symptom is OCR glyph confusions (``chi1d``) surviving
-into chunks, so repair lands on the chunk text directly. Mirrors
-:mod:`womblex.process.normalise_stage`: per-stage ``CheckpointManager``,
+Repair lands at the **element** layer — the shared source the chunk and
+enrichment branches both fork from — so downstream stages compose on it by
+selecting ``text_source='spellfix'`` (see :mod:`womblex.process.text_overlay`).
+Mirrors :mod:`womblex.process.normalise_stage`: per-stage ``CheckpointManager``,
 skip-existing on resume, batch-level isolation. Offline (no API).
 """
 
@@ -18,13 +19,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from womblex.config import SpellfixConfig
-from womblex.process.chunk_stage import _batch_bases
+from womblex.ingest.elements import TEXT_KINDS
+from womblex.process.chunk_stage import _batch_bases, _load_elements
 from womblex.store.checkpoint import CheckpointManager
-from womblex.store.output import chunks_path_for, read_chunks, read_manifest
+from womblex.store.output import read_manifest
 from womblex.store.spellfix_output import (
-    chunks_repaired_path_for,
-    write_repaired_chunks,
+    spellfix_text_path_for,
     write_spellfix_corrections,
+    write_spellfix_text,
 )
 
 logger = logging.getLogger(__name__)
@@ -33,7 +35,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class SpellfixStageResult:
     batches_written: int
-    chunks_repaired: int
+    elements_repaired: int
     corrections_applied: int
 
 
@@ -43,7 +45,7 @@ def spellfix_shards(
     *,
     checkpoint_mgr: CheckpointManager | None = None,
 ) -> SpellfixStageResult:
-    """Repair every batch's chunks; write repaired + corrections siblings."""
+    """Repair every batch's element text; write overlay + corrections siblings."""
     if not shard_dir.is_dir():
         raise FileNotFoundError(f"shard directory not found: {shard_dir}")
 
@@ -53,22 +55,20 @@ def spellfix_shards(
         return SpellfixStageResult(0, 0, 0)
 
     batches_written = 0
-    chunks_repaired = 0
+    elements_repaired = 0
     corrections_applied = 0
 
     for base in bases:
-        if not chunks_path_for(base).exists():
-            continue
         if checkpoint_mgr is not None and _all_docs_checkpointed(base, checkpoint_mgr):
             logger.info("spellfix_shards: skipping %s (all docs checkpointed)", base.stem)
             continue
 
-        repaired_rows, audit_rows, n_changed = _repair_batch(base, config)
+        text_rows, audit_rows, n_changed = _repair_batch(base, config)
 
-        write_repaired_chunks(repaired_rows, base)
+        write_spellfix_text(text_rows, base)
         write_spellfix_corrections(audit_rows, base)
         batches_written += 1
-        chunks_repaired += n_changed
+        elements_repaired += n_changed
         corrections_applied += len(audit_rows)
 
         if checkpoint_mgr is not None:
@@ -82,49 +82,55 @@ def spellfix_shards(
                 )
 
         logger.info(
-            "spellfix_shards: %s repaired %d chunks (%d corrections)",
+            "spellfix_shards: %s repaired %d elements (%d corrections)",
             base.stem, n_changed, len(audit_rows),
         )
 
     return SpellfixStageResult(
         batches_written=batches_written,
-        chunks_repaired=chunks_repaired,
+        elements_repaired=elements_repaired,
         corrections_applied=corrections_applied,
     )
 
 
-def _repair_batch(
-    base_path: Path, config: SpellfixConfig,
-) -> tuple[list[dict], list[dict], int]:
-    """Repair a batch's chunks; return ``(repaired_rows, audit_rows, n_changed)``."""
+def _repair_batch(base_path: Path, config: SpellfixConfig) -> tuple[list[dict], list[dict], int]:
+    """Read a batch's elements; return ``(text_rows, audit_rows, n_changed)``."""
     from womblex.process.spellfix import repair_text
 
-    table = read_chunks(base_path)
-    repaired_rows: list[dict] = []
+    elements_by_hash = _load_elements(base_path)
+    text_rows: list[dict] = []
     audit_rows: list[dict] = []
     n_changed = 0
-    for row in table.to_pylist():
-        text = row.get("text") or ""
-        fixed, corrections = repair_text(
-            text,
-            general_edits=config.general_edits,
-            dict_name=config.dict_name,
-        )
-        row["text"] = fixed
-        repaired_rows.append(row)
-        if corrections:
-            n_changed += 1
-        for c in corrections:
-            audit_rows.append({
-                "source_hash": row["source_hash"],
-                "chunk_index": row["chunk_index"],
-                "content_type": row["content_type"],
-                "offset": c.offset,
-                "original": c.original,
-                "corrected": c.corrected,
-                "method": c.method,
+    for source_hash, elements in elements_by_hash.items():
+        for e in elements:
+            if e.kind not in TEXT_KINDS or not e.text:
+                continue
+            fixed, corrections = repair_text(
+                e.text,
+                general_edits=config.general_edits,
+                dict_name=config.dict_name,
+            )
+            text_rows.append({
+                "source_hash": source_hash,
+                "elem_order": e.order,
+                "kind": e.kind,
+                "page": e.page,
+                "text": fixed,
+                "n_changes": len(corrections),
             })
-    return repaired_rows, audit_rows, n_changed
+            if corrections:
+                n_changed += 1
+            for c in corrections:
+                audit_rows.append({
+                    "source_hash": source_hash,
+                    "elem_order": e.order,
+                    "kind": e.kind,
+                    "offset": c.offset,
+                    "original": c.original,
+                    "corrected": c.corrected,
+                    "method": c.method,
+                })
+    return text_rows, audit_rows, n_changed
 
 
 def _doc_ids(base_path: Path) -> list[str]:
@@ -135,7 +141,7 @@ def _doc_ids(base_path: Path) -> list[str]:
 
 
 def _all_docs_checkpointed(base_path: Path, mgr: CheckpointManager) -> bool:
-    if not chunks_repaired_path_for(base_path).exists():
+    if not spellfix_text_path_for(base_path).exists():
         return False
     doc_ids = _doc_ids(base_path)
     return bool(doc_ids) and all(d in mgr.state.processed_ids for d in doc_ids)
