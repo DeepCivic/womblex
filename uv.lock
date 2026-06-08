@@ -2685,6 +2685,15 @@ wheels = [
 ]
 
 [[package]]
+name = "spylls"
+version = "0.1.7"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/5c/c2/19f34deb2dc1475dfeadafbd5666246041ee7578bb933e82de794f0a9283/spylls-0.1.7.tar.gz", hash = "sha256:7045892dcbd324d3685f69c5a760063e78fb839913724ce18077cf0a0c93f220", size = 1499693, upload-time = "2022-01-23T13:26:54.032Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cd/19/ce6fcb4b86e188983bcfc1f84e4ac6f3038ca8d68b6d70a678cdc566f66c/spylls-0.1.7-py2.py3-none-any.whl", hash = "sha256:0c7fa4b66615f390bd12fd37939b85934c012309fd3cce8584844c54270b7776", size = 1509482, upload-time = "2022-01-23T13:26:40.203Z" },
+]
+
+[[package]]
 name = "sympy"
 version = "1.14.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3041,6 +3050,7 @@ dependencies = [
     { name = "rapidocr-onnxruntime" },
     { name = "semchunk" },
     { name = "sentence-transformers" },
+    { name = "spylls" },
     { name = "tqdm" },
     { name = "ultralytics" },
 ]
@@ -3084,6 +3094,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'" },
     { name = "semchunk", specifier = ">=3.0" },
     { name = "sentence-transformers", specifier = ">=3.0" },
+    { name = "spylls", specifier = ">=0.1.7" },
     { name = "tqdm" },
     { name = "ultralytics", specifier = ">=8.0" },
     { name = "womblex", extras = ["isaacus", "dev"], marker = "extra == 'all'" },

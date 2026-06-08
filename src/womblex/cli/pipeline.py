@@ -382,9 +382,12 @@ def _cmd_chunk_shards(args: argparse.Namespace) -> int:
         return 1
 
     if args.config is not None:
-        chunking_config = load_config(args.config).chunking
+        cfg = load_config(args.config)
+        chunking_config = cfg.chunking
+        text_source = cfg.processing.text_source
     else:
         chunking_config = ChunkingConfig()
+        text_source = "elements"
 
     checkpoint_root = args.checkpoint_dir or shard_dir.parent / ".chunk-checkpoint"
     ckpt = CheckpointManager(checkpoint_root, f"{args.dataset}_chunk")
@@ -401,11 +404,11 @@ def _cmd_chunk_shards(args: argparse.Namespace) -> int:
                 )
 
     logger.info(
-        "chunk --shards: dir=%s tokenizer=%s chunk_size=%d processes=%d",
+        "chunk --shards: dir=%s tokenizer=%s chunk_size=%d processes=%d text_source=%s",
         shard_dir, chunking_config.tokenizer, chunking_config.chunk_size,
-        chunking_config.processes,
+        chunking_config.processes, text_source,
     )
-    result = chunk_shards(shard_dir, chunking_config, checkpoint_mgr=ckpt)
+    result = chunk_shards(shard_dir, chunking_config, text_source=text_source, checkpoint_mgr=ckpt)
     logger.info(
         "Done: %d batches written, %d docs chunked, %d total chunks",
         result.batches_written, result.docs_chunked, result.total_chunks,

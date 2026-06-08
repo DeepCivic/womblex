@@ -33,6 +33,7 @@ from womblex.process.chunker import (
     chunk_batch,
     create_chunker,
 )
+from womblex.process.text_overlay import apply_overlay, load_overlay
 from womblex.store.checkpoint import CheckpointManager
 from womblex.store.output import (
     CHUNKS_SUFFIX,
@@ -70,6 +71,7 @@ def chunk_shards(
     shard_dir: Path,
     chunking_config: ChunkingConfig,
     *,
+    text_source: str = "elements",
     checkpoint_mgr: CheckpointManager | None = None,
 ) -> ChunkStageResult:
     """Chunk every batch in ``shard_dir`` and write ``*.chunks.parquet`` siblings.
@@ -111,7 +113,9 @@ def chunk_shards(
             logger.info("chunk_shards: skipping %s (all docs checkpointed)", base.stem)
             continue
 
-        inputs, doc_ids_by_hash = _build_inputs_for_batch(base, chunking_config.chunk_tables)
+        inputs, doc_ids_by_hash = _build_inputs_for_batch(
+            base, chunking_config.chunk_tables, text_source,
+        )
 
         if inputs:
             chunks_by_hash = chunk_batch(
@@ -188,7 +192,7 @@ def _batch_bases(shard_dir: Path) -> list[Path]:
 
 
 def _build_inputs_for_batch(
-    base_path: Path, chunk_tables_enabled: bool,
+    base_path: Path, chunk_tables_enabled: bool, text_source: str = "elements",
 ) -> tuple[list[ChunkInput], dict[str, str]]:
     """Read a batch's element-stream parquets and produce ChunkInputs.
 
@@ -196,6 +200,10 @@ def _build_inputs_for_batch(
     covers every row in the manifest, including ``status='error'`` docs
     that contribute no chunks — callers need it to checkpoint those as
     "done at this stage" alongside the chunkable ones.
+
+    When ``text_source`` is not ``'elements'`` the matching element-text
+    overlay (normalise / spellfix) is applied before reassembly, so chunks
+    inherit the cleaned/repaired text.
     """
     try:
         manifest = read_manifest(base_path)
@@ -208,10 +216,11 @@ def _build_inputs_for_batch(
     ))
 
     elements_by_hash = _load_elements(base_path)
-    inputs = [
-        build_chunk_input(source_hash, elements, include_tables=chunk_tables_enabled)
-        for source_hash, elements in elements_by_hash.items()
-    ]
+    overrides = load_overlay(base_path, text_source)
+    inputs = []
+    for source_hash, elements in elements_by_hash.items():
+        apply_overlay(source_hash, elements, overrides)
+        inputs.append(build_chunk_input(source_hash, elements, include_tables=chunk_tables_enabled))
     return inputs, src_to_doc
 
 

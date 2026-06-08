@@ -71,6 +71,18 @@ normalise:
   despace_page_marker: true   # Heal '3|P age' footers → '3|Page' (footer/header kinds only).
   # substitutions: {}         # Literal {find: replace} for known letterhead/font-map typos.
 
+# Dictionary-gated OCR character-confusion repair (`womblex spellfix --shards`).
+# Separate, opt-in op (distinct from `normalise`). Reads `*.elements.parquet`
+# (chaining off the normalise overlay when present) and writes a
+# `*.spellfix_text.parquet` element-text overlay + `*.spellfix_corrections.parquet`
+# (audit); raw elements untouched. Consumers opt in via processing.text_source
+# below. Only rewrites out-of-dict tokens with a single unambiguous in-dict
+# candidate one character away.
+spellfix:
+  enabled: false
+  general_edits: false        # Tier A homoglyph (digit→letter) only. true = Tier B edit-1 (proper-noun risk).
+  # dict_name: en_AU          # Hunspell dict resolved via utils.models (bundled under _models/en_AU).
+
 # PII cleaning uses regex pattern recognisers (Presidio-style) validated by
 # a Sentence Transformers context model (all-MiniLM-L6-v2, 22M params).
 #
@@ -93,6 +105,14 @@ pii:
   pipeline_point: post_chunk
   context_similarity_threshold: 0.5
   model: all-MiniLM-L6-v2
+
+# Kanon-2 enrichment (`womblex enrich --shards`). Runs on the WHOLE document
+# (reassembled per processing.text_source); Kanon-2 chunks long inputs itself.
+enrichment:
+  enabled: false
+  model: kanon-2-enricher
+  overflow_strategy: auto       # auto/chunk = internal chunk+stitch (>16k tokens); drop_end | null
+  # skip_short_documents: 0     # skip docs shorter than N chars (0 = enrich all)
 
 # Entity linking (`womblex enrich --shards` then `womblex link --shards`).
 # Resolves document mentions to canonical reference-register entities. The
@@ -133,6 +153,12 @@ embedding:
 processing:
   batch_size: 25
   checkpoint_every: 25
+  # Single pipeline-level selector for the element-text layer that BOTH chunking
+  # and enrichment reassemble from. 'elements' = verbatim; 'normalised' = the
+  # normalise overlay; 'spellfix' = the spellfix overlay (chained on top of
+  # normalise). One knob on purpose: enrichment runs on the whole document and
+  # PII maps Kanon-2 mention offsets onto chunks, so both must read the same text.
+  text_source: elements         # elements | normalised | spellfix
   # Run-output retention controls how many prior run dirs survive under
   # <output_root>/. The current run is always preserved.
   retention:

@@ -99,6 +99,10 @@ A corpus exists to mature Womblex capability, not host custom code. Corpus-side 
 | `process/normalise.py` | Pure text-cleaning transforms (`normalise_text`): inline-whitespace collapse, `3\|P age` footer-glyph despacing, config-driven letterhead/font-map substitutions. The verbatim-policy downstream cleaning op's core | Read/write parquet; touch extraction (cleanup is downstream, never at the extraction boundary) |
 | `process/normalise_stage.py` | `normalise_shards()` over a shard dir — read `*.elements.parquet`, normalise TEXT_KINDS element text, write `*.normalised_text.parquet` (per-element cleaned text layer; passthrough where unchanged). Per-stage `CheckpointManager` | Implement transforms (those are in `process/normalise.py`); re-join redaction-induced paragraph breaks (deferred — cross-element) |
 | `store/normalise_output.py` | `*.normalised_text.parquet` schema + IO (self-contained, like `store/pii_output.py`). Cleaning layer — distinct from PII's masking `*.clean_text.parquet` | Implement transforms |
+| `process/spellfix.py` | Dictionary-gated OCR character-confusion repair (`repair_text`): out-of-dict trigger + single-edit + unambiguity gates over the bundled en_AU Hunspell dict (`spylls`). Tier A digit→letter homoglyphs (default); Tier B general edit-1 (opt-in). Distinct from the rejected substitution-table dead-end | Read/write parquet; correct valid-word misreads (engine-level concern) |
+| `process/spellfix_stage.py` | `spellfix_shards()` over a shard dir — read `*.elements.parquet` (chaining off the normalise overlay when present), repair TEXT_KINDS text, write `*.spellfix_text.parquet` (element-text overlay) + `*.spellfix_corrections.parquet` (audit). Raw elements untouched. Per-stage `CheckpointManager` | Implement the corrector (that's `process/spellfix.py`) |
+| `store/spellfix_output.py` | `*.spellfix_text.parquet` (element overlay, same shape as `*.normalised_text.parquet`) + `*.spellfix_corrections.parquet` schemas + IO (self-contained) | Implement repair/detection |
+| `process/text_overlay.py` | Shared element-text overlay resolver: `load_overlay(base, text_source)` / `apply_overlay(source_hash, elements, overrides)` for the normalise + spellfix layers, selected by one `processing.text_source`; applied before reassembly at both the chunk and enrich sites so they share one coordinate space | Implement the cleaning transforms; pick the text_source (callers/config do) |
 | `analyse/*.py` | Wrap Isaacus API calls; `query.py` loads enrichment graph from Parquet for PII masking | Handle PDFs directly |
 | `analyse/enrich_stage.py` | `enrich_shards()` over a shard dir — reassemble narrative via `reassemble_narrative`, call Kanon-2 per doc, write `*.enrichment_entities.parquet` + `*.enrichment_meta.parquet` siblings. Per-stage `CheckpointManager`, per-doc failure isolation | Implement matching/linking; know about registers |
 | `link/normalise.py` | Minimal name/address normalisation for matching (casefold, punctuation, street-abbrev, drop state/PO-box tokens) | Address *validation* (G-NAF is a separate, corpus-dependent concern) |
@@ -132,6 +136,7 @@ A corpus exists to mature Womblex capability, not host custom code. Corpus-side 
 - isaacus for analysis
 - presidio-anonymizer for PII replacement
 - sentence-transformers for PII context validation
+- spylls (pure-Python Hunspell) for the `spellfix` OCR-repair op; bundled en_AU dict under `_models/en_AU`
 - No heavyweight ML frameworks in core (models bundled in rapidocr-onnxruntime wheel, loaded lazily)
 - Local models in `models/` are resolved automatically by `utils/models.py` — no network access required at runtime
 ## Common Pitfalls

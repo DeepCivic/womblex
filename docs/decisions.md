@@ -194,6 +194,49 @@ classification decisions:
   belongs at the *engine/resolution* level (see the OCR-quality plan: recognition
   input resolution, preprocessing gate, confidence-gated VLM escalation), not in
   a post-extraction text rewrite.
+
+### Dictionary-gated OCR repair (`womblex spellfix`) — *v1 shipped (2026-06)*
+A **separate** op from `normalise` (which stays fidelity-neutral). It targets a
+narrow, observed failure the dead-end above does *not* cover: digit/letter glyph
+confusions surviving into chunks (`chi1d`→`child`, `p1an`→`plan`). Crucially it
+is **not** the rejected substitution-table approach — it does not enumerate
+errors as fixed rules. It validates candidates against the bundled en_AU Hunspell
+dictionary (`spylls`, harvested from the Australian Writing MCP; MIT/SCOWL) and
+rewrites a token only when **three gates** pass: out-of-dictionary trigger,
+single-character in-dictionary candidate, and a *unique* such candidate
+(unambiguity gate). Default Tier A swaps only OCR digit→letter homoglyphs
+(length-preserving, near-zero false positives); Tier B (general edit-distance-1)
+is opt-in and carries a proper-noun corruption risk, so it is flag-gated.
+
+What it does **not** catch: valid-word misreads (`com`→`corn`) — the wrong word
+is in the dictionary, so nothing fires; those still belong to the engine/
+resolution level. Implemented as `process/spellfix.py` (corrector) +
+`process/spellfix_stage.py` (driver) + `store/spellfix_output.py`.
+
+**Repair lives at the element layer, not the chunk layer — dictated by how
+Kanon-2 is designed to be used.** The enricher (`kanon-2-enricher`) ingests the
+*whole document* as one string and does its own internal chunking/segmentation
+(`overflow_strategy='auto'` stitches long docs back into a single prediction);
+its returned ILGS spans are Unicode code-point offsets into *that* source string.
+PII then maps those mention offsets onto our chunks via `chunk.start_char`. So
+the enricher input and the chunk source must be the **same string** in **one
+coordinate space**. Repairing at the chunk layer could never feed enrichment (it
+reassembles from elements, not chunks) and would split that coordinate space.
+Therefore spellfix writes an **element-text overlay** (`*.spellfix_text.parquet`,
+same shape as `*.normalised_text.parquet`) plus a `*.spellfix_corrections.parquet`
+audit; the raw `*.elements.parquet` is never modified.
+
+**Composition is a linear cleaning chain, selected by one setting.** Cleaning ops
+chain — `elements → normalised_text → spellfix_text` (spellfix overlays the
+normalise layer when present) — each a full passthrough layer; the last one
+produced is the canonical text. Consumers select it via a **single** pipeline
+setting, `processing.text_source` (`elements` | `normalised` | `spellfix`),
+resolved by `process/text_overlay.py` and applied before reassembly at *both*
+sites (`chunk_stage`, `enrich_stage`). It is deliberately one knob, not per-stage:
+divergent layers would desync the Kanon-2 mention↔chunk offset mapping. Embeddings
+and PII then inherit the repaired text for free (chunks derive from the same
+overlaid elements). A missing overlay falls back to verbatim, so stage *ordering*
+is the only requirement, not a hard dependency.
 - **Inline-per-span source redactions (#C).** Page-prefix `<REDACTED>` is in
   place; inline-per-span placement needs bbox-to-text character mapping (raster
   path now has per-word bboxes; native path needs a text-to-bbox map).

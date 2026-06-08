@@ -37,6 +37,7 @@ from womblex.cli import (
     quality,
     redact,
     score,
+    spellfix,
     verify,
 )
 from womblex.cli._shared import setup_logging
@@ -50,6 +51,7 @@ ALL_COMMANDS = [
     *link.COMMANDS,
     *embed.COMMANDS,
     *normalise.COMMANDS,
+    *spellfix.COMMANDS,
     *quality.COMMANDS,
     *pii.COMMANDS,
     *ingest.COMMANDS,
