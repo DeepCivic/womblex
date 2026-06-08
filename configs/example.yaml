@@ -71,6 +71,16 @@ normalise:
   despace_page_marker: true   # Heal '3|P age' footers → '3|Page' (footer/header kinds only).
   # substitutions: {}         # Literal {find: replace} for known letterhead/font-map typos.
 
+# Dictionary-gated OCR character-confusion repair (`womblex spellfix --shards`).
+# Separate, opt-in op (distinct from `normalise`). Reads `*.chunks.parquet`,
+# writes `*.chunks_repaired.parquet` + `*.spellfix_corrections.parquet` (audit);
+# raw chunks untouched. Only rewrites out-of-dict tokens with a single
+# unambiguous in-dict candidate one character away.
+spellfix:
+  enabled: false
+  general_edits: false        # Tier A homoglyph (digit→letter) only. true = Tier B edit-1 (proper-noun risk).
+  # dict_name: en_AU          # Hunspell dict resolved via utils.models (bundled under _models/en_AU).
+
 # PII cleaning uses regex pattern recognisers (Presidio-style) validated by
 # a Sentence Transformers context model (all-MiniLM-L6-v2, 22M params).
 #

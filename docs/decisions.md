@@ -194,6 +194,30 @@ classification decisions:
   belongs at the *engine/resolution* level (see the OCR-quality plan: recognition
   input resolution, preprocessing gate, confidence-gated VLM escalation), not in
   a post-extraction text rewrite.
+
+### Dictionary-gated OCR repair (`womblex spellfix`) — *v1 shipped (2026-06)*
+A **separate** op from `normalise` (which stays fidelity-neutral). It targets a
+narrow, observed failure the dead-end above does *not* cover: digit/letter glyph
+confusions surviving into chunks (`chi1d`→`child`, `p1an`→`plan`). Crucially it
+is **not** the rejected substitution-table approach — it does not enumerate
+errors as fixed rules. It validates candidates against the bundled en_AU Hunspell
+dictionary (`spylls`, harvested from the Australian Writing MCP; MIT/SCOWL) and
+rewrites a token only when **three gates** pass: out-of-dictionary trigger,
+single-character in-dictionary candidate, and a *unique* such candidate
+(unambiguity gate). Default Tier A swaps only OCR digit→letter homoglyphs
+(length-preserving, near-zero false positives); Tier B (general edit-distance-1)
+is opt-in and carries a proper-noun corruption risk, so it is flag-gated.
+
+What it does **not** catch: valid-word misreads (`com`→`corn`) — the wrong word
+is in the dictionary, so nothing fires; those still belong to the engine/
+resolution level. Implemented as `process/spellfix.py` (corrector) +
+`process/spellfix_stage.py` (driver) + `store/spellfix_output.py`. Runs at the
+**chunk** level, *before* the Isaacus-facing consumers (opposite ordering to PII
+masking, which is terminal): writes a `*.chunks_repaired.parquet` layer plus a
+`*.spellfix_corrections.parquet` audit — the raw `*.chunks.parquet` is never
+modified. **Deferred:** wiring the chunk consumers (embed / quality) to prefer
+the repaired layer behind a flag — same write-first / consume-later shape as the
+normalise and PII clean_text sidecars.
 - **Inline-per-span source redactions (#C).** Page-prefix `<REDACTED>` is in
   place; inline-per-span placement needs bbox-to-text character mapping (raster
   path now has per-word bboxes; native path needs a text-to-bbox map).

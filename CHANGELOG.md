@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`spellfix` stage — dictionary-gated OCR character-confusion repair
+  (`womblex spellfix`).** A separate, opt-in cleaning op (distinct from the
+  fidelity-neutral `normalise`) that fixes digit/letter glyph confusions
+  surviving into chunks (`chi1d`→`child`). Validates candidates against the
+  bundled en_AU Hunspell dictionary (`spylls`, harvested from the Australian
+  Writing MCP; MIT/SCOWL) and rewrites a token only on three gates:
+  out-of-dictionary trigger, single-character in-dictionary candidate, and a
+  *unique* such candidate. Default Tier A swaps only OCR digit→letter homoglyphs
+  (length-preserving); Tier B general edit-distance-1 is opt-in (`--general` /
+  `general_edits`, carries proper-noun risk). Reads `*.chunks.parquet`; writes
+  `*.chunks_repaired.parquet` (repaired layer) + `*.spellfix_corrections.parquet`
+  (audit) — raw chunks are never modified. New deps: `spylls`; bundled dict under
+  `_models/en_AU`. (`process/spellfix.py`, `process/spellfix_stage.py`,
+  `store/spellfix_output.py`, `cli/spellfix.py`, `SpellfixConfig`.)
 - **`score --text-source` — CER of extraction vs normalisation.** `womblex
   score` (and `score_labels`) now accept `text_source={elements,normalised}`:
   `normalised` reassembles the labelled page from the `*.normalised_text.parquet`

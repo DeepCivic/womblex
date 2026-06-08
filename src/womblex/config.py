@@ -401,6 +401,32 @@ class NormaliseConfig(BaseModel):
     )
 
 
+class SpellfixConfig(BaseModel):
+    """Dictionary-gated OCR character-confusion repair (``womblex spellfix``).
+
+    A separate, opt-in cleaning op (distinct from ``normalise``, which is
+    fidelity-neutral formatting only). Reads ``*.chunks.parquet`` and writes a
+    repaired ``*.chunks_repaired.parquet`` layer plus a ``*.spellfix_corrections.
+    parquet`` audit trail — the raw chunks are never modified. Only out-of-
+    dictionary tokens with a single unambiguous in-dictionary candidate are
+    rewritten. See ``docs/decisions.md`` "Dictionary-gated OCR repair".
+    """
+
+    enabled: bool = Field(default=False, description="Run the spellfix stage.")
+    general_edits: bool = Field(
+        default=False,
+        description="Tier B: enable general edit-distance-1 candidates "
+                    "(insert/delete/substitute/transpose) in addition to the default "
+                    "Tier A digit→letter homoglyph swaps. Higher recall but carries a "
+                    "proper-noun corruption risk — opt-in.",
+    )
+    dict_name: str = Field(
+        default="en_AU",
+        description="Hunspell dictionary name resolved via utils.models "
+                    "(bundled under `_models/en_AU`).",
+    )
+
+
 class QualityConfig(BaseModel):
     """Chunk-quality annotation op (``womblex quality``).
 
@@ -602,6 +628,7 @@ class WomblexConfig(BaseModel):
     redaction: RedactionConfig = RedactionConfig()
     chunking: ChunkingConfig = ChunkingConfig()
     normalise: NormaliseConfig = NormaliseConfig()
+    spellfix: SpellfixConfig = SpellfixConfig()
     quality: QualityConfig = QualityConfig()
     enrichment: EnrichmentConfig = EnrichmentConfig()
     embedding: EmbeddingConfig = EmbeddingConfig()
