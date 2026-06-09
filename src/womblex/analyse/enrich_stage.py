@@ -23,7 +23,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
-from womblex.analyse.enrich import enrich_document
+from womblex.analyse.enrich import enrich_document_raw
 from womblex.analyse.models import EnrichmentResult
 from womblex.config import EnrichmentConfig
 from womblex.ingest.elements import Element
@@ -31,6 +31,10 @@ from womblex.process.chunk_stage import _batch_bases
 from womblex.process.chunker import reassemble_narrative
 from womblex.process.text_overlay import apply_overlay, load_overlay
 from womblex.store.checkpoint import CheckpointManager
+from womblex.store.enrichment_doc import (
+    enrichment_doc_path_for,
+    write_enrichment_doc_shard,
+)
 from womblex.store.enrichment_output import (
     enrichment_entities_path_for,
     write_enrichment_entities_shard,
@@ -54,6 +58,7 @@ def enrich_shards(
     *,
     client: object,
     text_source: str = "elements",
+    persist_document: bool = False,
     checkpoint_mgr: CheckpointManager | None = None,
 ) -> EnrichStageResult:
     """Enrich every batch in ``shard_dir`` and write enrichment siblings.
@@ -61,6 +66,11 @@ def enrich_shards(
     ``client`` is an ``isaacus.Isaacus`` instance (injected so tests can
     pass a fake). Skips batches whose entities sidecar already exists when
     ``checkpoint_mgr`` is provided and every contained doc is checkpointed.
+
+    When ``persist_document`` is true, also writes a
+    ``*.enrichment_doc.parquet`` sibling holding the raw ILGS Document per
+    doc (stamped with ``text_source``) so the chunk stage can reuse it for
+    semchunk-4 AI chunking without re-enriching (``docs/decisions.md``).
     """
     if not shard_dir.is_dir():
         raise FileNotFoundError(f"shard directory not found: {shard_dir}")
@@ -75,19 +85,22 @@ def enrich_shards(
     total_entities = 0
 
     for base in bases:
-        if checkpoint_mgr is not None and _all_docs_checkpointed(base, checkpoint_mgr):
+        if checkpoint_mgr is not None and _all_docs_checkpointed(
+            base, checkpoint_mgr, persist_document=persist_document,
+        ):
             logger.info("enrich_shards: skipping %s (all docs checkpointed)", base.stem)
             continue
 
         narratives, doc_ids_by_hash = _load_narratives(base, text_source)
         results: list[tuple[str, EnrichmentResult]] = []
+        doc_rows: list[tuple[str, str, str]] = []  # (source_hash, text_source, json)
         errored: set[str] = set()
 
         for source_hash, text in narratives.items():
             if len(text.strip()) < max(1, enrichment_config.skip_short_documents):
                 continue  # nothing to enrich — terminal, counts as resolved
             try:
-                enr = enrich_document(
+                enr, raw_doc = enrich_document_raw(
                     text, client,
                     model=enrichment_config.model,
                     overflow_strategy=enrichment_config.overflow_strategy,
@@ -102,6 +115,10 @@ def enrich_shards(
                 errored.add(source_hash)
                 continue
             results.append((source_hash, enr))
+            if persist_document:
+                # raw_doc is the SDK ILGS Document (typed object to avoid a hard
+                # isaacus import); model_dump_json round-trips it losslessly.
+                doc_rows.append((source_hash, text_source, raw_doc.model_dump_json()))  # type: ignore[attr-defined]
             total_entities += (
                 len(enr.persons) + len(enr.locations)
                 + len(enr.terms) + len(enr.external_documents)
@@ -109,6 +126,8 @@ def enrich_shards(
 
         write_enrichment_entities_shard(results, base)
         write_enrichment_meta_shard(results, base)
+        if persist_document:
+            write_enrichment_doc_shard(doc_rows, base)
         batches_written += 1
         docs_enriched += len(results)
 
@@ -186,9 +205,18 @@ def _load_narratives(
     return narratives, src_to_doc
 
 
-def _all_docs_checkpointed(base_path: Path, mgr: CheckpointManager) -> bool:
-    """True if the entities sidecar exists and every manifest doc is checkpointed."""
+def _all_docs_checkpointed(
+    base_path: Path, mgr: CheckpointManager, *, persist_document: bool = False,
+) -> bool:
+    """True if the entities sidecar exists and every manifest doc is checkpointed.
+
+    When ``persist_document`` is requested, the doc sidecar must also exist —
+    otherwise a batch enriched before the flag was enabled would be skipped on
+    resume and never gain its ``*.enrichment_doc.parquet``.
+    """
     if not enrichment_entities_path_for(base_path).exists():
+        return False
+    if persist_document and not enrichment_doc_path_for(base_path).exists():
         return False
     try:
         m = read_manifest(base_path)

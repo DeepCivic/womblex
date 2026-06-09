@@ -286,6 +286,29 @@ def enrich_document(
                             retry_base_delay=retry_base_delay)[0]
 
 
+def enrich_document_raw(
+    text: str,
+    client: object,
+    *,
+    model: str = DEFAULT_MODEL,
+    overflow_strategy: str = "auto",
+    max_retries: int = DEFAULT_MAX_RETRIES,
+    retry_base_delay: float = DEFAULT_RETRY_BASE_DELAY,
+) -> tuple[EnrichmentResult, object]:
+    """Like :func:`enrich_document` but also return the *raw* SDK Document.
+
+    The raw ``isaacus.types.ilgs.v1.document.Document`` is the object semchunk
+    4 accepts for AI chunking without re-enriching (``docs/decisions.md``). It
+    is already in hand inside :func:`enrich_documents_raw` and normally
+    discarded after conversion; this entry point hands it back so the enrich
+    stage can persist it for chunk-stage reuse.
+    """
+    return enrich_documents_raw([text], client, model=model,
+                                overflow_strategy=overflow_strategy,
+                                max_retries=max_retries,
+                                retry_base_delay=retry_base_delay)[0]
+
+
 def enrich_documents(
     texts: list[str],
     client: object,
@@ -297,7 +320,7 @@ def enrich_documents(
 ) -> list[EnrichmentResult]:
     """Enrich one or more documents via the Isaacus enrichment API.
 
-    Handles 429 rate-limit errors with exponential backoff.
+    Thin wrapper over :func:`enrich_documents_raw` that drops the raw Document.
 
     Args:
         texts: List of full document texts.
@@ -315,6 +338,32 @@ def enrich_documents(
     Raises:
         RuntimeError: If enrichment fails after all retries.
     """
+    return [
+        result for result, _raw in enrich_documents_raw(
+            texts, client, model=model, overflow_strategy=overflow_strategy,
+            max_retries=max_retries, retry_base_delay=retry_base_delay,
+        )
+    ]
+
+
+def enrich_documents_raw(
+    texts: list[str],
+    client: object,
+    *,
+    model: str = DEFAULT_MODEL,
+    overflow_strategy: str = "auto",
+    max_retries: int = DEFAULT_MAX_RETRIES,
+    retry_base_delay: float = DEFAULT_RETRY_BASE_DELAY,
+) -> list[tuple[EnrichmentResult, object]]:
+    """Enrich documents, returning ``(EnrichmentResult, raw SDK Document)`` pairs.
+
+    The single source of the retry/backoff logic; :func:`enrich_documents`
+    and :func:`enrich_document` are thin views that drop the raw Document.
+    Handles 429 rate-limit errors with exponential backoff.
+
+    Raises:
+        RuntimeError: If enrichment fails after all retries.
+    """
     last_error: Exception | None = None
 
     for attempt in range(max_retries + 1):
@@ -324,10 +373,10 @@ def enrich_documents(
                 texts=texts,
                 overflow_strategy=overflow_strategy,
             )
-            # Convert SDK response to our models
-            results: list[EnrichmentResult] = []
+            # Convert SDK response to our models, keeping the raw Document.
+            results: list[tuple[EnrichmentResult, object]] = []
             for r in response.results:
-                results.append(_convert_document(r.document))
+                results.append((_convert_document(r.document), r.document))
 
             logger.info(
                 "Enriched %d document(s), usage: %d input tokens",

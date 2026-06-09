@@ -529,6 +529,16 @@ class EnrichmentConfig(BaseModel):
 
     )
 
+    persist_document: bool = Field(
+        default=False,
+        description=(
+            "Persist the raw ILGS Document per doc to *.enrichment_doc.parquet so "
+            "the chunk stage reuses it for semchunk-4 AI chunking without "
+            "re-enriching (docs/decisions.md). Off by default (large blob); "
+            "auto-enabled by WomblexConfig when chunking.chunking_model is set."
+        ),
+    )
+
 
 
 class DatasetConfig(BaseModel):
@@ -698,20 +708,22 @@ class WomblexConfig(BaseModel):
     processing: ProcessingConfig = ProcessingConfig()
 
     @model_validator(mode="after")
-    def _warn_double_enrichment(self) -> "WomblexConfig":
-        """Warn when AI chunking + the enrich stage both enrich the same text.
+    def _wire_ai_chunking_reuse(self) -> "WomblexConfig":
+        """Auto-wire single-enrichment reuse when AI chunking + enrich both run.
 
-        semchunk 4 AI chunking (``chunking.chunking_model``) enriches each
-        document to pick boundaries; the enrich stage enriches the same
-        reassembled narrative. Running both pays for Kanon-2 enrichment twice
-        — surface it rather than silently double-billing.
+        To avoid enriching the same narrative twice, the enrich stage persists
+        the raw ILGS Document and the chunk stage reuses it (docs/decisions.md).
+        When both are on we auto-enable ``enrichment.persist_document`` and warn
+        only about the ordering the config can't enforce: enrich must run before
+        chunk, else chunk self-enriches (the double-enrich falls back per doc).
         """
         if self.chunking.chunking_model and self.enrichment.enabled:
+            self.enrichment.persist_document = True
             logging.getLogger(__name__).warning(
-                "chunking.chunking_model=%r enables AI chunking AND "
-                "enrichment.enabled is true: the same narrative is enriched "
-                "twice (once at chunk time, once in the enrich stage). See "
-                "process/chunker.py for the deferred graph-reuse optimisation.",
+                "chunking.chunking_model=%r + enrichment.enabled: auto-enabled "
+                "enrichment.persist_document so chunk reuses the enrich stage's "
+                "Document. Run `enrich` BEFORE `chunk` — otherwise the reuse "
+                "sidecar is absent and chunk self-enriches (double cost).",
                 self.chunking.chunking_model,
             )
         return self

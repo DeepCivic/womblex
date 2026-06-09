@@ -35,6 +35,7 @@ from womblex.process.chunker import (
 )
 from womblex.process.text_overlay import apply_overlay, load_overlay
 from womblex.store.checkpoint import CheckpointManager
+from womblex.store.enrichment_doc import read_enrichment_docs
 from womblex.store.output import (
     CHUNKS_SUFFIX,
     _SHARD_ROLES,
@@ -120,12 +121,17 @@ def chunk_shards(
         )
 
         if inputs:
+            overrides = (
+                _load_narrative_overrides(base, text_source)
+                if chunking_config.chunking_model else None
+            )
             chunks_by_hash = chunk_batch(
                 inputs,
                 chunker,
                 overlap=chunking_config.overlap,
                 processes=chunking_config.processes,
                 progress=chunking_config.progress,
+                narrative_overrides=overrides,
             )
             rows = _chunks_to_rows(chunks_by_hash)
             chunked_now = sum(1 for c in chunks_by_hash.values() if c)
@@ -224,6 +230,55 @@ def _build_inputs_for_batch(
         apply_overlay(source_hash, elements, overrides)
         inputs.append(build_chunk_input(source_hash, elements, include_tables=chunk_tables_enabled))
     return inputs, src_to_doc
+
+
+# ---------------------------------------------------------------------------
+# AI-chunking reuse: rehydrate the enrich stage's persisted ILGS Documents
+# ---------------------------------------------------------------------------
+
+
+def _load_narrative_overrides(
+    base_path: Path, text_source: str,
+) -> dict[str, object] | None:
+    """Load and rehydrate ``*.enrichment_doc.parquet`` Documents for a batch.
+
+    Returns ``{source_hash: Document}`` for chunk_batch's ``narrative_overrides``
+    (the byte-identity guard there decides whether each is actually reused), or
+    ``None`` when no sidecar exists / the SDK is unavailable — both cases fall
+    back to semchunk self-enrich. The stamped ``text_source`` is used only as a
+    cheap pre-filter; a stamp mismatch is logged but still passed through, since
+    the authoritative guard is byte-identity of ``Document.text``.
+    """
+    stored = read_enrichment_docs(base_path)
+    if not stored:
+        return None
+    try:
+        from isaacus.types.ilgs.v1.document import Document
+    except ImportError:
+        logger.warning(
+            "chunk reuse: isaacus SDK not importable; cannot rehydrate "
+            "persisted Documents for %s — self-enriching instead.", base_path.stem,
+        )
+        return None
+
+    overrides: dict[str, object] = {}
+    for source_hash, (stamp, doc_json) in stored.items():
+        if not doc_json:
+            continue
+        if stamp and stamp != text_source:
+            logger.info(
+                "chunk reuse: %s persisted under text_source=%r but chunking "
+                "under %r; byte-identity guard will decide.",
+                source_hash, stamp, text_source,
+            )
+        try:
+            overrides[source_hash] = Document.model_validate_json(doc_json)
+        except Exception as e:  # corrupt blob — skip, fall back per doc
+            logger.warning(
+                "chunk reuse: could not rehydrate Document for %s (%s); "
+                "self-enriching instead.", source_hash, e,
+            )
+    return overrides or None
 
 
 # ---------------------------------------------------------------------------

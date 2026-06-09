@@ -162,11 +162,15 @@ For each file processed via `operations.py`:
       │     elements.parquet, table_cells.parquet, form_fields.parquet, _manifest.parquet
       ├── per-stage sidecars (each written by its own `womblex <stage> --shards`
       │   command over the shard dir; joinable on source_hash):
+      │     ├── *.normalised_text.parquet                          (normalise — offline overlay)
+      │     ├── *.spellfix_text.parquet + *.spellfix_corrections.parquet (spellfix — offline overlay)
       │     ├── *.chunks.parquet                                    (chunk — I2)
+      │     ├── *.chunk_quality.parquet                             (quality — offline annotation)
       │     ├── *.redactions.parquet                                (redact — I3)
       │     ├── *.enrichment_entities.parquet + *.enrichment_meta.parquet (enrich — I7)
       │     ├── *.entity_links.parquet                              (link — I7)
-      │     └── *.embeddings.parquet                                (embed — I7)
+      │     ├── *.embeddings.parquet                                (embed — I7)
+      │     └── *.pii_spans.parquet + *.clean_text.parquet          (pii — terminal mask, after enrich/embed)
       ├── write_batch_enrichment(batch, dir) → entities/graph_edges/enrichment_meta
       │     (legacy E2E single-file writer; the per-stage enrich shards above
       │      reuse the same ENTITY/GRAPH schemas, keyed on source_hash)

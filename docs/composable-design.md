@@ -63,7 +63,17 @@ extract(csv) → .parquet                                      tabular to Parque
 ingest_gnaf(dir) → done                                      PSV to Parquet, nothing else
 ingest_geo(dir) → done                                       SHP to GeoParquet, nothing else
 load_graph(parquet_dir) → pii_clean(chunks, graph) → done    re-run PII from saved graph
+extract(pdf) → enrich → chunk(chunking_model) → done         AI chunking reuses enrich's Document
 ```
+
+The last row is the AI-chunking single-enrichment reuse seam — the same
+persisted-output-reuse shape as `load_graph → pii` (a later stage consumes an
+earlier stage's sidecar rather than recomputing). `enrich` writes the raw ILGS
+Document to `*.enrichment_doc.parquet`; `chunk` reuses it when `chunking_model`
+is set, guarded by byte-identity of `Document.text` against the reassembled
+narrative. It is an *ordering* requirement, not a hard dependency: run out of
+order or without the sidecar and `chunk` self-enriches (composable fallback,
+the same "missing overlay falls back to verbatim" idiom as `text_source`).
 
 ### Invalid Compositions (precondition violations)
 
