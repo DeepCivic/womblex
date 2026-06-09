@@ -55,6 +55,11 @@ chunking:
   chunk_size: 480       # Max tokens/chunk. null = auto-derive from tokeniser's model_max_length.
   enabled: true
   chunk_tables: true
+  # chunking_model: kanon-2-enricher  # semchunk 4 AI chunking — boundaries follow the
+  #                        # Isaacus enricher's structure spans (calls the API per doc at
+  #                        # chunk time). null (default) = offline token chunking. NOTE:
+  #                        # enabling this AND the enrich stage enriches the same text twice.
+  # tokenizer_kwargs: null  # Extra kwargs forwarded to the tokeniser/token counter.
   # overlap: null          # Token overlap between chunks. <1 = proportion, >=1 = absolute tokens.
   # memoize: true          # Cache token counts for repeated substrings.
   # cache_maxsize: null     # Bound memoization cache. null = unbounded.

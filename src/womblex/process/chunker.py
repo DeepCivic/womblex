@@ -13,7 +13,11 @@ Pass-through to semchunk:
 
 - :func:`create_chunker` wraps ``semchunk.chunkerify`` and exposes
   every creation-time parameter (``tokenizer`` → ``tokenizer_or_token_counter``,
-  ``chunk_size``, ``memoize``, ``cache_maxsize``, ``max_token_chars``).
+  ``chunk_size``, ``chunking_model``, ``isaacus_client``,
+  ``tokenizer_kwargs``, ``memoize``, ``cache_maxsize``, ``max_token_chars``).
+  ``chunking_model`` is semchunk 4's AI-chunking lever and stays ``None``
+  by default — composable, so callers using a non-Kanon tokeniser keep the
+  offline token-based split untouched.
 - :func:`chunk_batch` is the single entry point used by every caller
   (E2E :func:`womblex.operations.run_chunking`, per-stage
   :mod:`womblex.process.chunk_stage`). It flattens narratives across
@@ -33,6 +37,16 @@ Womblex-only surface (no semchunk equivalent):
   :func:`build_chunk_input` — element-stream → ``ChunkInput`` projection.
 - :func:`_repair_redaction_splits` — heal ``<REDACTED>`` markers split
   across a chunk boundary; semchunk has no opinion about our marker.
+
+AI chunking (semchunk 4) and double enrichment: when ``chunking_model``
+is set, semchunk enriches each document with ``kanon-2-enricher`` to pick
+chunk boundaries. Womblex's separate ``enrich`` stage enriches the *same*
+reassembled narrative with the *same* model — so running both AI chunking
+and the enrich stage pays for Kanon-2 enrichment twice. The composable
+default (``chunking_model=None``) avoids this entirely; reusing one
+enrichment graph across both stages (semchunk accepts a pre-enriched
+``ILGSDocument`` input) is a deferred orchestration optimisation tracked
+in ``docs/decisions.md``.
 """
 
 from __future__ import annotations
@@ -99,6 +113,9 @@ def create_chunker(
     tokenizer: str | Callable[[str], int],
     chunk_size: int | None = None,
     *,
+    chunking_model: str | None = None,
+    isaacus_client: object | None = None,
+    tokenizer_kwargs: dict | None = None,
     memoize: bool = True,
     cache_maxsize: int | None = None,
     max_token_chars: int | None = None,
@@ -112,6 +129,19 @@ def create_chunker(
             semchunk, which derives the size from the tokeniser's
             ``model_max_length`` (only valid for a real tokeniser, not a
             callable token counter).
+        chunking_model: Isaacus enrichment model (e.g. ``"kanon-2-enricher"``)
+            enabling semchunk 4's AI chunking — boundaries follow the
+            enricher's structure spans instead of the purely token/recursive
+            split. ``None`` (default) keeps the offline token-based algorithm,
+            so non-Kanon callers are unaffected. When set, semchunk calls the
+            Isaacus API per document at chunk time (needs the SDK + a key);
+            see the AI-chunking note in the module docstring on avoiding a
+            second enrichment pass.
+        isaacus_client: An ``isaacus.Isaacus`` instance for AI chunking. When
+            ``None`` and ``chunking_model`` is set, semchunk constructs one
+            from ``ISAACUS_API_KEY``. Ignored unless ``chunking_model`` is set.
+        tokenizer_kwargs: Extra keyword arguments forwarded to the tokeniser /
+            token counter (semchunk 4).
         memoize: Cache token counts for repeated substrings.
         cache_maxsize: Upper bound on memoization cache entries.
             ``None`` = unbounded.
@@ -120,6 +150,9 @@ def create_chunker(
     return semchunk.chunkerify(
         tokenizer,
         chunk_size=chunk_size,
+        chunking_model=chunking_model,
+        isaacus_client=isaacus_client,
+        tokenizer_kwargs=tokenizer_kwargs,
         memoize=memoize,
         cache_maxsize=cache_maxsize,
         max_token_chars=max_token_chars,

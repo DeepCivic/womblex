@@ -166,6 +166,79 @@ classification decisions:
 
 ## Deferred / backlog
 
+- **AI chunking (semchunk 4) — single-enrichment graph reuse.** *Specced
+  2026-06, off-by-default, not yet built.* The `chunking.chunking_model`
+  pass-through (shipped 2026-06) lets semchunk pick chunk boundaries from the
+  Kanon-2 enricher's structure spans; it is **opt-in and off by default** so
+  non-Kanon tokeniser users keep the offline token/recursive split
+  (composability). The open work is *cost*: AI chunking enriches each document
+  at chunk time, and the separate `enrich` stage enriches the *same*
+  reassembled narrative again — running both pays Kanon-2 twice (a
+  `WomblexConfig` validator warns on this combination). The fix is to enrich
+  once and feed that graph to both stages.
+
+  **Mechanism (verified against installed semchunk 4.0.0 source).**
+  `semchunk.chunk` / the chunker accept `str | ILGSDocument`, where
+  `ILGSDocument` is `isaacus.types.ilgs.v1.document.Document` — the *exact* SDK
+  object `analyse/enrich.py` already receives as
+  `response.results[i].document` and discards after `_convert_document`. When a
+  Document is passed, semchunk sets `text = ilgs_doc.text` and builds its span
+  tree **from the doc, with no API call** (`semchunk.py:227,236,265`); chunk
+  offsets then index `ilgs_doc.text`. Both `enrich_shards` and `chunk_shards`
+  reassemble the narrative through the *same* `reassemble_narrative` + same
+  `text_source` overlay (identical by construction), and `enrich`/`chunk` are
+  sibling stages depending only on `elements`, so running enrich first is
+  dependency-safe (embed reads chunks; link/pii read enrichment; nothing feeds
+  enrich from chunks).
+
+  **Why a new sidecar is unavoidable.** Stages are separate CLI commands with
+  no shared memory, and the existing `*.enrichment_entities.parquet` /
+  `*.enrichment_meta.parquet` are flattened and lossy (entity mentions + meta
+  only — no segment tree, headings, crossreferences, or the full span set
+  semchunk consumes). Reuse requires persisting the *raw* Document. It is a
+  Stainless-generated pydantic model, so `model_dump_json()` ↔
+  `model_validate_json()` round-trips losslessly.
+
+  **Chosen design — Option 2 (persist raw Document, reorder enrich→chunk,
+  chunk reuses).** Rejected alternatives: Option 1 (share the in-memory
+  Document — impossible across separate CLI stages); Option 3 (merge enrich +
+  chunk into one stage — breaks the one-stage-one-sidecar composability the
+  pipeline is built on). Option 2 steps:
+  1. New self-contained store `store/enrichment_doc.py` →
+     `*.enrichment_doc.parquet`, one row `{source_hash, document_json}`;
+     mirrors `enrichment_output.py`.
+  2. `analyse/enrich.py` exposes the raw Document alongside the converted
+     `EnrichmentResult` (it is already in hand inside `enrich_documents`).
+  3. `enrich_stage.py` writes the doc sidecar **off by default** — opt-in via
+     an `enrichment.persist_document` flag, auto-enabled when
+     `chunking.chunking_model` is set; users who never reuse pay no storage.
+     Checkpoint/skip parity with the entities sidecar.
+  4. `chunk_stage.py` + `process/chunker.chunk_batch`: when `chunking_model`
+     is set, load the doc sidecar and, per `source_hash`, pass the rehydrated
+     Document into semchunk for the *narrative* path (tables stay token-mode).
+     Offsets index `document.text == narrative`, so `page_breaks` mapping is
+     unchanged. Fallback when no sidecar present: pass `chunking_model` and let
+     semchunk self-enrich (the double-enrich — only when enrich didn't run
+     first).
+  5. Ordering contract: with AI chunking on, run `enrich` before `chunk`.
+     Repoint the existing `WomblexConfig` validator from "warns about
+     double-enrich" to "warns only when reuse isn't wired (sidecar absent /
+     enrich after chunk)".
+
+  **Verification gates — require a live Isaacus key, hold implementation until
+  checked (do not build blind):**
+  1. `document.text` is byte-identical to the input narrative (the offset
+     basis the whole reuse rests on).
+  2. A rehydrated `Document.model_validate_json()` satisfies semchunk's
+     `isinstance(text, ILGSDocument)` runtime check (same SDK class identity).
+  3. `overflow_strategy="auto"` long-doc behaviour: enrich stitches multiple
+     prechunks; semchunk treats a supplied Document as a single prechunk —
+     confirm the span set still indexes the full source text.
+
+  Estimated ~1–1.5 days, the `chunk_batch` Document-acceptance change being the
+  main risk. Until this lands, do not enable `chunking_model` alongside the
+  enrich stage in a shipped config.
+
 - **Downstream text-cleaning op (#B/#D)** — *v1 shipped* as `womblex normalise
   --shards` (`process/normalise.py` transforms + `process/normalise_stage.py`
   driver). Writes a `*.normalised_text.parquet` text layer over the narrative
