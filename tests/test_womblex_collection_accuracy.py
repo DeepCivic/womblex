@@ -154,6 +154,8 @@ class TestRedactionDetection:
     def test_throsby_redaction_count_and_pages(self) -> None:
         if not THROSBY_PDF.exists():
             pytest.skip(f"Fixture missing: {THROSBY_PDF}")
+        if not THROSBY_GT_REDACTED.exists():
+            pytest.skip(f"Fixture missing: {THROSBY_GT_REDACTED}")
 
         from womblex.redact.detector import RedactionDetector
         from womblex.redact.stage import detect_redactions
@@ -408,6 +410,8 @@ class TestExtractionFidelity:
         """CER between native PDF extraction and human transcript."""
         if not THROSBY_PDF.exists():
             pytest.skip(f"Fixture missing: {THROSBY_PDF}")
+        if not THROSBY_GT_REDACTED.exists():
+            pytest.skip(f"Fixture missing: {THROSBY_GT_REDACTED}")
 
         from womblex.ingest.detect import DetectionConfig, detect_file_type
         from womblex.ingest.extract import extract_text
