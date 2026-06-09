@@ -103,6 +103,48 @@ class TestEnrichShards:
         assert "throsby" not in ckpt.state.processed_ids
 
 
+class TestPersistDocumentReuse:
+    """Live: the persisted Document round-trips and byte-matches the narrative.
+
+    This is the runtime form of verification gate 1 (docs/decisions.md): the
+    chunk stage's reuse guard accepts a Document only when ``document.text``
+    equals the reassembled narrative, so the persisted-then-rehydrated text
+    must be byte-identical to what enrich/chunk reassemble.
+    """
+
+    def test_doc_sidecar_round_trips_and_matches_narrative(self, shard_dir, isaacus_client):
+        from womblex.analyse.enrich_stage import _load_narratives
+        from womblex.store.enrichment_doc import (
+            enrichment_doc_path_for,
+            read_enrichment_docs,
+        )
+
+        enrich_shards(shard_dir, EnrichmentConfig(), client=isaacus_client,
+                      persist_document=True)
+        base = shard_dir / "batch-0001.parquet"
+        assert enrichment_doc_path_for(base).exists()
+
+        stored = read_enrichment_docs(base)
+        assert stored, "persist_document=True produced no doc sidecar rows"
+
+        from isaacus.types.ilgs.v1.document import Document
+
+        narratives, _ = _load_narratives(base, "elements")
+        for source_hash, (stamp, doc_json) in stored.items():
+            assert stamp == "elements"
+            doc = Document.model_validate_json(doc_json)
+            assert doc.text == narratives[source_hash], (
+                "rehydrated Document.text must byte-match the narrative the "
+                "chunk-stage reuse guard reassembles"
+            )
+
+    def test_default_writes_no_doc_sidecar(self, shard_dir, isaacus_client):
+        from womblex.store.enrichment_doc import enrichment_doc_path_for
+
+        enrich_shards(shard_dir, EnrichmentConfig(), client=isaacus_client)
+        assert not enrichment_doc_path_for(shard_dir / "batch-0001.parquet").exists()
+
+
 class TestEnrichThenLink:
     def test_full_chain_resolves_throsby(self, shard_dir, reference_config, isaacus_client):
         enrich_shards(shard_dir, EnrichmentConfig(), client=isaacus_client)

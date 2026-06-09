@@ -34,8 +34,8 @@ pip install womblex[isaacus]
 For development:
 
 ```bash
-git clone https://github.com/Team-DeepCivic/Womblex.git
-cd Womblex
+git clone https://github.com/DeepCivic/womblex.git
+cd womblex
 uv sync --extra dev
 ```
 
@@ -86,11 +86,15 @@ womblex extract dataset.xlsx -o output/
 # Per-stage commands (primary workflow for staged corpora): each consumes the
 # prior stage's shard directory and writes its own sidecar in place, with an
 # independent resumable CheckpointManager.
-womblex chunk  --shards output/<run_id>/documents/                  # *.chunks.parquet
-womblex redact --shards output/<run_id>/documents/ --pdfs <pdf_dir> # *.redactions.parquet
-womblex enrich --shards output/<run_id>/documents/                  # *.enrichment_entities.parquet (Kanon-2; needs ISAACUS_API_KEY)
-womblex link   --shards output/<run_id>/documents/ --config <yaml>  # *.entity_links.parquet (register match)
-womblex embed  --shards output/<run_id>/documents/                  # *.embeddings.parquet (Kanon-2 chunk embeddings)
+womblex normalise --shards output/<run_id>/documents/               # *.normalised_text.parquet (offline text cleanup)
+womblex spellfix  --shards output/<run_id>/documents/               # *.spellfix_text.parquet + *.spellfix_corrections.parquet (offline OCR repair)
+womblex chunk     --shards output/<run_id>/documents/               # *.chunks.parquet
+womblex quality   --shards output/<run_id>/documents/               # *.chunk_quality.parquet (offline chunk annotation)
+womblex redact    --shards output/<run_id>/documents/ --pdfs <dir>  # *.redactions.parquet
+womblex enrich    --shards output/<run_id>/documents/               # *.enrichment_entities.parquet (Kanon-2; needs ISAACUS_API_KEY)
+womblex link      --shards output/<run_id>/documents/ --config <yaml> # *.entity_links.parquet (register match)
+womblex embed     --shards output/<run_id>/documents/               # *.embeddings.parquet (Kanon-2 chunk embeddings)
+womblex pii       --shards output/<run_id>/documents/               # *.pii_spans.parquet (audit) + *.clean_text.parquet (masked, terminal)
 
 # Audit shard integrity (extraction stage)
 womblex verify-shards output/<run_id>/
@@ -127,13 +131,6 @@ A doc-level summary type still surfaces in metadata.
 | Word | `.docx` | python-docx (paragraphs + tables) |
 | Spreadsheet | `.csv`, `.xlsx`, `.xls` | pandas per-row or per-sheet |
 
-**Other formats** — routed by file extension:
-
-| Format | Extensions | Extraction Strategy |
-|--------|-----------|---------------------|
-| Word | `.docx` | python-docx (paragraphs + tables) |
-| Spreadsheet | `.csv`, `.xlsx`, `.xls` | pandas per-row or per-sheet |
-
 ### 2. Extraction
 
 Each document type routes to an appropriate extractor. `extract_text()` always returns a `list[ExtractionResult]`:
@@ -144,7 +141,7 @@ Each document type routes to an appropriate extractor. `extract_text()` always r
 
 Each result carries a `document_id` used as the primary key downstream.
 
-Text at the extraction boundary is **verbatim** — `_normalise_text` no longer runs in the extraction hot path. Whatever the producing extractor (native text layer, PaddleOCR, DOCX, spreadsheet-print, …) emits is what lands on the element's `text` field. Downstream stages (PII, redaction, chunking) may rewrite `pages[i].text`, but the parquet writer serialises `elements`, so on-disk content stays extraction-time verbatim. Cleanup (font-encoding artefacts, running OCR footers) belongs to a downstream cleaning stage. See `docs/extraction.md`.
+Text at the extraction boundary is **verbatim** — `_normalise_text` no longer runs in the extraction hot path. Whatever the producing extractor (native text layer, PaddleOCR, DOCX, spreadsheet-print, …) emits is what lands on the element's `text` field. Downstream stages (PII, redaction, chunking) may rewrite `pages[i].text`, but the parquet writer serialises `elements`, so on-disk content stays extraction-time verbatim. Cleanup (font-encoding artefacts, running OCR footers, OCR character-confusions) belongs to downstream offline stages — `womblex normalise` writes a `*.normalised_text.parquet` overlay and `womblex spellfix` writes a `*.spellfix_text.parquet` overlay, both leaving the verbatim `elements` untouched. See `docs/extraction.md`.
 
 ### 3. Redaction
 
@@ -163,13 +160,20 @@ Chunking has two invocation modes that share one engine (`chunk_batch`):
 
 Both modes reassemble narrative + tables from each source's element stream, then feed every doc's narratives into a single semchunk call (with overlap) and every doc's table markdowns into another (no overlap), so `processes` parallelises across the whole batch. Chunks carry `(start_char, end_char, page_start, page_end, has_redaction, content_type)`; they join back to `elements` via `source_hash` plus offset-range overlap.
 
+**AI chunking (optional).** Setting `chunking.chunking_model` (e.g. `kanon-2-enricher`) switches narrative chunking to semchunk 4's AI chunking — boundaries follow the Isaacus enricher's document structure instead of the offline token split. Off by default, so non-Kanon setups are unaffected. When the `enrich` stage also runs, enrich it once: run `womblex enrich` **before** `womblex chunk`, and enrich persists the graph (`*.enrichment_doc.parquet`) for chunk to reuse instead of enriching twice. A byte-identity guard ensures reuse only happens when the persisted text matches the chunk source; otherwise it self-enriches.
+
 ### 5. PII Cleaning
 
-An optional PII cleaning stage strips personal identifiers from chunk text before output or enrichment. Operates on chunks post-chunking as an isolated pipeline stage.
+An optional PII stage masks personal identifiers in chunk text. It is **graph-driven**: the primary candidates are PII-typed entities from the Kanon-2 enrichment graph (`natural`→PERSON, `address`→ADDRESS), mapped onto chunks via mention offsets — so PII runs *after* enrichment, not before. Recall is flexed by enrichment granularity, not by a separate detector.
 
-Currently detects: **PERSON** (regex + cosine-similarity context validation via `all-MiniLM-L6-v2`) and **ADDRESS** (street-type anchor regex). See `docs/accuracy/PII_CLEANING.md` for measured baseline.
+A local regex + cosine-context backstop (PERSON via `all-MiniLM-L6-v2`, ADDRESS via street-type regex) exists but is **opt-in and off by default** (`pii.use_regex_backstop = false`): on this corpus it is low-precision (~15% — orgs and headings get tagged PERSON), so it is reserved for recall experiments. The `all-MiniLM-L6-v2` model is pre-bundled in `models/` and loaded from disk — no network access at runtime.
 
-The `all-MiniLM-L6-v2` model is pre-bundled in `models/` and loaded from disk — no network access required at runtime.
+Masking is **terminal**. The stage writes two siblings and never rewrites the raw chunks that feed Isaacus:
+
+- **`*.pii_spans.parquet`** — one row per detected span (audit/reversible), carrying the graph `entity_id` and its `<PERSON_n>` replacement.
+- **`*.clean_text.parquet`** — the masked, publishable text layer (`<PERSON_1>`, `<ADDRESS_1>`, … — typed and numbered off the graph entity), written by default (`pii.write_clean_text = true`).
+
+See `docs/accuracy/PII_CLEANING.md` for the measured baseline and [docs/decisions.md](docs/decisions.md) for why masking is terminal.
 
 ### 6. Embeddings and Enrichment
 
@@ -243,15 +247,20 @@ See [docs/extraction.md](docs/extraction.md) for the canonical schema
 reference, element kinds, the reassembly query, and the verbatim-text
 policy.
 
-With `womblex[isaacus]` enrichment enabled:
+With `womblex[isaacus]` enrichment enabled, the per-stage `womblex enrich --shards` writes sidecars alongside each batch:
 
-**entities.parquet** — Flat entity mentions for filtering
+**`batch-NNNN.enrichment_entities.parquet`** — flat entity mentions for filtering / PII candidates
 
-**graph_edges.parquet** — Relationship edges for graph queries
+**`batch-NNNN.enrichment_meta.parquet`** — document-level enrichment metadata
 
-**enrichment_meta.parquet** — Document-level enrichment metadata
+**`batch-NNNN.enrichment_doc.parquet`** — *(only with `enrichment.persist_document`, auto-enabled when AI chunking is on)* the raw ILGS Document per doc, reused by the chunk stage for AI chunking
+
+The E2E graph path (`womblex run`) additionally emits `entities.parquet` and `graph_edges.parquet` for graph queries.
 
 ## Project Structure
+
+A file-level map of the source tree lives in
+[docs/project-structure.md](docs/project-structure.md). At a glance:
 
 ```
 womblex/
@@ -259,66 +268,22 @@ womblex/
 ├── docs/              # Architecture docs, ADRs, accuracy reports
 ├── fixtures/          # Test fixtures (separate repo, see THIRD_PARTY_DATA.md)
 ├── src/womblex/
-│   ├── cli/                # CLI subpackage — per-topic modules (pipeline, redact, ingest, score, profile)
-│   ├── config.py           # Pydantic config models
-│   ├── operations/         # Independent operations (extract/redact/chunk/pii/enrich), one module each
-│   ├── score.py            # womblex score subcommand — labels-vs-parquet CER scoring
-│   ├── profile/            # womblex profile subcommand — column schema inference
-│   ├── ingest/
-│   │   ├── detect.py            # Doc-level type classification (non-PDF dispatch + summary type for PDFs)
-│   │   ├── page_profile.py      # Per-page PageProfile + cheap qualifiers (e.g. spreadsheet-print)
-│   │   ├── orchestrator.py      # Plan-driven PDF extractor — walks per-page profiles, dispatches operations
-│   │   ├── elements.py          # Element model + kinds + Cell / FieldEntry / BBox (canonical)
-│   │   ├── views.py             # ExtractionResult + legacy view types (TableData / FormField / TextBlock / ImageData) as read-only projections over elements
-│   │   ├── extract.py           # extract_text() entry point + page-level primitives (re-exports views)
-│   │   ├── forms.py             # Form-pair extraction (AcroForm + spatial + line-based for OCR)
-│   │   ├── spreadsheet_print.py # Multi-page table extractor for spreadsheet-printed PDFs
-│   │   ├── morphology.py        # Page-image morphology helpers (handwriting / glyph regularity)
-│   │   ├── grid_projection.py   # Column-aware text reconstruction (block-aware paragraph emission)
-│   │   ├── strategies.py        # Re-export shim — non-PDF extractors + legacy ImageExtractor
-│   │   ├── strategies_scanned.py # OCR primitives (_ocr_page, _layout_blocks_and_tables) + ImageExtractor
-│   │   ├── strategies_file.py   # Non-PDF extractors (DOCX, plain text, non-textual)
-│   │   ├── interfaces/
-│   │   │   └── protocols.py     # Backend protocols (OCRReader, LayoutAnalyzer, Preprocessor)
-│   │   ├── paddle_ocr.py        # PaddleOCR wrapper via rapidocr-onnxruntime + YOLOLayoutAnalyzer
-│   │   ├── llm_ocr.py           # Optional LLM-based OCR backend (vision models via OpenAI-compatible API)
-│   │   ├── spreadsheet.py       # CSV/Excel extraction — one ExtractionResult per workbook with cells as elements
-│   │   ├── gnaf.py              # G-NAF PSV → Parquet ingest (standalone)
-│   │   ├── gnaf_schema.py       # G-NAF table schemas — static column definitions
-│   │   ├── geospatial.py        # SHP → GeoParquet ingest (standalone)
-│   │   ├── redaction.py         # Backwards-compatible re-export of redact.detector
-│   │   ├── heuristics_cv2.py    # OpenCV-based detection heuristics
-│   │   └── heuristics_numpy.py  # NumPy-based detection heuristics
-│   ├── redact/
-│   │   ├── detector.py      # CV2 raster + vector-drawing redacted region detection
-│   │   ├── stage.py         # Post-extraction redaction stage (vector-first, raster fallback)
-│   │   ├── batch.py         # Batch redaction: annotate_redactions_for_shards, validate_redactions_against_labels
-│   │   └── utils.py         # Masking utilities
-│   ├── pii/
-│   │   ├── cleaner.py       # PII detection and stripping
-│   │   └── stage.py         # PII cleaning pipeline stage
-│   ├── process/
-│   │   ├── chunker.py       # semchunk integration — chunk_batch engine + element-stream → ChunkInput helpers
-│   │   └── chunk_stage.py   # chunk_shards() over a shard dir — drives `womblex chunk --shards`
-│   ├── analyse/
-│   │   ├── enrich.py        # Isaacus enrichment wrappers
-│   │   ├── graph.py         # Entity graph construction
-│   │   ├── models.py        # Enrichment data models
-│   │   └── query.py         # Load enrichment graph from Parquet for PII masking
-│   ├── store/
-│   │   ├── output.py        # Parquet output: elements + table_cells + form_fields + manifest + chunks sidecars + integrity checks
-│   │   ├── shard_audit.py   # Directory-level shard integrity + chunks-side audit + reconcile-with-checkpoint
-│   │   ├── enrichment_output.py  # Enrichment-specific output
-│   │   ├── retention.py     # run_id-based retention policy
-│   │   └── checkpoint.py    # Per-stage CheckpointManager
-│   ├── utils/
-│   │   ├── metrics.py       # WER/CER accuracy metrics
-│   │   ├── tabular_metrics.py # Tabular extraction accuracy (structural fidelity, data integrity)
-│   │   └── models.py        # Local model path resolution (models/ dir, HF snapshot layout)
-│   └── verify/
-│       └── engine.py        # Two-pass extraction quality verification
+│   ├── cli/           # CLI subpackage — per-topic command modules
+│   ├── operations/    # Independent operations (extract/redact/chunk/pii/enrich)
+│   ├── ingest/        # Detection, per-page profiling, PDF/non-PDF extraction
+│   ├── redact/        # Redaction detection + post-extraction stage
+│   ├── pii/           # Graph-driven PII detection + terminal masking
+│   ├── process/       # Chunking + offline text stages (normalise/spellfix/quality)
+│   ├── link/          # Record linkage to reference registers
+│   ├── analyse/       # Isaacus enrichment + embeddings + entity graph
+│   ├── store/         # Parquet schemas, sidecar IO, checkpoints, retention
+│   ├── utils/         # Metrics + local model path resolution
+│   └── verify/        # Two-pass extraction quality verification
 └── tests/
 ```
+
+See [docs/project-structure.md](docs/project-structure.md) for the full
+per-module breakdown.
 
 ## Development
 

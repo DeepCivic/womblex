@@ -213,7 +213,9 @@ The `RedactionReport` is stored on `ExtractionResult.redaction_report` for downs
 
 ### 6. Process — Chunking
 
-`chunker.py` wraps [semchunk](https://github.com/isaacus-dev/semchunk) v3+ with full parameter exposure. Chunk size defaults to 480 tokens — sized to fit Isaacus classifier and extractor context windows (512 tokens) with 32-token headroom. Uses semchunk's native offset tracking for reliable `(start_char, end_char)` provenance.
+`chunker.py` wraps [semchunk](https://github.com/isaacus-dev/semchunk) v4 with full parameter exposure. Chunk size defaults to 480 tokens — sized to fit Isaacus classifier and extractor context windows (512 tokens) with 32-token headroom. Uses semchunk's native offset tracking for reliable `(start_char, end_char)` provenance.
+
+**AI chunking + single-enrichment reuse.** Setting `chunking.chunking_model` switches the narrative path to semchunk 4's AI chunking — boundaries follow the Kanon-2 enricher's structure spans instead of the token/recursive split (opt-in, off by default). To avoid enriching the same text twice when the `enrich` stage also runs, the enrich stage persists the raw ILGS Document to `*.enrichment_doc.parquet` and `chunk_batch` reuses it per `source_hash` via `narrative_overrides`, gated by a byte-identity check (`Document.text == reassembled narrative`); on mismatch or absence the doc self-enriches. Run `enrich` before `chunk`. See `docs/decisions.md`.
 
 The `chunk_document()` entry point:
 1. Chunks narrative text with native offset tracking (no `text.find()` heuristics)
@@ -229,13 +231,11 @@ Chunking is gated by `config.chunking.enabled` and table handling by `config.chu
 
 ### 7. PII — Personal Information Cleaning
 
-`pii/stage.py` runs PII cleaning as an isolated operation at configurable points (`post_extraction`, `post_chunk`, `post_enrichment`).
+PII is **graph-driven**. `pii/cleaner.py` takes its primary candidates from the Kanon-2 enrichment graph — PII-typed entities (`natural`→PERSON, `address`→ADDRESS) mapped onto chunks via mention offsets — so the stage runs *after* enrichment. There is no separate primary detector; recall is flexed by enrichment granularity, not by a second pass. The per-stage entry point is `pii/pii_stage.py` (`pii_shards()` over a shard dir, drives `womblex pii --shards`); `pii/stage.py` holds the in-memory helpers for the E2E `run` path at configurable points (`post_extraction`, `post_chunk`, `post_enrichment`).
 
-`pii/cleaner.py` uses title-case and honorific regex patterns to find PERSON candidates, then validates each against reference contexts using cosine similarity with `all-MiniLM-L6-v2`. ADDRESS detection uses a street-type anchor regex. The regex uses `[^\S\n]+` (non-newline whitespace) as the word-boundary separator to prevent multi-line span capture. Threshold 0.35 (empirically calibrated on Australian government docs).
+A local regex + cosine-context detector remains as an **opt-in backstop** (`pii.use_regex_backstop`, default **off**): title-case and honorific regex for PERSON validated against reference contexts via cosine similarity with `all-MiniLM-L6-v2` (threshold 0.35, calibrated on Australian government docs; the regex uses `[^\S\n]+` as the word boundary to prevent multi-line capture), plus a street-type anchor regex for ADDRESS. It is ~15% precision on this corpus (orgs/headings get tagged PERSON), so it is reserved for recall experiments.
 
-At `post_enrichment`, the cleaner also merges entity spans from the Isaacus enrichment graph (persons, locations) into the PII replacement set.
-
-Detected PII spans are replaced with `<ENTITY_TYPE>` tags via `presidio-anonymizer`. Current coverage: PERSON and ADDRESS. See `docs/accuracy/PII_CLEANING.md` for measured recall/precision baseline.
+Masking is **terminal** — it never rewrites the raw chunks that feed Isaacus. The stage writes two siblings: `*.pii_spans.parquet` (one row per span, audit/reversible, carrying the graph `entity_id`) and `*.clean_text.parquet` (the masked publishable layer, `<PERSON_1>` / `<ADDRESS_1>` typed and numbered off the graph entity, written by default). Current coverage: PERSON and ADDRESS. See `docs/accuracy/PII_CLEANING.md` for the measured baseline.
 
 ### 8. Analyse — Enrichment
 
@@ -278,7 +278,7 @@ Results are classified as `passed`, `warning`, or `failed` based on the ratio of
 
 **No external Levenshtein dependency.** `utils/metrics.py` provides CER, WER, and CER-s (spatially-sorted CER) using a numpy-accelerated Levenshtein implementation. Short strings (≤500 chars) use a pure-Python DP loop; longer strings use numpy vectorised row operations. `spatial_sort_text()` reorders words by bounding-box centroid to isolate recognition errors from reading-order errors. No rapidfuzz or other C-extension dependency.
 
-**PII cleaning is context-validated regex.** `pii/cleaner.py` uses title-case and honorific regex patterns to find PERSON candidates, then validates each against reference contexts using cosine similarity with `all-MiniLM-L6-v2`. ADDRESS detection uses a street-type anchor regex. Current coverage: PERSON and ADDRESS — ORGANISATION, URL, phone, and email are not yet detected. See `docs/accuracy/PII_CLEANING.md` for measured recall/precision baseline.
+**PII cleaning is graph-driven, masked after Isaacus.** `pii/cleaner.py` takes its primary candidates from the Kanon-2 enrichment graph (PII-typed entities mapped onto chunks by mention offset); the regex + cosine-context detector (`all-MiniLM-L6-v2`) is an opt-in backstop (`pii.use_regex_backstop`, default off, ~15% precision). Masking is terminal — `*.clean_text.parquet` (`<PERSON_n>`) is written *after* enrich/embed and never rewrites the raw chunks. Current coverage: PERSON and ADDRESS — ORGANISATION, URL, phone, and email are not yet detected. See `docs/accuracy/PII_CLEANING.md` for measured recall/precision baseline.
 
 **750-line hard cap per file.** Signals the need to split before files become unwieldy. The PDF dispatcher (`orchestrator.py` + `page_profile.py` + `extract.py`) and the non-PDF strategy modules (`strategies_scanned.py`, `strategies_file.py`, with `strategies.py` as a re-export shim) are split this way; `SpreadsheetExtractor` lives in `spreadsheet.py`; the CLI is split into a `cli/` subpackage of per-topic modules for the same reason.
 
@@ -294,9 +294,17 @@ The remaining unimplemented capabilities. Everything above this line is current 
 
 **Remaining TODOs:**
 
-1. **AI/Semantic Chunking:** Provider-agnostic semantic chunking mode for `chunker.py`. Uses enrichment spans to find semantic boundaries rather than punctuation heuristics. Design below.
+1. **AI/Semantic Chunking:** ✅ **Shipped 2026-06 via a different mechanism.**
+   Rather than the homegrown boundary-hints layer proposed below, this is now
+   delivered by semchunk 4's native AI chunking (`chunking.chunking_model`) plus
+   single-enrichment reuse — the enrich stage persists the raw ILGS Document to
+   `*.enrichment_doc.parquet` and the chunk stage reuses it (byte-identity
+   guarded). See `docs/decisions.md` ("AI chunking — single-enrichment graph
+   reuse") and the `### 6. Process — Chunking` section above. The proposed design
+   below is retained for historical rationale and is **superseded**; only the
+   *Local Enrichment Fallback* (item 2) remains genuine future work.
 
-### AI/Semantic Chunking — Proposed Design
+### AI/Semantic Chunking — Proposed Design (SUPERSEDED — see note above)
 
 #### Problem
 
@@ -475,4 +483,4 @@ Invalid compositions remain the same — semantic chunking still requires an ext
 - No new dependencies. Semantic chunking uses the same Isaacus client (or whatever populates `EnrichmentResult`).
 - No changes to downstream operations. PII, graph, store, verify all consume `list[TextChunk]` as before.
 
-2. **Local Enrichment Fallback:** The PII cleaner's `post_enrichment` mode and the semantic chunking design both depend on `EnrichmentResult`, which today only comes from Isaacus (`enrich.py`). Without an Isaacus client, PII falls back to regex-only detection and semantic chunking falls back to pure semchunk. A local enrichment provider (e.g. spaCy `en_core_web_trf`, a fine-tuned NER model, or sentence-transformers topic segmentation) that populates `EnrichmentResult` with entity mentions and optionally segments would give both systems something to work with offline — lower quality than Isaacus, but better than regex-only / no boundaries. The provider quality spectrum in the semantic chunking design above applies here too. Implementation: a new `analyse/enrich_local.py` returning `EnrichmentResult`, selected by config (e.g. `enrichment.provider: local`), no changes to downstream consumers.
+2. **Local Enrichment Fallback:** The PII cleaner's `post_enrichment` mode and the semantic chunking design both depend on `EnrichmentResult`, which today only comes from Isaacus (`enrich.py`). Without an Isaacus client there are no graph spans, so PII has only the opt-in regex backstop (off by default) and semantic chunking falls back to pure semchunk. A local enrichment provider (e.g. spaCy `en_core_web_trf`, a fine-tuned NER model, or sentence-transformers topic segmentation) that populates `EnrichmentResult` with entity mentions and optionally segments would give both systems something to work with offline — lower quality than Isaacus, but better than regex-only / no boundaries. The provider quality spectrum in the semantic chunking design above applies here too. Implementation: a new `analyse/enrich_local.py` returning `EnrichmentResult`, selected by config (e.g. `enrichment.provider: local`), no changes to downstream consumers.

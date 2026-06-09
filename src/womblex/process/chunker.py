@@ -38,22 +38,24 @@ Womblex-only surface (no semchunk equivalent):
 - :func:`_repair_redaction_splits` — heal ``<REDACTED>`` markers split
   across a chunk boundary; semchunk has no opinion about our marker.
 
-AI chunking (semchunk 4) and double enrichment: when ``chunking_model``
-is set, semchunk enriches each document with ``kanon-2-enricher`` to pick
-chunk boundaries. Womblex's separate ``enrich`` stage enriches the *same*
-reassembled narrative with the *same* model — so running both AI chunking
-and the enrich stage pays for Kanon-2 enrichment twice. The composable
-default (``chunking_model=None``) avoids this entirely; reusing one
-enrichment graph across both stages (semchunk accepts a pre-enriched
-``ILGSDocument`` input) is a deferred orchestration optimisation tracked
-in ``docs/decisions.md``.
+AI chunking (semchunk 4) and enrichment reuse: when ``chunking_model``
+is set, semchunk picks chunk boundaries from an ILGS Document. To avoid
+enriching the same narrative twice (once at chunk time, once in the
+``enrich`` stage), :func:`chunk_batch` accepts ``narrative_overrides``
+mapping ``source_hash`` → a pre-enriched ``Document`` persisted by the
+enrich stage (``*.enrichment_doc.parquet``). An override is used only when
+its ``.text`` is byte-identical to the doc's reassembled narrative — the
+coordinate-space guard from ``docs/decisions.md``; on mismatch (or no
+sidecar) the doc falls back to passing the string and letting semchunk
+self-enrich. The composable default (``chunking_model=None``) keeps the
+offline token split, so non-Kanon callers are unaffected.
 """
 
 from __future__ import annotations
 
 import bisect
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import cast
 
@@ -279,6 +281,7 @@ def chunk_batch(
     overlap: int | float | None = None,
     processes: int = 1,
     progress: bool = False,
+    narrative_overrides: dict[str, object] | None = None,
 ) -> dict[str, list[TextChunk]]:
     """Chunk every doc's narrative + tables in two semchunk calls.
 
@@ -288,6 +291,15 @@ def chunk_batch(
     ``processes`` and ``progress`` arguments therefore parallelise
     across the entire batch, not per document.
 
+    ``narrative_overrides`` maps ``source_hash`` → a pre-enriched semchunk
+    input (an ILGS ``Document``) for semchunk-4 AI-chunking reuse. An
+    override is used **only** when its ``.text`` is byte-identical to that
+    doc's reassembled ``narrative`` (the coordinate-space guard from
+    ``docs/decisions.md``); on any mismatch the plain narrative string is
+    chunked instead, so a stale or differently-cleaned Document silently
+    falls back to self-enrich rather than desyncing offsets. Tables always
+    chunk in token mode.
+
     Returns ``{source_hash: list[TextChunk]}`` with ``chunk_index``
     re-sequenced per doc, ``has_redaction`` populated from the chunk
     text, and ``page_start`` / ``page_end`` resolved from per-doc page
@@ -296,14 +308,15 @@ def chunk_batch(
     if not inputs:
         return {}
 
-    narrative_texts: list[str] = []
+    overrides = narrative_overrides or {}
+    narrative_texts: list[object] = []  # str | ILGSDocument (mixed; semchunk handles both)
     narrative_owners: list[int] = []
     table_texts: list[str] = []
     table_owners: list[tuple[int, int | None]] = []
 
     for i, doc in enumerate(inputs):
         if doc.narrative.strip():
-            narrative_texts.append(doc.narrative)
+            narrative_texts.append(_resolve_narrative_input(doc, overrides))
             narrative_owners.append(i)
         for page, md in doc.tables:
             if md.strip():
@@ -358,17 +371,45 @@ def chunk_batch(
     return out
 
 
+def _resolve_narrative_input(doc: ChunkInput, overrides: dict[str, object]) -> object:
+    """Return the semchunk input for ``doc``: a reused Document or the string.
+
+    The byte-identity guard: an override is honoured only when its ``.text``
+    equals ``doc.narrative`` exactly (same coordinate space). Otherwise the
+    plain narrative string is returned and semchunk self-enriches (if a
+    ``chunking_model`` is set) — the per-doc fallback in ``docs/decisions.md``.
+    """
+    override = overrides.get(doc.source_hash)
+    if override is None:
+        return doc.narrative
+    override_text = getattr(override, "text", None)
+    if override_text == doc.narrative:
+        return override
+    logger.warning(
+        "chunk reuse guard: persisted Document.text for %s does not match the "
+        "reassembled narrative (len %s vs %s); falling back to self-enrich.",
+        doc.source_hash,
+        None if override_text is None else len(override_text),
+        len(doc.narrative),
+    )
+    return doc.narrative
+
+
 def _chunker_batch(
     chunker: semchunk.Chunker,
-    texts: list[str],
+    texts: Sequence[object],
     *,
     overlap: int | float | None,
     processes: int,
     progress: bool,
 ) -> tuple[list[list[str]], list[list[tuple[int, int]]]]:
-    """Call semchunk on a list of texts; always returns ``(chunks, offsets)``."""
+    """Call semchunk on a list of texts; always returns ``(chunks, offsets)``.
+
+    ``texts`` may mix ``str`` and ILGS ``Document`` items (AI-chunking reuse);
+    semchunk dispatches on type at runtime — verified live in docs/decisions.md.
+    """
     chunks, offsets = chunker(
-        texts,
+        texts,  # type: ignore[arg-type]  # str | Document items; semchunk handles both
         offsets=True,
         overlap=overlap,
         processes=processes,

@@ -61,9 +61,18 @@ def cmd_enrich(args: argparse.Namespace) -> int:
         _cfg = load_config(args.config)
         enrichment_config = _cfg.enrichment
         text_source = _cfg.processing.text_source
+        # Persist the raw Document for chunk-stage reuse whenever this config
+        # also enables AI chunking — even if enrichment.enabled is false, since
+        # the user is running `enrich` explicitly here. WomblexConfig already
+        # auto-enables persist_document for the both-on case.
+        persist_document = (
+            enrichment_config.persist_document
+            or bool(_cfg.chunking.chunking_model)
+        )
     else:
         enrichment_config = EnrichmentConfig()
         text_source = "elements"
+        persist_document = enrichment_config.persist_document
 
     try:
         import isaacus
@@ -89,11 +98,12 @@ def cmd_enrich(args: argparse.Namespace) -> int:
                 logger.warning("Resume integrity scan: dropped %d doc(s) with corrupted "
                                "enrichment shards; they will be re-enriched.", len(dropped))
 
-    logger.info("enrich --shards: dir=%s model=%s text_source=%s overflow=%s",
+    logger.info("enrich --shards: dir=%s model=%s text_source=%s overflow=%s persist_doc=%s",
                 shard_dir, enrichment_config.model, text_source,
-                enrichment_config.overflow_strategy)
+                enrichment_config.overflow_strategy, persist_document)
     result = enrich_shards(shard_dir, enrichment_config, client=client,
-                           text_source=text_source, checkpoint_mgr=ckpt)
+                           text_source=text_source, persist_document=persist_document,
+                           checkpoint_mgr=ckpt)
     logger.info(
         "Done: %d batches written, %d docs enriched, %d entities",
         result.batches_written, result.docs_enriched, result.total_entities,

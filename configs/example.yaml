@@ -56,9 +56,10 @@ chunking:
   enabled: true
   chunk_tables: true
   # chunking_model: kanon-2-enricher  # semchunk 4 AI chunking — boundaries follow the
-  #                        # Isaacus enricher's structure spans (calls the API per doc at
-  #                        # chunk time). null (default) = offline token chunking. NOTE:
-  #                        # enabling this AND the enrich stage enriches the same text twice.
+  #                        # Isaacus enricher's structure spans. null (default) = offline
+  #                        # token chunking. With the enrich stage also on, run `enrich`
+  #                        # BEFORE `chunk`: enrich persists the Document and chunk reuses
+  #                        # it (no double-enrich). Out of order, chunk self-enriches.
   # tokenizer_kwargs: null  # Extra kwargs forwarded to the tokeniser/token counter.
   # overlap: null          # Token overlap between chunks. <1 = proportion, >=1 = absolute tokens.
   # memoize: true          # Cache token counts for repeated substrings.
@@ -118,6 +119,9 @@ enrichment:
   model: kanon-2-enricher
   overflow_strategy: auto       # auto/chunk = internal chunk+stitch (>16k tokens); drop_end | null
   # skip_short_documents: 0     # skip docs shorter than N chars (0 = enrich all)
+  # persist_document: false     # write *.enrichment_doc.parquet (raw ILGS Document) for
+  #                             # AI-chunking reuse. Auto-enabled when chunking.chunking_model
+  #                             # is set; off otherwise (the blob is large).
 
 # Entity linking (`womblex enrich --shards` then `womblex link --shards`).
 # Resolves document mentions to canonical reference-register entities. The
