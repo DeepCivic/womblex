@@ -305,7 +305,7 @@ class TestPipelineConfig:
                 chunking=ChunkingConfig(chunking_model="kanon-2-enricher"),
                 enrichment=EnrichmentConfig(enabled=True),
             )
-        assert any("enriched" in r.message for r in caplog.records)
+        assert any("persist_document" in r.message for r in caplog.records)
 
 
     def test_no_warning_when_ai_chunking_off(self, caplog) -> None:
