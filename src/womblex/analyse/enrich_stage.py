@@ -2,8 +2,10 @@
 
 Consumes ``*.elements.parquet`` + ``*._manifest.parquet`` already written
 by the extraction stage and writes ``*.enrichment_entities.parquet`` +
-``*.enrichment_meta.parquet`` siblings per batch, joinable to the other
-sidecars on ``source_hash``.
+``*.enrichment_meta.parquet`` + ``*.graph_edges.parquet`` siblings per
+batch, joinable to the other sidecars on ``source_hash``. The graph-edges
+sidecar is the shippable enrichment graph (relations, hierarchy, citations,
+and — when a ``*.chunks.parquet`` sibling exists — mention→chunk edges).
 
 Reassembles the document narrative as the ``\\n\\n``-joined text of
 TEXT_KINDS elements in ``elem_order`` per source_hash via the shared
@@ -24,11 +26,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from womblex.analyse.enrich import enrich_document_raw
+from womblex.analyse.graph import build_document_graph
 from womblex.analyse.models import EnrichmentResult
 from womblex.config import EnrichmentConfig
 from womblex.ingest.elements import Element
 from womblex.process.chunk_stage import _batch_bases
-from womblex.process.chunker import reassemble_narrative
+from womblex.process.chunker import TextChunk, reassemble_narrative
 from womblex.process.text_overlay import apply_overlay, load_overlay
 from womblex.store.checkpoint import CheckpointManager
 from womblex.store.enrichment_doc import (
@@ -37,10 +40,12 @@ from womblex.store.enrichment_doc import (
 )
 from womblex.store.enrichment_output import (
     enrichment_entities_path_for,
+    graph_edges_path_for,
     write_enrichment_entities_shard,
     write_enrichment_meta_shard,
+    write_graph_edges_shard,
 )
-from womblex.store.output import read_elements, read_manifest
+from womblex.store.output import chunks_path_for, read_chunks, read_elements, read_manifest
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +131,14 @@ def enrich_shards(
 
         write_enrichment_entities_shard(results, base)
         write_enrichment_meta_shard(results, base)
+        chunks_by_hash = _load_chunks(base)
+        write_graph_edges_shard(
+            [
+                (src, build_document_graph(src, enr, chunks_by_hash.get(src)))
+                for src, enr in results
+            ],
+            base,
+        )
         if persist_document:
             write_enrichment_doc_shard(doc_rows, base)
         batches_written += 1
@@ -205,16 +218,51 @@ def _load_narratives(
     return narratives, src_to_doc
 
 
+def _load_chunks(base_path: Path) -> dict[str, list[TextChunk]]:
+    """Narrative chunks per source_hash from the batch's chunks sidecar, if present.
+
+    Entity mention spans are offsets into the reassembled narrative, so only
+    narrative chunks (which share that coordinate space) feed the graph's
+    chunk-mention edges; table chunks carry offsets in their own markdown space.
+    """
+    if not chunks_path_for(base_path).exists():
+        return {}
+    try:
+        chunk_rows = read_chunks(base_path).to_pylist()
+    except Exception as e:  # unreadable sidecar — graph still ships, minus chunk edges
+        logger.warning("enrich_shards: unreadable chunks sidecar for %s: %s", base_path.stem, e)
+        return {}
+    by_hash: dict[str, list[TextChunk]] = defaultdict(list)
+    for row in chunk_rows:
+        if row["content_type"] != "narrative":
+            continue
+        by_hash[row["source_hash"]].append(TextChunk(
+            text=row["text"],
+            start_char=row["start_char"],
+            end_char=row["end_char"],
+            chunk_index=row["chunk_index"],
+            content_type=row["content_type"],
+        ))
+    return by_hash
+
+
 def _all_docs_checkpointed(
     base_path: Path, mgr: CheckpointManager, *, persist_document: bool = False,
 ) -> bool:
     """True if the entities sidecar exists and every manifest doc is checkpointed.
+
+    The graph-edges sidecar must also exist — a batch enriched before graph
+    shipping landed is re-enriched on resume so it gains its
+    ``*.graph_edges.parquet`` (mirroring ``persist_document``: the graph is
+    only buildable from the live EnrichmentResult).
 
     When ``persist_document`` is requested, the doc sidecar must also exist —
     otherwise a batch enriched before the flag was enabled would be skipped on
     resume and never gain its ``*.enrichment_doc.parquet``.
     """
     if not enrichment_entities_path_for(base_path).exists():
+        return False
+    if not graph_edges_path_for(base_path).exists():
         return False
     if persist_document and not enrichment_doc_path_for(base_path).exists():
         return False

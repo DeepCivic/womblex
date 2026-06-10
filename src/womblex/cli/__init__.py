@@ -8,7 +8,9 @@ Usage:
 
     womblex run                  --config configs/example.yaml
     womblex extract              document.pdf -o output/
+    womblex chunk                --shards <dir> [--config configs/example.yaml]
     womblex chunk                --config configs/example.yaml
+    womblex manifest             --shards <dir> [-o PATH]
     womblex normalise            --shards <dir> [--config configs/example.yaml]
     womblex redact               --shards <dir> --pdfs <dir> [--checkpoint PATH]
     womblex redact               --config configs/example.yaml

@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 
-from womblex.cli.pipeline import cmd_chunk, cmd_run
+from womblex.cli.pipeline import _register_chunk, cmd_chunk, cmd_manifest, cmd_run
 
 from womblex.config import ChunkingConfig, DatasetConfig, PathsConfig, WomblexConfig, load_config
 
@@ -420,6 +420,50 @@ class TestCmdRunRunIdLayout:
 
 
 # ---------------------------------------------------------------------------
+# Run-level manifest consolidation
+# ---------------------------------------------------------------------------
+
+
+class TestRunManifest:
+    def test_run_writes_consolidated_manifest_at_run_root(self, tmp_path: Path) -> None:
+        if not _CSV_FILE.exists():
+            pytest.skip("CSV fixture not available")
+
+        import pyarrow.parquet as pq
+
+        from womblex.store.output import read_manifest
+
+        shard_dir = _seed_run_with_extraction(tmp_path, run_id="manifest-run")
+        manifest_path = shard_dir.parent / "manifest.parquet"
+        assert manifest_path.exists()
+
+        table = pq.read_table(str(manifest_path))
+        per_batch = read_manifest(shard_dir)
+        assert table.num_rows == per_batch.num_rows > 0
+        # The columns a consumer needs to map chunks back to documents.
+        assert {"source_hash", "doc_id", "filename", "status"} <= set(table.schema.names)
+
+    def test_cmd_manifest_consolidates_existing_run(self, tmp_path: Path) -> None:
+        if not _CSV_FILE.exists():
+            pytest.skip("CSV fixture not available")
+
+        shard_dir = _seed_run_with_extraction(tmp_path, run_id="manifest-cmd")
+        manifest_path = shard_dir.parent / "manifest.parquet"
+        manifest_path.unlink()  # simulate a run written before end-of-run manifests
+
+        args = argparse.Namespace(shards=shard_dir, output=None)
+        assert cmd_manifest(args) == 0
+        assert manifest_path.exists()
+        assert manifest_path.stat().st_size > 0
+
+    def test_cmd_manifest_rejects_dir_without_manifests(self, tmp_path: Path) -> None:
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        args = argparse.Namespace(shards=empty, output=None)
+        assert cmd_manifest(args) == 1
+
+
+# ---------------------------------------------------------------------------
 # cmd_chunk --shards (B3)
 # ---------------------------------------------------------------------------
 
@@ -562,4 +606,39 @@ class TestCmdChunkShards:
         fresh = chunks_files[0]
         assert fresh.exists()
         assert fresh.stat().st_size > 0
+
+
+class TestChunkCliFlags:
+    """--shards and --config must be combinable: per-stage AI chunking
+    (chunking.chunking_model) is only reachable when a config rides along
+    with --shards."""
+
+    def test_shards_and_config_parse_together(self) -> None:
+        p = argparse.ArgumentParser()
+        _register_chunk(p)
+        args = p.parse_args(["--shards", "shards-dir", "--config", "cfg.yaml"])
+        assert args.shards == Path("shards-dir")
+        assert args.config == Path("cfg.yaml")
+
+    def test_neither_flag_is_an_error(self) -> None:
+        args = argparse.Namespace(shards=None, config=None)
+        assert cmd_chunk(args) == 1
+
+    def test_shards_with_config_sources_chunking_settings(self, tmp_path: Path) -> None:
+        """The --shards branch reads chunking + text_source from --config."""
+        if not _CSV_FILE.exists():
+            pytest.skip("CSV fixture not available")
+        if not isaacus_available():
+            pytest.skip("chunking needs the Kanon-2 tokeniser (isaacus SDK + ISAACUS_API_KEY)")
+
+        shard_dir = _seed_run_with_extraction(tmp_path, run_id="i2-cfg")
+        cfg = tmp_path / "cfg.yaml"  # written by the seed helper
+        assert cfg.exists()
+        args = argparse.Namespace(
+            shards=shard_dir, config=cfg,
+            checkpoint_dir=None, dataset="i2-cfg",
+            no_resume=True, limit=None,
+        )
+        assert cmd_chunk(args) == 0
+        assert list(shard_dir.glob("*.chunks.parquet"))
 

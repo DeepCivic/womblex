@@ -225,10 +225,14 @@ def cmd_run(args: argparse.Namespace) -> int:
             format_eta(avg_per_doc * docs_remaining),
         )
 
+    from womblex.store.run_manifest import write_run_manifest
+
+    manifest_path = write_run_manifest(shard_dir)
+
     total_elapsed = time.time() - start_time
     logger.info(
-        "Done in %s: %d succeeded, %d failed. Output: %s",
-        format_eta(total_elapsed), total_succeeded, total_failed, output_root,
+        "Done in %s: %d succeeded, %d failed. Output: %s (manifest: %s)",
+        format_eta(total_elapsed), total_succeeded, total_failed, output_root, manifest_path,
     )
     return 0
 
@@ -322,8 +326,7 @@ def cmd_extract(args: argparse.Namespace) -> int:
 
 
 def _register_chunk(p: argparse.ArgumentParser) -> None:
-    mode = p.add_mutually_exclusive_group(required=True)
-    mode.add_argument(
+    p.add_argument(
         "--shards", type=Path,
         help=(
             "Per-stage mode: chunk an existing shard directory "
@@ -331,9 +334,14 @@ def _register_chunk(p: argparse.ArgumentParser) -> None:
             "Writes ``*.chunks.parquet`` siblings in place."
         ),
     )
-    mode.add_argument(
+    p.add_argument(
         "--config", type=Path,
-        help="E2E composition mode: run extraction + chunking from config YAML.",
+        help=(
+            "Config YAML. With --shards: sources chunking settings "
+            "(tokenizer, chunk_size, chunking_model for AI chunking) and "
+            "processing.text_source. Without --shards: E2E composition mode "
+            "(extraction + chunking)."
+        ),
     )
     p.add_argument(
         "--checkpoint-dir", type=Path, default=None,
@@ -364,7 +372,10 @@ def cmd_chunk(args: argparse.Namespace) -> int:
     """Chunk a shard directory (per-stage) or a config-described corpus (E2E)."""
     if args.shards is not None:
         return _cmd_chunk_shards(args)
-    return _cmd_chunk_config(args)
+    if args.config is not None:
+        return _cmd_chunk_config(args)
+    logger.error("chunk requires --shards (per-stage) and/or --config (E2E)")
+    return 1
 
 
 def _cmd_chunk_shards(args: argparse.Namespace) -> int:
@@ -456,8 +467,42 @@ def _cmd_chunk_config(args: argparse.Namespace) -> int:
     return 0
 
 
+# --- manifest ----------------------------------------------------------------
+
+
+def _register_manifest(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--shards", type=Path, required=True,
+        help="Shard dir (`<run_id>/documents/`) whose `*._manifest.parquet` "
+             "sidecars are consolidated.",
+    )
+    p.add_argument(
+        "-o", "--output", type=Path, default=None,
+        help="Output parquet path (default: `<run_root>/manifest.parquet`).",
+    )
+
+
+def cmd_manifest(args: argparse.Namespace) -> int:
+    """Consolidate per-batch manifests into one run-level documents table."""
+    from womblex.store.run_manifest import write_run_manifest
+
+    shard_dir: Path = args.shards
+    if not shard_dir.is_dir():
+        logger.error("--shards path is not a directory: %s", shard_dir)
+        return 1
+    if not any(shard_dir.glob("*._manifest.parquet")):
+        logger.error("--shards directory has no `*._manifest.parquet`: %s", shard_dir)
+        return 1
+    write_run_manifest(shard_dir, args.output)
+    return 0
+
+
 COMMANDS = [
     Command("run", "Run all pipeline stages from a config file", _register_run, cmd_run),
     Command("extract", "Extract text from a single document", _register_extract, cmd_extract),
     Command("chunk", "Extract and chunk documents", _register_chunk, cmd_chunk),
+    Command(
+        "manifest", "Consolidate per-batch manifests into a run-level documents table",
+        _register_manifest, cmd_manifest,
+    ),
 ]

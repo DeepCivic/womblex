@@ -8,6 +8,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Run-level document manifest.** `womblex run` now consolidates the per-batch
+  `batch-NNNN._manifest.parquet` sidecars into a single
+  `<run_root>/manifest.parquet` at the end of the run — the published
+  documents table mapping `source_hash` (the join key on every chunk/sidecar
+  row) back to `doc_id`, `filename`, extraction method, counts and status, so
+  shipped chunks are attributable to their source documents. A new
+  `womblex manifest --shards <dir> [-o PATH]` command regenerates it for
+  existing runs. (`store/run_manifest.py`, `cli/pipeline.py`.)
+- **Shippable enrichment graph.** `enrich_shards` now writes a
+  `*.graph_edges.parquet` sibling per batch alongside the entities/meta
+  sidecars — the Kanon-2 document graph (containment, segment hierarchy,
+  person/location hierarchy, citations, cross-references, contact-info and
+  date relations) flattened to the existing `GRAPH_EDGE_SCHEMA`, with
+  `document_id` carrying the `source_hash` so it joins the other sidecars.
+  When the batch already has a `*.chunks.parquet` sibling, narrative chunks
+  are mapped in so the graph includes mention→chunk edges. On resume, a batch
+  missing its graph sidecar is re-enriched so prior runs gain it (the graph is
+  only buildable from the live enrichment result). New
+  `write_graph_edges_shard` / `read_graph_edges` / `graph_edges_path_for`.
+  (`analyse/enrich_stage.py`, `store/enrichment_output.py`.)
+- **CLI fix — `womblex chunk --shards` + `--config` combinable.** The two
+  flags were in a `required=True` mutually exclusive argparse group, which made
+  the `--shards` branch's config handling (chunking settings, `chunking_model`
+  for AI chunking, `processing.text_source`) unreachable from the CLI —
+  per-stage AI chunking was dead-ended. They now combine: `--shards` with
+  `--config` sources chunking settings from the YAML; `--config` alone remains
+  the E2E composition mode. (`cli/pipeline.py`.)
 - **Single-enrichment reuse for AI chunking.** When AI chunking
   (`chunking.chunking_model`) and the `enrich` stage are both on, the enrich
   stage now persists the raw ILGS Document per doc to a new
