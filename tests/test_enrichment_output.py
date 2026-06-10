@@ -27,9 +27,12 @@ from womblex.store.enrichment_output import (
     ENRICHMENT_META_SCHEMA,
     ENTITY_SCHEMA,
     GRAPH_EDGE_SCHEMA,
+    graph_edges_path_for,
+    read_graph_edges,
     write_enrichment_metadata,
     write_entity_mentions,
     write_graph_edges,
+    write_graph_edges_shard,
 )
 
 
@@ -194,6 +197,43 @@ class TestWriteGraphEdges:
         table = pq.read_table(str(output))
         relations = table.column("relation").to_pylist()
         assert "contains" in relations
+
+
+class TestGraphEdgesShard:
+    """Per-batch ``*.graph_edges.parquet`` sibling (the shippable graph)."""
+
+    def test_shard_round_trips_via_base_and_dir(self, tmp_path: Path) -> None:
+        text = _make_text()
+        enrichment = _make_enrichment(text)
+        chunks = _make_chunks(text)
+        graph = build_document_graph("hash1", enrichment, chunks)
+        base = tmp_path / "batch-0001.parquet"
+
+        target = write_graph_edges_shard([("hash1", graph)], base)
+        assert target == graph_edges_path_for(base)
+        assert target.exists()
+
+        by_base = read_graph_edges(base)
+        by_dir = read_graph_edges(tmp_path)
+        assert by_base.num_rows == by_dir.num_rows > 0
+        assert set(by_base.column("document_id").to_pylist()) == {"hash1"}
+        relations = set(by_base.column("relation").to_pylist())
+        # containment + chunk-mention edges both present when chunks are passed
+        assert "contains" in relations
+        assert "mentioned_in" in relations
+
+    def test_empty_shard_and_empty_dir_are_schema_correct(self, tmp_path: Path) -> None:
+        base = tmp_path / "batch-0001.parquet"
+        write_graph_edges_shard([], base)
+        table = read_graph_edges(base)
+        assert table.num_rows == 0
+        assert table.schema.names == GRAPH_EDGE_SCHEMA.names
+
+        empty_dir = tmp_path / "empty"
+        empty_dir.mkdir()
+        table = read_graph_edges(empty_dir)
+        assert table.num_rows == 0
+        assert table.schema.names == GRAPH_EDGE_SCHEMA.names
 
 
 # ---------------------------------------------------------------------------

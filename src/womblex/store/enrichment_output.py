@@ -329,11 +329,17 @@ def write_enrichment_metadata(
 
 ENRICHMENT_ENTITIES_SUFFIX = ".enrichment_entities.parquet"
 ENRICHMENT_META_SUFFIX = ".enrichment_meta.parquet"
+GRAPH_EDGES_SUFFIX = ".graph_edges.parquet"
 
 
 def enrichment_entities_path_for(base_path: Path) -> Path:
     """Return ``<base>.enrichment_entities.parquet`` sibling for a shard base."""
     return base_path.parent / f"{base_path.stem}{ENRICHMENT_ENTITIES_SUFFIX}"
+
+
+def graph_edges_path_for(base_path: Path) -> Path:
+    """Return ``<base>.graph_edges.parquet`` sibling for a shard base."""
+    return base_path.parent / f"{base_path.stem}{GRAPH_EDGES_SUFFIX}"
 
 
 def enrichment_meta_path_for(base_path: Path) -> Path:
@@ -369,6 +375,41 @@ def write_enrichment_meta_shard(
     target.parent.mkdir(parents=True, exist_ok=True)
     _write_enrichment_rows(rows, target, ENRICHMENT_META_SCHEMA)
     return target
+
+
+def write_graph_edges_shard(
+    graphs: list[tuple[str, DocumentGraph]], base_path: Path,
+) -> Path:
+    """Write a batch's graph edges to ``<base>.graph_edges.parquet``.
+
+    ``graphs`` is ``(source_hash, DocumentGraph)``; the source_hash is
+    written into ``GRAPH_EDGE_SCHEMA``'s ``document_id`` column so the
+    sidecar joins with the others. Empty input produces an
+    empty-but-schema-correct file so downstream globs are safe.
+    """
+    rows: list[dict[str, Any]] = []
+    for source_hash, graph in graphs:
+        rows.extend(_graph_edges_to_rows(source_hash, graph))
+    target = graph_edges_path_for(base_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    _write_enrichment_rows(rows, target, GRAPH_EDGE_SCHEMA)
+    logger.info("Wrote graph edges shard %s: rows=%d", target.name, len(rows))
+    return target
+
+
+def read_graph_edges(path: Path) -> "pa.Table":
+    """Read graph edges from a single sibling file or a shard-dir glob."""
+    p = Path(path)
+    if p.is_dir():
+        shards = sorted(p.glob(f"*{GRAPH_EDGES_SUFFIX}"))
+        if not shards:
+            return pa.table(
+                {f.name: pa.array([], type=f.type) for f in GRAPH_EDGE_SCHEMA},
+                schema=GRAPH_EDGE_SCHEMA,
+            )
+        return pa.concat_tables([_read_enrichment_shard(s, GRAPH_EDGE_SCHEMA) for s in shards])
+    target = p if p.name.endswith(GRAPH_EDGES_SUFFIX) else graph_edges_path_for(p)
+    return _read_enrichment_shard(target, GRAPH_EDGE_SCHEMA)
 
 
 def read_enrichment_entities(path: Path) -> "pa.Table":

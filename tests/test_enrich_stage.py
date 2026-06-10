@@ -24,7 +24,9 @@ from womblex.link.stage import link_shards
 from womblex.store.checkpoint import CheckpointManager
 from womblex.store.enrichment_output import (
     enrichment_entities_path_for,
+    graph_edges_path_for,
     read_enrichment_entities,
+    read_graph_edges,
 )
 from womblex.store.output import read_entity_links, write_results
 
@@ -81,6 +83,17 @@ class TestEnrichShards:
         kinds = {r["entity_type"] for r in rows}
         # Throsby notice really contains a corporate provider + a postal address.
         assert "corporate" in kinds and "address" in kinds
+
+    def test_writes_graph_edges_sidecar(self, shard_dir, isaacus_client):
+        result = enrich_shards(shard_dir, EnrichmentConfig(), client=isaacus_client)
+        assert result.docs_enriched == 1
+        base = shard_dir / "batch-0001.parquet"
+        assert graph_edges_path_for(base).exists()
+        edges = read_graph_edges(base)
+        assert edges.num_rows > 0, "real enrichment produced no graph edges"
+        # document_id carries the source_hash so the graph joins the sidecars
+        hashes = set(read_enrichment_entities(base).column("document_id").to_pylist())
+        assert set(edges.column("document_id").to_pylist()) <= hashes
 
     def test_checkpoint_skips_on_resume(self, shard_dir, isaacus_client, tmp_path):
         ckpt = CheckpointManager(tmp_path / ".enrich-ckpt", "t_enrich")

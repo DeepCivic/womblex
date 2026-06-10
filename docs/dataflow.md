@@ -167,13 +167,19 @@ For each file processed via `operations.py`:
       │     ├── *.chunks.parquet                                    (chunk — I2)
       │     ├── *.chunk_quality.parquet                             (quality — offline annotation)
       │     ├── *.redactions.parquet                                (redact — I3)
-      │     ├── *.enrichment_entities.parquet + *.enrichment_meta.parquet (enrich — I7)
+      │     ├── *.enrichment_entities.parquet + *.enrichment_meta.parquet
+      │     │     + *.graph_edges.parquet                            (enrich — I7; graph
+      │     │       edges gain mention→chunk links when *.chunks.parquet exists)
       │     ├── *.entity_links.parquet                              (link — I7)
       │     ├── *.embeddings.parquet                                (embed — I7)
       │     └── *.pii_spans.parquet + *.clean_text.parquet          (pii — terminal mask, after enrich/embed)
       ├── write_batch_enrichment(batch, dir) → entities/graph_edges/enrichment_meta
       │     (legacy E2E single-file writer; the per-stage enrich shards above
       │      reuse the same ENTITY/GRAPH schemas, keyed on source_hash)
+      ├── write_run_manifest(shard_dir) → <run_root>/manifest.parquet — run-level
+      │     documents table (all batch _manifests consolidated; the published
+      │     source_hash → doc_id/filename mapping). Written at the end of
+      │     `womblex run`; regenerate any run with `womblex manifest --shards`.
       └── per-stage CheckpointManager (JSON, resumable; self-healing on resume
           via reconcile_stage_checkpoint_with_shards)
 ```
