@@ -21,6 +21,7 @@ Usage:
     womblex profile              <file> [--sample-rows N]
     womblex ingest-gnaf          <input> -o output/gnaf
     womblex ingest-geo           <input> -o output/geo
+    womblex ingest-abn           <input> -o output/abn
 """
 from __future__ import annotations
 

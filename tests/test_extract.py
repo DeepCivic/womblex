@@ -581,6 +581,71 @@ class TestSpreadsheetExtractor:
         assert result.error is not None
         assert result.elements == []
 
+    def test_xlsx_title_preamble_split_from_header(self, tmp_path: Path) -> None:
+        """Export-product shape (e.g. AusTender): title + blank row above the header.
+
+        The real header row must be the one marked is_header — pandas'
+        fabricated ``Unnamed: N`` names must never appear as cell values.
+        """
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Contract Notice Export"
+        ws.append(["Contract Notice Export"])
+        ws.append([])
+        headers = ["Agency", "CN ID", "Publish Date", "Value", "Description", "Supplier Name"]
+        ws.append(headers)
+        ws.append(["Example Agency", "CN0000001", "2026-01-05 09:00:00", "12345.67",
+                   "Office fitout", "Example Supplier Pty Ltd"])
+        ws.append(["Example Agency", "CN0000002", "2026-01-06 10:00:00", "99000",
+                   "ICT services", "Another Supplier Pty Ltd"])
+        path = tmp_path / "AusTenderContractNoticeExport_20260101_000000.xlsx"
+        wb.save(path)
+
+        result = SpreadsheetExtractor().extract_path(path)
+        assert result.error is None
+
+        header_cells = [
+            e.value for e in result.elements
+            if e.kind == "sheet_cell" and (e.meta or {}).get("is_header")
+        ]
+        assert header_cells == headers
+        assert not any("Unnamed" in (e.value or "") for e in result.elements)
+
+        sheet_meta = next(e for e in result.elements if e.kind == "sheet_meta")
+        assert sheet_meta.meta is not None
+        assert sheet_meta.meta["preamble"] == "Contract Notice Export"
+
+        data_cells = [
+            e.value for e in result.elements
+            if e.kind == "sheet_cell" and e.row == 1
+        ]
+        assert data_cells[0] == "Example Agency"
+        assert "Example Supplier Pty Ltd" in data_cells
+
+    def test_csv_without_preamble_unchanged(self, tmp_path: Path) -> None:
+        """A plain header-first CSV keeps its row-0 header behaviour."""
+        path = tmp_path / "plain.csv"
+        path.write_text("Name,Code\nAlpha,A1\nBeta,B2\n", encoding="utf-8")
+
+        result = SpreadsheetExtractor().extract_path(path)
+        assert result.error is None
+
+        header_cells = [
+            e.value for e in result.elements
+            if e.kind == "sheet_cell" and (e.meta or {}).get("is_header")
+        ]
+        assert header_cells == ["Name", "Code"]
+        sheet_meta = next(e for e in result.elements if e.kind == "sheet_meta")
+        assert "preamble" not in (sheet_meta.meta or {})
+        rows = {
+            (e.row, e.col): e.value
+            for e in result.elements if e.kind == "sheet_cell"
+        }
+        assert rows[(1, 0)] == "Alpha"
+        assert rows[(2, 1)] == "B2"
+
 
 # ---------------------------------------------------------------------------
 # DocxExtractor

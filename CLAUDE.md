@@ -86,6 +86,7 @@ A corpus exists to mature Womblex capability, not host custom code. Corpus-side 
 | `ingest/morphology.py` | Page-image morphology helpers — handwriting / glyph regularity / stroke-width variance / OCR confidence sampling | Know about document semantics |
 | `ingest/gnaf.py` | Standalone G-NAF PSV → Parquet ingest (bypasses NLP pipeline) | Run redaction, chunking, PII, or enrichment |
 | `ingest/gnaf_schema.py` | Static, versioned column definitions for all G-NAF table types | Parse SQL at runtime |
+| `ingest/abn_bulk.py` | Standalone ABN Lookup bulk extract XML → Parquet ingest (streamed, constant memory; records + names sidecar per file; bypasses NLP pipeline) | Run redaction, chunking, PII, or enrichment; match names to documents (that's `link/`) |
 | `ingest/geospatial.py` | Standalone SHP → GeoParquet ingest (bypasses NLP pipeline) | Run redaction, chunking, PII, or enrichment |
 | `ingest/paddle_ocr.py` | Wrap RapidOCR and YOLOv8 layout analysis | Implement extraction strategy logic |
 | `redact/detector.py` | Detect and mask redacted regions | Know about document semantics |

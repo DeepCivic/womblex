@@ -35,6 +35,45 @@ from womblex.ingest.extract import (
 
 logger = logging.getLogger(__name__)
 
+# Rows scanned for the real header when a sheet opens with title /
+# blank rows (e.g. AusTender contract-notice exports).
+_HEADER_SCAN_ROWS = 10
+
+
+def split_preamble(df_raw: "pd.DataFrame") -> tuple[list[str], "pd.DataFrame"]:
+    """Split leading title/blank rows from a ``header=None`` sheet read.
+
+    Export products put a title row (and often a blank row) above the
+    real header; parsing those with pandas' default ``header=0`` turns
+    the title into the header and fabricates ``Unnamed: N`` column names
+    — values that never existed in the source. Reading with
+    ``header=None`` and splitting here keeps everything verbatim.
+
+    The header is the first row in the scan window with at least two
+    non-empty cells; rows above it become preamble text. Falls back to
+    row 0 (the previous behaviour) when no row qualifies, so headerless
+    single-column sheets are unaffected.
+    """
+    if len(df_raw) == 0:
+        return [], df_raw
+
+    header_idx = 0
+    for i in range(min(len(df_raw), _HEADER_SCAN_ROWS)):
+        non_empty = sum(1 for v in df_raw.iloc[i] if str(v).strip())
+        if non_empty >= 2:
+            header_idx = i
+            break
+
+    preamble = [
+        str(v).strip()
+        for i in range(header_idx)
+        for v in df_raw.iloc[i]
+        if str(v).strip()
+    ]
+    df = df_raw.iloc[header_idx + 1:].reset_index(drop=True)
+    df.columns = [str(v) for v in df_raw.iloc[header_idx]]
+    return preamble, df
+
 
 def _classify_sheet(name: str, df: "pd.DataFrame") -> SheetInfo:
     """Classify a sheet's structure for detection-time metadata only.
@@ -116,15 +155,21 @@ class SpreadsheetExtractor:
         suffix = path.suffix.lower()
         try:
             if suffix == ".csv":
-                df = pd.read_csv(path, dtype=str, keep_default_na=False)
-                order = _emit_sheet(elements, order, sheet_name="default", sheet_index=0, df=df)
+                df_raw = pd.read_csv(path, dtype=str, keep_default_na=False, header=None)
+                preamble, df = split_preamble(df_raw)
+                order = _emit_sheet(
+                    elements, order, sheet_name="default", sheet_index=0,
+                    df=df, preamble=preamble,
+                )
             else:
                 xl = pd.ExcelFile(str(path))
                 for sheet_idx, name in enumerate(xl.sheet_names):
-                    df = xl.parse(name, dtype=str, keep_default_na=False)
+                    df_raw = xl.parse(name, dtype=str, keep_default_na=False, header=None)
+                    preamble, df = split_preamble(df_raw)
                     order = _emit_sheet(
                         elements, order,
-                        sheet_name=str(name), sheet_index=sheet_idx, df=df,
+                        sheet_name=str(name), sheet_index=sheet_idx,
+                        df=df, preamble=preamble,
                     )
         except Exception as e:
             return _spreadsheet_error(path.stem, f"Failed to read spreadsheet: {e}")
@@ -160,18 +205,27 @@ def _emit_sheet(
     sheet_name: str,
     sheet_index: int,
     df: "pd.DataFrame",
+    preamble: list[str] | None = None,
 ) -> int:
-    """Append sheet_meta + sheet_cell elements for one sheet. Return next order."""
+    """Append sheet_meta + sheet_cell elements for one sheet. Return next order.
+
+    Title/blank rows split off above the header land verbatim on the
+    sheet_meta element (``meta["preamble"]``), keeping the row-0-is-header
+    contract of the cell grid intact for downstream table views.
+    """
     order = start_order
     n_rows, n_cols = len(df), len(df.columns)
+    meta = {
+        "sheet_index": str(sheet_index),
+        "rows": str(n_rows),
+        "cols": str(n_cols),
+    }
+    if preamble:
+        meta["preamble"] = "\n".join(preamble)
     elements.append(Element(
         order=order, kind="sheet_meta", extractor="xlsx",
         sheet=sheet_name, confidence=1.0,
-        meta={
-            "sheet_index": str(sheet_index),
-            "rows": str(n_rows),
-            "cols": str(n_cols),
-        },
+        meta=meta,
     ))
     order += 1
 
