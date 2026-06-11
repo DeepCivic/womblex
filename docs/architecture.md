@@ -8,6 +8,7 @@ Input File
 ├─ Narrative (PDF/DOCX/TXT) ──► Extract Text ──► [.txt or .parquet]
 ├─ Tabular (CSV/XLSX) ────────► Transform Rows ──► [.parquet]
 ├─ Tabular (PSV/G-NAF) ──────► Standalone Ingest ──► [.parquet]
+├─ Register (XML/ABN) ───────► Standalone Ingest ──► [.parquet]
 └─ Geospatial (SHP) ─────────► Transform Geometry ──► [GeoParquet]
         │
         ▼  (Optional operations — any combination, caller composes directly)
@@ -45,6 +46,7 @@ src/womblex/
 │   ├── spreadsheet.py         # CSV/Excel extraction — one ExtractionResult per workbook, cells as elements
 │   ├── gnaf.py                # G-NAF PSV → Parquet ingest (standalone, bypasses NLP pipeline)
 │   ├── gnaf_schema.py         # G-NAF table schemas — static column definitions
+│   ├── abn_bulk.py            # ABN bulk extract XML → Parquet ingest (standalone, bypasses NLP pipeline)
 │   ├── geospatial.py          # SHP → GeoParquet ingest (standalone, bypasses NLP pipeline)
 │   ├── redaction.py           # Backwards-compatible re-export of redact.detector
 │   ├── heuristics_cv2.py      # Image heuristics: skew, blur, table grids, contour analysis
@@ -73,7 +75,8 @@ src/womblex/
 ├── utils/
 │   ├── models.py          # Local model path resolution (models/ dir + HF snapshot layout)
 │   ├── metrics.py         # CER, WER, CER-s accuracy metrics (numpy-accelerated Levenshtein + spatial sort)
-│   └── tabular_metrics.py # Tabular extraction accuracy (structural fidelity, data integrity, key preservation)
+│   ├── tabular_metrics.py # Tabular extraction accuracy (structural fidelity, data integrity, key preservation)
+│   └── checksum.py        # Shared streamed MD5 helper for the standalone register ingests
 ├── profile/               # Column schema inference (womblex profile subcommand)
 ├── score.py               # Labels-vs-parquet CER scoring (womblex score subcommand)
 ├── cli/                   # CLI subpackage — per-topic modules:
@@ -81,7 +84,7 @@ src/womblex/
 │   ├── _shared.py         # Command NamedTuple, setup_logging, discover_files
 │   ├── pipeline.py        # run, extract, chunk subcommands
 │   ├── redact.py          # redact, annotate-redactions, validate-redactions subcommands
-│   ├── ingest.py          # ingest-gnaf, ingest-geo subcommands
+│   ├── ingest.py          # ingest-gnaf, ingest-geo, ingest-abn subcommands
 │   ├── score.py           # score subcommand
 │   └── profile.py         # profile subcommand
 ├── config.py              # Pydantic config models and YAML loader
@@ -199,7 +202,24 @@ The ingest reads SHP files via `pyogrio`, validates geometry with `shapely`, and
 
 CLI: `womblex ingest-geo <input_dir> -o <output_dir> [--no-md5]`
 
-### 5. Redact — Post-Extraction Redaction
+### 5. Ingest — ABN Bulk Extract (Standalone)
+
+`ingest/abn_bulk.py` provides a standalone ingest path for the [ABN Lookup bulk extract](https://data.gov.au/data/dataset/abn-bulk-extract) — a weekly snapshot of the Australian Business Register, distributed as 20 XML files (~6 GB uncompressed, ~11M ABNs). Like G-NAF, this is a reference register: NLP operations are irrelevant and bypassed entirely.
+
+Each file is stream-parsed (`ET.iterparse`, constant memory) and projected into two Parquet siblings:
+
+- `<stem>.parquet` — one row per ABR record: ABN/status/dates, entity type, the main entity name or legal-entity name parts (given names kept as separate `given_name_1` / `given_name_2` columns, since a single given name may itself contain a space), state/postcode, ACN, GST.
+- `<stem>_names.parquet` — one row per registered name (main/legal, business, trading, DGR fund), keyed by ABN, shaped for `link/` register consumption.
+
+Design principles:
+
+- **Zero semantic mutation:** All columns stored as strings. Absent optional fields become `""`, never null.
+- **Provenance metadata:** Each Parquet file carries `abn.schema_version`, `abn.source_file`, `abn.source_md5`, and `abn.row_count` as key-value metadata.
+- **Per-file failure isolation:** Any failure (malformed XML, read/write error) logs with the source name, removes partial output, and lets the directory ingest continue. Files whose root element is not `Transfer` are skipped with a warning.
+
+CLI: `womblex ingest-abn <file-or-dir> -o <output_dir> [--no-md5]`
+
+### 6. Redact — Post-Extraction Redaction
 
 `redact/stage.py` runs as a separate operation after extraction. It renders each PDF page as an image, runs the CV2-based `RedactionDetector` to find black-box regions, and applies the configured mode:
 
@@ -211,7 +231,7 @@ The `RedactionReport` is stored on `ExtractionResult.redaction_report` for downs
 
 `redact/utils.py` provides a `pre_ocr_mask()` helper for tooling that needs to mask redactions before OCR. This is not called by extraction strategies (see CLAUDE.md — redaction inside `_ocr_page()` caused false positives on form fields and diagram fills).
 
-### 6. Process — Chunking
+### 7. Process — Chunking
 
 `chunker.py` wraps [semchunk](https://github.com/isaacus-dev/semchunk) v4 with full parameter exposure. Chunk size defaults to 480 tokens — sized to fit Isaacus classifier and extractor context windows (512 tokens) with 32-token headroom. Uses semchunk's native offset tracking for reliable `(start_char, end_char)` provenance.
 
@@ -229,7 +249,7 @@ When redaction mode is `flag`, the chunking stage calls `annotate_chunks()` to p
 
 Chunking is gated by `config.chunking.enabled` and table handling by `config.chunking.chunk_tables`.
 
-### 7. PII — Personal Information Cleaning
+### 8. PII — Personal Information Cleaning
 
 PII is **graph-driven**. `pii/cleaner.py` takes its primary candidates from the Kanon-2 enrichment graph — PII-typed entities (`natural`→PERSON, `address`→ADDRESS) mapped onto chunks via mention offsets — so the stage runs *after* enrichment. There is no separate primary detector; recall is flexed by enrichment granularity, not by a second pass. The per-stage entry point is `pii/pii_stage.py` (`pii_shards()` over a shard dir, drives `womblex pii --shards`); `pii/stage.py` holds the in-memory helpers for the E2E `run` path at configurable points (`post_extraction`, `post_chunk`, `post_enrichment`).
 
@@ -237,7 +257,7 @@ A local regex + cosine-context detector remains as an **opt-in backstop** (`pii.
 
 Masking is **terminal** — it never rewrites the raw chunks that feed Isaacus. The stage writes two siblings: `*.pii_spans.parquet` (one row per span, audit/reversible, carrying the graph `entity_id`) and `*.clean_text.parquet` (the masked publishable layer, `<PERSON_1>` / `<ADDRESS_1>` typed and numbered off the graph entity, written by default). Current coverage: PERSON and ADDRESS. See `docs/accuracy/PII_CLEANING.md` for the measured baseline.
 
-### 8. Analyse — Enrichment
+### 9. Analyse — Enrichment
 
 Wrappers in `analyse/` call the Isaacus SDK:
 
@@ -245,7 +265,7 @@ Wrappers in `analyse/` call the Isaacus SDK:
 - `graph.py` — builds a `DocumentGraph` from enrichment results, mapping entities (persons, locations, terms, external documents) to graph nodes and relationships (cross-references, contact info, dates) to edges. Chunk-level mention links are computed from span offsets.
 - `models.py` — ILGS data models: `Span`, `Segment`, `Person`, `Location`, `Term`, `ExternalDocument`, `Quote`, `DateInfo`, `CrossReference`, `EnrichmentResult`, and contact info types.
 
-### 9. Store — Output
+### 10. Store — Output
 
 `store/output.py` writes four sibling parquet files per batch — `batch-NNNN.elements.parquet`, `batch-NNNN.table_cells.parquet`, `batch-NNNN.form_fields.parquet`, `batch-NNNN._manifest.parquet`. Downstream stages add their own per-batch sidecars over the same shard dir, each via a `womblex <stage> --shards` command and joinable on `source_hash`: `*.chunks.parquet` (chunk, I2), `*.redactions.parquet` (redact, I3), `*.enrichment_entities.parquet` + `*.enrichment_meta.parquet` (enrich, I7), `*.entity_links.parquet` (link, I7), `*.embeddings.parquet` (embed, I7). `store/enrichment_output.py` also has a legacy E2E writer that emits three Parquet files from enrichment results:
 
@@ -255,7 +275,7 @@ Wrappers in `analyse/` call the Isaacus SDK:
 
 `store/checkpoint.py` provides `CheckpointManager` for resumable batch runs. Checkpoints are JSON files recording processed document IDs and batch metadata. On resume, already-processed documents are skipped.
 
-### 10. Verify — Quality Checks
+### 11. Verify — Quality Checks
 
 `verify/engine.py` runs two-pass verification on the output Parquet:
 
@@ -300,7 +320,7 @@ The remaining unimplemented capabilities. Everything above this line is current 
    single-enrichment reuse — the enrich stage persists the raw ILGS Document to
    `*.enrichment_doc.parquet` and the chunk stage reuses it (byte-identity
    guarded). See `docs/decisions.md` ("AI chunking — single-enrichment graph
-   reuse") and the `### 6. Process — Chunking` section above. The proposed design
+   reuse") and the `### 7. Process — Chunking` section above. The proposed design
    below is retained for historical rationale and is **superseded**; only the
    *Local Enrichment Fallback* (item 2) remains genuine future work.
 

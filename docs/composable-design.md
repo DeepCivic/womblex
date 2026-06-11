@@ -23,10 +23,11 @@ PDF / DOCX / TXT     extract(path) → ExtractionResult  ExtractionResult (in me
 CSV / XLSX           extract(path) → ExtractionResult  ExtractionResult (in memory)
                      extract(path) → .parquet file      Parquet (CLI or batch)
 PSV (G-NAF)          ingest_gnaf(dir) → .parquet files  one Parquet per PSV file
+XML (ABN bulk)       ingest_abn(file|dir) → .parquet    records + names Parquet per XML file
 SHP                  ingest_geo(dir) → .parquet files   one GeoParquet per SHP file
 ```
 
-G-NAF and geospatial ingest are standalone — they produce Parquet directly and do not return `ExtractionResult`. They cannot be followed by transform operations (chunk, redact, PII, enrich). This is by design: structured relational data and geometry are not narrative text.
+G-NAF, ABN bulk extract, and geospatial ingest are standalone — they produce Parquet directly and do not return `ExtractionResult`. They cannot be followed by transform operations (chunk, redact, PII, enrich). This is by design: structured relational data, registers, and geometry are not narrative text.
 
 The single-file `.txt` output is a CLI convenience for single-unit extractions only (PDF, DOCX, TXT input producing exactly one extraction unit). Multi-unit inputs (spreadsheets) must use `.parquet` output.
 
@@ -61,6 +62,7 @@ extract(pdf) → chunk → enrich → build_graph → pii_clean(advanced) → do
 extract(pdf) → chunk → embed → done
 extract(csv) → .parquet                                      tabular to Parquet
 ingest_gnaf(dir) → done                                      PSV to Parquet, nothing else
+ingest_abn(dir) → done                                       ABN XML to Parquet, nothing else
 ingest_geo(dir) → done                                       SHP to GeoParquet, nothing else
 load_graph(parquet_dir) → pii_clean(chunks, graph) → done    re-run PII from saved graph
 extract(pdf) → enrich → chunk(chunking_model) → done         AI chunking reuses enrich's Document
@@ -83,6 +85,7 @@ enrich without extract — enrichment needs full document text
 build_graph without enrich — graph needs enrichment
 pii_clean(advanced) without build_graph — advanced PII needs graph
 ingest_gnaf → chunk — G-NAF output is Parquet, not ExtractionResult
+ingest_abn → enrich — register Parquet is not ExtractionResult
 ingest_geo → pii_clean — GeoParquet is geometry, not text
 extract(csv, 10k rows) → .txt — multi-unit, must use .parquet
 ```
@@ -103,4 +106,5 @@ docs fall back per-document. The remaining rows are structural impossibilities
 - `womblex extract <file> --format txt|parquet` calls `run_extraction()` directly
 - `womblex ingest-gnaf` calls `ingest_gnaf_directory()` directly
 - `womblex ingest-geo` calls `ingest_geospatial_directory()` directly
+- `womblex ingest-abn` calls `ingest_abn_xml()` / `ingest_abn_directory()` directly
 - `womblex chunk`, `womblex redact` call individual operations directly

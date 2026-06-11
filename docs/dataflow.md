@@ -11,7 +11,7 @@ The system has two categories of operation:
 
 Enrichment requires an external Isaacus client.
 
-G-NAF PSV ingest is a standalone path (`womblex ingest-gnaf`) that bypasses extraction entirely — see below.
+G-NAF PSV, geospatial SHP, and ABN bulk extract XML ingest are standalone paths (`womblex ingest-gnaf` / `ingest-geo` / `ingest-abn`) that bypass extraction entirely — see below.
 
 ```
 Raw files (PDF / DOCX / CSV / XLSX)
@@ -350,6 +350,33 @@ SHP files bypass extraction entirely. The flow is:
 ```
 
 CLI: `womblex ingest-geo <root_dir> -o <output_dir>`
+
+## ABN Bulk Extract Standalone Ingest
+
+ABN Lookup bulk extract XML files bypass extraction entirely. Each input
+(`yyyymmddPublicNN.xml`, ~6 GB uncompressed across 20 files) is stream-parsed
+with constant memory and projected into two Parquet siblings. The flow is:
+
+```
+ABN bulk extract .xml (Transfer → many ABR records)
+        │
+        ▼
+┌───────────────────┐
+│  ingest_abn_xml   │  → <stem>.parquet        (one row per ABR record)
+│  (ingest/         │  → <stem>_names.parquet  (one row per registered name,
+│   abn_bulk)       │     keyed by ABN, for link/ register consumption)
+└───────────────────┘
+```
+
+Records carry ABN/status, entity type, the main or legal-entity name parts
+(given names split into `given_name_1` / `given_name_2`), state/postcode, ACN
+and GST; absent optionals are `""`. Provenance (`abn.schema_version`,
+`abn.source_file`, `abn.source_md5`, `abn.row_count`) rides as Parquet
+metadata. Failures are isolated per file: a malformed or unreadable file logs
+with its source name, removes any partial output, and lets the directory
+ingest continue.
+
+CLI: `womblex ingest-abn <file-or-dir> -o <output_dir>`
 
 ## Batch Processing and Checkpointing
 
