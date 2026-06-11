@@ -106,7 +106,8 @@ def test_ingest_individual_record(tmp_path: Path):
     assert row["replaced"] == "N"
     assert row["entity_type_ind"] == "IND"
     assert row["name_type"] == "LGL"
-    assert row["given_names"] == "JANE ANNE"
+    assert row["given_name_1"] == "JANE"
+    assert row["given_name_2"] == "ANNE"
     assert row["family_name"] == "CITIZEN"
     assert row["non_individual_name"] == ""  # individuals have no main name
     assert row["state"] == "NSW"
@@ -129,7 +130,7 @@ def test_ingest_company_record(tmp_path: Path):
     assert row["abn"] == "22222222222"
     assert row["non_individual_name"] == "EXAMPLE WIDGETS PTY LTD"
     assert row["name_type"] == "MN"
-    assert row["given_names"] == ""  # main entities have no individual name parts
+    assert row["given_name_1"] == ""  # main entities have no individual name parts
     assert row["asic_number"] == "000000019"
     assert row["asic_number_type"] == "undetermined"
 
@@ -159,6 +160,29 @@ def test_absent_optionals_are_empty_strings(tmp_path: Path):
     assert row["gst_status_from_date"] == ""
     assert row["asic_number"] == ""
     assert all(v is not None for v in row.values())
+
+
+def test_spaced_given_name_kept_distinct(tmp_path: Path):
+    """A single given name containing a space is distinguishable from two."""
+    record = (
+        '<ABR recordLastUpdatedDate="20260301" replaced="N">'
+        '<ABN status="ACT" ABNStatusFromDate="20100401">44444444444</ABN>'
+        "<EntityType><EntityTypeInd>IND</EntityTypeInd>"
+        "<EntityTypeText>Individual/Sole Trader</EntityTypeText></EntityType>"
+        '<LegalEntity><IndividualName type="LGL">'
+        "<GivenName>ANSHPREET SINGH</GivenName><FamilyName>EXAMPLE</FamilyName>"
+        "</IndividualName><BusinessAddress><AddressDetails>"
+        "<State>VIC</State><Postcode>3024</Postcode>"
+        "</AddressDetails></BusinessAddress></LegalEntity></ABR>"
+    )
+    xml = tmp_path / "20260601Public09.xml"
+    _write_extract(xml, record)
+
+    result = ingest_abn_xml(xml, tmp_path / "out")
+    assert result is not None
+    row = {k: v[0] for k, v in pq.read_table(str(result.records_path)).to_pydict().items()}
+    assert row["given_name_1"] == "ANSHPREET SINGH"
+    assert row["given_name_2"] == ""
 
 
 def test_provenance_metadata(tmp_path: Path):
@@ -252,6 +276,26 @@ def test_ingest_abn_directory(tmp_path: Path):
     assert sum(r.record_count for r in results) == 3
     assert (tmp_path / "out" / "20260601Public01.parquet").exists()
     assert (tmp_path / "out" / "20260601Public02_names.parquet").exists()
+
+
+def test_directory_continues_past_failing_file(tmp_path: Path):
+    """One broken file must not stop the batch (per-file failure isolation)."""
+    src = tmp_path / "extract"
+    _write_extract(src / "20260601Public01.xml", _IND_RECORD)
+    # Truncated mid-record: parse fails partway through.
+    (src / "20260601Public02.xml").write_text(
+        '<Transfer error="false">' + _PRV_RECORD + "<ABR>", encoding="utf-8",
+    )
+    _write_extract(src / "20260601Public03.xml", _TRT_RECORD)
+
+    results = ingest_abn_directory(src, tmp_path / "out")
+    assert len(results) == 2
+    assert {r.records_path.name for r in results} == {
+        "20260601Public01.parquet", "20260601Public03.parquet",
+    }
+    # Failed file's partial output cleaned up.
+    assert not (tmp_path / "out" / "20260601Public02.parquet").exists()
+    assert not (tmp_path / "out" / "20260601Public02_names.parquet").exists()
 
 
 def test_ingest_empty_directory(tmp_path: Path):

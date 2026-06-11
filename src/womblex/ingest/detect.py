@@ -447,21 +447,32 @@ def _detect_spreadsheet(path: Path) -> DocumentProfile:
     """Inspect a CSV or Excel file and classify each sheet's structure."""
     import pandas as pd
     # Local import: spreadsheet.py → extract.py → detect.py would be circular at module level.
-    from womblex.ingest.spreadsheet import _classify_sheet, read_csv_raw, split_preamble  # noqa: PLC0415
+    from womblex.ingest.spreadsheet import (  # noqa: PLC0415
+        _HEADER_SCAN_ROWS,
+        _classify_sheet,
+        read_csv_raw,
+        split_preamble,
+    )
+
+    # Sample 500 data rows for classification; the read allows headroom
+    # for preamble + header rows consumed by split_preamble so the sample
+    # size matches the pre-preamble behaviour.
+    sample_rows = 500
+    read_rows = sample_rows + _HEADER_SCAN_ROWS
 
     suffix = path.suffix.lower()
     sheet_infos: list[SheetInfo] = []
     try:
         if suffix == ".csv":
-            df_raw = read_csv_raw(path, nrows=500)
+            df_raw = read_csv_raw(path, nrows=read_rows)
             _, df = split_preamble(df_raw)
-            sheet_infos.append(_classify_sheet("default", df))
+            sheet_infos.append(_classify_sheet("default", df.iloc[:sample_rows]))
         else:
             xl = pd.ExcelFile(str(path))
             for name in xl.sheet_names:
-                df_raw = xl.parse(name, dtype=str, keep_default_na=False, nrows=500, header=None)
+                df_raw = xl.parse(name, dtype=str, keep_default_na=False, nrows=read_rows, header=None)
                 _, df = split_preamble(df_raw)
-                sheet_infos.append(_classify_sheet(str(name), df))
+                sheet_infos.append(_classify_sheet(str(name), df.iloc[:sample_rows]))
     except Exception as e:
         logger.warning("spreadsheet detection failed: path=%s error=%s", path, e)
 

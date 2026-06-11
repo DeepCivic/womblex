@@ -26,7 +26,7 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from womblex.ingest.gnaf import _md5_file
+from womblex.utils.checksum import md5_file
 
 logger = logging.getLogger(__name__)
 
@@ -35,9 +35,10 @@ logger = logging.getLogger(__name__)
 SCHEMA_VERSION = "2.6"
 
 # One row per ABR record. Individuals (EntityTypeInd=IND) populate the
-# name_title / given_names / family_name columns; all other entity types
-# populate non_individual_name. given_names joins the schema's 0–2
-# GivenName elements with a single space.
+# name_title / given_name_1 / given_name_2 / family_name columns; all
+# other entity types populate non_individual_name. The schema caps
+# GivenName at two elements; given names are kept as separate columns
+# because a single given name may itself contain a space.
 RECORD_COLUMNS = [
     "abn",
     "abn_status",
@@ -49,7 +50,8 @@ RECORD_COLUMNS = [
     "name_type",
     "non_individual_name",
     "name_title",
-    "given_names",
+    "given_name_1",
+    "given_name_2",
     "family_name",
     "state",
     "postcode",
@@ -128,8 +130,15 @@ def _parse_abr(elem: ET.Element) -> tuple[dict[str, str], list[dict[str, str]]]:
         if name_el is not None:
             record["name_type"] = name_el.get("type", "")
             record["name_title"] = _findtext(name_el, "NameTitle")
-            givens = [(g.text or "").strip() for g in name_el.findall("GivenName")]
-            record["given_names"] = " ".join(g for g in givens if g)
+            givens = [
+                g for g in
+                ((el.text or "").strip() for el in name_el.findall("GivenName"))
+                if g
+            ]
+            record["given_name_1"] = givens[0] if givens else ""
+            # The schema caps GivenName at two; tolerate extras by folding
+            # them into the second column rather than dropping them.
+            record["given_name_2"] = " ".join(givens[1:])
             record["family_name"] = _findtext(name_el, "FamilyName")
             display_name = " ".join(
                 p for p in (*givens, record["family_name"]) if p
@@ -188,7 +197,13 @@ class _BatchedWriter:
         self.count = 0
         self._writer: pq.ParquetWriter | None = None
 
-    def append(self, rows: list[dict[str, str]]) -> None:
+    def append_row(self, row: dict[str, str]) -> None:
+        self.rows.append(row)
+        self.count += 1
+        if len(self.rows) >= _BATCH_ROWS:
+            self.flush()
+
+    def extend(self, rows: list[dict[str, str]]) -> None:
         self.rows.extend(rows)
         self.count += len(rows)
         if len(self.rows) >= _BATCH_ROWS:
@@ -211,7 +226,10 @@ class _BatchedWriter:
 
     def abort(self) -> None:
         if self._writer is not None:
-            self._writer.close()
+            try:
+                self._writer.close()
+            except Exception:  # noqa: BLE001 — best-effort release before unlink
+                pass
         self.path.unlink(missing_ok=True)
 
 
@@ -228,61 +246,66 @@ def ingest_abn_xml(
     *output_dir*. Returns None if the file is not a bulk extract
     (root element is not ``Transfer``) or cannot be parsed.
     """
-    metadata: dict[bytes, bytes] = {
-        b"abn.schema_version": SCHEMA_VERSION.encode(),
-        b"abn.source_file": xml_path.name.encode(),
-    }
-    if compute_md5:
-        metadata[b"abn.source_md5"] = _md5_file(xml_path).encode()
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    records_path = output_dir / f"{xml_path.stem}.parquet"
-    names_path = output_dir / f"{xml_path.stem}_names.parquet"
-
-    records = _BatchedWriter(records_path, _RECORD_SCHEMA, metadata)
-    names = _BatchedWriter(names_path, _NAMES_SCHEMA, metadata)
-
-    root: ET.Element | None = None
+    records: _BatchedWriter | None = None
+    names: _BatchedWriter | None = None
     try:
-        for event, elem in ET.iterparse(str(xml_path), events=("start", "end")):
-            if event == "start":
-                if root is None:
-                    root = elem
-                    if root.tag != "Transfer":
-                        logger.warning(
-                            "abn: root element is %r, not Transfer — skipping: %s",
-                            root.tag, xml_path.name,
-                        )
-                        return None
+        metadata: dict[bytes, bytes] = {
+            b"abn.schema_version": SCHEMA_VERSION.encode(),
+            b"abn.source_file": xml_path.name.encode(),
+        }
+        if compute_md5:
+            metadata[b"abn.source_md5"] = md5_file(xml_path).encode()
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        records_path = output_dir / f"{xml_path.stem}.parquet"
+        names_path = output_dir / f"{xml_path.stem}_names.parquet"
+
+        records = _BatchedWriter(records_path, _RECORD_SCHEMA, metadata)
+        names = _BatchedWriter(names_path, _NAMES_SCHEMA, metadata)
+
+        parser = ET.iterparse(str(xml_path), events=("start", "end"))
+        _, root = next(parser)  # first event is the start of the root element
+        if root.tag != "Transfer":
+            logger.warning(
+                "abn: root element is %r, not Transfer — skipping: %s",
+                root.tag, xml_path.name,
+            )
+            return None
+
+        for event, elem in parser:
+            if event != "end" or elem.tag != "ABR":
                 continue
-            if elem.tag == "ABR":
-                record, name_rows = _parse_abr(elem)
-                records.append([record])
-                names.append(name_rows)
-                # Drop processed children from the root so memory stays
-                # constant across multi-gigabyte files.
-                if root is not None:
-                    root.clear()
-    except ET.ParseError as e:
-        logger.error("abn: failed to parse %s: %s", xml_path.name, e)
-        records.abort()
-        names.abort()
+            record, name_rows = _parse_abr(elem)
+            records.append_row(record)
+            names.extend(name_rows)
+            # Drop processed children from the root so memory stays
+            # constant across multi-gigabyte files.
+            root.clear()
+
+        records.close()
+        names.close()
+
+        logger.info(
+            "abn: %s → %s (%d records), %s (%d names)",
+            xml_path.name, records_path.name, records.count,
+            names_path.name, names.count,
+        )
+        return AbnIngestResult(
+            records_path=records_path,
+            names_path=names_path,
+            record_count=records.count,
+            name_count=names.count,
+        )
+    except Exception as e:
+        # Any failure (malformed XML, read error, parquet write error) is
+        # isolated to this file: log with the source name, remove partial
+        # output, and let the directory ingest continue.
+        logger.error("abn: failed to ingest %s: %s", xml_path.name, e)
+        if records is not None:
+            records.abort()
+        if names is not None:
+            names.abort()
         return None
-
-    records.close()
-    names.close()
-
-    logger.info(
-        "abn: %s → %s (%d records), %s (%d names)",
-        xml_path.name, records_path.name, records.count,
-        names_path.name, names.count,
-    )
-    return AbnIngestResult(
-        records_path=records_path,
-        names_path=names_path,
-        record_count=records.count,
-        name_count=names.count,
-    )
 
 
 def discover_xml_files(root: Path) -> list[Path]:

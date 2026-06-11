@@ -39,10 +39,13 @@ logger = logging.getLogger(__name__)
 # blank / metadata rows (e.g. AusTender contract-notice exports).
 _HEADER_SCAN_ROWS = 10
 
-# A header candidate must span at least this fraction of the widest row
-# in the scan window. Title rows and "key: value" metadata blocks above
-# the real header rarely reach half its width, while the header matches
-# the data rows below it.
+# Extra rows past the scan window used to score how table-like the rows
+# below a header candidate are.
+_HEADER_LOOKAHEAD_ROWS = 10
+
+# Fallback discriminator when run-scoring cannot decide: a header
+# candidate must span at least this fraction of the widest row in the
+# scan window.
 _HEADER_WIDTH_RATIO = 0.6
 
 
@@ -54,13 +57,18 @@ def read_csv_raw(path: Path, *, nrows: int | None = None) -> "pd.DataFrame":
     file fail ("Expected 1 fields, saw N"). Sniffing the true maximum
     field count and passing explicit column names lets export-product
     CSVs with preamble rows parse; short rows are padded with ``""``.
+    With ``nrows``, the sniff is capped at the same row count — pandas
+    parses no further, so later rows cannot affect the read.
     """
     import csv
+    from itertools import islice
 
     import pandas as pd
 
     with open(path, newline="", encoding="utf-8", errors="replace") as f:
-        max_fields = max((len(row) for row in csv.reader(f)), default=0)
+        reader = csv.reader(f)
+        rows = islice(reader, nrows) if nrows is not None else reader
+        max_fields = max((len(row) for row in rows), default=0)
     df = pd.read_csv(
         path, dtype=str, keep_default_na=False, header=None,
         names=range(max_fields), nrows=nrows,
@@ -78,29 +86,61 @@ def split_preamble(df_raw: "pd.DataFrame") -> tuple[list[str], "pd.DataFrame"]:
     the source. Reading with ``header=None`` and splitting here keeps
     everything verbatim.
 
-    The header is the first row in the scan window whose non-empty cell
-    count reaches ``_HEADER_WIDTH_RATIO`` of the window's widest row
-    (minimum two cells) — narrow preamble rows never qualify against a
-    wide table. Falls back to row 0 (the previous behaviour) when no row
-    qualifies, so headerless single-column sheets are unaffected, and
-    genuinely narrow sheets (two-column key/value or glossary layouts)
-    keep their row-0 header because every row has the same width.
+    The header is the candidate row (>= 2 non-empty cells in the scan
+    window) that starts the longest run of table-consistent rows below
+    it: a following row is consistent when it has >= 2 non-empty cells
+    and is no wider than the candidate (+1 column of slack). Title and
+    metadata rows score short runs — a blank separator or the wider table
+    below breaks them — while the real header scores its data body. Ties
+    on run length prefer the wider candidate (a 2-cell metadata line
+    never beats the table header). When no candidate has any consistent
+    following row (e.g. a header-only sheet), falls back to the
+    width-ratio rule, and to row 0 for single-column sheets — so
+    headerless and uniformly narrow layouts keep their old behaviour.
     """
-    if len(df_raw) == 0:
+    n = len(df_raw)
+    if n == 0:
         return [], df_raw
 
-    window = min(len(df_raw), _HEADER_SCAN_ROWS)
+    scan = min(n, _HEADER_SCAN_ROWS)
+    horizon = min(n, _HEADER_SCAN_ROWS + _HEADER_LOOKAHEAD_ROWS)
     widths = [
         sum(1 for v in df_raw.iloc[i] if str(v).strip())
-        for i in range(window)
+        for i in range(horizon)
     ]
+
+    def _run_length(idx: int) -> int:
+        cap = widths[idx] + 1
+        run = 0
+        for j in range(idx + 1, horizon):
+            w = widths[j]
+            if w == 1:
+                # Single-cell rows (sub-headers, section notes) neither
+                # extend nor break a table run.
+                continue
+            if w == 0 or w > cap:
+                break
+            run += 1
+        return run
+
     header_idx = 0
-    max_width = max(widths)
-    if max_width >= 2:
-        threshold = max(2.0, _HEADER_WIDTH_RATIO * max_width)
-        header_idx = next(
-            (i for i, w in enumerate(widths) if w >= threshold), 0,
-        )
+    best_run = 0
+    for i in range(scan):
+        if widths[i] < 2:
+            continue
+        run = _run_length(i)
+        if run > best_run or (run == best_run and run > 0 and widths[i] > widths[header_idx]):
+            header_idx, best_run = i, run
+
+    if best_run == 0:
+        # Nothing below any candidate looks like a table body — fall back
+        # to width: first row reaching the ratio of the window's widest.
+        max_width = max(widths[:scan])
+        if max_width >= 2:
+            threshold = max(2.0, _HEADER_WIDTH_RATIO * max_width)
+            header_idx = next(
+                (i for i, w in enumerate(widths[:scan]) if w >= threshold), 0,
+            )
 
     preamble = [
         str(v).strip()

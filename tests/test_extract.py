@@ -701,6 +701,57 @@ class TestSpreadsheetExtractor:
         sheet_meta = next(e for e in result.elements if e.kind == "sheet_meta")
         assert "preamble" not in (sheet_meta.meta or {})
 
+    def test_title_wider_than_table_not_header(self, tmp_path: Path) -> None:
+        """A title row spanning more cells than the table itself stays preamble.
+
+        Run-scoring catches what a pure width rule cannot: the title's run
+        is broken by the blank row below it, while the real header is
+        followed by its data body.
+        """
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["Licence", "Register", "Extract"])  # 3-cell title
+        ws.append([])
+        ws.append(["Field", "Value"])  # real 2-col header
+        ws.append(["Licence number", "L1234"])
+        ws.append(["Status", "Active"])
+        path = tmp_path / "register.xlsx"
+        wb.save(path)
+
+        result = SpreadsheetExtractor().extract_path(path)
+        assert result.error is None
+
+        header_cells = [
+            e.value for e in result.elements
+            if e.kind == "sheet_cell" and (e.meta or {}).get("is_header")
+        ]
+        assert header_cells == ["Field", "Value"]
+        sheet_meta = next(e for e in result.elements if e.kind == "sheet_meta")
+        assert sheet_meta.meta is not None
+        assert "Licence" in sheet_meta.meta["preamble"]
+
+    def test_sub_header_row_does_not_shift_header(self, tmp_path: Path) -> None:
+        """A single-cell section row directly under the header is neutral."""
+        path = tmp_path / "sectioned.csv"
+        path.write_text(
+            "Name,Code,Status\n"
+            "Section A,,\n"
+            "Alpha,A1,Active\n"
+            "Beta,B2,Active\n",
+            encoding="utf-8",
+        )
+
+        result = SpreadsheetExtractor().extract_path(path)
+        assert result.error is None
+
+        header_cells = [
+            e.value for e in result.elements
+            if e.kind == "sheet_cell" and (e.meta or {}).get("is_header")
+        ]
+        assert header_cells == ["Name", "Code", "Status"]
+
     def test_csv_without_preamble_unchanged(self, tmp_path: Path) -> None:
         """A plain header-first CSV keeps its row-0 header behaviour."""
         path = tmp_path / "plain.csv"
