@@ -447,13 +447,13 @@ def _detect_spreadsheet(path: Path) -> DocumentProfile:
     """Inspect a CSV or Excel file and classify each sheet's structure."""
     import pandas as pd
     # Local import: spreadsheet.py → extract.py → detect.py would be circular at module level.
-    from womblex.ingest.spreadsheet import _classify_sheet, split_preamble  # noqa: PLC0415
+    from womblex.ingest.spreadsheet import _classify_sheet, read_csv_raw, split_preamble  # noqa: PLC0415
 
     suffix = path.suffix.lower()
     sheet_infos: list[SheetInfo] = []
     try:
         if suffix == ".csv":
-            df_raw = pd.read_csv(path, dtype=str, keep_default_na=False, nrows=500, header=None)
+            df_raw = read_csv_raw(path, nrows=500)
             _, df = split_preamble(df_raw)
             sheet_infos.append(_classify_sheet("default", df))
         else:

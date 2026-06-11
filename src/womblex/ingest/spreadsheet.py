@@ -36,33 +36,71 @@ from womblex.ingest.extract import (
 logger = logging.getLogger(__name__)
 
 # Rows scanned for the real header when a sheet opens with title /
-# blank rows (e.g. AusTender contract-notice exports).
+# blank / metadata rows (e.g. AusTender contract-notice exports).
 _HEADER_SCAN_ROWS = 10
+
+# A header candidate must span at least this fraction of the widest row
+# in the scan window. Title rows and "key: value" metadata blocks above
+# the real header rarely reach half its width, while the header matches
+# the data rows below it.
+_HEADER_WIDTH_RATIO = 0.6
+
+
+def read_csv_raw(path: Path, *, nrows: int | None = None) -> "pd.DataFrame":
+    """Read a CSV with no header inference, tolerating ragged leading rows.
+
+    ``pd.read_csv(header=None)`` infers the column count from the first
+    row, so a one-field title row above a wide header makes the whole
+    file fail ("Expected 1 fields, saw N"). Sniffing the true maximum
+    field count and passing explicit column names lets export-product
+    CSVs with preamble rows parse; short rows are padded with ``""``.
+    """
+    import csv
+
+    import pandas as pd
+
+    with open(path, newline="", encoding="utf-8", errors="replace") as f:
+        max_fields = max((len(row) for row in csv.reader(f)), default=0)
+    df = pd.read_csv(
+        path, dtype=str, keep_default_na=False, header=None,
+        names=range(max_fields), nrows=nrows,
+    )
+    return df.fillna("")
 
 
 def split_preamble(df_raw: "pd.DataFrame") -> tuple[list[str], "pd.DataFrame"]:
-    """Split leading title/blank rows from a ``header=None`` sheet read.
+    """Split leading title/metadata rows from a ``header=None`` sheet read.
 
-    Export products put a title row (and often a blank row) above the
-    real header; parsing those with pandas' default ``header=0`` turns
-    the title into the header and fabricates ``Unnamed: N`` column names
-    — values that never existed in the source. Reading with
-    ``header=None`` and splitting here keeps everything verbatim.
+    Export products put title rows, generated-date lines or ``key: value``
+    metadata blocks above the real header; parsing those with pandas'
+    default ``header=0`` turns the first row into the header and
+    fabricates ``Unnamed: N`` column names — values that never existed in
+    the source. Reading with ``header=None`` and splitting here keeps
+    everything verbatim.
 
-    The header is the first row in the scan window with at least two
-    non-empty cells; rows above it become preamble text. Falls back to
-    row 0 (the previous behaviour) when no row qualifies, so headerless
-    single-column sheets are unaffected.
+    The header is the first row in the scan window whose non-empty cell
+    count reaches ``_HEADER_WIDTH_RATIO`` of the window's widest row
+    (minimum two cells) — narrow preamble rows never qualify against a
+    wide table. Falls back to row 0 (the previous behaviour) when no row
+    qualifies, so headerless single-column sheets are unaffected, and
+    genuinely narrow sheets (two-column key/value or glossary layouts)
+    keep their row-0 header because every row has the same width.
     """
     if len(df_raw) == 0:
         return [], df_raw
 
+    window = min(len(df_raw), _HEADER_SCAN_ROWS)
+    widths = [
+        sum(1 for v in df_raw.iloc[i] if str(v).strip())
+        for i in range(window)
+    ]
     header_idx = 0
-    for i in range(min(len(df_raw), _HEADER_SCAN_ROWS)):
-        non_empty = sum(1 for v in df_raw.iloc[i] if str(v).strip())
-        if non_empty >= 2:
-            header_idx = i
-            break
+    max_width = max(widths)
+    if max_width >= 2:
+        threshold = max(2.0, _HEADER_WIDTH_RATIO * max_width)
+        header_idx = next(
+            (i for i, w in enumerate(widths) if w >= threshold), 0,
+        )
 
     preamble = [
         str(v).strip()
@@ -155,7 +193,7 @@ class SpreadsheetExtractor:
         suffix = path.suffix.lower()
         try:
             if suffix == ".csv":
-                df_raw = pd.read_csv(path, dtype=str, keep_default_na=False, header=None)
+                df_raw = read_csv_raw(path)
                 preamble, df = split_preamble(df_raw)
                 order = _emit_sheet(
                     elements, order, sheet_name="default", sheet_index=0,

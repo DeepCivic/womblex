@@ -624,6 +624,83 @@ class TestSpreadsheetExtractor:
         assert data_cells[0] == "Example Agency"
         assert "Example Supplier Pty Ltd" in data_cells
 
+    def test_xlsx_multicell_metadata_preamble(self, tmp_path: Path) -> None:
+        """Metadata blocks above the header span 2 cells but are not the header.
+
+        A naive "first row with >=2 non-empty cells" rule would pick the
+        ``Agency: | ...`` row; the width-ratio rule keeps scanning until a
+        row matching the table's real width.
+        """
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["Quarterly Statistics Report"])
+        ws.append(["Agency:", "Example Commission"])
+        ws.append(["Generated:", "2026-06-11"])
+        ws.append([])
+        headers = ["Region", "Quarter", "Applications", "Approvals", "Refusals", "Pending"]
+        ws.append(headers)
+        ws.append(["NSW", "Q3", "120", "100", "15", "5"])
+        path = tmp_path / "stats.xlsx"
+        wb.save(path)
+
+        result = SpreadsheetExtractor().extract_path(path)
+        assert result.error is None
+
+        header_cells = [
+            e.value for e in result.elements
+            if e.kind == "sheet_cell" and (e.meta or {}).get("is_header")
+        ]
+        assert header_cells == headers
+        sheet_meta = next(e for e in result.elements if e.kind == "sheet_meta")
+        assert sheet_meta.meta is not None
+        preamble = sheet_meta.meta["preamble"]
+        assert "Quarterly Statistics Report" in preamble
+        assert "Example Commission" in preamble
+        assert "2026-06-11" in preamble
+
+    def test_ragged_csv_with_title_row(self, tmp_path: Path) -> None:
+        """A one-field title row above a wide CSV header must not fail the read."""
+        path = tmp_path / "export.csv"
+        path.write_text(
+            "Contract Notice Export\n"
+            "\n"
+            "Agency,CN ID,Value,Description\n"
+            "Example Agency,CN0000001,12345.67,Office fitout\n",
+            encoding="utf-8",
+        )
+
+        result = SpreadsheetExtractor().extract_path(path)
+        assert result.error is None
+
+        header_cells = [
+            e.value for e in result.elements
+            if e.kind == "sheet_cell" and (e.meta or {}).get("is_header")
+        ]
+        assert header_cells == ["Agency", "CN ID", "Value", "Description"]
+        sheet_meta = next(e for e in result.elements if e.kind == "sheet_meta")
+        assert (sheet_meta.meta or {}).get("preamble") == "Contract Notice Export"
+
+    def test_two_column_key_value_sheet_keeps_row0_header(self, tmp_path: Path) -> None:
+        """Uniformly narrow sheets are not mistaken for preamble + header."""
+        path = tmp_path / "kv.csv"
+        path.write_text(
+            "Field,Value\nLicence number,L1234\nStatus,Active\n",
+            encoding="utf-8",
+        )
+
+        result = SpreadsheetExtractor().extract_path(path)
+        assert result.error is None
+
+        header_cells = [
+            e.value for e in result.elements
+            if e.kind == "sheet_cell" and (e.meta or {}).get("is_header")
+        ]
+        assert header_cells == ["Field", "Value"]
+        sheet_meta = next(e for e in result.elements if e.kind == "sheet_meta")
+        assert "preamble" not in (sheet_meta.meta or {})
+
     def test_csv_without_preamble_unchanged(self, tmp_path: Path) -> None:
         """A plain header-first CSV keeps its row-0 header behaviour."""
         path = tmp_path / "plain.csv"

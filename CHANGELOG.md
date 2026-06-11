@@ -20,17 +20,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   metadata — the `ingest/gnaf.py` pattern. New `womblex ingest-abn <file|dir>`
   CLI command; bypasses the NLP pipeline. (`ingest/abn_bulk.py`,
   `cli/ingest.py`, `tests/test_abn_bulk.py` — all-synthetic fixtures.)
-- **Spreadsheet preamble/header detection.** Export products that open with a
-  title row above the real header (e.g. AusTender contract-notice exports)
-  previously had the title parsed as the header, with pandas fabricating
-  `Unnamed: N` column names that landed verbatim-violating cell values on the
-  element stream. Sheets are now read with `header=None` and split via
-  `split_preamble`: the header is the first row in a 10-row window with ≥2
-  non-empty cells, title rows above it land verbatim on the sheet_meta
-  element (`meta["preamble"]`), and the row-0-is-header contract of the cell
-  grid is preserved for downstream table views. Header-first and
-  single-column sheets are unaffected. Detection (`_detect_spreadsheet`)
-  shares the same split, so `SheetInfo.key_column` now resolves against the
+- **Spreadsheet preamble/header detection.** Export products that open with
+  title rows, generated-date lines or `key: value` metadata blocks above the
+  real header (e.g. AusTender contract-notice exports, agency stats
+  workbooks) previously had the first row parsed as the header, with pandas
+  fabricating `Unnamed: N` column names that landed verbatim-violating cell
+  values on the element stream — and ragged CSVs (one-field title row above
+  a wide header) failed outright. Sheets are now read with `header=None`
+  (CSVs via a new field-count-sniffing `read_csv_raw`) and split via
+  `split_preamble`: the header is the first row in a 10-row window whose
+  non-empty width reaches 60% of the window's widest row (min two cells), so
+  narrow metadata rows never out-compete a wide table; preamble rows land
+  verbatim on the sheet_meta element (`meta["preamble"]`) and the
+  row-0-is-header contract of the cell grid is preserved for downstream
+  table views. Header-first, single-column and uniformly narrow (key/value,
+  glossary) sheets are unaffected. Detection (`_detect_spreadsheet`) shares
+  the same reader and split, so `SheetInfo.key_column` resolves against the
   real header. (`ingest/spreadsheet.py`, `ingest/detect.py`.)
 - **Run-level document manifest.** `womblex run` now consolidates the per-batch
   `batch-NNNN._manifest.parquet` sidecars into a single
