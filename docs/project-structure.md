@@ -37,6 +37,7 @@ womblex/
 │   │   ├── spreadsheet.py       # CSV/Excel extraction — one ExtractionResult per workbook with cells as elements
 │   │   ├── gnaf.py              # G-NAF PSV → Parquet ingest (standalone)
 │   │   ├── gnaf_schema.py       # G-NAF table schemas — static column definitions
+│   │   ├── abn_bulk.py          # ABN bulk extract XML → Parquet ingest (standalone, streamed)
 │   │   ├── geospatial.py        # SHP → GeoParquet ingest (standalone)
 │   │   ├── redaction.py         # Backwards-compatible re-export of redact.detector
 │   │   ├── heuristics_cv2.py    # OpenCV-based detection heuristics
@@ -84,7 +85,8 @@ womblex/
 │   ├── utils/
 │   │   ├── metrics.py       # WER/CER accuracy metrics
 │   │   ├── tabular_metrics.py # Tabular extraction accuracy (structural fidelity, data integrity)
-│   │   └── models.py        # Local model path resolution (models/ dir, HF snapshot layout)
+│   │   ├── models.py        # Local model path resolution (models/ dir, HF snapshot layout)
+│   │   └── checksum.py      # Shared streamed MD5 helper for the standalone register ingests
 │   └── verify/
 │       └── engine.py        # Two-pass extraction quality verification
 └── tests/

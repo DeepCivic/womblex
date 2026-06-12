@@ -581,6 +581,199 @@ class TestSpreadsheetExtractor:
         assert result.error is not None
         assert result.elements == []
 
+    def test_xlsx_title_preamble_split_from_header(self, tmp_path: Path) -> None:
+        """Export-product shape (e.g. AusTender): title + blank row above the header.
+
+        The real header row must be the one marked is_header — pandas'
+        fabricated ``Unnamed: N`` names must never appear as cell values.
+        """
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Contract Notice Export"
+        ws.append(["Contract Notice Export"])
+        ws.append([])
+        headers = ["Agency", "CN ID", "Publish Date", "Value", "Description", "Supplier Name"]
+        ws.append(headers)
+        ws.append(["Example Agency", "CN0000001", "2026-01-05 09:00:00", "12345.67",
+                   "Office fitout", "Example Supplier Pty Ltd"])
+        ws.append(["Example Agency", "CN0000002", "2026-01-06 10:00:00", "99000",
+                   "ICT services", "Another Supplier Pty Ltd"])
+        path = tmp_path / "AusTenderContractNoticeExport_20260101_000000.xlsx"
+        wb.save(path)
+
+        result = SpreadsheetExtractor().extract_path(path)
+        assert result.error is None
+
+        header_cells = [
+            e.value for e in result.elements
+            if e.kind == "sheet_cell" and (e.meta or {}).get("is_header")
+        ]
+        assert header_cells == headers
+        assert not any("Unnamed" in (e.value or "") for e in result.elements)
+
+        sheet_meta = next(e for e in result.elements if e.kind == "sheet_meta")
+        assert sheet_meta.meta is not None
+        assert sheet_meta.meta["preamble"] == "Contract Notice Export"
+
+        data_cells = [
+            e.value for e in result.elements
+            if e.kind == "sheet_cell" and e.row == 1
+        ]
+        assert data_cells[0] == "Example Agency"
+        assert "Example Supplier Pty Ltd" in data_cells
+
+    def test_xlsx_multicell_metadata_preamble(self, tmp_path: Path) -> None:
+        """Metadata blocks above the header span 2 cells but are not the header.
+
+        A naive "first row with >=2 non-empty cells" rule would pick the
+        ``Agency: | ...`` row; the width-ratio rule keeps scanning until a
+        row matching the table's real width.
+        """
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["Quarterly Statistics Report"])
+        ws.append(["Agency:", "Example Commission"])
+        ws.append(["Generated:", "2026-06-11"])
+        ws.append([])
+        headers = ["Region", "Quarter", "Applications", "Approvals", "Refusals", "Pending"]
+        ws.append(headers)
+        ws.append(["NSW", "Q3", "120", "100", "15", "5"])
+        path = tmp_path / "stats.xlsx"
+        wb.save(path)
+
+        result = SpreadsheetExtractor().extract_path(path)
+        assert result.error is None
+
+        header_cells = [
+            e.value for e in result.elements
+            if e.kind == "sheet_cell" and (e.meta or {}).get("is_header")
+        ]
+        assert header_cells == headers
+        sheet_meta = next(e for e in result.elements if e.kind == "sheet_meta")
+        assert sheet_meta.meta is not None
+        preamble = sheet_meta.meta["preamble"]
+        assert "Quarterly Statistics Report" in preamble
+        assert "Example Commission" in preamble
+        assert "2026-06-11" in preamble
+
+    def test_ragged_csv_with_title_row(self, tmp_path: Path) -> None:
+        """A one-field title row above a wide CSV header must not fail the read."""
+        path = tmp_path / "export.csv"
+        path.write_text(
+            "Contract Notice Export\n"
+            "\n"
+            "Agency,CN ID,Value,Description\n"
+            "Example Agency,CN0000001,12345.67,Office fitout\n",
+            encoding="utf-8",
+        )
+
+        result = SpreadsheetExtractor().extract_path(path)
+        assert result.error is None
+
+        header_cells = [
+            e.value for e in result.elements
+            if e.kind == "sheet_cell" and (e.meta or {}).get("is_header")
+        ]
+        assert header_cells == ["Agency", "CN ID", "Value", "Description"]
+        sheet_meta = next(e for e in result.elements if e.kind == "sheet_meta")
+        assert (sheet_meta.meta or {}).get("preamble") == "Contract Notice Export"
+
+    def test_two_column_key_value_sheet_keeps_row0_header(self, tmp_path: Path) -> None:
+        """Uniformly narrow sheets are not mistaken for preamble + header."""
+        path = tmp_path / "kv.csv"
+        path.write_text(
+            "Field,Value\nLicence number,L1234\nStatus,Active\n",
+            encoding="utf-8",
+        )
+
+        result = SpreadsheetExtractor().extract_path(path)
+        assert result.error is None
+
+        header_cells = [
+            e.value for e in result.elements
+            if e.kind == "sheet_cell" and (e.meta or {}).get("is_header")
+        ]
+        assert header_cells == ["Field", "Value"]
+        sheet_meta = next(e for e in result.elements if e.kind == "sheet_meta")
+        assert "preamble" not in (sheet_meta.meta or {})
+
+    def test_title_wider_than_table_not_header(self, tmp_path: Path) -> None:
+        """A title row spanning more cells than the table itself stays preamble.
+
+        Run-scoring catches what a pure width rule cannot: the title's run
+        is broken by the blank row below it, while the real header is
+        followed by its data body.
+        """
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["Licence", "Register", "Extract"])  # 3-cell title
+        ws.append([])
+        ws.append(["Field", "Value"])  # real 2-col header
+        ws.append(["Licence number", "L1234"])
+        ws.append(["Status", "Active"])
+        path = tmp_path / "register.xlsx"
+        wb.save(path)
+
+        result = SpreadsheetExtractor().extract_path(path)
+        assert result.error is None
+
+        header_cells = [
+            e.value for e in result.elements
+            if e.kind == "sheet_cell" and (e.meta or {}).get("is_header")
+        ]
+        assert header_cells == ["Field", "Value"]
+        sheet_meta = next(e for e in result.elements if e.kind == "sheet_meta")
+        assert sheet_meta.meta is not None
+        assert "Licence" in sheet_meta.meta["preamble"]
+
+    def test_sub_header_row_does_not_shift_header(self, tmp_path: Path) -> None:
+        """A single-cell section row directly under the header is neutral."""
+        path = tmp_path / "sectioned.csv"
+        path.write_text(
+            "Name,Code,Status\n"
+            "Section A,,\n"
+            "Alpha,A1,Active\n"
+            "Beta,B2,Active\n",
+            encoding="utf-8",
+        )
+
+        result = SpreadsheetExtractor().extract_path(path)
+        assert result.error is None
+
+        header_cells = [
+            e.value for e in result.elements
+            if e.kind == "sheet_cell" and (e.meta or {}).get("is_header")
+        ]
+        assert header_cells == ["Name", "Code", "Status"]
+
+    def test_csv_without_preamble_unchanged(self, tmp_path: Path) -> None:
+        """A plain header-first CSV keeps its row-0 header behaviour."""
+        path = tmp_path / "plain.csv"
+        path.write_text("Name,Code\nAlpha,A1\nBeta,B2\n", encoding="utf-8")
+
+        result = SpreadsheetExtractor().extract_path(path)
+        assert result.error is None
+
+        header_cells = [
+            e.value for e in result.elements
+            if e.kind == "sheet_cell" and (e.meta or {}).get("is_header")
+        ]
+        assert header_cells == ["Name", "Code"]
+        sheet_meta = next(e for e in result.elements if e.kind == "sheet_meta")
+        assert "preamble" not in (sheet_meta.meta or {})
+        rows = {
+            (e.row, e.col): e.value
+            for e in result.elements if e.kind == "sheet_cell"
+        }
+        assert rows[(1, 0)] == "Alpha"
+        assert rows[(2, 1)] == "B2"
+
 
 # ---------------------------------------------------------------------------
 # DocxExtractor

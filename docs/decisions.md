@@ -25,6 +25,37 @@ E2E (`womblex run`) modes feed the same engines by construction.
 
 ## Key design decisions
 
+### Reference registers — dedicated ingests; document formats — generic
+Two pathways, chosen deliberately (2026-06). Widely-used reference registers
+with novel format quirks (G-NAF PSV, ABN bulk extract XML) get **dedicated
+standalone ingest modules** — the schema projection is irreducibly
+source-specific, and a config-driven xpath/column DSL would be bigger than the
+~100 lines of parsing it replaces. The dedicated modules share one skeleton
+(discover → per-file ingest with isolation → Parquet + provenance metadata;
+`utils/checksum.md5_file` is the shared piece) but the skeleton itself is not
+yet abstracted — three copies with one shared helper; consolidate into a
+register-ingest layer if/when a fourth register lands. **Document and export
+formats (Excel/CSV) stay generic**: no filename knowledge, no per-dataset
+toggles; corpus wrinkles (AusTender preamble rows) are solved as
+general heuristics in the shared spreadsheet path.
+
+### Spreadsheet header detection — run-scoring over width-ratio
+Export products open with title rows, generated-date lines, or `key: value`
+metadata blocks above the real header; pandas' default `header=0` fabricates
+`Unnamed: N` column names from them. Sheets are read `header=None` and split by
+`split_preamble`. The header is the candidate row (≥2 non-empty cells in a
+10-row window) that **starts the longest run of table-consistent rows below
+it** — blank rows break a run, single-cell section rows are neutral, ties
+prefer the wider candidate. Chosen over the simpler first-wide-row /
+width-ratio rules because both misfire on multi-cell metadata lines and on
+titles wider than a narrow table; width-ratio survives only as the fallback
+when no candidate has a table body below it (header-only sheets). Rejected:
+content heuristics (uniqueness, non-numeric-ness of header values) — false
+positives on real headers with duplicate/numeric labels outweighed the gain;
+per-corpus threshold config — these are format heuristics, not dataset
+settings. Known limitation: a preamble row spilling across most of the table's
+width directly above the header (no blank separator) can still win.
+
 ### Entity linking — Kanon-2 candidates + register matching
 Kanon-2 enrichment is a strong candidate *generator* but does not canonicalise
 (one real entity surfaces under many surface forms — legal/trading variants,

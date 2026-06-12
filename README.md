@@ -1,6 +1,6 @@
 # Womblex
 
-Document extraction pipeline for converting Australian government documents into ML-friendly corpus or collections. Extracts text from PDFs and Word documents (native, scanned, forms, hybrid). Spreadsheets are ingested and produce one result per logical row, ready for per-record semantic analysis.
+Document extraction pipeline for converting Australian government documents into ML-friendly corpus or collections. Extracts text from PDFs and Word documents (native, scanned, forms, hybrid). Spreadsheets are ingested as cell-grained element streams with automatic header/preamble detection, ready for per-record semantic analysis. Reference registers (G-NAF, ABN bulk extract, geospatial) have standalone Parquet ingests that bypass the NLP pipeline.
 
 ## Design disclosure
 This project is designed for everyone. All design decisions favour air-gapped edge deployment, running on limited resources. This means Womblex doesn't include many of the more robust 'all in one' OCR models.
@@ -96,6 +96,11 @@ womblex link      --shards output/<run_id>/documents/ --config <yaml> # *.entity
 womblex embed     --shards output/<run_id>/documents/               # *.embeddings.parquet (Kanon-2 chunk embeddings)
 womblex pii       --shards output/<run_id>/documents/               # *.pii_spans.parquet (audit) + *.clean_text.parquet (masked, terminal)
 
+# Standalone register ingests (bypass the NLP pipeline, write Parquet directly)
+womblex ingest-gnaf "G-NAF/G-NAF FEBRUARY 2026" -o output/gnaf   # G-NAF PSV → Parquet
+womblex ingest-abn  extracts/ -o output/abn                      # ABN bulk extract XML → records + names Parquet
+womblex ingest-geo  shapefiles/ -o output/geo                    # SHP → GeoParquet
+
 # Audit shard integrity (extraction stage)
 womblex verify-shards output/<run_id>/
 ```
@@ -129,7 +134,7 @@ A doc-level summary type still surfaces in metadata.
 | Format | Extensions | Extraction Strategy |
 |--------|-----------|---------------------|
 | Word | `.docx` | python-docx (paragraphs + tables) |
-| Spreadsheet | `.csv`, `.xlsx`, `.xls` | pandas per-row or per-sheet |
+| Spreadsheet | `.csv`, `.xlsx`, `.xls` | pandas cell-grained element stream with header/preamble detection |
 
 ### 2. Extraction
 
@@ -137,7 +142,7 @@ Each document type routes to an appropriate extractor. `extract_text()` always r
 
 - **PDFs** return a single-element list. The per-page orchestrator dispatches `_apply_native_page` or `_apply_ocr_page` based on each page's `PageProfile`. PaddleOCR returns per-region confidence scores stored in the document profile. YOLO layout analysis (DocLayNet `yolo11n_doc_layout.pt`, with COCO `yolov8n.pt` as fallback) is called on OCR pages by `_layout_blocks_and_tables` to populate `Element.kind` for the layout regions it detects; a full-page scan whose dominant region is a figure but which OCR's to substantial text is tagged `paragraph` rather than `figure` so its content reaches chunking.
 - **DOCX** returns a single-element list with paragraphs and tables interleaved in OOXML body order.
-- **Spreadsheets** return one `ExtractionResult` per workbook. Each sheet contributes a leading `kind='sheet_meta'` element followed by one `kind='sheet_cell'` element per non-empty cell.
+- **Spreadsheets** return one `ExtractionResult` per workbook. Each sheet contributes a leading `kind='sheet_meta'` element followed by one `kind='sheet_cell'` element per non-empty cell. Export products that open with title rows or `key: value` metadata blocks above the real header (e.g. AusTender contract-notice exports) are handled: the header is detected by run-scoring (the candidate row starting the longest run of table-consistent rows below it), preamble rows land verbatim on `sheet_meta.meta["preamble"]`, and row 0 of the cell grid is always the real header. Ragged CSVs (a one-field title row above a wide header) parse rather than fail.
 
 Each result carries a `document_id` used as the primary key downstream.
 

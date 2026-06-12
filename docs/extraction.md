@@ -47,8 +47,8 @@ verbatim text because the writer reads `elements`, not `pages`.
 | `table` | table; cells nest on `Element.cells` in memory, flatten to a sidecar in parquet |
 | `form` | form region; fields nest on `Element.fields`, flatten to a sidecar in parquet |
 | `page_break` | one per page transition (N-1 for an N-page document); `text`/`bbox` empty, `page` is the page just begun |
-| `sheet_meta` | one per worksheet in a spreadsheet (carries sheet index, dimensions) |
-| `sheet_cell` | one per non-empty spreadsheet cell |
+| `sheet_meta` | one per worksheet in a spreadsheet (carries sheet index, dimensions; title/metadata rows found above the real header land verbatim on `meta["preamble"]`) |
+| `sheet_cell` | one per non-empty spreadsheet cell; row 0 is always the detected header row (`meta["is_header"]`) |
 
 ## Text policy
 

@@ -8,6 +8,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **ABN Lookup bulk extract ingest.** New `ingest/abn_bulk.py` stream-parses
+  the ABR bulk extract XML files (`yyyymmddPublicNN.xml`, ~6 GB uncompressed
+  across 20 files) with constant memory and writes two Parquet files per
+  input: `<stem>.parquet` (one row per ABR record — ABN/status, entity type,
+  main entity name or legal-entity name parts with given names as separate
+  `given_name_1` / `given_name_2` columns since a single given name may
+  itself contain a space, state/postcode, ACN, GST) and
+  `<stem>_names.parquet` (one row per registered name — main/legal, business,
+  trading and DGR fund names keyed by ABN, ready for `link/` register
+  consumption). Values are verbatim strings, absent optionals are `""`, and
+  provenance (schema version, source file, MD5, row counts) rides as parquet
+  metadata — the `ingest/gnaf.py` pattern. Failures are isolated per file:
+  any error (malformed XML, read/write failure) logs with the source name,
+  removes partial output, and lets the directory ingest continue. New
+  `womblex ingest-abn <file|dir>` CLI command; bypasses the NLP pipeline.
+  (`ingest/abn_bulk.py`, `cli/ingest.py`, `tests/test_abn_bulk.py` —
+  all-synthetic fixtures.) The shared MD5 helper moved to
+  `utils/checksum.py`, replacing the per-module copies in `ingest/gnaf.py`
+  and `ingest/geospatial.py`.
+- **Spreadsheet preamble/header detection.** Export products that open with
+  title rows, generated-date lines or `key: value` metadata blocks above the
+  real header (e.g. AusTender contract-notice exports, agency stats
+  workbooks) previously had the first row parsed as the header, with pandas
+  fabricating `Unnamed: N` column names that landed verbatim-violating cell
+  values on the element stream — and ragged CSVs (one-field title row above
+  a wide header) failed outright. Sheets are now read with `header=None`
+  (CSVs via a new field-count-sniffing `read_csv_raw`, capped at `nrows`
+  when sampling) and split via `split_preamble`: the header is the
+  candidate row (≥2 non-empty cells in a 10-row window) that starts the
+  longest run of table-consistent rows below it — a blank separator or the
+  wider table below breaks a title/metadata row's run, ties prefer the
+  wider candidate, single-cell section rows are neutral, and a width-ratio
+  rule plus row-0 fallback covers header-only and single-column sheets.
+  Preamble rows land verbatim on the sheet_meta element
+  (`meta["preamble"]`) and the row-0-is-header contract of the cell grid is
+  preserved for downstream table views. Header-first, single-column and
+  uniformly narrow (key/value, glossary) sheets are unaffected. Detection
+  (`_detect_spreadsheet`) shares the same reader and split with headroom so
+  the 500-row classification sample is unchanged, and `SheetInfo.key_column`
+  resolves against the real header. (`ingest/spreadsheet.py`,
+  `ingest/detect.py`.)
 - **Run-level document manifest.** `womblex run` now consolidates the per-batch
   `batch-NNNN._manifest.parquet` sidecars into a single
   `<run_root>/manifest.parquet` at the end of the run — the published

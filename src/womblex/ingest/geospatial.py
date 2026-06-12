@@ -13,10 +13,11 @@ Usage::
 
 from __future__ import annotations
 
-import hashlib
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+
+from womblex.utils.checksum import md5_file
 
 logger = logging.getLogger(__name__)
 
@@ -31,15 +32,6 @@ class GeospatialIngestResult:
     crs: str | None
     geometry_type: str | None
     error: str | None = None
-
-
-def _md5_file(path: Path) -> str:
-    """Compute MD5 hex digest of a file."""
-    h = hashlib.md5()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(65536), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def ingest_shapefile(
@@ -108,7 +100,7 @@ def ingest_shapefile(
         "geospatial.invalid_geometries": str(invalid_count),
     }
     if compute_md5:
-        metadata["geospatial.source_md5"] = _md5_file(shp_path)
+        metadata["geospatial.source_md5"] = md5_file(shp_path)
 
     # Write GeoParquet.
     output_dir.mkdir(parents=True, exist_ok=True)

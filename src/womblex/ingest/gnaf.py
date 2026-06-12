@@ -14,7 +14,6 @@ Usage::
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import re
 from pathlib import Path
@@ -24,6 +23,7 @@ import pyarrow.csv as pcsv
 import pyarrow.parquet as pq
 
 from womblex.ingest.gnaf_schema import ALL_TABLES, SCHEMA_VERSION
+from womblex.utils.checksum import md5_file
 
 logger = logging.getLogger(__name__)
 
@@ -50,15 +50,6 @@ def _parse_filename(stem: str) -> tuple[str | None, str | None]:
         return m.group(1).upper(), m.group(2).upper()
 
     return None, None
-
-
-def _md5_file(path: Path) -> str:
-    """Compute MD5 hex digest of a file, streaming in 64KB chunks."""
-    h = hashlib.md5()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(65536), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def ingest_psv(
@@ -130,7 +121,7 @@ def ingest_psv(
     if state:
         metadata[b"gnaf.state"] = state.encode()
     if compute_md5:
-        metadata[b"gnaf.source_md5"] = _md5_file(psv_path).encode()
+        metadata[b"gnaf.source_md5"] = md5_file(psv_path).encode()
 
     # Merge with any existing Arrow metadata.
     existing = table.schema.metadata or {}
