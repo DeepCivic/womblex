@@ -36,6 +36,9 @@ def cmd_ingest_gnaf(args: argparse.Namespace) -> int:
         logger.error("No files were written. Check logs for details.")
         return 1
 
+    from womblex.store.register_manifest import write_register_manifest
+    write_register_manifest(output_dir)
+
     logger.info("Wrote %d Parquet files to %s", len(written), output_dir)
     return 0
 
@@ -97,6 +100,9 @@ def cmd_ingest_abn(args: argparse.Namespace) -> int:
     if not results:
         logger.error("No files were written. Check logs for details.")
         return 1
+
+    from womblex.store.register_manifest import write_register_manifest
+    write_register_manifest(output_dir)
 
     total_records = sum(r.record_count for r in results)
     total_names = sum(r.name_count for r in results)
