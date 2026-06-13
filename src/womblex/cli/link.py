@@ -12,7 +12,7 @@ import argparse
 import logging
 from pathlib import Path
 
-from womblex.cli._shared import Command
+from womblex.cli._shared import Command, make_isaacus_client
 
 logger = logging.getLogger("womblex")
 
@@ -80,7 +80,7 @@ def cmd_enrich(args: argparse.Namespace) -> int:
         logger.error("isaacus SDK not installed. Install with: uv sync --extra isaacus")
         return 1
     try:
-        client = isaacus.Isaacus()  # reads ISAACUS_API_KEY from the environment
+        client = make_isaacus_client()  # reads + strips ISAACUS_API_KEY
     except Exception as e:
         logger.error("Could not construct Isaacus client (is ISAACUS_API_KEY set?): %s", e)
         return 1

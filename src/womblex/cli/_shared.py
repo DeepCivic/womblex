@@ -20,6 +20,26 @@ class Command(NamedTuple):
     handler: Callable[[argparse.Namespace], int]
 
 
+def make_isaacus_client():  # type: ignore[no-untyped-def]
+    """Construct an Isaacus client, stripping whitespace from the API key.
+
+    The Isaacus SDK reads ``ISAACUS_API_KEY`` from the environment as-is,
+    so a stray trailing newline (common when a key is pasted into a
+    ``.env`` file on Windows) reaches httpx as an illegal header value and
+    fails with a cryptic ``LocalProtocolError``. Stripping the key here
+    makes the bootstrap robust to that. Falls back to the SDK default
+    (env-var lookup) when the variable is unset.
+    """
+    import os
+
+    import isaacus
+
+    key = os.environ.get("ISAACUS_API_KEY")
+    if key is not None and key.strip() != key:
+        return isaacus.Isaacus(api_key=key.strip())
+    return isaacus.Isaacus()
+
+
 def setup_logging(verbose: bool = False) -> None:
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(
