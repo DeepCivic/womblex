@@ -75,12 +75,10 @@ def cmd_enrich(args: argparse.Namespace) -> int:
         persist_document = enrichment_config.persist_document
 
     try:
-        import isaacus
+        client = make_isaacus_client()  # imports isaacus + reads/strips ISAACUS_API_KEY
     except ImportError:
         logger.error("isaacus SDK not installed. Install with: uv sync --extra isaacus")
         return 1
-    try:
-        client = make_isaacus_client()  # reads + strips ISAACUS_API_KEY
     except Exception as e:
         logger.error("Could not construct Isaacus client (is ISAACUS_API_KEY set?): %s", e)
         return 1
