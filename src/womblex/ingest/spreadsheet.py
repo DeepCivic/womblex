@@ -36,12 +36,16 @@ from womblex.ingest.extract import (
 logger = logging.getLogger(__name__)
 
 # Rows scanned for the real header when a sheet opens with title /
-# blank / metadata rows (e.g. AusTender contract-notice exports).
-_HEADER_SCAN_ROWS = 10
+# blank / metadata rows. Wide enough to clear a long leading key/value
+# block (e.g. the ~20-row GrantConnect "Criteria Summary" above its real
+# 32-column header) as well as the short AusTender title/blank preamble.
+_HEADER_SCAN_ROWS = 40
 
 # Extra rows past the scan window used to score how table-like the rows
-# below a header candidate are.
-_HEADER_LOOKAHEAD_ROWS = 10
+# below a header candidate are. With the scan window above this gives a
+# 60-row horizon — enough for a real header's data body to out-score a
+# narrow metadata run that precedes it.
+_HEADER_LOOKAHEAD_ROWS = 20
 
 # Fallback discriminator when run-scoring cannot decide: a header
 # candidate must span at least this fraction of the widest row in the
@@ -87,15 +91,18 @@ def split_preamble(df_raw: "pd.DataFrame") -> tuple[list[str], "pd.DataFrame"]:
     everything verbatim.
 
     The header is the candidate row (>= 2 non-empty cells in the scan
-    window) that starts the longest run of table-consistent rows below
-    it: a following row is consistent when it has >= 2 non-empty cells
-    and is no wider than the candidate (+1 column of slack). Title and
-    metadata rows score short runs — a blank separator or the wider table
-    below breaks them — while the real header scores its data body. Ties
-    on run length prefer the wider candidate (a 2-cell metadata line
-    never beats the table header). When no candidate has any consistent
-    following row (e.g. a header-only sheet), falls back to the
-    width-ratio rule, and to row 0 for single-column sheets — so
+    window) that maximises ``width * run`` — the breadth of the row times
+    the length of the run of table-consistent rows below it (a following
+    row is consistent when it has >= 2 non-empty cells and is no wider
+    than the candidate, +1 column of slack). Scoring on breadth-times-depth
+    is what lets a wide real header out-rank a *longer* but narrow run of
+    ``key | value`` metadata above it: the GrantConnect "Criteria Summary"
+    is a ~20-row block of 2-wide rows, but the 32-wide header below it
+    starts a far higher-scoring body. Title and metadata rows also score
+    low because a blank separator or the wider table below breaks their
+    run. Ties on score prefer the wider candidate. When no candidate has
+    any consistent following row (e.g. a header-only sheet), falls back to
+    the width-ratio rule, and to row 0 for single-column sheets — so
     headerless and uniformly narrow layouts keep their old behaviour.
     """
     n = len(df_raw)
@@ -124,15 +131,15 @@ def split_preamble(df_raw: "pd.DataFrame") -> tuple[list[str], "pd.DataFrame"]:
         return run
 
     header_idx = 0
-    best_run = 0
+    best_score = 0
     for i in range(scan):
         if widths[i] < 2:
             continue
-        run = _run_length(i)
-        if run > best_run or (run == best_run and run > 0 and widths[i] > widths[header_idx]):
-            header_idx, best_run = i, run
+        score = _run_length(i) * widths[i]
+        if score > best_score or (score == best_score and score > 0 and widths[i] > widths[header_idx]):
+            header_idx, best_score = i, score
 
-    if best_run == 0:
+    if best_score == 0:
         # Nothing below any candidate looks like a table body — fall back
         # to width: first row reaching the ratio of the window's widest.
         max_width = max(widths[:scan])

@@ -752,6 +752,58 @@ class TestSpreadsheetExtractor:
         ]
         assert header_cells == ["Name", "Code", "Status"]
 
+    def test_xlsx_long_keyvalue_block_above_wide_header(self, tmp_path: Path) -> None:
+        """GrantConnect shape: a long 2-column key/value block above a wide header.
+
+        The *Grant Award Published* export opens with a ~20-row two-column
+        "Criteria Summary" block before the real 32-column header. A
+        run-length-only rule picks the key/value block (its consistent
+        2-wide run out-scores a later header); scoring breadth-times-depth
+        and widening the scan window pick the real, much wider header.
+        """
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Grant Award Published"
+        ws.append(["Criteria Summary"])
+        # 20-row two-column key/value block.
+        criteria = [
+            ("Portfolio/Agency", "All Active Agencies"),
+            ("Date Range", "01-Jan-2026 to 31-Mar-2026"),
+            ("Grant Program", "All Programs"),
+            ("Grant Activity", "All Activities"),
+            ("Category", "All Categories"),
+        ]
+        for _ in range(4):  # repeat to reach ~20 rows of metadata
+            for key, value in criteria:
+                ws.append([key, value])
+        ws.append([])  # blank separator before the real header
+
+        headers = [f"Col{i}" for i in range(32)]
+        headers[0:3] = ["Agency", "GA ID", "Internal Reference ID"]
+        ws.append(headers)
+        for r in range(25):  # a deep data body so the header out-scores the block
+            ws.append([f"Agency {r}", f"GA{r:06d}", f"REF{r}"] + [""] * 29)
+        path = tmp_path / "GrantConnect-Grant-Award-Published_20260401.xlsx"
+        wb.save(path)
+
+        result = SpreadsheetExtractor().extract_path(path)
+        assert result.error is None
+
+        header_cells = [
+            e.value for e in result.elements
+            if e.kind == "sheet_cell" and (e.meta or {}).get("is_header")
+        ]
+        assert header_cells[:3] == ["Agency", "GA ID", "Internal Reference ID"]
+        assert "Portfolio/Agency" not in header_cells
+
+        sheet_meta = next(e for e in result.elements if e.kind == "sheet_meta")
+        assert sheet_meta.meta is not None
+        preamble = sheet_meta.meta["preamble"]
+        assert "Criteria Summary" in preamble
+        assert "All Active Agencies" in preamble
+
     def test_csv_without_preamble_unchanged(self, tmp_path: Path) -> None:
         """A plain header-first CSV keeps its row-0 header behaviour."""
         path = tmp_path / "plain.csv"
