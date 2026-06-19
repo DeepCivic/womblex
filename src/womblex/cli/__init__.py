@@ -30,6 +30,7 @@ import logging
 import sys
 
 from womblex.cli import (
+    cloud,
     embed,
     ingest,
     link,
@@ -50,6 +51,7 @@ logger = logging.getLogger("womblex")
 
 ALL_COMMANDS = [
     *pipeline.COMMANDS,
+    *cloud.COMMANDS,
     *redact.COMMANDS,
     *link.COMMANDS,
     *embed.COMMANDS,

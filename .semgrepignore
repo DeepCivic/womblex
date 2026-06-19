@@ -1,0 +1,7 @@
+# Vendored model artefacts are not our source code — skip them (they also
+# time out the scanner, e.g. the all-MiniLM tokenizer.json).
+src/womblex/_models/
+
+# Test fixtures and generated accuracy docs are data, not code.
+fixtures/
+docs/accuracy/

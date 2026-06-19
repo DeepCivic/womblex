@@ -104,7 +104,11 @@ def _cluster_ids(keys: list) -> list[int | None]:
 
 
 def exact_dup_ids(texts: list[str]) -> list[int | None]:
-    return _cluster_ids([hashlib.md5(_norm(t).encode()).hexdigest() for t in texts])
+    # Content addressing for dup detection, not a security signature.
+    # nosemgrep: python.lang.security.insecure-hash-algorithms-md5.insecure-hash-algorithm-md5
+    return _cluster_ids(
+        [hashlib.md5(_norm(t).encode(), usedforsecurity=False).hexdigest() for t in texts]
+    )
 
 
 def near_dup_ids(texts: list[str], perms: int, bands: int, k: int) -> list[int | None]:

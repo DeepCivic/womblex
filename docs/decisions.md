@@ -25,6 +25,35 @@ E2E (`womblex run`) modes feed the same engines by construction.
 
 ## Key design decisions
 
+### Distributed execution — stage-in/stage-out, not a filesystem abstraction
+Cloud scale-out (2026-06) reuses the existing batch shape rather than rewriting
+it. Womblex already shards, checkpoints per batch, and isolates per-doc
+failures; the only gaps for horizontal scale were *shared state* and a *safe
+claim*. Two deliberate choices:
+
+- **Object storage by stage-in/stage-out, not by threading an abstraction
+  through every stage.** A worker pulls a batch's inputs to a local scratch dir,
+  runs the ordinary `Path`-based pipeline, and pushes the shard sidecars back
+  (`store/remote.py`, fsspec). *Rejected:* making `shard_dir` a filesystem
+  abstraction wired through all ~10 `*_shards()` stages + `output.py` +
+  `shard_audit.py` — a large, risky refactor that fights the `Path` idiom for no
+  gain over copying a handful of files at the job boundary. fsspec's local
+  backend means the air-gapped/CPU default exercises the *same* code path with
+  no S3 dependency touched.
+- **A Postgres `FOR UPDATE SKIP LOCKED` queue is the distributed checkpoint, not
+  a second mechanism alongside the JSON `CheckpointManager`.** Concurrent
+  workers writing one checkpoint file would race; distinct rows under
+  `SKIP LOCKED` do not. So the worker path does **not** use `CheckpointManager`
+  — the job `status` carries resumability, and re-running `enqueue` (idempotent
+  on `(run_id, batch_num)`) is the resume. *Rejected:* Redis/Celery (new
+  infra, against the single-datastore goal) and an in-app file lock (no
+  multi-host safety). One Postgres table, no broker.
+
+The load-bearing invariant: `cmd_run` and the worker call **one** shared
+`batch.process_batch`, so local and distributed runs produce byte-identical
+shards by construction — the same reasoning as "per-stage and E2E feed the same
+engines".
+
 ### Reference registers — dedicated ingests; document formats — generic
 Two pathways, chosen deliberately (2026-06). Widely-used reference registers
 with novel format quirks (G-NAF PSV, ABN bulk extract XML) get **dedicated

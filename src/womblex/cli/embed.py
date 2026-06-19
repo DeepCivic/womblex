@@ -62,6 +62,8 @@ def cmd_embed(args: argparse.Namespace) -> int:
         logger.error("isaacus SDK not installed. Install with: uv sync --extra isaacus")
         return 1
     except Exception as e:
+        # Logs the exception, not the key — the rule trips on "API_KEY" in the literal.
+        # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
         logger.error("Could not construct Isaacus client (is ISAACUS_API_KEY set?): %s", e)
         return 1
 
