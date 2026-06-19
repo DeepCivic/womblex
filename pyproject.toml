@@ -114,5 +114,7 @@ module = [
     "isaacus.*",
     "spylls",
     "spylls.*",
+    "fsspec",
+    "fsspec.*",
 ]
 ignore_missing_imports = true

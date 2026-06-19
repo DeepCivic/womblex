@@ -200,7 +200,7 @@ class JobQueue:
                 """,
                 (older_than_seconds,),
             )
-            n = cur.rowcount
+            n: int = cur.rowcount
         if n:
             logger.warning("Requeued %d stale job(s) (locked > %.0fs)", n, older_than_seconds)
         return n

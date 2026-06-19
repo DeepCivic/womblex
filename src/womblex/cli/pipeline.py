@@ -394,6 +394,8 @@ def _cmd_chunk_shards(args: argparse.Namespace) -> int:
                     "chunks shards; they will be re-chunked.", len(dropped),
                 )
 
+    # Logs chunking config only — the rule trips on "token" in "tokenizer".
+    # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
     logger.info(
         "chunk --shards: dir=%s tokenizer=%s chunk_size=%d processes=%d text_source=%s",
         shard_dir, chunking_config.tokenizer, chunking_config.chunk_size,
