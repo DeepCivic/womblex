@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import tempfile
 from pathlib import Path
 
 from womblex.cli._shared import SUPPORTED_EXTENSIONS, Command
@@ -188,8 +189,81 @@ def cmd_jobs(args: argparse.Namespace) -> int:
     return 0
 
 
+# --- finalize ----------------------------------------------------------------
+
+
+def _register_finalize(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--store", help="Object-store base URI (or $WOMBLEX_STORE_URI)")
+    p.add_argument("--run-id", required=True, help="Run to finalise")
+    p.add_argument(
+        "--output-prefix", default=None,
+        help="Store-relative outputs dir (default: runs/<run_id>). "
+             "Reads <output-prefix>/documents/*._manifest.parquet.",
+    )
+    p.add_argument("--dsn", default=None,
+                   help="Optional Postgres DSN — warn if jobs are still unfinished")
+
+
+def cmd_finalize(args: argparse.Namespace) -> int:
+    """Consolidate a distributed run's shard manifests into one run manifest.
+
+    ``womblex run`` writes ``<run_root>/manifest.parquet`` at the end of a local
+    run; a distributed run has no single end, so this is the explicit
+    finalisation step. Run it once the fleet has drained: it downloads every
+    ``*._manifest.parquet`` shard, consolidates them, and uploads
+    ``<output-prefix>/manifest.parquet`` back to the store. Idempotent — safe to
+    re-run as more batches land.
+    """
+    from womblex.store.remote import RemoteStore
+    from womblex.store.run_manifest import RUN_MANIFEST_FILENAME, write_run_manifest
+
+    store_uri = _resolve_store(args)
+    if not store_uri:
+        logger.error("No store URI (pass --store or set WOMBLEX_STORE_URI)")
+        return 1
+
+    output_prefix = (args.output_prefix or f"runs/{args.run_id}").strip("/")
+    shard_prefix = f"{output_prefix}/documents"
+    store = RemoteStore.from_uri(store_uri)
+
+    dsn = _resolve_dsn(args)
+    if dsn:
+        from womblex.cloud.queue import JobQueue
+
+        with JobQueue(dsn) as queue:
+            stats = queue.stats(args.run_id)
+        unfinished = stats.get("pending", 0) + stats.get("running", 0)
+        if unfinished:
+            logger.warning(
+                "run %s has %d unfinished job(s) (%s) — finalising shards present so far",
+                args.run_id, unfinished, stats,
+            )
+        if stats.get("failed"):
+            logger.warning("run %s has %d failed job(s); their docs are absent",
+                           args.run_id, stats["failed"])
+
+    manifest_keys = store.list_files(shard_prefix, "*._manifest.parquet")
+    if not manifest_keys:
+        logger.error("No *._manifest.parquet under %s/%s", store_uri, shard_prefix)
+        return 1
+
+    with tempfile.TemporaryDirectory(prefix="womblex-finalize-") as tmp:
+        docs = Path(tmp) / "documents"
+        store.download_to_dir(manifest_keys, docs)
+        local_manifest = write_run_manifest(docs)
+        store.upload_file(local_manifest, f"{output_prefix}/{RUN_MANIFEST_FILENAME}")
+
+    logger.info(
+        "Finalised run %s: %d shard manifest(s) -> %s/%s/%s",
+        args.run_id, len(manifest_keys), store_uri, output_prefix, RUN_MANIFEST_FILENAME,
+    )
+    return 0
+
+
 COMMANDS = [
     Command("enqueue", "Plan batches into the cloud job queue", _register_enqueue, cmd_enqueue),
     Command("worker", "Process batches from the cloud job queue", _register_worker, cmd_worker),
     Command("jobs", "Show cloud job-queue status", _register_jobs, cmd_jobs),
+    Command("finalize", "Consolidate a distributed run's manifest in object storage",
+            _register_finalize, cmd_finalize),
 ]

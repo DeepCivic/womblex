@@ -130,6 +130,11 @@ womblex worker --store s3://womblex --config configs/example.yaml \
 
 # 3. Watch progress.
 womblex jobs --run-id <run_id>     # pending/running/done/failed counts
+
+# 4. Finalise once the fleet drains: consolidate the per-batch shard manifests
+#    into <store>/runs/<run_id>/manifest.parquet (the local `run` does this at
+#    its end; a distributed run has no single end, so it's an explicit step).
+womblex finalize --store s3://womblex --run-id <run_id>
 ```
 
 Connection details come from `--store`/`WOMBLEX_STORE_URI`, `--dsn`/`WOMBLEX_DB_DSN`

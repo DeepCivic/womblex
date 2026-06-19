@@ -123,7 +123,7 @@ A corpus exists to mature Womblex capability, not host custom code. Corpus-side 
 | `store/remote.py` | `RemoteStore` — fsspec stage-in/stage-out object-storage adapter (S3/MinIO/GCS/local) for distributed runs; `is_remote_uri`, `storage_options_from_env`. Confines all remote-storage knowledge to one place so `Path`-based stages stay untouched | Thread a filesystem abstraction through the stages; know about the queue |
 | `cloud/queue.py` | `JobQueue` — Postgres `FOR UPDATE SKIP LOCKED` batch queue (one `womblex_jobs` table); `enqueue` (idempotent on `(run_id, batch_num)`), `claim`, `complete`, `fail` (with retry), `requeue_stale`, `stats`. The row `status` is the distributed checkpoint | Run extraction; touch object storage |
 | `cloud/worker.py` | `run_worker()` — claim a batch, stage its inputs from `RemoteStore`, run `process_batch`, publish shards back, mark the row; per-job failure isolation, idle/once/stale-recovery modes | Implement the queue or the pipeline body (those are `cloud/queue.py` / `batch.py`) |
-| `cli/cloud.py` | `enqueue` / `worker` / `jobs` CLI — distributed counterpart to `womblex run` over a shared `--store` object-store URI + Postgres `--dsn` | Implement queue/worker/storage logic (those are `cloud/` + `store/remote.py`) |
+| `cli/cloud.py` | `enqueue` / `worker` / `jobs` / `finalize` CLI — distributed counterpart to `womblex run` over a shared `--store` object-store URI + Postgres `--dsn`. `finalize` consolidates a distributed run's shard manifests into `<run>/manifest.parquet` in the store (the explicit end-step `cmd_run` does locally) | Implement queue/worker/storage logic (those are `cloud/` + `store/remote.py`) |
 ## Coding Conventions
 ### Style
 - Python 3.11+

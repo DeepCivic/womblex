@@ -7,6 +7,8 @@
 #   docker compose run --rm womblex enqueue --input-prefix inputs/demo \
 #       --config configs/example.yaml --create-schema
 #   docker compose up --scale worker=4 worker
+#   # once drained, consolidate the run manifest:
+#   docker compose run --rm womblex finalize --run-id <run_id>
 #
 # Inputs and outputs share the s3://womblex bucket; shards land at
 # runs/<run_id>/documents/.

@@ -39,6 +39,21 @@ CREATE INDEX IF NOT EXISTS womblex_jobs_claim_idx
     ON womblex_jobs (status, batch_num);
 """
 
+# Literal queries (no f-string interpolation) — the only varying part is the
+# optional run filter, so each variant is spelled out in full.
+_CLAIM_COLS = "id, run_id, batch_num, input_keys, shard_prefix, attempts"
+_CLAIM_TAIL = "ORDER BY batch_num FOR UPDATE SKIP LOCKED LIMIT 1"
+_CLAIM_ANY = (
+    f"SELECT {_CLAIM_COLS} FROM womblex_jobs "
+    f"WHERE status = 'pending' AND attempts < max_attempts {_CLAIM_TAIL}"
+)
+_CLAIM_RUN = (
+    f"SELECT {_CLAIM_COLS} FROM womblex_jobs "
+    f"WHERE status = 'pending' AND attempts < max_attempts AND run_id = %s {_CLAIM_TAIL}"
+)
+_STATS_ALL = "SELECT status, count(*) FROM womblex_jobs GROUP BY status"
+_STATS_RUN = "SELECT status, count(*) FROM womblex_jobs WHERE run_id = %s GROUP BY status"
+
 
 @dataclass
 class JobSpec:
@@ -127,20 +142,10 @@ class JobQueue:
 
     def claim(self, worker_id: str, run_id: str | None = None) -> Job | None:
         """Atomically claim the next pending batch, or ``None`` if none free."""
-        where_run = "AND run_id = %s" if run_id else ""
+        sql = _CLAIM_RUN if run_id else _CLAIM_ANY
         params: tuple = (run_id,) if run_id else ()
         with self.conn.transaction():
-            row = self.conn.execute(
-                f"""
-                SELECT id, run_id, batch_num, input_keys, shard_prefix, attempts
-                FROM womblex_jobs
-                WHERE status = 'pending' AND attempts < max_attempts {where_run}
-                ORDER BY batch_num
-                FOR UPDATE SKIP LOCKED
-                LIMIT 1
-                """,
-                params,
-            ).fetchone()
+            row = self.conn.execute(sql, params).fetchone()
             if row is None:
                 return None
             job_id = row[0]
@@ -202,12 +207,9 @@ class JobQueue:
 
     def stats(self, run_id: str | None = None) -> dict[str, int]:
         """Count jobs by status (optionally for one run)."""
-        where = "WHERE run_id = %s" if run_id else ""
+        sql = _STATS_RUN if run_id else _STATS_ALL
         params: tuple = (run_id,) if run_id else ()
-        rows = self.conn.execute(
-            f"SELECT status, count(*) FROM womblex_jobs {where} GROUP BY status",
-            params,
-        ).fetchall()
+        rows = self.conn.execute(sql, params).fetchall()
         return {status: count for status, count in rows}
 
 

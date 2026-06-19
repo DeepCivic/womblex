@@ -84,6 +84,58 @@ def test_remote_store_download_to_dir_and_upload_glob(tmp_path):
     assert not store.exists("runs/r1/documents/other.txt")
 
 
+# --- finalize (local store, no Postgres) -------------------------------------
+
+
+def test_finalize_consolidates_manifest(tmp_path):
+    """End-to-end finalize: real shards -> store -> consolidated manifest."""
+    import argparse
+
+    import pyarrow.parquet as pq
+
+    from womblex.batch import process_batch
+    from womblex.cli.cloud import cmd_finalize
+    from womblex.config import (
+        ChunkingConfig,
+        DatasetConfig,
+        ExtractionConfig,
+        PathsConfig,
+        RedactionConfig,
+        WomblexConfig,
+    )
+
+    csv = tmp_path / "people.csv"
+    csv.write_text("name,role\nAlice,Director\nBob,Analyst\n")
+    cfg = WomblexConfig(
+        dataset=DatasetConfig(name="fin"),
+        paths=PathsConfig(
+            input_root=tmp_path, output_root=tmp_path / "out", checkpoint_dir=tmp_path / ".ckpt"
+        ),
+        extraction=ExtractionConfig(),
+        chunking=ChunkingConfig(enabled=False),
+        redaction=RedactionConfig(enabled=False),
+    )
+
+    local_shards = tmp_path / "local_shards"
+    local_shards.mkdir()
+    process_batch([csv], cfg, batch_num=1, shard_dir=local_shards)
+
+    store_root = tmp_path / "store"
+    store = RemoteStore.from_uri(str(store_root))
+    run_id = "rfin"
+    for p in local_shards.glob("batch-0001._manifest.parquet"):
+        store.upload_file(p, f"runs/{run_id}/documents/{p.name}")
+
+    rc = cmd_finalize(argparse.Namespace(
+        store=str(store_root), run_id=run_id, output_prefix=None, dsn=None,
+    ))
+    assert rc == 0
+    assert store.exists(f"runs/{run_id}/manifest.parquet")
+
+    dl = store.download_file(f"runs/{run_id}/manifest.parquet", tmp_path / "manifest.parquet")
+    assert pq.read_table(dl).num_rows == 1  # one source document
+
+
 # --- JobQueue (needs Postgres) -----------------------------------------------
 
 

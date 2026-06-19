@@ -18,13 +18,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `(run_id, batch_num)`, per-job retry, crashed-worker requeue); (3)
   `cloud/worker.py` — a worker that claims a batch, stages its inputs, runs the
   shared `batch.process_batch` body, and publishes `batch-NNNN.*.parquet` shards
-  back. New CLI: `womblex enqueue` / `worker` / `jobs`. Outputs are the ordinary
-  shard layout, so `manifest` / `chunk --shards` consume a distributed run
-  exactly like a local one. `process_batch` is also now the single shared body
-  behind `womblex run`, so local and distributed modes cannot diverge.
+  back. New CLI: `womblex enqueue` / `worker` / `jobs` / `finalize` (the last
+  consolidates a distributed run's shard manifests into
+  `<run>/manifest.parquet` in the store — the explicit end-step `womblex run`
+  performs locally). Outputs are the ordinary shard layout, so `manifest` /
+  `chunk --shards` consume a distributed run exactly like a local one.
+  `process_batch` is also now the single shared body behind `womblex run`, so
+  local and distributed modes cannot diverge.
 - **Container image + compose stack.** `Dockerfile` (extraction + `[cloud]`)
   and `docker-compose.yml` bundling Postgres (queue), MinIO (object store), and
   horizontally scalable workers (`docker compose up --scale worker=N`).
+- **CI security job.** `ci.yml` gains a `security` job: Semgrep SAST over `src/`
+  with the Python + OWASP Top Ten rulesets (blocking) and `pip-audit`
+  dependency scanning (informational — the ML dep tree carries advisories we
+  can't action directly). The test job now also installs the `cloud` extra so
+  the object-storage tests run in CI.
 - **ABN Lookup bulk extract ingest.** New `ingest/abn_bulk.py` stream-parses
   the ABR bulk extract XML files (`yyyymmddPublicNN.xml`, ~6 GB uncompressed
   across 20 files) with constant memory and writes two Parquet files per
