@@ -105,6 +105,50 @@ womblex ingest-geo  shapefiles/ -o output/geo                    # SHP → GeoPa
 womblex verify-shards output/<run_id>/
 ```
 
+## Distributed / cloud execution (optional)
+
+The local commands above run single-process and CPU-first — the default, and
+all that's needed for air-gapped edge use. For large corpora where you don't
+want to wait hours, the `cloud` extra adds horizontal scale-out **without
+changing extraction behaviour**: the same per-batch body runs, just across many
+workers that share a Postgres job queue and an object store.
+
+```bash
+pip install womblex[cloud]   # fsspec + s3fs + psycopg3
+```
+
+```bash
+# 1. Plan: list source docs in object storage, split into batches, enqueue.
+#    Idempotent on (run_id, batch_num) — re-run to resume.
+womblex enqueue --store s3://womblex --input-prefix inputs/demo \
+    --config configs/example.yaml --create-schema
+
+# 2. Process: run as many workers as you like (separate hosts/containers).
+#    Each claims batches via FOR UPDATE SKIP LOCKED — no double-processing.
+womblex worker --store s3://womblex --config configs/example.yaml \
+    --stale-timeout 900            # requeue batches orphaned by crashed workers
+
+# 3. Watch progress.
+womblex jobs --run-id <run_id>     # pending/running/done/failed counts
+```
+
+Connection details come from `--store`/`WOMBLEX_STORE_URI`, `--dsn`/`WOMBLEX_DB_DSN`
+(or `DATABASE_URL`), and the standard `AWS_*` / `WOMBLEX_S3_ENDPOINT` env vars
+(MinIO works as an S3 endpoint). Shards land at `<store>/runs/<run_id>/documents/`
+in the **ordinary layout**, so once synced down, `womblex manifest` /
+`chunk --shards` / every per-stage command consume a distributed run exactly
+like a local one.
+
+A ready-to-run stack (Postgres + MinIO + scalable workers) lives in
+`docker-compose.yml`:
+
+```bash
+docker compose up -d postgres minio createbuckets init
+docker compose run --rm womblex enqueue --input-prefix inputs/demo \
+    --config configs/example.yaml --create-schema
+docker compose up --scale worker=4 worker
+```
+
 ## How It Works
 
 ### 1. Per-page profiling + plan-driven orchestrator

@@ -38,15 +38,8 @@ def _register_run(p: argparse.ArgumentParser) -> None:
 
 def cmd_run(args: argparse.Namespace) -> int:
     """Run all pipeline stages using a config file."""
+    from womblex.batch import process_batch
     from womblex.config import load_config
-    from womblex.operations import (
-        BatchResult,
-        run_chunking,
-        run_extraction,
-        run_pii_cleaning,
-        run_redaction,
-        write_batch_parquet,
-    )
     from womblex.store.checkpoint import CheckpointManager
     from womblex.store.output import ShardVerificationError, verify_shard_persistence
     from womblex.store.retention import apply_retention, generate_run_id, most_recent_run
@@ -184,28 +177,15 @@ def cmd_run(args: argparse.Namespace) -> int:
             batch_num, len(batch_files), i + 1, min(i + batch_size, total_files), total_files,
         )
 
-        batch_results = run_extraction(batch_files, config)
-        if config.redaction.enabled:
-            batch_results = run_redaction(batch_results, config)
-        if config.chunking.enabled:
-            batch_results = run_chunking(batch_results, config)
-        if config.pii.enabled:
-            batch_results = run_pii_cleaning(batch_results, config)
-
-        batch = BatchResult(results=batch_results)
+        outcome = process_batch(batch_files, config, batch_num=batch_num, shard_dir=shard_dir)
+        batch = outcome.batch
         total_succeeded += batch.succeeded
         total_failed += batch.failed
 
-        shard_path = shard_dir / f"batch-{batch_num:04d}.parquet"
-        rows_to_write = sum(
-            1 for r in batch.results if r.status == "completed" and r.extraction is not None
-        )
-        write_batch_parquet(batch, shard_path)
-
-        if rows_to_write > 0:
+        if outcome.rows_written > 0:
             try:
                 cumulative_shard_size = verify_shard_persistence(
-                    shard_path, rows_to_write, cumulative_shard_size,
+                    outcome.shard_path, outcome.rows_written, cumulative_shard_size,
                 )
             except ShardVerificationError as e:
                 logger.error("[Batch %d] integrity check failed: %s", batch_num, e)

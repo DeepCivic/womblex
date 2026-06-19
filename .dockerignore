@@ -1,0 +1,15 @@
+.git
+.github
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+pytest.log
+output/
+.venv/
+venv/
+# Benchmark fixtures are large and not needed in the runtime image.
+fixtures/fixtures/
+docs/accuracy/
+*.egg-info/

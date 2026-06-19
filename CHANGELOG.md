@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Distributed / cloud execution (`womblex[cloud]`).** Optional scale-out for
+  long batch runs without changing the local CPU-first default. Three pieces:
+  (1) `store/remote.py` — an fsspec stage-in/stage-out object-storage adapter
+  (S3/MinIO/GCS/local) that confines all remote-storage knowledge to one place
+  so the `Path`-based stages stay untouched; (2) `cloud/queue.py` — a Postgres
+  `FOR UPDATE SKIP LOCKED` job queue over one `womblex_jobs` table where the row
+  `status` *is* the distributed checkpoint (idempotent re-enqueue on
+  `(run_id, batch_num)`, per-job retry, crashed-worker requeue); (3)
+  `cloud/worker.py` — a worker that claims a batch, stages its inputs, runs the
+  shared `batch.process_batch` body, and publishes `batch-NNNN.*.parquet` shards
+  back. New CLI: `womblex enqueue` / `worker` / `jobs`. Outputs are the ordinary
+  shard layout, so `manifest` / `chunk --shards` consume a distributed run
+  exactly like a local one. `process_batch` is also now the single shared body
+  behind `womblex run`, so local and distributed modes cannot diverge.
+- **Container image + compose stack.** `Dockerfile` (extraction + `[cloud]`)
+  and `docker-compose.yml` bundling Postgres (queue), MinIO (object store), and
+  horizontally scalable workers (`docker compose up --scale worker=N`).
 - **ABN Lookup bulk extract ingest.** New `ingest/abn_bulk.py` stream-parses
   the ABR bulk extract XML files (`yyyymmddPublicNN.xml`, ~6 GB uncompressed
   across 20 files) with constant memory and writes two Parquet files per

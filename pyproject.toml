@@ -30,6 +30,14 @@ dependencies = [
 # Isaacus enrichment - pip install womblex[isaacus]
 isaacus = ["isaacus>=0.19"]
 
+# Cloud / distributed execution - pip install womblex[cloud]
+# Object-storage staging (fsspec + s3fs) and the Postgres job queue (psycopg3).
+cloud = [
+    "fsspec>=2024.0",
+    "s3fs>=2024.0",
+    "psycopg[binary]>=3.1",
+]
+
 # Development tools - pip install womblex[dev]
 dev = [
     "pytest>=8.0",
@@ -39,7 +47,7 @@ dev = [
 ]
 
 # Full install - pip install womblex[all]
-all = ["womblex[isaacus,dev]"]
+all = ["womblex[isaacus,cloud,dev]"]
 
 [project.scripts]
 womblex = "womblex.cli:main"
