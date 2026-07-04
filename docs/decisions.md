@@ -25,6 +25,71 @@ E2E (`womblex run`) modes feed the same engines by construction.
 
 ## Key design decisions
 
+### Pre-extracted corpora — an ingest that *feeds* the pipeline
+`ingest/records.py` (2026-07) exists because Womblex's stages consume
+element-shard directories, but a pre-extracted corpus (the Open Australian
+Legal Corpus; any JSONL of already-clean text) needs no extraction. It is the
+odd one out among the standalone ingests: `gnaf`/`abn`/`geo` produce flat
+register tables that *bypass* the NLP pipeline, whereas records ingest produces
+the element stream that *feeds* it. Deliberate choices:
+
+- **`source_hash = sha256(record_id + text)`** (not file bytes — there is no
+  file). Content-addressed, so the asset refresh procedure is a cache hit by
+  construction: re-ingesting an unchanged record yields the same hash, and its
+  existing enrichment/chunk/embedding sidecars still join.
+- **Text → one `paragraph` element per blank-line block.** The canonical
+  document text for the asset is therefore the reassembled narrative
+  (`\n\n`-joined), byte-identical to the source for the `\n\n`-delimited
+  majority. Offsets are internally consistent by construction — enrich and
+  chunk both reassemble the same elements — so byte-fidelity to the *original*
+  JSONL is not required (no consumer maps enrichment offsets back to it).
+- **Corpus-agnostic.** A `RecordFieldMapping` (declared by `stories/<corpus>`)
+  names the id/text/provenance fields; the library knows nothing about OALC.
+  Provenance columns go in a `*.provenance.parquet` sidecar
+  (`store/provenance_output.py`), not `MANIFEST_SCHEMA` — keeping the shared
+  manifest schema stable while carrying arbitrary per-corpus metadata,
+  consolidated into a run-root `manifest.parquet` (source_hash → provenance).
+
+### Rate limits bind on tokens — token-budget request packing
+Observed (and confirmed across a ~280M-token programme): Isaacus rate limits
+bind on **tokens per request/window**, not request count. So request packing is
+never naive doc-count batching. `utils/token_packer.py` packs to
+`min(max_items, token_budget)` using **exact local counts** from the kanon-2
+tokenizer (free on Hugging Face, vendored under `_models/` — counting is
+offline and exact, not estimated). `enrich_stage` uses it to send
+`min(8 docs, token_budget)` per request — an 8× request-count cut for small
+docs, while staying token-safe for a batch of long judgments. Measured: this
+sustained ~0.7–1.0 M tok/min single-process with **zero 429s** (throughput is
+workload-shaped — decisions pack denser than bulky legislation).
+
+### Long documents — client-side split + offset-merge; split docs not persisted
+A document past `split_ceiling` (default 100K tokens) is split on structural
+(blank-line) boundaries into sub-documents enriched separately, and the
+per-segment `EnrichmentResult`s are stitched back by `analyse/enrich_merge.py`:
+every span shifted by the segment's `start_char`, every entity/segment id
+namespaced by segment index. This is the same offset stitch the enricher does
+internally for >16K inputs, applied one level up — needed only because a single
+very large *request* is the rate-limit risk. **Split docs are deliberately not
+persisted** for AI-chunking reuse (no single ILGS Document spans the full
+narrative), so those few long-tail docs self-enrich once at chunk time.
+*Measured tradeoff:* negligible for caselaw (~0.4% of docs >100K) but material
+for legislation (~4%, +~15% on enrich cost); the lever is to raise
+`split_ceiling` — a single 377K-token request was observed to succeed with no
+429, so the ceiling is far above the earlier ~150–200K assumption and the
+32K/100K defaults are conservative.
+
+### Graph-edge refresh — enrichment precedes AI chunking, so edges lag
+Semchunk-4 AI chunking reuses the persisted enrichment Document, so the order
+is `enrich → chunk`. Consequence: the `*.graph_edges.parquet` written at enrich
+time cannot contain mention→chunk edges (no chunks exist yet), and
+`enrichment_entities.chunk_index` is `-1`. `analyse/graph_refresh.py` closes the
+gap **offline** after chunking: entity mention spans and chunk offsets share the
+same narrative coordinate space, so overlap is deterministic and API-free. It
+rewrites `chunk_index` and replaces the `mentioned_in` edges while preserving
+hierarchy/citation/cross-reference edges; idempotent by construction. Only
+entity mentions are relinked — segment/cross-reference chunk edges need the full
+`EnrichmentResult` and are out of scope.
+
 ### Distributed execution — stage-in/stage-out, not a filesystem abstraction
 Cloud scale-out (2026-06) reuses the existing batch shape rather than rewriting
 it. Womblex already shards, checkpoints per batch, and isolates per-doc

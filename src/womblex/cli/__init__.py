@@ -10,6 +10,9 @@ Usage:
     womblex extract              document.pdf -o output/
     womblex chunk                --shards <dir> [--config configs/example.yaml]
     womblex chunk                --config configs/example.yaml
+    womblex enrich               --shards <dir> [--config configs/example.yaml]
+    womblex graph-refresh        --shards <dir>   (offline mention→chunk edge rebuild)
+    womblex embed                --shards <dir> [--config configs/example.yaml]
     womblex manifest             --shards <dir> [-o PATH]
     womblex normalise            --shards <dir> [--config configs/example.yaml]
     womblex redact               --shards <dir> --pdfs <dir> [--checkpoint PATH]

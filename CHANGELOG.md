@@ -8,6 +8,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Pre-extracted records ingest (`ingest/records.py`).** Turns already-clean
+  text records (a JSONL corpus; the Open Australian Legal Corpus) straight into
+  the standard element-shard layout (`*.elements.parquet` + sidecars +
+  `*._manifest.parquet`) so the `enrich → chunk → embed → graph-refresh`
+  pipeline runs over a pre-extracted corpus unchanged — unlike the register
+  ingests (`gnaf`/`abn`/`geo`) which *bypass* the NLP pipeline, this one *feeds*
+  it. `source_hash = sha256(record_id + text)` is content-addressed (unchanged
+  records are cache hits on re-ingest); text is split into paragraph blocks so
+  the reassembled narrative round-trips. Corpus-agnostic — a
+  `RecordFieldMapping` (declared by a thin `stories/<corpus>` config) names the
+  id / text / provenance fields. Record metadata lands in a
+  `*.provenance.parquet` sidecar (`store/provenance_output.py`) consolidated
+  into a run-root `manifest.parquet` (source_hash → provenance).
+- **Token-budget request packer (`utils/token_packer.py`).** Isaacus rate
+  limits bind on *tokens per request/window*, not request count, so requests
+  are packed by exact local token counts from the kanon-2 tokenizer:
+  `pack_by_tokens` groups items to `min(max_items, token_budget)`; an
+  over-budget item is sent solo; `split_on_boundaries` splits an over-ceiling
+  document on blank-line boundaries into offset-tagged segments. `TokenCounter`
+  is a cached, offline wrapper over the tokenizer.
+- **Enrichment — token-aware batching + long-doc split (`enrich_stage.py`).**
+  Replaces the one-doc-per-call loop with packer-driven requests of
+  `min(max_texts_per_request=8, token_budget)` (8× fewer requests for small
+  docs; token-aware so a batch of long judgments never overpacks a
+  429-triggering request). A doc over `split_ceiling` is split and its
+  per-segment results offset-merged (`analyse/enrich_merge.py`). `enrich.py`
+  honours a `Retry-After` header on 429. New `EnrichmentConfig` knobs:
+  `tokenizer`, `max_texts_per_request`, `token_budget`, `split_ceiling`.
+- **Graph-edge refresh stage (`analyse/graph_refresh.py`, `womblex
+  graph-refresh`).** Offline, deterministic rebuild of mention→chunk edges from
+  the entity + chunk sidecars (both carry char offsets) — needed because AI
+  chunking runs *after* enrichment, so the enrich-time graph has no chunk edges
+  yet. Populates `enrichment_entities.chunk_index` and refreshes
+  `*.graph_edges.parquet`, preserving hierarchy/citation edges. Idempotent.
+- **Offline kanon-2 tokenizer.** The tokenizer is vendored under
+  `_models/kanon-2-tokenizer` and resolved locally by both the token packer and
+  `create_chunker` — no Hugging Face round-trip per run, offline-safe.
 - **Distributed / cloud execution (`womblex[cloud]`).** Optional scale-out for
   long batch runs without changing the local CPU-first default. Three pieces:
   (1) `store/remote.py` — an fsspec stage-in/stage-out object-storage adapter
