@@ -107,6 +107,49 @@ def select_by_rules(corpus_path: Path, rules: list[dict]) -> list[dict]:
     return out
 
 
+def load_patterns(pattern_file: Path) -> list[str]:
+    """Load text-reference regexes (stories/oalc/*.yaml, --reference-file)."""
+    raw = yaml.safe_load(pattern_file.read_text())
+    return raw.get("patterns", [])
+
+
+def ingested_doc_ids(derived: Path) -> set[str]:
+    """version_ids already ingested (from the derived manifest), to exclude."""
+    import pyarrow.parquet as pq
+
+    manifest = derived / "manifest.parquet"
+    if not manifest.exists():
+        return set()
+    return set(pq.read_table(str(manifest)).column("doc_id").to_pylist())
+
+
+def select_references(corpus_path: Path, patterns: list[str], exclude: set[str]):
+    """Stream decisions whose text references any pattern (excluding ``exclude``).
+
+    A generator — the reference set is large (tens of thousands of judgments),
+    so records are streamed straight into ``ingest_records`` in constant
+    memory, never materialised. One combined case-insensitive regex per doc.
+    """
+    import re
+
+    combined = re.compile("|".join(patterns), re.I)
+    yielded = 0
+    with open(corpus_path, encoding="utf-8") as f:
+        for line in f:
+            try:
+                r = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if r.get("type") != "decision":
+                continue
+            if r.get("version_id") in exclude:
+                continue
+            if combined.search(r.get("text", "") or ""):
+                yielded += 1
+                yield r
+    logger.info("references: selected %d decisions", yielded)
+
+
 def next_batch_num(shard_dir: Path) -> int:
     """Next free batch number in ``shard_dir`` (1 when empty), so a new ingest
     appends after existing shards instead of overwriting them."""
@@ -399,6 +442,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--select-file", type=Path, default=None,
                     help="Curated citation-rule YAML (stories/oalc/*.yaml). Overrides --tier; "
                          "appends the matched instruments after any existing shards.")
+    ap.add_argument("--reference-file", type=Path, default=None,
+                    help="Text-reference pattern YAML: selects decisions whose text references "
+                         "any pattern, excluding already-ingested docs. Appends after existing shards.")
     ap.add_argument("--corpus", type=Path, required=True, help="Path to pristine corpus.jsonl")
     ap.add_argument("--derived", type=Path, required=True, help="derived/v<version>/ output root")
     ap.add_argument("--sample", type=int, default=None, help="Stratified sample size (T0). Omit = whole slice.")
@@ -410,19 +456,31 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    if not args.tier and not args.select_file:
-        ap.error("one of --tier or --select-file is required")
+    if not args.tier and not args.select_file and not args.reference_file:
+        ap.error("one of --tier, --select-file or --reference-file is required")
     stages = [s.strip() for s in args.stages.split(",") if s.strip()]
     shard_dir = args.derived / "shards"
     counter = TokenCounter()
     cfg = _asset_config(args.config)
     mapping = load_mapping()
-    label = args.select_file.stem if args.select_file else args.tier
+    label = (args.reference_file or args.select_file).stem if (
+        args.reference_file or args.select_file) else args.tier
     measurements: dict[str, object] = {"selection": label, "sample": args.sample}
 
     if "ingest" in stages:
         start_batch = next_batch_num(shard_dir)
-        if args.select_file:
+        if args.reference_file:
+            # Large text-reference set — stream decisions in constant memory,
+            # excluding already-ingested docs.
+            exclude = ingested_doc_ids(args.derived)
+            res = ingest_records(
+                select_references(args.corpus, load_patterns(args.reference_file), exclude),
+                shard_dir, mapping, batch_size=args.batch_size, start_batch=start_batch,
+            )
+            measurements["reference_docs"] = res.docs_ingested
+            logger.info("ingest: appended %d referencing decisions from batch-%04d",
+                        res.docs_ingested, start_batch)
+        elif args.select_file:
             # Curated instrument set — materialise (small) for exact token stats.
             records = select_by_rules(args.corpus, load_rules(args.select_file))
             ingest_records(records, shard_dir, mapping, batch_size=args.batch_size,
