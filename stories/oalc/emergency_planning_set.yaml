@@ -1,0 +1,34 @@
+# Curated instrument set — NSW/Federal emergency, disaster, planning &
+# environment statutes for the bushfire/landtitle knowledge base.
+#
+# Consumed by run_tier.py --select-file. Each rule is a case-insensitive regex
+# on the OALC `citation`, with an optional `jurisdiction` constraint. Decisions
+# are always excluded (legislation + statutory instruments only). A document
+# matching several rules is selected once (deduped on version_id).
+name: emergency_planning_set
+
+rules:
+  # --- Emergency / disaster (NSW) ---
+  - {citation: "state emergency and rescue management act 1989", jurisdiction: new_south_wales}
+  - {citation: "rural fires act 1997", jurisdiction: new_south_wales}
+  - {citation: "state emergency service act 1989", jurisdiction: new_south_wales}
+  - {citation: "reconstruction authority act 2022", jurisdiction: new_south_wales}
+  - {citation: "public health act 2010", jurisdiction: new_south_wales}
+  - {citation: "^water management act 2000", jurisdiction: new_south_wales}
+  - {citation: 'water management \(general\) regulation 2018', jurisdiction: new_south_wales}
+  - {citation: "murray river traffic", jurisdiction: new_south_wales}
+
+  # --- Emergency / disaster (Federal) ---
+  - {citation: "national emergency declaration act 2020", jurisdiction: commonwealth}
+
+  # --- Planning & environment (NSW) ---
+  - {citation: "environmental planning and assessment act 1979", jurisdiction: new_south_wales}
+  - {citation: "resilience and hazards", jurisdiction: new_south_wales}
+  - {citation: "exempt and complying development", jurisdiction: new_south_wales}
+  - {citation: "local environmental plan", jurisdiction: new_south_wales}   # all 179 NSW LEPs
+
+  # --- Planning & environment (Federal) ---
+  # EPBC Act 1999 + all subordinate instruments made under it (the citation
+  # carries the Act name), plus APRA.
+  - {citation: "environment protection and biodiversity conservation act 1999", jurisdiction: commonwealth}
+  - {citation: "australian prudential regulation authority act 1998", jurisdiction: commonwealth}

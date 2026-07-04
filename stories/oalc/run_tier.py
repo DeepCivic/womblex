@@ -66,6 +66,61 @@ def load_mapping() -> RecordFieldMapping:
 # ---------------------------------------------------------------------------
 
 
+def load_rules(select_file: Path) -> list[dict]:
+    """Load a curated citation-rule set (stories/oalc/*.yaml, --select-file)."""
+    raw = yaml.safe_load(select_file.read_text())
+    return raw.get("rules", [])
+
+
+def select_by_rules(corpus_path: Path, rules: list[dict]) -> list[dict]:
+    """Return full records matching any citation rule (legislation only).
+
+    Each rule is ``{citation: <regex>, jurisdiction: <optional>}``. Decisions
+    are excluded; a record matching several rules is returned once. The set is
+    small (curated instruments), so full records are materialised for ingest +
+    exact token stats.
+    """
+    import re
+
+    compiled = [(re.compile(r["citation"], re.I), r.get("jurisdiction")) for r in rules]
+    out: list[dict] = []
+    seen: set[str] = set()
+    with open(corpus_path, encoding="utf-8") as f:
+        for line in f:
+            try:
+                r = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if r.get("type") == "decision":
+                continue
+            vid = r.get("version_id")
+            if vid in seen:
+                continue
+            cit = r.get("citation", "") or ""
+            jur = r.get("jurisdiction")
+            for pat, jfilter in compiled:
+                if pat.search(cit) and (jfilter is None or jfilter == jur):
+                    out.append(r)
+                    seen.add(vid)
+                    break
+    logger.info("select: %d records match %d rules", len(out), len(rules))
+    return out
+
+
+def next_batch_num(shard_dir: Path) -> int:
+    """Next free batch number in ``shard_dir`` (1 when empty), so a new ingest
+    appends after existing shards instead of overwriting them."""
+    import re
+
+    mx = 0
+    if shard_dir.is_dir():
+        for p in shard_dir.glob("batch-*._manifest.parquet"):
+            m = re.match(r"batch-(\d+)", p.name)
+            if m:
+                mx = max(mx, int(m.group(1)))
+    return mx + 1
+
+
 def scan_slice(corpus_path: Path, tier: str) -> list[tuple[str, int]]:
     """Stream the corpus, return (version_id, char_len) for the tier's records."""
     predicate = _TIER_PREDICATES[tier]
@@ -339,7 +394,11 @@ def _asset_config(cfg_path: Path | None):  # noqa: ANN202
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="OALC corpus-asset tier runner (step 0)")
-    ap.add_argument("--tier", required=True, choices=sorted(_TIER_PREDICATES))
+    ap.add_argument("--tier", default=None, choices=sorted(_TIER_PREDICATES),
+                    help="Slice predicate. Omit when using --select-file.")
+    ap.add_argument("--select-file", type=Path, default=None,
+                    help="Curated citation-rule YAML (stories/oalc/*.yaml). Overrides --tier; "
+                         "appends the matched instruments after any existing shards.")
     ap.add_argument("--corpus", type=Path, required=True, help="Path to pristine corpus.jsonl")
     ap.add_argument("--derived", type=Path, required=True, help="derived/v<version>/ output root")
     ap.add_argument("--sample", type=int, default=None, help="Stratified sample size (T0). Omit = whole slice.")
@@ -351,41 +410,60 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    if not args.tier and not args.select_file:
+        ap.error("one of --tier or --select-file is required")
     stages = [s.strip() for s in args.stages.split(",") if s.strip()]
     shard_dir = args.derived / "shards"
     counter = TokenCounter()
     cfg = _asset_config(args.config)
     mapping = load_mapping()
-    measurements: dict[str, object] = {"tier": args.tier, "sample": args.sample}
+    label = args.select_file.stem if args.select_file else args.tier
+    measurements: dict[str, object] = {"selection": label, "sample": args.sample}
 
     if "ingest" in stages:
-        items = scan_slice(args.corpus, args.tier)
-        wanted = stratified_sample(items, args.sample, args.seed) if args.sample else {v for v, _ in items}
-        if args.sample:
-            # Small sampled slice (T0): materialise so we can emit exact token
-            # stats for the RUNLOG.
-            records = list(extract_records(args.corpus, wanted))
-            ingest_records(records, shard_dir, mapping, batch_size=args.batch_size)
-            stats = token_stats(counter, [r.get(mapping.text_field, "") or "" for r in records])
-            measurements["token_stats"] = stats
-            logger.info("ingest: token stats %s", json.dumps(stats))
+        start_batch = next_batch_num(shard_dir)
+        if args.select_file:
+            # Curated instrument set — materialise (small) for exact token stats.
+            records = select_by_rules(args.corpus, load_rules(args.select_file))
+            ingest_records(records, shard_dir, mapping, batch_size=args.batch_size,
+                           start_batch=start_batch)
+            measurements["token_stats"] = token_stats(
+                counter, [r.get(mapping.text_field, "") or "" for r in records])
+            logger.info("ingest: appended %d docs at batch-%04d, token stats %s",
+                        len(records), start_batch, json.dumps(measurements["token_stats"]))
         else:
-            # Full tier: stream extract → ingest in constant memory (tens of
-            # thousands of docs). Length distribution is the char lengths from
-            # the scan; exact token stats are skipped (measured live per stage).
-            ingest_records(
-                extract_records(args.corpus, wanted), shard_dir, mapping,
-                batch_size=args.batch_size,
-            )
-            char_lens = sorted(c for _, c in items)
-            measurements["char_len_stats"] = {
-                "docs": len(char_lens),
-                "p50_chars": char_lens[len(char_lens) // 2] if char_lens else 0,
-                "max_chars": char_lens[-1] if char_lens else 0,
-            }
+            items = scan_slice(args.corpus, args.tier)
+            wanted = (stratified_sample(items, args.sample, args.seed)
+                      if args.sample else {v for v, _ in items})
+            if args.sample:
+                records = list(extract_records(args.corpus, wanted))
+                ingest_records(records, shard_dir, mapping, batch_size=args.batch_size,
+                               start_batch=start_batch)
+                measurements["token_stats"] = token_stats(
+                    counter, [r.get(mapping.text_field, "") or "" for r in records])
+                logger.info("ingest: token stats %s", json.dumps(measurements["token_stats"]))
+            else:
+                # Full tier: stream extract → ingest in constant memory.
+                ingest_records(extract_records(args.corpus, wanted), shard_dir, mapping,
+                               batch_size=args.batch_size, start_batch=start_batch)
+                char_lens = sorted(c for _, c in items)
+                measurements["char_len_stats"] = {
+                    "docs": len(char_lens),
+                    "p50_chars": char_lens[len(char_lens) // 2] if char_lens else 0,
+                    "max_chars": char_lens[-1] if char_lens else 0,
+                }
         write_corpus_manifest(shard_dir)
 
-    stage_runners = {
+    _run_stages(stages, shard_dir, counter, cfg, measurements)
+    out = args.derived / f"{label}_measurements.json"
+    out.write_text(json.dumps(measurements, indent=2))
+    logger.info("wrote measurements → %s", out)
+    return 0
+
+
+def _run_stages(stages, shard_dir, counter, cfg, measurements) -> None:  # noqa: ANN001
+    """Run the requested API/offline stages, recording measurements."""
+    runners = {
         "enrich": lambda: run_enrich(shard_dir, counter, cfg),
         "chunk": lambda: run_chunk(shard_dir, counter, cfg),
         "embed": lambda: run_embed(shard_dir, counter, cfg),
@@ -394,7 +472,7 @@ def main(argv: list[str] | None = None) -> int:
     for name in ("enrich", "chunk", "embed", "graph-refresh"):
         if name not in stages:
             continue
-        m = stage_runners[name]()
+        m = runners[name]()
         measurements[name] = {
             "wall_seconds": round(m.wall_seconds, 1),
             "units": m.units, "input_tokens": m.input_tokens,
@@ -405,11 +483,6 @@ def main(argv: list[str] | None = None) -> int:
             "notes": m.notes,
         }
         logger.info("stage %s: %s", name, json.dumps(measurements[name]))
-
-    out = args.derived / "t0_measurements.json"
-    out.write_text(json.dumps(measurements, indent=2))
-    logger.info("wrote measurements → %s", out)
-    return 0
 
 
 if __name__ == "__main__":
