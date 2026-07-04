@@ -309,11 +309,13 @@ class ChunkingConfig(BaseModel):
     pass-through); ``processes=1`` keeps single-thread Chromebook
     portability.
 
-    The Kanon-2 tokeniser is obtainable only through the Isaacus API, so
-    the chunk stage is gated on it: when the Isaacus SDK + ``ISAACUS_API_KEY``
-    aren't available the stage logs and skips (see
-    ``womblex.utils.availability.isaacus_available``). Chunking therefore
-    runs alongside the rest of the Isaacus-dependent analysis, not offline.
+    The Kanon-2 tokeniser is free on Hugging Face (and vendored under
+    ``_models/kanon-2-tokenizer``, resolved locally by ``create_chunker``), so
+    chunk-size token counting is exact and fully offline. **AI chunking**
+    (``chunking_model``) does call the Isaacus API per document, so the chunk
+    stage currently gates on API availability (``ISAACUS_API_KEY`` +
+    ``womblex.utils.availability.isaacus_available``) and skips when absent;
+    plain token chunking needs no key and that gate is conservative.
     """
 
 

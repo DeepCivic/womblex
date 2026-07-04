@@ -108,11 +108,14 @@ upstream, each for a measured corpus reason:
 `chunk_size=480` (Kanon-2 window — upstream defaults to `None`, which
 auto-derives the size from the tokeniser's `model_max_length`; that
 path still passes through if `chunk_size` is set to `null`),
-`processes=1` (Chromebook portability). The Kanon-2 tokeniser is
-obtainable only through the Isaacus API, so the chunk stage is gated on
-it: without the Isaacus SDK + `ISAACUS_API_KEY` the stage logs and skips
-(`womblex.utils.availability.isaacus_available`). `offsets=True` is pinned in the
-adapter because Womblex always needs char offsets for page mapping.
+`processes=1` (Chromebook portability). The Kanon-2 tokeniser is free on
+Hugging Face (vendored under `_models/kanon-2-tokenizer`, resolved
+locally), so chunk-size counting is exact and offline; the chunk stage
+still gates on `ISAACUS_API_KEY`
+(`womblex.utils.availability.isaacus_available`) because **AI chunking**
+(`chunking_model`) calls the API — that gate is conservative for plain
+token chunking. `offsets=True` is pinned in the adapter because Womblex
+always needs char offsets for page mapping.
 
 ### elements.parquet
 
