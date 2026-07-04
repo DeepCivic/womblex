@@ -35,6 +35,29 @@ DEFAULT_MAX_RETRIES = 3
 DEFAULT_RETRY_BASE_DELAY = 2.0
 
 
+def _retry_after_seconds(exc: object) -> float | None:
+    """Extract a ``Retry-After`` delay (seconds) from an SDK exception, if any.
+
+    The Isaacus SDK's ``RateLimitError`` carries the HTTP ``response``; its
+    ``Retry-After`` header (delta-seconds) is the server's own backoff advice.
+    Returns ``None`` when unavailable so the caller falls back to exponential.
+    """
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        return None
+    try:
+        raw = headers.get("retry-after")
+    except Exception:
+        return None
+    if not raw:
+        return None
+    try:
+        return max(0.0, float(raw))
+    except (TypeError, ValueError):
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Response conversion helpers
 # ---------------------------------------------------------------------------
@@ -389,12 +412,16 @@ def enrich_documents_raw(
             last_error = e
             error_str = str(e)
 
-            # Retry on rate limits (429)
+            # Retry on rate limits (429), honouring a Retry-After header when the
+            # server sends one (adaptive throttle: back off exactly as told, else
+            # exponential). Whole ~150-200K-token requests trigger these.
             if "429" in error_str or "rate" in error_str.lower():
-                delay = retry_base_delay * (2 ** attempt)
+                retry_after = _retry_after_seconds(e)
+                delay = retry_after if retry_after is not None else retry_base_delay * (2 ** attempt)
                 logger.warning(
-                    "Rate limited on enrichment (attempt %d/%d), retrying in %.1fs",
+                    "Rate limited on enrichment (attempt %d/%d), retrying in %.1fs%s",
                     attempt + 1, max_retries + 1, delay,
+                    " (Retry-After)" if retry_after is not None else "",
                 )
                 time.sleep(delay)
                 continue

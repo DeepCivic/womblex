@@ -12,10 +12,21 @@ TEXT_KINDS elements in ``elem_order`` per source_hash via the shared
 :func:`womblex.process.chunker.reassemble_narrative` — the same text the
 chunker sees, by construction — and feeds it to the enrichment API.
 
-Enrichment runs one document at a time so a single API failure isolates to
-that document (the batch continues), mirroring the corpus-wide "individual
-document failures shouldn't stop the batch" policy. The downstream
-:mod:`womblex.link.stage` consumes the entities sidecar.
+Requests are **token-budget packed** (:mod:`womblex.utils.token_packer`):
+docs are grouped into ``min(max_texts_per_request, token_budget)`` per
+enrichment call — the 8-doc API cap and the per-request token ceiling that
+rate limits bind on, whichever binds first. A doc over the budget is sent
+solo; a doc over ``split_ceiling`` is split on structural boundaries into
+sub-documents enriched separately and offset-merged
+(:func:`womblex.analyse.enrich_merge.merge_segment_results`). A failed request
+isolates to its group (those docs are left unprocessed so a resume retries
+them), mirroring the corpus-wide "individual document failures shouldn't stop
+the batch" policy. The downstream :mod:`womblex.link.stage` consumes the
+entities sidecar.
+
+Split documents are not persisted for AI-chunking reuse (no single ILGS
+Document spans the full narrative); the chunk stage self-enriches those few
+long-tail docs. All other docs persist normally when ``persist_document``.
 """
 
 from __future__ import annotations
@@ -25,9 +36,16 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
-from womblex.analyse.enrich import enrich_document_raw
+from womblex.analyse.enrich import enrich_documents_raw
+from womblex.analyse.enrich_merge import merge_segment_results
 from womblex.analyse.graph import build_document_graph
 from womblex.analyse.models import EnrichmentResult
+from womblex.utils.token_packer import (
+    TextSegment,
+    TokenCounter,
+    pack_by_tokens,
+    split_on_boundaries,
+)
 from womblex.config import EnrichmentConfig
 from womblex.ingest.elements import Element
 from womblex.process.chunk_stage import _batch_bases
@@ -65,6 +83,7 @@ def enrich_shards(
     text_source: str = "elements",
     persist_document: bool = False,
     checkpoint_mgr: CheckpointManager | None = None,
+    token_counter: TokenCounter | None = None,
 ) -> EnrichStageResult:
     """Enrich every batch in ``shard_dir`` and write enrichment siblings.
 
@@ -85,6 +104,8 @@ def enrich_shards(
         logger.warning("enrich_shards: no batches found in %s", shard_dir)
         return EnrichStageResult(0, 0, 0)
 
+    counter = token_counter or TokenCounter(enrichment_config.tokenizer)
+
     batches_written = 0
     docs_enriched = 0
     total_entities = 0
@@ -97,33 +118,17 @@ def enrich_shards(
             continue
 
         narratives, doc_ids_by_hash = _load_narratives(base, text_source)
-        results: list[tuple[str, EnrichmentResult]] = []
-        doc_rows: list[tuple[str, str, str]] = []  # (source_hash, text_source, json)
-        errored: set[str] = set()
+        min_chars = max(1, enrichment_config.skip_short_documents)
+        packable = [
+            (h, t) for h, t in narratives.items() if len(t.strip()) >= min_chars
+        ]
 
-        for source_hash, text in narratives.items():
-            if len(text.strip()) < max(1, enrichment_config.skip_short_documents):
-                continue  # nothing to enrich — terminal, counts as resolved
-            try:
-                enr, raw_doc = enrich_document_raw(
-                    text, client,
-                    model=enrichment_config.model,
-                    overflow_strategy=enrichment_config.overflow_strategy,
-                    max_retries=enrichment_config.max_retries,
-                    retry_base_delay=enrichment_config.retry_base_delay,
-                )
-            except Exception as e:  # transient (e.g. network) — leave for retry
-                logger.error(
-                    "enrich_shards: enrichment failed for %s: %s",
-                    doc_ids_by_hash.get(source_hash, source_hash), e,
-                )
-                errored.add(source_hash)
-                continue
-            results.append((source_hash, enr))
-            if persist_document:
-                # raw_doc is the SDK ILGS Document (typed object to avoid a hard
-                # isaacus import); model_dump_json round-trips it losslessly.
-                doc_rows.append((source_hash, text_source, raw_doc.model_dump_json()))  # type: ignore[attr-defined]
+        results, doc_rows, errored = _enrich_packed(
+            packable, client, enrichment_config, counter,
+            text_source=text_source, persist_document=persist_document,
+            doc_ids_by_hash=doc_ids_by_hash,
+        )
+        for _src, enr in results:
             total_entities += (
                 len(enr.persons) + len(enr.locations)
                 + len(enr.terms) + len(enr.external_documents)
@@ -169,6 +174,88 @@ def enrich_shards(
         docs_enriched=docs_enriched,
         total_entities=total_entities,
     )
+
+
+# ---------------------------------------------------------------------------
+# Token-budgeted request packing + long-doc split
+# ---------------------------------------------------------------------------
+
+
+def _enrich_packed(
+    packable: list[tuple[str, str]],
+    client: object,
+    config: EnrichmentConfig,
+    counter: TokenCounter,
+    *,
+    text_source: str,
+    persist_document: bool,
+    doc_ids_by_hash: dict[str, str],
+) -> tuple[list[tuple[str, EnrichmentResult]], list[tuple[str, str, str]], set[str]]:
+    """Pack ``(source_hash, narrative)`` docs into requests and enrich each.
+
+    Returns ``(results, doc_rows, errored)``. A request's failure marks every
+    doc in that group errored — left unprocessed so a resume retries it. A doc
+    over ``split_ceiling`` is split + offset-merged and never persisted for
+    AI-chunking reuse (no single Document spans the full narrative).
+    """
+    results: list[tuple[str, EnrichmentResult]] = []
+    doc_rows: list[tuple[str, str, str]] = []
+    errored: set[str] = set()
+
+    groups = pack_by_tokens(
+        packable, counter.count_batch,
+        max_items=config.max_texts_per_request,
+        token_budget=config.token_budget,
+    )
+    for group in groups:
+        keys = [it.key for it in group.items]
+        try:
+            if group.solo and group.total_tokens > config.split_ceiling:
+                src = group.items[0].key
+                results.append((src, _enrich_split_doc(group.items[0].text, client, config, counter)))
+            else:
+                pairs = enrich_documents_raw(
+                    [it.text for it in group.items], client,
+                    model=config.model,
+                    overflow_strategy=config.overflow_strategy,
+                    max_retries=config.max_retries,
+                    retry_base_delay=config.retry_base_delay,
+                )
+                for it, (enr, raw_doc) in zip(group.items, pairs):
+                    results.append((it.key, enr))
+                    if persist_document:
+                        # raw_doc is the SDK ILGS Document; model_dump_json round-trips it.
+                        doc_rows.append((it.key, text_source, raw_doc.model_dump_json()))  # type: ignore[attr-defined]
+        except Exception as e:  # transient (network/429-exhausted) — leave for retry
+            logger.error(
+                "enrich_shards: enrichment failed for %s: %s",
+                [doc_ids_by_hash.get(k, k) for k in keys], e,
+            )
+            errored.update(keys)
+            continue
+    return results, doc_rows, errored
+
+
+def _enrich_split_doc(
+    text: str, client: object, config: EnrichmentConfig, counter: TokenCounter,
+) -> EnrichmentResult:
+    """Split an over-ceiling doc on boundaries, enrich each segment, offset-merge."""
+    segments = split_on_boundaries(text, counter.count_batch, max_tokens=config.split_ceiling)
+    seg_results: list[tuple[TextSegment, EnrichmentResult]] = []
+    for seg in segments:
+        pairs = enrich_documents_raw(
+            [seg.text], client,
+            model=config.model,
+            overflow_strategy=config.overflow_strategy,
+            max_retries=config.max_retries,
+            retry_base_delay=config.retry_base_delay,
+        )
+        seg_results.append((seg, pairs[0][0]))
+    logger.info(
+        "enrich_shards: split long doc (%d tokens) into %d segments",
+        sum(s.tokens for s in segments), len(segments),
+    )
+    return merge_segment_results(text, seg_results)
 
 
 # ---------------------------------------------------------------------------

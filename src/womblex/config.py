@@ -521,6 +521,33 @@ class EnrichmentConfig(BaseModel):
 
     batch_size: int = Field(default=10, ge=1, description="Documents per enrichment batch")
 
+    tokenizer: str = Field(
+        default="isaacus/kanon-2-tokenizer",
+        description="HuggingFace tokeniser id for exact local token counting when "
+                    "packing token-budgeted requests (free on Hugging Face).",
+    )
+
+    max_texts_per_request: int = Field(
+        default=8, ge=1,
+        description="API doc-count ceiling per enrichment request (Isaacus max is 8). "
+                    "Requests pack to min(max_texts_per_request, token_budget).",
+    )
+
+    token_budget: int = Field(
+        default=32768, ge=1,
+        description="Per-request token budget (B). Docs are packed so a request's "
+                    "combined tokens stay within this; a doc over it is sent solo. "
+                    "Rate limits bind on tokens/request — start ~32K and probe at T0.",
+    )
+
+    split_ceiling: int = Field(
+        default=100_000, ge=1,
+        description="A solo document above this token count is split client-side on "
+                    "structural (blank-line) boundaries into <= split_ceiling segments, "
+                    "enriched separately and offset-merged. ~150-200K tokens is the "
+                    "observed 429 failure zone; 100K leaves margin.",
+    )
+
     skip_short_documents: int = Field(
 
         default=0, ge=0,

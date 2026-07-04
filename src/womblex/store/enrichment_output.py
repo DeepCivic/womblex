@@ -397,6 +397,32 @@ def write_graph_edges_shard(
     return target
 
 
+def write_enrichment_entities_rows(rows: list[dict[str, Any]], base_path: Path) -> Path:
+    """Write pre-built ENTITY_SCHEMA rows to ``<base>.enrichment_entities.parquet``.
+
+    Lower-level than :func:`write_enrichment_entities_shard` (which derives rows
+    from an ``EnrichmentResult``): the graph-edge refresh already holds the
+    mention rows and only needs to rewrite them with ``chunk_index`` populated.
+    """
+    target = enrichment_entities_path_for(base_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    _write_enrichment_rows(rows, target, ENTITY_SCHEMA)
+    return target
+
+
+def write_graph_edges_rows(rows: list[dict[str, Any]], base_path: Path) -> Path:
+    """Write pre-built GRAPH_EDGE_SCHEMA rows to ``<base>.graph_edges.parquet``.
+
+    Lower-level than :func:`write_graph_edges_shard` (which flattens a
+    ``DocumentGraph``): the graph-edge refresh rewrites the existing edge set
+    with refreshed mention→chunk edges appended.
+    """
+    target = graph_edges_path_for(base_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    _write_enrichment_rows(rows, target, GRAPH_EDGE_SCHEMA)
+    return target
+
+
 def read_graph_edges(path: Path) -> "pa.Table":
     """Read graph edges from a single sibling file or a shard-dir glob."""
     p = Path(path)
