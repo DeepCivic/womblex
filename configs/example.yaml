@@ -49,8 +49,10 @@ redaction:
   use_layout_filter: true
 
 chunking:
-  # The Kanon-2 tokeniser is API-only, so the chunk stage is skipped unless the
-  # Isaacus SDK + ISAACUS_API_KEY are available (it runs with the analysis side).
+  # The Kanon-2 tokeniser is free on Hugging Face (isaacus/kanon-2-tokenizer),
+  # so chunk-size token counting is exact and fully offline — no API key needed
+  # for plain token chunking. Only AI chunking (chunking_model below) calls the
+  # Isaacus API, since boundaries then follow the enricher's structure spans.
   tokenizer: "isaacus/kanon-2-tokenizer"
   chunk_size: 480       # Max tokens/chunk. null = auto-derive from tokeniser's model_max_length.
   enabled: true

@@ -1,9 +1,12 @@
-"""CLI: graph-building stages — ``enrich`` (Kanon-2) and ``link`` (register match).
+"""CLI: graph-building stages — ``enrich`` (Kanon-2), ``link`` (register match)
+and ``graph-refresh`` (offline mention→chunk edge rebuild).
 
-Both are per-stage (``--shards``) commands over an existing extraction shard
+All are per-stage (``--shards``) commands over an existing extraction shard
 directory, mirroring ``womblex chunk --shards``: each has an independent
 ``CheckpointManager`` and writes sibling parquets in place. ``enrich``
-requires the ``isaacus`` extra + ``ISAACUS_API_KEY``; ``link`` is offline.
+requires the ``isaacus`` extra + ``ISAACUS_API_KEY``; ``link`` and
+``graph-refresh`` are offline. Run ``graph-refresh`` *after* ``chunk`` (the
+AI-chunking pipeline order is enrich → chunk → graph-refresh).
 """
 
 from __future__ import annotations
@@ -180,7 +183,66 @@ def cmd_link(args: argparse.Namespace) -> int:
     return 0
 
 
+# --- graph-refresh -----------------------------------------------------------
+
+
+def _register_graph_refresh(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--shards", type=Path, required=True,
+        help="Shard dir with `*.enrichment_entities.parquet` + `*.chunks.parquet`; "
+             "rewrites those + `*.graph_edges.parquet` in place with mention→chunk links.",
+    )
+    p.add_argument("--checkpoint-dir", type=Path, default=None,
+                   help="Per-stage checkpoint root (default: `<shard_dir>/../.graph-refresh-checkpoint/`).")
+    p.add_argument("--dataset", type=str, default="graph_refresh",
+                   help="Checkpoint dataset name. Default: 'graph_refresh'.")
+    p.add_argument("--no-resume", action="store_true",
+                   help="Clear the checkpoint before running (re-refresh every batch).")
+
+
+def cmd_graph_refresh(args: argparse.Namespace) -> int:
+    """Rebuild mention→chunk edges from entities + chunks (per-stage, offline)."""
+    from womblex.analyse.graph_refresh import refresh_graph_edges
+    from womblex.store.checkpoint import CheckpointManager
+
+    shard_dir: Path = args.shards
+    if not shard_dir.is_dir():
+        logger.error("--shards path is not a directory: %s", shard_dir)
+        return 1
+    if not any(shard_dir.glob("*.enrichment_entities.parquet")):
+        logger.error(
+            "--shards directory has no `*.enrichment_entities.parquet` — run "
+            "`womblex enrich --shards` first: %s", shard_dir,
+        )
+        return 1
+    if not any(shard_dir.glob("*.chunks.parquet")):
+        logger.error(
+            "--shards directory has no `*.chunks.parquet` — run "
+            "`womblex chunk --shards` first: %s", shard_dir,
+        )
+        return 1
+
+    checkpoint_root = args.checkpoint_dir or shard_dir.parent / ".graph-refresh-checkpoint"
+    ckpt = CheckpointManager(checkpoint_root, f"{args.dataset}_graph_refresh")
+    if args.no_resume:
+        ckpt.clear()
+    else:
+        ckpt.load()
+
+    logger.info("graph-refresh --shards: dir=%s", shard_dir)
+    result = refresh_graph_edges(shard_dir, checkpoint_mgr=ckpt)
+    logger.info(
+        "Done: %d batches written, %d docs refreshed, %d mention edges",
+        result.batches_written, result.docs_refreshed, result.edges_added,
+    )
+    return 0
+
+
 COMMANDS = [
     Command("enrich", "Enrich a shard directory via Kanon-2 (per-stage)", _register_enrich, cmd_enrich),
     Command("link", "Match enrichment candidates to a reference register", _register_link, cmd_link),
+    Command(
+        "graph-refresh", "Rebuild mention→chunk graph edges after chunking (offline)",
+        _register_graph_refresh, cmd_graph_refresh,
+    ),
 ]
