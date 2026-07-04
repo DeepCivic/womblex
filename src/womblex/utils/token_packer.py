@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,14 @@ class TokenCounter:
         if self._tok is None:
             from transformers import AutoTokenizer
 
-            self._tok = AutoTokenizer.from_pretrained(self._name, **self._kwargs)
+            from womblex.utils.models import resolve_local_model_path
+
+            # Prefer a vendored copy under models/<name> so token counting is
+            # fully offline (no Hugging Face round-trip per run); fall back to
+            # the hub id only when it isn't vendored.
+            local = resolve_local_model_path(self._name.split("/")[-1])
+            source = str(local) if isinstance(local, Path) else self._name
+            self._tok = AutoTokenizer.from_pretrained(source, **self._kwargs)
         return self._tok
 
     def count(self, text: str) -> int:

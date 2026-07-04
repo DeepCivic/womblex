@@ -111,10 +111,15 @@ def stratified_sample(items: list[tuple[str, int]], n: int, seed: int) -> set[st
     return picked
 
 
-def extract_records(corpus_path: Path, wanted: set[str]) -> list[dict]:
-    """Second pass: pull the full records for ``wanted`` version_ids."""
-    found: list[dict] = []
+def extract_records(corpus_path: Path, wanted: set[str]):
+    """Second pass: stream the full records for ``wanted`` version_ids.
+
+    A generator — never materialises the whole slice, so a full tier (tens of
+    thousands of ~30 KB docs) ingests in constant memory. ``ingest_records``
+    consumes it streaming (batches of ``batch_size``).
+    """
     remaining = set(wanted)
+    pulled = 0
     with open(corpus_path, encoding="utf-8") as f:
         for line in f:
             try:
@@ -123,12 +128,12 @@ def extract_records(corpus_path: Path, wanted: set[str]) -> list[dict]:
                 continue
             vid = r.get("version_id")
             if vid in remaining:
-                found.append(r)
+                yield r
+                pulled += 1
                 remaining.discard(vid)
                 if not remaining:
                     break
-    logger.info("extract: pulled %d/%d records", len(found), len(wanted))
-    return found
+    logger.info("extract: pulled %d/%d records", pulled, len(wanted))
 
 
 # ---------------------------------------------------------------------------
@@ -356,12 +361,29 @@ def main(argv: list[str] | None = None) -> int:
     if "ingest" in stages:
         items = scan_slice(args.corpus, args.tier)
         wanted = stratified_sample(items, args.sample, args.seed) if args.sample else {v for v, _ in items}
-        records = extract_records(args.corpus, wanted)
-        ingest_records(records, shard_dir, mapping, batch_size=args.batch_size)
+        if args.sample:
+            # Small sampled slice (T0): materialise so we can emit exact token
+            # stats for the RUNLOG.
+            records = list(extract_records(args.corpus, wanted))
+            ingest_records(records, shard_dir, mapping, batch_size=args.batch_size)
+            stats = token_stats(counter, [r.get(mapping.text_field, "") or "" for r in records])
+            measurements["token_stats"] = stats
+            logger.info("ingest: token stats %s", json.dumps(stats))
+        else:
+            # Full tier: stream extract → ingest in constant memory (tens of
+            # thousands of docs). Length distribution is the char lengths from
+            # the scan; exact token stats are skipped (measured live per stage).
+            ingest_records(
+                extract_records(args.corpus, wanted), shard_dir, mapping,
+                batch_size=args.batch_size,
+            )
+            char_lens = sorted(c for _, c in items)
+            measurements["char_len_stats"] = {
+                "docs": len(char_lens),
+                "p50_chars": char_lens[len(char_lens) // 2] if char_lens else 0,
+                "max_chars": char_lens[-1] if char_lens else 0,
+            }
         write_corpus_manifest(shard_dir)
-        stats = token_stats(counter, [r.get(mapping.text_field, "") or "" for r in records])
-        measurements["token_stats"] = stats
-        logger.info("ingest: token stats %s", json.dumps(stats))
 
     stage_runners = {
         "enrich": lambda: run_enrich(shard_dir, counter, cfg),

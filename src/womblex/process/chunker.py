@@ -149,6 +149,15 @@ def create_chunker(
             ``None`` = unbounded.
         max_token_chars: Max chars per token estimate for optimisation.
     """
+    if isinstance(tokenizer, str):
+        # Prefer a vendored copy (e.g. _models/kanon-2-tokenizer) so chunking is
+        # offline — no Hugging Face round-trip; fall back to the hub id when not
+        # vendored. A callable token counter is passed through untouched.
+        from womblex.utils.models import resolve_local_model_path
+
+        local = resolve_local_model_path(tokenizer.split("/")[-1])
+        if not isinstance(local, str):
+            tokenizer = str(local)
     return semchunk.chunkerify(
         tokenizer,
         chunk_size=chunk_size,
