@@ -128,6 +128,18 @@ def load_patterns(pattern_file: Path) -> list[str]:
     return raw.get("patterns", [])
 
 
+def load_theme_patterns(pattern_file: Path) -> dict[str, list[str]]:
+    """Load theme-grouped reference regexes (``themes:`` mapping), or ``{}``.
+
+    A theme-grouped reference-file (stories/oalc/theme_references.yaml) carries
+    ``themes: {land_title: [...], ...}`` instead of a flat ``patterns:`` list, so
+    the sweep can stamp which theme(s) each citing doc matched. Returns ``{}`` for
+    a flat reference-file, so ``main`` falls back to the plain ``patterns:`` path.
+    """
+    raw = yaml.safe_load(pattern_file.read_text())
+    return raw.get("themes", {}) or {}
+
+
 def ingested_doc_ids(derived: Path) -> set[str]:
     """version_ids already ingested (from the derived manifest), to exclude."""
     import pyarrow.parquet as pq
@@ -163,6 +175,45 @@ def select_references(corpus_path: Path, patterns: list[str], exclude: set[str])
                 yielded += 1
                 yield r
     logger.info("references: selected %d decisions", yielded)
+
+
+def select_references_by_theme(
+    corpus_path: Path, theme_patterns: dict[str, list[str]], exclude: set[str]
+):
+    """Stream decisions whose text cites any theme's legislation, theme-stamped.
+
+    Like :func:`select_references`, but one combined regex *per theme*: a doc is
+    yielded if it matches at least one theme, with ``record["theme"]`` set to the
+    sorted ``";"``-joined set of every theme it matched (single-theme docs keep a
+    bare value, e.g. ``"land_title"``; a doc citing both national parks and native
+    title law gets ``"national_parks;native_title"``). Downstream theme selects
+    use substring/contains, never equality (the compound rows would be missed).
+    A generator — the sweep is large (thousands of judgments), streamed straight
+    into ``ingest_records`` in constant memory.
+    """
+    import re
+
+    compiled = {
+        theme: re.compile("|".join(pats), re.I) for theme, pats in theme_patterns.items()
+    }
+    yielded = 0
+    with open(corpus_path, encoding="utf-8") as f:
+        for line in f:
+            try:
+                r = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if r.get("type") != "decision":
+                continue
+            if r.get("version_id") in exclude:
+                continue
+            text = r.get("text", "") or ""
+            matched = sorted(t for t, pat in compiled.items() if pat.search(text))
+            if matched:
+                r["theme"] = ";".join(matched)
+                yielded += 1
+                yield r
+    logger.info("references: selected %d decisions (theme-grouped)", yielded)
 
 
 def next_batch_num(shard_dir: Path) -> int:
@@ -488,9 +539,24 @@ def main(argv: list[str] | None = None) -> int:
             # Large text-reference set — stream decisions in constant memory,
             # excluding already-ingested docs.
             exclude = ingested_doc_ids(args.derived)
+            theme_patterns = load_theme_patterns(args.reference_file)
+            if theme_patterns:
+                # Theme-grouped sweep (theme_references.yaml): stamp the sorted
+                # ";"-joined matched-theme set into a `theme` provenance column,
+                # parallel to the select-path theme stamp (step 0.1). Older
+                # batches (no theme) widen to "" — see store.provenance_output.
+                ref_mapping = replace(
+                    mapping, provenance_fields=[*mapping.provenance_fields, "theme"])
+                records_iter = select_references_by_theme(
+                    args.corpus, theme_patterns, exclude)
+                measurements["theme_grouped"] = sorted(theme_patterns)
+            else:
+                ref_mapping = mapping
+                records_iter = select_references(
+                    args.corpus, load_patterns(args.reference_file), exclude)
             res = ingest_records(
-                select_references(args.corpus, load_patterns(args.reference_file), exclude),
-                shard_dir, mapping, batch_size=args.batch_size, start_batch=start_batch,
+                records_iter, shard_dir, ref_mapping,
+                batch_size=args.batch_size, start_batch=start_batch,
             )
             measurements["reference_docs"] = res.docs_ingested
             logger.info("ingest: appended %d referencing decisions from batch-%04d",
