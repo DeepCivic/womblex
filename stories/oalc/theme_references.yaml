@@ -1,0 +1,62 @@
+# Step 0.2 citing-judgement sweep — reference set.
+#
+# Decisions (type=decision) whose TEXT cites the theme governing legislation
+# confirmed present in step 0.1 (theme_legislation.yaml), grouped by theme.
+# Mirrors instrument_references.yaml (the emergency/planning reference run),
+# but theme-grouped so the sweep can stamp a `theme` provenance column per
+# citing doc (a doc may cite >1 theme — see the multi-theme tagging note).
+#
+# Consumed by run_tier.py --reference-file. Already-ingested docs are excluded
+# automatically (the derived manifest). Case-insensitive regex, matched against
+# full decision text.
+#
+# Pattern policy — precision over recall, mirroring the measured 71%-coverage
+# instrument_references run:
+#   * Full Act short titles, YEAR-ANCHORED, so amendment Acts / same-named
+#     interstate statutes are not swept in (VIC Transfer of Land Act 1958,
+#     the Native Title Amendment Acts, etc. do not match).
+#   * Word boundaries (\b) so "...Act 1974" is not caught inside a longer year.
+#   * Bare abbreviations (RPA, NTA, NPW Act) are DELIBERATELY OMITTED: a
+#     judgment citing an Act spells its full title at least once, so the
+#     abbreviation-only case is ~empty recall for real false-positive risk.
+#     The two exceptions kept are hyper-specific and unambiguous: "EPBC Act"
+#     and "CALM Act".
+#   * Mabo v Queensland (No 2) enters here as a CITED AUTHORITY (a HCA
+#     decision, not legislation — so it belongs in 0.2, not 0.1), anchored on
+#     the distinctive report citation (1992) 175 CLR 1 and the case name.
+#
+# Sizing (net-new docs / tokens / $ per theme + union, overlap with the
+# existing asset) is recorded in RUNLOG §"Step 0.2 — sizing". No spend until
+# John approves scope at the sizing gate.
+name: theme_references
+
+themes:
+  # --- Land title: Torrens-title principal Acts (NSW/QLD/SA/WA) ---
+  land_title:
+    - '\bReal Property Act 1900\b'          # NSW
+    - '\bLand Title Act 1994\b'             # QLD (singular "Title"; the plural ACT/NT Acts differ)
+    - '\bReal Property Act 1886\b'          # SA
+    - '\bTransfer of Land Act 1893\b'       # WA (VIC's Transfer of Land Act 1958 excluded by year)
+
+  # --- National parks / conservation principal Acts (NSW/SA/WA/QLD/Cth) ---
+  national_parks:
+    - '\bNational Parks and Wildlife Act 1974\b'          # NSW
+    - '\bNational Parks and Wildlife Act 1972\b'          # SA
+    - '\bConservation and Land Management Act 1984\b'     # WA
+    - '\bCALM Act\b'                                      # WA (unambiguous abbreviation)
+    - '\bNature Conservation Act 1992\b'                  # QLD
+    - '\bEnvironment Protection and Biodiversity Conservation Act 1999\b'  # Cth EPBC
+    - '\bEPBC Act\b'                                      # Cth (unambiguous abbreviation)
+
+  # --- Native title: principal Act + state consent Acts + NT land rights + Mabo ---
+  native_title:
+    - '\bNative Title Act 1993\b'                            # Cth principal (amendment Acts excluded)
+    - '\bNative Title \(New South Wales\) Act 1994\b'
+    - '\bNative Title \(Queensland\) Act 1993\b'
+    - '\bNative Title \(South Australia\) Act 1994\b'
+    - '\bNative Title \(Tasmania\) Act 1994\b'
+    - '\bAboriginal Land Rights \(Northern Territory\) Act 1976\b'   # NT land rights (a Cth Act)
+    # Mabo v Queensland (No 2) (1992) 175 CLR 1 — landmark cited authority
+    - 'Mabo v[.]? Queensland \(No\.? ?2\)'
+    - 'Mabo v[.]? Queensland \[No\.? ?2\]'
+    - '\(1992\) 175 CLR 1\b'
