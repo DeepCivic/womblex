@@ -28,7 +28,7 @@ import json
 import logging
 import random
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import yaml
@@ -75,14 +75,19 @@ def load_rules(select_file: Path) -> list[dict]:
 def select_by_rules(corpus_path: Path, rules: list[dict]) -> list[dict]:
     """Return full records matching any citation rule (legislation only).
 
-    Each rule is ``{citation: <regex>, jurisdiction: <optional>}``. Decisions
-    are excluded; a record matching several rules is returned once. The set is
-    small (curated instruments), so full records are materialised for ingest +
-    exact token stats.
+    Each rule is ``{citation: <regex>, jurisdiction: <optional>, theme:
+    <optional>}``. Decisions are excluded; a record matching several rules is
+    returned once (first match wins). When the matched rule carries a ``theme``
+    it is stamped onto the record (``record["theme"]``) so the ingest can carry
+    it into a provenance column. The set is small (curated instruments), so
+    full records are materialised for ingest + exact token stats.
     """
     import re
 
-    compiled = [(re.compile(r["citation"], re.I), r.get("jurisdiction")) for r in rules]
+    compiled = [
+        (re.compile(r["citation"], re.I), r.get("jurisdiction"), r.get("theme"))
+        for r in rules
+    ]
     out: list[dict] = []
     seen: set[str] = set()
     with open(corpus_path, encoding="utf-8") as f:
@@ -98,13 +103,23 @@ def select_by_rules(corpus_path: Path, rules: list[dict]) -> list[dict]:
                 continue
             cit = r.get("citation", "") or ""
             jur = r.get("jurisdiction")
-            for pat, jfilter in compiled:
+            for pat, jfilter, theme in compiled:
                 if pat.search(cit) and (jfilter is None or jfilter == jur):
+                    if theme:
+                        r["theme"] = theme
                     out.append(r)
                     seen.add(vid)
                     break
     logger.info("select: %d records match %d rules", len(out), len(rules))
     return out
+
+
+def _count_by(records: list[dict], key: str) -> dict[str, int]:
+    """Tally records by a field value (e.g. theme) for the measurements log."""
+    counts: dict[str, int] = {}
+    for r in records:
+        counts[str(r.get(key, "") or "")] = counts.get(str(r.get(key, "") or ""), 0) + 1
+    return counts
 
 
 def load_patterns(pattern_file: Path) -> list[str]:
@@ -482,8 +497,18 @@ def main(argv: list[str] | None = None) -> int:
                         res.docs_ingested, start_batch)
         elif args.select_file:
             # Curated instrument set — materialise (small) for exact token stats.
-            records = select_by_rules(args.corpus, load_rules(args.select_file))
-            ingest_records(records, shard_dir, mapping, batch_size=args.batch_size,
+            rules = load_rules(args.select_file)
+            records = select_by_rules(args.corpus, rules)
+            sel_mapping = mapping
+            if any(rule.get("theme") for rule in rules):
+                # Carry the matched rule's theme into a `theme` provenance column
+                # so downstream can select statutes by theme. The manifest
+                # consolidation widens columns across batches, so older batches
+                # (no theme) get "" — see store.provenance_output.
+                sel_mapping = replace(
+                    mapping, provenance_fields=[*mapping.provenance_fields, "theme"])
+                measurements["theme_docs"] = _count_by(records, "theme")
+            ingest_records(records, shard_dir, sel_mapping, batch_size=args.batch_size,
                            start_batch=start_batch)
             measurements["token_stats"] = token_stats(
                 counter, [r.get(mapping.text_field, "") or "" for r in records])

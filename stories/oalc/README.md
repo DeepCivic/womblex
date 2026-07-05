@@ -29,6 +29,10 @@ and checkpoints skip already-done batches, so nothing is re-spent.
   incl. all NSW LEPs and the EPBC Act + subordinate instruments.
 - `instrument_references.yaml` — text-reference patterns selecting **judgments**
   that cite those instruments.
+- `theme_legislation.yaml` — a curated **legislation** set (citation regex rules)
+  for the land-title / native-title / national-parks themes (step 0.1). Each rule
+  carries a `theme` tag which the runner writes into a `theme` provenance column,
+  so downstream can select statutes by theme.
 - `run_tier.py` — the runner (selection + ingest + staged run + measurements).
 
 ## Selection modes (`run_tier.py`)
