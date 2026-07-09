@@ -74,7 +74,9 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
 
             batch_size = load_config(args.config).processing.batch_size
         else:
-            batch_size = 100
+            from womblex.config import ProcessingConfig
+
+            batch_size = ProcessingConfig().batch_size
     if batch_size < 1:
         logger.error("batch-size must be >= 1")
         return 1

@@ -30,15 +30,20 @@ def is_remote_uri(uri: str) -> bool:
     return uri.startswith(_REMOTE_PROTOCOLS)
 
 
-def storage_options_from_env() -> dict:
-    """Build fsspec/s3fs storage options from standard env vars.
+def storage_options_from_env(uri: str) -> dict:
+    """Build fsspec storage options for *uri* from standard env vars.
 
-    Honours the AWS conventions s3fs already reads (``AWS_ACCESS_KEY_ID``,
-    ``AWS_SECRET_ACCESS_KEY``, ``AWS_REGION``) plus an explicit endpoint
-    override (``WOMBLEX_S3_ENDPOINT`` or ``AWS_ENDPOINT_URL``) so MinIO and
-    other S3-compatible stores work without code changes. Returns an empty
-    dict for local paths — fsspec needs nothing there.
+    Only ``s3://`` gets explicit options: the AWS conventions s3fs already
+    reads (``AWS_ACCESS_KEY_ID``, ``AWS_SECRET_ACCESS_KEY``, ``AWS_REGION``)
+    plus an endpoint override (``WOMBLEX_S3_ENDPOINT`` or
+    ``AWS_ENDPOINT_URL``) so MinIO and other S3-compatible stores work
+    without code changes. Every other backend — ``gs://``, ``az://``, local —
+    returns an empty dict and authenticates via its own native mechanism
+    (gcsfs/adlfs ambient credentials); these kwargs are s3fs-shaped and
+    would misconfigure them.
     """
+    if not uri.startswith("s3://"):
+        return {}
     endpoint = os.environ.get("WOMBLEX_S3_ENDPOINT") or os.environ.get("AWS_ENDPOINT_URL")
     opts: dict = {}
     key = os.environ.get("AWS_ACCESS_KEY_ID")
@@ -82,8 +87,8 @@ class RemoteStore:
     def from_uri(cls, uri: str, *, storage_options: dict | None = None) -> "RemoteStore":
         """Open a store at *uri* (e.g. ``s3://bucket/runs`` or ``/data/runs``)."""
         fsspec = _require_fsspec()
-        opts = storage_options if storage_options is not None else storage_options_from_env()
-        fs, root = fsspec.core.url_to_fs(uri, **(opts if is_remote_uri(uri) else {}))
+        opts = storage_options if storage_options is not None else storage_options_from_env(uri)
+        fs, root = fsspec.core.url_to_fs(uri, **opts)
         return cls(fs=fs, root=root.rstrip("/"))
 
     def _full(self, rel: str) -> str:

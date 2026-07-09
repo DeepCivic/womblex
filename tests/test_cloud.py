@@ -34,11 +34,15 @@ def test_storage_options_from_env(monkeypatch):
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "s")
     monkeypatch.setenv("WOMBLEX_S3_ENDPOINT", "http://minio:9000")
     monkeypatch.setenv("AWS_REGION", "us-east-1")
-    opts = storage_options_from_env()
+    opts = storage_options_from_env("s3://bucket/x")
     assert opts["key"] == "k"
     assert opts["secret"] == "s"
     assert opts["client_kwargs"]["endpoint_url"] == "http://minio:9000"
     assert opts["client_kwargs"]["region_name"] == "us-east-1"
+    # The options above are s3fs-shaped — other backends must not receive
+    # them even with AWS env vars set.
+    assert storage_options_from_env("gs://bucket/x") == {}
+    assert storage_options_from_env("/tmp/x") == {}
 
 
 def test_remote_store_file_roundtrip(tmp_path):

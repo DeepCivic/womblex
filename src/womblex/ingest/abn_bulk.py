@@ -260,8 +260,14 @@ def ingest_abn_xml(
         records_path = output_dir / f"{xml_path.stem}.parquet"
         names_path = output_dir / f"{xml_path.stem}_names.parquet"
 
-        records = _BatchedWriter(records_path, _RECORD_SCHEMA, metadata)
-        names = _BatchedWriter(names_path, _NAMES_SCHEMA, metadata)
+        # Tag each output's role in the footer so the register manifest can
+        # tell records from the names sidecar without filename heuristics.
+        records = _BatchedWriter(
+            records_path, _RECORD_SCHEMA, {**metadata, b"abn.role": b"records"}
+        )
+        names = _BatchedWriter(
+            names_path, _NAMES_SCHEMA, {**metadata, b"abn.role": b"names"}
+        )
 
         parser = ET.iterparse(str(xml_path), events=("start", "end"))
         _, root = next(parser)  # first event is the start of the root element
