@@ -192,6 +192,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   transforms. 4 new unit tests.
 
 ### Fixed
+- **Register manifest now covers `ingest-geo` and derives roles from footer
+  metadata only.** `cmd_ingest_geo` never called `write_register_manifest`
+  despite the documented `abn`/`gnaf`/`geo` coverage, and the module's
+  namespace whitelist said `geo` while `ingest/geospatial.py` writes
+  `geospatial.*` footer keys — so geo outputs could not be indexed at all.
+  The namespace is now taken from whichever `<ns>.source_file` footer key is
+  present (no per-register registry to keep in sync), geo ingest writes the
+  manifest like ABN/G-NAF, and the ABN ingest tags each output with an
+  `abn.role` footer key (`records`/`names`) so the manifest's role column
+  comes from metadata rather than the `_names` filename suffix — the exact
+  glob-style fragility the manifest exists to remove. ABN outputs written
+  before this change lack the role key and re-index as `records`; re-run
+  `ingest-abn` to restore the distinction. Also renames the module's
+  `RUN_MANIFEST_FILENAME` constant to `REGISTER_MANIFEST_FILENAME` — it had
+  borrowed the *run* manifest's constant name from `store/run_manifest.py`
+  while naming a different artefact.
+- **`RemoteStore` no longer leaks s3fs-shaped options into non-S3 backends.**
+  `storage_options_from_env()` built AWS-style kwargs (`key`, `secret`,
+  `client_kwargs.endpoint_url`) and `from_uri` applied them to *any* remote
+  protocol, so a `gs://`/`az://` store with AWS env vars set (common in mixed
+  environments) got misconfigured. The helper now takes the target URI and
+  returns options only for `s3://`; other backends authenticate via their own
+  native mechanisms. Also: `womblex enqueue`'s batch-size fallback now reads
+  `ProcessingConfig()` instead of restating the default, and the worker
+  derives its shard-upload glob from the `BatchOutcome.shard_path` the batch
+  reported, so the `batch-NNNN` naming scheme lives only in `womblex.batch`.
 - **K9-fig — full-page scans no longer dropped from chunking as `figure`.**
   The dominant-region fallback in `_layout_blocks_and_tables` collapsed a
   whole page's OCR onto one block tagged with the largest layout region's
