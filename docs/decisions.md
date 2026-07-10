@@ -413,3 +413,69 @@ is the only requirement, not a hard dependency.
   documents currently 400 instead of auto-chunking. Low priority — oversized
   inputs are typically large tabular/reference data that should not be routed to
   the enricher at all (reference data belongs on the graph/reference path).
+
+### Modality routing — prose / tabular / register as the primary fork — *proposed (2026-06), not yet implemented*
+Extraction currently makes its coarsest cut by *format* (`extract_text` splits
+non-PDF SPREADSHEET/DOCX/TEXT vs PDF, `extract.py:449`), and the prose-vs-tabular
+decision for a **spreadsheet trapped in a PDF** is made *late and inside* the
+per-page orchestrator (`extract_with_plan`, `orchestrator.py:384`) — gated by
+`qualify_for_spreadsheet_print`, after per-page profiling, interleaved with prose
+dispatch, and threaded through element assembly as `is_spreadsheet_print` /
+`include_tables=not is_spreadsheet_print`. So the PDF orchestrator is *partly a
+spreadsheet engine*, and tabular content is graded by a prose metric (CER/WER)
+and reconstructed by prose-shaped layout heuristics (the layout stage measures
+~30 % F1 with heavy over-segmentation). The proposal: make **modality**
+(`PROSE` / `TABULAR` / `REGISTER`) an explicit fork decided **once, before** the
+orchestrator, orthogonal to the 12 `DocumentType`s (not a replacement — `doc_type`
+stays the summary attribute it already is).
+
+**Options reviewed.**
+- **A — status quo (do nothing).** Leave the tabular decision buried in the
+  orchestrator. *Rejected:* the coupling is the observed smell — the orchestrator
+  carries spreadsheet state, and tabular is scored/reconstructed as if it were
+  prose. It works but doesn't scale as more tabular shapes land.
+- **B — flatten every input to PDF, then one extraction path.** Normalise DOCX /
+  XLSX / images to PDF up front so there is a single pipeline. *Rejected — this is
+  the harmful reading of "narrow the state".* It narrows on *format*, not
+  representation: it converts near-zero-CER native text (DocxExtractor reads
+  OOXML in document order; SpreadsheetExtractor reads exact cells) into a
+  layout-recovery + OCR problem (0.2–0.5 CER, ~30 % layout F1), paginates
+  unbounded grids arbitrarily (the very problem `spreadsheet_print.py` exists to
+  undo), and violates the verbatim-boundary policy by round-tripping bytes
+  through a renderer. It buys a single code path at the cost of a measurable
+  regression on exactly the documents that currently extract cleanly.
+- **C — modality router, document-level (chosen direction).** Narrow on
+  *representation*, not format. A single `classify_modality(profile, profiles,
+  filename) -> Modality` at the `extract_text` boundary routes the whole doc:
+  `PROSE` → orchestrator / Docx/Text extractors (scored by CER/WER); `TABULAR` →
+  one grid-first path unifying native spreadsheets, CSVs, *and* spreadsheet-print
+  PDFs (scored by `utils/tabular_metrics.py`, not CER); `REGISTER` → bypass the
+  NLP pipeline (already the case for G-NAF / ABN / geospatial — the existing
+  proof the pattern works). The element stream stays the narrow waist: tabular
+  still emits `sheet_cell` / table elements, so **nothing downstream changes**.
+- **D — per-page modality from the outset.** Classify modality per page so a
+  mixed FOI bundle sends its manifest pages tabular and its cover-letter pages
+  prose. *Deferred, not rejected:* it is the honest end-state given the existing
+  per-page philosophy, but it is the hard ML part and should land last, on a
+  clean structure, only once fixtures show doc-level is insufficient.
+
+**Why C over B/D.** C moves the fork *earlier* (before orchestration) without
+collapsing modalities into one lossy format (B's mistake) and without paying for
+per-page classification before it is shown to matter (D). It confines the change
+behind one classifier + the element-stream contract, so it is measurable against
+the accuracy suite and reversible.
+
+**Phasing (impact-to-effort).** (0) Lock the current accuracy numbers as the
+regression baseline and add ≥1 labelled spreadsheet-print PDF + its matching
+XLSX/CSV to the womblex-collection fixtures — fixtures are the bottleneck (the
+same GT gap that leaves the Throsby/Isaacus report sections unpopulated).
+(1) Lift the fork: extract `classify_modality`, reproduce today's behaviour
+byte-for-byte, route `TABULAR` to a thin `extract_tabular()` that calls existing
+code — pure seam-creation, near-zero risk, the highest-leverage step. (2) Drain
+the orchestrator: delete `is_spreadsheet_print` / `spreadsheet_tables` /
+`include_tables=...` now that tabular routes pre-orchestration; the orchestrator
+goes back to per-page prose/OCR only. (3) Unify tabular extraction under one
+grid-first path scored by `tabular_metrics`. (4) *(deferred)* per-page modality
+(Option D) if measured to matter. The load-bearing invariant throughout: the
+element stream is the contract, so downstream stages are untouched by
+construction.
