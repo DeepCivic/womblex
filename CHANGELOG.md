@@ -192,6 +192,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   transforms. 4 new unit tests.
 
 ### Fixed
+- **OpenCV 5 compatibility in skew detection.** `detect_skew_angle`
+  (`ingest/heuristics_cv2.py`) unpacked `HoughLinesP` segments as `line[0]`,
+  which assumes OpenCV 4's `(N, 1, 4)` layout; OpenCV 5 flattens to `(N, 4)`,
+  turning `line[0]` into a scalar and crashing every OCR-path extraction
+  (`TypeError: cannot unpack non-iterable numpy.int32`). The segments are now
+  reshaped to `(-1, 4)` before unpacking, which accepts both layouts. New
+  direct unit tests pin both shapes so the regression no longer needs the
+  full OCR fixture suite to surface.
+- **mypy no longer pins `python_version = "3.11"`.** The pin forced the CI
+  3.12 matrix leg to re-check under 3.11 grammar — redundant with the 3.11
+  leg, and broken once numpy ≥ 2.5 (3.12-only) began shipping PEP 695 `type`
+  statements in its stubs, which mypy rejects under a 3.11 target. Each leg
+  now checks at its own interpreter version.
 - **Register manifest now covers `ingest-geo` and derives roles from footer
   metadata only.** `cmd_ingest_geo` never called `write_register_manifest`
   despite the documented `abn`/`gnaf`/`geo` coverage, and the module's

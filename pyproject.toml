@@ -89,7 +89,10 @@ line-length = 120
 target-version = "py311"
 
 [tool.mypy]
-python_version = "3.11"
+# No python_version pin: each CI matrix leg checks at its own interpreter
+# version. Pinning 3.11 broke the 3.12 leg — numpy >= 2.5 (3.12-only) ships
+# PEP 695 `type` statements in its stubs, which mypy rejects under a 3.11
+# target.
 warn_return_any = true
 warn_unused_configs = true
 
