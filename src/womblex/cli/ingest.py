@@ -68,6 +68,9 @@ def cmd_ingest_geo(args: argparse.Namespace) -> int:
         logger.error("No files were written. Check logs for details.")
         return 1
 
+    from womblex.store.register_manifest import write_register_manifest
+    write_register_manifest(output_dir)
+
     logger.info("Wrote %d GeoParquet files to %s", succeeded, output_dir)
     return 0
 

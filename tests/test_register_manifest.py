@@ -6,12 +6,13 @@ keys the manifest reads stay in sync with what the ingests attach.
 
 from pathlib import Path
 
+import pyarrow as pa
 import pyarrow.parquet as pq
 
 from womblex.ingest.abn_bulk import ingest_abn_xml
 from womblex.store.register_manifest import (
+    REGISTER_MANIFEST_FILENAME,
     REGISTER_MANIFEST_SCHEMA,
-    RUN_MANIFEST_FILENAME,
     write_register_manifest,
 )
 
@@ -45,7 +46,7 @@ def test_manifest_indexes_abn_outputs(tmp_path: Path):
     ingest_abn_xml(xml, out, compute_md5=True)
 
     manifest_path = write_register_manifest(out)
-    assert manifest_path == out / RUN_MANIFEST_FILENAME
+    assert manifest_path == out / REGISTER_MANIFEST_FILENAME
     assert manifest_path.exists()
 
     table = pq.read_table(manifest_path)
@@ -56,7 +57,7 @@ def test_manifest_indexes_abn_outputs(tmp_path: Path):
     assert "20260601Public01.parquet" in rows
     assert "20260601Public01_names.parquet" in rows
     # The manifest itself is never indexed.
-    assert RUN_MANIFEST_FILENAME not in rows
+    assert REGISTER_MANIFEST_FILENAME not in rows
 
     records = rows["20260601Public01.parquet"]
     names = rows["20260601Public01_names.parquet"]
@@ -68,6 +69,30 @@ def test_manifest_indexes_abn_outputs(tmp_path: Path):
     assert names["row_count"] == 2
     assert records["schema_version"]
     assert records["source_md5"]  # compute_md5=True populated it
+
+
+def test_manifest_indexes_geospatial_namespace(tmp_path: Path):
+    """Namespace detection is generic: ``geospatial.*`` footer keys (as
+    written by ingest/geospatial.py) index without a per-register registry."""
+    out = tmp_path / "out"
+    out.mkdir()
+    meta = {
+        b"geospatial.source_file": b"suburbs.shp",
+        b"geospatial.source_md5": b"abc123",
+    }
+    table = pa.Table.from_pylist(
+        [{"name": "Acton"}, {"name": "Braddon"}],
+        schema=pa.schema([("name", pa.string())]).with_metadata(meta),
+    )
+    pq.write_table(table, str(out / "suburbs.parquet"))
+
+    rows = pq.read_table(write_register_manifest(out)).to_pylist()
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["source_file"] == "suburbs.shp"
+    assert row["role"] == "records"
+    assert row["row_count"] == 2
+    assert row["source_md5"] == "abc123"
 
 
 def test_manifest_empty_dir_is_schema_correct(tmp_path: Path):
@@ -88,5 +113,5 @@ def test_manifest_excludes_itself_on_rerun(tmp_path: Path):
     write_register_manifest(out)
     # Re-running must not index the manifest written by the first run.
     table = pq.read_table(write_register_manifest(out))
-    assert RUN_MANIFEST_FILENAME not in {r["output_file"] for r in table.to_pylist()}
+    assert REGISTER_MANIFEST_FILENAME not in {r["output_file"] for r in table.to_pylist()}
     assert table.num_rows == 2

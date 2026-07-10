@@ -39,7 +39,9 @@ def _process_job(job: Job, config: WomblexConfig, store: RemoteStore) -> None:
 
         files = store.download_to_dir(job.input_keys, inputs_dir)
         outcome = process_batch(files, config, batch_num=job.batch_num, shard_dir=shards_dir)
-        store.upload_glob(shards_dir, f"batch-{job.batch_num:04d}.*", job.shard_prefix)
+        # Glob off the shard path the batch reported, so the naming scheme
+        # lives only in womblex.batch.
+        store.upload_glob(shards_dir, f"{outcome.shard_path.stem}.*", job.shard_prefix)
         logger.info(
             "[batch %d] %d ok, %d failed -> %s",
             job.batch_num, outcome.batch.succeeded, outcome.batch.failed, job.shard_prefix,
