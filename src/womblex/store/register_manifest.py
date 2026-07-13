@@ -26,7 +26,7 @@ import pyarrow.parquet as pq
 
 logger = logging.getLogger(__name__)
 
-RUN_MANIFEST_FILENAME = "manifest.parquet"
+REGISTER_MANIFEST_FILENAME = "manifest.parquet"
 
 # One row per output Parquet file. ``role`` distinguishes the records vs
 # names sidecars (ABN) or the table type (G-NAF) without globbing.
@@ -40,10 +40,6 @@ REGISTER_MANIFEST_SCHEMA = pa.schema([
     ("ingested_at_iso", pa.string()),
 ])
 
-# Key-value metadata namespaces the register ingests attach to their
-# Parquet footers (``abn.*`` / ``gnaf.*`` / ``geo.*``).
-_KNOWN_NAMESPACES = ("abn", "gnaf", "geo")
-
 
 def _decode_meta(raw: dict[bytes, bytes] | None) -> dict[str, str]:
     if not raw:
@@ -52,25 +48,24 @@ def _decode_meta(raw: dict[bytes, bytes] | None) -> dict[str, str]:
 
 
 def _namespace(meta: dict[str, str]) -> str | None:
+    """The footer-key namespace, taken from whichever ``<ns>.source_file``
+    key is present (``abn.`` / ``gnaf.`` / ``geospatial.`` / any future
+    ingest) — no per-register registry to keep in sync."""
     for key in meta:
-        ns = key.split(".", 1)[0]
-        if ns in _KNOWN_NAMESPACES:
+        ns, _, field = key.partition(".")
+        if field == "source_file":
             return ns
     return None
 
 
-def _role_for(output_path: Path, ns: str | None, meta: dict[str, str]) -> str:
-    """Derive a role label without globbing.
-
-    G-NAF tags its table type in metadata; ABN names sidecars end in
-    ``_names``; everything else is the primary records output.
-    """
+def _role_for(ns: str | None, meta: dict[str, str]) -> str:
+    """Role from footer metadata only: an explicit ``<ns>.role`` (ABN
+    records/names), else the G-NAF table type, else the primary records
+    output. Filenames are never inspected."""
     if ns is not None:
-        table = meta.get(f"{ns}.table_name")
-        if table:
-            return table
-    if output_path.stem.endswith("_names"):
-        return "names"
+        role = meta.get(f"{ns}.role") or meta.get(f"{ns}.table_name")
+        if role:
+            return role
     return "records"
 
 
@@ -84,7 +79,7 @@ def _manifest_row(output_path: Path) -> dict[str, object]:
     return {
         "source_file": source_file,
         "output_file": output_path.name,
-        "role": _role_for(output_path, ns, meta),
+        "role": _role_for(ns, meta),
         "row_count": md.num_rows,
         "schema_version": schema_version,
         "source_md5": source_md5,
@@ -101,11 +96,11 @@ def write_register_manifest(output_dir: Path) -> Path:
     produces an empty, schema-correct file so downstream reads are safe.
     """
     files = sorted(
-        p for p in output_dir.glob("*.parquet") if p.name != RUN_MANIFEST_FILENAME
+        p for p in output_dir.glob("*.parquet") if p.name != REGISTER_MANIFEST_FILENAME
     )
     rows = [_manifest_row(p) for p in files]
     table = pa.Table.from_pylist(rows, schema=REGISTER_MANIFEST_SCHEMA)
-    target = output_dir / RUN_MANIFEST_FILENAME
+    target = output_dir / REGISTER_MANIFEST_FILENAME
     target.parent.mkdir(parents=True, exist_ok=True)
     pq.write_table(table, str(target), compression="zstd", compression_level=3)
     logger.info("Wrote register manifest %s: outputs=%d", target, table.num_rows)
@@ -113,7 +108,7 @@ def write_register_manifest(output_dir: Path) -> Path:
 
 
 __all__ = [
+    "REGISTER_MANIFEST_FILENAME",
     "REGISTER_MANIFEST_SCHEMA",
-    "RUN_MANIFEST_FILENAME",
     "write_register_manifest",
 ]

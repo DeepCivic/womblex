@@ -61,10 +61,10 @@ def detect_skew_angle(gray: np.ndarray, min_line_length: int = 100) -> SkewAnaly
     if lines is None or len(lines) < 5:
         return SkewAnalysis(angle=0.0, confidence=0.0)
 
-    # Calculate angles of all detected lines
+    # Calculate angles of all detected lines. OpenCV 4 returns segments as
+    # (N, 1, 4); OpenCV 5 flattens to (N, 4) — reshape covers both.
     angles = []
-    for line in lines:
-        x1, y1, x2, y2 = line[0]
+    for x1, y1, x2, y2 in np.asarray(lines).reshape(-1, 4):
         if x2 - x1 != 0:  # Avoid division by zero
             angle = np.arctan2(y2 - y1, x2 - x1) * 180 / np.pi
             # Only consider near-horizontal lines (within 45 degrees)
