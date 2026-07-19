@@ -94,7 +94,7 @@ class TestSplitOnBoundaries:
 
 class TestTokenCounterLive:
     def test_real_kanon_tokenizer_counts(self):
-        transformers = pytest.importorskip("transformers")
+        pytest.importorskip("transformers")
         from womblex.utils.token_packer import TokenCounter
 
         try:

@@ -1,7 +1,8 @@
 [project]
 name = "womblex"
-version = "0.1.0"
+version = "0.2.0"
 description = "Document extraction pipeline for Australian government documents"
+readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 
@@ -49,20 +50,26 @@ dev = [
 # Full install - pip install womblex[all]
 all = ["womblex[isaacus,cloud,dev]"]
 
+[project.urls]
+Repository = "https://github.com/DeepCivic/womblex"
+Changelog = "https://github.com/DeepCivic/womblex/blob/main/CHANGELOG.md"
+
 [project.scripts]
 womblex = "womblex.cli:main"
 
 [build-system]
-requires = ["setuptools>=68.0"]
+# >=77 for PEP 639 SPDX `license = "Apache-2.0"` string support.
+requires = ["setuptools>=77.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-# Bundle the small en_AU Hunspell dictionary (MIT/SCOWL) for offline spellfix.
+# Bundle the small en_AU Hunspell dictionary (MIT/SCOWL) for offline spellfix,
+# and the kanon-2 tokenizer so token packing + chunking need no HF round-trip.
 # Large model artefacts under _models/ are resolved via WOMBLEX_MODELS_DIR, not shipped.
-womblex = ["_models/en_AU/*"]
+womblex = ["_models/en_AU/*", "_models/kanon-2-tokenizer/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
