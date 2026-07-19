@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-19
+
 ### Added
 - **Pre-extracted records ingest (`ingest/records.py`).** Turns already-clean
   text records (a JSONL corpus; the Open Australian Legal Corpus) straight into
@@ -643,6 +645,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `_normalise_text` regex extended to catch fullwidth Unicode `Page`
   variants in OCR'd footers (`5lｐａge`, `3lＰａｇｅ`).
 
+### Packaging
+- MANIFEST.in no longer packages all of `src/womblex/_models/` — only the
+  en_AU Hunspell dictionary ships, matching the declared package-data. The
+  previous rule pulled every local model artefact (~110 MB compressed) into
+  both the sdist and, via setuptools' `include-package-data` default, the
+  wheel — over PyPI's 100 MB per-file limit. Large models remain resolved
+  via `WOMBLEX_MODELS_DIR`.
+- PyPI metadata completed: `readme`, project URLs; setuptools floor raised
+  to >=77 for PEP 639 SPDX licence string support.
+
 ## [0.1.0] - 2026-04-28
 
 ### Added
@@ -1073,5 +1085,6 @@ Eight concrete fixes K1-K8 written up in "Open follow-ups" above. K1 / K3 / K4 /
   boundaries. Structural OCR-engine limit; not addressable in
   Womblex without a layout-aware OCR backend.
 
-[Unreleased]: https://github.com/DeepCivic/womblex/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/DeepCivic/womblex/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/DeepCivic/womblex/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/DeepCivic/womblex/releases/tag/v0.1.0
