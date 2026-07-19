@@ -4,9 +4,11 @@ include CHANGELOG.md
 include py.typed
 
 recursive-include src/womblex *.py py.typed
-# Only the small en_AU Hunspell dictionary ships (see pyproject package-data);
-# large model artefacts are resolved via WOMBLEX_MODELS_DIR, not packaged.
+# Only the small artefacts ship (see pyproject package-data): the en_AU
+# Hunspell dictionary and the kanon-2 tokenizer. Large model artefacts are
+# resolved via WOMBLEX_MODELS_DIR, not packaged.
 recursive-include src/womblex/_models/en_AU *
+recursive-include src/womblex/_models/kanon-2-tokenizer *
 include src/womblex/_models/README.md
 
 prune tests

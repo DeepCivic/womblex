@@ -66,9 +66,10 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
-# Bundle the small en_AU Hunspell dictionary (MIT/SCOWL) for offline spellfix.
+# Bundle the small en_AU Hunspell dictionary (MIT/SCOWL) for offline spellfix,
+# and the kanon-2 tokenizer so token packing + chunking need no HF round-trip.
 # Large model artefacts under _models/ are resolved via WOMBLEX_MODELS_DIR, not shipped.
-womblex = ["_models/en_AU/*"]
+womblex = ["_models/en_AU/*", "_models/kanon-2-tokenizer/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -654,6 +654,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   via `WOMBLEX_MODELS_DIR`.
 - PyPI metadata completed: `readme`, project URLs; setuptools floor raised
   to >=77 for PEP 639 SPDX licence string support.
+- The kanon-2 tokenizer (~5 MB) is bundled in the wheel alongside the en_AU
+  dictionary, so pip-installed token packing and chunking resolve it locally
+  with no Hugging Face round-trip, as already documented.
 
 ## [0.1.0] - 2026-04-28
 
