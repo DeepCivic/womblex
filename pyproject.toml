@@ -5,6 +5,28 @@ description = "Document extraction pipeline for Australian government documents"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "DeepCivic" }]
+keywords = [
+    "pdf",
+    "ocr",
+    "document-extraction",
+    "foi",
+    "government-documents",
+    "parquet",
+    "nlp",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Text Processing",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
 
 # Core dependencies - extraction works without Isaacus
 dependencies = [
@@ -51,15 +73,17 @@ dev = [
 all = ["womblex[isaacus,cloud,dev]"]
 
 [project.urls]
+Homepage = "https://github.com/DeepCivic/womblex"
 Repository = "https://github.com/DeepCivic/womblex"
 Changelog = "https://github.com/DeepCivic/womblex/blob/main/CHANGELOG.md"
+Issues = "https://github.com/DeepCivic/womblex/issues"
 
 [project.scripts]
 womblex = "womblex.cli:main"
 
 [build-system]
-# >=77 for PEP 639 SPDX `license = "Apache-2.0"` string support.
-requires = ["setuptools>=77.0"]
+# >=77.0.3 for PEP 639 SPDX `license` / `license-files` support.
+requires = ["setuptools>=77.0.3"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]

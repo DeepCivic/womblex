@@ -41,7 +41,7 @@ uv sync --extra dev
 
 A minimal test-fixture set is vendored in this repo (`fixtures/fixtures/`), so a
 fresh clone runs most of the suite with no extra setup. The full benchmark set
-lives in a separate repository — see [THIRD_PARTY_DATA.md](THIRD_PARTY_DATA.md)
+lives in a separate repository — see [THIRD_PARTY_DATA.md](https://github.com/DeepCivic/womblex/blob/main/THIRD_PARTY_DATA.md)
 for how to obtain it.
 
 ### System Dependencies
@@ -227,7 +227,7 @@ Masking is **terminal**. The stage writes two siblings and never rewrites the ra
 - **`*.pii_spans.parquet`** — one row per detected span (audit/reversible), carrying the graph `entity_id` and its `<PERSON_n>` replacement.
 - **`*.clean_text.parquet`** — the masked, publishable text layer (`<PERSON_1>`, `<ADDRESS_1>`, … — typed and numbered off the graph entity), written by default (`pii.write_clean_text = true`).
 
-See `docs/accuracy/PII_CLEANING.md` for the measured baseline and [docs/decisions.md](docs/decisions.md) for why masking is terminal.
+See `docs/accuracy/PII_CLEANING.md` for the measured baseline and [docs/decisions.md](https://github.com/DeepCivic/womblex/blob/main/docs/decisions.md) for why masking is terminal.
 
 ### 6. Embeddings and Enrichment
 
@@ -297,7 +297,7 @@ elements, one row per field. Same join key.
 **`batch-NNNN._manifest.parquet`** — one row per source file with
 provenance, status, and element / cell / field counts.
 
-See [docs/extraction.md](docs/extraction.md) for the canonical schema
+See [docs/extraction.md](https://github.com/DeepCivic/womblex/blob/main/docs/extraction.md) for the canonical schema
 reference, element kinds, the reassembly query, and the verbatim-text
 policy.
 
@@ -314,7 +314,7 @@ The E2E graph path (`womblex run`) additionally emits `entities.parquet` and `gr
 ## Project Structure
 
 A file-level map of the source tree lives in
-[docs/project-structure.md](docs/project-structure.md). At a glance:
+[docs/project-structure.md](https://github.com/DeepCivic/womblex/blob/main/docs/project-structure.md). At a glance:
 
 ```
 womblex/
@@ -336,7 +336,7 @@ womblex/
 └── tests/
 ```
 
-See [docs/project-structure.md](docs/project-structure.md) for the full
+See [docs/project-structure.md](https://github.com/DeepCivic/womblex/blob/main/docs/project-structure.md) for the full
 per-module breakdown.
 
 ## Development
