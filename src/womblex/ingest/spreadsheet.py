@@ -10,9 +10,20 @@ spreadsheets to masquerade as documents and made cross-format queries
 awkward; the element-stream model treats cells natively.
 
 Source values are verbatim: pandas reads with ``dtype=str``, so
-"1,234" stays "1,234". ``value_type`` is a hint (currently always
-"text"); formula and number_format remain unset — preserving those
-needs an openpyxl-based reader and is out of scope for this refactor.
+"1,234" stays "1,234". That read is authoritative for ``value`` and is
+never overridden here.
+
+For XLSX a second, read-only openpyxl pass supplies the two facts pandas
+discards: the cell's ``number_format`` and whether the stored value was
+numeric (``value_type``). Both are cell *metadata*, not content — the
+string on ``value`` is unchanged either way. They matter because a
+register's money column is often identifiable only from its format:
+a GrantConnect award export carries ``$#,##0.00`` on ~49,000 cells whose
+text is a bare ``50000``, with no currency symbol anywhere in the sheet.
+Dropping the format discards the only unambiguous currency marker in the
+file. Only non-``General`` formats are retained, which keeps the lookup
+small (most cells are ``General``). CSV has no cell formats, so those
+sheets keep ``number_format`` unset.
 """
 
 from __future__ import annotations
@@ -248,13 +259,21 @@ class SpreadsheetExtractor:
                 )
             else:
                 xl = pd.ExcelFile(str(path))
+                cell_meta = _read_cell_metadata(path)
                 for sheet_idx, name in enumerate(xl.sheet_names):
                     df_raw = xl.parse(name, dtype=str, keep_default_na=False, header=None)
                     preamble, df = split_preamble(df_raw)
+                    # split_preamble drops rows 0..header_idx inclusive, so the
+                    # header's index in the original sheet is recoverable from
+                    # the row counts — no signature change needed to align the
+                    # openpyxl lookup with the emitted grid.
+                    header_idx = len(df_raw) - len(df) - 1
                     order = _emit_sheet(
                         elements, order,
                         sheet_name=str(name), sheet_index=sheet_idx,
                         df=df, preamble=preamble,
+                        cell_meta=cell_meta.get(str(name)),
+                        row_offset=max(header_idx, 0),
                     )
         except Exception as e:
             return _spreadsheet_error(path.stem, f"Failed to read spreadsheet: {e}")
@@ -283,6 +302,67 @@ class SpreadsheetExtractor:
         )
 
 
+def _value_type_for(value: object) -> str:
+    """Classify a stored spreadsheet value. A hint only — never a coercion."""
+    import datetime as _dt
+
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, (_dt.datetime, _dt.date, _dt.time)):
+        return "date"
+    if isinstance(value, (int, float)):
+        return "numeric"
+    return "text"
+
+
+def _read_cell_metadata(
+    path: Path,
+) -> dict[str, dict[tuple[int, int], tuple[str, str]]]:
+    """Map ``sheet -> {(row, col): (number_format, value_type)}`` for an XLSX.
+
+    Row/column indices are zero-based over the raw sheet, matching pandas'
+    ``header=None`` read so callers can offset into the emitted grid. Only
+    cells whose format is not ``General`` are recorded, so a mostly-unformatted
+    workbook costs almost nothing.
+
+    Best-effort: any failure yields an empty map and extraction proceeds with
+    the fields unset, exactly as before this pass existed.
+    """
+    try:
+        from openpyxl import load_workbook
+    except ImportError:  # pragma: no cover - openpyxl is a core dependency
+        logger.warning("openpyxl unavailable; cell formats not preserved")
+        return {}
+
+    out: dict[str, dict[tuple[int, int], tuple[str, str]]] = {}
+    try:
+        wb = load_workbook(str(path), read_only=True, data_only=True)
+    except Exception as e:
+        logger.warning("Could not read cell formats from %s: %s", path.name, e)
+        return {}
+
+    try:
+        for ws in wb.worksheets:
+            sheet_map: dict[tuple[int, int], tuple[str, str]] = {}
+            for r, row in enumerate(ws.iter_rows()):
+                for cell in row:
+                    if cell.value is None:
+                        continue
+                    fmt = cell.number_format or ""
+                    vtype = _value_type_for(cell.value)
+                    if fmt in ("", "General") and vtype == "text":
+                        continue
+                    sheet_map[(r, cell.column - 1)] = (fmt, vtype)
+            if sheet_map:
+                out[ws.title] = sheet_map
+    except Exception as e:
+        logger.warning("Cell-format pass failed on %s: %s", path.name, e)
+        return out
+    finally:
+        wb.close()
+    return out
+
+
 def _emit_sheet(
     elements: list[Element],
     start_order: int,
@@ -291,12 +371,18 @@ def _emit_sheet(
     sheet_index: int,
     df: "pd.DataFrame",
     preamble: list[str] | None = None,
+    cell_meta: dict[tuple[int, int], tuple[str, str]] | None = None,
+    row_offset: int = 0,
 ) -> int:
     """Append sheet_meta + sheet_cell elements for one sheet. Return next order.
 
     Title/blank rows split off above the header land verbatim on the
     sheet_meta element (``meta["preamble"]``), keeping the row-0-is-header
     contract of the cell grid intact for downstream table views.
+
+    ``cell_meta`` carries per-cell ``(number_format, value_type)`` from the
+    openpyxl pass, keyed by raw-sheet coordinates; ``row_offset`` is the raw
+    index of the header row, so emitted ``row`` values map back onto it.
     """
     order = start_order
     n_rows, n_cols = len(df), len(df.columns)
@@ -314,7 +400,18 @@ def _emit_sheet(
     ))
     order += 1
 
-    # Header row at row=0
+    def _lookup(row_idx: int, col_idx: int) -> tuple[str | None, str]:
+        if not cell_meta:
+            return None, "text"
+        found = cell_meta.get((row_offset + row_idx, col_idx))
+        if found is None:
+            return None, "text"
+        fmt, vtype = found
+        return (fmt or None), vtype
+
+    # Header row at row=0. Headers are labels, so their own format is not
+    # meaningful — but the label itself is what identifies a column
+    # downstream, so it is emitted unchanged.
     for col_idx, header in enumerate(df.columns):
         text = str(header)
         if not text.strip():
@@ -333,10 +430,12 @@ def _emit_sheet(
             text = str(val)
             if not text.strip():
                 continue
+            number_format, value_type = _lookup(row_idx, col_idx)
             elements.append(Element(
                 order=order, kind="sheet_cell", extractor="xlsx",
                 sheet=sheet_name, row=row_idx, col=col_idx,
-                value=text, value_type="text", confidence=1.0,
+                value=text, value_type=value_type, confidence=1.0,
+                number_format=number_format,
             ))
             order += 1
 
