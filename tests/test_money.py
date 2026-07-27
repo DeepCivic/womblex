@@ -300,6 +300,69 @@ def test_paragraph_extraction_end_to_end():
 
 
 # ---------------------------------------------------------------------------
+# Boundaries: newlines, malformed numbers, compact ISO forms
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(("text", "value", "currency"), [
+    ("USD100", Decimal("100"), "USD"),
+    ("AUD1500", Decimal("1500"), "AUD"),
+    ("EUR2000", Decimal("2000"), "EUR"),
+])
+def test_compact_iso_form_is_not_an_incident_reference(text, value, currency):
+    """`USD100` looks like a reference number to the FP filter; the ISO
+    membership check is what tells the two apart."""
+    span = _one(text)
+    assert (span.value, span.currency) == (value, currency)
+
+
+def test_no_pattern_crosses_the_element_join():
+    """`\\n\\n` joins two elements in the reassembled narrative. A range binding
+    across it would fabricate a relationship between unrelated paragraphs."""
+    spans = find_money("Payment of $100\n\n-$200 was made")
+    assert [s.value for s in spans] == [Decimal("100"), Decimal("-200")]
+    assert all(s.range_group is None for s in spans)
+
+    spans = find_money("Line one $100\n\nto $200 line two")
+    assert [s.value for s in spans] == [Decimal("100"), Decimal("200")]
+    assert all(s.range_role is None for s in spans)
+
+
+def test_magnitude_survives_a_single_line_wrap():
+    # PDF text layers wrap mid-phrase; one newline is still one paragraph.
+    assert _one("allocated $5\nmillion to the program").value == Decimal("5000000")
+    # But two are an element boundary, so the scale does not reach across.
+    assert _one("allocated $5\n\nmillion to the program").value == Decimal("5")
+
+
+def test_malformed_thousands_group_is_declined():
+    # `$1,23` would otherwise report one dollar — wrong by two orders.
+    assert find_money("$1,23") == []
+    assert _one("$1,234").value == Decimal("1234")
+
+
+def test_large_document_stays_linear():
+    """Guards the interval index: a linear rescan here was 3s on 300 KB."""
+    import time
+
+    unit = "The Department paid $1,234.56 on 1 July 2025 under s167(1). "
+    text = unit * 3000  # ~180 KB
+    t0 = time.perf_counter()
+    spans = find_money(text)
+    elapsed = time.perf_counter() - t0
+    assert len(spans) == 3000
+    assert elapsed < 5.0, f"quadratic regression: {elapsed:.1f}s on {len(text)} chars"
+
+
+def test_comma_dense_ocr_noise_does_not_backtrack():
+    import time
+
+    t0 = time.perf_counter()
+    find_money("$" + ",".join(["1"] * 4000))
+    assert time.perf_counter() - t0 < 2.0
+
+
+# ---------------------------------------------------------------------------
 # Column-evidenced path
 # ---------------------------------------------------------------------------
 

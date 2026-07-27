@@ -22,6 +22,7 @@ resolved by priority, then span length, then confidence.
 from __future__ import annotations
 
 import re
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -93,8 +94,16 @@ _PRIORITY = {"p7": 0, "p9": 0, "p1": 1, "p6": 1, "p2": 2, "p4": 4, "p3": 5,
 _CONFIDENCE = {"p1": 0.99, "p6": 0.99, "p2": 0.99, "p3": 0.90, "p4": 0.90,
                "p5": 0.75, "p9": 0.90, "p10": 0.35}
 
-_SCALE_TAIL = rf"(?:\s?(?P<scale>{_SCALE_ALT})(?![A-Za-z]))?"
-_NEG = r"(?P<neg>-\s?)?"
+# Whitespace inside a pattern may span at most one line break, so no match can
+# cross the ``\n\n`` element join `reassemble_narrative` writes — a pattern that
+# did would bind two unrelated paragraphs together. Same discipline as the PII
+# regexes (CLAUDE.md). Range separators are stricter still (`_HGAP`): a range
+# fabricates a *relationship* between two numbers, so it stays on one line.
+_GAP = r"[^\S\n]*\n?[^\S\n]*"
+_HGAP = r"[^\S\n]*"
+
+_SCALE_TAIL = rf"(?:{_GAP}(?P<scale>{_SCALE_ALT})(?![A-Za-z]))?"
+_NEG = rf"(?P<neg>-{_HGAP})?"
 
 
 def _num_alt(international: bool) -> str:
@@ -104,41 +113,43 @@ def _num_alt(international: bool) -> str:
 def _compile(international: bool) -> dict[str, re.Pattern[str]]:
     """Build the pattern set for a locale mode (cached by :func:`_patterns`)."""
     num = _num_alt(international)
-    left = rf"(?:(?P<sym_a>{_SYMBOL_ALT})\s?)?(?P<neg_a>-\s?)?(?P<num_a>{num})" \
-           rf"(?:\s?(?P<scale_a>{_SCALE_ALT})(?![A-Za-z]))?"
-    right = rf"(?:(?P<sym_b>{_SYMBOL_ALT})\s?)?(?P<num_b>{num})" \
-            rf"(?:\s?(?P<scale_b>{_SCALE_ALT})(?![A-Za-z]))?"
+    scale_tail = rf"(?:{_GAP}(?P<scale_a>{_SCALE_ALT})(?![A-Za-z]))?"
+    left = rf"(?:(?P<sym_a>{_SYMBOL_ALT}){_HGAP})?(?P<neg_a>-{_HGAP})?(?P<num_a>{num})" \
+           rf"{scale_tail}"
+    right = rf"(?:(?P<sym_b>{_SYMBOL_ALT}){_HGAP})?(?P<num_b>{num})" \
+            rf"(?:{_HGAP}(?P<scale_b>{_SCALE_ALT})(?![A-Za-z]))?"
     return {
         # 7 — ranges. Scanned first so an endpoint is never claimed alone.
         "p7": re.compile(
-            rf"(?<![A-Za-z0-9]){left}\s*(?:[–—‒-]|to)\s*{right}", re.IGNORECASE),
+            rf"(?<![A-Za-z0-9]){left}{_HGAP}(?:[\u2013\u2014\u2012-]|to){_HGAP}{right}",
+            re.IGNORECASE),
         "p7_between": re.compile(
-            rf"\bbetween\s+{left}\s+and\s+{right}", re.IGNORECASE),
+            rf"\bbetween{_HGAP}\s?{left}{_HGAP}\s?and{_HGAP}\s?{right}", re.IGNORECASE),
         # 1 / 6 — symbol prefix, optional magnitude.
         "p1": re.compile(
-            rf"(?<![A-Za-z0-9]){_NEG}(?P<sym>{_SYMBOL_ALT})\s?(?P<num>{num})"
+            rf"(?<![A-Za-z0-9]){_NEG}(?P<sym>{_SYMBOL_ALT}){_HGAP}(?P<num>{num})"
             rf"{_SCALE_TAIL}", re.IGNORECASE),
         # 2 — ISO prefix (`AUD 100`, `AUD$21.9 million`). Case-sensitive.
         "p2": re.compile(
-            rf"(?<![A-Za-z])(?P<iso>[A-Z]{{3}})\s?(?P<sym>\$)?\s?{_NEG}"
-            rf"(?P<num>{num})(?:\s?(?P<scale>{_SCALE_ALT})(?![A-Za-z]))?"),
+            rf"(?<![A-Za-z])(?P<iso>[A-Z]{{3}}){_HGAP}(?P<sym>\$)?{_HGAP}{_NEG}"
+            rf"(?P<num>{num}){_SCALE_TAIL}"),
         # 3 — ISO suffix (`100 AUD`).
         "p3": re.compile(
             rf"(?<![A-Za-z0-9]){_NEG}(?P<num>{num})"
-            rf"(?:\s?(?P<scale>{_SCALE_ALT})(?![A-Za-z]))?\s?"
+            rf"{_SCALE_TAIL}{_HGAP}"
             rf"(?P<iso>[A-Z]{{3}})(?![A-Za-z])"),
         # 4 — currency word (`100 dollars`, `250 Australian dollars`).
         "p4": re.compile(
-            rf"(?<![A-Za-z0-9]){_NEG}(?P<num>{num}){_SCALE_TAIL}\s?"
+            rf"(?<![A-Za-z0-9]){_NEG}(?P<num>{num}){_SCALE_TAIL}{_GAP}"
             rf"(?P<word>{_WORD_ALT})\b", re.IGNORECASE),
         # 5 — symbol suffix (`100$`, `50€`).
         "p5": re.compile(
-            rf"(?<![A-Za-z0-9]){_NEG}(?P<num>{num})\s?"
+            rf"(?<![A-Za-z0-9]){_NEG}(?P<num>{num}){_HGAP}"
             rf"(?P<sym>{_SUFFIX_SYMBOL_ALT})(?![0-9])"),
         # 9 — accounting negative (`($100)`, `(6,550.1)` under context).
         "p9": re.compile(
-            rf"\(\s?(?P<sym>{_SYMBOL_ALT})?\s?(?P<num>{num}){_SCALE_TAIL}\s?\)",
-            re.IGNORECASE),
+            rf"\({_HGAP}(?P<sym>{_SYMBOL_ALT})?{_HGAP}(?P<num>{num})"
+            rf"{_SCALE_TAIL}{_HGAP}\)", re.IGNORECASE),
         # 10 — bare number, implicit financial context. Off by default.
         "p10": re.compile(rf"(?<![A-Za-z0-9.,]){_NEG}(?P<num>{num})"
                           rf"{_SCALE_TAIL}(?![A-Za-z0-9])", re.IGNORECASE),
@@ -217,12 +228,20 @@ def blocked_spans(text: str) -> list[tuple[int, int, str]]:
         for m in pattern.finditer(text):
             if name in ("measurement", "temperature") and _preceded_by_currency(text, m.start()):
                 continue
+            if name == "incident_ref" and _iso_prefixed(m.group(0)):
+                continue  # `USD100` is an amount, not a reference number
             out.append((m.start(), m.end(), name))
     for m in POSTCODE_RE.finditer(text):
         window = text[max(0, m.start() - 40):m.end() + 40]
         if STATE_RE.search(window):
             out.append((m.start(), m.end(), "postcode"))
     return out
+
+
+def _iso_prefixed(token: str) -> bool:
+    """True for `USD100`-shaped tokens whose letters are a real currency code."""
+    m = re.match(r"([A-Z]{2,4})", token)
+    return m is not None and resolve_iso(m.group(1)) is not None
 
 
 def _preceded_by_currency(text: str, pos: int) -> bool:
@@ -237,8 +256,30 @@ def _preceded_by_currency(text: str, pos: int) -> bool:
     return bool(re.fullmatch(r"[A-Z]{3}", tail)) and resolve_iso(tail) is not None
 
 
-def _overlaps(a: tuple[int, int], spans: list[tuple[int, int, str]]) -> bool:
-    return any(a[0] < e and s < a[1] for s, e, _ in spans)
+class _IntervalIndex:
+    """Sorted interval set answering "does anything overlap [start, end)?".
+
+    A linear scan per candidate is quadratic in document length — measured at
+    3s on a 300 KB narrative, which is an ordinary FOI bundle. Sorting by start
+    and carrying a running maximum end answers each query with one bisect: an
+    overlap exists iff some interval starting before ``end`` reaches past
+    ``start``, and the prefix maximum is exactly that reach.
+    """
+
+    __slots__ = ("_starts", "_max_end")
+
+    def __init__(self, spans: list[tuple[int, int]]) -> None:
+        items = sorted(spans)
+        self._starts = [s for s, _ in items]
+        self._max_end: list[int] = []
+        reach = -1
+        for _, end in items:
+            reach = max(reach, end)
+            self._max_end.append(reach)
+
+    def overlaps(self, start: int, end: int) -> bool:
+        i = bisect_left(self._starts, end)
+        return i > 0 and self._max_end[i - 1] > start
 
 
 # ---------------------------------------------------------------------------
@@ -246,19 +287,26 @@ def _overlaps(a: tuple[int, int], spans: list[tuple[int, int, str]]) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _locale_ambiguous(m: re.Match[str], num_group: str, international: bool) -> bool:
-    """True for a continental-format number seen in Australian mode.
+_MALFORMED_GROUP_RE = re.compile(r",\d{1,2}(?!\d)")
 
-    ``€1.000,50`` would otherwise be read as ``€1.000`` — one euro, silently
-    wrong by 10³. Australian mode declines it rather than guessing the locale;
-    ``international_numbers`` is the deliberate opt-in.
+
+def _ambiguous_continuation(m: re.Match[str], num_group: str, international: bool) -> bool:
+    """True when the number runs on in a way this locale can't account for.
+
+    Two cases, both silently wrong if extracted rather than declined:
+
+    - ``€1.000,50`` in Australian mode reads as ``€1.000`` — one euro, wrong by
+      10³. ``international_numbers`` is the deliberate opt-in for that format.
+    - ``$1,23`` has a malformed thousands group; the pattern consumes ``$1`` and
+      drops the rest, reporting one dollar instead of a hundred-odd.
     """
+    tail = m.string[m.end(num_group):m.end(num_group) + 4]
+    if _MALFORMED_GROUP_RE.match(tail):
+        return True
     if international:
         return False
     raw = m.group(num_group)
-    if not re.fullmatch(r"\d{1,3}\.\d{3}", raw):
-        return False
-    return bool(re.match(r",\d", m.string[m.end(num_group):m.end(num_group) + 2]))
+    return bool(re.fullmatch(r"\d{1,3}\.\d{3}", raw)) and bool(re.match(r",\d", tail))
 
 
 def _candidate(
@@ -268,7 +316,7 @@ def _candidate(
     confidence: float | None = None, negative: bool = False,
     international: bool = False, subunit: bool = False,
 ) -> MoneySpan | None:
-    if _locale_ambiguous(m, num_group, international):
+    if _ambiguous_continuation(m, num_group, international):
         return None
     value = parse_number(m.group(num_group), international=international)
     if value is None:
@@ -431,7 +479,7 @@ def _scan_implicit(text: str, pats, opts: MoneyOptions) -> list[MoneySpan]:
 
 
 def _scan_ranges(
-    text: str, pats, opts: MoneyOptions, blocked: list[tuple[int, int, str]],
+    text: str, pats, opts: MoneyOptions, blocked: _IntervalIndex,
 ) -> tuple[list[MoneySpan], list[tuple[int, int]]]:
     """Both endpoints, linked by ``range_group``; the whole span is claimed.
 
@@ -445,13 +493,16 @@ def _scan_ranges(
     group = 0
     for key in ("p7_between", "p7"):
         for m in pats[key].finditer(text):
-            if _overlaps((m.start(), m.end()), blocked):
+            if blocked.overlaps(m.start(), m.end()):
                 continue
             if any(m.start() < e and s < m.end() for s, e in claimed):
-                continue
+                continue  # claimed ranges are few; a linear check is cheap here
             sym_a, sym_b = m.group("sym_a"), m.group("sym_b")
             if not sym_a and not sym_b:
                 continue  # no evidence on either endpoint
+            if any(_ambiguous_continuation(m, g, opts.international_numbers)
+                   for g in ("num_a", "num_b")):
+                continue  # malformed / continental endpoint — decline the pair
             lo = parse_number(m.group("num_a"), international=opts.international_numbers)
             hi = parse_number(m.group("num_b"), international=opts.international_numbers)
             if lo is None or hi is None:
@@ -495,12 +546,19 @@ def _resolve_overlaps(candidates: list[MoneySpan]) -> list[MoneySpan]:
         candidates,
         key=lambda c: (_PRIORITY[c.evidence], -(c.end - c.start), -c.confidence, c.start),
     )
+    # `kept` is maintained sorted and disjoint, so only the neighbours either
+    # side of the insertion point can overlap — no full rescan per candidate.
     kept: list[MoneySpan] = []
+    starts: list[int] = []
     for cand in ordered:
-        if any(cand.start < k.end and k.start < cand.end for k in kept):
+        i = bisect_right(starts, cand.start)
+        if i > 0 and kept[i - 1].end > cand.start:
             continue
-        kept.append(cand)
-    return sorted(kept, key=lambda c: (c.start, c.end))
+        if i < len(kept) and kept[i].start < cand.end:
+            continue
+        kept.insert(i, cand)
+        starts.insert(i, cand.start)
+    return kept
 
 
 def _attach_modifier(text: str, span: MoneySpan) -> None:
@@ -536,9 +594,10 @@ def find_money(text: str, options: MoneyOptions | None = None) -> list[MoneySpan
         return []
     opts = options or MoneyOptions()
     pats = _patterns(opts.international_numbers)
-    blocked = blocked_spans(text)
+    blocked = _IntervalIndex([(s, e) for s, e, _ in blocked_spans(text)])
 
     ranges, claimed = _scan_ranges(text, pats, opts, blocked)
+    claimed_index = _IntervalIndex(claimed)
 
     candidates: list[MoneySpan] = []
     for scan in (_scan_symbol_prefix, _scan_iso_prefix, _scan_iso_suffix,
@@ -549,8 +608,8 @@ def find_money(text: str, options: MoneyOptions | None = None) -> list[MoneySpan
 
     candidates = [
         c for c in candidates
-        if not _overlaps((c.start, c.end), blocked)
-        and not any(c.start < e and s < c.end for s, e in claimed)
+        if not blocked.overlaps(c.start, c.end)
+        and not claimed_index.overlaps(c.start, c.end)
     ]
 
     resolved = _resolve_overlaps(candidates) + ranges

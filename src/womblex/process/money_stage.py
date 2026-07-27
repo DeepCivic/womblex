@@ -332,6 +332,8 @@ def _cell_spans(
         return rows
 
     for row_idx, text in body:
+        if not any(ch.isdigit() for ch in text):
+            continue  # every pattern needs a digit; skip the scan on prose cells
         for span in find_money(text, opts):
             stored = quantise(span.value)
             if stored is None:

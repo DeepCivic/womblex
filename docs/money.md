@@ -377,6 +377,16 @@ Two departures from the pipeline sketch below, both consequences of the
   (`context_chars`, default 160), not a parsed sentence. The offsets recover
   anything wider.
 
+One invariant falls out of the same decision and is worth stating, because
+violating it fabricates data rather than merely missing some. The reassembled
+narrative joins elements with `\n\n`, so **no pattern may match across two line
+breaks**: whitespace inside a pattern spans at most one newline, and a range's
+separator none at all. Without that, `Payment of $100` and `-$200 was made` —
+two unrelated paragraphs, possibly two unrelated table rows — bind into a
+single `$100–$200` range. This mirrors the newline rule the PII regexes already
+follow ([CLAUDE.md](../CLAUDE.md)). A magnitude suffix *may* sit across one
+wrap (`$5\nmillion`), because PDF text layers wrap mid-phrase constantly.
+
 ## Processing pipeline
 
 1. **Pre-processing** — preserve original text and character offsets; Unicode

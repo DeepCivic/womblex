@@ -265,6 +265,35 @@ def test_missing_shard_dir_raises(tmp_path: Path):
     raise AssertionError("expected FileNotFoundError")
 
 
+def test_resume_scan_drops_corrupt_sidecars(tmp_path: Path):
+    """The shared resume self-heal must recognise the money sidecar suffix."""
+    from womblex.store.money_output import MONEY_SPANS_SUFFIX
+    from womblex.store.shard_audit import reconcile_stage_checkpoint_with_shards
+
+    _build_shard(tmp_path, [_element(0, "paragraph", text="paid $100")])
+    ckpt = CheckpointManager(tmp_path / ".money-checkpoint", "ds_money")
+    money_shards(tmp_path, MoneyConfig(), checkpoint_mgr=ckpt)
+    assert DOC in ckpt.state.processed_ids
+
+    (tmp_path / f"batch-0001{MONEY_SPANS_SUFFIX}").write_bytes(b"")  # corrupt
+    dropped = reconcile_stage_checkpoint_with_shards(
+        ckpt, tmp_path, suffix=MONEY_SPANS_SUFFIX)
+
+    assert dropped == [DOC]
+    assert money_shards(tmp_path, MoneyConfig(), checkpoint_mgr=ckpt).batches_written == 1
+
+
+def test_prose_cells_without_digits_are_skipped(tmp_path: Path):
+    elements = [_element(0, "table", header_rows=[0])]
+    cells = [
+        _cell(0, 0, 0, "Notes"), _cell(0, 1, 0, "no amount here"),
+        _cell(0, 2, 0, "also nothing"), _cell(0, 3, 0, "paid $50"),
+    ]
+    base = _build_shard(tmp_path, elements, cells)
+    money_shards(tmp_path, MoneyConfig())
+    assert [r["value"] for r in read_money_spans(base).to_pylist()] == [Decimal("50.0000")]
+
+
 def test_quantise_drops_unstorable_values():
     assert quantise(Decimal("1.23456")) == Decimal("1.2346")
     assert quantise(Decimal(10) ** 40) is None

@@ -71,7 +71,10 @@ def cmd_money(args: argparse.Namespace) -> int:
     else:
         config = MoneyConfig()
     if args.text_source:
+        # An explicit flag outranks the config: `money.text_source` would
+        # otherwise win inside the stage and silently ignore the override.
         text_source = args.text_source
+        config = config.model_copy(update={"text_source": args.text_source})
     if not config.enabled:
         logger.info("money stage disabled in config; nothing to do.")
         return 0

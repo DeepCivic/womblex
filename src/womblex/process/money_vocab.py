@@ -252,12 +252,18 @@ FALSE_POSITIVE_PATTERNS: dict[str, re.Pattern[str]] = {
     ),
     "incident_ref": re.compile(r"\b[A-Z]{2,4}[-/]?\d{3,}(?:/\d+)?\b"),
     "parcel": re.compile(r"\b(?:lot|dp|sp|pid|lga)\s?\d+\b", re.IGNORECASE),
+    # These reuse the NUM_AU shape rather than `\d+(?:[,.]\d+)*`: the latter
+    # backtracks quadratically over comma-dense OCR noise ("1,1,1,1,…"), which
+    # is exactly what a bad scan produces.
     "measurement": re.compile(
-        r"\b\d+(?:[,.]\d+)*\s?(?:" + "|".join(_MEASURE_UNITS) + r")\b",
+        r"\b(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?\s?(?:" + "|".join(_MEASURE_UNITS) + r")\b",
         re.IGNORECASE,
     ),
     "temperature": re.compile(r"\b\d+(?:\.\d+)?\s?°[CF]?"),
-    "percent": re.compile(r"\b\d+(?:[,.]\d+)*\s?(?:%|per\s?cent|percent)\b", re.IGNORECASE),
+    "percent": re.compile(
+        r"\b(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?\s?(?:%|per\s?cent|percent)\b",
+        re.IGNORECASE,
+    ),
     "version": re.compile(r"\bv(?:ersion)?\s?\d+(?:\.\d+)+\b", re.IGNORECASE),
 }
 
