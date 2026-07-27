@@ -3,7 +3,7 @@
 Document extraction pipeline for converting Australian government documents into ML-friendly corpus or collections. Extracts text from PDFs and Word documents (native, scanned, forms, hybrid). Spreadsheets are ingested as cell-grained element streams with automatic header/preamble detection, ready for per-record semantic analysis. Reference registers (G-NAF, ABN bulk extract, geospatial) have standalone Parquet ingests that bypass the NLP pipeline.
 
 ## Design disclosure
-This project is designed for everyone. All design decisions favour air-gapped edge deployment, running on limited resources. This means Womblex doesn't include many of the more robust 'all in one' OCR models.
+This project is designed for everyone with a focus on inexpensive processing. This means Womblex doesn't include many of the more robust 'all in one' OCR models.
 
 Mature OCR models are used to compete with Womblex for evaluations and guide development.
 
@@ -105,13 +105,12 @@ womblex ingest-geo  shapefiles/ -o output/geo                    # SHP → GeoPa
 womblex verify-shards output/<run_id>/
 ```
 
-## Distributed / cloud execution (optional)
+## Environment-Agnostic Execution
 
-The local commands above run single-process and CPU-first — the default, and
-all that's needed for air-gapped edge use. For large corpora where you don't
-want to wait hours, the `cloud` extra adds horizontal scale-out **without
-changing extraction behaviour**: the same per-batch body runs, just across many
-workers that share a Postgres job queue and an object store.
+The system scales from minimum hardware (e.g., a Chromebook) 
+to distributed cloud clusters without altering extraction behavior. 
+Configurable "knobs," such as parallel thread limits, allow you to optimize 
+resource usage for your specific infrastructure.
 
 ```bash
 pip install womblex[cloud]   # fsspec + s3fs + psycopg3

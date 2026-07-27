@@ -3,8 +3,9 @@ Context for Claude when working on this codebase.
 ## Project Purpose
 Womblex extracts text from Australian government PDF document releases and prepares it for semantic analysis via Isaacus. The project exists because:
 1. Government documents are messy (scanned, redacted, mixed formats)
-2. Isaacus models need clean, chunked text as input
-3. Getting text out is hard; analysis after that is easy
+2. Embedding model should have clean, chunked text as input
+3. Typically semantic chunking is better for most things
+4. Getting text out is hard; analysis after that is easy
 The `raw_documents/` folder contains a curated mix of government document types. This serves as the baseline for testing and refining the extraction → Parquet process.
 
 ## Key Design Decisions
@@ -38,10 +39,11 @@ detector profiles every page independently (`ingest/page_profile.py`
 → `PageProfile`); the orchestrator (`ingest/orchestrator.py`) dispatches
 operations page-by-page based on those profiles.
 
-Government FOI bundles are heterogeneous within a single file — cover
-letter + columnar table + form + signed declaration. Document-level
-routing collapses this to one strategy and loses the per-region
-structure. Page-level routing matches the data.
+Government FOI bundles, papers and scientific document bundles can be
+heterogeneous within a single file — cover letter + columnar table + 
+form + signed declaration. Document-level routing collapses this to 
+one strategy and loses the per-region structure. 
+Page-level routing matches the data.
 
 The doc-level `DocumentType` is now a *summary attribute* on the
 result, not a switch. PDF strategy classes (`Native*`, `Scanned*`,
@@ -51,14 +53,18 @@ into the orchestrator's per-page operations
 
 `get_extractor()` only handles non-PDF types (DOCX, SPREADSHEET, TEXT,
 IMAGE). For any PDF, `extract_text()` calls `extract_pdf_with_plan()`.
+
 ### Redaction is a post-extraction concern
 Redaction runs as a separate operation after extraction via `redact/stage.py`. The redaction detector misfires on form fields, chart regions, and diagram fills when called inside `_ocr_page()`, suppressing legitimate text. Do not call `pre_ocr_mask` from within extraction strategies.
+
 ### Thin adapters over mature libraries
 For mature, widely-used dependencies (`semchunk`, `rapidocr-onnxruntime`, `presidio-anonymizer`, `sentence-transformers`, the Isaacus SDK), Womblex's role is a thin adapter that handles only the integration concerns the library can't know about — parquet I/O, element-stream projection, source-hash plumbing, corpus-specific wrinkles (e.g. `<REDACTED>` cross-boundary repair). The library's full surface is reached via pass-through (its parameters *are* the feature flags); Womblex defaults track upstream defaults except where the corpus has a measured reason to diverge. Anti-patterns: a Womblex toggle for a library feature, a wrapper that re-implements something the library does natively, hardcoded defaults that shadow upstream without justification. When a library absorbs a concern Womblex previously handled, delete the Womblex code rather than carrying a parallel implementation.
+
 ### Chunking is generic semchunk integration
 `process/chunker.py` exposes `create_chunker` (wraps `semchunk.chunkerify`) and one entry point `chunk_batch(inputs, chunker, *, overlap, processes, progress)`. Every caller flattens all docs' narratives into one semchunk call and all docs' table markdowns into another, so `processes` and the progress bar parallelise across the whole batch. The chunker accepts any HuggingFace tokeniser identifier or a callable token counter — tokeniser and chunk size are dataset-level config choices in `configs/*.yaml`.
 
 `process/chunk_stage.py` provides `chunk_shards(shard_dir, config)` — the per-stage entry point that walks an existing extraction shard directory, reassembles narrative + tables from each `*.elements.parquet` via `build_chunk_input(source_hash, elements)`, calls `chunk_batch`, and writes a `*.chunks.parquet` sibling. The same `build_chunk_input` powers the in-memory `operations.run_chunking` path, so per-stage and E2E modes feed semchunk identical inputs by construction.
+
 ### PII is graph-driven and masked after Isaacus
 PII detection consumes the Kanon-2 enrichment graph: PII-typed entities (`natural`→PERSON, `address`→ADDRESS) are the candidates, mapped onto chunks via mention offsets. There is no separate detector and no second enrichment pass — the optional regex/cosine backstop (`pii.use_regex_backstop`, default off) is low-precision and opt-in only; recall is flexed by enrichment *granularity/duration*, not by the backstop. Masking is **terminal**: the `pii` stage writes a masked `*.clean_text.parquet` (`<PERSON_n>`, typed + numbered off the graph entity) *after* enrich + embed and never rewrites the raw chunks that feed Isaacus (the enricher strips `<…>` tags as OCR noise). See [docs/decisions.md](docs/decisions.md).
 
@@ -67,10 +73,13 @@ The "why" behind the library — design decisions and rejected alternatives, app
 
 ### Config-driven, not hardcoded
 Dataset-specific settings live in YAML configs. The codebase doesn't know about specific datasets — that's all in config files under `configs/`.
+
 ### Checkpointing for long jobs
 Processing 1500+ documents takes hours. Checkpoint after each batch so failures don't require full restart.
+
 ### Corpus relationship to library
 A corpus exists to mature Womblex capability, not host custom code. Corpus-side scripts in `stories/<corpus>/` are appropriate for *configuration + invocation + output formatting* of library functions; any iteration / aggregation / orchestration logic belongs in Womblex. `score.py` and `redact/batch.py` are precedents — promoted from corpus-local scripts to first-class library. Substantive work should ship library-first, with the corpus as its test case.
+
 ## Module Responsibilities
 | Module | Does | Doesn't |
 |--------|------|---------|
@@ -129,6 +138,7 @@ A corpus exists to mature Womblex capability, not host custom code. Corpus-side 
 | `cloud/queue.py` | `JobQueue` — Postgres `FOR UPDATE SKIP LOCKED` batch queue (one `womblex_jobs` table); `enqueue` (idempotent on `(run_id, batch_num)`), `claim`, `complete`, `fail` (with retry), `requeue_stale`, `stats`. The row `status` is the distributed checkpoint | Run extraction; touch object storage |
 | `cloud/worker.py` | `run_worker()` — claim a batch, stage its inputs from `RemoteStore`, run `process_batch`, publish shards back, mark the row; per-job failure isolation, idle/once/stale-recovery modes | Implement the queue or the pipeline body (those are `cloud/queue.py` / `batch.py`) |
 | `cli/cloud.py` | `enqueue` / `worker` / `jobs` / `finalize` CLI — distributed counterpart to `womblex run` over a shared `--store` object-store URI + Postgres `--dsn`. `finalize` consolidates a distributed run's shard manifests into `<run>/manifest.parquet` in the store (the explicit end-step `cmd_run` does locally) | Implement queue/worker/storage logic (those are `cloud/` + `store/remote.py`) |
+
 ## Coding Conventions
 ### Style
 - Python 3.11+
@@ -137,10 +147,12 @@ A corpus exists to mature Womblex capability, not host custom code. Corpus-side 
 - Pydantic for config/validation
 - Australian spelling in comments and docs
 - **750 line hard cap per file** — validate after every file save with `wc -l`; split if exceeded
+
 ### Error Handling
 - Individual document failures shouldn't stop the batch
 - Log errors with document ID for debugging
 - Store error status in output for review
+
 ### Dependencies
 - PyMuPDF (`fitz`) for PDF handling
 - rapidocr-onnxruntime for OCR (bundles PaddleOCR v4 ONNX det/rec/cls models, no PaddlePaddle framework)
@@ -153,6 +165,7 @@ A corpus exists to mature Womblex capability, not host custom code. Corpus-side 
 - spylls (pure-Python Hunspell) for the `spellfix` OCR-repair op; bundled en_AU dict under `_models/en_AU`
 - No heavyweight ML frameworks in core (models bundled in rapidocr-onnxruntime wheel, loaded lazily)
 - Local models in `models/` are resolved automatically by `utils/models.py` — no network access required at runtime
+
 ## Common Pitfalls
 ### PyMuPDF import
 ```python
@@ -184,6 +197,7 @@ text = page.get_text("text", flags=fitz.TEXT_DEHYPHENATE)
 **Chunking reads `elements`, not `pages[i].text`** (as of I2, 2026-05-27). `chunk_batch` consumes `ChunkInput`s built from the element stream via `reassemble_narrative` + `collect_tables_from_elements`. In-memory `pages[i].text` mutations from PII / redact-blackout no longer flow to chunks under `womblex run`; downstream stages that want post-rewrite text will consume the `*.clean_text.parquet` sidecar (P1, not yet written).
 
 If an extractor is producing wrong bytes due to its own bug (broken ToUnicode font maps producing `$` for `'s`, URL corruption like `http:lL`, spaced-character OCR footers), the fix belongs in the extractor itself, not as a post-extraction normalisation pass. Systematic post-extraction cleanup belongs to a downstream cleaning stage that rewrites element text. See `docs/extraction.md`.
+
 ### Local model resolution
 `utils/models.py` is the single source of truth for finding pre-downloaded models. Always use `resolve_local_model_path(name)` rather than constructing paths manually:
 ```python

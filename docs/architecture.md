@@ -1,6 +1,9 @@
 # Architecture
 
-Womblex extracts and normalises Australian government data for semantic analysis via Isaacus. Input files are routed by format to the appropriate ingest path. Operations are independent functions with clear preconditions — callers compose them directly.
+Womblex extracts and normalises Australian government data for analysis. 
+Input files are routed by format to the appropriate ingest path. 
+Operations are independent functions with clear preconditions — 
+callers compose them directly.
 
 ```
 Input File
