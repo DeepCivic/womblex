@@ -3,6 +3,8 @@
 
 import logging
 
+import re
+
 from pathlib import Path
 
 from typing import Any
@@ -492,6 +494,97 @@ class QualityConfig(BaseModel):
         return self
 
 
+class MoneyColumnsConfig(BaseModel):
+    """Column-evidenced half of the money op — bare cells in a money column."""
+
+    enabled: bool = Field(default=True, description="Classify table/sheet columns.")
+    numeric_fraction_min: float = Field(
+        default=0.7, ge=0.0, le=1.0,
+        description="Minimum fraction of non-null cells that must parse as numbers "
+                    "before a header can promote a column. Null markers (—, n/a, nil) "
+                    "are absent values and are excluded from the denominator, not "
+                    "counted against it.",
+    )
+    min_cells: int = Field(
+        default=3, ge=1,
+        description="Minimum non-null cells before header evidence is trusted.",
+    )
+    extra_header_terms: list[str] = Field(
+        default_factory=list,
+        description="Corpus-specific money header vocabulary, added to the built-in set.",
+    )
+    extra_veto_terms: list[str] = Field(
+        default_factory=list,
+        description="Corpus-specific header terms that suppress a column (whole-word).",
+    )
+
+
+class MoneyConfig(BaseModel):
+    """Monetary amount annotation op (``womblex money``).
+
+    Reads ``*.elements.parquet`` + ``*.table_cells.parquet`` and writes
+    ``*.money_spans.parquet`` + ``*.money_columns.parquet`` sidecars. Offline,
+    API-free, annotation only — element and chunk text are never rewritten.
+    Amounts are recovered along two paths: self-evidencing (a symbol, ISO code
+    or currency word sits with the number) and column-evidenced (a bare number
+    whose money-ness comes from its column's header or number format). See
+    ``docs/money.md``.
+    """
+
+    enabled: bool = Field(default=True, description="Run the money stage.")
+    narrative: bool = Field(
+        default=True, description="Scan reassembled narrative text (self-evidencing path).",
+    )
+    default_currency: str = Field(
+        default="AUD",
+        description="Currency assumed where a document states none. Australian "
+                    "government publications use `$` to mean AUD unless another "
+                    "currency is explicitly established.",
+    )
+    international_numbers: bool = Field(
+        default=False,
+        description="Accept continental formats (1.000,50). Off by default: "
+                    "Australia does not use comma decimals, and inferring locale "
+                    "adds false positives for no benefit on this corpus.",
+    )
+    implicit_context: bool = Field(
+        default=False,
+        description="Pattern 10 — bare numbers near financial trigger vocabulary in "
+                    "narrative text. Low precision on this corpus; opt in for recall "
+                    "experiments only. Header vocabulary (the high-value use of the "
+                    "same terms) is unaffected by this flag.",
+    )
+    min_confidence: float = Field(
+        default=0.5, ge=0.0, le=1.0,
+        description="Drop narrative candidates scoring below this.",
+    )
+    context_chars: int = Field(
+        default=160, ge=0,
+        description="Characters of surrounding text stored with each narrative span.",
+    )
+    text_source: str | None = Field(
+        default=None,
+        description="Element-text layer the narrative offsets index. Null inherits "
+                    "processing.text_source, which is what keeps money spans in the "
+                    "same coordinate space as enrichment mentions and chunks.",
+    )
+    columns: MoneyColumnsConfig = MoneyColumnsConfig()
+
+    @field_validator("default_currency")
+    @classmethod
+    def _check_currency(cls, v: str) -> str:
+        if not re.fullmatch(r"[A-Z]{3}", v):
+            raise ValueError(f"default_currency must be a 3-letter ISO 4217 code, got {v!r}")
+        return v
+
+    @field_validator("text_source")
+    @classmethod
+    def _check_text_source(cls, v: str | None) -> str | None:
+        if v is not None and v not in ("elements", "normalised", "spellfix"):
+            raise ValueError(f"text_source must be elements|normalised|spellfix, got {v!r}")
+        return v
+
+
 class EnrichmentConfig(BaseModel):
 
     """Isaacus enrichment settings."""
@@ -730,6 +823,7 @@ class WomblexConfig(BaseModel):
     normalise: NormaliseConfig = NormaliseConfig()
     spellfix: SpellfixConfig = SpellfixConfig()
     quality: QualityConfig = QualityConfig()
+    money: MoneyConfig = MoneyConfig()
     enrichment: EnrichmentConfig = EnrichmentConfig()
     embedding: EmbeddingConfig = EmbeddingConfig()
     linking: LinkingConfig = LinkingConfig()

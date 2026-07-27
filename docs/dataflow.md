@@ -166,6 +166,9 @@ For each file processed via `operations.py`:
       │     ├── *.spellfix_text.parquet + *.spellfix_corrections.parquet (spellfix — offline overlay)
       │     ├── *.chunks.parquet                                    (chunk — I2)
       │     ├── *.chunk_quality.parquet                             (quality — offline annotation)
+      │     ├── *.money_spans.parquet + *.money_columns.parquet     (money — offline annotation;
+      │     │     narrative spans carry the text_source they index, cells carry
+      │     │     (sheet|parent_elem_order, row, col))
       │     ├── *.redactions.parquet                                (redact — I3)
       │     ├── *.enrichment_entities.parquet + *.enrichment_meta.parquet
       │     │     + *.graph_edges.parquet                            (enrich — I7; graph

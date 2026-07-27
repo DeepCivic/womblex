@@ -90,6 +90,7 @@ womblex normalise --shards output/<run_id>/documents/               # *.normalis
 womblex spellfix  --shards output/<run_id>/documents/               # *.spellfix_text.parquet + *.spellfix_corrections.parquet (offline OCR repair)
 womblex chunk     --shards output/<run_id>/documents/               # *.chunks.parquet
 womblex quality   --shards output/<run_id>/documents/               # *.chunk_quality.parquet (offline chunk annotation)
+womblex money     --shards output/<run_id>/documents/               # *.money_spans.parquet + *.money_columns.parquet (offline amount annotation)
 womblex redact    --shards output/<run_id>/documents/ --pdfs <dir>  # *.redactions.parquet
 womblex enrich    --shards output/<run_id>/documents/               # *.enrichment_entities.parquet (Kanon-2; needs ISAACUS_API_KEY)
 womblex link      --shards output/<run_id>/documents/ --config <yaml> # *.entity_links.parquet (register match)
@@ -326,7 +327,7 @@ womblex/
 │   ├── ingest/        # Detection, per-page profiling, PDF/non-PDF extraction
 │   ├── redact/        # Redaction detection + post-extraction stage
 │   ├── pii/           # Graph-driven PII detection + terminal masking
-│   ├── process/       # Chunking + offline text stages (normalise/spellfix/quality)
+│   ├── process/       # Chunking + offline text/annotation stages (normalise/spellfix/quality/money)
 │   ├── link/          # Record linkage to reference registers
 │   ├── analyse/       # Isaacus enrichment + embeddings + entity graph
 │   ├── store/         # Parquet schemas, sidecar IO, checkpoints, retention

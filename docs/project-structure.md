@@ -60,6 +60,10 @@ womblex/
 │   │   ├── spellfix_stage.py # spellfix_shards() — drives `womblex spellfix --shards`; writes *.spellfix_text.parquet + corrections
 │   │   ├── quality.py       # Chunk-quality annotation heuristics
 │   │   ├── quality_stage.py # quality_shards() — drives `womblex quality --shards`; writes *.chunk_quality.parquet
+│   │   ├── money.py         # Self-evidencing money recognition (find_money) — patterns, FP blocking, exact Decimals
+│   │   ├── money_vocab.py   # Currency tiers / ISO 4217 / scale / false-positive / header vocabulary tables (data only)
+│   │   ├── money_columns.py # Column-evidenced money — classify_column + per-cell parsing
+│   │   ├── money_stage.py   # money_shards() — drives `womblex money --shards`; writes *.money_spans.parquet + *.money_columns.parquet
 │   │   └── text_overlay.py  # Shared overlay read/merge helper for the offline text layers
 │   ├── link/
 │   │   ├── matcher.py       # Generic record-linkage: alias / address-exact / token-set name-fuzzy (stdlib difflib)
@@ -80,6 +84,7 @@ womblex/
 │   │   ├── enrichment_output.py  # Enrichment-specific output
 │   │   ├── pii_output.py    # pii_spans + clean_text parquet schemas + IO
 │   │   ├── normalise_output.py   # *.normalised_text.parquet schema + IO
+│   │   ├── money_output.py  # *.money_spans.parquet (decimal128 values) + *.money_columns.parquet schemas + IO
 │   │   ├── retention.py     # run_id-based retention policy
 │   │   └── checkpoint.py    # Per-stage CheckpointManager
 │   ├── utils/

@@ -4,9 +4,13 @@ Design for the `money` annotation op: recovering monetary amounts from
 Womblex's extraction output, normalising them to exact values, and recording
 them as a joinable sidecar.
 
-Status: **design + one shipped prerequisite.** The extractor change described
-under [Shipped prerequisite](#shipped-prerequisite) is merged. The op itself is
-specified here and not yet built.
+Status: **shipped.** The op is built — `womblex money --shards <dir>` writes
+`*.money_spans.parquet` + `*.money_columns.parquet` per batch
+(`process/money*.py`, `store/money_output.py`). The extractor change under
+[Shipped prerequisite](#shipped-prerequisite) is merged. What remains open is
+the measurement: there is still no labelled ground truth, so no precision or
+recall figure is quoted here — see
+[Open gap: no ground truth](#open-gap-no-ground-truth).
 
 ## Scope and naming
 
@@ -335,6 +339,44 @@ With an approximation qualifier:
 }
 ```
 
+### As built
+
+`*.money_spans.parquet` is that record, flattened, with the anchor made
+explicit. One row per amount; `locus` discriminates which anchor group is
+populated, and **exactly one group is non-null per row**:
+
+| Locus | Non-null anchor columns |
+|---|---|
+| `narrative` | `text_source`, `start_char`, `end_char`, `page` |
+| `table_cell` | `parent_elem_order`, `row`, `col` |
+| `sheet_cell` | `sheet`, `row`, `col`, `elem_order` |
+
+Beyond the JSON above the row also carries `evidence` (`p1`–`p10` for the
+narrative patterns, `number_format` / `header+numeric` / `header_currency` for
+the column path), `range_group` + `range_role` (which link a range's two
+endpoints — the JSON record has no way to express the relationship the design
+requires be preserved), and `column_id` (the classified column a cell
+inherited from; null when the cell was self-evidencing).
+
+`*.money_columns.parquet` is the second sidecar: one row per column
+considered, money or not, with the evidence that decided it — header text,
+number format, numeric and null fractions, veto term, currency, scale, and how
+many cells it yielded. The column path decides ~98.7% of the corpus's amounts
+off a single per-column verdict, and with no labelled ground truth yet that
+verdict needs to be reviewable rather than implicit in the spans it produced.
+
+Two departures from the pipeline sketch below, both consequences of the
+[placement](#placement-in-womblex) decision:
+
+- **Step 1 does no text rewriting.** Unicode and whitespace normalisation are
+  already the `normalise` / `spellfix` overlays' job, and re-doing them inside
+  this op would put spans in a private coordinate space that no longer joins to
+  enrichment mentions or chunks. The op selects an existing element-text layer
+  (`processing.text_source`) and records which one on every narrative row.
+- **Step 6's "surrounding sentence" is a capped character window**
+  (`context_chars`, default 160), not a parsed sentence. The offsets recover
+  anything wider.
+
 ## Processing pipeline
 
 1. **Pre-processing** — preserve original text and character offsets; Unicode
@@ -378,8 +420,19 @@ The narrative offsets index whichever element-text layer was selected
 (`processing.text_source`: `elements` / `normalised` / `spellfix`), so that
 choice is recorded alongside the spans and the space stays self-describing.
 
-**Output** is a `*.money_spans.parquet` sidecar per batch, joinable on
-`source_hash`, with a per-stage `CheckpointManager` like every other stage.
+**Output** is a `*.money_spans.parquet` sidecar per batch (plus the
+`*.money_columns.parquet` verdict audit), joinable on `source_hash`, with a
+per-stage `CheckpointManager` like every other stage.
+
+**As built:** `womblex money --shards <dir>`, config under `money:`.
+`process/money.py` (self-evidencing patterns) and `process/money_columns.py`
+(column classification) are pure cores over strings and cell lists;
+`process/money_stage.py` walks the shard directory, applies the selected
+text-source overlay, and writes both sidecars; `store/money_output.py` owns
+the schemas. A classified money column owns its cells — the column supplies
+currency, scale and the accounting-negative gate — while cells in every other
+column, vetoed ones included, are still scanned for *self-evidencing* amounts:
+a `$1,200.50` cell carries its own evidence whatever its header says.
 
 ## Decisions
 
