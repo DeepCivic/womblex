@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Spreadsheet extraction preserves `number_format` and a numeric
+  `value_type`.** `ingest/spreadsheet.py` read cells with pandas
+  (`dtype=str`), which discards both, so every `sheet_cell` element landed with
+  `value_type="text"` and `number_format=None` despite `ELEMENT_SCHEMA` having
+  columns for each. A second read-only openpyxl pass now supplies them.
+  Values are untouched — the pandas read stays authoritative, so the verbatim
+  contract ("1,234" stays "1,234") is unchanged.
+
+  This matters because a register's money column is frequently identifiable
+  *only* from its format: a GrantConnect award export carries `$#,##0.00` on
+  48,997 cells whose text is a bare `50000`, and no cell, header or value in
+  that workbook contains a currency symbol. The format was the sole
+  unambiguous currency marker in the file and was being dropped at the
+  extraction boundary, where no downstream stage could recover it. Only
+  non-`General` formats are retained, keeping the lookup small. CSV sheets have
+  no cell formats and are unaffected; a failed openpyxl pass logs a warning and
+  leaves the fields unset rather than failing extraction.
+
 ## [0.2.0] - 2026-07-19
 
 ### Added
