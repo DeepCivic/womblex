@@ -27,8 +27,8 @@ this round. Two principles carry over unchanged from the original plan:
 | A3 — wire the OCR-PDF path | Not started — **next up in Track A** |
 | A4 — route the image path | Not started |
 | A5 — conventions + lineage | Requirements landed with A1 (confidence lineage, producer marker); the "preserved by construction" claims verify when A3/A4 put a table through the pipeline |
-| B0 — fix the table metric | Not started — live doc/metric defect, **next up overall** |
-| B1 — decompose the measurement | Not started |
+| B0 — fix the table metric | **Landed** (this branch) — steering corrected; GT aggregation drops stray Table runs (`MIN_TABLE_GT_SPANS=3`); EXTRACTION.md refreshes on next full accuracy run |
+| B1 — decompose the measurement | Not started — **next up with B3** |
 | B2 — metric set + gate calibration | Not started — inherits three specifics from A1 (see Open decisions) |
 | B3 — rendered-clean GT harness | Not started (the `dense_text_548` GT itself landed, `7f756cc`) |
 | B4 — report + docs wiring | Not started |
@@ -314,7 +314,7 @@ scanned fixture tracks progress without gating.
 | `structural_fidelity` / `data_integrity` / `key_column_preservation` / `schema_conformance` | `tabular_metrics.py:31/80/160/195` | DataFrame-shaped; wired only to spreadsheet ingest today (`evaluation.md` §2) |
 | DocLayNet layout harness incl. per-class table F1 | `test_fixture_accuracy.py:448` | B1's decomposition hangs off this |
 
-### B0 — fix the table metric before measuring against it
+### B0 — fix the table metric before measuring against it — **landed**
 
 **(a) steering's Layout Detection paragraph is stale.** It says "0
 predictions across all DocLayNet fixtures"; EXTRACTION.md's per-class table
@@ -339,6 +339,22 @@ granularity with a minimum-span filter) before anyone reads a reconstruction
 number against it. Also: **`table_0` contains no Table-labelled GT at all**
 (196 Text, 2 Section-header, 1 Page-footer) — despite the name it is not a
 table fixture and must not be used as one.
+
+**What landed.** Both corrections applied to steering.md (Layout Detection
+rewritten; the `grid_projection` bullet corrected while there). The
+aggregation fix took the min-span form: `_aggregate_doclaynet_blocks` now
+counts constituent spans per block and drops Table blocks below
+`MIN_TABLE_GT_SPANS = 3`. Drop, not merge, was verified as the right remedy:
+the two strays are footnote lines *below* the table (y 725–734 against a
+table ending at y 724) mislabelled Table — merging would have stretched the
+GT table rect over footnote text, which would poison the B1.2 GT-rect
+derivation. `dense_text_548` now contributes exactly 1 GT Table block;
+`sparse_text_344`'s 8-span block is untouched. Verified by a layout-only
+probe replicating the suite's per-class computation (all non-table classes
+byte-identical to EXTRACTION.md): table TP1/FP0/FN3 → TP1/FP0/FN1
+(R 25% → 50%, F1 40% → 66.7%); the remaining FN is `sparse_text_344`'s
+genuinely undetected block. EXTRACTION.md itself refreshes on the next full
+accuracy-suite run (hour-plus; not run for this change).
 
 ### B1 — decompose the measurement into two stages
 
@@ -439,9 +455,10 @@ Planned: `B0 → B3 rendered-GT harness + B1.2 → A1 → A3 → A4 → B2 bread
 B4/B5`. Actual: A1 landed first (deviation recorded in Status above).
 Remaining, order unchanged:
 
-`B0 → B3 rendered-GT harness + B1.2 → A3 (+A2) → A4 → B2 breadth → B4/B5`.
+`B0 → B3 rendered-GT harness + B1.2 → A3 (+A2) → A4 → B2 breadth → B4/B5`,
+of which B0 has now landed.
 
-B0 first because it is a live doc/metric defect. The rendered-GT harness
+B0 first because it was a live doc/metric defect. The rendered-GT harness
 and B1.2 still land before A3 — with A1 already shipped, they are what
 turns its provisional gates into calibrated ones *before* reconstructed
 grids start landing in parquet shards. A2 is a three-line page-level
@@ -468,13 +485,12 @@ refusal that rides along with A3's wiring.
    column-population floor of 3 should be a parameter rather than couple
    `MIN_BODY_ROWS` to it, and whether a two-line header should merge or
    refuse.
-2. B0 remedy: fix `_aggregate_doclaynet_blocks` for tables, or report table
-   detection at region granularity with a min-span filter?
-
 Resolved this revision: shared `table_grid.py` (A1 — anti-duplication);
 `_table_aware_text` end-state (A1); skew handling (A2 — refuse);
 gate-vs-warn (B5 — gate clean, track dense); GT sign-off (landed in
-`7f756cc`, conventions as recommended); `sparse_text_344` (B3 — non-GT).
+`7f756cc`, conventions as recommended); `sparse_text_344` (B3 — non-GT);
+B0 remedy (landed: min-span filter `MIN_TABLE_GT_SPANS=3` in
+`_aggregate_doclaynet_blocks`, dropping — not merging — stray Table runs).
 
 ---
 

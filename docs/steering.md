@@ -52,7 +52,9 @@ Two `DocumentType` values are still unreachable:
 
 ### Layout Detection
 
-Layout detection produces 0 predictions across all DocLayNet fixtures — 0% precision, recall, and F1 for every class. The YOLOv8n model (general-purpose COCO) produces no document-layout predictions. A document-specific layout model is needed for any layout analysis capability.
+**Resolved (model): the document-specific swap landed** (#12, `yolo11n_doc_layout.pt`, 2026-05-25) — the earlier "0 predictions across all DocLayNet fixtures" finding described the general-purpose COCO YOLOv8n and is obsolete. The current model does detect document layout, including tables: on `dense_text_548` it returns a `table` region at 0.96 confidence.
+
+**Resolved (metric): the reported 25% table recall was largely a GT-aggregation artefact** (B0, 2026-07-28). `_aggregate_doclaynet_blocks` groups *consecutive* same-label word spans, so two stray 1-word Table-labelled footnote lines in `dense_text_548` split the real 397-word table run into three GT blocks, each unmatched stray charged as a separate false negative. GT Table blocks are now filtered by a minimum span count (`MIN_TABLE_GT_SPANS = 3`) before matching. Note also `table_0` contains no Table-labelled GT at all (196 Text, 2 Section-header, 1 Page-footer) — despite the name it is not a table fixture and serves as a false-table (no-GT) fixture instead.
 
 Per-class P/R/F1 is tracked in `accuracy/EXTRACTION.md`.
 
@@ -78,14 +80,14 @@ What happens today, on DocLayNet `dense_text_548` (a scanned
 
 Two changes are required, and the second is easy to miss:
 
-- **Reconstruct cells within a detected table region.** The inputs exist:
-  RapidOCR returns `OCRRegionResult(bbox, text, confidence)` per detected
-  region, and `ingest/grid_projection.py` already projects
-  `(x0, y0, x1, y1, text)` tuples onto columns via occupancy histograms and
-  gutter detection — the same geometry, currently fed from PyMuPDF words
-  rather than OCR boxes. `ingest/spreadsheet_print.py` solves the adjacent
-  problem (column inference + row binning) for native PDFs and is the closest
-  prior art for the row side.
+- **Reconstruct cells within a detected table region.** The reconstructor
+  now exists (A1, landed): the grid algorithm was lifted from
+  `ingest/spreadsheet_print.py` — the real prior art — into the shared
+  `ingest/table_grid.py`, and `ingest/ocr_tables.py` feeds it OCR quads via
+  `reconstruct_table(regions, table_rect, dpi, conf)`. It is not yet wired
+  into the layout pass (A3): `tables` is still returned empty on every path.
+  (`ingest/grid_projection.py`, previously cited here, projects page-level
+  prose gutters rather than cells — it was not a usable feeder.)
 - **Route standalone images through it.** `ImageExtractor.extract` emits one
   page-wide `paragraph` element per page and never calls
   `_layout_blocks_and_tables` at all. Fixing only the OCR-PDF path would leave
@@ -107,11 +109,9 @@ values downstream, which is worse than the current honest silence.
 
 The implementation plan — extraction fix, benchmark/accuracy extension, and the
 ground-truth authoring spec for the anchor fixture — is in
-[table-cell-reconstruction-plan.md](table-cell-reconstruction-plan.md). Note it
-records two corrections to this document, unapplied as yet: the Layout
-Detection section below is stale (table detection is not 0 — see
-`accuracy/EXTRACTION.md`), and the reusable-pieces bullet above overstates the
-`grid_projection` fit.
+[table-cell-reconstruction-plan.md](table-cell-reconstruction-plan.md). The two
+corrections it recorded against this document (the stale Layout Detection
+claim, the overstated `grid_projection` fit) were applied with B0, 2026-07-28.
 
 ### Reading Order
 
@@ -152,6 +152,21 @@ Measured on Throsby fixture (7 GT `<REDACTED>` tags across 3 pages); vector-firs
 - **Open — scanned/raster cohort precision.** Direct-Complaint forms with dark form-field backgrounds (02737-class scanned_mixed docs) still trigger the area-threshold contour detector even with `max_area_ratio=0.05`. Higher precision on this cohort would need a different detection signal (e.g. layout-aware classes that distinguish form fields from redaction bars). See `stories/STATUS.md` §11.
 
 ## Changelog
+
+### 2026-07-28: B0 — table metric fixed before measuring reconstruction against it
+
+Corrected the stale Layout Detection finding (the "0 predictions" claim
+described the pre-#12 COCO model) and fixed the DocLayNet table-class GT
+aggregation: stray sub-`MIN_TABLE_GT_SPANS` Table-labelled runs (footnote
+lines mislabelled Table in `dense_text_548`) are dropped from the GT instead
+of each being charged as a false negative. Recorded that `table_0` carries no
+Table-labelled GT and is a false-table fixture, not a table fixture.
+Verified by a layout-only probe replicating the suite's computation: table
+class TP1/FP0/FN3 (R 25%, F1 40%) → TP1/FP0/FN1 (R 50%, F1 66.7%), the
+remaining FN being `sparse_text_344`'s genuinely undetected 8-word block; all
+other classes unchanged. `docs/accuracy/EXTRACTION.md` still shows the
+pre-fix numbers until the next full accuracy-suite run regenerates it. See
+[table-cell-reconstruction-plan.md](table-cell-reconstruction-plan.md) B0.
 
 ### 2026-03-22: Benchmark test performance + stale findings cleanup
 

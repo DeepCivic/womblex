@@ -215,6 +215,11 @@ def _ocr_words_with_boxes(
     return words_with_boxes
 
 
+# Table-labelled runs shorter than this are annotation strays (footnote lines
+# mislabelled Table in dense_text_548) — dropped from GT rather than FN-charged.
+MIN_TABLE_GT_SPANS = 3
+
+
 def _aggregate_doclaynet_blocks(
     bboxes: list[list[float]], labels: list[str],
 ) -> list[tuple[tuple[float, float, float, float], str]]:
@@ -222,13 +227,15 @@ def _aggregate_doclaynet_blocks(
 
     DocLayNet annotates per text-line; layout models predict page-level blocks.
     This groups consecutive spans sharing a label into a single bounding box.
+    Table blocks with < ``MIN_TABLE_GT_SPANS`` spans are dropped as strays.
     """
     if not bboxes:
         return []
 
-    blocks: list[tuple[tuple[float, float, float, float], str]] = []
+    blocks: list[tuple[tuple[float, float, float, float], str, int]] = []
     cur_label = labels[0]
     x0, y0, x1, y1 = bboxes[0]
+    n_spans = 1
 
     for i in range(1, len(bboxes)):
         if labels[i] == cur_label:
@@ -238,13 +245,16 @@ def _aggregate_doclaynet_blocks(
             y0 = min(y0, by0)
             x1 = max(x1, bx1)
             y1 = max(y1, by1)
+            n_spans += 1
         else:
-            blocks.append(((x0, y0, x1, y1), cur_label))
+            blocks.append(((x0, y0, x1, y1), cur_label, n_spans))
             cur_label = labels[i]
             x0, y0, x1, y1 = bboxes[i]
+            n_spans = 1
 
-    blocks.append(((x0, y0, x1, y1), cur_label))
-    return blocks
+    blocks.append(((x0, y0, x1, y1), cur_label, n_spans))
+    return [(box, lbl) for box, lbl, n in blocks
+            if not (lbl == "Table" and n < MIN_TABLE_GT_SPANS)]
 
 
 # ---------------------------------------------------------------------------
