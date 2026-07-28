@@ -71,27 +71,31 @@ What happens today, on DocLayNet `dense_text_548` (a scanned
 1. OCR reads the page well — nearly every digit is correct in the output.
 2. The layout model **does** find the table: `analyze()` returns a `table`
    region at 0.96 confidence.
-3. `_layout_blocks_and_tables` (`ingest/strategies_scanned.py`) turns that
-   region into `TextBlock(text="[TABLE]", block_type="table")` and returns.
-   Its `tables: list[TableData] = []` is declared, never appended to on any
+3. `_layout_blocks_and_tables` (`ingest/strategies_scanned.py`) turned that
+   region into `TextBlock(text="[TABLE]", block_type="table")` and returned.
+   Its `tables: list[TableData] = []` was declared, never appended to on any
    path, and returned empty.
-4. So the shard carries no `table` element and no `table_cells` rows. Every
-   downstream consumer of structure sees a single page-wide paragraph.
+4. So the shard carried no `table` element and no `table_cells` rows. Every
+   downstream consumer of structure saw a single page-wide paragraph.
 
 Two changes are required, and the second is easy to miss:
 
-- **Reconstruct cells within a detected table region.** The reconstructor
-  now exists (A1, landed): the grid algorithm was lifted from
-  `ingest/spreadsheet_print.py` — the real prior art — into the shared
-  `ingest/table_grid.py`, and `ingest/ocr_tables.py` feeds it OCR quads via
-  `reconstruct_table(regions, table_rect, dpi, conf)`. It is not yet wired
-  into the layout pass (A3): `tables` is still returned empty on every path.
+- **Reconstruct cells within a detected table region — done (A1 + A3).**
+  The grid algorithm was lifted from `ingest/spreadsheet_print.py` — the real
+  prior art — into the shared `ingest/table_grid.py`, and
+  `ingest/ocr_tables.py` feeds it OCR quads via `reconstruct_table(regions,
+  table_rect, dpi, conf)`. A3 wired it into the layout pass, so an OCR'd PDF
+  page now yields a cellified `table` element (and the page narrative is
+  rebuilt from the regions outside the rect, so the table isn't also chunked
+  as prose). Deskewed pages refuse outright (A2). The precision gates are
+  still provisional pending B2 calibration.
   (`ingest/grid_projection.py`, previously cited here, projects page-level
   prose gutters rather than cells — it was not a usable feeder.)
-- **Route standalone images through it.** `ImageExtractor.extract` emits one
-  page-wide `paragraph` element per page and never calls
-  `_layout_blocks_and_tables` at all. Fixing only the OCR-PDF path would leave
-  every image input (the whole DocLayNet/FUNSD fixture shape) unchanged.
+- **Route standalone images through it — still open (A4).**
+  `ImageExtractor.extract` emits one page-wide `paragraph` element per page
+  and never calls `_layout_blocks_and_tables` at all. With only the OCR-PDF
+  path fixed, every image input (the whole DocLayNet/FUNSD fixture shape) is
+  still unchanged — this is now the largest remaining piece of #17.
 
 **Measured payoff.** Feeding the same page's real grid through the money op's
 column classifier recovers 30 of 30 amounts, versus 1 today — the consuming

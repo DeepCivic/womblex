@@ -272,8 +272,32 @@ are not known to be comparable and the regions are dropped with a warning.
 Losing reconstruction inputs is the correct failure; a mis-binned grid would be
 confidently wrong downstream. Deskewed pages are a distinct hazard (OCR runs on
 the warped image, YOLO on the raw one) that this check does **not** catch —
-`warpAffine` preserves dimensions — and are handled separately by a page-level
-refusal.
+`warpAffine` preserves dimensions — so they get their own page-level refusal:
+the orchestrator reads `"deskew" ∈ steps` off `_ocr_page` and the layout pass
+drops its cell source, keeping the page's pre-reconstruction behaviour exactly.
+Mapping the layout rect into deskewed space is deferred to the round targeting
+real scans.
+
+### The OCR table double-count is the narrative fallback, not the placeholder
+When a table reconstructs on an OCR'd page, the page narrative must be rebuilt
+from the OCR regions *outside* the table rect. The reason is easy to get wrong:
+layout-derived non-table blocks always carry `text=""`, so
+`_layout_blocks_and_tables`'s "no block has text" fallback fires on essentially
+every layout-successful page and returns **one block holding the whole page's
+OCR text, table content included** — already discarding the `[TABLE]`
+placeholder. Subtracting only the placeholder would change nothing; the
+chunker would still see the table twice, once as narrative prose and once as
+markdown. The complement is re-emitted with `_table_aware_text` rather than
+`_spatial_sort_regions`, because the reconstructor supersedes it only *inside*
+the rects the layout model found — outside them it still covers table runs the
+model missed. The same absorbed regions are withheld from
+`_extract_form_pairs_from_regions`, so a colon-bearing cell cannot land in both
+a form element and the table.
+
+`PageResult.text` stays the verbatim full-page OCR text through all of this.
+The subtraction is an element-stream concern; page text feeds `_text_coverage`
+and the accuracy suite's CER, which compare against a transcript of the whole
+page, and chunking reads `elements` rather than `pages[i].text`.
 
 ## Rejected approaches / dead-ends
 

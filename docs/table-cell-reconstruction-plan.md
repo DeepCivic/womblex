@@ -22,27 +22,27 @@ this round. Two principles carry over unchanged from the original plan:
 | Stage | Status |
 |---|---|
 | A0 — scope + region plumbing | **Landed** (`1f85f7e`) |
-| A1 — shared `table_grid` + OCR feeder | **Landed** (this branch, incl. QA fixes) |
-| A2 — skew refusal | Not started (~3 lines, lands with A3) |
-| A3 — wire the OCR-PDF path | Not started — **next up in Track A** |
-| A4 — route the image path | Not started |
-| A5 — conventions + lineage | Requirements landed with A1 (confidence lineage, producer marker); the "preserved by construction" claims verify when A3/A4 put a table through the pipeline |
-| B0 — fix the table metric | **Landed** (this branch) — steering corrected; GT aggregation drops stray Table runs (`MIN_TABLE_GT_SPANS=3`); EXTRACTION.md refreshes on next full accuracy run |
-| B1 — decompose the measurement | **B1.2 landed** (this branch, `tests/test_table_benchmark.py`) — GT-rect-conditioned reconstruction, no detector in the loop. Stage 1 is the existing per-class F1 (fixed by B0); stage 3 end-to-end awaits A3 |
+| A1 — shared `table_grid` + OCR feeder | **Landed** (`#25`, incl. QA fixes) |
+| A2 — skew refusal | **Landed** (with A3) |
+| A3 — wire the OCR-PDF path | **Landed** — the OCR-PDF path emits table elements; narrative subtracted, form pairs de-duplicated |
+| A4 — route the image path | Not started — **next up in Track A** |
+| A5 — conventions + lineage | **Verified for the OCR-PDF path** — element projection, producer marker and single-markdown chunker view observed end-to-end; the image path repeats the check at A4 |
+| B0 — fix the table metric | **Landed** (`#26`) — steering corrected; GT aggregation drops stray Table runs (`MIN_TABLE_GT_SPANS=3`); EXTRACTION.md refreshes on next full accuracy run |
+| B1 — decompose the measurement | **B1.2 landed** (`#26`, `tests/test_table_benchmark.py`) — GT-rect-conditioned reconstruction, no detector in the loop. Stage 1 is the existing per-class F1 (fixed by B0); stage 3 (end-to-end, detector included) is now *possible* on the OCR-PDF path after A3 but is not yet written — it rides with B4 |
 | B2 — metric set + gate calibration | Not started — inherits three specifics from A1 plus the `dense_text_548` partial-grid finding from B3 (see Open decisions) |
-| B3 — rendered-clean GT harness | **Landed** (this branch) — 6 rendered fixtures reconstruct with exact structure; `sparse_text_344` off-spec GT removed; the A.6 checker still rides with B2 |
+| B3 — rendered-clean GT harness | **Landed** (`#26`) — 6 rendered fixtures reconstruct with exact structure; `sparse_text_344` off-spec GT removed; the A.6 checker still rides with B2 |
 | B4 — report + docs wiring | Not started |
 | B5 — regression guard | Not started |
 
-**Sequencing deviation, recorded:** A1 landed *before* B0/B3/B1.2, against
-the planned order. The consequence the original ordering was designed to
-avoid is real and accepted: the reconstructor exists but is untuned — every
-precision gate in `ocr_tables.py` is a provisional structural constant, not
-a calibrated threshold. That is why A1 refused to pick a two-line-header
-threshold and why B0 → B3 → B1.2 should still land **before A3 wires the
-reconstructor in**: wiring an unmeasured reconstructor into extraction
-would put uncalibrated grids into parquet shards. The remaining order is
-unchanged: `B0 → B3 + B1.2 → A3 (+A2) → A4 → B2 → B4/B5`.
+**Sequencing deviation, resolved:** A1 landed *before* B0/B3/B1.2, against
+the planned order — the reconstructor existed before any measurement of it
+did. The correction held: B0 → B3 → B1.2 all landed **before A3 wired the
+reconstructor in**, so A3 went live against a measured baseline rather than
+putting unmeasured grids into parquet shards. What remains true is that the
+precision gates in `ocr_tables.py` are still provisional structural
+constants, not calibrated thresholds — B2 owns that, and it now calibrates
+against a live path rather than a dormant one. Remaining order:
+`A4 → B2 → B4/B5`.
 
 ## Where tables come from today (why this scope is enough)
 
@@ -50,7 +50,8 @@ unchanged: `B0 → B3 + B1.2 → A3 (+A2) → A4 → B2 → B4/B5`.
 |---|---|---|
 | Native PDF | `_find_native_tables` — PyMuPDF `find_tables` (lines + text strategies), cross-checked, cellified (`orchestrator.py:104`, `:124`) | **Works.** Covers the digital-native majority of the round-1 corpus |
 | Spreadsheet-print PDF | `ingest/spreadsheet_print.py` behind its qualifier | **Works** |
-| OCR'd page (PDF or image) | `_layout_blocks_and_tables` detects the region, `tables` returned empty | **The gap.** #17 closes it |
+| OCR'd PDF page | `_layout_blocks_and_tables` detects the region → `reconstruct_table` cellifies it | **Works** as of A3 (refuses below the gates, and on deskewed pages per A2) |
+| OCR'd image file | `ImageExtractor` never calls the layout pass | **The remaining gap.** A4 closes it |
 | LLM-OCR (mistral-ocr, ollama) | Markdown, no regions | Out of scope (A0) |
 
 Everything downstream of `TableData` already works: `_table_to_element`
@@ -189,7 +190,7 @@ measure the cost against real fixtures before a threshold is picked.
 Nothing is wired into the layout pass yet — `tables` is still returned
 empty on every extraction path until A3.
 
-### A2 — skew: refuse, don't solve (round-1 cut)
+### A2 — skew: refuse, don't solve (round-1 cut) — **landed**
 
 The trap, verified: `_ocr_page` (`strategies_scanned.py:215`) calls
 `preprocess_for_ocr` for region engines, which **deskews via `warpAffine`**
@@ -213,7 +214,16 @@ moves B1's detection metric.
 `ImageExtractor` doesn't preprocess (:518-520), so the image path has no
 mismatch and no refusal condition.
 
-### A3 — wire the OCR-PDF path
+**What landed.** `_layout_blocks_and_tables` gained `page_deskewed: bool`,
+which drops the cell source alongside the A0 dimension guard — the two
+answers to the same question ("are these coordinates comparable to my
+render?"), kept together. The orchestrator supplies it as
+`"deskew" in steps`, reading the flag `preprocess_for_ocr` already sets
+rather than inferring skew a second time. The refusal is debug-logged, and
+the page keeps today's behaviour exactly: no table element, full-text
+narrative block.
+
+### A3 — wire the OCR-PDF path — **landed**
 
 `_layout_blocks_and_tables` already takes `ocr_regions` + `ocr_pix_dims`
 (landed in A0). What remains is populating the `tables` list declared at
@@ -239,6 +249,45 @@ Two adjacent overlaps, both cheap to close in the same wiring:
 - Leave the `SCANNED_MACHINEWRITTEN` grid fallback (:205-214) alone;
   `not page_tables` already guards it.
 
+**What landed.** `_layout_blocks_and_tables` calls `reconstruct_table` per
+detected table region and now returns a third value —
+`consumed_regions`, the OCR regions a successful table absorbed. On success
+the `[TABLE]` placeholder block is dropped (the table element replaces it);
+on refusal it stays, so the fallback's "no non-table block has text" test is
+unchanged. The narrative rule is as planned: when anything reconstructed,
+the fallback block's text is rebuilt from the complement regions and the
+block is typed `paragraph` outright (the dominant region's kind described
+the table, which is no longer part of that block). A page that is only a
+table returns no narrative block rather than the empty layout placeholders.
+The debug line now reports the reconstruction *outcome* per region rather
+than the pre-reconstructor region count, and is no longer `isEnabledFor`-gated
+because the intersection is computed either way.
+
+Three deliberate calls beyond the plan text:
+
+- **The complement is re-emitted with `_table_aware_text`, not
+  `_spatial_sort_regions`.** A3's prose named the latter, but A1's end-state
+  is explicit that `_table_aware_text` is superseded only *inside*
+  layout-detected table rects and "keeps covering table runs the layout model
+  missed". Using the row-major sorter on the complement would drop that
+  coverage for no gain; the reconstructor already owns the rects it was given.
+- **`PageResult.text` stays the verbatim full-page OCR text.** The
+  subtraction is an element-stream concern. Page text feeds `_text_coverage`
+  and the accuracy suite's CER, which compare against a transcript of the
+  whole page — subtracting the table there would move those metrics without
+  any downstream consumer benefiting, since chunking reads `elements`.
+- **The exception handler resets `tables`/`consumed`.** The pass's
+  catch-all previously wrapped a function that could only return empty
+  tables. Now a throw partway through the region loop could surface tables
+  whose text had not yet been subtracted from the narrative — precisely the
+  double-count A3 exists to prevent — so the handler drops them and the page
+  falls back to today's behaviour.
+
+The form-pair exclusion landed as planned; the orchestrator's layout call now
+runs *before* the form call so it has the consumed set to filter with (forms
+are collected separately and appended per page, so element order is
+unaffected). The `SCANNED_MACHINEWRITTEN` grid fallback was left alone.
+
 ### A4 — route the image path
 
 `ImageExtractor.extract` (:500) never calls `_layout_blocks_and_tables` —
@@ -250,14 +299,20 @@ home), tables must interleave by y rather than append, the LLM branch
 rule applies identically — the page-wide paragraph currently contains the
 table text.
 
-### A5 — post-processing conventions and lineage — **requirements landed, verification pending A3/A4**
+### A5 — post-processing conventions and lineage — **verified for the OCR-PDF path**
 
 The two mandated provenance fields below landed with A1
 (`reconstruct_table` sets confidence from the constituent regions and
-stamps `context["producer"] = "table_grid"`). The convention claims that
-follow are verified at the code level but can only be *end-to-end*
-confirmed once A3/A4 put a reconstructed table through the writer,
-chunker and money stage.
+stamps `context["producer"] = "table_grid"`). A3 is the first path that
+actually puts one through the pipeline, so the convention claims are now
+*observed* rather than structural: `TestReconstructedTableDownstream`
+drives an OCR page through the orchestrator and asserts the element is a
+cellified `kind="table"` with `header_rows=[0]`, that
+`meta["context_producer"] == "table_grid"` survives the existing
+`context_* → meta` copy with no schema change, that the narrative
+paragraph beside it holds no table text, and that
+`collect_tables_from_elements` yields exactly one markdown table. The
+image path repeats the check at A4.
 
 Because Track A produces a `TableData` and reuses `_table_to_element`, every
 downstream composed stage consumes reconstructed tables through the existing
@@ -414,7 +469,7 @@ the upgrade path if the alignment metric proves too coarse.
   either is fine, both are visible in the report. The A.6 checker still
   needs writing (the checks above were run by hand once).
 - **`sparse_text_344`: declare non-GT and remove its CSV/meta** — done
-  (this branch). It landed off-spec (no `_table` suffix; a different meta
+  (`#26`). It landed off-spec (no `_table` suffix; a different meta
   schema than Appendix A) and its 8-word, 4-row single-column block
   exercises almost nothing. One GT convention, one loader — carrying a
   second format for a marginal fixture is exactly the duplication this
@@ -491,17 +546,23 @@ config default change to an LLM engine can't turn the gates into no-ops.
 
 Planned: `B0 → B3 rendered-GT harness + B1.2 → A1 → A3 → A4 → B2 breadth →
 B4/B5`. Actual: A1 landed first (deviation recorded in Status above).
-Remaining, order unchanged:
-
-`B0 → B3 rendered-GT harness + B1.2 → A3 (+A2) → A4 → B2 breadth → B4/B5`,
-of which B0, B3 and B1.2 have now landed. Remaining:
-`A3 (+A2) → A4 → B2 breadth → B4/B5`.
+Everything since has followed the plan. Remaining: **`A4 → B2 breadth →
+B4/B5`**.
 
 B0 went first because it was a live doc/metric defect. The rendered-GT
-harness and B1.2 landed before A3 as planned — the measurement now exists
-to calibrate A1's provisional gates, and it surfaced one calibration input
-immediately (the `dense_text_548` partial grid, above). A2 is a three-line
-page-level refusal that rides along with A3's wiring.
+harness and B1.2 landed before A3 as planned — the measurement existed
+before the reconstructor was wired in, and it surfaced one calibration
+input immediately (the `dense_text_548` partial grid, above). A2 rode
+along with A3's wiring as intended.
+
+One consequence of the ordering to keep in view: A3 is live but B2 has not
+calibrated the gates, so the constants in `ocr_tables.py` remain
+provisional *in production*, not just in the abstract. The rendered-clean
+cohort says they are safe on the target shape (6/6 exact structure); the
+`dense_text_548` partial says they do not yet refuse the hard shape. Until
+B2 lands, a hard-shape table on an OCR'd page can produce a low-quality
+grid rather than silence — visible in the parquet via
+`meta["context_producer"] = "table_grid"` and the element confidence.
 
 ## Deferred to a later round (recorded so they aren't relitigated)
 
@@ -517,8 +578,10 @@ page-level refusal that rides along with A3's wiring.
 
 ## Open decisions
 
-1. Precision-gate thresholds — set from the rendered-clean fixtures + the
-   false-table set (not from `dense_text_548`, which no longer gates).
+1. Precision-gate thresholds — **now the highest-priority open item**, because
+   A3 made the gates load-bearing in production rather than dormant. Set them
+   from the rendered-clean fixtures + the false-table set (not from
+   `dense_text_548`, which no longer gates).
    Three specifics inherited from A1: a right-edge overflow guardrail
    (`MIN_ASSIGNED_RATIO` only gates the left edge), whether the
    column-population floor of 3 should be a parameter rather than couple

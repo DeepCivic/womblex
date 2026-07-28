@@ -166,6 +166,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   provisional gates should refuse that shape). The off-spec
   `sparse_text_344` CSV/meta GT is removed (declared non-GT).
 
+- **Table-cell reconstruction on OCR'd pages (#17), steps A3 + A2 — the
+  OCR-PDF path now produces cells.** A layout-detected table region on an
+  OCR'd PDF page is handed to `reconstruct_table`, and where the grid clears
+  its precision gates the page gains a `kind="table"` element with cells
+  instead of the table's text being swallowed into page narrative. This is
+  the first path on which `_layout_blocks_and_tables` returns a non-empty
+  `tables` list. Nothing downstream changed to accommodate it: the element
+  goes through the same `_table_to_element` → writer → `table_cells.parquet`
+  route as native and spreadsheet-print tables, so the chunker's markdown
+  projection and the money stage's `table_cell` locus pick it up as-is.
+
+  The double-count this had to avoid is the **narrative fallback**, not the
+  `[TABLE]` placeholder. Layout-derived blocks carry no text, so the "no
+  block has text" fallback fires on essentially every layout-successful page
+  and emits one block holding the whole page's OCR text — table content
+  included. Where a table reconstructs, that narrative is now rebuilt from
+  the OCR regions *outside* its rect, so the chunker sees the table once
+  (as markdown) rather than twice. A page that is only a table emits no
+  narrative block at all. The same absorbed regions are withheld from
+  form-pair extraction, so a colon-bearing cell can't land in both a form
+  element and the table. On refusal — the precision gates, or A2 below —
+  the page keeps its previous behaviour exactly, byte for byte.
+
+  `PageResult.text` stays the verbatim full-page OCR text. The subtraction
+  is an element-stream concern; page text feeds text-coverage and the CER
+  metrics, which compare against a transcript of the whole page.
+
+  **A2 — deskewed pages refuse rather than mis-bin.** `preprocess_for_ocr`
+  deskews via `warpAffine` before OCR when |angle| > 0.5°, so the region
+  coordinates are in rotated space while the layout pass renders the raw
+  page. `warpAffine` preserves the frame, so A0's dimension guard cannot
+  catch this. The orchestrator now reads `"deskew" ∈ steps` off `_ocr_page`
+  and the layout pass drops its cell source on such pages — a page-level
+  refusal consistent with precision-first. Mapping the layout rect into
+  deskewed space is deferred to the round that targets real scans. Flat
+  contemporary documents, round 1's target, almost never trip deskew.
+
+  The image path (`ImageExtractor`) is still untouched — that is A4.
+
 ### Fixed
 - **A declined continental number no longer leaks its decimal tail as an
   amount.** In Australian (default) mode `find_money` correctly refuses to read

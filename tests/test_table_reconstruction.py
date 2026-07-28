@@ -2,10 +2,12 @@
 
 Round 1. A0 pinned the scope (region-based engines) and the plumbing that
 carries OCR regions into the layout pass. A1 added the shared grid module
-(``table_grid``) and the OCR feeder (``ocr_tables.reconstruct_table``) —
-cells can now be produced from a table rect, but nothing is wired into
-the layout pass yet (that is A3), so ``tables`` stays empty on every
-extraction path.
+(``table_grid``) and the OCR feeder (``ocr_tables.reconstruct_table``).
+A3 wires the feeder into the layout pass on the OCR-PDF path — a detected
+table region whose cells reconstruct becomes a ``TableData``, the page
+narrative is rebuilt from the regions outside its rect, and the absorbed
+regions are withheld from form-pair extraction. A2 refuses reconstruction
+outright on deskewed pages. The image path is still untouched (A4).
 """
 
 from __future__ import annotations
@@ -107,50 +109,52 @@ class TestLayoutPassPlumbing:
 
     def test_regions_are_optional(self, blank_page: fitz.Page) -> None:
         """Callers without regions (legacy, tests) keep today's behaviour."""
-        blocks, tables = _layout_blocks_and_tables(blank_page, 200, "page text", 90.0)
-        # Pins the A3 starting point: layout-derived non-table blocks carry
-        # no text, so the fallback collapses the page — including the table's
-        # content — onto one block, and no table is produced.
+        blocks, tables, consumed = _layout_blocks_and_tables(
+            blank_page, 200, "page text", 90.0,
+        )
+        # With no cell source there is nothing to reconstruct, so the fallback
+        # still collapses the page — table content included — onto one block.
         assert len(blocks) == 1
         assert blocks[0].text == "page text"
         assert tables == []
+        assert consumed == []
 
     def test_matching_render_dims_keep_regions(
         self, blank_page: fitz.Page, caplog,
     ) -> None:
         pix = blank_page.get_pixmap(dpi=200)
         with caplog.at_level(logging.WARNING, logger="womblex.ingest.strategies_scanned"):
-            _blocks, tables = _layout_blocks_and_tables(
+            _blocks, tables, _consumed = _layout_blocks_and_tables(
                 blank_page, 200, "page text", 90.0,
                 ocr_regions=[_region(10, 10, 100, 40)],
                 ocr_pix_dims=(int(pix.width), int(pix.height)),
             )
         assert "dropping cell regions" not in caplog.text
-        # A0 ships no reconstructor — tables stay empty on every path.
+        # One stray region inside the rect is not a grid — the gates refuse.
         assert tables == []
 
-    def test_debug_log_counts_regions_inside_the_table_rect(
+    def test_debug_log_reports_the_reconstruction_outcome(
         self, blank_page: fitz.Page, caplog,
     ) -> None:
-        """The gap's size is traceable per page before the reconstructor lands."""
+        """Every detected table region logs whether cells came out of it."""
         pix = blank_page.get_pixmap(dpi=200)
         with caplog.at_level(logging.DEBUG, logger="womblex.ingest.strategies_scanned"):
             _layout_blocks_and_tables(
                 blank_page, 200, "page text", 90.0,
-                ocr_regions=[
-                    _region(10, 10, 100, 40),      # inside the table rect
-                    _region(10, 600, 100, 640),    # below it
-                ],
+                ocr_regions=[_region(10, 10, 100, 40)],
                 ocr_pix_dims=(int(pix.width), int(pix.height)),
             )
-        assert "layout table region: page=0 confidence=0.96 ocr_regions=1" in caplog.text
+        assert (
+            "layout table region: page=0 confidence=0.96 reconstructed=False"
+            in caplog.text
+        )
 
     def test_regions_without_dims_are_dropped(
         self, blank_page: fitz.Page, caplog,
     ) -> None:
         """Unverifiable is treated as non-comparable: regions need their dims."""
         with caplog.at_level(logging.WARNING, logger="womblex.ingest.strategies_scanned"):
-            _blocks, tables = _layout_blocks_and_tables(
+            _blocks, tables, _consumed = _layout_blocks_and_tables(
                 blank_page, 200, "page text", 90.0,
                 ocr_regions=[_region(10, 10, 100, 40)],
             )
@@ -162,7 +166,7 @@ class TestLayoutPassPlumbing:
     ) -> None:
         """Non-comparable coordinate spaces lose the inputs, never mis-bin."""
         with caplog.at_level(logging.WARNING, logger="womblex.ingest.strategies_scanned"):
-            _blocks, tables = _layout_blocks_and_tables(
+            _blocks, tables, _consumed = _layout_blocks_and_tables(
                 blank_page, 200, "page text", 90.0,
                 ocr_regions=[_region(10, 10, 100, 40)],
                 ocr_pix_dims=(17, 23),
@@ -174,9 +178,12 @@ class TestLayoutPassPlumbing:
 class TestOcrPageScoping:
     """A0 — only the region-based branch reaches the layout pass."""
 
-    def _patch_ocr_page(self, monkeypatch, *, native_order: bool, regions: list) -> None:
+    def _patch_ocr_page(
+        self, monkeypatch, *, native_order: bool, regions: list,
+        steps: list[str] | None = None,
+    ) -> None:
         def _fake_ocr_page(page, dpi, lang, engine, engine_options):
-            return ("page text", 90.0, [], native_order, regions, (1700, 2200))
+            return ("page text", 90.0, list(steps or []), native_order, regions, (1700, 2200))
 
         monkeypatch.setattr(
             "womblex.ingest.strategies_scanned._ocr_page", _fake_ocr_page,
@@ -193,10 +200,14 @@ class TestOcrPageScoping:
 
         seen: dict = {}
 
-        def _fake_layout(page, dpi, text, conf, ocr_regions=None, ocr_pix_dims=None):
+        def _fake_layout(
+            page, dpi, text, conf,
+            ocr_regions=None, ocr_pix_dims=None, page_deskewed=False,
+        ):
             seen["regions"] = ocr_regions
             seen["pix_dims"] = ocr_pix_dims
-            return [], []
+            seen["deskewed"] = page_deskewed
+            return [], [], []
 
         monkeypatch.setattr(
             "womblex.ingest.strategies_scanned._layout_blocks_and_tables", _fake_layout,
@@ -390,3 +401,262 @@ class TestReconstructTable:
         # A rect nowhere near the regions holds no centroids.
         assert reconstruct_table(regions, (1400.0, 50.0, 1600.0, 500.0), 200, 0.96,
                                  pix_dims=self.DIMS) is None
+
+
+# The layout rect enclosing every grid `_grid_regions` builds, and a narrative
+# band well below it. A 612×792 pt page renders to 1700×2200 px at 200 dpi, so
+# both sit inside the page.
+_TABLE_RECT = (50.0, 50.0, 1300.0, 900.0)
+_NARRATIVE_RECT = (50.0, 950.0, 1300.0, 1300.0)
+
+
+def _narrative_regions() -> list[OCRRegionResult]:
+    return [
+        _region(100, 1000, 600, 1040, "Narrative line one"),
+        _region(100, 1100, 600, 1140, "Narrative line two"),
+    ]
+
+
+class TestLayoutPassReconstruction:
+    """A3 — a detected table region becomes a TableData on the OCR-PDF path."""
+
+    DIMS = (1700, 2200)
+
+    @pytest.fixture(autouse=True)
+    def _stub_analyzer(self, monkeypatch) -> None:
+        monkeypatch.setattr(
+            "womblex.ingest.strategies_scanned.get_layout_analyzer",
+            lambda: _StubAnalyzer([
+                LayoutRegionResult(bbox=_TABLE_RECT, label="Table",
+                                   block_type="table", confidence=0.96),
+                LayoutRegionResult(bbox=_NARRATIVE_RECT, label="Text",
+                                   block_type="paragraph", confidence=0.90),
+            ]),
+        )
+
+    def _run(self, page: fitz.Page, regions: list[OCRRegionResult]):
+        return _layout_blocks_and_tables(
+            page, 200, "whole page OCR text", 90.0,
+            ocr_regions=regions, ocr_pix_dims=self.DIMS,
+        )
+
+    def test_table_region_yields_cells(self, blank_page: fitz.Page) -> None:
+        blocks, tables, consumed = self._run(
+            blank_page, _grid_regions() + _narrative_regions(),
+        )
+        assert len(tables) == 1
+        assert tables[0].headers == ["H1", "H2", "H3", "H4"]
+        assert tables[0].rows[0] == ["r1c1", "r1c2", "r1c3", "r1c4"]
+        assert tables[0].context["producer"] == "table_grid"
+        # The 16 grid regions are absorbed; the narrative pair is not.
+        assert len(consumed) == 16
+        assert blocks and blocks[0].block_type == "paragraph"
+
+    def test_narrative_is_rebuilt_from_the_complement(
+        self, blank_page: fitz.Page,
+    ) -> None:
+        """The chunker must not see the table twice — as prose and as markdown."""
+        blocks, tables, _consumed = self._run(
+            blank_page, _grid_regions() + _narrative_regions(),
+        )
+        assert tables
+        assert len(blocks) == 1
+        assert blocks[0].text == "Narrative line one\nNarrative line two"
+        assert "H1" not in blocks[0].text
+        assert "r1c1" not in blocks[0].text
+
+    def test_table_only_page_emits_no_narrative_block(
+        self, blank_page: fitz.Page,
+    ) -> None:
+        blocks, tables, consumed = self._run(blank_page, _grid_regions())
+        assert len(tables) == 1
+        assert consumed
+        assert blocks == []
+
+    def test_refusal_keeps_todays_full_text_fallback(
+        self, blank_page: fitz.Page,
+    ) -> None:
+        """Below the gates the page behaves exactly as it did before A3."""
+        sparse = [_region(100, 100, 300, 140, "not a grid")] + _narrative_regions()
+        blocks, tables, consumed = self._run(blank_page, sparse)
+        assert tables == []
+        assert consumed == []
+        assert len(blocks) == 1
+        assert blocks[0].text == "whole page OCR text"
+
+    def test_reconstructor_failure_falls_back_to_the_whole_page(
+        self, blank_page: fitz.Page, monkeypatch,
+    ) -> None:
+        """A throw mid-loop must not leave tables emitted but text unsubtracted."""
+        def _boom(*args, **kwargs):
+            raise ValueError("grid inference blew up")
+
+        monkeypatch.setattr(
+            "womblex.ingest.strategies_scanned.reconstruct_table", _boom,
+        )
+        blocks, tables, consumed = self._run(
+            blank_page, _grid_regions() + _narrative_regions(),
+        )
+        assert tables == []
+        assert consumed == []
+        assert len(blocks) == 1
+        assert blocks[0].text == "whole page OCR text"
+
+    def test_deskewed_page_refuses(self, blank_page: fitz.Page, caplog) -> None:
+        """A2 — deskew rotated the OCR input out of the layout render's frame."""
+        with caplog.at_level(logging.DEBUG, logger="womblex.ingest.strategies_scanned"):
+            blocks, tables, consumed = _layout_blocks_and_tables(
+                blank_page, 200, "whole page OCR text", 90.0,
+                ocr_regions=_grid_regions() + _narrative_regions(),
+                ocr_pix_dims=self.DIMS,
+                page_deskewed=True,
+            )
+        assert "deskewed page, refusing table reconstruction" in caplog.text
+        assert tables == []
+        assert consumed == []
+        assert blocks[0].text == "whole page OCR text"
+
+
+class TestOrchestratorTableWiring:
+    """A3 — the orchestrator surfaces reconstructed tables and de-duplicates."""
+
+    DIMS = (1700, 2200)
+
+    @pytest.fixture(autouse=True)
+    def _stub_analyzer(self, monkeypatch) -> None:
+        monkeypatch.setattr(
+            "womblex.ingest.strategies_scanned.get_layout_analyzer",
+            lambda: _StubAnalyzer([
+                LayoutRegionResult(bbox=_TABLE_RECT, label="Table",
+                                   block_type="table", confidence=0.96),
+                LayoutRegionResult(bbox=_NARRATIVE_RECT, label="Text",
+                                   block_type="paragraph", confidence=0.90),
+            ]),
+        )
+
+    def _apply(self, page: fitz.Page, monkeypatch, regions, steps=()):
+        from womblex.ingest.detect import DocumentType
+        from womblex.ingest.orchestrator import _apply_ocr_page, _PageAccum
+
+        def _fake_ocr_page(page, dpi, lang, engine, engine_options):
+            return ("whole page OCR text", 90.0, list(steps), False, regions, self.DIMS)
+
+        monkeypatch.setattr(
+            "womblex.ingest.strategies_scanned._ocr_page", _fake_ocr_page,
+        )
+        accum = _PageAccum(page_number=0)
+        _apply_ocr_page(
+            page, _ocr_profile(), accum,
+            dpi=200, lang="eng", engine="paddleocr", engine_options={},
+            doc_type=DocumentType.SCANNED_MACHINEWRITTEN,
+        )
+        return accum
+
+    def test_table_reaches_the_accumulator(
+        self, blank_page: fitz.Page, monkeypatch,
+    ) -> None:
+        accum = self._apply(
+            blank_page, monkeypatch, _grid_regions() + _narrative_regions(),
+        )
+        assert len(accum.tables) == 1
+        assert accum.tables[0].headers == ["H1", "H2", "H3", "H4"]
+
+    def test_page_text_stays_verbatim(
+        self, blank_page: fitz.Page, monkeypatch,
+    ) -> None:
+        """Narrative subtraction is an element-stream concern.
+
+        ``PageResult.text`` is what the page says, table included — it feeds
+        text-coverage and the CER metrics, which compare against a transcript
+        of the whole page.
+        """
+        accum = self._apply(
+            blank_page, monkeypatch, _grid_regions() + _narrative_regions(),
+        )
+        assert accum.text == "whole page OCR text"
+
+    def test_consumed_regions_do_not_become_form_fields(
+        self, blank_page: fitz.Page, monkeypatch,
+    ) -> None:
+        """A colon-bearing cell must not land in both a form and the table."""
+        regions = _grid_regions() + _narrative_regions()
+        # Give one body cell a label/value shape the form extractor would pair.
+        pairish = next(r for r in regions if r.text == "r2c2")
+        pairish.text = "Owner: Smith"
+        accum = self._apply(blank_page, monkeypatch, regions)
+        assert accum.tables
+        assert not any(f.value == "Smith" for f in accum.forms)
+
+    def test_deskew_step_is_forwarded_as_the_refusal_signal(
+        self, blank_page: fitz.Page, monkeypatch,
+    ) -> None:
+        """A2 — the orchestrator reads the refusal off ``_ocr_page``'s steps."""
+        accum = self._apply(
+            blank_page, monkeypatch,
+            _grid_regions() + _narrative_regions(),
+            steps=("deskew", "binarise"),
+        )
+        assert accum.tables == []
+
+
+class TestReconstructedTableDownstream:
+    """A5 — the conventions hold once a reconstructed table reaches the stream.
+
+    A1 set the two provenance fields; A3 is the first path that actually puts
+    one through ``_table_to_element``, so these claims stop being structural
+    and start being observed.
+    """
+
+    def _elements(self, blank_page: fitz.Page, monkeypatch):
+        from womblex.ingest.orchestrator import _accum_to_elements
+
+        accum = TestOrchestratorTableWiring()._apply(
+            blank_page, monkeypatch, _grid_regions() + _narrative_regions(),
+        )
+        elements, _next = _accum_to_elements(accum, 0, include_tables=True)
+        return elements
+
+    @pytest.fixture(autouse=True)
+    def _stub_analyzer(self, monkeypatch) -> None:
+        monkeypatch.setattr(
+            "womblex.ingest.strategies_scanned.get_layout_analyzer",
+            lambda: _StubAnalyzer([
+                LayoutRegionResult(bbox=_TABLE_RECT, label="Table",
+                                   block_type="table", confidence=0.96),
+                LayoutRegionResult(bbox=_NARRATIVE_RECT, label="Text",
+                                   block_type="paragraph", confidence=0.90),
+            ]),
+        )
+
+    def test_projects_to_a_cellified_table_element(
+        self, blank_page: fitz.Page, monkeypatch,
+    ) -> None:
+        elements = self._elements(blank_page, monkeypatch)
+        tables = [e for e in elements if e.kind == "table"]
+        assert len(tables) == 1
+        el = tables[0]
+        assert el.header_rows == [0]
+        assert [c.value for c in el.cells if c.row == 0] == ["H1", "H2", "H3", "H4"]
+        # Lineage: distinguishable from a PyMuPDF-fallback table in the parquet,
+        # via the existing context_* → meta copy, with no schema change.
+        assert el.meta["context_producer"] == "table_grid"
+
+    def test_narrative_element_holds_no_table_text(
+        self, blank_page: fitz.Page, monkeypatch,
+    ) -> None:
+        elements = self._elements(blank_page, monkeypatch)
+        paragraphs = [e for e in elements if e.kind == "paragraph"]
+        assert len(paragraphs) == 1
+        assert paragraphs[0].text == "Narrative line one\nNarrative line two"
+
+    def test_chunker_sees_the_table_exactly_once(
+        self, blank_page: fitz.Page, monkeypatch,
+    ) -> None:
+        from womblex.process.chunker import collect_tables_from_elements
+
+        elements = self._elements(blank_page, monkeypatch)
+        tables = collect_tables_from_elements(elements)
+        assert len(tables) == 1
+        _page, markdown = tables[0]
+        assert "H1" in markdown
+        assert markdown.count("r1c1") == 1
