@@ -600,16 +600,24 @@ below. The rest, as measurements:
   *Grants of Plan-Based Awards* page: four money columns headed
   `Threshold ($)` / `Target ($)` / `Maximum ($)` / `Grant Date Fair Value …
   ($)`, about 35 amounts. The op recovers **one** — the single footnote where
-  OCR preserved a `$`. OCR captures nearly every digit correctly, but
-  `_layout_blocks_and_tables` detects the table region (YOLO confidence 0.96)
-  and emits it as a `[TABLE]` placeholder block with **no cells**: its
-  ``tables`` list is never populated on any code path. So no scanned page
-  yields a `table` element, the column path has nothing to classify, and every
-  amount on it is a bare number the narrative path is right to decline.
+  OCR preserved a `$`. OCR captures nearly every digit correctly, but the
+  layout model's table region (YOLO confidence 0.96) became a `[TABLE]`
+  placeholder block with **no cells**, so the column path had nothing to
+  classify and every amount on the page was a bare number the narrative path
+  is right to decline.
+
+  **Partly closed, 2026-07-28.** `_layout_blocks_and_tables` now reconstructs
+  cells inside a detected table region (#17 step A3), so an OCR'd **PDF** page
+  yields a real `table` element and the column path reaches it. This fixture
+  is not yet among them: `dense_text_548` is a PNG, and image inputs route
+  through `ImageExtractor`, which still never calls the layout pass (#17 step
+  A4). The measurement above therefore still describes this fixture; the
+  mechanism sentence it originally gave — that `tables` is never populated on
+  any code path — no longer holds.
 
   Fed the same page's real structure, the column path recovers **30 of 30**.
-  The op is ready; OCR table-cell reconstruction is the missing piece, and it
-  is extraction-side work tracked as item #17 in
+  The op is ready; the remaining missing piece is extraction-side, tracked as
+  item #17 in
   [steering.md](steering.md#table-cell-reconstruction-on-ocrd-pages-17) — not
   a change to this op. This
   also answers the benchmark gap noted below — money loss through OCR was

@@ -167,14 +167,6 @@ def _apply_ocr_page(
     accum.method = "ocr"
     accum.confidence = conf
     accum.steps.extend(steps)
-    # K2′: prefer per-region extraction (preserves bbox) when the OCR engine
-    # returned per-detection results. LLM engines that resolve reading order
-    # natively yield no regions — fall back to bbox-less line extraction.
-    if regions:
-        pw, ph = pix_dims
-        accum.forms.extend(_extract_form_pairs_from_regions(regions, float(pw), float(ph)))
-    else:
-        accum.forms.extend(_extract_form_pairs_from_lines(text))
 
     # Table structure is a region-based concern: LLM/VLM engines resolve
     # reading order natively and emit markdown with no regions, so there is
@@ -182,15 +174,34 @@ def _apply_ocr_page(
     # entirely. Only the region-based (paddleocr) branch carries `regions` +
     # `pix_dims` through to the layout pass. See
     # docs/table-cell-reconstruction-plan.md (A0).
+    consumed: list = []
     if native_order:
         accum.blocks.extend(_markdown_page_block(page, text, conf))
         page_tables: list[TableData] = []
     else:
-        page_blocks, page_tables = _layout_blocks_and_tables(
+        page_blocks, page_tables, consumed = _layout_blocks_and_tables(
             page, dpi, text, conf,
             ocr_regions=regions, ocr_pix_dims=pix_dims,
+            # A2: deskew rotated the OCR input, so the region coords no longer
+            # share the layout render's frame — refuse reconstruction there.
+            page_deskewed="deskew" in steps,
         )
         accum.blocks.extend(page_blocks)
+
+    # K2′: prefer per-region extraction (preserves bbox) when the OCR engine
+    # returned per-detection results. LLM engines that resolve reading order
+    # natively yield no regions — fall back to bbox-less line extraction.
+    # Regions a reconstructed table absorbed are excluded, so a colon-bearing
+    # cell doesn't land in both a form element and the table (A3).
+    if regions:
+        pw, ph = pix_dims
+        taken = {id(r) for r in consumed}
+        form_regions = [r for r in regions if id(r) not in taken]
+        accum.forms.extend(
+            _extract_form_pairs_from_regions(form_regions, float(pw), float(ph)),
+        )
+    else:
+        accum.forms.extend(_extract_form_pairs_from_lines(text))
 
     # Mixed-doc tagging: classify content_type per page on OCR pages.
     if doc_type == DocumentType.SCANNED_MIXED:

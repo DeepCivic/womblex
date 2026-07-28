@@ -28,7 +28,7 @@ from womblex.ingest.extract import (
     _text_coverage,
 )
 from womblex.ingest.interfaces.protocols import OCRRegionResult
-from womblex.ingest.ocr_tables import regions_in_rect, span_from_region
+from womblex.ingest.ocr_tables import reconstruct_table, regions_in_rect, span_from_region
 from womblex.ingest.paddle_ocr import (
     get_layout_analyzer,
     get_ocr_reader,
@@ -357,7 +357,8 @@ def _layout_blocks_and_tables(
     conf: float,
     ocr_regions: Sequence[OCRRegionResult] | None = None,
     ocr_pix_dims: tuple[int, int] | None = None,
-) -> tuple[list[TextBlock], list[TableData]]:
+    page_deskewed: bool = False,
+) -> tuple[list[TextBlock], list[TableData], list[OCRRegionResult]]:
     """Run YOLO layout analysis on a page, returning typed TextBlocks and tables.
 
     Falls back to a single paragraph block if the layout model is unavailable.
@@ -370,11 +371,21 @@ def _layout_blocks_and_tables(
     are dropped. Only region-based engines (paddleocr) supply them; LLM/VLM
     engines resolve reading order natively, return no regions, and are
     dispatched to ``_markdown_page_block`` instead, so they never reach
-    this function. See docs/table-cell-reconstruction-plan.md (A0) —
-    ``tables`` is still returned empty until the reconstructor lands.
+    this function.
+
+    ``page_deskewed`` reports whether ``preprocess_for_ocr`` rotated the
+    image before OCR: the region coords are then in deskewed space while
+    this pass renders the raw page, so the two are not comparable and
+    round 1 refuses reconstruction on such pages (A2).
+
+    Returns ``(blocks, tables, consumed_regions)`` — the third element is
+    the OCR regions absorbed by a reconstructed table, which the caller
+    excludes from form-pair extraction so a colon-bearing cell does not
+    land in both a form element and the table.
     """
     blocks: list[TextBlock] = []
     tables: list[TableData] = []
+    consumed: list[OCRRegionResult] = []
 
     try:
         analyzer = get_layout_analyzer()
@@ -398,6 +409,14 @@ def _layout_blocks_and_tables(
                 page.number, ocr_dims, layout_dims,
             )
             cell_source = []
+        # Deskew survives the dimension check — warpAffine preserves the
+        # frame — so it needs its own refusal (A2). Mapping the layout rect
+        # into deskewed space is deferred to the round that targets scans.
+        if cell_source and page_deskewed:
+            logger.debug(
+                "deskewed page, refusing table reconstruction: page=%d", page.number,
+            )
+            cell_source = []
 
         regions = analyzer.analyze(img)
         if not regions:
@@ -408,15 +427,22 @@ def _layout_blocks_and_tables(
             pos = _normalise_bbox((rx0, ry0, rx1, ry1), float(pix.width), float(pix.height))
 
             if region.block_type == "table":
-                # Reconstruction inputs, logged so the size of the gap is
-                # traceable per page before the reconstructor exists. Gated:
-                # the intersection is real work, not a format string.
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        "layout table region: page=%d confidence=%.2f ocr_regions=%d",
-                        page.number, region.confidence,
-                        len(regions_in_rect(cell_source, (rx0, ry0, rx1, ry1))),
+                table = None
+                if cell_source:
+                    table = reconstruct_table(
+                        cell_source, (rx0, ry0, rx1, ry1), dpi, region.confidence,
+                        pix_dims=layout_dims,
                     )
+                logger.debug(
+                    "layout table region: page=%d confidence=%.2f reconstructed=%s",
+                    page.number, region.confidence, table is not None,
+                )
+                if table is not None:
+                    tables.append(table)
+                    consumed.extend(regions_in_rect(cell_source, (rx0, ry0, rx1, ry1)))
+                    continue
+                # Refused: keep the placeholder so the region is still visible
+                # to the fallback's "no non-table block has text" test.
                 blocks.append(TextBlock(
                     text="[TABLE]",
                     position=pos,
@@ -431,33 +457,62 @@ def _layout_blocks_and_tables(
                     confidence=region.confidence,
                 ))
 
-        # If layout produced blocks but none have text, fall back to single block
-        if blocks and not any(b.text.strip() for b in blocks if b.block_type != "table"):
-            block = _ocr_text_block(page, text, conf)
+        # Layout-derived blocks carry no text, so this fires on essentially
+        # every layout-successful page: the page's OCR text collapses onto one
+        # block. Where a table reconstructed, that text is rebuilt from the
+        # regions *outside* its rect — otherwise the chunker sees the table
+        # twice, once as narrative and once as markdown.
+        if consumed or (blocks and not any(
+            b.text.strip() for b in blocks if b.block_type != "table"
+        )):
+            page_text = text
+            if consumed:
+                taken = {id(r) for r in consumed}
+                page_text = _table_aware_text(
+                    [r for r in cell_source if id(r) not in taken],
+                )
+            block = _ocr_text_block(page, page_text, conf)
             if block:
-                dominant = max(regions, key=lambda r: (r.bbox[2] - r.bbox[0]) * (r.bbox[3] - r.bbox[1]))
                 # The whole page's OCR text is being collapsed into this one
                 # block. If the dominant region is a non-text kind (figure) but
                 # the page yielded substantial prose, it is a full-page scan,
                 # not a figure — tag it paragraph so it is not silently dropped
-                # from chunking. K9-fig.
+                # from chunking. K9-fig. Where a table reconstructed, what is
+                # left is by construction the non-table remainder, so the
+                # dominant region's kind no longer describes it.
+                if consumed:
+                    block_type = "paragraph"
+                else:
+                    dominant = max(
+                        regions, key=lambda r: (r.bbox[2] - r.bbox[0]) * (r.bbox[3] - r.bbox[1]),
+                    )
+                    block_type = _ocr_region_block_type(block.text, dominant.block_type)
                 block = TextBlock(
                     text=block.text,
                     position=block.position,
-                    block_type=_ocr_region_block_type(block.text, dominant.block_type),
+                    block_type=block_type,
                     confidence=block.confidence,
                 )
-                return [block], tables
+                return [block], tables, consumed
+            if consumed:
+                # A page that is only a table: no narrative left over. Emitting
+                # the empty layout placeholders would add blank paragraphs.
+                return [], tables, consumed
 
     except (FileNotFoundError, Exception):
-        pass
+        # Precision-first: a partially-built page must not reach the caller
+        # with tables emitted but the narrative not yet subtracted — that is
+        # the double-count A3 exists to prevent. Reconstruction added a throw
+        # site inside the region loop, so discard the partial page entirely
+        # and let the full-text fallback below rebuild it.
+        blocks, tables, consumed = [], [], []
 
     if not blocks:
         block = _ocr_text_block(page, text, conf)
         if block:
             blocks = [block]
 
-    return blocks, tables
+    return blocks, tables, consumed
 
 
 # ---------------------------------------------------------------------------
