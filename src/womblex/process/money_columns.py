@@ -221,6 +221,11 @@ def cell_amount(
     raw = re.sub(r"\b[A-Z]{3}\b", "", raw).strip()
     if not raw or not re.fullmatch(r"[\d,. ]+", raw):
         return None
+    # An internal space only survives as a thousands separator. `24.2 5` is a
+    # value with a footnote marker attached, and closing the gap would invent
+    # 24.25 — deleting spaces unconditionally fabricates numbers.
+    if " " in raw and not re.fullmatch(r"\d{1,3}(?: \d{3})+(?:\.\d+)?", raw):
+        return None
 
     value = parse_number(raw.replace(" ", ""), international=international)
     if value is None:
@@ -239,6 +244,45 @@ def scaled(value: Decimal, scale: str | None) -> Decimal:
 # ---------------------------------------------------------------------------
 # Classification
 # ---------------------------------------------------------------------------
+
+
+def fold_header_continuation(
+    header: str,
+    values: Sequence[str | None],
+    *,
+    options: ColumnOptions | None = None,
+) -> tuple[str, list[str | None]]:
+    """Absorb a header row the extractor left sitting in the body.
+
+    PDF financial tables wrap their headers across two lines — ``Approved`` /
+    ``Budget $m`` — and the extractor declares only the first row a header. The
+    unit and the money vocabulary both live in the second, so without folding
+    the column reads as a nameless run of bare numbers and is (correctly, given
+    what it can see) left alone. Measured on the ANAO Major Projects Report,
+    this is the difference between recovering the 27 approved-budget amounts
+    and recovering none of them.
+
+    Only one row is folded, only when it is non-numeric text, and only when the
+    rest of the column is numeric enough to be a data column — so a genuine
+    text data row is never eaten.
+    """
+    opts = options or ColumnOptions()
+    if not values:
+        return header, list(values)
+    first, rest = values[0], list(values[1:])
+    if is_null_marker(first) or cell_amount(first, international=opts.international_numbers):
+        return header, list(values)
+
+    present = [v for v in rest if not is_null_marker(v)]
+    if len(present) < opts.min_cells:
+        return header, list(values)
+    numeric = sum(
+        1 for v in present
+        if cell_amount(v, international=opts.international_numbers) is not None
+    )
+    if numeric / len(present) < opts.numeric_fraction_min:
+        return header, list(values)
+    return f"{header} {first}".strip(), rest
 
 
 def classify_column(
@@ -333,6 +377,7 @@ __all__ = [
     "ColumnVerdict",
     "cell_amount",
     "classify_column",
+    "fold_header_continuation",
     "extract_column",
     "format_currency",
     "header_currency",

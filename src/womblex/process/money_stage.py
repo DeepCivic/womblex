@@ -38,6 +38,7 @@ from womblex.process.money_columns import (
     ColumnVerdict,
     classify_column,
     extract_column,
+    fold_header_continuation,
 )
 from womblex.process.text_overlay import apply_overlay, load_overlay
 from womblex.store.checkpoint import CheckpointManager
@@ -224,16 +225,18 @@ def _table_rows(
         header_rows = sorted(elem.header_rows or [])
         header_by_col = _header_texts(by_col, header_rows)
 
+        declared = set(header_rows)
         for col, entries in sorted(by_col.items()):
             entries.sort()
-            body = [(r, v) for r, v in entries if r not in set(header_rows)]
+            body = [(r, v) for r, v in entries if r not in declared]
             header = header_by_col.get(col, "")
-            verdict = (
-                classify_column(header, [v for _, v in body], options=col_opts)
-                if header_rows else
-                ColumnVerdict(verdict="insufficient", evidence="no_header",
-                              header_text="", cells_total=len(body))
-            )
+            if header_rows:
+                header, body = _fold_continuation(header, body, col_opts)
+                verdict = classify_column(
+                    header, [v for _, v in body], options=col_opts)
+            else:
+                verdict = ColumnVerdict(verdict="insufficient", evidence="no_header",
+                                        header_text="", cells_total=len(body))
             column_id = f"elem{elem.order}:col{col}"
             extracted = _cell_spans(
                 source_hash, body, verdict, opts, col_opts, column_id,
@@ -272,8 +275,11 @@ def _sheet_rows(
         for col, entries in sorted(cols.items()):
             entries.sort()
             header = next((v for r, v, _, _ in entries if r == 0), "")
-            body = [(r, v, order) for r, v, order, _ in entries if r != 0]
+            rows = [(r, v) for r, v, _, _ in entries if r != 0]
+            orders = {r: o for r, _, o, _ in entries if r != 0}
             fmt = _dominant_format([f for r, _, _, f in entries if r != 0])
+            header, rows = _fold_continuation(header, rows, col_opts)
+            body = [(r, v, orders[r]) for r, v in rows]
             verdict = classify_column(
                 header, [v for _, v, _ in body], number_format=fmt, options=col_opts)
             column_id = f"sheet:{sheet}:col{col}"
@@ -348,6 +354,21 @@ def _cell_spans(
                 context=text[:200],
             ))
     return rows
+
+
+def _fold_continuation(
+    header: str, body: list[tuple[int, str]], col_opts: ColumnOptions,
+) -> tuple[str, list[tuple[int, str]]]:
+    """Row-indexed wrapper over :func:`fold_header_continuation`.
+
+    Keeps the row indices attached, so a folded header row is dropped from the
+    body rather than later extracted as if it were an amount.
+    """
+    folded, remaining = fold_header_continuation(
+        header, [v for _, v in body], options=col_opts)
+    if len(remaining) == len(body):
+        return header, body
+    return folded, body[len(body) - len(remaining):]
 
 
 def _header_texts(

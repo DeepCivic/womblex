@@ -494,6 +494,21 @@ closed and slow-moving. **The risk in this feature is not narrative parsing —
 it is deciding whether a bare column of numbers is money, and no candidate
 library addresses that.**
 
+### Header continuation rows are folded into the header
+
+Measured on the ANAO Major Projects Report: PDF financial tables wrap their
+header across two lines — `Approved` on row 0, `Budget $m` on row 1 — and the
+extractor declares only the first a header row. The unit and the money
+vocabulary both live in the second, so the column read as a nameless run of
+bare numbers and was left alone, losing all 27 approved-budget amounts.
+
+`fold_header_continuation` absorbs **one** leading body row into the header,
+and only when that row is non-numeric text while the rest of the column is
+numeric enough to be a data column — so a genuine text data row is never eaten.
+This is a header-*reading* fix, not a relaxation of the deferred "no
+recoverable header" case below: the header is present in the table, just not
+where the extractor said it was.
+
 ### Cross-validation by re-reading sources: rejected
 
 An earlier design recounted amounts by independently re-reading each source
@@ -520,6 +535,51 @@ PDFs have no text layer, and reporting those as failures would bury real ones).
   revisit with a legislation/contract corpus.
 - **Penalty units** — zero occurrences across all 29 benchmark PDFs. These are
   audit, FOI and budget documents, not legislation.
+
+## First real-document run
+
+Four benchmark fixtures, run through the real pipeline (extract → money) rather
+than synthetic shards. Still **not** a precision/recall measurement — there is
+no labelled set — but every span was checked by hand against the source.
+
+| Fixture | Amounts found | Checked against |
+|---|---|---|
+| ANAO Major Projects Report 2020–21 (PDF, 30pp) | 42 narrative + 53 table_cell | every `$` in the transcript |
+| ANAO, same report as a text transcript | 42 narrative | 44 `$` in the file |
+| DFAT PBS 2025–26 (DOCX) | 47 narrative + 12 table_cell | source `python-docx` table dump |
+| DocLayNet `dense_text_548` (scanned page, OCR) | 1 narrative | ground-truth transcript |
+| FUNSD `82200067_0069` (transcript) | 0 | ground-truth transcript |
+
+Findings that changed the code are in the [Decisions](#decisions) section
+below. The rest, as measurements:
+
+- **Recall on marked narrative amounts is complete on the two ANAO runs.** Of
+  44 `$` characters in the transcript, 42 are amounts and all 42 are
+  extracted; the other two are the `Budget $m` / `Amount $b` column headers,
+  which are unit declarations, not amounts.
+- **The `Approved Budget $m` column reconciles three ways.** Its 25 project
+  amounts sum to $78,699.2m, matching both the table's own total row and the
+  narrative's independently written "$78.7 billion". That is the strongest
+  correctness signal available without a labelled set, and it exercises the
+  whole column path — header scale, cell parsing, exact decimals.
+- **FUNSD's zero is correct.** Its `AMOUNT RECEIVED FROM VENDOR` column is
+  empty in the source; the numbers on the page are unit counts and rep counts.
+- **The op's ceiling is the extraction.** Two of DocLayNet's three amounts are
+  absent from the money op's input because OCR read `$15.37` as `s15.37`. The
+  op is right to decline: `s15` is precisely the legislative-reference shape
+  (`s167(1)`) the false-positive table blocks, so accepting `s` as a currency
+  symbol would trade two recoveries for a large class of false positives. The
+  fix, if it is worth making, belongs in OCR or a cleaning op.
+- **Plain-text records cannot use the column path.** The ANAO transcript
+  flattens the same `Approved Budget $m` table into narrative, where the
+  amounts are bare numbers with no column to inherit from — 27 amounts
+  recovered from the PDF, 0 from the transcript of the same pages. This is the
+  designed refusal, and it is a reason to prefer the structural source when a
+  corpus offers both.
+- **No financial tables in the DFAT DOCX.** All 51 of its tables are
+  performance-measure or glossary tables (confirmed against the source with
+  `python-docx`); its money is narrative, and 47 amounts were recovered there.
+  Zero money columns is correct, not a miss.
 
 ## Open gap: no ground truth
 

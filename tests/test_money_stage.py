@@ -163,6 +163,31 @@ def test_table_column_evidence_and_anchors(tmp_path: Path):
     assert verdicts[1]["cells_extracted"] == 3
 
 
+def test_wrapped_header_row_is_recovered(tmp_path: Path):
+    """Modelled on the ANAO Major Projects Report: the header wraps across two
+    rows (`Approved` / `Budget $m`) and only the first is declared. The folded
+    row must supply the scale and must not itself be extracted as an amount."""
+    elements = [_element(0, "table", header_rows=[0])]
+    cells = [_cell(0, 0, 0, "Project"), _cell(0, 0, 1, "Approved")]
+    cells += [_cell(0, 1, 0, ""), _cell(0, 1, 1, "Budget $m")]
+    for i, v in enumerate(["16,631.3", "9108.9", "6291.8", "78,699.2"], start=2):
+        cells += [_cell(0, i, 0, f"Project {i}"), _cell(0, i, 1, v)]
+    base = _build_shard(tmp_path, elements, cells)
+
+    money_shards(tmp_path, MoneyConfig())
+
+    rows = read_money_spans(base).to_pylist()
+    assert [r["value"] for r in rows] == [
+        Decimal("16631300000.0000"), Decimal("9108900000.0000"),
+        Decimal("6291800000.0000"), Decimal("78699200000.0000")]
+    assert all(r["multiplier"] == "million" for r in rows)
+    assert 1 not in {r["row"] for r in rows}, "the folded header row is not an amount"
+
+    verdict = next(c for c in read_money_columns(base).to_pylist() if c["col"] == 1)
+    assert verdict["header_text"] == "Approved Budget $m"
+    assert (verdict["verdict"], verdict["scale"]) == ("money", "million")
+
+
 def test_table_without_header_rows_leaves_bare_cells_alone(tmp_path: Path):
     elements = [_element(0, "table")]
     cells = [_cell(0, r, 0, v) for r, v in enumerate(["1,500", "2,700", "300", "900"])]

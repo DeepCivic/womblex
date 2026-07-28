@@ -24,6 +24,7 @@ from womblex.process.money_columns import (
     cell_amount,
     classify_column,
     extract_column,
+    fold_header_continuation,
     header_currency,
     header_scale,
     is_null_marker,
@@ -458,6 +459,42 @@ def test_cell_amount_parsing():
     assert cell_amount("15%") is None
     assert cell_amount("Pending") is None
     assert cell_amount("—") is None
+
+
+def test_header_continuation_row_is_folded_into_the_header():
+    """The ANAO Major Projects Report case: a header wrapped across two rows,
+    only the first of which the extractor declares. Without folding, the unit
+    (`$m`) and the vocabulary (`Budget`) are both invisible and 27 real amounts
+    are left un-extracted."""
+    body = ["Budget $m", "16,631.3", "9108.9", "6291.8", "5925.8", "78,699.2"]
+    header, values = fold_header_continuation("Approved", body)
+    assert header == "Approved Budget $m"
+    assert values == body[1:]
+
+    verdict = classify_column(header, values)
+    assert verdict.is_money
+    assert verdict.scale == "million"
+    assert [v for _, v, _ in extract_column(values, verdict)][0] == Decimal("16631300000.0")
+
+
+def test_header_continuation_does_not_eat_a_data_row():
+    # A column of text values is not a money column with a stray header.
+    header, values = fold_header_continuation("Project", ["Wedgetail", "Hornet", "Tiger"])
+    assert (header, values) == ("Project", ["Wedgetail", "Hornet", "Tiger"])
+    # Nor is a numeric first row a header.
+    header, values = fold_header_continuation("Value", ["100", "200", "300"])
+    assert (header, values) == ("Value", ["100", "200", "300"])
+    # Too few data cells below to tell — leave it alone.
+    header, values = fold_header_continuation("Amount", ["$m", "100"])
+    assert header == "Amount"
+
+
+def test_footnote_marker_does_not_fabricate_a_value():
+    """`24.2 5` is a value with a footnote marker, not 24.25 — closing the gap
+    would invent a number that is in no document."""
+    assert cell_amount("24.2 5") is None
+    assert cell_amount("1 234 567") == (Decimal("1234567"), False)  # spaced thousands
+    assert cell_amount("24.25") == (Decimal("24.25"), False)
 
 
 def test_extra_veto_terms_from_config():

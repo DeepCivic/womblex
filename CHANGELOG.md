@@ -44,8 +44,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   row, so they join enrichment mentions and map to chunks), `table_cell` is
   `(parent_elem_order, row, col)`, `sheet_cell` is `(sheet, row, col)`.
 
+  Header continuation rows are folded into the header: PDF financial tables
+  wrap `Approved` / `Budget $m` across two rows and declare only the first,
+  which previously left the column looking like a nameless run of bare
+  numbers. One leading non-numeric row is absorbed when the rest of the column
+  is numeric, so a genuine text data row is never eaten.
+
   No new dependencies. Pattern 10 (bare numbers near financial vocabulary in
   narrative) and continental number formats ship off by default.
+
+  First real-document run (four benchmark fixtures through the real pipeline,
+  every span hand-checked): all 42 marked narrative amounts recovered from the
+  ANAO Major Projects Report, and its `Approved Budget $m` column reconciles
+  three ways — 25 project amounts summing to the table's own total row and to
+  the narrative's independently written "$78.7 billion". Details and the
+  measured limits in [docs/money.md](docs/money.md).
 
 ### Fixed
 - **Spreadsheet extraction preserves `number_format` and a numeric
