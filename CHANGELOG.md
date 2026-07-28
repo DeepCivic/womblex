@@ -53,6 +53,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   No new dependencies. Pattern 10 (bare numbers near financial vocabulary in
   narrative) and continental number formats ship off by default.
 
+  A veto term no longer suppresses a column whose header declares its own
+  currency: `Grant Date Fair Value of Stock and Option Awards ($)` is a money
+  column that happens to contain the word "date", and vetoing it lost all five
+  amounts beneath it. Count columns on the same page carry `(#)` rather than
+  `($)` and stay vetoed. The overridden term is still recorded in the column
+  audit.
+
   First real-document run (four benchmark fixtures through the real pipeline,
   every span hand-checked): all 42 marked narrative amounts recovered from the
   ANAO Major Projects Report, and its `Approved Budget $m` column reconciles

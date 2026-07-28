@@ -402,6 +402,25 @@ def test_veto_terms_suppress_numeric_columns(header):
     assert verdict.veto_term is not None
 
 
+def test_explicit_header_currency_outranks_an_incidental_veto_term():
+    """DocLayNet `dense_text_548`: `Grant Date Fair Value ... ($)` is a money
+    column that happens to contain the word "date". Vetoing on that loses every
+    amount beneath it — the `($)` is the header describing itself."""
+    values = ["8,453,500", "568,690", "345,825", "445,730", "338,140"]
+    verdict = classify_column("Grant Date Fair Value of Stock and Option Awards ($)", values)
+    assert verdict.is_money
+    assert verdict.veto_term == "date"  # recorded, but overridden — still auditable
+    assert len(extract_column(values, verdict)) == 5
+
+
+def test_veto_still_wins_without_an_explicit_currency_marker():
+    # Count columns on the same page carry `(#)`, not `($)`, and stay vetoed.
+    assert classify_column(
+        "All Other Option Awards: Number of Securities Underlying Options (#)",
+        ["550,000", "37,000", "22,500"]).verdict == "vetoed"
+    assert classify_column("Date", ["20,000", "30,000", "40,000"]).verdict == "vetoed"
+
+
 def test_veto_matching_is_whole_word():
     verdict = classify_column("Average Cost", ["1,200", "1,300", "1,100"])
     assert verdict.is_money, "`age` must not veto `Average Cost`"

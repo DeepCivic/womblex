@@ -257,12 +257,19 @@ column is classified once; every cell beneath inherits the verdict.
    promotes a column on its own: identifiers, counts and postcodes are
    numerically indistinguishable from money.
 
-**Vetoes.** A header matching non-money vocabulary suppresses the column even
-when its cells are numeric and thousands-separated: `postcode`, `abn`, `acn`,
+**Vetoes.** A header matching non-money vocabulary suppresses a column that
+would otherwise be promoted on vocabulary alone, even when its cells are
+numeric and thousands-separated: `postcode`, `abn`, `acn`,
 `id`, `count`, `number`, `phone`, `year`, `date`, `percent`, `%`, `rate`,
 `ratio`, `index`, `quantity`, `fte`, `headcount`, `latitude`, `longitude`.
 Term matching must be **whole-word** — `age` is a veto term and `Average Cost`
-must survive it.
+must survive it. A veto does **not** override a header that declares its own
+currency: `Grant Date Fair Value of Stock and Option Awards ($)` is a money
+column containing the incidental word `date`, and vetoing it loses all five
+amounts beneath it. The `($)` is the header describing itself, in the same
+string as the veto term, so it wins; the overridden term is still recorded in
+the column audit. A count column on the same page carries `(#)`, not `($)`,
+and stays vetoed.
 
 **Null markers.** Financial tables are sparse. `—`, `–`, `-`, `n/a`, `nil`,
 `none` and similar are absent values and must be excluded from the numeric
@@ -547,7 +554,7 @@ no labelled set — but every span was checked by hand against the source.
 | ANAO Major Projects Report 2020–21 (PDF, 30pp) | 42 narrative + 53 table_cell | every `$` in the transcript |
 | ANAO, same report as a text transcript | 42 narrative | 44 `$` in the file |
 | DFAT PBS 2025–26 (DOCX) | 47 narrative + 12 table_cell | source `python-docx` table dump |
-| DocLayNet `dense_text_548` (scanned page, OCR) | 1 narrative | ground-truth transcript |
+| DocLayNet `dense_text_548` (scanned page, OCR) | 1 of ~35 | ground-truth transcript |
 | FUNSD `82200067_0069` (transcript) | 0 | ground-truth transcript |
 
 Findings that changed the code are in the [Decisions](#decisions) section
@@ -564,12 +571,29 @@ below. The rest, as measurements:
   whole column path — header scale, cell parsing, exact decimals.
 - **FUNSD's zero is correct.** Its `AMOUNT RECEIVED FROM VENDOR` column is
   empty in the source; the numbers on the page are unit counts and rep counts.
-- **The op's ceiling is the extraction.** Two of DocLayNet's three amounts are
-  absent from the money op's input because OCR read `$15.37` as `s15.37`. The
-  op is right to decline: `s15` is precisely the legislative-reference shape
-  (`s167(1)`) the false-positive table blocks, so accepting `s` as a currency
-  symbol would trade two recoveries for a large class of false positives. The
-  fix, if it is worth making, belongs in OCR or a cleaning op.
+- **Scanned money tables are unreachable today, and that is the largest
+  measured gap.** DocLayNet `dense_text_548` is a proxy-statement
+  *Grants of Plan-Based Awards* page: four money columns headed
+  `Threshold ($)` / `Target ($)` / `Maximum ($)` / `Grant Date Fair Value …
+  ($)`, about 35 amounts. The op recovers **one** — the single footnote where
+  OCR preserved a `$`. OCR captures nearly every digit correctly, but
+  `_layout_blocks_and_tables` detects the table region (YOLO confidence 0.96)
+  and emits it as a `[TABLE]` placeholder block with **no cells**: its
+  ``tables`` list is never populated on any code path. So no scanned page
+  yields a `table` element, the column path has nothing to classify, and every
+  amount on it is a bare number the narrative path is right to decline.
+
+  Fed the same page's real structure, the column path recovers **30 of 30**.
+  The op is ready; OCR table-cell reconstruction is the missing piece. This
+  also answers the benchmark gap noted below — money loss through OCR was
+  unmeasured, and on this page it is ~97%, none of it attributable to the
+  detector.
+
+  (Two further amounts are lost to OCR reading `$15.37` as `s15.37`. The op is
+  right to decline those: `s15` is precisely the legislative-reference shape
+  the false-positive table blocks, so accepting `s` as a currency symbol would
+  trade two recoveries for a large class of false positives. That fix belongs
+  in OCR or a cleaning op, and it is a rounding error next to the 30.)
 - **Plain-text records cannot use the column path.** The ANAO transcript
   flattens the same `Approved Budget $m` table into narrative, where the
   amounts are bare numbers with no column to inherit from — 27 amounts
@@ -594,10 +618,13 @@ money / not-money with expected value. That is a small artefact, not a
 subsystem, and it is what would let the `quantulum3` decision above be settled
 by measurement rather than argument, and serve as a regression baseline.
 
-Fixture coverage is otherwise good for spreadsheets and native PDFs. One gap
-remains: **no scanned money document exists** in the benchmark. Of 29 PDFs, 11
-have no text layer, but none of those contain monetary amounts, so money loss
-through OCR is unmeasured.
+Fixture coverage is otherwise good for spreadsheets and native PDFs. The
+scanned-money gap is now partly closed: DocLayNet `dense_text_548` is a scanned
+page of money columns, and the measured loss is ~97% — attributable entirely to
+OCR producing no table cells, not to the detector (see
+[First real-document run](#first-real-document-run)). Of the 29 PDFs, 11 have
+no text layer and none of those contain monetary amounts, so OCR money loss
+across the PDF set specifically remains unmeasured.
 
 ## Shipped prerequisite
 

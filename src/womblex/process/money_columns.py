@@ -314,17 +314,26 @@ def classify_column(
         cells_total=total,
     )
 
-    veto = _veto_term(header, opts.extra_veto_terms)
-    if veto:
-        verdict.verdict, verdict.evidence, verdict.veto_term = "vetoed", "header_veto", veto
-        return verdict
-    if number_format and "%" in number_format:
-        verdict.verdict, verdict.evidence = "vetoed", "percent_format"
-        return verdict
-
     scale = header_scale(header)
     hdr_currency, _ = header_currency(header, opts.default_currency)
     fmt_currency = format_currency(number_format)
+
+    # A veto term suppresses a column that would otherwise be promoted on
+    # vocabulary alone. It does *not* override the column declaring its own
+    # currency: `Grant Date Fair Value of Stock and Option Awards ($)` is a
+    # money column that happens to contain the word "date", and vetoing it
+    # loses every amount beneath it. The `($)` is the header describing itself,
+    # in the same string as the incidental term.
+    veto = _veto_term(header, opts.extra_veto_terms)
+    if veto:
+        verdict.veto_term = veto
+        if not hdr_currency:
+            verdict.verdict, verdict.evidence = "vetoed", "header_veto"
+            return verdict
+    if number_format and "%" in number_format:
+        verdict.verdict, verdict.evidence = "vetoed", "percent_format"
+        verdict.veto_term = verdict.veto_term or None
+        return verdict
 
     if fmt_currency and numeric_fraction >= opts.numeric_fraction_min:
         verdict.verdict, verdict.evidence = "money", "number_format"
