@@ -42,6 +42,7 @@ from womblex.process.money_vocab import (
     NUM_AU,
     NUM_INTL,
     POSTCODE_RE,
+    SCALE_CANONICAL,
     SCALES,
     STATE_RE,
     SUBUNIT_WORDS,
@@ -188,14 +189,19 @@ def parse_number(raw: str, *, international: bool = False) -> Decimal | None:
 
 
 def apply_scale(value: Decimal, scale: str | None) -> tuple[Decimal, str | None]:
-    """Multiply by a magnitude suffix. Returns ``(value, canonical_suffix)``."""
+    """Multiply by a magnitude suffix. Returns ``(value, canonical_suffix)``.
+
+    The suffix returned is the canonical name for the magnitude, not the token
+    the document happened to use: ``$1.2m`` and ``$1.2 million`` both report
+    ``million``, so the persisted ``multiplier`` is one value per magnitude.
+    """
     if not scale:
         return value, None
     key = scale.lower()
     factor = SCALES.get(key)
     if factor is None:
         return value, None
-    return value * factor, key
+    return value * factor, SCALE_CANONICAL[key]
 
 
 def resolve_symbol(sym: str) -> str:
@@ -443,10 +449,9 @@ def _scan_word(text: str, pats, opts: MoneyOptions) -> list[MoneySpan]:
     for m in pats["p4"].finditer(text):
         word = m.group("word").lower()
         code = CURRENCY_WORDS.get(word, opts.default_currency)
-        conf = _CONFIDENCE["p4"] if code is not None else 0.6
         span = _candidate(
             m, "p4", currency=code, currency_source="word",
-            confidence=conf, international=opts.international_numbers,
+            international=opts.international_numbers,
             subunit=word in SUBUNIT_WORDS,
         )
         if span:

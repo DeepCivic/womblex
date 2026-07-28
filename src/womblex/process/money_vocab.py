@@ -137,6 +137,20 @@ SCALES: dict[str, Decimal] = {
     "trillions": Decimal(10) ** 12,
 }
 
+# Recognition is deliberately broad (every spelling above), but only one name
+# per magnitude is ever *written*. Documents spell the same multiplier `$1.2m`,
+# `$1.2 mn` and `$1.2 million`; persisting the raw token would split one
+# magnitude across three values of `money_spans.multiplier` and fragment any
+# downstream group-by. The lane is the long form, matching what the
+# column-evidenced path already emits from `header_scale`.
+SCALE_CANONICAL: dict[str, str] = {
+    "k": "thousand", "thousand": "thousand", "thousands": "thousand",
+    "m": "million", "mn": "million", "million": "million", "millions": "million",
+    "b": "billion", "bn": "billion", "billion": "billion", "billions": "billion",
+    "t": "trillion", "tn": "trillion", "trillion": "trillion",
+    "trillions": "trillion",
+}
+
 # Single letters are multipliers only next to a currency marker (`$100m`), never
 # on their own — the gate that rejects `100m road`, `50m radius`, `20m hose`.
 AMBIGUOUS_SCALES: frozenset[str] = frozenset({"k", "m", "b", "t"})
@@ -339,6 +353,7 @@ __all__ = [
     "NUM_INTL",
     "POSTCODE_RE",
     "SCALES",
+    "SCALE_CANONICAL",
     "STATE_RE",
     "SUBUNIT_WORDS",
     "SYMBOL_TO_CODE",

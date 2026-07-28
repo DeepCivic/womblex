@@ -80,6 +80,22 @@ def test_original_text_is_preserved():
     assert span.multiplier == "million"
 
 
+@pytest.mark.parametrize(("text", "canonical"), [
+    ("$1.2m", "million"), ("$1.2 mn", "million"), ("$1.2 million", "million"),
+    ("$1.2bn", "billion"), ("$1.2 b", "billion"), ("$1.2 billion", "billion"),
+    ("$5k", "thousand"), ("$5 thousand", "thousand"),
+    ("$1.5t", "trillion"), ("$1.5 trillion", "trillion"),
+])
+def test_multiplier_is_one_lane_per_magnitude(text, canonical):
+    """Recognition is broad; what gets written is not.
+
+    Persisting the document's own token split a single magnitude across
+    `m` / `mn` / `million` in `money_spans.multiplier`, so a downstream
+    group-by fragmented. The column path already emitted the long form.
+    """
+    assert _one(text).multiplier == canonical
+
+
 def test_values_are_exact_decimals_not_floats():
     span = _one("$0.10")
     assert span.value == Decimal("0.10")
