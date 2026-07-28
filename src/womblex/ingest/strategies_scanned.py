@@ -1,8 +1,14 @@
-"""Extraction strategies for scanned and hybrid PDF documents.
+"""OCR primitives for scanned pages, consumed by the orchestrator.
 
 Covers SCANNED_MACHINEWRITTEN, SCANNED_HANDWRITTEN, SCANNED_MIXED,
 HYBRID, and IMAGE document types — all requiring OCR (PaddleOCR by
 default, or an LLM/VLM engine such as Mistral OCR via AWS Bedrock).
+
+These are page-level primitives, not document-level strategies: every
+one of the types above is dispatched per page by
+``orchestrator.extract_with_plan``. Images are no exception — ``fitz``
+opens one as a single-page document, so it reaches the same
+``_apply_ocr_page`` path a scanned PDF page does.
 """
 
 from __future__ import annotations
@@ -14,18 +20,12 @@ import fitz
 
 from womblex.ingest.elements import TEXT_KINDS
 from womblex.ingest.extract import (
-    ExtractionMetadata,
-    ExtractionResult,
-    PageResult,
     TableData,
     TextBlock,
-    _extract_images_from_page,
     _normalise_bbox,
     _normalise_rect,
     _ocr_text_block,
-    _page_to_gray,
     _pixmap_to_array,
-    _text_coverage,
 )
 from womblex.ingest.interfaces.protocols import OCRRegionResult
 from womblex.ingest.ocr_tables import reconstruct_table, regions_in_rect, span_from_region
@@ -36,7 +36,6 @@ from womblex.ingest.paddle_ocr import (
     preprocess_for_ocr,
 )
 from womblex.ingest.table_grid import Span, cluster_x_centroids, rows_from_spans
-from womblex.ingest.views import table_to_element
 
 logger = logging.getLogger(__name__)
 
@@ -514,152 +513,3 @@ def _layout_blocks_and_tables(
             blocks = [block]
 
     return blocks, tables, consumed
-
-
-# ---------------------------------------------------------------------------
-# 8. image
-# ---------------------------------------------------------------------------
-
-
-class ImageExtractor:
-    """Extract text and metadata from standalone image files / image PDFs."""
-
-    def __init__(
-        self,
-        dpi: int = 200,
-        lang: str = "eng",
-        engine: str = "paddleocr",
-        engine_options: dict | None = None,
-    ) -> None:
-        self.dpi = dpi
-        self.lang = lang
-        self.engine = engine
-        self.engine_options = engine_options or {}
-
-    def _page_layout(
-        self,
-        page: fitz.Page,
-        page_result,
-        text: str,
-        conf: float,
-        pix,
-    ) -> tuple[str, list[TableData]]:
-        """Reconstruct tables on an image page and subtract them from the narrative.
-
-        Returns ``(narrative_text, tables)``. The layout pass is consulted
-        only for region-based engines; its result is adopted **only when a
-        table actually reconstructed**, so a page with no table — or one
-        whose grid failed the precision gates — keeps today's exact
-        behaviour: the full-page OCR text as one paragraph.
-
-        ``ImageExtractor`` runs OCR on the raw pixmap without
-        ``preprocess_for_ocr``, so there is no deskew to refuse (A2) and
-        the OCR and layout renders share a frame by construction.
-        """
-        if page_result.reading_order_native or not page_result.regions:
-            return text, []
-        try:
-            blocks, tables, consumed = _layout_blocks_and_tables(
-                page, self.dpi, text, conf,
-                ocr_regions=page_result.regions,
-                ocr_pix_dims=(int(pix.width), int(pix.height)),
-                page_deskewed=False,
-            )
-        except Exception as exc:
-            logger.warning(
-                "image-page layout pass failed: page=%d err=%s", page.number, exc,
-            )
-            return text, []
-        if not tables or not consumed:
-            return text, []
-        # A3's rule, unchanged: the narrative the layout pass returns is
-        # rebuilt from the regions outside the table rects, so the chunker
-        # does not see the table as prose *and* as markdown. A table-only
-        # page yields no block at all.
-        return ("\n".join(b.text for b in blocks), tables)
-
-    def extract(self, doc: fitz.Document) -> ExtractionResult:
-        from womblex.ingest.elements import Element
-        from womblex.ingest.heuristics_cv2 import calculate_blur_score
-
-        pages: list[PageResult] = []
-        elements: list[Element] = []
-        order = 0
-        confidences: list[float] = []
-        steps: list[str] = []
-
-        reader = get_ocr_reader(engine=self.engine, lang=self.lang, **self.engine_options)
-
-        for page in doc:
-            gray = _page_to_gray(page, dpi=self.dpi)
-            blur = calculate_blur_score(gray)
-            if blur is not None and blur < 50:
-                steps.append("low_blur_warning")
-
-            pix = page.get_pixmap(dpi=self.dpi)
-            img = _pixmap_to_array(pix)
-            page_result = reader.read_page(img)
-            if page_result.reading_order_native and page_result.markdown is not None:
-                text = page_result.markdown.strip()
-            else:
-                text = "\n".join(r.text for r in page_result.regions if r.text.strip())
-            avg_conf = page_result.confidence * 100.0
-            confidences.append(avg_conf)
-
-            pages.append(PageResult(page_number=page.number, text=text, method="ocr"))
-
-            pw, ph = page.rect.width, page.rect.height
-            page_conf = avg_conf / 100 if avg_conf else 0.0
-
-            # A4: run the layout pass so a detected table region on an image
-            # page reconstructs its cells, exactly as on the OCR-PDF path.
-            # LLM/VLM engines return markdown and no regions — nothing to
-            # reconstruct from — so they pass through untouched (A0).
-            narrative, page_tables = self._page_layout(
-                page, page_result, text, page_conf, pix,
-            )
-
-            placed: list[tuple[float, float, Element]] = []
-            if narrative.strip():
-                placed.append((0.0, 0.0, Element(
-                    order=0, kind="paragraph", extractor="ocr_paddle",
-                    page=page.number,
-                    bbox=_normalise_bbox((0, 0, pw, ph), pw, ph),
-                    text=narrative.strip(), confidence=page_conf,
-                )))
-            for t in page_tables:
-                placed.append((t.position.y, t.position.x, table_to_element(
-                    t, page.number, "ocr_paddle", 0,
-                )))
-            for im in _extract_images_from_page(page):
-                placed.append((im.position.y, im.position.x, Element(
-                    order=0, kind="image", extractor="figure_image",
-                    page=page.number, bbox=im.position,
-                    alt_text=im.alt_text, confidence=im.confidence,
-                )))
-
-            # Tables interleave by position rather than append — the page-wide
-            # narrative sorts first, then tables and figures in reading order.
-            placed.sort(key=lambda r: (r[0], r[1]))
-            for _y, _x, el in placed:
-                el.order = order
-                elements.append(el)
-                order += 1
-
-        avg_conf_doc = sum(confidences) / len(confidences) if confidences else 0.0
-        coverage = _text_coverage(pages)
-        unique_steps = sorted(set(steps))
-
-        return ExtractionResult(
-            pages=pages,
-            elements=elements,
-            method="image",
-            metadata=ExtractionMetadata(
-                extraction_strategy="image",
-                confidence=avg_conf_doc / 100 if avg_conf_doc else 0.0,
-                processing_time=0.0,
-                page_count=len(doc),
-                text_coverage=coverage,
-                preprocessing_steps=unique_steps,
-            ),
-        )

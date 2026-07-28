@@ -23,7 +23,6 @@ from womblex.ingest.extract import (
 from womblex.ingest.spreadsheet import SpreadsheetExtractor
 from womblex.ingest.strategies import (
     DocxExtractor,
-    ImageExtractor,
     TextExtractor,
 )
 
@@ -493,10 +492,10 @@ class TestExtractionMetadata:
 
 
 class TestGetExtractor:
-    """`get_extractor` is the legacy non-PDF dispatch. Native and scanned PDFs
-    route through `extract_pdf_with_plan` (orchestrator) — see
-    test_orchestrator-style assertions in test_pipeline.py / test_integration.py
-    for that path."""
+    """`get_extractor` is the legacy path-based dispatch — SPREADSHEET, DOCX,
+    TEXT and nothing else. Everything else, images included, routes through
+    `extract_pdf_with_plan` (orchestrator) — see test_pipeline.py /
+    test_integration.py, and test_table_reconstruction.py for the image case."""
 
     def _make_profile(self, doc_type: DocumentType) -> DocumentProfile:
         return DocumentProfile(
@@ -513,9 +512,11 @@ class TestGetExtractor:
             confidence=0.9,
         )
 
-    def test_image_returns_correct_extractor(self) -> None:
-        ext = get_extractor(self._make_profile(DocumentType.IMAGE))
-        assert isinstance(ext, ImageExtractor)
+    def test_image_is_not_handled_here(self) -> None:
+        """Images route through the orchestrator, like every other fitz-openable
+        input — PyMuPDF opens one as a single-page document."""
+        with pytest.raises(ValueError, match="SPREADSHEET/DOCX/TEXT"):
+            get_extractor(self._make_profile(DocumentType.IMAGE))
 
     def test_spreadsheet_returns_correct_extractor(self) -> None:
         ext = get_extractor(self._make_profile(DocumentType.SPREADSHEET))
@@ -530,7 +531,7 @@ class TestGetExtractor:
         assert isinstance(ext, TextExtractor)
 
     def test_pdf_type_raises(self) -> None:
-        with pytest.raises(ValueError, match="only handles non-PDF"):
+        with pytest.raises(ValueError, match="only handles SPREADSHEET/DOCX/TEXT"):
             get_extractor(self._make_profile(DocumentType.NATIVE_NARRATIVE))
 
 

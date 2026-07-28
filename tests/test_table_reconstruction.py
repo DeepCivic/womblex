@@ -7,8 +7,10 @@ A3 wires the feeder into the layout pass on the OCR-PDF path — a detected
 table region whose cells reconstruct becomes a ``TableData``, the page
 narrative is rebuilt from the regions outside its rect, and the absorbed
 regions are withheld from form-pair extraction. A2 refuses reconstruction
-outright on deskewed pages. A4 routes the image path (``ImageExtractor``)
-through the same layout pass, and A5's conventions are re-verified there.
+outright on deskewed pages. A4 closed as a no-op: the legacy
+``ImageExtractor`` it named was unreachable — ``extract_text`` routes
+standalone images through the orchestrator too — so it was deleted rather
+than wired up. ``TestImageDocumentsRouteThroughTheOrchestrator`` pins that.
 """
 
 from __future__ import annotations
@@ -670,175 +672,92 @@ class TestReconstructedTableDownstream:
 class _StubReader:
     """An OCR reader returning fixed regions, as a region-based engine would."""
 
-    def __init__(self, regions: list[OCRRegionResult], native_order: bool = False) -> None:
+    def __init__(self, regions: list[OCRRegionResult]) -> None:
         self._regions = regions
-        self._native = native_order
 
     def read_page(self, img) -> OCRPageResult:
-        if self._native:
-            return OCRPageResult(
-                regions=[], markdown="# whole page markdown",
-                reading_order_native=True, confidence=0.9,
-            )
         return OCRPageResult(regions=self._regions, confidence=0.9)
 
 
-class TestImagePathReconstruction:
-    """A4 — ``ImageExtractor`` routes through the layout pass like the PDF path.
+class TestImageDocumentsRouteThroughTheOrchestrator:
+    """A4, as resolved: standalone images were never a separate path.
 
-    The image path builds its elements directly rather than through
-    ``_accum_to_elements``, so every A3/A5 claim has to be observed again
-    here rather than inherited.
+    ``extract_text`` sends every non-(SPREADSHEET|DOCX|TEXT) document —
+    ``IMAGE`` included — to ``extract_pdf_with_plan``, because PyMuPDF opens
+    an image as a one-page document. The legacy ``ImageExtractor`` that A4
+    was written to fix was unreachable, so it was deleted instead of wired
+    up. These tests pin the routing, so a future change that reintroduces a
+    bypass fails here rather than silently losing table reconstruction on
+    every image input.
     """
 
-    @pytest.fixture
-    def image_doc(self):
-        """A 612×792 pt page — 1700×2200 px at 200 dpi, matching the stub rects."""
-        doc = fitz.open()
-        doc.new_page(width=612, height=792)
-        yield doc
-        doc.close()
+    def _profile(self):
+        from womblex.ingest.detect import DocumentProfile, DocumentType
 
-    def _stub_analyzer(self, monkeypatch, regions=None) -> None:
+        return DocumentProfile(
+            doc_type=DocumentType.IMAGE,
+            page_count=1, has_text_layer=False, text_coverage=0.0,
+            has_images=True, has_tables=True, has_handwriting_signals=False,
+            ocr_confidence=None, glyph_regularity=None,
+            stroke_consistency=None, confidence=0.9,
+        )
+
+    def _png(self, tmp_path):
+        """A 612×792 pt page rendered at 200 dpi — 1700×2200 px, matching the stub rects."""
+        doc = fitz.open()
+        page = doc.new_page(width=612, height=792)
+        page.insert_text((72, 100), "x")
+        out = tmp_path / "scan.png"
+        page.get_pixmap(dpi=200).save(str(out))
+        doc.close()
+        return out
+
+    def _extract(self, tmp_path, monkeypatch):
+        from womblex.ingest.extract import extract_text
+
+        monkeypatch.setattr(
+            "womblex.ingest.strategies_scanned.get_ocr_reader",
+            lambda **kw: _StubReader(_grid_regions() + _narrative_regions()),
+        )
         monkeypatch.setattr(
             "womblex.ingest.strategies_scanned.get_layout_analyzer",
-            lambda: _StubAnalyzer(regions if regions is not None else [
+            lambda: _StubAnalyzer([
                 LayoutRegionResult(bbox=_TABLE_RECT, label="Table",
                                    block_type="table", confidence=0.96),
                 LayoutRegionResult(bbox=_NARRATIVE_RECT, label="Text",
                                    block_type="paragraph", confidence=0.90),
             ]),
         )
-
-    def _extract(self, doc, monkeypatch, ocr_regions, *, native_order=False):
-        from womblex.ingest.strategies_scanned import ImageExtractor
-
+        # Deskew would refuse reconstruction (A2); this fixture has no skew,
+        # so hold preprocessing to the identity and keep the test about routing.
         monkeypatch.setattr(
-            "womblex.ingest.strategies_scanned.get_ocr_reader",
-            lambda **kw: _StubReader(ocr_regions, native_order=native_order),
+            "womblex.ingest.strategies_scanned.preprocess_for_ocr",
+            lambda img: (img, []),
         )
-        return ImageExtractor(dpi=200, engine="paddleocr").extract(doc)
+        return extract_text(self._png(tmp_path), self._profile(), dpi=200)[0]
 
-    def test_table_region_becomes_a_table_element(self, image_doc, monkeypatch) -> None:
-        self._stub_analyzer(monkeypatch)
-        result = self._extract(
-            image_doc, monkeypatch, _grid_regions() + _narrative_regions(),
-        )
+    def test_get_extractor_refuses_image(self) -> None:
+        """The dead IMAGE case is gone — routing it here would be the bug."""
+        from womblex.ingest.extract import get_extractor
+
+        with pytest.raises(ValueError, match="SPREADSHEET/DOCX/TEXT"):
+            get_extractor(self._profile())
+
+    def test_image_document_yields_a_reconstructed_table(
+        self, tmp_path, monkeypatch,
+    ) -> None:
+        result = self._extract(tmp_path, monkeypatch)
         tables = [e for e in result.elements if e.kind == "table"]
         assert len(tables) == 1
         el = tables[0]
         assert el.header_rows == [0]
         assert [c.value for c in el.cells if c.row == 0] == ["H1", "H2", "H3", "H4"]
-        assert [c.value for c in el.cells if c.row == 1] == ["r1c1", "r1c2", "r1c3", "r1c4"]
-        # A5 on the image path: the producer marker survives the same
-        # context_* → meta copy, so a reconstructed table stays
-        # distinguishable in the parquet.
         assert el.meta["context_producer"] == "table_grid"
-        assert el.extractor == "ocr_paddle"
-        assert el.page == 0
 
-    def test_narrative_element_holds_no_table_text(self, image_doc, monkeypatch) -> None:
-        """A3's subtraction rule applies identically — no double-count."""
-        self._stub_analyzer(monkeypatch)
-        result = self._extract(
-            image_doc, monkeypatch, _grid_regions() + _narrative_regions(),
-        )
+    def test_image_document_narrative_holds_no_table_text(
+        self, tmp_path, monkeypatch,
+    ) -> None:
+        result = self._extract(tmp_path, monkeypatch)
         paragraphs = [e for e in result.elements if e.kind == "paragraph"]
         assert len(paragraphs) == 1
         assert paragraphs[0].text == "Narrative line one\nNarrative line two"
-        assert "r1c1" not in paragraphs[0].text
-
-    def test_page_text_stays_verbatim(self, image_doc, monkeypatch) -> None:
-        """``PageResult.text`` feeds text-coverage and CER — the whole page."""
-        self._stub_analyzer(monkeypatch)
-        result = self._extract(
-            image_doc, monkeypatch, _grid_regions() + _narrative_regions(),
-        )
-        assert "r1c1" in result.pages[0].text
-        assert "Narrative line one" in result.pages[0].text
-
-    def test_table_only_page_emits_no_narrative(self, image_doc, monkeypatch) -> None:
-        self._stub_analyzer(monkeypatch)
-        result = self._extract(image_doc, monkeypatch, _grid_regions())
-        assert [e.kind for e in result.elements] == ["table"]
-
-    def test_chunker_sees_the_table_exactly_once(self, image_doc, monkeypatch) -> None:
-        from womblex.process.chunker import collect_tables_from_elements
-
-        self._stub_analyzer(monkeypatch)
-        result = self._extract(
-            image_doc, monkeypatch, _grid_regions() + _narrative_regions(),
-        )
-        tables = collect_tables_from_elements(result.elements)
-        assert len(tables) == 1
-        _page, markdown = tables[0]
-        assert "H1" in markdown
-        assert markdown.count("r1c1") == 1
-
-    def test_refusal_keeps_todays_full_page_paragraph(
-        self, image_doc, monkeypatch,
-    ) -> None:
-        """Below the gates the image path behaves exactly as it did before A4."""
-        self._stub_analyzer(monkeypatch)
-        sparse = [_region(100, 100, 300, 140, "not a grid")] + _narrative_regions()
-        result = self._extract(image_doc, monkeypatch, sparse)
-        assert not any(e.kind == "table" for e in result.elements)
-        paragraphs = [e for e in result.elements if e.kind == "paragraph"]
-        assert len(paragraphs) == 1
-        assert "not a grid" in paragraphs[0].text
-        assert "Narrative line one" in paragraphs[0].text
-
-    def test_no_table_region_keeps_todays_full_page_paragraph(
-        self, image_doc, monkeypatch,
-    ) -> None:
-        self._stub_analyzer(monkeypatch, regions=[
-            LayoutRegionResult(bbox=_NARRATIVE_RECT, label="Text",
-                               block_type="paragraph", confidence=0.90),
-        ])
-        result = self._extract(
-            image_doc, monkeypatch, _grid_regions() + _narrative_regions(),
-        )
-        assert not any(e.kind == "table" for e in result.elements)
-        paragraphs = [e for e in result.elements if e.kind == "paragraph"]
-        assert len(paragraphs) == 1
-        assert "r1c1" in paragraphs[0].text
-
-    def test_layout_failure_keeps_todays_full_page_paragraph(
-        self, image_doc, monkeypatch,
-    ) -> None:
-        """No layout model available is the common case, not an error path."""
-        def _boom():
-            raise RuntimeError("no layout analyzer")
-
-        monkeypatch.setattr(
-            "womblex.ingest.strategies_scanned.get_layout_analyzer", _boom,
-        )
-        result = self._extract(
-            image_doc, monkeypatch, _grid_regions() + _narrative_regions(),
-        )
-        assert not any(e.kind == "table" for e in result.elements)
-        paragraphs = [e for e in result.elements if e.kind == "paragraph"]
-        assert len(paragraphs) == 1
-        assert "r1c1" in paragraphs[0].text
-
-    def test_llm_engine_bypasses_the_layout_pass(self, image_doc, monkeypatch) -> None:
-        """A0 — no regions to reconstruct from; markdown passes through."""
-        def _must_not_run():
-            raise AssertionError("layout pass reached on a native-reading-order engine")
-
-        monkeypatch.setattr(
-            "womblex.ingest.strategies_scanned.get_layout_analyzer", _must_not_run,
-        )
-        result = self._extract(image_doc, monkeypatch, [], native_order=True)
-        assert not any(e.kind == "table" for e in result.elements)
-        assert result.pages[0].text == "# whole page markdown"
-
-    def test_element_order_is_dense_and_ascending(self, image_doc, monkeypatch) -> None:
-        """Tables are placed by position, so ``order`` must be assigned after sorting."""
-        self._stub_analyzer(monkeypatch)
-        result = self._extract(
-            image_doc, monkeypatch, _grid_regions() + _narrative_regions(),
-        )
-        assert [e.order for e in result.elements] == list(range(len(result.elements)))
-        # The page-wide narrative sorts to y=0, ahead of the table's own y.
-        assert [e.kind for e in result.elements] == ["paragraph", "table"]

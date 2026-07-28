@@ -281,7 +281,9 @@ def generate_extraction_report(results: dict[str, list[dict]]) -> str:
     lines.append("Doc-level types are a *summary attribute* of the orchestrator's "
                  "per-page dispatch (`_apply_native_page` / `_apply_ocr_page`); "
                  "per-page routing is what determines actual behaviour. "
-                 "Non-PDFs route via `get_extractor()`.")
+                 "Only the path-based formats (DOCX, SPREADSHEET, TEXT) route "
+                 "via `get_extractor()`; everything `fitz` can open — images "
+                 "included — goes through the orchestrator.")
     lines.append("")
     lines.append("| Document Type | Path | Per-page operations |")
     lines.append("|---------------|------|---------------------|")
@@ -292,7 +294,8 @@ def generate_extraction_report(results: dict[str, list[dict]]) -> str:
     lines.append("| SCANNED_HANDWRITTEN | orchestrator | PaddleOCR + line-based form pairs |")
     lines.append("| SCANNED_MIXED | orchestrator | PaddleOCR + per-page typed/handwritten classification |")
     lines.append("| HYBRID | orchestrator | per-page native vs OCR dispatch |")
-    lines.append("| IMAGE | `ImageExtractor` (legacy) | Direct PaddleOCR |")
+    lines.append("| IMAGE | orchestrator | opened by `fitz` as a one-page doc; "
+                 "PaddleOCR + YOLO layout + table reconstruction, as any scanned page |")
     lines.append("| DOCX | `DocxExtractor` | python-docx, OOXML body in document order |")
     lines.append("| SPREADSHEET | `SpreadsheetExtractor` | one `ExtractionResult` per workbook; `kind='sheet_meta'` + `kind='sheet_cell'` elements |")
     lines.append("| TEXT | `TextExtractor` | UTF-8/Latin-1 passthrough |")

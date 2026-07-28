@@ -82,9 +82,8 @@ def table_to_element(
     Headers become row 0; data rows shift to rows 1..n. Header row index
     captured in ``header_rows`` so the legacy projection round-trips.
 
-    Lives here rather than in the orchestrator because both PDF paths need
-    it: the orchestrator's ``_accum_to_elements`` and ``ImageExtractor``,
-    which builds its elements directly.
+    Sits beside the ``TableData`` view it reads and the reverse projections
+    below, so both directions of the view↔element mapping are in one file.
     """
     cells: list[Cell] = []
     for col_idx in range(len(t.headers)):
