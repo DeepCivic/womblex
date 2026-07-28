@@ -7,6 +7,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`money` annotation op** (`womblex money --shards`). Recovers monetary
+  amounts from the extraction parquet and writes two siblings per batch:
+  `*.money_spans.parquet` (one row per amount) and `*.money_columns.parquet`
+  (the column-classification audit). Offline, API-free, no ordering dependency
+  on enrich, and it never rewrites element or chunk text. Implements the design
+  in [docs/money.md](docs/money.md).
+
+  Two evidence paths, because most of this corpus's amounts carry no currency
+  marker at all:
+
+  - **Self-evidencing** (`process/money.py`) — a symbol, ISO 4217 code or
+    currency word sits with the number. The pattern set is applied in priority
+    order with overlap resolution, magnitude expansion (`$4.2bn`, 97% of marked
+    narrative amounts carry a scale suffix), range endpoints linked rather than
+    collapsed, qualifiers (`up to`, `~`) stored separately from the value, and
+    accounting negatives gated — an unanchored bracketed-number scan is the
+    corpus's worst false-positive source (`s167(1)`, `(02) 6203 7300`).
+    Candidates embedded in Australian false-positive classes (dates, times,
+    phone numbers, ABNs/ACNs, legislative references, measurements,
+    percentages) are rejected.
+  - **Column-evidenced** (`process/money_columns.py`) — a bare number whose
+    money-ness comes from its column: number format carrying a currency symbol
+    (definitive), else money-vocabulary header plus predominantly numeric
+    cells. Numeric cells never promote a column alone; whole-word vetoes
+    suppress one (`age` vetoes `Age`, `Average Cost` survives); null markers
+    are absent values excluded from the numeric fraction; the header supplies
+    the column's scale (`$m`, `$'000`) and currency. A column with no
+    recoverable header is left un-extracted.
+
+  Values are exact `decimal128(38, 4)`, not floats — aggregating a 48,997-row
+  register accumulates float error. Three loci are anchored in two coordinate
+  spaces and never mixed: `narrative` spans are character offsets into the
+  reassembled narrative in the `processing.text_source` layer (stamped on every
+  row, so they join enrichment mentions and map to chunks), `table_cell` is
+  `(parent_elem_order, row, col)`, `sheet_cell` is `(sheet, row, col)`.
+
+  Header continuation rows are folded into the header: PDF financial tables
+  wrap `Approved` / `Budget $m` across two rows and declare only the first,
+  which previously left the column looking like a nameless run of bare
+  numbers. One leading non-numeric row is absorbed when the rest of the column
+  is numeric, so a genuine text data row is never eaten.
+
+  No new dependencies. Pattern 10 (bare numbers near financial vocabulary in
+  narrative) and continental number formats ship off by default.
+
+  A number in a header no longer declares a thousands scale: the `'000`
+  pattern matched the `000` inside any number, so a `Grants over $10,000`
+  header multiplied every cell beneath it by 1,000.
+
+  Tier-3 ISO codes are gated on surrounding context rather than merely
+  scored lower, because several are ordinary English words in capitals:
+  ungated, `TOP 10 projects` reads as ten Tongan paʻanga and
+  `ALL OTHER COMPENSATION ($)` resolves to Albanian lek. A tier-3 code needs a
+  currency symbol or financial trigger word nearby; in a header it must be
+  parenthesised (`Value (PGK)`). Tier 1/2 codes stand alone.
+
+  Count columns are no longer read as money. A financial table marks a count
+  column `(#)` exactly as it marks a money column `($)` — the same page can
+  carry `Threshold ($)` and `Threshold (#)` — but the header tokeniser dropped
+  `#` entirely and promoted the count column on the vocabulary term alone.
+
+  A veto term no longer suppresses a column whose header declares its own
+  currency: `Grant Date Fair Value of Stock and Option Awards ($)` is a money
+  column that happens to contain the word "date", and vetoing it lost all five
+  amounts beneath it. Count columns on the same page carry `(#)` rather than
+  `($)` and stay vetoed. The overridden term is still recorded in the column
+  audit.
+
+  First real-document run (four benchmark fixtures through the real pipeline,
+  every span hand-checked): all 42 marked narrative amounts recovered from the
+  ANAO Major Projects Report, and its `Approved Budget $m` column reconciles
+  three ways — 25 project amounts summing to the table's own total row and to
+  the narrative's independently written "$78.7 billion". Details and the
+  measured limits in [docs/money.md](docs/money.md).
+
 ### Fixed
 - **Spreadsheet extraction preserves `number_format` and a numeric
   `value_type`.** `ingest/spreadsheet.py` read cells with pandas

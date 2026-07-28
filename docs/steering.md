@@ -31,6 +31,7 @@ See `accuracy/` for current benchmark numbers. See `architecture.md` for how the
 | 14 | Per-document-type config overrides | High | Enables type-specific DPI, thresholds | |
 | 15 | End-to-end task metrics (Isaacus integration) | High | Measures actual application success | **In progress — I6/I7 landed Isaacus enrich/link/embed stages; PII (I8) + coverage metrics next** |
 | 16 | Handwriting via dedicated HTR model | High | Only if handwritten docs are in scope | |
+| 17 | Table-cell reconstruction for OCR'd pages | Medium | Unblocks every structural consumer on scanned documents. Measured: a scanned money table yields 1 amount of ~35 today, 30 with cells | **Open — see below** |
 
 ## Findings by Component
 
@@ -54,6 +55,55 @@ Two `DocumentType` values are still unreachable:
 Layout detection produces 0 predictions across all DocLayNet fixtures — 0% precision, recall, and F1 for every class. The YOLOv8n model (general-purpose COCO) produces no document-layout predictions. A document-specific layout model is needed for any layout analysis capability.
 
 Per-class P/R/F1 is tracked in `accuracy/EXTRACTION.md`.
+
+### Table-cell reconstruction on OCR'd pages (#17)
+
+**A detected table region never becomes cells.** Found while validating the
+`money` op against real documents ([docs/money.md](money.md), "First
+real-document run"); recorded here because the fix is entirely extraction-side
+and benefits every structural consumer, not just money.
+
+What happens today, on DocLayNet `dense_text_548` (a scanned
+*Grants of Plan-Based Awards* page, four money columns, ~35 amounts):
+
+1. OCR reads the page well — nearly every digit is correct in the output.
+2. The layout model **does** find the table: `analyze()` returns a `table`
+   region at 0.96 confidence.
+3. `_layout_blocks_and_tables` (`ingest/strategies_scanned.py`) turns that
+   region into `TextBlock(text="[TABLE]", block_type="table")` and returns.
+   Its `tables: list[TableData] = []` is declared, never appended to on any
+   path, and returned empty.
+4. So the shard carries no `table` element and no `table_cells` rows. Every
+   downstream consumer of structure sees a single page-wide paragraph.
+
+Two changes are required, and the second is easy to miss:
+
+- **Reconstruct cells within a detected table region.** The inputs exist:
+  RapidOCR returns `OCRRegionResult(bbox, text, confidence)` per detected
+  region, and `ingest/grid_projection.py` already projects
+  `(x0, y0, x1, y1, text)` tuples onto columns via occupancy histograms and
+  gutter detection — the same geometry, currently fed from PyMuPDF words
+  rather than OCR boxes. `ingest/spreadsheet_print.py` solves the adjacent
+  problem (column inference + row binning) for native PDFs and is the closest
+  prior art for the row side.
+- **Route standalone images through it.** `ImageExtractor.extract` emits one
+  page-wide `paragraph` element per page and never calls
+  `_layout_blocks_and_tables` at all. Fixing only the OCR-PDF path would leave
+  every image input (the whole DocLayNet/FUNSD fixture shape) unchanged.
+
+**Measured payoff.** Feeding the same page's real grid through the money op's
+column classifier recovers 30 of 30 amounts, versus 1 today — the consuming
+stage is already ready for the structure. More broadly this is the only route
+to the column-evidenced path on scanned documents, which
+[money.md](money.md) measures as where the overwhelming majority of the
+corpus's monetary amounts live.
+
+**Validation this needs.** Accuracy docs are test-generated, so a
+reconstructor must be measured with `utils/tabular_metrics.py` (structural
+fidelity, data integrity, key-column preservation) over the DocLayNet
+fixtures, and `docs/accuracy/EXTRACTION.md` regenerated. Precision matters
+more than coverage here: a wrongly-binned grid produces confidently wrong
+values downstream, which is worse than the current honest silence.
 
 ### Reading Order
 

@@ -91,6 +91,28 @@ spellfix:
   general_edits: false        # Tier A homoglyph (digit→letter) only. true = Tier B edit-1 (proper-noun risk).
   # dict_name: en_AU          # Hunspell dict resolved via utils.models (bundled under _models/en_AU).
 
+# Monetary amount annotation (`womblex money --shards`). Offline, API-free,
+# annotation only — writes `*.money_spans.parquet` (one row per amount across
+# the narrative / table_cell / sheet_cell loci) + `*.money_columns.parquet`
+# (the column-classification audit). Never rewrites element or chunk text.
+# Narrative offsets index the processing.text_source layer below. See
+# docs/money.md.
+money:
+  enabled: true
+  # narrative: true            # Scan reassembled narrative (self-evidencing amounts).
+  # default_currency: AUD      # `$` means AUD unless a document establishes otherwise.
+  # international_numbers: false  # Accept 1.000,50. Off: Australia has no comma decimals.
+  # implicit_context: false    # Pattern 10 (bare number near "cost"/"fee"/…). Low precision.
+  # min_confidence: 0.5        # Drop narrative candidates below this.
+  # context_chars: 160         # Surrounding text stored with each narrative span.
+  # text_source: null          # null = inherit processing.text_source.
+  columns:
+    enabled: true
+    # numeric_fraction_min: 0.7  # Of non-null cells; null markers (—, n/a, nil) excluded.
+    # min_cells: 3               # Non-null cells before header evidence is trusted.
+    # extra_header_terms: []     # Corpus money headers, added to the built-in set.
+    # extra_veto_terms: []       # Corpus headers that suppress a column (whole-word).
+
 # PII cleaning uses regex pattern recognisers (Presidio-style) validated by
 # a Sentence Transformers context model (all-MiniLM-L6-v2, 22M params).
 #

@@ -4,9 +4,13 @@ Design for the `money` annotation op: recovering monetary amounts from
 Womblex's extraction output, normalising them to exact values, and recording
 them as a joinable sidecar.
 
-Status: **design + one shipped prerequisite.** The extractor change described
-under [Shipped prerequisite](#shipped-prerequisite) is merged. The op itself is
-specified here and not yet built.
+Status: **shipped.** The op is built — `womblex money --shards <dir>` writes
+`*.money_spans.parquet` + `*.money_columns.parquet` per batch
+(`process/money*.py`, `store/money_output.py`). The extractor change under
+[Shipped prerequisite](#shipped-prerequisite) is merged. What remains open is
+the measurement: there is still no labelled ground truth, so no precision or
+recall figure is quoted here — see
+[Open gap: no ground truth](#open-gap-no-ground-truth).
 
 ## Scope and naming
 
@@ -114,6 +118,18 @@ Every ISO currency code is supported but assigned lower confidence unless
 reinforced by surrounding context. **Three uppercase letters are never treated
 as a currency unless they are members of the ISO 4217 list** — `ABC` and `XYZ`
 are not currencies.
+
+"Unless reinforced by surrounding context" is a **gate**, not just a
+confidence penalty, because a number of ISO codes are ordinary English words
+in capitals: `ALL` (Albanian lek), `TOP` (Tongan paʻanga), `TRY`, `PEN`, `CUP`,
+`MAD`, `BOB`, `CAD`. Ungated, `TOP 10 projects were funded` is ten paʻanga and
+`ALL 25 recipients` is Albanian lek — both shapes are common in government
+reporting. A tier-3 code is admitted only when a currency symbol or financial
+trigger word sits within ~48 characters; tier 1 and 2 codes stand alone. The
+same asymmetry applies to column headers: a *parenthesised* code names the
+column's currency (`Value (PGK)`), while a bare one is trusted only at tier
+1/2 — so `ALL OTHER COMPENSATION ($)`, a standard heading in this document
+class, resolves through its `$` rather than to Albanian lek.
 
 ## Number recognition
 
@@ -253,12 +269,19 @@ column is classified once; every cell beneath inherits the verdict.
    promotes a column on its own: identifiers, counts and postcodes are
    numerically indistinguishable from money.
 
-**Vetoes.** A header matching non-money vocabulary suppresses the column even
-when its cells are numeric and thousands-separated: `postcode`, `abn`, `acn`,
+**Vetoes.** A header matching non-money vocabulary suppresses a column that
+would otherwise be promoted on vocabulary alone, even when its cells are
+numeric and thousands-separated: `postcode`, `abn`, `acn`,
 `id`, `count`, `number`, `phone`, `year`, `date`, `percent`, `%`, `rate`,
 `ratio`, `index`, `quantity`, `fte`, `headcount`, `latitude`, `longitude`.
 Term matching must be **whole-word** — `age` is a veto term and `Average Cost`
-must survive it.
+must survive it. A veto does **not** override a header that declares its own
+currency: `Grant Date Fair Value of Stock and Option Awards ($)` is a money
+column containing the incidental word `date`, and vetoing it loses all five
+amounts beneath it. The `($)` is the header describing itself, in the same
+string as the veto term, so it wins; the overridden term is still recorded in
+the column audit. A count column on the same page carries `(#)`, not `($)`,
+and stays vetoed.
 
 **Null markers.** Financial tables are sparse. `—`, `–`, `-`, `n/a`, `nil`,
 `none` and similar are absent values and must be excluded from the numeric
@@ -268,7 +291,9 @@ suppresses genuine money columns: on the DocLayNet compensation-table fixture a
 
 **Column scale.** Financial tables put the unit in the header (`$m`, `$'000`)
 and leave the cells bare, so the header supplies the multiplier for every cell
-beneath it. Where no header is recoverable — the common case for PDF financial
+beneath it. The `'000` form must not match the `000` inside a number already in
+the header — `Grants over $10,000` declares no scale, and reading one there
+multiplies every cell beneath it by 1,000. Where no header is recoverable — the common case for PDF financial
 tables — bare cells are **left alone rather than guessed at**. Under-counting
 is the correct failure mode here.
 
@@ -335,6 +360,54 @@ With an approximation qualifier:
 }
 ```
 
+### As built
+
+`*.money_spans.parquet` is that record, flattened, with the anchor made
+explicit. One row per amount; `locus` discriminates which anchor group is
+populated, and **exactly one group is non-null per row**:
+
+| Locus | Non-null anchor columns |
+|---|---|
+| `narrative` | `text_source`, `start_char`, `end_char`, `page` |
+| `table_cell` | `parent_elem_order`, `row`, `col` |
+| `sheet_cell` | `sheet`, `row`, `col`, `elem_order` |
+
+Beyond the JSON above the row also carries `evidence` (`p1`–`p10` for the
+narrative patterns, `number_format` / `header+numeric` / `header_currency` for
+the column path), `range_group` + `range_role` (which link a range's two
+endpoints — the JSON record has no way to express the relationship the design
+requires be preserved), and `column_id` (the classified column a cell
+inherited from; null when the cell was self-evidencing).
+
+`*.money_columns.parquet` is the second sidecar: one row per column
+considered, money or not, with the evidence that decided it — header text,
+number format, numeric and null fractions, veto term, currency, scale, and how
+many cells it yielded. The column path decides ~98.7% of the corpus's amounts
+off a single per-column verdict, and with no labelled ground truth yet that
+verdict needs to be reviewable rather than implicit in the spans it produced.
+
+Two departures from the pipeline sketch below, both consequences of the
+[placement](#placement-in-womblex) decision:
+
+- **Step 1 does no text rewriting.** Unicode and whitespace normalisation are
+  already the `normalise` / `spellfix` overlays' job, and re-doing them inside
+  this op would put spans in a private coordinate space that no longer joins to
+  enrichment mentions or chunks. The op selects an existing element-text layer
+  (`processing.text_source`) and records which one on every narrative row.
+- **Step 6's "surrounding sentence" is a capped character window**
+  (`context_chars`, default 160), not a parsed sentence. The offsets recover
+  anything wider.
+
+One invariant falls out of the same decision and is worth stating, because
+violating it fabricates data rather than merely missing some. The reassembled
+narrative joins elements with `\n\n`, so **no pattern may match across two line
+breaks**: whitespace inside a pattern spans at most one newline, and a range's
+separator none at all. Without that, `Payment of $100` and `-$200 was made` —
+two unrelated paragraphs, possibly two unrelated table rows — bind into a
+single `$100–$200` range. This mirrors the newline rule the PII regexes already
+follow ([CLAUDE.md](../CLAUDE.md)). A magnitude suffix *may* sit across one
+wrap (`$5\nmillion`), because PDF text layers wrap mid-phrase constantly.
+
 ## Processing pipeline
 
 1. **Pre-processing** — preserve original text and character offsets; Unicode
@@ -378,8 +451,19 @@ The narrative offsets index whichever element-text layer was selected
 (`processing.text_source`: `elements` / `normalised` / `spellfix`), so that
 choice is recorded alongside the spans and the space stays self-describing.
 
-**Output** is a `*.money_spans.parquet` sidecar per batch, joinable on
-`source_hash`, with a per-stage `CheckpointManager` like every other stage.
+**Output** is a `*.money_spans.parquet` sidecar per batch (plus the
+`*.money_columns.parquet` verdict audit), joinable on `source_hash`, with a
+per-stage `CheckpointManager` like every other stage.
+
+**As built:** `womblex money --shards <dir>`, config under `money:`.
+`process/money.py` (self-evidencing patterns) and `process/money_columns.py`
+(column classification) are pure cores over strings and cell lists;
+`process/money_stage.py` walks the shard directory, applies the selected
+text-source overlay, and writes both sidecars; `store/money_output.py` owns
+the schemas. A classified money column owns its cells — the column supplies
+currency, scale and the accounting-negative gate — while cells in every other
+column, vetoed ones included, are still scanned for *self-evidencing* amounts:
+a `$1,200.50` cell carries its own evidence whatever its header says.
 
 ## Decisions
 
@@ -431,6 +515,21 @@ closed and slow-moving. **The risk in this feature is not narrative parsing —
 it is deciding whether a bare column of numbers is money, and no candidate
 library addresses that.**
 
+### Header continuation rows are folded into the header
+
+Measured on the ANAO Major Projects Report: PDF financial tables wrap their
+header across two lines — `Approved` on row 0, `Budget $m` on row 1 — and the
+extractor declares only the first a header row. The unit and the money
+vocabulary both live in the second, so the column read as a nameless run of
+bare numbers and was left alone, losing all 27 approved-budget amounts.
+
+`fold_header_continuation` absorbs **one** leading body row into the header,
+and only when that row is non-numeric text while the rest of the column is
+numeric enough to be a data column — so a genuine text data row is never eaten.
+This is a header-*reading* fix, not a relaxation of the deferred "no
+recoverable header" case below: the header is present in the table, just not
+where the extractor said it was.
+
 ### Cross-validation by re-reading sources: rejected
 
 An earlier design recounted amounts by independently re-reading each source
@@ -458,6 +557,81 @@ PDFs have no text layer, and reporting those as failures would bury real ones).
 - **Penalty units** — zero occurrences across all 29 benchmark PDFs. These are
   audit, FOI and budget documents, not legislation.
 
+## First real-document run
+
+Four benchmark fixtures, run through the real pipeline (extract → money) rather
+than synthetic shards. Still **not** a precision/recall measurement — there is
+no labelled set — but every span was checked by hand against the source.
+
+| Fixture | Amounts found | Checked against |
+|---|---|---|
+| ANAO Major Projects Report 2020–21 (PDF, 30pp) | 42 narrative + 53 table_cell | every `$` in the transcript |
+| ANAO, same report as a text transcript | 42 narrative | 44 `$` in the file |
+| DFAT PBS 2025–26 (DOCX) | 47 narrative + 12 table_cell | source `python-docx` table dump |
+| DocLayNet `dense_text_548` (scanned page, OCR) | 1 of ~35 | ground-truth transcript |
+| FUNSD `82200067_0069` (transcript) | 0 | ground-truth transcript |
+
+Findings that changed the code are in the [Decisions](#decisions) section
+below. The rest, as measurements:
+
+- **Recall on marked narrative amounts is complete on the two ANAO runs.** Of
+  44 `$` characters in the transcript, 42 are amounts and all 42 are
+  extracted; the other two are the `Budget $m` / `Amount $b` column headers,
+  which are unit declarations, not amounts.
+- **The `Approved Budget $m` column reconciles three ways.** Its 25 project
+  amounts sum to $78,699.2m, matching both the table's own total row and the
+  narrative's independently written "$78.7 billion". That is the strongest
+  correctness signal available without a labelled set, and it exercises the
+  whole column path — header scale, cell parsing, exact decimals.
+- **FUNSD's zero is correct.** Its `AMOUNT RECEIVED FROM VENDOR` column is
+  empty in the source; the numbers on the page are unit counts and rep counts.
+- **Two header-marker defects, both found on one scanned page.** That page
+  carries `Threshold ($)` and `Threshold (#)` — dollars and unit counts,
+  distinguished only by the marker. The money op honoured neither correctly:
+  `Grant Date Fair Value ... ($)` was vetoed on the incidental word `date`,
+  and `Threshold (#)` was promoted to money because the header tokeniser
+  dropped `#` entirely and matched the vocabulary term `threshold`. The first
+  lost 5 real amounts; the second invented 5. Both are fixed, and `#` is now a
+  token character precisely because a financial table marks a count column the
+  same way it marks a money one.
+
+- **Scanned money tables are unreachable today, and that is the largest
+  measured gap.** DocLayNet `dense_text_548` is a proxy-statement
+  *Grants of Plan-Based Awards* page: four money columns headed
+  `Threshold ($)` / `Target ($)` / `Maximum ($)` / `Grant Date Fair Value …
+  ($)`, about 35 amounts. The op recovers **one** — the single footnote where
+  OCR preserved a `$`. OCR captures nearly every digit correctly, but
+  `_layout_blocks_and_tables` detects the table region (YOLO confidence 0.96)
+  and emits it as a `[TABLE]` placeholder block with **no cells**: its
+  ``tables`` list is never populated on any code path. So no scanned page
+  yields a `table` element, the column path has nothing to classify, and every
+  amount on it is a bare number the narrative path is right to decline.
+
+  Fed the same page's real structure, the column path recovers **30 of 30**.
+  The op is ready; OCR table-cell reconstruction is the missing piece, and it
+  is extraction-side work tracked as item #17 in
+  [steering.md](steering.md#table-cell-reconstruction-on-ocrd-pages-17) — not
+  a change to this op. This
+  also answers the benchmark gap noted below — money loss through OCR was
+  unmeasured, and on this page it is ~97%, none of it attributable to the
+  detector.
+
+  (Two further amounts are lost to OCR reading `$15.37` as `s15.37`. The op is
+  right to decline those: `s15` is precisely the legislative-reference shape
+  the false-positive table blocks, so accepting `s` as a currency symbol would
+  trade two recoveries for a large class of false positives. That fix belongs
+  in OCR or a cleaning op, and it is a rounding error next to the 30.)
+- **Plain-text records cannot use the column path.** The ANAO transcript
+  flattens the same `Approved Budget $m` table into narrative, where the
+  amounts are bare numbers with no column to inherit from — 27 amounts
+  recovered from the PDF, 0 from the transcript of the same pages. This is the
+  designed refusal, and it is a reason to prefer the structural source when a
+  corpus offers both.
+- **No financial tables in the DFAT DOCX.** All 51 of its tables are
+  performance-measure or glossary tables (confirmed against the source with
+  `python-docx`); its money is narrative, and 47 amounts were recovered there.
+  Zero money columns is correct, not a miss.
+
 ## Open gap: no ground truth
 
 **There is no labelled money data in the benchmark.** Every count in this
@@ -471,10 +645,13 @@ money / not-money with expected value. That is a small artefact, not a
 subsystem, and it is what would let the `quantulum3` decision above be settled
 by measurement rather than argument, and serve as a regression baseline.
 
-Fixture coverage is otherwise good for spreadsheets and native PDFs. One gap
-remains: **no scanned money document exists** in the benchmark. Of 29 PDFs, 11
-have no text layer, but none of those contain monetary amounts, so money loss
-through OCR is unmeasured.
+Fixture coverage is otherwise good for spreadsheets and native PDFs. The
+scanned-money gap is now partly closed: DocLayNet `dense_text_548` is a scanned
+page of money columns, and the measured loss is ~97% — attributable entirely to
+OCR producing no table cells, not to the detector (see
+[First real-document run](#first-real-document-run)). Of the 29 PDFs, 11 have
+no text layer and none of those contain monetary amounts, so OCR money loss
+across the PDF set specifically remains unmeasured.
 
 ## Shipped prerequisite
 

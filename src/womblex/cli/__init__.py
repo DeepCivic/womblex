@@ -14,6 +14,7 @@ Usage:
     womblex graph-refresh        --shards <dir>   (offline mention→chunk edge rebuild)
     womblex embed                --shards <dir> [--config configs/example.yaml]
     womblex manifest             --shards <dir> [-o PATH]
+    womblex money                --shards <dir> [--config configs/example.yaml]
     womblex normalise            --shards <dir> [--config configs/example.yaml]
     womblex redact               --shards <dir> --pdfs <dir> [--checkpoint PATH]
     womblex redact               --config configs/example.yaml
@@ -37,6 +38,7 @@ from womblex.cli import (
     embed,
     ingest,
     link,
+    money,
     normalise,
     pii,
     pipeline,
@@ -61,6 +63,7 @@ ALL_COMMANDS = [
     *normalise.COMMANDS,
     *spellfix.COMMANDS,
     *quality.COMMANDS,
+    *money.COMMANDS,
     *pii.COMMANDS,
     *ingest.COMMANDS,
     *score.COMMANDS,
