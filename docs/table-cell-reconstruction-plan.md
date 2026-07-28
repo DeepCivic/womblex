@@ -149,6 +149,43 @@ home), tables must interleave by y rather than append, the LLM branch
 rule applies identically — the page-wide paragraph currently contains the
 table text.
 
+### A5 — post-processing conventions and lineage: preserved by construction
+
+Because Track A produces a `TableData` and reuses `_table_to_element`, every
+downstream composed stage consumes reconstructed tables through the existing
+conventions — verified, not assumed:
+
+- **Writer** (`store/output.py:275`): any `kind="table"` element with cells
+  denormalises to `table_cells.parquet` keyed `(source_hash,
+  parent_elem_order)`; the element row carries `source_hash`,
+  `collection_id`, `elem_order`, `extractor`, `confidence`, `page`, `bbox`,
+  `header_rows`, `meta`; the batch manifest's `table_cells_count` rises
+  naturally. No writer or schema change.
+- **Chunker**: `collect_tables_from_elements` (`chunker.py:491`) picks up
+  any `kind='table'` element → one markdown table; chunks/embeddings join on
+  `(source_hash, chunk_index, content_type)` unchanged.
+- **Money stage**: the `table_cell` locus anchors `(source_hash,
+  parent_elem_order, row, col)` on the sidecar (`money_stage.py:243`) —
+  reconstructed tables become column-classifiable with zero money-stage
+  changes; that is the measured payoff.
+- **Cleaning overlays** (normalise / spellfix) rewrite `TEXT_KINDS` only —
+  table cell values stay extraction-verbatim, exactly as native and
+  spreadsheet-print tables do today.
+
+Two provenance fields the reconstructor must populate deliberately rather
+than inherit as defaults:
+
+- **`confidence`** — set `TableData.confidence` from the constituent region
+  confidences (and the gate score), not a constant; it is the element's
+  lineage signal for downstream quality filtering.
+- **Producer marker** — on OCR pages `_accum_to_elements` stamps every
+  element `extractor="ocr_paddle"`, and the `SCANNED_MACHINEWRITTEN` grid
+  fallback (:214) lands PyMuPDF tables through the *same* accumulator, so
+  reconstructed and fallback tables would be indistinguishable in the
+  parquet. Set `TableData.context["producer"] = "table_grid"` — the existing
+  `context_* → meta` copy in `_table_to_element` (`orchestrator.py:267`)
+  carries it to `meta["context_producer"]` with no schema change.
+
 ---
 
 # Track B — benchmark + accuracy extension
