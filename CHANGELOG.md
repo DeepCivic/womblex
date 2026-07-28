@@ -142,6 +142,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   layout pass yet — `tables` is still returned empty on every extraction
   path until A3.
 
+- **Table reconstruction benchmark (#17, steps B0 + B3 + B1.2).** The
+  table metric is fixed before anything is measured against it (B0): the
+  DocLayNet GT aggregation no longer charges stray sub-3-span
+  Table-labelled runs (footnote lines mislabelled Table) as false
+  negatives — table recall on the vendored fixtures was 25% largely by
+  annotation artefact, 50% after the fix — and steering's stale
+  "0 predictions" layout claim is corrected.
+
+  `tests/test_table_benchmark.py` (B3 + B1.2, `benchmark`-marked) measures
+  reconstruction *conditioned on a correct table rect*, no layout detector
+  in the loop: deterministic table pages rendered from the two vendored
+  spreadsheet sources (3 pages × 30 rows of the Approved-providers CSV;
+  one page per MSO fuel sheet), rasterised at 200 dpi, OCR'd with
+  paddleocr, reconstructed with the rect known by construction, scored
+  positionally against the drawn strings under a declared normalisation
+  (NFKC + dash folding + whitespace collapse). Round-1 baseline: all six
+  rendered-clean fixtures reconstruct with exact structure and full header
+  recovery; cell accuracy 84–99%, every mismatch glyph-level OCR
+  recognition rather than grid binning. The hard scan fixture
+  `dense_text_548` tracks without a gate and yielded a 12×12 partial grid
+  against its 39×11 GT — recorded as a B2 gate-calibration input (the
+  provisional gates should refuse that shape). The off-spec
+  `sparse_text_344` CSV/meta GT is removed (declared non-GT).
+
 ### Fixed
 - **A declined continental number no longer leaks its decimal tail as an
   amount.** In Australian (default) mode `find_money` correctly refuses to read
