@@ -566,7 +566,10 @@ class TestWomblexExtraction:
         else:
             total_pages = None
 
-        results = extract_text(file_path, profile)
+        # Engine pinned: these numbers describe the region-based (paddleocr)
+        # path. A config default change to an LLM engine would silently
+        # measure a different pipeline. See table-cell-reconstruction-plan A0.
+        results = extract_text(file_path, profile, engine="paddleocr")
         extracted = results[0].full_text
 
         gt_text = transcript_path.read_text(encoding="utf-8").strip()
@@ -656,7 +659,7 @@ def _act_eci_extract(pdf_path: str):
     from womblex.ingest.extract import extract_text
     p = Path(pdf_path)
     profile = detect_file_type(p, DetectionConfig())
-    return extract_text(p, profile)[0]
+    return extract_text(p, profile, engine="paddleocr")[0]
 
 
 def _reassemble_page(elements: list, page: int, transforms=None) -> str:
