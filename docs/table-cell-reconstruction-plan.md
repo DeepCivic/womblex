@@ -27,10 +27,10 @@ this round. Two principles carry over unchanged from the original plan:
 | A3 — wire the OCR-PDF path | Not started — **next up in Track A** |
 | A4 — route the image path | Not started |
 | A5 — conventions + lineage | Requirements landed with A1 (confidence lineage, producer marker); the "preserved by construction" claims verify when A3/A4 put a table through the pipeline |
-| B0 — fix the table metric | Not started — live doc/metric defect, **next up overall** |
-| B1 — decompose the measurement | Not started |
-| B2 — metric set + gate calibration | Not started — inherits three specifics from A1 (see Open decisions) |
-| B3 — rendered-clean GT harness | Not started (the `dense_text_548` GT itself landed, `7f756cc`) |
+| B0 — fix the table metric | **Landed** (this branch) — steering corrected; GT aggregation drops stray Table runs (`MIN_TABLE_GT_SPANS=3`); EXTRACTION.md refreshes on next full accuracy run |
+| B1 — decompose the measurement | **B1.2 landed** (this branch, `tests/test_table_benchmark.py`) — GT-rect-conditioned reconstruction, no detector in the loop. Stage 1 is the existing per-class F1 (fixed by B0); stage 3 end-to-end awaits A3 |
+| B2 — metric set + gate calibration | Not started — inherits three specifics from A1 plus the `dense_text_548` partial-grid finding from B3 (see Open decisions) |
+| B3 — rendered-clean GT harness | **Landed** (this branch) — 6 rendered fixtures reconstruct with exact structure; `sparse_text_344` off-spec GT removed; the A.6 checker still rides with B2 |
 | B4 — report + docs wiring | Not started |
 | B5 — regression guard | Not started |
 
@@ -314,7 +314,7 @@ scanned fixture tracks progress without gating.
 | `structural_fidelity` / `data_integrity` / `key_column_preservation` / `schema_conformance` | `tabular_metrics.py:31/80/160/195` | DataFrame-shaped; wired only to spreadsheet ingest today (`evaluation.md` §2) |
 | DocLayNet layout harness incl. per-class table F1 | `test_fixture_accuracy.py:448` | B1's decomposition hangs off this |
 
-### B0 — fix the table metric before measuring against it
+### B0 — fix the table metric before measuring against it — **landed**
 
 **(a) steering's Layout Detection paragraph is stale.** It says "0
 predictions across all DocLayNet fixtures"; EXTRACTION.md's per-class table
@@ -340,7 +340,23 @@ number against it. Also: **`table_0` contains no Table-labelled GT at all**
 (196 Text, 2 Section-header, 1 Page-footer) — despite the name it is not a
 table fixture and must not be used as one.
 
-### B1 — decompose the measurement into two stages
+**What landed.** Both corrections applied to steering.md (Layout Detection
+rewritten; the `grid_projection` bullet corrected while there). The
+aggregation fix took the min-span form: `_aggregate_doclaynet_blocks` now
+counts constituent spans per block and drops Table blocks below
+`MIN_TABLE_GT_SPANS = 3`. Drop, not merge, was verified as the right remedy:
+the two strays are footnote lines *below* the table (y 725–734 against a
+table ending at y 724) mislabelled Table — merging would have stretched the
+GT table rect over footnote text, which would poison the B1.2 GT-rect
+derivation. `dense_text_548` now contributes exactly 1 GT Table block;
+`sparse_text_344`'s 8-span block is untouched. Verified by a layout-only
+probe replicating the suite's per-class computation (all non-table classes
+byte-identical to EXTRACTION.md): table TP1/FP0/FN3 → TP1/FP0/FN1
+(R 25% → 50%, F1 40% → 66.7%); the remaining FN is `sparse_text_344`'s
+genuinely undetected block. EXTRACTION.md itself refreshes on the next full
+accuracy-suite run (hour-plus; not run for this change).
+
+### B1 — decompose the measurement into two stages — **B1.2 landed**
 
 Report reconstruction **conditioned on a correct region**, not blended with
 detector recall:
@@ -397,13 +413,51 @@ the upgrade path if the alignment metric proves too coarse.
   1 is not solving. Expected round-1 outcome is refusal or a partial score;
   either is fine, both are visible in the report. The A.6 checker still
   needs writing (the checks above were run by hand once).
-- **`sparse_text_344`: declare non-GT and remove its CSV/meta.** It landed
-  off-spec (no `_table` suffix; a different meta schema than Appendix A) and
-  its 8-word, 4-row single-column block exercises almost nothing. One GT
-  convention, one loader — carrying a second format for a marginal fixture
-  is exactly the duplication this round avoids.
+- **`sparse_text_344`: declare non-GT and remove its CSV/meta** — done
+  (this branch). It landed off-spec (no `_table` suffix; a different meta
+  schema than Appendix A) and its 8-word, 4-row single-column block
+  exercises almost nothing. One GT convention, one loader — carrying a
+  second format for a marginal fixture is exactly the duplication this
+  round avoids.
 - Later: more Table-labelled pages from the full DocLayNet clone (per
   THIRD_PARTY_DATA.md) when the scan round arrives.
+
+**What landed** (`tests/test_table_benchmark.py`, marked `benchmark`, ~25 s
+for the whole cohort). The rendered-GT route: pandas reads the source →
+deterministic bounded-width column subsets (5 of the CSV's 10; 5 of the
+fuel sheets' 8 by position) → fitz draws a left-aligned grid on a
+content-sized page (helv 9 pt, 16 pt row pitch, 24 pt column gaps) → 200 dpi
+rasterise → paddleocr → `reconstruct_table` with the rect known by
+construction (B1.2: `conf=1.0`, no detector in the loop) → positional
+scoring against the drawn strings, normalised NFKC + dash-fold + whitespace
+collapse (the scorer declares its normalisation; GT stays verbatim). Six
+fixtures: 3 pages × 30 rows of the Approved-providers CSV, plus one page
+per fuel sheet (Diesel / Gasoline / Kerosene, 9 rows). B2's alignment
+projection can later swap this positional scorer for the `tabular_metrics`
+set without touching the render route.
+
+Measured (round-1 baseline, 2026-07-28):
+
+| Fixture | GT | Result | Headers | Cells |
+|---|---|---|---|---|
+| approved_providers_p1–p3 | 30×5 | 30×5 exact | 5/5 | 96.0–98.7% |
+| mso_diesel / gasoline / kerosene | 9×5 | 9×5 exact | 5/5 | 84.4–95.6% |
+| dense_text_548 (tracking, GT rect) | 39×11 | **partial 12×12** | — | — |
+
+Every rendered-clean cell mismatch is glyph-level OCR recognition, not
+binning: a lost space (`PO Box1213`), `0`→`o` on single-char cells,
+`6`↔`9` at 9 pt. The grid itself is exact on all six. Two structural
+asserts already gate (reconstruction happened; column count exact) — B5
+formalises the rest.
+
+**The tracking fixture did not refuse** — the provisional gates passed a
+12×12 partial grid against the 39×11 GT (over-segmented columns,
+under-merged rows). Round 1 said "refusal or a partial score; either is
+fine, both are visible" — but this is now a *measured* input to B2:
+precision-first wants the stacked-header hierarchical shape refused (or
+scored low), so gate calibration must add a signal this shape trips
+(e.g. assigned-ratio symmetry, header-band coherence) rather than assume
+`MIN_*` constants catch it.
 
 ### B4 — report + docs wiring
 
@@ -439,13 +493,15 @@ Planned: `B0 → B3 rendered-GT harness + B1.2 → A1 → A3 → A4 → B2 bread
 B4/B5`. Actual: A1 landed first (deviation recorded in Status above).
 Remaining, order unchanged:
 
-`B0 → B3 rendered-GT harness + B1.2 → A3 (+A2) → A4 → B2 breadth → B4/B5`.
+`B0 → B3 rendered-GT harness + B1.2 → A3 (+A2) → A4 → B2 breadth → B4/B5`,
+of which B0, B3 and B1.2 have now landed. Remaining:
+`A3 (+A2) → A4 → B2 breadth → B4/B5`.
 
-B0 first because it is a live doc/metric defect. The rendered-GT harness
-and B1.2 still land before A3 — with A1 already shipped, they are what
-turns its provisional gates into calibrated ones *before* reconstructed
-grids start landing in parquet shards. A2 is a three-line page-level
-refusal that rides along with A3's wiring.
+B0 went first because it was a live doc/metric defect. The rendered-GT
+harness and B1.2 landed before A3 as planned — the measurement now exists
+to calibrate A1's provisional gates, and it surfaced one calibration input
+immediately (the `dense_text_548` partial grid, above). A2 is a three-line
+page-level refusal that rides along with A3's wiring.
 
 ## Deferred to a later round (recorded so they aren't relitigated)
 
@@ -467,14 +523,15 @@ refusal that rides along with A3's wiring.
    (`MIN_ASSIGNED_RATIO` only gates the left edge), whether the
    column-population floor of 3 should be a parameter rather than couple
    `MIN_BODY_ROWS` to it, and whether a two-line header should merge or
-   refuse.
-2. B0 remedy: fix `_aggregate_doclaynet_blocks` for tables, or report table
-   detection at region granularity with a min-span filter?
-
+   refuse. Plus one measured by B3: the current gates pass a 12×12 partial
+   grid on `dense_text_548` (39×11 GT) — the stacked-header hierarchical
+   shape needs a refusal signal, not just tighter `MIN_*` constants.
 Resolved this revision: shared `table_grid.py` (A1 — anti-duplication);
 `_table_aware_text` end-state (A1); skew handling (A2 — refuse);
 gate-vs-warn (B5 — gate clean, track dense); GT sign-off (landed in
-`7f756cc`, conventions as recommended); `sparse_text_344` (B3 — non-GT).
+`7f756cc`, conventions as recommended); `sparse_text_344` (B3 — non-GT);
+B0 remedy (landed: min-span filter `MIN_TABLE_GT_SPANS=3` in
+`_aggregate_doclaynet_blocks`, dropping — not merging — stray Table runs).
 
 ---
 
