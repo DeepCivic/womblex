@@ -112,9 +112,10 @@ def check_weak_signals(row: dict[str, Any], config: VerificationConfig) -> list[
     
     # Page count anomaly (only if column exists)
     page_count = row.get("page_count")
-    if page_count is not None:
-        if page_count == 0 or page_count > config.max_page_count:
-            signals.append("page_count_anomaly")
+    if page_count is not None and (
+        page_count == 0 or page_count > config.max_page_count
+    ):
+        signals.append("page_count_anomaly")
     
     # Text-based checks
     text = row.get("text", "")

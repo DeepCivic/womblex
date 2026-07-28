@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 import shutil
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -32,7 +32,7 @@ def generate_run_id() -> str:
     Format: ``run-YYYYMMDDTHHMMSSZ`` — sorts lexically by creation order
     and parses back as an ISO-8601 basic-format timestamp.
     """
-    return "run-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return "run-" + datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
 
 
 def list_runs(output_root: Path) -> list[Path]:

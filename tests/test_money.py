@@ -43,27 +43,27 @@ def _one(text: str, options: MoneyOptions | None = None):
 
 
 @pytest.mark.parametrize(("text", "value", "currency", "evidence"), [
-    ("$100", Decimal("100"), "AUD", "p1"),
-    ("-$250", Decimal("-250"), "AUD", "p1"),
-    ("A$500", Decimal("500"), "AUD", "p1"),
-    ("AU$5 million", Decimal("5000000"), "AUD", "p6"),
-    ("AUD 100", Decimal("100"), "AUD", "p2"),
-    ("USD 50", Decimal("50"), "USD", "p2"),
-    ("EUR 1000", Decimal("1000"), "EUR", "p2"),
-    ("100 AUD", Decimal("100"), "AUD", "p3"),
-    ("500 USD", Decimal("500"), "USD", "p3"),
-    ("100 dollars", Decimal("100"), "AUD", "p4"),
-    ("250 Australian dollars", Decimal("250"), "AUD", "p4"),
+    ("$100", Decimal(100), "AUD", "p1"),
+    ("-$250", Decimal(-250), "AUD", "p1"),
+    ("A$500", Decimal(500), "AUD", "p1"),
+    ("AU$5 million", Decimal(5000000), "AUD", "p6"),
+    ("AUD 100", Decimal(100), "AUD", "p2"),
+    ("USD 50", Decimal(50), "USD", "p2"),
+    ("EUR 1000", Decimal(1000), "EUR", "p2"),
+    ("100 AUD", Decimal(100), "AUD", "p3"),
+    ("500 USD", Decimal(500), "USD", "p3"),
+    ("100 dollars", Decimal(100), "AUD", "p4"),
+    ("250 Australian dollars", Decimal(250), "AUD", "p4"),
     ("50 cents", Decimal("0.5"), "AUD", "p4"),
-    ("100$", Decimal("100"), "AUD", "p5"),
-    ("50€", Decimal("50"), "EUR", "p5"),
-    ("$5 million", Decimal("5000000"), "AUD", "p6"),
-    ("AUD 12 billion", Decimal("12000000000"), "AUD", "p6"),
-    ("$4.2bn", Decimal("4200000000"), "AUD", "p6"),
-    ("$500k", Decimal("500000"), "AUD", "p6"),
-    ("$78.7bn", Decimal("78700000000"), "AUD", "p6"),
-    ("$33.1 million", Decimal("33100000"), "AUD", "p6"),
-    ("AUD$21.9 million", Decimal("21900000"), "AUD", "p6"),
+    ("100$", Decimal(100), "AUD", "p5"),
+    ("50€", Decimal(50), "EUR", "p5"),
+    ("$5 million", Decimal(5000000), "AUD", "p6"),
+    ("AUD 12 billion", Decimal(12000000000), "AUD", "p6"),
+    ("$4.2bn", Decimal(4200000000), "AUD", "p6"),
+    ("$500k", Decimal(500000), "AUD", "p6"),
+    ("$78.7bn", Decimal(78700000000), "AUD", "p6"),
+    ("$33.1 million", Decimal(33100000), "AUD", "p6"),
+    ("AUD$21.9 million", Decimal(21900000), "AUD", "p6"),
 ])
 def test_pattern_table(text, value, currency, evidence):
     span = _one(text)
@@ -76,8 +76,24 @@ def test_pattern_table(text, value, currency, evidence):
 def test_original_text_is_preserved():
     span = _one("Funding allocation was $5.2 million.")
     assert span.text == "$5.2 million"
-    assert span.value == Decimal("5200000")
+    assert span.value == Decimal(5200000)
     assert span.multiplier == "million"
+
+
+@pytest.mark.parametrize(("text", "canonical"), [
+    ("$1.2m", "million"), ("$1.2 mn", "million"), ("$1.2 million", "million"),
+    ("$1.2bn", "billion"), ("$1.2 b", "billion"), ("$1.2 billion", "billion"),
+    ("$5k", "thousand"), ("$5 thousand", "thousand"),
+    ("$1.5t", "trillion"), ("$1.5 trillion", "trillion"),
+])
+def test_multiplier_is_one_lane_per_magnitude(text, canonical):
+    """Recognition is broad; what gets written is not.
+
+    Persisting the document's own token split a single magnitude across
+    `m` / `mn` / `million` in `money_spans.multiplier`, so a downstream
+    group-by fragmented. The column path already emitted the long form.
+    """
+    assert _one(text).multiplier == canonical
 
 
 def test_values_are_exact_decimals_not_floats():
@@ -99,7 +115,7 @@ def test_bare_letter_scale_needs_a_currency_marker(text):
 
 
 def test_bare_letter_scale_licensed_by_symbol():
-    assert _one("$100m").value == Decimal("100000000")
+    assert _one("$100m").value == Decimal(100000000)
 
 
 # ---------------------------------------------------------------------------
@@ -109,19 +125,19 @@ def test_bare_letter_scale_licensed_by_symbol():
 
 def test_range_keeps_both_endpoints_and_shares_scale():
     lo, hi = find_money("$10–20 million")
-    assert (lo.value, hi.value) == (Decimal("10000000"), Decimal("20000000"))
+    assert (lo.value, hi.value) == (Decimal(10000000), Decimal(20000000))
     assert lo.range_group == hi.range_group
     assert (lo.range_role, hi.range_role) == ("lower", "upper")
 
 
 def test_range_with_symbol_on_both_endpoints():
     lo, hi = find_money("$100-$150")
-    assert (lo.value, hi.value) == (Decimal("100"), Decimal("150"))
+    assert (lo.value, hi.value) == (Decimal(100), Decimal(150))
 
 
 def test_between_and_range():
     lo, hi = find_money("grants of between $5,000 and $10,000 were made")
-    assert (lo.value, hi.value) == (Decimal("5000"), Decimal("10000"))
+    assert (lo.value, hi.value) == (Decimal(5000), Decimal(10000))
 
 
 def test_range_needs_evidence_on_an_endpoint():
@@ -148,14 +164,14 @@ def test_qualifier_stored_separately_never_folded_into_value(text, modifier):
 
 def test_bracketed_amount_with_symbol_is_negative():
     span = _one("($100)")
-    assert span.value == Decimal("-100")
+    assert span.value == Decimal(-100)
     assert span.negative is True
     assert span.evidence == "p9"
 
 
 def test_bracketed_amount_after_iso_code_is_negative():
     span = _one("AUD (500)")
-    assert span.value == Decimal("-500")
+    assert span.value == Decimal(-500)
 
 
 def test_bracketed_amount_under_accounting_context():
@@ -195,7 +211,7 @@ def test_false_positive_classes_are_rejected(text):
 def test_postcode_rejected_only_with_address_context():
     assert find_money("PO Box 100, Canberra ACT 2600",
                       MoneyOptions(implicit_context=True, min_confidence=0.3)) == []
-    assert any(s.value == Decimal("2600") for s in find_money(
+    assert any(s.value == Decimal(2600) for s in find_money(
         "the fee is 2600", MoneyOptions(implicit_context=True, min_confidence=0.3)))
 
 
@@ -256,11 +272,33 @@ def test_ambiguous_currency_word_leaves_currency_unresolved():
 def test_australian_number_forms():
     assert parse_number("1,000.50") == Decimal("1000.50")
     assert parse_number(".50") == Decimal("0.50")
-    assert parse_number("100") == Decimal("100")
+    assert parse_number("100") == Decimal(100)
 
 
 def test_comma_decimal_not_read_as_australian():
     assert find_money("€1.000,50") == []
+
+
+@pytest.mark.parametrize("text", [
+    "1.000,50 EUR",       # ISO suffix (p3)
+    "1.000,50€",          # symbol suffix (p5)
+    "1.000,50 dollars",   # currency word (p4)
+    "Paid 1.234,56 EUR to the vendor.",
+])
+def test_continental_tail_is_not_extracted_as_its_own_amount(text):
+    """A declined continental number must not leak its decimal tail.
+
+    Declining the candidate that starts at the run is not sufficient: the tail
+    (`,56 EUR`) is itself a complete match for the suffix patterns, so this
+    used to return `56 EUR` — wrong by 10³. Only the *prefix*-marker forms were
+    ever safe, which is why `€1.000,50` above passed while these did not.
+    """
+    assert find_money(text) == []
+
+
+def test_malformed_thousands_group_blocks_the_whole_run():
+    assert find_money("$1,23") == []
+    assert find_money("1,23 dollars") == []
 
 
 def test_international_mode_accepts_comma_decimals():
@@ -281,7 +319,7 @@ def test_implicit_context_off_by_default():
 def test_implicit_context_when_enabled_scores_lowest():
     opts = MoneyOptions(implicit_context=True, min_confidence=0.3)
     span = _one("The estimated cost is 250.", opts)
-    assert span.value == Decimal("250")
+    assert span.value == Decimal(250)
     assert span.evidence == "p10"
     assert span.confidence < 0.5
 
@@ -300,7 +338,7 @@ def test_implicit_context_does_not_license_a_bare_letter_scale():
 
 def test_longer_match_wins_at_equal_priority():
     span = _one("AUD$21.9 million")  # not `$21.9`
-    assert span.value == Decimal("21900000")
+    assert span.value == Decimal(21900000)
 
 
 def test_paragraph_extraction_end_to_end():
@@ -310,7 +348,7 @@ def test_paragraph_extraction_end_to_end():
         "registry on (02) 6203 7300 or write to PO Box 100, Canberra ACT 2600."
     )
     spans = find_money(para)
-    assert [s.value for s in spans] == [Decimal("33100000"), Decimal("4200000")]
+    assert [s.value for s in spans] == [Decimal(33100000), Decimal(4200000)]
     assert spans[1].modifier == "approximately"
     assert para[spans[0].start:spans[0].end] == spans[0].text
 
@@ -321,9 +359,9 @@ def test_paragraph_extraction_end_to_end():
 
 
 @pytest.mark.parametrize(("text", "value", "currency"), [
-    ("USD100", Decimal("100"), "USD"),
-    ("AUD1500", Decimal("1500"), "AUD"),
-    ("EUR2000", Decimal("2000"), "EUR"),
+    ("USD100", Decimal(100), "USD"),
+    ("AUD1500", Decimal(1500), "AUD"),
+    ("EUR2000", Decimal(2000), "EUR"),
 ])
 def test_compact_iso_form_is_not_an_incident_reference(text, value, currency):
     """`USD100` looks like a reference number to the FP filter; the ISO
@@ -336,25 +374,25 @@ def test_no_pattern_crosses_the_element_join():
     """`\\n\\n` joins two elements in the reassembled narrative. A range binding
     across it would fabricate a relationship between unrelated paragraphs."""
     spans = find_money("Payment of $100\n\n-$200 was made")
-    assert [s.value for s in spans] == [Decimal("100"), Decimal("-200")]
+    assert [s.value for s in spans] == [Decimal(100), Decimal(-200)]
     assert all(s.range_group is None for s in spans)
 
     spans = find_money("Line one $100\n\nto $200 line two")
-    assert [s.value for s in spans] == [Decimal("100"), Decimal("200")]
+    assert [s.value for s in spans] == [Decimal(100), Decimal(200)]
     assert all(s.range_role is None for s in spans)
 
 
 def test_magnitude_survives_a_single_line_wrap():
     # PDF text layers wrap mid-phrase; one newline is still one paragraph.
-    assert _one("allocated $5\nmillion to the program").value == Decimal("5000000")
+    assert _one("allocated $5\nmillion to the program").value == Decimal(5000000)
     # But two are an element boundary, so the scale does not reach across.
-    assert _one("allocated $5\n\nmillion to the program").value == Decimal("5")
+    assert _one("allocated $5\n\nmillion to the program").value == Decimal(5)
 
 
 def test_malformed_thousands_group_is_declined():
     # `$1,23` would otherwise report one dollar — wrong by two orders.
     assert find_money("$1,23") == []
-    assert _one("$1,234").value == Decimal("1234")
+    assert _one("$1,234").value == Decimal(1234)
 
 
 def test_large_document_stays_linear():
@@ -492,7 +530,7 @@ def test_a_number_in_the_header_is_not_a_thousands_scale(header):
     verdict = classify_column(header, values)
     if verdict.is_money:
         assert [v for _, v, _ in extract_column(values, verdict)] == [
-            Decimal("1200"), Decimal("3400"), Decimal("2750")]
+            Decimal(1200), Decimal(3400), Decimal(2750)]
 
 
 @pytest.mark.parametrize(("header", "scale"), [
@@ -518,13 +556,13 @@ def test_brackets_in_a_money_column_are_accounting_negatives():
     verdict = classify_column("Expenditure", values)
     extracted = extract_column(values, verdict)
     assert [v for _, v, _ in extracted] == [
-        Decimal("1500"), Decimal("-300"), Decimal("2700")]
+        Decimal(1500), Decimal(-300), Decimal(2700)]
 
 
 def test_cell_amount_parsing():
     assert cell_amount("$1,234.50") == (Decimal("1234.50"), False)
     assert cell_amount("(1,234.50)") == (Decimal("-1234.50"), True)
-    assert cell_amount("50000") == (Decimal("50000"), False)
+    assert cell_amount("50000") == (Decimal(50000), False)
     assert cell_amount("15%") is None
     assert cell_amount("Pending") is None
     assert cell_amount("—") is None
@@ -543,7 +581,7 @@ def test_header_continuation_row_is_folded_into_the_header():
     verdict = classify_column(header, values)
     assert verdict.is_money
     assert verdict.scale == "million"
-    assert [v for _, v, _ in extract_column(values, verdict)][0] == Decimal("16631300000.0")
+    assert next(v for _, v, _ in extract_column(values, verdict)) == Decimal("16631300000.0")
 
 
 def test_header_continuation_does_not_eat_a_data_row():
@@ -562,7 +600,7 @@ def test_footnote_marker_does_not_fabricate_a_value():
     """`24.2 5` is a value with a footnote marker, not 24.25 — closing the gap
     would invent a number that is in no document."""
     assert cell_amount("24.2 5") is None
-    assert cell_amount("1 234 567") == (Decimal("1234567"), False)  # spaced thousands
+    assert cell_amount("1 234 567") == (Decimal(1234567), False)  # spaced thousands
     assert cell_amount("24.25") == (Decimal("24.25"), False)
 
 

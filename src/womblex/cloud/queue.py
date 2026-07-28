@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import Self
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +80,7 @@ class Job:
 
 def _require_psycopg():  # type: ignore[no-untyped-def]
     try:
-        import psycopg  # noqa: F401
+        import psycopg
     except ImportError as e:  # pragma: no cover - exercised only without the extra
         raise ImportError(
             "The job queue requires the 'cloud' extra. "
@@ -103,7 +104,7 @@ class JobQueue:
     def close(self) -> None:
         self.conn.close()
 
-    def __enter__(self) -> "JobQueue":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *exc: object) -> None:
@@ -214,7 +215,7 @@ class JobQueue:
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 __all__ = ["Job", "JobQueue", "JobSpec", "utcnow"]

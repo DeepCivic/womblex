@@ -5,9 +5,8 @@ from pathlib import Path
 import pyarrow.parquet as pq
 import pytest
 
-from womblex.ingest.gnaf import _parse_filename, ingest_psv, discover_psv_files, ingest_gnaf_directory
+from womblex.ingest.gnaf import _parse_filename, discover_psv_files, ingest_gnaf_directory, ingest_psv
 from womblex.ingest.gnaf_schema import ALL_TABLES, SCHEMA_VERSION
-
 
 # ── Filename parsing ────────────────────────────────────────────────────────
 

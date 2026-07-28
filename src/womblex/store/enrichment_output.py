@@ -423,7 +423,7 @@ def write_graph_edges_rows(rows: list[dict[str, Any]], base_path: Path) -> Path:
     return target
 
 
-def read_graph_edges(path: Path) -> "pa.Table":
+def read_graph_edges(path: Path) -> pa.Table:
     """Read graph edges from a single sibling file or a shard-dir glob."""
     p = Path(path)
     if p.is_dir():
@@ -438,7 +438,7 @@ def read_graph_edges(path: Path) -> "pa.Table":
     return _read_enrichment_shard(target, GRAPH_EDGE_SCHEMA)
 
 
-def read_enrichment_entities(path: Path) -> "pa.Table":
+def read_enrichment_entities(path: Path) -> pa.Table:
     """Read entity mentions from a single sibling file or a shard-dir glob."""
     p = Path(path)
     if p.is_dir():
@@ -453,7 +453,7 @@ def read_enrichment_entities(path: Path) -> "pa.Table":
     return _read_enrichment_shard(target, ENTITY_SCHEMA)
 
 
-def _write_enrichment_rows(rows: list[dict[str, Any]], path: Path, schema: "pa.Schema") -> None:
+def _write_enrichment_rows(rows: list[dict[str, Any]], path: Path, schema: pa.Schema) -> None:
     if rows:
         table = pa.Table.from_pylist(rows, schema=schema)
     else:
@@ -461,7 +461,7 @@ def _write_enrichment_rows(rows: list[dict[str, Any]], path: Path, schema: "pa.S
     pq.write_table(table, str(path), compression="zstd", compression_level=3)
 
 
-def _read_enrichment_shard(path: Path, schema: "pa.Schema") -> "pa.Table":
+def _read_enrichment_shard(path: Path, schema: pa.Schema) -> pa.Table:
     raw = pq.read_table(str(path))
     missing = [f.name for f in schema if f.name not in raw.schema.names]
     if missing:

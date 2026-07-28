@@ -43,7 +43,7 @@ def analyze_histogram(gray: np.ndarray, num_bins: int = 256) -> HistogramAnalysi
     Returns:
         HistogramAnalysis with detection results
     """
-    hist, bin_edges = np.histogram(gray.flatten(), bins=num_bins, range=(0, 256))
+    hist, _bin_edges = np.histogram(gray.flatten(), bins=num_bins, range=(0, 256))
     hist = hist.astype(float) / hist.sum()  # Normalize
 
     # Noise floor: amount of signal in very dark region (0-30)

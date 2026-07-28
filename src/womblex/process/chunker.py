@@ -57,11 +57,11 @@ import bisect
 import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import cast
+from typing import Any, cast
 
 import semchunk
 
-from womblex.ingest.elements import Element, TEXT_KINDS
+from womblex.ingest.elements import TEXT_KINDS, Element
 from womblex.ingest.views import _element_to_table_data, _sheets_to_table_data
 
 logger = logging.getLogger(__name__)
@@ -162,7 +162,10 @@ def create_chunker(
         tokenizer,
         chunk_size=chunk_size,
         chunking_model=chunking_model,
-        isaacus_client=isaacus_client,
+        # `object | None` on the signature keeps this module SDK-free (callers
+        # without the isaacus extra pass None); semchunk's stub names the
+        # concrete client, so the narrowing happens here at the boundary.
+        isaacus_client=cast("Any", isaacus_client),
         tokenizer_kwargs=tokenizer_kwargs,
         memoize=memoize,
         cache_maxsize=cache_maxsize,
@@ -287,7 +290,7 @@ def chunk_batch(
     inputs: list[ChunkInput],
     chunker: semchunk.Chunker,
     *,
-    overlap: int | float | None = None,
+    overlap: float | None = None,
     processes: int = 1,
     progress: bool = False,
     narrative_overrides: dict[str, object] | None = None,
@@ -408,7 +411,7 @@ def _chunker_batch(
     chunker: semchunk.Chunker,
     texts: Sequence[object],
     *,
-    overlap: int | float | None,
+    overlap: float | None,
     processes: int,
     progress: bool,
 ) -> tuple[list[list[str]], list[list[tuple[int, int]]]]:

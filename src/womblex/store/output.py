@@ -618,13 +618,13 @@ def verify_shard_persistence(
     Raises ``ShardVerificationError`` on any anomaly.
     """
     paths = _shard_paths(output_path)
-    for role, path in paths.items():
+    for path in paths.values():
         if not path.exists():
             raise ShardVerificationError(f"shard missing after write: {path}")
         if path.stat().st_size == 0:
             raise ShardVerificationError(f"shard is zero bytes: {path}")
         try:
-            pq.ParquetFile(str(path)).metadata  # smoke-test readability
+            _ = pq.ParquetFile(str(path)).metadata  # smoke-test readability
         except Exception as e:
             raise ShardVerificationError(f"shard unreadable: {path}: {e}") from e
 
@@ -702,7 +702,7 @@ def verify_chunks_persistence(
     if target.stat().st_size == 0:
         raise ShardVerificationError(f"chunks shard is zero bytes: {target}")
     try:
-        pq.ParquetFile(str(target)).metadata
+        _ = pq.ParquetFile(str(target)).metadata  # smoke-test readability
     except Exception as e:
         raise ShardVerificationError(f"chunks shard unreadable: {target}: {e}") from e
 

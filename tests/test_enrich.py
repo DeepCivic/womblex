@@ -22,7 +22,6 @@ from womblex.analyse.enrich import (
 )
 from womblex.analyse.models import EnrichmentResult
 
-
 # ---------------------------------------------------------------------------
 # Fixtures: mock SDK objects
 # ---------------------------------------------------------------------------

@@ -8,10 +8,9 @@ from __future__ import annotations
 
 from womblex.analyse.models import Location, Person, Span
 from womblex.config import PIIConfig
-from womblex.pii.cleaner import PIICleaner, _ADDRESS_RE
+from womblex.pii.cleaner import _ADDRESS_RE, PIICleaner
 from womblex.pii.stage import _extract_known_spans, clean_enriched_chunks
 from womblex.process.chunker import TextChunk
-
 
 # ---------------------------------------------------------------------------
 # Helpers — minimal enrichment result with only the fields PII stage reads
@@ -114,7 +113,7 @@ class TestCleanWithKnownSpans:
         """Overlapping regex and enrichment spans produce one replacement."""
         cleaner = PIICleaner(context_similarity_threshold=0.5)
         text = "Mr. John Smith attended."
-        cleaned, count = cleaner.clean_with_known_spans(
+        cleaned, _count = cleaner.clean_with_known_spans(
             text, known_spans=[(4, 14, "PERSON")], text_offset=0,
         )
         assert "<PERSON>" in cleaned
@@ -337,7 +336,7 @@ class TestPIICleanerAddress:
     def test_address_not_detected_when_entity_disabled(self) -> None:
         cleaner = PIICleaner(entities=["PERSON"])
         text = "The office is at 100 George Street in Sydney."
-        cleaned, count = cleaner.clean(text)
+        cleaned, _count = cleaner.clean(text)
         assert "<ADDRESS>" not in cleaned
 
     def test_person_and_address_both_detected(self) -> None:

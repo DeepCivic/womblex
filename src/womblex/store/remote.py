@@ -61,7 +61,7 @@ def storage_options_from_env(uri: str) -> dict:
 
 def _require_fsspec():  # type: ignore[no-untyped-def]
     try:
-        import fsspec  # noqa: F401
+        import fsspec
     except ImportError as e:  # pragma: no cover - exercised only without the extra
         raise ImportError(
             "Object-storage staging requires the 'cloud' extra. "
@@ -84,7 +84,7 @@ class RemoteStore:
     root: str
 
     @classmethod
-    def from_uri(cls, uri: str, *, storage_options: dict | None = None) -> "RemoteStore":
+    def from_uri(cls, uri: str, *, storage_options: dict | None = None) -> RemoteStore:
         """Open a store at *uri* (e.g. ``s3://bucket/runs`` or ``/data/runs``)."""
         fsspec = _require_fsspec()
         opts = storage_options if storage_options is not None else storage_options_from_env(uri)
@@ -103,7 +103,7 @@ class RemoteStore:
         full = self._full(rel)
         matches: list[str] = self.fs.glob(f"{full}/{pattern}")  # type: ignore[attr-defined]
         prefix = self.root + "/"
-        return [m[len(prefix):] if m.startswith(prefix) else m for m in matches]
+        return [m.removeprefix(prefix) for m in matches]
 
     def download_file(self, rel: str, local_path: Path) -> Path:
         local_path.parent.mkdir(parents=True, exist_ok=True)

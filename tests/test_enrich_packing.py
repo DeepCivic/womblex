@@ -50,7 +50,7 @@ class _FakeEnrichments:
     def __init__(self, calls: list[list[str]]):
         self._calls = calls
 
-    def create(self, *, model, texts, overflow_strategy):  # noqa: ARG002
+    def create(self, *, model, texts, overflow_strategy):
         self._calls.append(list(texts))
         results = [SimpleNamespace(document=_fake_document(t)) for t in texts]
         return SimpleNamespace(

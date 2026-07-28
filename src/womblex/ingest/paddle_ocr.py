@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 import numpy as np
 
@@ -107,7 +107,7 @@ class PaddleOCRReader:
     """
 
     _V5_DIR = "paddleocr-v5"
-    _V5_FILES = {
+    _V5_FILES: ClassVar[dict[str, str]] = {
         "det": "ppocrv5-mobile-det.onnx",
         "rec": "ppocrv5-mobile-rec.onnx",
         "cls": "ppocrv5-cls.onnx",
@@ -320,11 +320,10 @@ class YOLOLayoutAnalyzer:
         try:
             n = get_inference_threads()
             _apply_thread_env(n)
-            from ultralytics import YOLO  # type: ignore[import-untyped]
-
             # Cap torch's intra-op pool (defaults to cpu_count). interop must be
             # set before any parallel work — best-effort, ignore if already used.
             import torch
+            from ultralytics import YOLO  # type: ignore[import-untyped]
 
             torch.set_num_threads(n)
             try:

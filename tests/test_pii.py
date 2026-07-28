@@ -10,22 +10,15 @@ Sentence Transformers model) or explicitly accept model loading time.
 
 from __future__ import annotations
 
-
 from dataclasses import dataclass, field
-
 from pathlib import Path
 
-
 import pytest
-
+from pydantic import ValidationError
 
 from womblex.config import PIIConfig, WomblexConfig
-
-from womblex.pii.cleaner import PIICleaner, _COMMON_WORDS, _HONORIFIC_RE, _TITLE_CASE_RE
-
+from womblex.pii.cleaner import _COMMON_WORDS, _HONORIFIC_RE, _TITLE_CASE_RE, PIICleaner
 from womblex.pii.stage import clean_chunks, clean_extraction
-
-
 
 # ---------------------------------------------------------------------------
 
@@ -238,7 +231,7 @@ class TestPIICleanerHighConfidence:
 
         text = "On 1 January, Ms. Helen Ward signed the form."
 
-        cleaned, count = cleaner.clean(text)
+        cleaned, _count = cleaner.clean(text)
 
         assert "On 1 January," in cleaned
 
@@ -253,7 +246,7 @@ class TestPIICleanerHighConfidence:
 
         text = "Dr. Sarah Connor attended."
 
-        cleaned, count = cleaner.clean(text)
+        _cleaned, count = cleaner.clean(text)
 
         assert count == 1
 
@@ -277,7 +270,7 @@ class TestPIICleanerCommonWordExclusion:
 
         text = "The incident occurred in New South Wales last Monday."
 
-        cleaned, count = cleaner.clean(text)
+        cleaned, _count = cleaner.clean(text)
 
         # "New South Wales" should not be replaced — all common words
 
@@ -290,7 +283,7 @@ class TestPIICleanerCommonWordExclusion:
 
         text = "The Australian Government Department issued the report."
 
-        cleaned, count = cleaner.clean(text)
+        cleaned, _count = cleaner.clean(text)
 
         assert "Australian Government Department" in cleaned
 
@@ -506,7 +499,7 @@ class TestPIIConfig:
 
     def test_threshold_clamped(self) -> None:
 
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
 
             PIIConfig(context_similarity_threshold=1.5)
 

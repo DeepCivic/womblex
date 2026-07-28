@@ -40,7 +40,7 @@ def _has_ruled_lines(page: fitz.Page, dpi: int = 72) -> bool:
     import cv2
     import numpy as np
 
-    gray, width, height = _page_to_grayscale(page, dpi)
+    gray, width, _height = _page_to_grayscale(page, dpi)
 
     # Threshold to binary (invert so lines are white)
     _, binary = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
@@ -90,7 +90,7 @@ def _analyze_glyph_regularity(page: fitz.Page, dpi: int = 150) -> float | None:
     )
 
     # Find connected components (individual glyphs/characters)
-    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(binary)
+    num_labels, _labels, stats, _centroids = cv2.connectedComponentsWithStats(binary)
 
     # Filter components by size to get likely text glyphs
     # Exclude background (label 0) and very small/large components
@@ -102,7 +102,7 @@ def _analyze_glyph_regularity(page: fitz.Page, dpi: int = 150) -> float | None:
     glyph_heights = []
 
     for i in range(1, num_labels):  # Skip background
-        x, y, w, h, area = stats[i]
+        _x, _y, w, h, area = stats[i]
         if min_area <= area <= max_area and min_height <= h <= max_height:
             # Aspect ratio filter: glyphs are roughly square-ish to tall
             aspect = w / h if h > 0 else 0
@@ -144,7 +144,7 @@ def _analyze_stroke_width_variance(page: fitz.Page, dpi: int = 150) -> float | N
     import cv2
     import numpy as np
 
-    gray, width, height = _page_to_grayscale(page, dpi)
+    gray, _width, _height = _page_to_grayscale(page, dpi)
 
     # Adaptive threshold
     binary = cv2.adaptiveThreshold(
@@ -205,9 +205,12 @@ def _has_handwriting_signals(page: fitz.Page, dpi: int = 150) -> bool:
         # One very low → strong signal
         if glyph_regularity < 0.25 or stroke_consistency < 0.25:
             return True
-    elif glyph_regularity is not None and glyph_regularity < 0.3:
-        return True
-    elif stroke_consistency is not None and stroke_consistency < 0.3:
+    # Only one score available — a single low reading has to carry the call, so
+    # the threshold sits between the "both low" and "one very low" gates above.
+    elif (
+        (glyph_regularity is not None and glyph_regularity < 0.3)
+        or (stroke_consistency is not None and stroke_consistency < 0.3)
+    ):
         return True
 
     return False
@@ -223,6 +226,7 @@ def _sample_ocr_confidence(
     """
     try:
         import numpy as np
+
         from womblex.ingest.paddle_ocr import get_paddle_reader
 
         pix = page.get_pixmap(dpi=dpi)

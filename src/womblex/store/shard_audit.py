@@ -28,16 +28,17 @@ from __future__ import annotations
 import json
 import logging
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 import pyarrow.parquet as pq
 
 from womblex.store.output import (
-    CHUNKS_SUFFIX,
     _SHARD_ROLES,
     _SHARD_SUFFIX,
+    CHUNKS_SUFFIX,
     _shard_paths,
     chunks_path_for,
     read_manifest,
@@ -174,7 +175,7 @@ def _check_batch(base: Path) -> BatchIntegrity:
             role_ok[role] = False
             continue
         try:
-            pq.ParquetFile(str(p)).metadata
+            _ = pq.ParquetFile(str(p)).metadata  # smoke-test readability
             role_ok[role] = True
         except Exception as e:
             files_readable = False
@@ -392,7 +393,7 @@ def _archive_batch(base_path: Path, suffix: str) -> None:
     """Rename every sibling shard for ``base_path`` with ``suffix`` so
     the reader globs skip them. Idempotent — re-archiving is a no-op.
     """
-    for role, path in _shard_paths(base_path).items():
+    for path in _shard_paths(base_path).values():
         if not path.exists():
             continue
         archived = path.with_name(path.name + suffix)
@@ -467,7 +468,7 @@ def scan_chunks_directory(shard_dir: Path) -> list[ChunksBatchIntegrity]:
             issues.append("zero-byte chunks")
         else:
             try:
-                pq.ParquetFile(str(target)).metadata
+                _ = pq.ParquetFile(str(target)).metadata  # smoke-test readability
                 file_readable = True
                 src_col = pq.read_table(str(target), columns=["source_hash"]).column("source_hash")
                 source_hashes = tuple(src_col.to_pylist())
@@ -526,7 +527,7 @@ def scan_sidecar_directory(shard_dir: Path, suffix: str) -> list[SidecarBatchInt
             issues.append(f"zero-byte {suffix}")
         else:
             try:
-                pq.ParquetFile(str(p)).metadata
+                _ = pq.ParquetFile(str(p)).metadata  # smoke-test readability
                 readable = True
             except Exception as e:
                 issues.append(f"unreadable {suffix}: {e}")

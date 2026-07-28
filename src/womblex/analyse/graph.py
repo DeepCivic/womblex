@@ -372,7 +372,7 @@ def _add_crossreference_edges(
         end_seg_id = f"{doc_id}:{xref.end}"
 
         graph.add_edge(GraphEdge(
-            source=start_seg_id if xref.start == xref.end else start_seg_id,
+            source=start_seg_id,
             target=end_seg_id,
             relation="crossreferences",
             properties={

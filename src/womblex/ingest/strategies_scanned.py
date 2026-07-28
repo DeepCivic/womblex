@@ -10,6 +10,7 @@ import logging
 
 import fitz
 
+from womblex.ingest.elements import TEXT_KINDS
 from womblex.ingest.extract import (
     ExtractionMetadata,
     ExtractionResult,
@@ -24,7 +25,6 @@ from womblex.ingest.extract import (
     _pixmap_to_array,
     _text_coverage,
 )
-from womblex.ingest.elements import TEXT_KINDS
 from womblex.ingest.paddle_ocr import (
     get_layout_analyzer,
     get_ocr_reader,

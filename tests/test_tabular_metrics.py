@@ -4,26 +4,16 @@
 from pathlib import Path
 
 import pandas as pd
-
 import pyarrow as pa
-
 import pyarrow.parquet as pq
-
 import pytest
 
-
 from womblex.utils.tabular_metrics import (
-
     data_integrity,
-
     key_column_preservation,
-
     schema_conformance,
-
     structural_fidelity,
 )
-
-
 
 # ── Structural Fidelity ────────────────────────────────────────────────────
 
@@ -299,7 +289,6 @@ class TestCSVFixtureAccuracy:
         """
 
         from womblex.ingest.detect import DetectionConfig, detect_file_type
-
         from womblex.ingest.extract import extract_text
 
 
@@ -367,12 +356,13 @@ class TestCSVFixtureAccuracy:
         # matches its canonical schema.
 
         from womblex.config import ChunkingConfig, DatasetConfig, PathsConfig, WomblexConfig
-
-        from womblex.operations import run_extraction, write_batch_parquet, BatchResult
-
+        from womblex.operations import BatchResult, run_extraction, write_batch_parquet
         from womblex.store.output import (
-            ELEMENT_SCHEMA, TABLE_CELLS_SCHEMA, FORM_FIELDS_SCHEMA,
-            MANIFEST_SCHEMA, _shard_paths,
+            ELEMENT_SCHEMA,
+            FORM_FIELDS_SCHEMA,
+            MANIFEST_SCHEMA,
+            TABLE_CELLS_SCHEMA,
+            _shard_paths,
         )
 
 

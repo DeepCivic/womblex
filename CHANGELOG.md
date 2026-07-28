@@ -84,6 +84,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   measured limits in [docs/money.md](docs/money.md).
 
 ### Fixed
+- **A declined continental number no longer leaks its decimal tail as an
+  amount.** In Australian (default) mode `find_money` correctly refuses to read
+  `1.234,56` — the reading is ambiguous and `international_numbers` is the
+  deliberate opt-in — but declining the candidate that *starts* at the run left
+  the rest of it exposed, and `,56 EUR` is itself a complete match for the
+  suffix patterns. `1.234,56 EUR` came back as `56 EUR`, a value wrong by 10³,
+  which is precisely the failure the guard exists to prevent. Ambiguous numeric
+  runs (continental decimals, and malformed thousands groups like `$1,23`) are
+  now blocked whole, so the amount is missed rather than misread.
+
+  Only the ISO-suffix, currency-word and symbol-suffix patterns leaked;
+  prefix-marker forms were always safe, because the tail has no leading marker
+  to match. That asymmetry is why the existing locale test (`€1.000,50`, a
+  prefix form) passed throughout. International mode is unaffected — there the
+  continental reading is the correct one.
+
+- **CI runs the type-check and test steps again.** `ruff` was declared
+  unpinned, so CI resolved 0.16.0, whose expanded *default* rule set reported
+  297 errors across a tree that had been green — 233 of them pre-existing and
+  unrelated, surfaced by the release rather than by any change. Lint runs
+  before mypy and pytest, so both were being skipped entirely and the `money`
+  op merged without CI ever executing its tests. `ruff` is now bounded
+  (`>=0.16,<0.17`) so an upstream release can no longer turn CI red on its own;
+  raising that ceiling is a deliberate commit that also clears whatever the new
+  defaults flag.
+
+  The tree is now clean under 0.16.0's defaults. `--fix` resolved 174 findings
+  mechanically; `BLE001`, `S110` and `S112` are suppressed in
+  `[tool.ruff.lint]` because the codebase deliberately does what they flag —
+  every site is a batch- or per-document isolation boundary, and narrowing
+  those handlers to named exception types would let one malformed document
+  abort a 1500-document run. The remaining 55 were resolved individually.
+  Two are worth noting beyond the mechanical: the readability smoke-tests in
+  `store/output.py` / `store/shard_audit.py` (`pq.ParquetFile(p).metadata`,
+  whose whole purpose is to raise on a corrupt footer) now bind their result
+  rather than being deleted as useless expressions, and `analyse/graph.py`
+  carried a crossreference edge whose `source` was the same value on both
+  arms of its conditional — collapsed to the value it already produced, so
+  behaviour is unchanged, but the condition looks like it was meant to
+  distinguish something.
+
+- **The Isaacus test suites run in CI.** CI installed `.[dev,cloud]`, omitting
+  the `isaacus` extra, so the enrich / graph / query / embed modules hit their
+  module-level `importorskip("isaacus")` and skipped wholesale — 66 tests that
+  need no API key never ran. CI now installs the extra; only the 10 tests
+  requiring a live endpoint still skip on the missing key. Installing the SDK
+  also unmasked a real typing error in `process/chunker.py`, where
+  `isaacus_client` is deliberately `object | None` to keep the module SDK-free;
+  the narrowing to semchunk's concrete client type now happens at the call
+  boundary.
+
+- **`mypy` passes with `openpyxl` installed.** The new read-only openpyxl pass
+  below was the codebase's first import of it and had no entry in the
+  `ignore_missing_imports` override list, so the type-check leg failed on a
+  missing stub package.
+
 - **Spreadsheet extraction preserves `number_format` and a numeric
   `value_type`.** `ingest/spreadsheet.py` read cells with pandas
   (`dtype=str`), which discards both, so every `sheet_cell` element landed with

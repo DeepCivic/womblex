@@ -17,7 +17,6 @@ from womblex.ingest.grid_projection import (
     render_spatial_text,
 )
 
-
 # ---------------------------------------------------------------------------
 # project_to_columns — algorithm-level tests using fake word tuples
 # ---------------------------------------------------------------------------

@@ -13,10 +13,10 @@ from womblex.link.stage import LinkStageResult, link_shards
 __all__ = [
     "Candidate",
     "Link",
-    "resolve",
+    "LinkStageResult",
     "ReferenceEntity",
     "ReferenceTable",
-    "load_reference",
-    "LinkStageResult",
     "link_shards",
+    "load_reference",
+    "resolve",
 ]

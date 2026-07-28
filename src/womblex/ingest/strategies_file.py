@@ -159,7 +159,7 @@ class TextExtractor:
 class NonTextualExtractor:
     """Placeholder for documents that cannot be extracted — flags for manual review."""
 
-    def extract(self, doc: "fitz.Document") -> ExtractionResult:
+    def extract(self, doc: fitz.Document) -> ExtractionResult:
         return ExtractionResult(
             pages=[], method="non_textual",
             error="Document flagged as non-textual; requires manual review.",
