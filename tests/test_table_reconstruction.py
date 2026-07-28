@@ -1,8 +1,11 @@
 """Table-cell reconstruction on OCR'd pages (#17).
 
-Round 1, A0: scope is the region-based (paddleocr) path. These tests pin
-the scoping decision and the plumbing that carries OCR regions into the
-layout pass — no cells are produced yet.
+Round 1. A0 pinned the scope (region-based engines) and the plumbing that
+carries OCR regions into the layout pass. A1 added the shared grid module
+(``table_grid``) and the OCR feeder (``ocr_tables.reconstruct_table``) —
+cells can now be produced from a table rect, but nothing is wired into
+the layout pass yet (that is A3), so ``tables`` stays empty on every
+extraction path.
 """
 
 from __future__ import annotations
@@ -13,8 +16,18 @@ import fitz
 import pytest
 
 from womblex.ingest.interfaces.protocols import LayoutRegionResult, OCRRegionResult
+from womblex.ingest.ocr_tables import (
+    reconstruct_table,
+    regions_in_rect,
+    span_from_region,
+)
 from womblex.ingest.page_profile import PageProfile
-from womblex.ingest.strategies_scanned import _layout_blocks_and_tables, _regions_in_rect
+from womblex.ingest.strategies_scanned import (
+    _layout_blocks_and_tables,
+    _spatial_sort_regions,
+    _table_aware_text,
+)
+from womblex.ingest.table_grid import Span, rows_from_spans
 
 
 def _region(x0: int, y0: int, x1: int, y1: int, text: str = "cell") -> OCRRegionResult:
@@ -59,7 +72,7 @@ class TestRegionsInRect:
     def test_selects_by_centroid(self) -> None:
         inside = _region(100, 100, 200, 130)
         outside = _region(100, 500, 200, 530)
-        got = _regions_in_rect([inside, outside], (50.0, 50.0, 300.0, 300.0))
+        got = regions_in_rect([inside, outside], (50.0, 50.0, 300.0, 300.0))
         assert got == [inside]
 
     def test_straddling_region_follows_its_middle(self) -> None:
@@ -67,14 +80,14 @@ class TestRegionsInRect:
         straddles_in = _region(100, 260, 200, 330)
         # Mostly below; centroid (y=315) is outside.
         straddles_out = _region(100, 280, 200, 350)
-        got = _regions_in_rect([straddles_in, straddles_out], (50.0, 50.0, 300.0, 300.0))
+        got = regions_in_rect([straddles_in, straddles_out], (50.0, 50.0, 300.0, 300.0))
         assert got == [straddles_in]
 
     def test_blank_regions_dropped(self) -> None:
-        assert _regions_in_rect([_region(100, 100, 200, 130, "   ")], (0.0, 0.0, 300.0, 300.0)) == []
+        assert regions_in_rect([_region(100, 100, 200, 130, "   ")], (0.0, 0.0, 300.0, 300.0)) == []
 
     def test_no_regions(self) -> None:
-        assert _regions_in_rect([], (0.0, 0.0, 300.0, 300.0)) == []
+        assert regions_in_rect([], (0.0, 0.0, 300.0, 300.0)) == []
 
 
 class TestLayoutPassPlumbing:
@@ -221,3 +234,134 @@ class TestOcrPageScoping:
             doc_type=DocumentType.SCANNED_MACHINEWRITTEN,
         )
         assert accum.tables == []
+
+
+class TestSharedGridHelpers:
+    """A1 — one algorithm in ``table_grid``, consumed by both feeders."""
+
+    def test_span_from_region_reduces_quad_to_bounds(self) -> None:
+        r = OCRRegionResult(
+            bbox=[[10, 20], [110, 25], [108, 55], [12, 50]],
+            text="cell", confidence=0.9,
+        )
+        s = span_from_region(r)
+        assert (s.x_left, s.y_top, s.x_right, s.y_bottom) == (10, 20, 110, 55)
+        assert s.text == "cell"
+
+    def test_rows_from_spans_clusters_by_centroid(self) -> None:
+        spans = [
+            Span(y_top=0, y_bottom=10, x_left=50, x_right=60, text="b"),
+            Span(y_top=1, y_bottom=11, x_left=10, x_right=20, text="a"),
+            Span(y_top=30, y_bottom=40, x_left=10, x_right=20, text="c"),
+        ]
+        rows, avg_h = rows_from_spans(spans)
+        assert [[s.text for s in row] for row in rows] == [["a", "b"], ["c"]]
+        assert avg_h == 10.0
+
+    def test_rows_from_spans_empty(self) -> None:
+        assert rows_from_spans([]) == ([], 0.0)
+
+    def test_spatial_sort_reads_row_major(self) -> None:
+        regions = [
+            _region(400, 100, 500, 130, "B"),
+            _region(100, 100, 200, 130, "A"),
+            _region(100, 300, 200, 330, "C"),
+        ]
+        assert _spatial_sort_regions(regions) == "A B\nC"
+
+    def test_table_aware_text_emits_table_runs_column_major(self) -> None:
+        regions = [
+            _region(100 + 300 * c, 100 + 100 * r, 220 + 300 * c, 130 + 100 * r,
+                    f"{'abc'[c]}{r + 1}")
+            for r in range(3) for c in range(3)
+        ]
+        assert _table_aware_text(regions) == "a1 a2 a3\n\nb1 b2 b3\n\nc1 c2 c3"
+
+
+def _grid_regions(
+    n_body_rows: int = 3,
+    n_cols: int = 4,
+    *,
+    col_pitch: int = 300,
+    row_pitch: int = 100,
+    conf: float = 0.9,
+) -> list[OCRRegionResult]:
+    """A clean grid at 200 dpi spacing: header row H1..Hn plus body cells r{r}c{c}."""
+    regions = []
+    for r in range(n_body_rows + 1):
+        for c in range(n_cols):
+            x0, y0 = 100 + col_pitch * c, 100 + row_pitch * r
+            regions.append(OCRRegionResult(
+                bbox=[[x0, y0], [x0 + 120, y0], [x0 + 120, y0 + 30], [x0, y0 + 30]],
+                text=f"H{c + 1}" if r == 0 else f"r{r}c{c + 1}",
+                confidence=conf,
+            ))
+    return regions
+
+
+class TestReconstructTable:
+    """A1 — the OCR feeder produces a TableData, or refuses (never a partial)."""
+
+    RECT = (50.0, 50.0, 1300.0, 500.0)
+    DIMS = (1700, 2200)
+
+    def test_clean_grid_reconstructs(self) -> None:
+        table = reconstruct_table(_grid_regions(), self.RECT, 200, 0.96, pix_dims=self.DIMS)
+        assert table is not None
+        assert table.headers == ["H1", "H2", "H3", "H4"]
+        assert table.rows == [
+            ["r1c1", "r1c2", "r1c3", "r1c4"],
+            ["r2c1", "r2c2", "r2c3", "r2c4"],
+            ["r3c1", "r3c2", "r3c3", "r3c4"],
+        ]
+
+    def test_lineage_confidence_and_producer(self) -> None:
+        """A5 — confidence from constituent regions, producer marker set."""
+        table = reconstruct_table(
+            _grid_regions(conf=0.8), self.RECT, 200, 0.96, pix_dims=self.DIMS,
+        )
+        assert table is not None
+        assert table.confidence == pytest.approx(0.8)
+        assert table.context["producer"] == "table_grid"
+
+    def test_detector_confidence_caps_region_confidence(self) -> None:
+        table = reconstruct_table(
+            _grid_regions(conf=0.9), self.RECT, 200, 0.5, pix_dims=self.DIMS,
+        )
+        assert table is not None
+        assert table.confidence == pytest.approx(0.5)
+
+    def test_position_normalised_by_pix_dims(self) -> None:
+        table = reconstruct_table(_grid_regions(), self.RECT, 200, 0.96, pix_dims=self.DIMS)
+        assert table is not None
+        assert table.position.x == pytest.approx(50 / 1700)
+        assert table.position.y == pytest.approx(50 / 2200)
+        assert table.position.width == pytest.approx(1250 / 1700)
+        assert table.position.height == pytest.approx(450 / 2200)
+
+    def test_refuses_too_few_columns(self) -> None:
+        got = reconstruct_table(
+            _grid_regions(n_cols=2), self.RECT, 200, 0.96, pix_dims=self.DIMS,
+        )
+        assert got is None
+
+    def test_refuses_too_few_rows(self) -> None:
+        got = reconstruct_table(
+            _grid_regions(n_body_rows=1), self.RECT, 200, 0.96, pix_dims=self.DIMS,
+        )
+        assert got is None
+
+    def test_refuses_poor_column_fit(self) -> None:
+        """Spans the column model can't place trip the assignment gate."""
+        # Strays sit inside the rect but left of column 1 beyond tolerance.
+        regions = _grid_regions() + [
+            _region(55, 200, 95, 230, "stray1"),
+            _region(55, 300, 95, 330, "stray2"),
+        ]
+        assert reconstruct_table(regions, self.RECT, 200, 0.96, pix_dims=self.DIMS) is None
+
+    def test_refuses_empty_rect(self) -> None:
+        regions = _grid_regions()
+        # A rect nowhere near the regions holds no centroids.
+        assert reconstruct_table(regions, (1400.0, 50.0, 1600.0, 500.0), 200, 0.96,
+                                 pix_dims=self.DIMS) is None

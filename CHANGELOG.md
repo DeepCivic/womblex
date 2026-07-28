@@ -114,6 +114,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Plan and sequencing in
   [docs/table-cell-reconstruction-plan.md](docs/table-cell-reconstruction-plan.md).
 
+- **Table-cell reconstruction on OCR'd pages (#17), step A1 — one shared
+  grid algorithm, two feeders.** The row/column inference that
+  `spreadsheet_print` already used (y-band binning, data-anchored column
+  clustering, x-left cell assignment) is lifted into `ingest/table_grid.py`
+  and consumed unchanged by `spreadsheet_print`; the point-space tolerances
+  became parameters so pixel-space callers scale them by `dpi/72` instead of
+  running ~2.8× too tight at 200 dpi. The OCR-side row-clustering preamble
+  that `_spatial_sort_regions` and `_table_aware_text` each carried nearly
+  line-for-line is now one shared helper (`rows_from_spans`), closing the
+  repo's third table-ish duplication.
+
+  `ingest/ocr_tables.py` is the new second feeder:
+  `reconstruct_table(regions, table_rect, dpi, conf)` reduces the OCR quads
+  inside a layout-detected table rect to spans and reconstructs the grid as
+  a `TableData` — or returns `None`, never a partial, below its precision
+  gates (minimum columns/rows and a column-fit ratio, provisional until B2
+  calibrates them; each refusal is debug-logged). Refusal on a hard shape is
+  a correct round-1 outcome. Element lineage is deliberate: confidence comes
+  from the constituent region confidences capped by the detector's, and
+  `context["producer"] = "table_grid"` distinguishes reconstructed tables
+  from PyMuPDF-fallback ones in the parquet. Nothing is wired into the
+  layout pass yet — `tables` is still returned empty on every extraction
+  path until A3.
+
 ### Fixed
 - **A declined continental number no longer leaks its decimal tail as an
   amount.** In Australian (default) mode `find_money` correctly refuses to read

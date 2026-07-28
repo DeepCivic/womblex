@@ -75,7 +75,7 @@ DocLayNet harness was already pinned by construction, calling
 which also pins the A3 starting point — the fallback currently collapses the
 whole page, table content included, onto one block.
 
-### A1 — one algorithm: `ingest/table_grid.py`
+### A1 — one algorithm: `ingest/table_grid.py` — **landed**
 
 **Resolved: shared module, not a duplicate.** The repo already holds three
 table-ish algorithms and must not gain a fourth:
@@ -110,6 +110,29 @@ End-state after A1:
 
 Signature: `reconstruct_table(regions, table_rect, dpi, conf) -> TableData |
 None`; returns `None` (never a partial) below the precision gates in B2.
+
+**What landed.** `ingest/table_grid.py` holds the lifted algorithm —
+`Span` / `Column`, `bin_y_bands`, `columns_from_data`, `column_for_x`,
+`bands_to_rows`, `drop_blank_rows` — with the point-space tolerances as
+parameters (`*_PT` defaults; pixel-space callers scale by `dpi/72`), plus
+`rows_from_spans` (the adaptive y-centroid row clustering) and
+`cluster_x_centroids`. `spreadsheet_print` consumes it (505 → 356 lines,
+behaviour unchanged); `_spatial_sort_regions` and `_table_aware_text` now
+share the `rows_from_spans` preamble, so the near-line-for-line
+region→rows duplication is gone. `ingest/ocr_tables.py` is the second
+feeder: `span_from_region` (the quad→bounds reduction), `regions_in_rect`
+(moved from `strategies_scanned` so the A3 import direction has no cycle)
+and `reconstruct_table(regions, table_rect, dpi, conf, *, pix_dims)` —
+`pix_dims` normalises the element position; `conf` is the layout
+detector's table-region confidence, capping the mean constituent-region
+confidence per A5, and `context["producer"] = "table_grid"` stamps the
+lineage. Columns derive from body spans (headers are commonly centred and
+would skew clusters); row 1 is taken as the header row. The precision
+gates are structural and **provisional until B2 calibrates them**:
+`MIN_COLUMNS=3`, `MIN_BODY_ROWS=2`, `MIN_ASSIGNED_RATIO=0.9` (fraction of
+in-rect spans the column model must place), each refusal debug-logged.
+Nothing is wired into the layout pass yet — `tables` is still returned
+empty on every extraction path until A3.
 
 ### A2 — skew: refuse, don't solve (round-1 cut)
 
