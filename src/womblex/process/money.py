@@ -359,11 +359,28 @@ def _scan_symbol_prefix(text: str, pats, opts: MoneyOptions) -> list[MoneySpan]:
     return out
 
 
+def _tier3_reinforced(text: str, start: int, end: int) -> bool:
+    """Is a tier-3 ISO code backed by surrounding financial context?
+
+    Tier 3 is "supported, but lower confidence unless reinforced by surrounding
+    context" (docs/money.md). Enforced as a gate, not just a penalty, because
+    several ISO codes are ordinary English words in caps: without it `TOP 10
+    projects` is ten Tongan paʻanga and `ALL 25 recipients` is Albanian lek.
+    Tier 1 and 2 codes stand on their own.
+    """
+    window = text[max(0, start - 48):end + 48]
+    if any(sym in window for sym in SYMBOL_TO_CODE):
+        return True
+    return CONTEXT_RE.search(window) is not None
+
+
 def _scan_iso_prefix(text: str, pats, opts: MoneyOptions) -> list[MoneySpan]:
     out = []
     for m in pats["p2"].finditer(text):
         code = resolve_iso(m.group("iso"))
         if code is None:
+            continue
+        if currency_tier(code) == 3 and not _tier3_reinforced(text, m.start(), m.end()):
             continue
         evidence = "p6" if m.group("scale") else "p2"
         span = _candidate(
@@ -380,6 +397,8 @@ def _scan_iso_suffix(text: str, pats, opts: MoneyOptions) -> list[MoneySpan]:
     for m in pats["p3"].finditer(text):
         code = resolve_iso(m.group("iso"))
         if code is None:
+            continue
+        if currency_tier(code) == 3 and not _tier3_reinforced(text, m.start(), m.end()):
             continue
         span = _candidate(m, "p3", currency=code, currency_source="iso",
                           international=opts.international_numbers)

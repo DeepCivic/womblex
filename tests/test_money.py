@@ -221,10 +221,25 @@ def test_iso_membership():
     assert resolve_iso("ABC") is None
 
 
-def test_tier3_currency_scores_lower_than_tier1():
+def test_tier3_currency_needs_context_and_scores_lower():
+    """Several ISO codes are ordinary English words in caps. Tier 3 is admitted
+    only when the surroundings reinforce it — otherwise `TOP 10 projects` is
+    ten Tongan paʻanga."""
     tier1 = _one("AUD 100")
-    tier3 = _one("PGK 100")
+    tier3 = _one("a grant of PGK 100 was paid")
+    assert tier3.currency == "PGK"
     assert tier3.confidence < tier1.confidence
+    assert find_money("PGK 100") == []          # bare tier 3: no reinforcement
+
+
+@pytest.mark.parametrize("text", [
+    "TOP 10 projects were funded",
+    "ALL 25 projects reported on time",
+    "TRY 3 times before escalating",
+    "CUP 4 finals",
+])
+def test_english_words_that_are_iso_codes_are_not_currencies(text):
+    assert find_money(text) == []
 
 
 def test_ambiguous_currency_word_leaves_currency_unresolved():
@@ -413,6 +428,18 @@ def test_explicit_header_currency_outranks_an_incidental_veto_term():
     assert len(extract_column(values, verdict)) == 5
 
 
+def test_unit_marker_columns_are_not_money():
+    """The same page carries `Threshold ($)` and `Threshold (#)` — dollars and
+    unit counts, distinguished only by the marker. A tokeniser that drops `#`
+    reads the count column as money and invents five amounts."""
+    counts = ["320,833", "21,583", "13,125", "16,917", "12,833"]
+    dollars = ["32,031", "9,180", "5,439", "9,287", "5,625"]
+    assert classify_column("Threshold (#)", counts).verdict == "vetoed"
+    assert classify_column("Target (#)", counts).verdict == "vetoed"
+    assert classify_column("Threshold ($)", dollars).is_money
+    assert classify_column("Target ($)", dollars).is_money
+
+
 def test_veto_still_wins_without_an_explicit_currency_marker():
     # Count columns on the same page carry `(#)`, not `($)`, and stay vetoed.
     assert classify_column(
@@ -452,6 +479,29 @@ def test_header_supplies_the_column_scale():
     assert verdict.scale == "million"
     assert [v for _, v, _ in extract_column(values, verdict)] == [
         Decimal("1500000.0"), Decimal("2700000.0"), Decimal("300000.0")]
+
+
+@pytest.mark.parametrize("header", [
+    "Budget 2000", "Grants over $10,000", "Threshold $5,000", "Payments 2019-20",
+])
+def test_a_number_in_the_header_is_not_a_thousands_scale(header):
+    """`Grants over $10,000` must not declare a thousands scale off the `000`
+    inside its own number — that multiplies every cell below it by 1,000."""
+    assert header_scale(header) is None
+    values = ["1,200", "3,400", "2,750"]
+    verdict = classify_column(header, values)
+    if verdict.is_money:
+        assert [v for _, v, _ in extract_column(values, verdict)] == [
+            Decimal("1200"), Decimal("3400"), Decimal("2750")]
+
+
+@pytest.mark.parametrize(("header", "scale"), [
+    ("Expenditure $'000", "thousand"), ("Value '000", "thousand"),
+    ("In $000s", "thousand"), ("Amount ($m)", "million"),
+    ("Cost ($ million)", "million"), ("Approved Budget $m", "million"),
+])
+def test_genuine_header_scales_still_read(header, scale):
+    assert header_scale(header) == scale
 
 
 def test_header_scale_and_currency_reading():

@@ -119,6 +119,18 @@ reinforced by surrounding context. **Three uppercase letters are never treated
 as a currency unless they are members of the ISO 4217 list** — `ABC` and `XYZ`
 are not currencies.
 
+"Unless reinforced by surrounding context" is a **gate**, not just a
+confidence penalty, because a number of ISO codes are ordinary English words
+in capitals: `ALL` (Albanian lek), `TOP` (Tongan paʻanga), `TRY`, `PEN`, `CUP`,
+`MAD`, `BOB`, `CAD`. Ungated, `TOP 10 projects were funded` is ten paʻanga and
+`ALL 25 recipients` is Albanian lek — both shapes are common in government
+reporting. A tier-3 code is admitted only when a currency symbol or financial
+trigger word sits within ~48 characters; tier 1 and 2 codes stand alone. The
+same asymmetry applies to column headers: a *parenthesised* code names the
+column's currency (`Value (PGK)`), while a bare one is trusted only at tier
+1/2 — so `ALL OTHER COMPENSATION ($)`, a standard heading in this document
+class, resolves through its `$` rather than to Albanian lek.
+
 ## Number recognition
 
 ### Australian number format (default)
@@ -279,7 +291,9 @@ suppresses genuine money columns: on the DocLayNet compensation-table fixture a
 
 **Column scale.** Financial tables put the unit in the header (`$m`, `$'000`)
 and leave the cells bare, so the header supplies the multiplier for every cell
-beneath it. Where no header is recoverable — the common case for PDF financial
+beneath it. The `'000` form must not match the `000` inside a number already in
+the header — `Grants over $10,000` declares no scale, and reading one there
+multiplies every cell beneath it by 1,000. Where no header is recoverable — the common case for PDF financial
 tables — bare cells are **left alone rather than guessed at**. Under-counting
 is the correct failure mode here.
 
@@ -571,6 +585,16 @@ below. The rest, as measurements:
   whole column path — header scale, cell parsing, exact decimals.
 - **FUNSD's zero is correct.** Its `AMOUNT RECEIVED FROM VENDOR` column is
   empty in the source; the numbers on the page are unit counts and rep counts.
+- **Two header-marker defects, both found on one scanned page.** That page
+  carries `Threshold ($)` and `Threshold (#)` — dollars and unit counts,
+  distinguished only by the marker. The money op honoured neither correctly:
+  `Grant Date Fair Value ... ($)` was vetoed on the incidental word `date`,
+  and `Threshold (#)` was promoted to money because the header tokeniser
+  dropped `#` entirely and matched the vocabulary term `threshold`. The first
+  lost 5 real amounts; the second invented 5. Both are fixed, and `#` is now a
+  token character precisely because a financial table marks a count column the
+  same way it marks a money one.
+
 - **Scanned money tables are unreachable today, and that is the largest
   measured gap.** DocLayNet `dense_text_548` is a proxy-statement
   *Grants of Plan-Based Awards* page: four money columns headed
@@ -584,7 +608,10 @@ below. The rest, as measurements:
   amount on it is a bare number the narrative path is right to decline.
 
   Fed the same page's real structure, the column path recovers **30 of 30**.
-  The op is ready; OCR table-cell reconstruction is the missing piece. This
+  The op is ready; OCR table-cell reconstruction is the missing piece, and it
+  is extraction-side work tracked as item #17 in
+  [steering.md](steering.md#table-cell-reconstruction-on-ocrd-pages-17) — not
+  a change to this op. This
   also answers the benchmark gap noted below — money loss through OCR was
   unmeasured, and on this page it is ~97%, none of it attributable to the
   detector.

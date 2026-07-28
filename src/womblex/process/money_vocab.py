@@ -300,6 +300,7 @@ HEADER_MONEY_TERMS: frozenset[str] = frozenset(set(CONTEXT_TRIGGERS) | {
 # thousands-separated. Matching is whole-word — `age` must not veto
 # `Average Cost`.
 HEADER_VETO_TERMS: frozenset[str] = frozenset({
+    "#", "units", "shares", "volume",
     "postcode", "postal", "abn", "acn", "arbn", "id", "ids", "identifier",
     "code", "count", "number", "no", "num", "qty", "quantity", "phone",
     "telephone", "mobile", "fax", "year", "years", "date", "dates", "month",
@@ -309,7 +310,10 @@ HEADER_VETO_TERMS: frozenset[str] = frozenset({
     "page", "pages", "row", "column", "sequence", "seq", "reference", "ref",
 })
 
-_TOKEN_RE = re.compile(r"[a-z$%']+", re.IGNORECASE)
+# `#` is a token character, not punctuation: financial tables mark a count
+# column `(#)` exactly as they mark a money column `($)`, and a tokeniser that
+# drops it cannot tell `Threshold ($)` from `Threshold (#)` on the same page.
+_TOKEN_RE = re.compile(r"[a-z$%#']+", re.IGNORECASE)
 
 
 def header_tokens(header: str) -> list[str]:

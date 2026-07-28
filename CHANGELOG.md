@@ -53,6 +53,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   No new dependencies. Pattern 10 (bare numbers near financial vocabulary in
   narrative) and continental number formats ship off by default.
 
+  A number in a header no longer declares a thousands scale: the `'000`
+  pattern matched the `000` inside any number, so a `Grants over $10,000`
+  header multiplied every cell beneath it by 1,000.
+
+  Tier-3 ISO codes are gated on surrounding context rather than merely
+  scored lower, because several are ordinary English words in capitals:
+  ungated, `TOP 10 projects` reads as ten Tongan paʻanga and
+  `ALL OTHER COMPENSATION ($)` resolves to Albanian lek. A tier-3 code needs a
+  currency symbol or financial trigger word nearby; in a header it must be
+  parenthesised (`Value (PGK)`). Tier 1/2 codes stand alone.
+
+  Count columns are no longer read as money. A financial table marks a count
+  column `(#)` exactly as it marks a money column `($)` — the same page can
+  carry `Threshold ($)` and `Threshold (#)` — but the header tokeniser dropped
+  `#` entirely and promoted the count column on the vocabulary term alone.
+
   A veto term no longer suppresses a column whose header declares its own
   currency: `Grant Date Fair Value of Stock and Option Awards ($)` is a money
   column that happens to contain the word "date", and vetoing it lost all five

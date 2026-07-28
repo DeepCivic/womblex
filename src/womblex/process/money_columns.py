@@ -36,6 +36,7 @@ from womblex.process.money_vocab import (
     NULL_MARKERS,
     SCALES,
     SYMBOL_TO_CODE,
+    currency_tier,
     header_tokens,
 )
 
@@ -84,7 +85,10 @@ class ColumnVerdict:
 _CURRENCY_SYMBOLS = tuple(sorted(SYMBOL_TO_CODE, key=len, reverse=True))
 
 _HEADER_SCALE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"\$?\s*'?000s?\b"), "thousand"),
+    # The lookbehind is load-bearing: without it the `000` inside a number in
+    # the header matches, so `Grants over $10,000` declares a thousands scale
+    # and multiplies every cell beneath it by 1,000.
+    (re.compile(r"(?<![\d,.])\$?\s*'?000s?\b"), "thousand"),
     (re.compile(r"\bthousands?\b", re.IGNORECASE), "thousand"),
     (re.compile(r"\bmillions?\b", re.IGNORECASE), "million"),
     (re.compile(r"\bbillions?\b", re.IGNORECASE), "billion"),
@@ -97,6 +101,9 @@ _HEADER_SCALE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 # (`[$$-en-AU]#,##0.00`, `[$£-en-GB]#,##0`).
 _FORMAT_LOCALE_RE = re.compile(r"\[\$(?P<sym>[^\-\]]*)")
 
+# `Value (AUD)` — the column naming its own currency.
+_PAREN_CODE_RE = re.compile(r"\(\s*\$?\s*([A-Z]{3})\s*\)")
+
 
 def header_currency(header: str, default: str) -> tuple[str | None, str | None]:
     """Currency named by a header. Returns ``(code, source)``.
@@ -106,8 +113,15 @@ def header_currency(header: str, default: str) -> tuple[str | None, str | None]:
     """
     if not header:
         return None, None
-    for token in re.findall(r"\b[A-Z]{3}\b", header):
+    # A parenthesised code is the column naming its currency. A bare one is
+    # only trusted for tier 1/2, because several ISO codes are ordinary words
+    # in caps — `ALL OTHER COMPENSATION ($)` is a dollar column, not Albanian
+    # lek, and the header's own `$` should win.
+    for token in _PAREN_CODE_RE.findall(header):
         if token in ISO_4217:
+            return token, "column_header"
+    for token in re.findall(r"\b[A-Z]{3}\b", header):
+        if token in ISO_4217 and currency_tier(token) < 3:
             return token, "column_header"
     for sym in _CURRENCY_SYMBOLS:
         if sym in header:

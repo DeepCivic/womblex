@@ -319,6 +319,42 @@ def test_prose_cells_without_digits_are_skipped(tmp_path: Path):
     assert [r["value"] for r in read_money_spans(base).to_pylist()] == [Decimal("50.0000")]
 
 
+def test_exactly_one_anchor_group_per_row(tmp_path: Path):
+    """The documented schema contract: `locus` says which anchor group is
+    populated, and the others stay null. Mixing coordinate spaces on one row
+    would make the sidecar unjoinable."""
+    elements = [
+        _element(0, "paragraph", text="The department paid $33.1 million."),
+        _element(1, "table", header_rows=[0]),
+        _element(2, "sheet_cell", sheet="S", row=0, col=0, value="Value", page=None),
+        _element(3, "sheet_cell", sheet="S", row=1, col=0, value="1000",
+                 page=None, number_format="$#,##0.00"),
+        _element(4, "sheet_cell", sheet="S", row=2, col=0, value="2000",
+                 page=None, number_format="$#,##0.00"),
+        _element(5, "sheet_cell", sheet="S", row=3, col=0, value="3000",
+                 page=None, number_format="$#,##0.00"),
+    ]
+    cells = [_cell(1, 0, 0, "Amount"), _cell(1, 1, 0, "500"),
+             _cell(1, 2, 0, "600"), _cell(1, 3, 0, "700")]
+    base = _build_shard(tmp_path, elements, cells)
+
+    money_shards(tmp_path, MoneyConfig())
+
+    rows = read_money_spans(base).to_pylist()
+    assert {r["locus"] for r in rows} == {"narrative", "table_cell", "sheet_cell"}
+    for r in rows:
+        narrative = r["start_char"] is not None
+        cell = r["row"] is not None
+        assert narrative != cell, f"row mixes anchor groups: {r}"
+        if r["locus"] == "narrative":
+            assert r["text_source"] == "elements"
+            assert r["sheet"] is None and r["parent_elem_order"] is None
+        if r["locus"] == "table_cell":
+            assert r["parent_elem_order"] is not None and r["sheet"] is None
+        if r["locus"] == "sheet_cell":
+            assert r["sheet"] is not None and r["parent_elem_order"] is None
+
+
 def test_quantise_drops_unstorable_values():
     assert quantise(Decimal("1.23456")) == Decimal("1.2346")
     assert quantise(Decimal(10) ** 40) is None
