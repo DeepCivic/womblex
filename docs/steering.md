@@ -105,6 +105,14 @@ fixtures, and `docs/accuracy/EXTRACTION.md` regenerated. Precision matters
 more than coverage here: a wrongly-binned grid produces confidently wrong
 values downstream, which is worse than the current honest silence.
 
+The implementation plan — extraction fix, benchmark/accuracy extension, and the
+ground-truth authoring spec for the anchor fixture — is in
+[table-cell-reconstruction-plan.md](table-cell-reconstruction-plan.md). Note it
+records two corrections to this document, unapplied as yet: the Layout
+Detection section below is stale (table detection is not 0 — see
+`accuracy/EXTRACTION.md`), and the reusable-pieces bullet above overstates the
+`grid_projection` fit.
+
 ### Reading Order
 
 **Resolved.** CER-s (sorted CER) now separates recognition from reading-order accuracy. 65% of FUNSD sequential CER was ordering mismatch.
