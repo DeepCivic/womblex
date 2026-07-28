@@ -17,6 +17,33 @@ this round. Two principles carry over unchanged from the original plan:
 - **No duplicate algorithms.** One shared grid module; existing table-ish
   code is consumed or superseded, never paralleled (see A1).
 
+## Status (updated 2026-07-28)
+
+| Stage | Status |
+|---|---|
+| A0 — scope + region plumbing | **Landed** (`1f85f7e`) |
+| A1 — shared `table_grid` + OCR feeder | **Landed** (this branch, incl. QA fixes) |
+| A2 — skew refusal | Not started (~3 lines, lands with A3) |
+| A3 — wire the OCR-PDF path | Not started — **next up in Track A** |
+| A4 — route the image path | Not started |
+| A5 — conventions + lineage | Requirements landed with A1 (confidence lineage, producer marker); the "preserved by construction" claims verify when A3/A4 put a table through the pipeline |
+| B0 — fix the table metric | Not started — live doc/metric defect, **next up overall** |
+| B1 — decompose the measurement | Not started |
+| B2 — metric set + gate calibration | Not started — inherits three specifics from A1 (see Open decisions) |
+| B3 — rendered-clean GT harness | Not started (the `dense_text_548` GT itself landed, `7f756cc`) |
+| B4 — report + docs wiring | Not started |
+| B5 — regression guard | Not started |
+
+**Sequencing deviation, recorded:** A1 landed *before* B0/B3/B1.2, against
+the planned order. The consequence the original ordering was designed to
+avoid is real and accepted: the reconstructor exists but is untuned — every
+precision gate in `ocr_tables.py` is a provisional structural constant, not
+a calibrated threshold. That is why A1 refused to pick a two-line-header
+threshold and why B0 → B3 → B1.2 should still land **before A3 wires the
+reconstructor in**: wiring an unmeasured reconstructor into extraction
+would put uncalibrated grids into parquet shards. The remaining order is
+unchanged: `B0 → B3 + B1.2 → A3 (+A2) → A4 → B2 → B4/B5`.
+
 ## Where tables come from today (why this scope is enough)
 
 | Path | Mechanism | Status |
@@ -223,7 +250,14 @@ home), tables must interleave by y rather than append, the LLM branch
 rule applies identically — the page-wide paragraph currently contains the
 table text.
 
-### A5 — post-processing conventions and lineage: preserved by construction
+### A5 — post-processing conventions and lineage — **requirements landed, verification pending A3/A4**
+
+The two mandated provenance fields below landed with A1
+(`reconstruct_table` sets confidence from the constituent regions and
+stamps `context["producer"] = "table_grid"`). The convention claims that
+follow are verified at the code level but can only be *end-to-end*
+confirmed once A3/A4 put a reconstructed table through the writer,
+chunker and money stage.
 
 Because Track A produces a `TableData` and reuses `_table_to_element`, every
 downstream composed stage consumes reconstructed tables through the existing
@@ -401,10 +435,17 @@ config default change to an LLM engine can't turn the gates into no-ops.
 
 ## Sequencing
 
-`B0 → B3 rendered-GT harness + B1.2 → A1 → A3 → A4 → B2 breadth → B4/B5`.
-B0 first because it is a live doc/metric defect. The rendered-GT harness and
-B1.2 land before A3 so the reconstructor is tuned against clean grids
-without the detector in the loop.
+Planned: `B0 → B3 rendered-GT harness + B1.2 → A1 → A3 → A4 → B2 breadth →
+B4/B5`. Actual: A1 landed first (deviation recorded in Status above).
+Remaining, order unchanged:
+
+`B0 → B3 rendered-GT harness + B1.2 → A3 (+A2) → A4 → B2 breadth → B4/B5`.
+
+B0 first because it is a live doc/metric defect. The rendered-GT harness
+and B1.2 still land before A3 — with A1 already shipped, they are what
+turns its provisional gates into calibrated ones *before* reconstructed
+grids start landing in parquet shards. A2 is a three-line page-level
+refusal that rides along with A3's wiring.
 
 ## Deferred to a later round (recorded so they aren't relitigated)
 
