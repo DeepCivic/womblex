@@ -1,9 +1,14 @@
 # Plan — #17 table-cell reconstruction, with benchmark + accuracy extension
 
 Implementation plan for [steering.md](steering.md#table-cell-reconstruction-on-ocrd-pages-17)
-item #17. Written before implementation and not yet executed — the line
-references below are against `00b4a39` and the open decisions at the end are
-unresolved.
+item #17. Written before implementation and not yet executed. **Revised
+2026-07-28 against `097c075`** — the original `00b4a39` baseline predated two
+commits that change the plan's ground: the Mistral-OCR engine swap (`097c075`,
+which reshaped `_ocr_page` / the orchestrator's OCR branch and added an
+LLM-OCR path with no regions at all — see A0), and the GT fixture commit
+(`7f756cc`, which partially executed Appendix A — see B3). Line references
+are updated to `097c075`; open decisions at the end are unresolved except
+where marked.
 
 Goal: a detected table region on an OCR'd page yields a `kind="table"` element
 with cells, on **both** the OCR-PDF path and the image path — and the benchmark
@@ -23,19 +28,53 @@ Everything downstream of `TableData` already works: `_table_to_element`
 (y, x), the writer denormalises to `table_cells.parquet`. **The only missing
 piece is producing a `TableData`.** No schema change, no new element kind.
 
+### A0 — scope: region-based engines only (new since the engine swap)
+
+The Mistral-OCR swap split the OCR branch in two, and reconstruction can only
+run on one side. When `reading_order_native` is true (mistral-ocr, ollama),
+the engine returns markdown and an **empty `regions` list**, and the
+orchestrator bypasses `_layout_blocks_and_tables` entirely
+(`orchestrator.py:179-183` sets `page_tables = []`). There is nothing to feed
+`reconstruct_table` — no quads exist. So Track A is architecturally scoped to
+the region-based (paddleocr) path, on both the OCR-PDF and image routes, and
+the benchmark must pin `engine="paddleocr"` or its numbers measure nothing.
+
+Pixtral markdown *does* contain pipe tables for table regions; a
+markdown-table → `TableData` parser would be a cheap third feeder that gives
+the LLM path table elements too. Not in scope for #17 — recorded as open
+decision 6 so it isn't lost.
+
+Also now true (simplifies A3): `_ocr_page` already returns
+`(text, conf, steps, reading_order_native, regions, pix_dims)` and the
+orchestrator already unpacks all six at `orchestrator.py:163` — the plumbing
+the original plan assigned to A3 half-exists; what remains is passing
+`regions` + `pix_dims` *into* `_layout_blocks_and_tables`.
+
 ### A1 — `ingest/table_grid.py` (shared) + `ingest/ocr_tables.py` (OCR feeder)
 
-Two corrections to the write-up's framing:
+Three corrections to the write-up's framing:
 
 - `OCRRegionResult.bbox` is a **four-point quadrilateral** `[[x,y] × 4]`
-  (`protocols.py:26`, built at `paddle_ocr.py:193`), not `(x0,y0,x1,y1)`. Not
-  drop-in into `grid_projection`; needs a 3-line bounds conversion.
+  (`interfaces/protocols.py:26`, built at `paddle_ocr.py:202`), not
+  `(x0,y0,x1,y1)`. Not drop-in into `grid_projection`; needs a 3-line bounds
+  conversion.
 - **`spreadsheet_print` is the whole algorithm, not just "the row side".** Its
-  `_Span(y_top, y_bottom, x_left, x_right, text)` (:57) is exactly what an OCR
+  `_Span(y_top, y_bottom, x_left, x_right, text)` (:58) is exactly what an OCR
   quad reduces to, and `_bin_y_bands → _columns_from_data → _column_for_x →
-  _bands_to_rows` (:371-430) *is* cell reconstruction. `grid_projection` finds
+  _bands_to_rows` *is* cell reconstruction. `grid_projection` finds
   page-level prose gutters and renders whitespace-aligned text, not cells —
   weaker prior art than the doc implies.
+- **There is already a third table algorithm in the target file, and the plan
+  must state its end-state.** `_table_aware_text`
+  (`strategies_scanned.py:91-212`) clusters OCR regions into rows and columns
+  (`_cluster_x_centroids`, `_find_table_end`, `_emit_columns`) and re-emits
+  detected table runs **column-major inside the page text**. It is the text
+  the fallback narrative block carries today (see A3). Intended end-state:
+  the reconstructor supersedes it *inside* layout-detected table rects;
+  `_table_aware_text` keeps covering table runs the layout model missed.
+  Without this decision the ingest package carries three table-ish
+  algorithms (`spreadsheet_print` binning, `_table_aware_text` clustering,
+  new `table_grid`) with no stated relationship.
 
 Lift the shared helpers into `ingest/table_grid.py`; `spreadsheet_print` imports
 them (505 → ~385 lines), `ocr_tables` too. One algorithm, two feeders.
@@ -47,33 +86,70 @@ PDF points and must become parameters scaled `dpi/72` — 2.8× off at 200 dpi.
 
 ### A2 — the coordinate-space trap
 
-`_ocr_page` (`strategies_scanned.py:212`) calls `preprocess_for_ocr`, which
-**deskews via `warpAffine`** (`paddle_ocr.py:469-473`) before OCR — so region
-coords are in deskewed space, while `_layout_blocks_and_tables` (:421-426)
-renders its *own* raw pixmap for YOLO. Same dimensions, content rotated;
-intersecting the table rect with OCR regions is wrong by the skew angle and
-fails silently at the edges. Fix: share one image out of `_ocr_page` (also kills
-a duplicate render). `ImageExtractor` doesn't preprocess (:517-518), so it has no
-mismatch — another reason the fix belongs in `_ocr_page`, not the reconstructor.
+`_ocr_page` (`strategies_scanned.py:215`) calls `preprocess_for_ocr` for
+region-based engines (LLM engines now skip it via `is_llm_engine`, :252 —
+irrelevant here since they yield no regions), which **deskews via
+`warpAffine`** (`paddle_ocr.py:489-493`) before OCR — so region coords are in
+deskewed space, while `_layout_blocks_and_tables` (:424-426) renders its
+*own* raw pixmap for YOLO. Same dimensions, content rotated; intersecting the
+table rect with OCR regions is wrong by the skew angle and fails silently at
+the edges.
+
+"Share one image out of `_ocr_page`" is the wrong fix as originally worded:
+the raw render is the one with the wrong coords, and sharing the
+*preprocessed* image with YOLO feeds the layout model binarised grayscale —
+a distribution shift that silently moves B1's detection metric. Preferred
+fix: have `preprocess_for_ocr` return the rotation matrix (deskew fires only
+when |angle| > 0.5° and confidence > 0.3, so it is usually identity and
+`"deskew" ∈ steps` flags when it isn't) and map the YOLO table rect into
+deskewed space — an affine on 4 points, no change to either model's input.
+The duplicate pixmap render can still be shared (both sides render the same
+raw pixmap at the same dpi); only the *coordinate mapping* needs the matrix.
+`ImageExtractor` doesn't preprocess (:518-520), so it has no mismatch —
+another reason the fix belongs in `_ocr_page`, not the reconstructor.
 
 ### A3 — wire the OCR-PDF path
 
-`_layout_blocks_and_tables` gains `regions` + `pix_dims` (orchestrator holds both
-at :163). Populate the `tables` list declared at :419 and returned empty at
-:465/:475. **Drop the `[TABLE]` placeholder block on success** —
-`_BLOCK_TYPE_TO_KIND` maps `table → paragraph` (:231), so keeping it would emit
-a literal `[TABLE]` paragraph *alongside* the table element and double-count the
-region. On failure, keep today's placeholder exactly. Leave the
-`SCANNED_MACHINEWRITTEN` grid fallback (:205-214) alone; `not page_tables`
-already guards it.
+`_layout_blocks_and_tables` gains `regions` + `pix_dims` (the orchestrator
+already holds both at :163, per A0). Populate the `tables` list declared at
+:421 and returned empty at :467/:477.
+
+**The real double-count is the fallback narrative block, not the `[TABLE]`
+placeholder.** Layout-derived non-table blocks always carry `text=""`
+(`strategies_scanned.py:445` — "layout region text not yet segmented"), so
+the "no block has text" fallback at :452 fires on essentially every
+layout-successful page and returns **one block containing the whole page's
+OCR text — table content included, column-major via `_table_aware_text`** —
+already discarding the `[TABLE]` placeholder in the process (`return [block],
+tables` at :467). Dropping the placeholder on success is therefore mostly a
+no-op; the actual requirement is: **when a table element is emitted, the
+table region's text must be excluded from the narrative block**, or the
+chunker sees the content twice — once as a narrative paragraph, once as
+table markdown. Fix shape: on reconstruction success, rebuild the page
+narrative from the regions *outside* the table rect (`_spatial_sort_regions`
+over the complement) and emit that as the paragraph block; on failure, keep
+today's full-text fallback (and its placeholder behaviour) exactly.
+`_BLOCK_TYPE_TO_KIND` still maps `table → paragraph` (:231), so any surviving
+placeholder would double-count — keep the drop, just don't mistake it for
+the fix. Leave the `SCANNED_MACHINEWRITTEN` grid fallback (:205-214) alone;
+`not page_tables` already guards it.
+
+A second, smaller overlap: the orchestrator runs
+`_extract_form_pairs_from_regions` over *all* page regions unconditionally
+(:173-175). Colon-bearing cells in a reconstructed table can land in both a
+form element and the table element. Cheap fix in the same wiring: exclude
+regions consumed by a successful table from the form-pair candidates.
 
 ### A4 — route the image path
 
-`ImageExtractor.extract` (:498) never calls `_layout_blocks_and_tables` — one
-page-wide paragraph per page (:531). It already holds `page_result.regions` and
-`pix`. Two wrinkles: it builds `Element`s directly rather than via
-`_accum_to_elements` (so `_table_to_element` needs a shared home), and tables
-must interleave by y rather than append.
+`ImageExtractor.extract` (:500) never calls `_layout_blocks_and_tables` — one
+page-wide paragraph per page (:533). It already holds `page_result.regions` and
+`pix`. Three wrinkles: it builds `Element`s directly rather than via
+`_accum_to_elements` (so `_table_to_element` needs a shared home), tables
+must interleave by y rather than append, and it too now has an LLM branch
+(:521-524, markdown + no regions) that must pass through untouched per A0.
+The A3 narrative-subtraction rule applies here identically — the page-wide
+paragraph currently contains the table text.
 
 ---
 
@@ -160,10 +236,23 @@ proves too coarse; don't add it speculatively.
 
 ### B3 — ground truth supply, given one real fixture
 
-- **Real scanned GT** — `dense_text_548`, **human-authored** (spec in the
-  appendix below). This is the anchor fixture and the only real-scan table GT.
-  Blocking for B1.2 and B2; nothing else in Track B depends on it.
-- **Volume GT, free and exact** — `_spreadsheets/Approved-providers-au-export_20260204.csv`
+- **Real scanned GT — landed** (`7f756cc`). `dense_text_548_table.csv` +
+  `.meta.json` now exist and pass the A.6 checks (39 × 11 rectangular, unique
+  headers, no trailing whitespace, `n_header_rows: 3`); the A.4 name-own-row
+  and A.2 em-dash conventions were applied as recommended. This unblocks
+  B1.2 and B2. The A.6 checker still needs writing — the checks above were
+  run by hand once, not wired into the suite.
+- **`sparse_text_344` GT landed off-spec and must be normalised before the
+  B2 loader exists.** `sparse_text_344.csv` lacks the `_table` suffix and its
+  `.meta.json` uses a different schema entirely
+  (`{"table": {header, data}, "context": {before, after}}` instead of
+  `{"n_header_rows", "key_column", "notes"}`). Two GT files, two conventions
+  — one loader cannot consume both. Either rename/rewrite it to the
+  Appendix A spec or declare it non-GT (B0 already flagged its 8-word block
+  as a fragment of marginal value; a 4-row single-column table exercises
+  almost nothing).
+- **Volume GT, free and exact** —
+  `womblex-collection/_spreadsheets/Approved-providers-au-export_20260204.csv`
   (10,859 × 10, with a natural key column) and `mso-statistics-sept-qtr-2025.xlsx`
   already ship in the fixtures. Render → PDF → rasterise → OCR → reconstruct →
   compare against the **source DataFrame**. Arbitrary volume, zero annotation
@@ -195,8 +284,10 @@ proves too coarse; don't add it speculatively.
 
 Assert-with-threshold on the new metrics (structure exact-match, cell F1 floor,
 **false-table count == 0**), so a later tuning change can't quietly trade
-precision for coverage. Today's benchmark tests end in `assert True` (:534) and
-only report — the table gates should be the first that actually fail.
+precision for coverage. Today's benchmark tests end in `assert True` (:530) and
+only report — the table gates should be the first that actually fail. The
+benchmark must pin `engine="paddleocr"` (per A0) so a config default change
+to an LLM engine can't silently turn the gates into no-ops.
 
 ---
 
@@ -209,12 +300,24 @@ reconstructor is tunable without the detector in the loop.
 ## Open decisions
 
 1. Shared `table_grid.py` vs duplicating the algorithm in `ocr_tables.py`.
+   Recommendation: share — `spreadsheet_print` is at 505 lines against the
+   750 cap, and a duplicated binning algorithm is exactly the parallel
+   implementation CLAUDE.md's thin-adapter rule tells us to delete.
 2. Precision-gate thresholds — set from `dense_text_548` + the false-table set.
 3. B0 remedy: fix `_aggregate_doclaynet_blocks` for tables, or report table
    detection at region granularity with a min-span filter?
 4. Do the new gates fail the build, or warn until the numbers settle?
-5. GT spec sign-off — the two judgement calls flagged in A.4 (participant-name
-   rows) and A.5 (dash folding at compare time).
+5. ~~GT spec sign-off~~ — **resolved by `7f756cc`**: A.4 (name-own-row) and
+   A.2 (verbatim em-dash) were applied as recommended in the landed
+   `dense_text_548_table.csv`. A.5 (scorer-side dash folding) remains a B2
+   implementation detail, not a GT question. What replaced it: the
+   `sparse_text_344` normalisation call in B3.
+6. LLM-OCR path (mistral-ocr / ollama): parse Pixtral markdown pipe tables
+   into `TableData` as a third feeder, or leave the LLM path table-less?
+   Out of scope for #17 either way (see A0); decide before it's needed.
+7. `_table_aware_text` end-state — accept the A1 recommendation (reconstructor
+   supersedes it inside detected table rects, it keeps covering undetected
+   runs) or fold it into `table_grid.py` wholesale?
 
 ---
 
