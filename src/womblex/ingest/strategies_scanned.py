@@ -8,6 +8,7 @@ default, or an LLM/VLM engine such as Mistral OCR via AWS Bedrock).
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 
 import fitz
 
@@ -26,6 +27,7 @@ from womblex.ingest.extract import (
     _pixmap_to_array,
     _text_coverage,
 )
+from womblex.ingest.interfaces.protocols import OCRRegionResult
 from womblex.ingest.paddle_ocr import (
     get_layout_analyzer,
     get_ocr_reader,
@@ -86,6 +88,32 @@ def _spatial_sort_regions(regions, line_tolerance: float = 0.5) -> str:
         row.sort(key=lambda t: t[1])
         out_lines.append(" ".join(t[0] for t in row))
     return "\n".join(out_lines)
+
+
+def _regions_in_rect(
+    regions: Sequence[OCRRegionResult],
+    rect: tuple[float, float, float, float],
+) -> list[OCRRegionResult]:
+    """Select OCR regions whose bbox centroid falls inside a pixel-space rect.
+
+    Both sides must be in the same image-pixel space — the OCR render and
+    the layout render of the same page at the same dpi. Callers verify
+    that (see ``_layout_blocks_and_tables``). Centroid containment, not
+    overlap, so a detection straddling the rect edge belongs to whichever
+    side holds its middle.
+    """
+    x0, y0, x1, y1 = rect
+    inside: list[OCRRegionResult] = []
+    for r in regions:
+        if not r.text.strip():
+            continue
+        xs = [p[0] for p in r.bbox]
+        ys = [p[1] for p in r.bbox]
+        cx = (min(xs) + max(xs)) / 2
+        cy = (min(ys) + max(ys)) / 2
+        if x0 <= cx <= x1 and y0 <= cy <= y1:
+            inside.append(r)
+    return inside
 
 
 def _table_aware_text(
@@ -412,10 +440,23 @@ def _layout_blocks_and_tables(
     dpi: int,
     text: str,
     conf: float,
+    ocr_regions: Sequence[OCRRegionResult] | None = None,
+    ocr_pix_dims: tuple[int, int] | None = None,
 ) -> tuple[list[TextBlock], list[TableData]]:
     """Run YOLO layout analysis on a page, returning typed TextBlocks and tables.
 
     Falls back to a single paragraph block if the layout model is unavailable.
+
+    ``ocr_regions`` / ``ocr_pix_dims`` carry the per-detection OCR output
+    that produced *text*, in image-pixel coords at *dpi* — the raw
+    material for reconstructing cells inside a detected table rect. They
+    are supplied together or not at all: regions without their render
+    dimensions cannot be checked against this pass's own render, so they
+    are dropped. Only region-based engines (paddleocr) supply them; LLM/VLM
+    engines resolve reading order natively, return no regions, and are
+    dispatched to ``_markdown_page_block`` instead, so they never reach
+    this function. See docs/table-cell-reconstruction-plan.md (A0) —
+    ``tables`` is still returned empty until the reconstructor lands.
     """
     blocks: list[TextBlock] = []
     tables: list[TableData] = []
@@ -424,6 +465,24 @@ def _layout_blocks_and_tables(
         analyzer = get_layout_analyzer()
         pix = page.get_pixmap(dpi=dpi)
         img = _pixmap_to_array(pix)
+
+        # The OCR render and this layout render are the same page at the
+        # same dpi, so their pixel spaces coincide and region bboxes can be
+        # intersected with layout rects directly. Verify rather than assume:
+        # unless the OCR render's dimensions are supplied *and* match, the
+        # coordinates are not known to be comparable and the regions are
+        # dropped. That costs reconstruction inputs but never produces a
+        # mis-binned grid.
+        cell_source = list(ocr_regions or ())
+        layout_dims = (int(pix.width), int(pix.height))
+        ocr_dims = tuple(ocr_pix_dims) if ocr_pix_dims is not None else None
+        if cell_source and ocr_dims != layout_dims:
+            logger.warning(
+                "OCR/layout renders not comparable, dropping cell regions: "
+                "page=%d ocr_dims=%s layout_dims=%s",
+                page.number, ocr_dims, layout_dims,
+            )
+            cell_source = []
 
         regions = analyzer.analyze(img)
         if not regions:
@@ -434,6 +493,15 @@ def _layout_blocks_and_tables(
             pos = _normalise_bbox((rx0, ry0, rx1, ry1), float(pix.width), float(pix.height))
 
             if region.block_type == "table":
+                # Reconstruction inputs, logged so the size of the gap is
+                # traceable per page before the reconstructor exists. Gated:
+                # the intersection is real work, not a format string.
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "layout table region: page=%d confidence=%.2f ocr_regions=%d",
+                        page.number, region.confidence,
+                        len(_regions_in_rect(cell_source, (rx0, ry0, rx1, ry1))),
+                    )
                 blocks.append(TextBlock(
                     text="[TABLE]",
                     position=pos,

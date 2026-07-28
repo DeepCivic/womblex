@@ -250,6 +250,31 @@ classification decisions:
   PaddleOCR/RapidOCR line detections; the legacy line-only path is retained for
   LLM-OCR engines that resolve reading order natively.
 
+### Table-cell reconstruction on OCR pages — region-based engines only
+Reconstructing cells inside a layout-detected table rect needs per-detection
+OCR quads to bin into rows and columns. Only region-based engines (paddleocr)
+produce them: LLM/VLM engines (`mistral-ocr`, `ollama`) set
+`reading_order_native` and return markdown with an **empty `regions` list**, so
+the orchestrator sends them to `_markdown_page_block` and they never reach the
+layout pass at all. Track A of
+[table-cell-reconstruction-plan.md](table-cell-reconstruction-plan.md) is
+therefore scoped to the region-based path on both the OCR-PDF and image routes,
+and any benchmark measuring it pins `engine="paddleocr"` — under a config
+default of an LLM engine the numbers would describe a different pipeline. A
+markdown-pipe-table → `TableData` parser is the LLM path's separate feeder,
+deferred.
+
+`_layout_blocks_and_tables` takes the regions plus the OCR render's pixel
+dimensions, together or not at all. The OCR render and the layout render are
+the same page at the same dpi, so their pixel spaces coincide — verified rather
+than assumed: unless the dimensions are supplied *and* match, the coordinates
+are not known to be comparable and the regions are dropped with a warning.
+Losing reconstruction inputs is the correct failure; a mis-binned grid would be
+confidently wrong downstream. Deskewed pages are a distinct hazard (OCR runs on
+the warped image, YOLO on the raw one) that this check does **not** catch —
+`warpAffine` preserves dimensions — and are handled separately by a page-level
+refusal.
+
 ## Rejected approaches / dead-ends
 
 - **OCR-side table-detection relaxation — do not retry without a new

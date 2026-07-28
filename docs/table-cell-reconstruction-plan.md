@@ -36,7 +36,7 @@ change, no new element kind.
 
 # Track A — the extraction fix
 
-### A0 — scope: region-based engines only
+### A0 — scope: region-based engines only — **landed**
 
 When `reading_order_native` is true (mistral-ocr, ollama), the engine
 returns markdown and an **empty `regions` list**, and the orchestrator
@@ -51,6 +51,29 @@ Plumbing note: `_ocr_page` already returns
 `(text, conf, steps, reading_order_native, regions, pix_dims)` and the
 orchestrator unpacks all six at `orchestrator.py:163` — what remains is
 passing `regions` + `pix_dims` *into* `_layout_blocks_and_tables`.
+
+**What landed.** `_layout_blocks_and_tables` gained `ocr_regions` +
+`ocr_pix_dims` (both optional — callers without them keep today's exact
+behaviour), and the orchestrator's region-based branch passes them. Three
+things came with the seam:
+
+- `_regions_in_rect(regions, rect)` — the OCR-quad → table-rect
+  intersection by centroid containment, the primitive A1's feeder consumes.
+- A coordinate-space guard: the OCR render and the layout render are the
+  same page at the same dpi, so their pixel spaces coincide. Unless the OCR
+  dimensions are supplied *and* match, the regions are dropped with a
+  warning rather than binned as incomparable coordinates. (Deskew is *not*
+  caught by this — dims survive `warpAffine`; that is A2's page-level
+  refusal.)
+- A per-table-region debug line carrying the intersecting region count, so
+  the size of the gap is traceable per page before the reconstructor exists.
+
+`tables` is still returned empty on every path — A0 produces no cells. The
+accuracy suite now pins `engine="paddleocr"` on its extraction calls (the
+DocLayNet harness was already pinned by construction, calling
+`get_paddle_reader` directly). Tests: `tests/test_table_reconstruction.py`,
+which also pins the A3 starting point — the fallback currently collapses the
+whole page, table content included, onto one block.
 
 ### A1 — one algorithm: `ingest/table_grid.py`
 
@@ -114,9 +137,9 @@ mismatch and no refusal condition.
 
 ### A3 — wire the OCR-PDF path
 
-`_layout_blocks_and_tables` gains `regions` + `pix_dims` (already held at
-orchestrator `:163`, per A0). Populate the `tables` list declared at :421
-and returned empty at :467/:477.
+`_layout_blocks_and_tables` already takes `ocr_regions` + `ocr_pix_dims`
+(landed in A0). What remains is populating the `tables` list declared at
+:421 and returned empty at :467/:477.
 
 **The double-count to prevent is the fallback narrative block, not the
 `[TABLE]` placeholder.** Layout-derived non-table blocks always carry

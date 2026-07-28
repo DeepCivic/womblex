@@ -176,11 +176,20 @@ def _apply_ocr_page(
     else:
         accum.forms.extend(_extract_form_pairs_from_lines(text))
 
+    # Table structure is a region-based concern: LLM/VLM engines resolve
+    # reading order natively and emit markdown with no regions, so there is
+    # nothing to reconstruct cells from and the layout pass is bypassed
+    # entirely. Only the region-based (paddleocr) branch carries `regions` +
+    # `pix_dims` through to the layout pass. See
+    # docs/table-cell-reconstruction-plan.md (A0).
     if native_order:
         accum.blocks.extend(_markdown_page_block(page, text, conf))
         page_tables: list[TableData] = []
     else:
-        page_blocks, page_tables = _layout_blocks_and_tables(page, dpi, text, conf)
+        page_blocks, page_tables = _layout_blocks_and_tables(
+            page, dpi, text, conf,
+            ocr_regions=regions, ocr_pix_dims=pix_dims,
+        )
         accum.blocks.extend(page_blocks)
 
     # Mixed-doc tagging: classify content_type per page on OCR pages.
