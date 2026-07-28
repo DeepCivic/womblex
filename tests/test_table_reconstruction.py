@@ -302,7 +302,9 @@ def _grid_regions(
 class TestReconstructTable:
     """A1 — the OCR feeder produces a TableData, or refuses (never a partial)."""
 
-    RECT = (50.0, 50.0, 1300.0, 500.0)
+    # Tall enough to contain every grid these tests build — a rect that
+    # clips the last row changes which gate fires and hides the one under test.
+    RECT = (50.0, 50.0, 1300.0, 900.0)
     DIMS = (1700, 2200)
 
     def test_clean_grid_reconstructs(self) -> None:
@@ -337,7 +339,7 @@ class TestReconstructTable:
         assert table.position.x == pytest.approx(50 / 1700)
         assert table.position.y == pytest.approx(50 / 2200)
         assert table.position.width == pytest.approx(1250 / 1700)
-        assert table.position.height == pytest.approx(450 / 2200)
+        assert table.position.height == pytest.approx(850 / 2200)
 
     def test_refuses_too_few_columns(self) -> None:
         got = reconstruct_table(
@@ -345,11 +347,34 @@ class TestReconstructTable:
         )
         assert got is None
 
-    def test_refuses_too_few_rows(self) -> None:
+    @pytest.mark.parametrize("n_body_rows", [1, 2])
+    def test_refuses_too_few_rows(self, n_body_rows: int) -> None:
+        """Two body rows also refuse — the column-population floor bites first."""
         got = reconstruct_table(
-            _grid_regions(n_body_rows=1), self.RECT, 200, 0.96, pix_dims=self.DIMS,
+            _grid_regions(n_body_rows=n_body_rows), self.RECT, 200, 0.96, pix_dims=self.DIMS,
         )
         assert got is None
+
+    def test_blank_leading_cell_does_not_merge_into_the_header(self) -> None:
+        """The continuation rule must not fold the first body row into row 0.
+
+        A blank leading cell (indented or grouped rows) is ordinary in real
+        tables; absorbing that row into the header loses it silently.
+        """
+        regions = [r for r in _grid_regions(n_body_rows=4) if r.text != "r1c1"]
+        table = reconstruct_table(regions, self.RECT, 200, 0.96, pix_dims=self.DIMS)
+        assert table is not None
+        assert table.headers == ["H1", "H2", "H3", "H4"]
+        assert table.rows[0] == ["", "r1c2", "r1c3", "r1c4"]
+        assert len(table.rows) == 4
+
+    def test_refuses_when_no_header_text_recovered(self) -> None:
+        """A grid whose header band lands in no column has no usable headers."""
+        regions = [
+            r for r in _grid_regions(n_body_rows=4)
+            if not r.text.startswith("H")
+        ] + [_region(55, 100, 95, 130, "stray header")]
+        assert reconstruct_table(regions, self.RECT, 200, 0.96, pix_dims=self.DIMS) is None
 
     def test_refuses_poor_column_fit(self) -> None:
         """Spans the column model can't place trip the assignment gate."""

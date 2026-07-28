@@ -127,10 +127,38 @@ and `reconstruct_table(regions, table_rect, dpi, conf, *, pix_dims)` —
 detector's table-region confidence, capping the mean constituent-region
 confidence per A5, and `context["producer"] = "table_grid"` stamps the
 lineage. Columns derive from body spans (headers are commonly centred and
-would skew clusters); row 1 is taken as the header row. The precision
-gates are structural and **provisional until B2 calibrates them**:
-`MIN_COLUMNS=3`, `MIN_BODY_ROWS=2`, `MIN_ASSIGNED_RATIO=0.9` (fraction of
-in-rect spans the column model must place), each refusal debug-logged.
+would skew clusters).
+
+The header band and the body bands are binned **separately**, because
+`bands_to_rows`'s continuation rule folds a band with no leading-column
+value into the row above — right for a wrapped body cell, silently wrong
+for a first body row whose leading cell is blank (indented or grouped
+rows), which was otherwise absorbed into the header and lost.
+
+The precision gates are structural and **provisional until B2 calibrates
+them**: `MIN_COLUMNS=3`, `MIN_BODY_ROWS=3`, `MIN_ASSIGNED_RATIO=0.9`,
+plus a refusal when no header cell recovers text; each refusal is
+debug-logged. Two measured properties B2 must calibrate around rather
+than assume away:
+
+- `MIN_BODY_ROWS` is 3, not 2, because `columns_from_data` independently
+  drops any x-cluster holding fewer than 3 spans — every column of a
+  2-body-row table is filtered out, so that shape can never reconstruct
+  and a lower constant would be unreachable rather than permissive.
+- `MIN_ASSIGNED_RATIO` is **asymmetric**: `column_for_x` assigns anything
+  at or right of the first column, so the ratio gates left-edge overflow
+  only. Content right of the last column either forms its own column or
+  joins the last one — the right-edge guardrail has to come from B2's
+  false-table fixtures, not from this ratio.
+
+Known round-1 limitation, deliberately not fixed here: a two-line header's
+second line becomes a spurious first body row (only `bands[0]` is the
+header). Merging it means solving multi-line headers — deferred — and
+refusing it means a proximity threshold; `spreadsheet_print`'s
+`HEADER_MERGE_PX` scales to ~33 px at 200 dpi, which would falsely refuse
+a dense clean table whose row pitch is ~28 px. B2's cell-F1 metric should
+measure the cost against real fixtures before a threshold is picked.
+
 Nothing is wired into the layout pass yet — `tables` is still returned
 empty on every extraction path until A3.
 
@@ -394,6 +422,11 @@ without the detector in the loop.
 
 1. Precision-gate thresholds — set from the rendered-clean fixtures + the
    false-table set (not from `dense_text_548`, which no longer gates).
+   Three specifics inherited from A1: a right-edge overflow guardrail
+   (`MIN_ASSIGNED_RATIO` only gates the left edge), whether the
+   column-population floor of 3 should be a parameter rather than couple
+   `MIN_BODY_ROWS` to it, and whether a two-line header should merge or
+   refuse.
 2. B0 remedy: fix `_aggregate_doclaynet_blocks` for tables, or report table
    detection at region granularity with a min-span filter?
 

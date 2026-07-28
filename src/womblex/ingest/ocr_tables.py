@@ -38,10 +38,17 @@ logger = logging.getLogger(__name__)
 # reconstructor refuses (returns None); a wrongly-binned grid is worse
 # than today's silence.
 MIN_COLUMNS = 3
-MIN_BODY_ROWS = 2
-# Fraction of in-rect spans that must land in an inferred column. Spans
-# falling outside every column mean the column model doesn't fit the
-# content — mis-binning risk, so refuse.
+# Three, not two: ``columns_from_data`` independently drops any x-cluster
+# holding fewer than 3 spans, so every column of a 2-body-row table is
+# filtered out and the shape can never reconstruct. A lower value here
+# would be unreachable rather than permissive.
+MIN_BODY_ROWS = 3
+# Fraction of in-rect spans that must land in an inferred column.
+# Asymmetric by construction: ``column_for_x`` assigns anything at or
+# right of the first column, so this catches spans overflowing the *left*
+# edge only. Content right of the last column is not gated here — it
+# either forms its own column or joins the last one. B2 sets the
+# right-edge guardrail from the false-table fixtures.
 MIN_ASSIGNED_RATIO = 0.9
 
 
@@ -113,10 +120,11 @@ def reconstruct_table(
     if len(bands) < 1 + MIN_BODY_ROWS:
         logger.debug("table reconstruction refused: only %d y-bands", len(bands))
         return None
+    header_bands, body_bands = bands[:1], bands[1:]
 
     # Columns come from the body spans, not the header band — headers are
     # commonly centred within wider cells and would skew the clusters.
-    body_spans = [s for _by, bs in bands[1:] for s in bs]
+    body_spans = [s for _by, bs in body_bands for s in bs]
     columns = columns_from_data(
         body_spans, table_rect[2],
         expected_k=0,
@@ -138,11 +146,19 @@ def reconstruct_table(
         )
         return None
 
-    rows = drop_blank_rows(bands_to_rows(bands, columns, x_tolerance=x_tol))
-    if len(rows) < 1 + MIN_BODY_ROWS:
-        logger.debug("table reconstruction refused: only %d rows after binning", len(rows))
+    # Header and body bin separately. ``bands_to_rows``'s continuation rule
+    # folds a band with no leading-column value into the row above — right
+    # for a wrapped body cell, silently wrong for a first body row whose
+    # leading cell is blank (indented or grouped rows), which would be
+    # absorbed into the header and lost.
+    headers = bands_to_rows(header_bands, columns, x_tolerance=x_tol)[0]
+    if not any(h for h in headers):
+        logger.debug("table reconstruction refused: no header text recovered")
         return None
-    headers, body = rows[0], rows[1:]
+    body = drop_blank_rows(bands_to_rows(body_bands, columns, x_tolerance=x_tol))
+    if len(body) < MIN_BODY_ROWS:
+        logger.debug("table reconstruction refused: only %d body rows after binning", len(body))
+        return None
 
     # Lineage, not defaults: confidence from the constituent regions
     # (capped by the detector's), producer marker so reconstructed tables

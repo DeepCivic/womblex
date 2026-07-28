@@ -129,9 +129,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `reconstruct_table(regions, table_rect, dpi, conf)` reduces the OCR quads
   inside a layout-detected table rect to spans and reconstructs the grid as
   a `TableData` — or returns `None`, never a partial, below its precision
-  gates (minimum columns/rows and a column-fit ratio, provisional until B2
-  calibrates them; each refusal is debug-logged). Refusal on a hard shape is
-  a correct round-1 outcome. Element lineage is deliberate: confidence comes
+  gates (minimum columns/rows, a left-edge column-fit ratio, and header text
+  actually recovering; provisional until B2 calibrates them, each refusal
+  debug-logged). Refusal on a hard shape is a correct round-1 outcome. The
+  header band and body bands bin separately, so a first body row with a blank
+  leading cell — an indented or grouped row — is no longer folded into the
+  header and lost by the wrapped-cell continuation rule. Element lineage is
+  deliberate: confidence comes
   from the constituent region confidences capped by the detector's, and
   `context["producer"] = "table_grid"` distinguishes reconstructed tables
   from PyMuPDF-fallback ones in the parquet. Nothing is wired into the
