@@ -91,11 +91,21 @@ Two changes are required, and the second is easy to miss:
   still provisional pending B2 calibration.
   (`ingest/grid_projection.py`, previously cited here, projects page-level
   prose gutters rather than cells — it was not a usable feeder.)
-- **Route standalone images through it — still open (A4).**
-  `ImageExtractor.extract` emits one page-wide `paragraph` element per page
-  and never calls `_layout_blocks_and_tables` at all. With only the OCR-PDF
-  path fixed, every image input (the whole DocLayNet/FUNSD fixture shape) is
-  still unchanged — this is now the largest remaining piece of #17.
+- **Route standalone images through it — done (A4).**
+  `ImageExtractor.extract` used to emit one page-wide `paragraph` element per
+  page and never call `_layout_blocks_and_tables` at all, so every image input
+  (the whole DocLayNet/FUNSD fixture shape) was unchanged by A3. It now runs
+  the same layout pass, adopting its result only where a table actually
+  reconstructed — a refusal, a page with no table region, or a missing layout
+  model all keep the previous page-wide paragraph. The cost is YOLO inference
+  on every image page, which is the price of detecting a region at all.
+
+**What remains on #17** is Track B, not Track A: the precision gates in
+`ingest/ocr_tables.py` are structural constants that have not been calibrated
+(B2), and the benchmark's table section and regression gates are not yet wired
+into `accuracy/EXTRACTION.md` (B4/B5). Until B2 lands, a hard-shape table
+(stacked spanning headers, hierarchical rows) can produce a low-quality grid
+rather than refusing — see the plan's `dense_text_548` measurement.
 
 **Measured payoff.** Feeding the same page's real grid through the money op's
 column classifier recovers 30 of 30 amounts, versus 1 today — the consuming

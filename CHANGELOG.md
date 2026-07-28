@@ -205,6 +205,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   The image path (`ImageExtractor`) is still untouched — that is A4.
 
+- **Table-cell reconstruction on OCR'd pages (#17), step A4 — the image
+  path now produces cells too.** `ImageExtractor` never ran layout analysis:
+  every page became one page-wide paragraph holding the whole page's OCR
+  text, table included. It now runs the same `_layout_blocks_and_tables`
+  pass the OCR-PDF path uses, so a detected table region on a standalone
+  image (or an image-only PDF) reconstructs its cells under the same
+  precision gates. Track A is complete for the region-based engines it was
+  scoped to.
+
+  The layout result is adopted **only when a table actually
+  reconstructed**. A page with no table region, one whose grid failed the
+  gates, or one where the layout model is unavailable keeps its previous
+  behaviour exactly — the full-page OCR text as one paragraph — so this
+  can only add table elements, never move existing text. `ImageExtractor`
+  OCRs the raw pixmap without `preprocess_for_ocr`, so there is no deskew
+  to refuse (A2) and the OCR and layout renders share a frame by
+  construction. A3's narrative-subtraction rule carries over unchanged: the
+  paragraph beside a reconstructed table is rebuilt from the regions
+  outside its rect, and `PageResult.text` stays the verbatim full page.
+
+  Elements on this path are now placed by `(y, x)` rather than appended,
+  matching the orchestrator's `_accum_to_elements`, with `order` assigned
+  after the sort. `_table_to_element` moved to `ingest/views.py` as
+  `table_to_element` — the forward projection beside the `TableData` view
+  it reads and the `Element` it builds — so both PDF paths share one
+  cellifier; its body is unchanged, leaving the OCR-PDF and
+  spreadsheet-print outputs byte-identical.
+
+  One cost, stated rather than buried: YOLO layout inference now runs on
+  every image page, where before it ran on none. That is the price of
+  detecting a table region at all, and both the layout pass's own catch-all
+  and the new call site handle a missing or failing layout model by falling
+  back to the previous behaviour.
+
 ### Fixed
 - **A declined continental number no longer leaks its decimal tail as an
   amount.** In Australian (default) mode `find_money` correctly refuses to read

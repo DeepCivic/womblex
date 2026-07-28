@@ -30,7 +30,7 @@ from typing import cast
 import fitz
 
 from womblex.ingest.detect import DocumentProfile, DocumentType
-from womblex.ingest.elements import TEXT_KINDS, Cell, Element, ElementKind, FieldEntry
+from womblex.ingest.elements import TEXT_KINDS, Element, ElementKind, FieldEntry
 from womblex.ingest.extract import (
     ExtractionMetadata,
     ExtractionResult,
@@ -52,6 +52,7 @@ from womblex.ingest.extract import (
 )
 from womblex.ingest.grid_projection import extract_page_text
 from womblex.ingest.page_profile import PageProfile, qualify_for_spreadsheet_print
+from womblex.ingest.views import table_to_element
 
 logger = logging.getLogger(__name__)
 
@@ -267,27 +268,6 @@ def _block_to_element(b: TextBlock, page: int, extractor: str, order: int) -> El
     )
 
 
-def _table_to_element(t: TableData, page: int | None, extractor: str, order: int) -> Element:
-    """Build a kind='table' element by re-cellifying a legacy TableData.
-
-    Headers become row 0; data rows shift to rows 1..n. Header row index
-    captured in ``header_rows`` so the legacy projection round-trips.
-    """
-    cells: list[Cell] = []
-    for col_idx in range(len(t.headers)):
-        cells.append(Cell(row=0, col=col_idx, value=t.headers[col_idx]))
-    for row_idx, row in enumerate(t.rows, start=1):
-        for col_idx in range(len(row)):
-            cells.append(Cell(row=row_idx, col=col_idx, value=row[col_idx]))
-    return Element(
-        order=order, kind="table", extractor=extractor,
-        page=page, bbox=t.position,
-        cells=cells, header_rows=[0] if t.headers else [],
-        confidence=t.confidence,
-        meta={**({"context_" + k: v for k, v in t.context.items()} if t.context else {})},
-    )
-
-
 def _form_to_element(forms: list[FormField], page: int, extractor: str, order: int) -> Element:
     """Group one page's form fields into a single kind='form' element.
 
@@ -339,7 +319,7 @@ def _accum_to_elements(
         if kind == "block":
             elements.append(_block_to_element(cast("TextBlock", obj), accum.page_number, extractor, order))
         elif kind == "table":
-            elements.append(_table_to_element(cast("TableData", obj), accum.page_number, extractor, order))
+            elements.append(table_to_element(cast("TableData", obj), accum.page_number, extractor, order))
         elif kind == "image":
             elements.append(_image_to_element(cast("ImageData", obj), accum.page_number, "figure_image", order))
         order += 1
@@ -445,7 +425,7 @@ def extract_with_plan(
         # Manifest tables append after all per-page elements; they have no
         # natural per-page anchor (they span pages) so they tail the stream.
         for t in spreadsheet_tables:
-            all_elements.append(_table_to_element(t, None, "spreadsheet_print", next_order))
+            all_elements.append(table_to_element(t, None, "spreadsheet_print", next_order))
             next_order += 1
         combined_steps.append("spreadsheet_print")
 

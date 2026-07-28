@@ -36,6 +36,7 @@ from womblex.ingest.paddle_ocr import (
     preprocess_for_ocr,
 )
 from womblex.ingest.table_grid import Span, cluster_x_centroids, rows_from_spans
+from womblex.ingest.views import table_to_element
 
 logger = logging.getLogger(__name__)
 
@@ -535,6 +536,48 @@ class ImageExtractor:
         self.engine = engine
         self.engine_options = engine_options or {}
 
+    def _page_layout(
+        self,
+        page: fitz.Page,
+        page_result,
+        text: str,
+        conf: float,
+        pix,
+    ) -> tuple[str, list[TableData]]:
+        """Reconstruct tables on an image page and subtract them from the narrative.
+
+        Returns ``(narrative_text, tables)``. The layout pass is consulted
+        only for region-based engines; its result is adopted **only when a
+        table actually reconstructed**, so a page with no table — or one
+        whose grid failed the precision gates — keeps today's exact
+        behaviour: the full-page OCR text as one paragraph.
+
+        ``ImageExtractor`` runs OCR on the raw pixmap without
+        ``preprocess_for_ocr``, so there is no deskew to refuse (A2) and
+        the OCR and layout renders share a frame by construction.
+        """
+        if page_result.reading_order_native or not page_result.regions:
+            return text, []
+        try:
+            blocks, tables, consumed = _layout_blocks_and_tables(
+                page, self.dpi, text, conf,
+                ocr_regions=page_result.regions,
+                ocr_pix_dims=(int(pix.width), int(pix.height)),
+                page_deskewed=False,
+            )
+        except Exception as exc:
+            logger.warning(
+                "image-page layout pass failed: page=%d err=%s", page.number, exc,
+            )
+            return text, []
+        if not tables or not consumed:
+            return text, []
+        # A3's rule, unchanged: the narrative the layout pass returns is
+        # rebuilt from the regions outside the table rects, so the chunker
+        # does not see the table as prose *and* as markdown. A table-only
+        # page yields no block at all.
+        return ("\n".join(b.text for b in blocks), tables)
+
     def extract(self, doc: fitz.Document) -> ExtractionResult:
         from womblex.ingest.elements import Element
         from womblex.ingest.heuristics_cv2 import calculate_blur_score
@@ -567,20 +610,40 @@ class ImageExtractor:
 
             pw, ph = page.rect.width, page.rect.height
             page_conf = avg_conf / 100 if avg_conf else 0.0
-            if text.strip():
-                elements.append(Element(
-                    order=order, kind="paragraph", extractor="ocr_paddle",
+
+            # A4: run the layout pass so a detected table region on an image
+            # page reconstructs its cells, exactly as on the OCR-PDF path.
+            # LLM/VLM engines return markdown and no regions — nothing to
+            # reconstruct from — so they pass through untouched (A0).
+            narrative, page_tables = self._page_layout(
+                page, page_result, text, page_conf, pix,
+            )
+
+            placed: list[tuple[float, float, Element]] = []
+            if narrative.strip():
+                placed.append((0.0, 0.0, Element(
+                    order=0, kind="paragraph", extractor="ocr_paddle",
                     page=page.number,
                     bbox=_normalise_bbox((0, 0, pw, ph), pw, ph),
-                    text=text.strip(), confidence=page_conf,
-                ))
-                order += 1
+                    text=narrative.strip(), confidence=page_conf,
+                )))
+            for t in page_tables:
+                placed.append((t.position.y, t.position.x, table_to_element(
+                    t, page.number, "ocr_paddle", 0,
+                )))
             for im in _extract_images_from_page(page):
-                elements.append(Element(
-                    order=order, kind="image", extractor="figure_image",
+                placed.append((im.position.y, im.position.x, Element(
+                    order=0, kind="image", extractor="figure_image",
                     page=page.number, bbox=im.position,
                     alt_text=im.alt_text, confidence=im.confidence,
-                ))
+                )))
+
+            # Tables interleave by position rather than append — the page-wide
+            # narrative sorts first, then tables and figures in reading order.
+            placed.sort(key=lambda r: (r[0], r[1]))
+            for _y, _x, el in placed:
+                el.order = order
+                elements.append(el)
                 order += 1
 
         avg_conf_doc = sum(confidences) / len(confidences) if confidences else 0.0

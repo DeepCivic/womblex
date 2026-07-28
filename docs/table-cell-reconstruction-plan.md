@@ -25,8 +25,8 @@ this round. Two principles carry over unchanged from the original plan:
 | A1 — shared `table_grid` + OCR feeder | **Landed** (`#25`, incl. QA fixes) |
 | A2 — skew refusal | **Landed** (with A3) |
 | A3 — wire the OCR-PDF path | **Landed** — the OCR-PDF path emits table elements; narrative subtracted, form pairs de-duplicated |
-| A4 — route the image path | Not started — **next up in Track A** |
-| A5 — conventions + lineage | **Verified for the OCR-PDF path** — element projection, producer marker and single-markdown chunker view observed end-to-end; the image path repeats the check at A4 |
+| A4 — route the image path | **Landed** — `ImageExtractor` runs the layout pass; tables placed by position, narrative subtracted |
+| A5 — conventions + lineage | **Verified on both OCR paths** — element projection, producer marker and single-markdown chunker view observed end-to-end on the OCR-PDF path (A3) and again on the image path (A4) |
 | B0 — fix the table metric | **Landed** (`#26`) — steering corrected; GT aggregation drops stray Table runs (`MIN_TABLE_GT_SPANS=3`); EXTRACTION.md refreshes on next full accuracy run |
 | B1 — decompose the measurement | **B1.2 landed** (`#26`, `tests/test_table_benchmark.py`) — GT-rect-conditioned reconstruction, no detector in the loop. Stage 1 is the existing per-class F1 (fixed by B0); stage 3 (end-to-end, detector included) is now *possible* on the OCR-PDF path after A3 but is not yet written — it rides with B4 |
 | B2 — metric set + gate calibration | Not started — inherits three specifics from A1 plus the `dense_text_548` partial-grid finding from B3 (see Open decisions) |
@@ -42,7 +42,7 @@ putting unmeasured grids into parquet shards. What remains true is that the
 precision gates in `ocr_tables.py` are still provisional structural
 constants, not calibrated thresholds — B2 owns that, and it now calibrates
 against a live path rather than a dormant one. Remaining order:
-`A4 → B2 → B4/B5`.
+`B2 → B4/B5`.
 
 ## Where tables come from today (why this scope is enough)
 
@@ -51,14 +51,14 @@ against a live path rather than a dormant one. Remaining order:
 | Native PDF | `_find_native_tables` — PyMuPDF `find_tables` (lines + text strategies), cross-checked, cellified (`orchestrator.py:104`, `:124`) | **Works.** Covers the digital-native majority of the round-1 corpus |
 | Spreadsheet-print PDF | `ingest/spreadsheet_print.py` behind its qualifier | **Works** |
 | OCR'd PDF page | `_layout_blocks_and_tables` detects the region → `reconstruct_table` cellifies it | **Works** as of A3 (refuses below the gates, and on deskewed pages per A2) |
-| OCR'd image file | `ImageExtractor` never calls the layout pass | **The remaining gap.** A4 closes it |
+| OCR'd image file | `ImageExtractor` calls the layout pass per page → `reconstruct_table` | **Works** as of A4 (same gates, same refusal behaviour) |
 | LLM-OCR (mistral-ocr, ollama) | Markdown, no regions | Out of scope (A0) |
 
-Everything downstream of `TableData` already works: `_table_to_element`
-(`orchestrator.py:250`) cellifies it, `_accum_to_elements` (:295) places it
-by (y, x), the writer denormalises to `table_cells.parquet`. **The only
-missing piece is producing a `TableData` on the OCR paths.** No schema
-change, no new element kind.
+Everything downstream of `TableData` already works: `table_to_element`
+(`views.py`, shared by both PDF paths since A4) cellifies it,
+`_accum_to_elements` places it by (y, x), the writer denormalises to
+`table_cells.parquet`. **The only missing piece was producing a
+`TableData` on the OCR paths.** No schema change, no new element kind.
 
 ---
 
@@ -288,18 +288,59 @@ runs *before* the form call so it has the consumed set to filter with (forms
 are collected separately and appended per page, so element order is
 unaffected). The `SCANNED_MACHINEWRITTEN` grid fallback was left alone.
 
-### A4 — route the image path
+### A4 — route the image path — **landed**
 
-`ImageExtractor.extract` (:500) never calls `_layout_blocks_and_tables` —
-one page-wide paragraph per page (:533). It already holds
-`page_result.regions` and `pix`. Wrinkles: it builds `Element`s directly
-rather than via `_accum_to_elements` (so `_table_to_element` needs a shared
-home), tables must interleave by y rather than append, the LLM branch
-(:521-524) passes through untouched per A0, and the A3 narrative-subtraction
-rule applies identically — the page-wide paragraph currently contains the
-table text.
+`ImageExtractor.extract` never called `_layout_blocks_and_tables` — one
+page-wide paragraph per page. It already held `page_result.regions` and
+`pix`. Wrinkles: it builds `Element`s directly rather than via
+`_accum_to_elements` (so `_table_to_element` needs a shared home), tables
+must interleave by y rather than append, the LLM branch passes through
+untouched per A0, and the A3 narrative-subtraction rule applies identically
+— the page-wide paragraph currently contains the table text.
 
-### A5 — post-processing conventions and lineage — **verified for the OCR-PDF path**
+**What landed.** `_table_to_element` moved to `ingest/views.py` as
+`table_to_element` — the forward projection beside the `TableData` view it
+consumes and the `Element` it produces, importable by both PDF paths with
+no cycle (`views` already imports `elements`; `extract` re-exports
+`views`). The orchestrator now calls the shared one; the body is unchanged,
+so the OCR-PDF and spreadsheet-print paths are byte-identical.
+
+`ImageExtractor._page_layout` is the new seam: for region-based engines it
+calls `_layout_blocks_and_tables` with the page's own OCR regions and
+render dimensions, and **adopts the result only when a table actually
+reconstructed**. That conditional is the point — a page with no table
+region, one whose grid failed the gates, or one where the layout model is
+unavailable keeps today's exact behaviour (full-page OCR text as one
+paragraph), so A4 can only add table elements, never move existing text.
+`page_deskewed=False` is passed literally, not inferred: `ImageExtractor`
+OCRs the raw pixmap without `preprocess_for_ocr`, so the OCR and layout
+renders share a frame by construction and A2's refusal has no condition to
+fire on.
+
+Element placement changed from *append* to *sort by (y, x)*, matching
+`_accum_to_elements`, with `order` assigned after the sort so it stays
+dense and ascending. With a page-wide narrative bbox the paragraph sorts
+first in practice; tables and figures then follow in reading order.
+
+Two costs worth stating rather than burying:
+
+- **The layout pass now runs on every image page**, where before it ran on
+  none. That is YOLO inference per page — the price of detecting a table
+  region at all. Its own internal catch-all already covers a missing or
+  failing layout model, and `_page_layout` wraps the call a second time so
+  an image document cannot fail on a path that previously did not exist.
+- **`PageResult.text` stays the verbatim full-page OCR text**, as on the
+  OCR-PDF path (A3) and for the same reason — the subtraction is an
+  element-stream concern, and page text feeds `_text_coverage` and the
+  accuracy suite's CER.
+
+Tests: `TestImagePathReconstruction` (9 cases) covers the table element and
+its lineage, narrative subtraction, the table-only page, verbatim page
+text, the single-markdown chunker view, the three refusal routes (gates /
+no table region / no layout model), the LLM bypass, and dense element
+ordering.
+
+### A5 — post-processing conventions and lineage — **verified on both OCR paths**
 
 The two mandated provenance fields below landed with A1
 (`reconstruct_table` sets confidence from the constituent regions and
@@ -311,8 +352,11 @@ cellified `kind="table"` with `header_rows=[0]`, that
 `meta["context_producer"] == "table_grid"` survives the existing
 `context_* → meta` copy with no schema change, that the narrative
 paragraph beside it holds no table text, and that
-`collect_tables_from_elements` yields exactly one markdown table. The
-image path repeats the check at A4.
+`collect_tables_from_elements` yields exactly one markdown table.
+`TestImagePathReconstruction` repeats every one of those assertions
+against `ImageExtractor` (A4), which builds its elements directly rather
+than through `_accum_to_elements` — so the conventions are observed on
+that path too, not inherited.
 
 Because Track A produces a `TableData` and reuses `_table_to_element`, every
 downstream composed stage consumes reconstructed tables through the existing
@@ -546,8 +590,9 @@ config default change to an LLM engine can't turn the gates into no-ops.
 
 Planned: `B0 → B3 rendered-GT harness + B1.2 → A1 → A3 → A4 → B2 breadth →
 B4/B5`. Actual: A1 landed first (deviation recorded in Status above).
-Everything since has followed the plan. Remaining: **`A4 → B2 breadth →
-B4/B5`**.
+Everything since has followed the plan. Remaining: **`B2 breadth →
+B4/B5`** — Track A is complete for the region-based engines it was scoped
+to (A0).
 
 B0 went first because it was a live doc/metric defect. The rendered-GT
 harness and B1.2 landed before A3 as planned — the measurement existed
@@ -555,14 +600,15 @@ before the reconstructor was wired in, and it surfaced one calibration
 input immediately (the `dense_text_548` partial grid, above). A2 rode
 along with A3's wiring as intended.
 
-One consequence of the ordering to keep in view: A3 is live but B2 has not
-calibrated the gates, so the constants in `ocr_tables.py` remain
-provisional *in production*, not just in the abstract. The rendered-clean
-cohort says they are safe on the target shape (6/6 exact structure); the
-`dense_text_548` partial says they do not yet refuse the hard shape. Until
-B2 lands, a hard-shape table on an OCR'd page can produce a low-quality
-grid rather than silence — visible in the parquet via
-`meta["context_producer"] = "table_grid"` and the element confidence.
+One consequence of the ordering to keep in view: A3 and A4 are live but B2
+has not calibrated the gates, so the constants in `ocr_tables.py` remain
+provisional *in production*, not just in the abstract — and now on both
+OCR paths rather than one. The rendered-clean cohort says they are safe on
+the target shape (6/6 exact structure); the `dense_text_548` partial says
+they do not yet refuse the hard shape. Until B2 lands, a hard-shape table
+on an OCR'd page can produce a low-quality grid rather than silence —
+visible in the parquet via `meta["context_producer"] = "table_grid"` and
+the element confidence.
 
 ## Deferred to a later round (recorded so they aren't relitigated)
 
