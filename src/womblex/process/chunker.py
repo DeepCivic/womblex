@@ -57,7 +57,7 @@ import bisect
 import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import cast
+from typing import Any, cast
 
 import semchunk
 
@@ -162,7 +162,10 @@ def create_chunker(
         tokenizer,
         chunk_size=chunk_size,
         chunking_model=chunking_model,
-        isaacus_client=isaacus_client,
+        # `object | None` on the signature keeps this module SDK-free (callers
+        # without the isaacus extra pass None); semchunk's stub names the
+        # concrete client, so the narrowing happens here at the boundary.
+        isaacus_client=cast("Any", isaacus_client),
         tokenizer_kwargs=tokenizer_kwargs,
         memoize=memoize,
         cache_maxsize=cache_maxsize,

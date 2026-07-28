@@ -263,6 +263,28 @@ def test_comma_decimal_not_read_as_australian():
     assert find_money("€1.000,50") == []
 
 
+@pytest.mark.parametrize("text", [
+    "1.000,50 EUR",       # ISO suffix (p3)
+    "1.000,50€",          # symbol suffix (p5)
+    "1.000,50 dollars",   # currency word (p4)
+    "Paid 1.234,56 EUR to the vendor.",
+])
+def test_continental_tail_is_not_extracted_as_its_own_amount(text):
+    """A declined continental number must not leak its decimal tail.
+
+    Declining the candidate that starts at the run is not sufficient: the tail
+    (`,56 EUR`) is itself a complete match for the suffix patterns, so this
+    used to return `56 EUR` — wrong by 10³. Only the *prefix*-marker forms were
+    ever safe, which is why `€1.000,50` above passed while these did not.
+    """
+    assert find_money(text) == []
+
+
+def test_malformed_thousands_group_blocks_the_whole_run():
+    assert find_money("$1,23") == []
+    assert find_money("1,23 dollars") == []
+
+
 def test_international_mode_accepts_comma_decimals():
     opts = MoneyOptions(international_numbers=True)
     values = [s.value for s in find_money("€1.000,50 and $10.000.000,00", opts)]

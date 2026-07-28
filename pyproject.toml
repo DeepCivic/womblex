@@ -65,7 +65,12 @@ cloud = [
 dev = [
     "pytest>=8.0",
     "pytest-cov",
-    "ruff",
+    # Upper-bounded deliberately: ruff expands its *default* rule set on minor
+    # bumps (0.16.0 turned on FURB/RUF/BLE/I/DTZ/S and 297 errors appeared in
+    # a tree that had been green), so an unpinned ruff turns CI red on an
+    # upstream release rather than on a change of ours. Raise the ceiling as a
+    # deliberate commit that also clears whatever the new rules flag.
+    "ruff>=0.15,<0.16",
     "mypy",
 ]
 
@@ -150,5 +155,7 @@ module = [
     "spylls.*",
     "fsspec",
     "fsspec.*",
+    "openpyxl",
+    "openpyxl.*",
 ]
 ignore_missing_imports = true

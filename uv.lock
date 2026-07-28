@@ -3716,7 +3716,7 @@ requires-dist = [
     { name = "python-dotenv" },
     { name = "pyyaml" },
     { name = "rapidocr-onnxruntime", specifier = ">=1.4" },
-    { name = "ruff", marker = "extra == 'dev'" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15,<0.16" },
     { name = "s3fs", marker = "extra == 'cloud'", specifier = ">=2024.0" },
     { name = "semchunk", specifier = ">=4.0" },
     { name = "sentence-transformers", specifier = ">=3.0" },

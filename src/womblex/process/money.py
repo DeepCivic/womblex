@@ -238,6 +238,37 @@ def blocked_spans(text: str) -> list[tuple[int, int, str]]:
     return out
 
 
+_NUMBER_RUN_RE = re.compile(r"\d[\d,.]*")
+_CONTINENTAL_RUN_RE = re.compile(r"\d{1,3}(?:\.\d{3})+,\d+")
+_MALFORMED_RUN_RE = re.compile(r"\d+(?:,\d{3})*,\d{1,2}")
+
+
+def ambiguous_number_spans(
+    text: str, *, international: bool = False,
+) -> list[tuple[int, int, str]]:
+    """Numeric runs this locale cannot read, blocked whole.
+
+    :func:`_ambiguous_continuation` declines the candidate that *starts* at
+    such a run, but declining is not enough on its own: the run's decimal tail
+    is itself a complete match for a suffix pattern, so in Australian mode
+    ``1.234,56 EUR`` came back as ``56 EUR`` — the value wrong by 10³, which is
+    the failure this guard exists to prevent. Blocking the whole run keeps
+    every pattern off it, so the amount is missed rather than misread.
+
+    Prefix-marker forms were already safe (``€1.000,50`` yields nothing,
+    because the tail has no leading marker to match), which is why only the
+    ISO-suffix, currency-word and symbol-suffix patterns leaked.
+    """
+    if international:
+        return []  # the continental reading is the correct one in this mode
+    out: list[tuple[int, int, str]] = []
+    for m in _NUMBER_RUN_RE.finditer(text):
+        raw = m.group(0).rstrip(".,")
+        if _CONTINENTAL_RUN_RE.fullmatch(raw) or _MALFORMED_RUN_RE.fullmatch(raw):
+            out.append((m.start(), m.start() + len(raw), "ambiguous_number"))
+    return out
+
+
 def _iso_prefixed(token: str) -> bool:
     """True for `USD100`-shaped tokens whose letters are a real currency code."""
     m = re.match(r"([A-Z]{2,4})", token)
@@ -613,7 +644,11 @@ def find_money(text: str, options: MoneyOptions | None = None) -> list[MoneySpan
         return []
     opts = options or MoneyOptions()
     pats = _patterns(opts.international_numbers)
-    blocked = _IntervalIndex([(s, e) for s, e, _ in blocked_spans(text)])
+    blocked = _IntervalIndex([
+        (s, e) for s, e, _ in
+        blocked_spans(text)
+        + ambiguous_number_spans(text, international=opts.international_numbers)
+    ])
 
     ranges, claimed = _scan_ranges(text, pats, opts, blocked)
     claimed_index = _IntervalIndex(claimed)
@@ -646,6 +681,7 @@ def find_money(text: str, options: MoneyOptions | None = None) -> list[MoneySpan
 __all__ = [
     "MoneyOptions",
     "MoneySpan",
+    "ambiguous_number_spans",
     "apply_scale",
     "blocked_spans",
     "context_for",
