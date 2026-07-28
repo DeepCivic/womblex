@@ -125,9 +125,9 @@ def _concat_widening(tables: list[pa.Table]) -> pa.Table:
 
 __all__ = [
     "PROVENANCE_SUFFIX",
-    "provenance_schema",
     "provenance_path_for",
-    "write_provenance_shard",
+    "provenance_schema",
     "read_provenance",
     "write_corpus_manifest",
+    "write_provenance_shard",
 ]

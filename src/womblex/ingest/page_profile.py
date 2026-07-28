@@ -17,10 +17,10 @@ from dataclasses import dataclass
 import fitz
 
 from womblex.ingest.detect import (
-    DocumentProfile,
-    DocumentType,
     _MIN_TEXT_LENGTH,
     _MIN_VECTOR_DRAWINGS,
+    DocumentProfile,
+    DocumentType,
     _has_form_structure,
     _has_handwriting_signals,
     _has_table_structure,

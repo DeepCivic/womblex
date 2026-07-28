@@ -11,7 +11,6 @@ enrichment sidecar.
 
 from __future__ import annotations
 
-
 import pytest
 
 from womblex.config import ReferenceConfig

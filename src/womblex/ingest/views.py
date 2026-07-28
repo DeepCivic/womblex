@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from womblex.ingest.elements import BBox, Element, TEXT_KINDS
+from womblex.ingest.elements import TEXT_KINDS, BBox, Element
 
 if TYPE_CHECKING:
     from womblex.redact.stage import RedactionReport
@@ -122,7 +122,7 @@ class ExtractionResult:
     metadata: ExtractionMetadata | None = None
     warnings: list[str] = field(default_factory=list)
     document_id: str | None = None
-    redaction_report: "RedactionReport | None" = None
+    redaction_report: RedactionReport | None = None
 
     @property
     def full_text(self) -> str:

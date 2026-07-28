@@ -18,7 +18,7 @@ SDK-free, mirroring ``store/run_manifest.py``'s shape.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pyarrow as pa
@@ -83,7 +83,7 @@ def _manifest_row(output_path: Path) -> dict[str, object]:
         "row_count": md.num_rows,
         "schema_version": schema_version,
         "source_md5": source_md5,
-        "ingested_at_iso": datetime.now(timezone.utc).isoformat(),
+        "ingested_at_iso": datetime.now(UTC).isoformat(),
     }
 
 

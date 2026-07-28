@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -267,7 +268,7 @@ class TestRedactionDetection:
 class TestPIITagging:
     """Test PII cleaner against human-annotated ground truth."""
 
-    _SUPPORTED_ENTITIES = ["PERSON", "ADDRESS"]
+    _SUPPORTED_ENTITIES: ClassVar[list[str]] = ["PERSON", "ADDRESS"]
 
     @pytest.fixture()
     def gt_entities(self) -> dict[str, list[str]]:
@@ -539,6 +540,7 @@ class TestBenchmarkPII:
             pytest.skip(f"Fixture missing: {img_path}")
 
         import cv2
+
         from womblex.ingest.paddle_ocr import get_paddle_reader, preprocess_for_ocr
 
         img = cv2.imread(str(img_path))

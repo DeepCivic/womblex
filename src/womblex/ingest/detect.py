@@ -211,7 +211,7 @@ def _has_form_structure(page: fitz.Page) -> bool:
 
 # Page-image morphology helpers moved to womblex.ingest.morphology to keep
 # detect.py under the 750-line cap. Re-exported below for backward compat.
-from womblex.ingest.morphology import (  # noqa: E402,F401
+from womblex.ingest.morphology import (  # noqa: F401
     _analyze_glyph_regularity,
     _analyze_stroke_width_variance,
     _has_handwriting_signals,
@@ -219,8 +219,6 @@ from womblex.ingest.morphology import (  # noqa: E402,F401
     _page_to_grayscale,
     _sample_ocr_confidence,
 )
-
-
 
 
 def _classify(
@@ -446,8 +444,9 @@ def detect_document_type(
 def _detect_spreadsheet(path: Path) -> DocumentProfile:
     """Inspect a CSV or Excel file and classify each sheet's structure."""
     import pandas as pd
+
     # Local import: spreadsheet.py → extract.py → detect.py would be circular at module level.
-    from womblex.ingest.spreadsheet import (  # noqa: PLC0415
+    from womblex.ingest.spreadsheet import (
         _HEADER_SCAN_ROWS,
         _classify_sheet,
         read_csv_raw,

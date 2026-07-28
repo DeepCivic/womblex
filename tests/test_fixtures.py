@@ -15,6 +15,7 @@ from __future__ import annotations
 import io
 import json
 from pathlib import Path
+
 import fitz
 import numpy as np
 import pytest
@@ -542,7 +543,7 @@ class TestFixtureChunking:
         # Every ground-truth token should appear somewhere in the chunks
         for token in gt_texts[:10]:
             assert token in combined, (
-                f"Ground-truth token {repr(token)} missing from chunks"
+                f"Ground-truth token {token!r} missing from chunks"
             )
 
     def test_empty_ground_truth_yields_no_chunks(self) -> None:

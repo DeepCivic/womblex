@@ -34,7 +34,6 @@ from womblex.ingest.extract import (
 )
 from womblex.ingest.interfaces.protocols import OCRRegionResult
 
-
 # Label heuristics: 1–6 words, must start with uppercase, no sentence
 # punctuation inside, no list-marker shapes ("A)", "(i)").
 _FORM_LABEL_RE = re.compile(r"^[A-Z][A-Za-z0-9 /'\-()&]{0,49}:?$")

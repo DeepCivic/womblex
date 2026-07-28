@@ -8,11 +8,10 @@ tests (no spurious detections) use a real FUNSD benchmark image.
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import TYPE_CHECKING
-
 import argparse
 import json
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 import fitz  # type: ignore[import-untyped]
 import numpy as np
@@ -143,7 +142,7 @@ class TestRedactionDetect:
         redactions = self.detector.detect(redacted_image, page=0, exclude_rects=exclude)
         assert len(redactions) == 1
         # Surviving bar should be the narrower one (y around 200-260)
-        x1, y1, x2, y2 = redactions[0].bbox
+        _x1, y1, _x2, _y2 = redactions[0].bbox
         assert 180 <= y1 <= 220
 
     def test_exclude_rects_none_is_noop(self, redacted_image: np.ndarray) -> None:
@@ -586,7 +585,7 @@ class TestVectorRedactionPath:
         report = detect_redactions(pdf_path, 1, build_detector(config), dpi=config.dpi)
         regions = report.page_redactions[0]
         assert len(regions) == 1
-        x1, y1, x2, y2 = regions[0].bbox
+        x1, _y1, x2, _y2 = regions[0].bbox
         # 100pt * 150/72 ≈ 208; 200pt * 150/72 ≈ 416
         assert x1 == int(100 * 150 / 72)
         assert x2 == int(200 * 150 / 72)
@@ -809,10 +808,10 @@ def _seed_redaction_shards(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def _redact_shards_args(shard_dir: Path, pdf_dir: Path | None, **overrides) -> argparse.Namespace:
-    base = dict(
-        shards=shard_dir, config=None, pdfs=pdf_dir, output=None,
-        checkpoint=None, dpi=150, max_area_ratio=0.05, limit=None,
-    )
+    base = {
+        "shards": shard_dir, "config": None, "pdfs": pdf_dir, "output": None,
+        "checkpoint": None, "dpi": 150, "max_area_ratio": 0.05, "limit": None,
+    }
     base.update(overrides)
     return argparse.Namespace(**base)
 

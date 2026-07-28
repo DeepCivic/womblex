@@ -160,8 +160,8 @@ def _find_native_tables(
     count by carving sub-block whitespace into pseudo-rows. Real tables
     decompose into ≥1 block per row in `get_text("dict")`.
     """
-    import sys
     import io as _io
+    import sys
 
     found: list[tuple[TableData, fitz.Rect, list[list]]] = []
     pw, ph = page.rect.width, page.rect.height
@@ -280,7 +280,7 @@ def _extract_images_from_page(page: fitz.Page) -> list[ImageData]:
 
 # Form-field extraction lives in womblex.ingest.forms — re-exported below
 # for backward compat (the legacy strategy modules import from here).
-from womblex.ingest.forms import (  # noqa: E402,F401
+from womblex.ingest.forms import (  # noqa: F401
     _extract_form_fields,
     _extract_form_pairs_from_lines,
     _extract_form_pairs_from_regions,
@@ -363,8 +363,7 @@ def _build_text_blocks(page: fitz.Page) -> list[TextBlock]:
             for span in line.get("spans", []):
                 block_text += span.get("text", "")
                 fs = span.get("size", 0)
-                if fs > max_font_size:
-                    max_font_size = fs
+                max_font_size = max(max_font_size, fs)
                 # PyMuPDF span flags: bit 4 (16) = bold
                 if span.get("flags", 0) & 16:
                     any_bold = True
@@ -400,9 +399,9 @@ def get_extractor(
     Only IMAGE, SPREADSHEET, DOCX, and TEXT still use the legacy strategy
     classes.
     """
-    from womblex.ingest.strategies_scanned import ImageExtractor
-    from womblex.ingest.strategies_file import DocxExtractor, TextExtractor
     from womblex.ingest.spreadsheet import SpreadsheetExtractor
+    from womblex.ingest.strategies_file import DocxExtractor, TextExtractor
+    from womblex.ingest.strategies_scanned import ImageExtractor
 
     opts = engine_options or {}
     match profile.doc_type:

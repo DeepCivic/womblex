@@ -105,9 +105,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   297 errors across a tree that had been green — 233 of them pre-existing and
   unrelated, surfaced by the release rather than by any change. Lint runs
   before mypy and pytest, so both were being skipped entirely and the `money`
-  op merged without CI ever executing its tests. `ruff` is now bounded to
-  `>=0.15,<0.16`; raising that ceiling is a deliberate commit that also clears
-  whatever the new defaults flag.
+  op merged without CI ever executing its tests. `ruff` is now bounded
+  (`>=0.16,<0.17`) so an upstream release can no longer turn CI red on its own;
+  raising that ceiling is a deliberate commit that also clears whatever the new
+  defaults flag.
+
+  The tree is now clean under 0.16.0's defaults. `--fix` resolved 174 findings
+  mechanically; `BLE001`, `S110` and `S112` are suppressed in
+  `[tool.ruff.lint]` because the codebase deliberately does what they flag —
+  every site is a batch- or per-document isolation boundary, and narrowing
+  those handlers to named exception types would let one malformed document
+  abort a 1500-document run. The remaining 55 were resolved individually.
+  Two are worth noting beyond the mechanical: the readability smoke-tests in
+  `store/output.py` / `store/shard_audit.py` (`pq.ParquetFile(p).metadata`,
+  whose whole purpose is to raise on a corrupt footer) now bind their result
+  rather than being deleted as useless expressions, and `analyse/graph.py`
+  carried a crossreference edge whose `source` was the same value on both
+  arms of its conditional — collapsed to the value it already produced, so
+  behaviour is unchanged, but the condition looks like it was meant to
+  distinguish something.
 
 - **The Isaacus test suites run in CI.** CI installed `.[dev,cloud]`, omitting
   the `isaacus` extra, so the enrich / graph / query / embed modules hit their

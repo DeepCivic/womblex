@@ -94,8 +94,7 @@ def _propagate_insertion(curr: np.ndarray) -> None:
             # Need to propagate
             for j in range(start, end):
                 v = curr[j - 1] + 1
-                if v < curr[j]:
-                    curr[j] = v
+                curr[j] = min(curr[j], v)
                 # else: no further propagation needed in this run
         # If carry >= curr[start], the block might still need internal propagation
         # but the loop above handles it

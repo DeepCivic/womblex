@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ class CheckpointState:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "CheckpointState":
+    def from_dict(cls, data: dict) -> CheckpointState:
         return cls(
             processed_ids=set(data.get("processed_ids", [])),
             total_processed=data.get("total_processed", 0),
@@ -76,13 +76,13 @@ class CheckpointManager:
                 self.state = CheckpointState()
         else:
             self.state = CheckpointState()
-            self.state.started_at = datetime.now().isoformat()
+            self.state.started_at = datetime.now(UTC).isoformat()
         return self.state
 
     def save(self) -> None:
         """Save current checkpoint state."""
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        self.state.updated_at = datetime.now().isoformat()
+        self.state.updated_at = datetime.now(UTC).isoformat()
         with open(self.checkpoint_file, "w") as f:
             json.dump(self.state.to_dict(), f, indent=2)
         logger.debug("Saved checkpoint: %d processed", self.state.total_processed)
@@ -126,5 +126,5 @@ class CheckpointManager:
         if self.checkpoint_file.exists():
             self.checkpoint_file.unlink()
         self.state = CheckpointState()
-        self.state.started_at = datetime.now().isoformat()
+        self.state.started_at = datetime.now(UTC).isoformat()
         logger.info("Cleared checkpoint")

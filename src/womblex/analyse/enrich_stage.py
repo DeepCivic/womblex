@@ -40,12 +40,6 @@ from womblex.analyse.enrich import enrich_documents_raw
 from womblex.analyse.enrich_merge import merge_segment_results
 from womblex.analyse.graph import build_document_graph
 from womblex.analyse.models import EnrichmentResult
-from womblex.utils.token_packer import (
-    TextSegment,
-    TokenCounter,
-    pack_by_tokens,
-    split_on_boundaries,
-)
 from womblex.config import EnrichmentConfig
 from womblex.ingest.elements import Element
 from womblex.process.chunk_stage import _batch_bases
@@ -64,6 +58,12 @@ from womblex.store.enrichment_output import (
     write_graph_edges_shard,
 )
 from womblex.store.output import chunks_path_for, read_chunks, read_elements, read_manifest
+from womblex.utils.token_packer import (
+    TextSegment,
+    TokenCounter,
+    pack_by_tokens,
+    split_on_boundaries,
+)
 
 logger = logging.getLogger(__name__)
 

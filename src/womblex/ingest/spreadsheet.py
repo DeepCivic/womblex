@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import pandas as pd
+
     from womblex.ingest.detect import DocumentProfile
 
 from womblex.ingest.detect import SheetInfo
@@ -64,7 +65,7 @@ _HEADER_LOOKAHEAD_ROWS = 20
 _HEADER_WIDTH_RATIO = 0.6
 
 
-def read_csv_raw(path: Path, *, nrows: int | None = None) -> "pd.DataFrame":
+def read_csv_raw(path: Path, *, nrows: int | None = None) -> pd.DataFrame:
     """Read a CSV with no header inference, tolerating ragged leading rows.
 
     ``pd.read_csv(header=None)`` infers the column count from the first
@@ -91,7 +92,7 @@ def read_csv_raw(path: Path, *, nrows: int | None = None) -> "pd.DataFrame":
     return df.fillna("")
 
 
-def split_preamble(df_raw: "pd.DataFrame") -> tuple[list[str], "pd.DataFrame"]:
+def split_preamble(df_raw: pd.DataFrame) -> tuple[list[str], pd.DataFrame]:
     """Split leading title/metadata rows from a ``header=None`` sheet read.
 
     Export products put title rows, generated-date lines or ``key: value``
@@ -171,7 +172,7 @@ def split_preamble(df_raw: "pd.DataFrame") -> tuple[list[str], "pd.DataFrame"]:
     return preamble, df
 
 
-def _classify_sheet(name: str, df: "pd.DataFrame") -> SheetInfo:
+def _classify_sheet(name: str, df: pd.DataFrame) -> SheetInfo:
     """Classify a sheet's structure for detection-time metadata only.
 
     The new extractor emits every cell regardless of sheet shape, so
@@ -369,7 +370,7 @@ def _emit_sheet(
     *,
     sheet_name: str,
     sheet_index: int,
-    df: "pd.DataFrame",
+    df: pd.DataFrame,
     preamble: list[str] | None = None,
     cell_meta: dict[tuple[int, int], tuple[str, str]] | None = None,
     row_offset: int = 0,

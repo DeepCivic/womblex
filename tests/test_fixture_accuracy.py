@@ -551,10 +551,10 @@ class TestWomblexExtraction:
         if not transcript_path.exists():
             pytest.skip(f"Transcript missing: {transcript_path}")
 
+        import fitz as _fitz
+
         from womblex.ingest.detect import DetectionConfig, detect_file_type
         from womblex.ingest.extract import extract_text
-
-        import fitz as _fitz
 
         profile = detect_file_type(file_path, DetectionConfig())
 
@@ -649,7 +649,7 @@ def _act_eci_pages() -> list[dict]:
     return pages
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _act_eci_extract(pdf_path: str):
     """Extract a fixture PDF once (cached — pages of one doc share extraction)."""
     from womblex.ingest.detect import DetectionConfig, detect_file_type

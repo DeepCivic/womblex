@@ -94,9 +94,9 @@ def read_enrichment_docs(base_path: Path) -> dict[str, tuple[str, str]]:
 
 
 __all__ = [
-    "ENRICHMENT_DOC_SUFFIX",
     "ENRICHMENT_DOC_SCHEMA",
+    "ENRICHMENT_DOC_SUFFIX",
     "enrichment_doc_path_for",
-    "write_enrichment_doc_shard",
     "read_enrichment_docs",
+    "write_enrichment_doc_shard",
 ]

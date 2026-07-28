@@ -62,7 +62,7 @@ def test_normalise_unicode_folds_spaces_and_separators():
 
 
 def test_normalise_unicode_removes_zero_width_and_bom():
-    text, n = normalise_unicode("foo​﻿bar")
+    text, n = normalise_unicode("foo\u200b﻿bar")
     assert text == "foobar"
     assert n == 2
 

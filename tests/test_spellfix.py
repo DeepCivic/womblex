@@ -18,15 +18,15 @@ import pytest
 
 pytest.importorskip("spylls")
 
-from womblex.config import SpellfixConfig  # noqa: E402
-from womblex.ingest.elements import Element  # noqa: E402
-from womblex.process.chunker import reassemble_narrative  # noqa: E402
-from womblex.process.spellfix import repair_text  # noqa: E402
-from womblex.process.spellfix_stage import spellfix_shards  # noqa: E402
-from womblex.process.text_overlay import apply_overlay, load_overlay  # noqa: E402
-from womblex.store.normalise_output import write_normalised_text  # noqa: E402
-from womblex.store.output import ELEMENT_SCHEMA, MANIFEST_SCHEMA, TABLE_CELLS_SCHEMA  # noqa: E402
-from womblex.store.spellfix_output import (  # noqa: E402
+from womblex.config import SpellfixConfig
+from womblex.ingest.elements import Element
+from womblex.process.chunker import reassemble_narrative
+from womblex.process.spellfix import repair_text
+from womblex.process.spellfix_stage import spellfix_shards
+from womblex.process.text_overlay import apply_overlay, load_overlay
+from womblex.store.normalise_output import write_normalised_text
+from womblex.store.output import ELEMENT_SCHEMA, MANIFEST_SCHEMA, TABLE_CELLS_SCHEMA
+from womblex.store.spellfix_output import (
     read_spellfix_corrections,
     read_spellfix_text,
     spellfix_text_path_for,

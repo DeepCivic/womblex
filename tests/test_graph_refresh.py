@@ -93,7 +93,7 @@ def test_preserves_non_mention_edges_and_replaces_stale(tmp_path):
 
 
 def test_idempotent(tmp_path):
-    d, base, _src_ = _setup_shard(tmp_path)
+    d, base, _ = _setup_shard(tmp_path)
     refresh_graph_edges(d)
     first = read_graph_edges(base).to_pylist()
     refresh_graph_edges(d)

@@ -10,34 +10,21 @@ PaddleOCR ONNX models may not be bundled in CI.
 
 
 from pathlib import Path
-
 from unittest.mock import patch
 
-
-
 import pytest
-
 import semchunk
 
-
 from womblex.config import (
-
     ChunkingConfig,
-
     DatasetConfig,
-
     DetectionConfig,
-
     PathsConfig,
     WomblexConfig,
 )
-
 from womblex.ingest.detect import DocumentType, detect_file_type
-
 from womblex.ingest.extract import extract_text
-
-from womblex.operations import run_extraction, run_chunking, write_batch_parquet, BatchResult
-
+from womblex.operations import BatchResult, run_chunking, run_extraction, write_batch_parquet
 from womblex.process.chunker import (
     ChunkInput,
     chunk_batch,

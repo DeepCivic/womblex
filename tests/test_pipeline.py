@@ -9,17 +9,12 @@ import argparse
 import shutil
 from pathlib import Path
 
-
 import pytest
 
-
 from womblex.cli.pipeline import _register_chunk, cmd_chunk, cmd_manifest, cmd_run
-
 from womblex.config import ChunkingConfig, DatasetConfig, PathsConfig, WomblexConfig, load_config
-
-from womblex.operations import BatchResult, DocumentResult, run_extraction, run_chunking
+from womblex.operations import BatchResult, DocumentResult, run_chunking, run_extraction
 from womblex.utils.availability import isaacus_available
-
 
 # Chunking sizes chunks with the Kanon-2 tokeniser, available only via the
 # Isaacus API; the chunk stage skips when it isn't configured (no SDK / key).
@@ -374,7 +369,7 @@ class TestCmdRunRunIdLayout:
         )
         assert cmd_run(args2) == 0
 
-        post_resume = sorted(set(p.name.split(".")[0] for p in run_dir.glob("batch-*.parquet")))
+        post_resume = sorted({p.name.split(".")[0] for p in run_dir.glob("batch-*.parquet")})
         assert post_resume == ["batch-0001", "batch-0002", "batch-0003"]
         # batch-0001 untouched (size invariant — if it had been overwritten with
         # different content it would almost certainly differ in size)

@@ -22,9 +22,10 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import ClassVar
 
 from womblex.config import ChunkingConfig, EnrichmentConfig, WomblexConfig
-from womblex.process.chunker import ChunkInput, chunk_batch, _resolve_narrative_input
+from womblex.process.chunker import ChunkInput, _resolve_narrative_input, chunk_batch
 from womblex.store.enrichment_doc import (
     enrichment_doc_path_for,
     read_enrichment_docs,
@@ -151,7 +152,9 @@ class TestChunkBatchReuse:
 
 
 class TestConfigAutoEnable:
-    _PATHS = {"input_root": "/tmp/i", "output_root": "/tmp/o", "checkpoint_dir": "/tmp/c"}
+    _PATHS: ClassVar[dict[str, str]] = {
+        "input_root": "/tmp/i", "output_root": "/tmp/o", "checkpoint_dir": "/tmp/c",
+    }
 
     def test_auto_enabled_when_ai_chunking_and_enrich(self) -> None:
         cfg = WomblexConfig(

@@ -25,13 +25,12 @@ from womblex.analyse.models import (
     ExternalDocument,
     Location,
     Person,
-    Span,
     Segment,
+    Span,
     Term,
     Website,
 )
 from womblex.process.chunker import TextChunk
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

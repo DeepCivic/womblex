@@ -20,13 +20,12 @@ from womblex.ingest.extract import (
     _normalise_bbox,
     get_extractor,
 )
+from womblex.ingest.spreadsheet import SpreadsheetExtractor
 from womblex.ingest.strategies import (
     DocxExtractor,
     ImageExtractor,
     TextExtractor,
 )
-from womblex.ingest.spreadsheet import SpreadsheetExtractor
-
 
 # ---------------------------------------------------------------------------
 # Data model tests
@@ -428,9 +427,10 @@ class TestPageBreakEmission:
 
     def test_three_page_pdf_emits_two_page_breaks(self, tmp_path: Path) -> None:
         import fitz
+
+        from womblex.ingest.detect import DocumentType
         from womblex.ingest.orchestrator import extract_with_plan
         from womblex.ingest.page_profile import profile_pages
-        from womblex.ingest.detect import DocumentType
 
         doc = fitz.open()
         for i in range(3):
@@ -453,9 +453,10 @@ class TestPageBreakEmission:
 
     def test_single_page_pdf_emits_no_page_breaks(self, tmp_path: Path) -> None:
         import fitz
+
+        from womblex.ingest.detect import DocumentType
         from womblex.ingest.orchestrator import extract_with_plan
         from womblex.ingest.page_profile import profile_pages
-        from womblex.ingest.detect import DocumentType
 
         doc = fitz.open()
         page = doc.new_page(width=595, height=842)

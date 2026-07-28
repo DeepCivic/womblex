@@ -105,7 +105,7 @@ def profile_file(
 
 
 def profile_dataframe(
-    df: "pd.DataFrame",
+    df: pd.DataFrame,
     *,
     source: str = "<dataframe>",
     sheet_name: str | None = None,
@@ -202,7 +202,7 @@ def _profile_ndjson(path: Path, sample_rows: int) -> TableProfile:
     return profile_dataframe(str_df, source=str(path), total_rows=total)
 
 
-def _arrow_to_type(arrow_type: "pa.DataType") -> str:
+def _arrow_to_type(arrow_type: pa.DataType) -> str:
     import pyarrow as pa
 
     if pa.types.is_integer(arrow_type):
@@ -225,7 +225,7 @@ def _count_csv_rows(path: Path) -> int:
     return max(total - 1, 0)
 
 
-def _profile_column(name: str, series: "pd.Series") -> ColumnProfile:
+def _profile_column(name: str, series: pd.Series) -> ColumnProfile:
     str_series = series.astype(str)
     non_empty_mask = str_series.str.len() > 0
     non_empty = str_series[non_empty_mask]
@@ -247,7 +247,7 @@ def _profile_column(name: str, series: "pd.Series") -> ColumnProfile:
         )
 
     unique = non_empty.unique()
-    unique_count = int(len(unique))
+    unique_count = len(unique)
     inferred = _infer_type(non_empty)
     min_v, max_v = _min_max(non_empty, inferred)
     max_length = int(non_empty.str.len().max()) if inferred == "string" else None
@@ -267,7 +267,7 @@ def _profile_column(name: str, series: "pd.Series") -> ColumnProfile:
     )
 
 
-def _infer_type(values: "pd.Series") -> str:
+def _infer_type(values: pd.Series) -> str:
     sample = values.head(_INFER_CAP)
 
     if all(_INT_RE.match(v) for v in sample):
@@ -298,20 +298,23 @@ def _is_floatlike(value: str) -> bool:
 def _try_parse(value: str, formats: tuple[str, ...], *, allow_iso: bool) -> bool:
     for fmt in formats:
         try:
-            datetime.strptime(value, fmt)
+            # Parsing is the *test* here — the datetime is discarded, so its
+            # tz-awareness is irrelevant. Requiring %z would narrow which
+            # formats are recognised, which is the opposite of the intent.
+            datetime.strptime(value, fmt)  # noqa: DTZ007
             return True
         except ValueError:
             continue
     if allow_iso:
         try:
-            datetime.fromisoformat(value.replace("Z", "+00:00"))
+            datetime.fromisoformat(value)  # handles a trailing `Z` on 3.11+
             return True
         except ValueError:
             return False
     return False
 
 
-def _min_max(values: "pd.Series", inferred: str) -> tuple[str | None, str | None]:
+def _min_max(values: pd.Series, inferred: str) -> tuple[str | None, str | None]:
     if inferred == "integer":
         nums = values.astype(int)
         return str(int(nums.min())), str(int(nums.max()))

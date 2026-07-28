@@ -30,15 +30,15 @@ from womblex.operations.pii import run_pii_cleaning
 from womblex.operations.redact import run_redaction
 
 __all__ = [
-    "DocumentResult",
     "BatchResult",
+    "DocumentResult",
     "PreconditionError",
-    "run_extraction",
-    "run_redaction",
-    "run_chunking",
-    "run_pii_cleaning",
-    "run_enrichment",
     "enrich_batch",
-    "write_batch_parquet",
+    "run_chunking",
+    "run_enrichment",
+    "run_extraction",
+    "run_pii_cleaning",
+    "run_redaction",
     "write_batch_enrichment",
+    "write_batch_parquet",
 ]

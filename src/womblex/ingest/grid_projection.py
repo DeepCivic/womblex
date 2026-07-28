@@ -13,9 +13,10 @@ operates directly on PyMuPDF ``page.get_text("words", ...)`` tuples.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from statistics import median
-from typing import TYPE_CHECKING, Sequence
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -176,9 +177,9 @@ def _render_column(col: ColumnRegion) -> str:
 
 
 def extract_page_text(
-    page: "fitz.Page",
+    page: fitz.Page,
     *,
-    exclude_rects: "Sequence[object] | None" = None,
+    exclude_rects: Sequence[object] | None = None,
 ) -> str:
     """Extract page text, using grid projection for multi-column layouts.
 
@@ -211,7 +212,7 @@ def extract_page_text(
 
 
 def _word_in_any_rect(
-    word: WordTuple, rects: "Sequence[fitz.Rect]",
+    word: WordTuple, rects: Sequence[fitz.Rect],
 ) -> bool:
     """Test if a word's midpoint falls inside any of the given rects."""
     cx = (word[0] + word[2]) / 2
@@ -223,7 +224,7 @@ def _word_in_any_rect(
 
 
 def _render_blocks_with_breaks(
-    page: "fitz.Page", *, exclude_rects: "Sequence[fitz.Rect] | None" = None,
+    page: fitz.Page, *, exclude_rects: Sequence[fitz.Rect] | None = None,
 ) -> str:
     """Render single-column page text block-by-block with ``\\n\\n`` separators.
 

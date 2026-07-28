@@ -31,7 +31,6 @@ from womblex.analyse.query import (
 from womblex.process.chunker import TextChunk
 from womblex.store.enrichment_output import write_entity_mentions, write_graph_edges
 
-
 # ---------------------------------------------------------------------------
 # Shared fixture builders (same data as test_enrichment_output.py)
 # ---------------------------------------------------------------------------

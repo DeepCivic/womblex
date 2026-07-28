@@ -211,8 +211,8 @@ def _narrative_chunks(base: Path) -> dict[str, list[tuple[int, int, int]]]:
         by_hash[row["source_hash"]].append(
             (row["chunk_index"], row["start_char"], row["end_char"]),
         )
-    for src in by_hash:
-        by_hash[src].sort(key=lambda t: t[0])
+    for mentions in by_hash.values():
+        mentions.sort(key=lambda t: t[0])
     return dict(by_hash)
 
 

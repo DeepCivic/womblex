@@ -107,7 +107,7 @@ class RedactionDetector:
 
     def _is_redaction_candidate(self, contour: np.ndarray, image_area: int) -> bool:
         """Filter contours that look like redaction boxes."""
-        x, y, w, h = cv2.boundingRect(contour)
+        _x, _y, w, h = cv2.boundingRect(contour)
         area = w * h
 
         # Area constraints relative to page size
@@ -120,10 +120,7 @@ class RedactionDetector:
         if h == 0:
             return False
         aspect = w / h
-        if aspect < self.min_aspect_ratio or aspect > self.max_aspect_ratio:
-            return False
-
-        return True
+        return self.min_aspect_ratio <= aspect <= self.max_aspect_ratio
 
     def mask(self, image: np.ndarray, redactions: list[RedactionInfo]) -> np.ndarray:
         """White-out redacted regions before OCR.

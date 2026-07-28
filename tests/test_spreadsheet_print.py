@@ -8,13 +8,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import fitz
 import pytest
 
-import fitz
-
+from womblex.ingest.page_profile import profile_pages, qualify_for_spreadsheet_print
 from womblex.ingest.spreadsheet_print import extract_spreadsheet_print
-from womblex.ingest.page_profile import qualify_for_spreadsheet_print, profile_pages
-
 
 _FIXTURES = (
     Path(__file__).resolve().parent.parent

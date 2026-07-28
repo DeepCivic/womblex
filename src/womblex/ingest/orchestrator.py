@@ -30,7 +30,7 @@ from typing import cast
 import fitz
 
 from womblex.ingest.detect import DocumentProfile, DocumentType
-from womblex.ingest.elements import Cell, Element, ElementKind, FieldEntry, TEXT_KINDS
+from womblex.ingest.elements import TEXT_KINDS, Cell, Element, ElementKind, FieldEntry
 from womblex.ingest.extract import (
     ExtractionMetadata,
     ExtractionResult,

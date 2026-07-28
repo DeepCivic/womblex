@@ -228,8 +228,8 @@ class _BatchedWriter:
         if self._writer is not None:
             try:
                 self._writer.close()
-            except Exception:  # noqa: BLE001 — best-effort release before unlink
-                pass
+            except Exception:
+                pass  # best-effort release before unlink
         self.path.unlink(missing_ok=True)
 
 

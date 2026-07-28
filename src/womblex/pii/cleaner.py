@@ -88,19 +88,18 @@ _COMMON_WORDS: frozenset[str] = frozenset({
     "Officer", "Officers", "Commissioner", "Ombudsman", "Tribunal", "Committee",
     "Act", "Bill", "Policy", "Report", "Review", "Inquiry",
     "The", "This", "That", "These", "Those", "Its", "Their",
-    "North", "South", "East", "West", "Central",
+    "North", "East", "West", "Central",
     # Regulatory/legal/organisational terms
     "Authorised", "Regulatory", "Authority", "Regulation", "Regulations",
     "Community", "Services", "Service", "Assurance", "Education", "Care",
     "National", "Law", "Laws", "Legal", "Administrative", "Action",
     "Decision", "Attachment", "Refer", "Issue", "Notice", "Direction",
-    "School", "Hours", "Centre", "Centre", "Program", "Programs",
+    "School", "Hours", "Centre", "Program", "Programs",
     "Assessment", "Application", "Compliance", "Incorporated", "Association",
     "Council", "Board", "Agency", "Office", "Division", "Unit",
     "Plan", "Plans", "Strategy", "Framework", "Guidelines", "Procedure",
     "Section", "Part", "Clause", "Schedule", "Appendix", "Annexure",
-    "Annual", "Corporate", "Regional", "Local", "State", "National",
-    "General", "Senior", "Principal", "Assistant", "Deputy", "Acting",
+    "Annual", "Corporate", "Regional", "Local", "State", "General", "Senior", "Principal", "Assistant", "Deputy", "Acting",
 })
 
 # Reference sentences used to calibrate person-in-context similarity scoring.

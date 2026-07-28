@@ -61,7 +61,7 @@ from typing import Any, cast
 
 import semchunk
 
-from womblex.ingest.elements import Element, TEXT_KINDS
+from womblex.ingest.elements import TEXT_KINDS, Element
 from womblex.ingest.views import _element_to_table_data, _sheets_to_table_data
 
 logger = logging.getLogger(__name__)
@@ -290,7 +290,7 @@ def chunk_batch(
     inputs: list[ChunkInput],
     chunker: semchunk.Chunker,
     *,
-    overlap: int | float | None = None,
+    overlap: float | None = None,
     processes: int = 1,
     progress: bool = False,
     narrative_overrides: dict[str, object] | None = None,
@@ -411,7 +411,7 @@ def _chunker_batch(
     chunker: semchunk.Chunker,
     texts: Sequence[object],
     *,
-    overlap: int | float | None,
+    overlap: float | None,
     processes: int,
     progress: bool,
 ) -> tuple[list[list[str]], list[list[tuple[int, int]]]]:

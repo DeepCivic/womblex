@@ -37,9 +37,9 @@ from womblex.process.text_overlay import apply_overlay, load_overlay
 from womblex.store.checkpoint import CheckpointManager
 from womblex.store.enrichment_doc import read_enrichment_docs
 from womblex.store.output import (
-    CHUNKS_SUFFIX,
     _SHARD_ROLES,
     _SHARD_SUFFIX,
+    CHUNKS_SUFFIX,
     chunks_path_for,
     read_elements,
     read_manifest,
@@ -345,8 +345,8 @@ def _load_elements(base_path: Path) -> dict[str, list[Element]]:
         )
         out[row["source_hash"]].append(elem)
 
-    for src in out:
-        out[src].sort(key=lambda e: e.order)
+    for elements in out.values():
+        elements.sort(key=lambda e: e.order)
     return dict(out)
 
 
@@ -395,4 +395,4 @@ def _all_docs_checkpointed(base_path: Path, mgr: CheckpointManager) -> bool:
     return False
 
 
-__all__ = ["ChunkStageResult", "chunk_shards", "CHUNKS_SUFFIX"]
+__all__ = ["CHUNKS_SUFFIX", "ChunkStageResult", "chunk_shards"]

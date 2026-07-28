@@ -70,7 +70,7 @@ dev = [
     # a tree that had been green), so an unpinned ruff turns CI red on an
     # upstream release rather than on a change of ours. Raise the ceiling as a
     # deliberate commit that also clears whatever the new rules flag.
-    "ruff>=0.15,<0.16",
+    "ruff>=0.16,<0.17",
     "mypy",
 ]
 
@@ -123,6 +123,21 @@ log_file_format = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 [tool.ruff]
 line-length = 120
 target-version = "py311"
+
+[tool.ruff.lint]
+# These three are off because the codebase deliberately does what they flag,
+# not because the findings are noisy. Every site is a batch- or per-document
+# isolation boundary, where CLAUDE.md's contract is explicit: "Individual
+# document failures shouldn't stop the batch" and "Reject unusual data — warn
+# about it, but continue processing". Narrowing those handlers to named
+# exception types would let one malformed document abort a 1500-document run,
+# which is the bug they exist to prevent. Suppressing them here keeps that a
+# single stated decision rather than 68 scattered `noqa` comments.
+ignore = [
+    "BLE001",  # blind-except: the isolation handlers, by design
+    "S110",    # try-except-pass: best-effort probes with a documented fallback
+    "S112",    # try-except-continue: skip the bad record, keep the batch going
+]
 
 [tool.mypy]
 # No python_version pin: each CI matrix leg checks at its own interpreter

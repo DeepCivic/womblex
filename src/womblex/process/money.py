@@ -303,7 +303,7 @@ class _IntervalIndex:
     ``start``, and the prefix maximum is exactly that reach.
     """
 
-    __slots__ = ("_starts", "_max_end")
+    __slots__ = ("_max_end", "_starts")
 
     def __init__(self, spans: list[tuple[int, int]]) -> None:
         items = sorted(spans)

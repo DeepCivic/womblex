@@ -258,7 +258,7 @@ def ingest_records(
 __all__ = [
     "RecordFieldMapping",
     "RecordsIngestResult",
+    "ingest_records",
     "records_source_hash",
     "split_text_blocks",
-    "ingest_records",
 ]

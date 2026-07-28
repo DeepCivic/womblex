@@ -16,7 +16,6 @@ from womblex.ingest.detect import (
     detect_document_type,
 )
 
-
 # ---------------------------------------------------------------------------
 # _has_table_structure
 # ---------------------------------------------------------------------------
@@ -193,11 +192,13 @@ class TestClassify:
 
 class TestDetectDocumentType:
     def test_nonexistent_file_raises(self, tmp_path: Path) -> None:
-        with pytest.raises(Exception):
+        # PyMuPDF raises its own FileNotFoundError, which subclasses
+        # RuntimeError rather than the builtin — accept either, so the test
+        # survives a change of extractor without going blind.
+        with pytest.raises((FileNotFoundError, RuntimeError)):
             detect_document_type(tmp_path / "nope.pdf")
 
     def test_returns_document_profile(self, funsd_image_dir: Path) -> None:
         """Detect type of a real FUNSD form image embedded in a PDF — smoke test."""
         # This test validates the interface; real PDF fixtures will be added
         # to fixtures/ for comprehensive detection coverage.
-        pass
