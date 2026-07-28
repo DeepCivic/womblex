@@ -163,7 +163,7 @@ A corpus exists to mature Womblex capability, not host custom code. Corpus-side 
 ### Dependencies
 - PyMuPDF (`fitz`) for PDF handling
 - rapidocr-onnxruntime for OCR (bundles PaddleOCR v4 ONNX det/rec/cls models, no PaddlePaddle framework)
-- boto3 (optional `[bedrock]` extra) for the `mistral-ocr` engine — Mistral Pixtral Large via AWS Bedrock (Converse API)
+- boto3 (optional `[bedrock]` extra) for the `mistral-ocr` engine — Mistral Pixtral Large via AWS Bedrock (Converse API). Imported lazily at exactly one site, `ingest/llm_ocr.py:_ensure_client` (`boto3.client("bedrock-runtime")`); nothing on the core extraction path touches it, which is why the whole suite runs without it and only the VLM benchmark skips
 - ultralytics for YOLOv8 layout analysis (bundled yolov8n.pt in `models/`)
 - opencv-python-headless for image processing (binarisation, deskew)
 - semchunk for chunking
@@ -373,4 +373,5 @@ For new shapes that fit within the existing native/OCR dispatch:
 - Log document IDs with all errors
 - Write checkpoint after each batch
 - Manage dependencies via `pyproject.toml` + `uv lock`; no separate requirements files
+- Expect `uv sync` to rewrite `uv.lock` with **boto3 / s3transfer / jmespath** entries. That is the optional `[bedrock]` extra (`boto3>=1.34`) — the AWS Bedrock client behind the `mistral-ocr` OCR engine, nothing to do with the core pipeline. The committed `uv.lock` predates that extra and is stale against `pyproject.toml`: `uv lock --check` reports it needs updating, so any sync regenerates it. Keep that churn out of unrelated commits (`git checkout -- uv.lock`), and refresh the lock as its own dependency-scoped change with human approval
 - Verify mechanism claims against code or measurement before writing docs — `grep`/`Read` the file or run a probe, attach the evidence. Inferred descriptions without grounding tend to be wrong and need correcting later.
