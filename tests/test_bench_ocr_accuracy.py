@@ -12,8 +12,9 @@ IAM-line images are ~128px tall, so their pages are very short — correct
 behaviour for single-line recognition.
 
 Each test is parametrised over the OCR engines listed in ``OCR_ENGINES``.
-The ``deepseek-ocr`` engine requires a reachable Ollama instance with the
-``deepseek-ocr:3b`` tag pulled — tests skip cleanly otherwise.
+The ``mistral-ocr`` engine requires AWS Bedrock access (boto3 installed,
+resolvable credentials, and Pixtral Large model access enabled) — tests
+skip cleanly otherwise.
 """
 
 from __future__ import annotations
@@ -32,34 +33,41 @@ from womblex.ingest.extract import extract_text
 from womblex.utils.metrics import cer, wer
 
 # Engines exercised by every parametrised test. Add new engines here.
-OCR_ENGINES: list[str] = ["paddleocr", "deepseek-ocr"]
+OCR_ENGINES: list[str] = ["paddleocr", "mistral-ocr"]
 
 
-def _ollama_base_url() -> str:
-    return os.environ.get("OLLAMA_BASE_URL", "http://localhost:11435/v1").rstrip("/")
+def _bedrock_region() -> str:
+    return (
+        os.environ.get("AWS_REGION")
+        or os.environ.get("AWS_DEFAULT_REGION")
+        or "us-east-1"
+    )
 
 
-def _deepseek_available() -> bool:
-    """Return True if Ollama is reachable and the deepseek-ocr tag is present."""
+def _mistral_available() -> bool:
+    """Return True if boto3 is installed and AWS credentials resolve.
+
+    A lightweight probe: we don't call Bedrock (that would cost tokens and
+    require model access) — we only confirm the SDK is present and the
+    standard credential chain yields credentials. A missing model-access
+    grant still surfaces at request time as a logged warning + empty text.
+    """
     try:
-        import httpx
+        import boto3
     except ImportError:
         return False
-    base = _ollama_base_url().removesuffix("/v1")
     try:
-        resp = httpx.get(f"{base}/api/tags", timeout=2.0)
-        resp.raise_for_status()
-        names = {m.get("name", "") for m in resp.json().get("models", [])}
+        session = boto3.Session(region_name=_bedrock_region())
+        return session.get_credentials() is not None
     except Exception:
         return False
-    return any(n.startswith("deepseek-ocr") for n in names)
 
 
 def _skip_if_unavailable(engine: str) -> None:
-    if engine == "deepseek-ocr" and not _deepseek_available():
+    if engine == "mistral-ocr" and not _mistral_available():
         pytest.skip(
-            f"deepseek-ocr unavailable at {_ollama_base_url()} "
-            "(no Ollama, or model tag not pulled)"
+            "mistral-ocr unavailable "
+            "(boto3 missing, or no resolvable AWS credentials)"
         )
 
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "fixtures"

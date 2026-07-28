@@ -161,6 +161,7 @@ A corpus exists to mature Womblex capability, not host custom code. Corpus-side 
 ### Dependencies
 - PyMuPDF (`fitz`) for PDF handling
 - rapidocr-onnxruntime for OCR (bundles PaddleOCR v4 ONNX det/rec/cls models, no PaddlePaddle framework)
+- boto3 (optional `[bedrock]` extra) for the `mistral-ocr` engine — Mistral Pixtral Large via AWS Bedrock (Converse API)
 - ultralytics for YOLOv8 layout analysis (bundled yolov8n.pt in `models/`)
 - opencv-python-headless for image processing (binarisation, deskew)
 - semchunk for chunking
@@ -263,13 +264,16 @@ uv run python -m pytest tests/test_fixture_accuracy.py tests/test_womblex_collec
 ### Expected conditional skips
 The skip count is environment-dependent (which optional deps, services, and
 fixtures are present) — none are on broken code. On a bare checkout (no Isaacus
-key, no Ollama, vendored fixtures only) a full `pytest tests/` reports ~50 skips;
-on a dev box with the full fixtures, an Isaacus key, and Ollama, far fewer skip.
+key, no AWS credentials, vendored fixtures only) a full `pytest tests/` reports
+~50 skips; on a dev box with the full fixtures, an Isaacus key, and AWS Bedrock
+access, far fewer skip.
 Run with `-rs` to see live reasons. The recurring ones:
 
-- **~15 — DeepSeek-OCR VLM benchmark** (`test_bench_ocr_accuracy.py`): needs a
-  local **Ollama** server (default `http://localhost:11435/v1`) with the
-  deepseek-ocr model pulled. Skips cleanly when absent.
+- **~15 — Mistral OCR VLM benchmark** (`test_bench_ocr_accuracy.py`): the
+  `mistral-ocr` engine invokes Mistral Pixtral Large via **AWS Bedrock**
+  (`bedrock-runtime`). Needs `boto3` installed (the `[bedrock]` extra) and
+  resolvable AWS credentials with Pixtral Large model access enabled. Skips
+  cleanly when absent.
 - **geospatial** (`test_geospatial.py`): needs the optional `geopandas` /
   `pyogrio` extras.
 - **isaacus SDK** (`test_enrich.py` / `test_graph.py` / `test_query.py` /

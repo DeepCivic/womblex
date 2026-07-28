@@ -45,7 +45,7 @@ src/womblex/
 │   │   └── protocols.py       # Backend protocols: OCRReader, LayoutAnalyzer, Preprocessor
 │   ├── paddle_ocr.py          # PaddleOCR wrapper via rapidocr-onnxruntime (det/rec/cls)
 │   │                          # Also hosts YOLOLayoutAnalyzer for layout region detection (COCO yolov8n)
-│   ├── llm_ocr.py             # Optional LLM-based OCR backend (vision-capable models via OpenAI-compatible API)
+│   ├── llm_ocr.py             # LLM/VLM OCR backends: Mistral Pixtral Large via AWS Bedrock, + local Ollama
 │   ├── spreadsheet.py         # CSV/Excel extraction — one ExtractionResult per workbook, cells as elements
 │   ├── gnaf.py                # G-NAF PSV → Parquet ingest (standalone, bypasses NLP pipeline)
 │   ├── gnaf_schema.py         # G-NAF table schemas — static column definitions

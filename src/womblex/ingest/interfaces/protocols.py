@@ -33,10 +33,10 @@ class OCRPageResult:
     """Page-level OCR output.
 
     Region-based engines (PaddleOCR, Tesseract, EasyOCR, cloud APIs that
-    return word/line boxes) populate ``regions``. LLM-based engines
-    (DeepSeek-OCR, Mistral OCR, Gemini) typically return prose/markdown
-    with reading order already resolved — they populate ``markdown`` and
-    set ``reading_order_native=True``.
+    return word/line boxes) populate ``regions``. LLM/VLM-based engines
+    (Mistral OCR via Bedrock, Ollama, Gemini) typically return
+    prose/markdown with reading order already resolved — they populate
+    ``markdown`` and set ``reading_order_native=True``.
 
     Strategies normalise both shapes into the existing TextBlock pipeline.
     """

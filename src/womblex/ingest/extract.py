@@ -439,9 +439,11 @@ def extract_text(
 
     When *max_pages* is set, PDF extraction is limited to the first N pages.
 
-    ``engine`` selects the OCR backend (``paddleocr`` default, or
-    ``deepseek-ocr`` for the local LLM). ``engine_options`` forwards
-    engine-specific kwargs (e.g. ``model``, ``base_url``, ``prompt``).
+    ``engine`` selects the OCR backend (``paddleocr`` default, or an
+    LLM/VLM engine: ``mistral-ocr`` for Mistral Pixtral Large via AWS
+    Bedrock, ``ollama`` for a local multimodal LLM). ``engine_options``
+    forwards engine-specific kwargs (e.g. ``model``, ``region``,
+    ``base_url``, ``prompt``).
     """
     # Non-PDF path-based extractors keep the legacy strategy switch for now;
     # the Phase 2 orchestrator covers PDFs only.

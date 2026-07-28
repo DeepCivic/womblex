@@ -1,7 +1,8 @@
 """Extraction strategies for scanned and hybrid PDF documents.
 
 Covers SCANNED_MACHINEWRITTEN, SCANNED_HANDWRITTEN, SCANNED_MIXED,
-HYBRID, and IMAGE document types — all requiring OCR via PaddleOCR.
+HYBRID, and IMAGE document types — all requiring OCR (PaddleOCR by
+default, or an LLM/VLM engine such as Mistral OCR via AWS Bedrock).
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from womblex.ingest.extract import (
 from womblex.ingest.paddle_ocr import (
     get_layout_analyzer,
     get_ocr_reader,
+    is_llm_engine,
     preprocess_for_ocr,
 )
 
@@ -227,9 +229,9 @@ def _ocr_page(
     returned ``pix_width`` / ``pix_height`` to get 0-1 floats.
 
     Region-based engines (paddleocr) get the standard preprocess pipeline
-    (deskew + binarise). LLM-based engines (deepseek-ocr) skip preprocessing
-    because they ingest the colour render directly and resolve reading order
-    themselves.
+    (deskew + binarise). LLM/VLM engines (mistral-ocr, ollama) skip
+    preprocessing because they ingest the colour render directly and
+    resolve reading order themselves.
     """
     import cv2
 
@@ -245,13 +247,13 @@ def _ocr_page(
 
     reader = get_ocr_reader(engine=engine, lang=lang, **(engine_options or {}))
 
-    # LLM engines work better on the unmodified colour render; binarised
+    # LLM/VLM engines work better on the unmodified colour render; binarised
     # output throws off models trained on natural document images.
-    if engine.lower() in {"paddleocr", "paddle", "rapidocr"}:
-        ocr_input, steps = preprocess_for_ocr(img)
-    else:
+    if is_llm_engine(engine):
         ocr_input = img
         steps = ["llm_native_input"]
+    else:
+        ocr_input, steps = preprocess_for_ocr(img)
 
     if blur is not None and blur < 50:
         steps.append("low_blur_warning")

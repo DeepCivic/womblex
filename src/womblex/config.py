@@ -45,16 +45,21 @@ class OCRConfig(BaseModel):
     Supported engines:
 
     - ``paddleocr`` (default): local rapidocr-onnxruntime, returns regions.
-    - ``deepseek-ocr``: local DeepSeek-OCR via an OpenAI-compatible
-      endpoint (e.g. Ollama at ``OLLAMA_BASE_URL``). Returns markdown
-      with native reading order.
+    - ``mistral-ocr``: Mistral's Pixtral Large VLM inferenced via AWS
+      Bedrock (Converse API). Returns markdown with native reading order.
+    - ``ollama``: local multimodal LLM via an OpenAI-compatible endpoint
+      (Ollama at ``OLLAMA_BASE_URL``). Returns markdown with native
+      reading order.
 
     ``engine_options`` forwards engine-specific kwargs:
 
-    - DeepSeek-OCR: ``model`` (default ``deepseek-ocr:3b``),
-      ``base_url`` (default from ``OLLAMA_BASE_URL`` env or
-      ``http://localhost:11435/v1``), ``prompt`` (default
-      ``"<image>\\nFree OCR."``).
+    - Mistral OCR: ``model`` (default ``mistral.pixtral-large-2502-v1:0``,
+      or ``MISTRAL_OCR_MODEL_ID`` env), ``region`` (default from
+      ``AWS_REGION`` / ``AWS_DEFAULT_REGION`` env or ``us-east-1``). AWS
+      credentials resolve via the standard boto3 chain.
+    - Ollama: ``model`` (default ``llama3.2-vision``), ``base_url``
+      (default from ``OLLAMA_BASE_URL`` env or
+      ``http://localhost:11435/v1``), ``prompt``.
     """
 
     engine: str = "paddleocr"

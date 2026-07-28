@@ -404,25 +404,41 @@ _ENGINE_ALIASES: dict[str, str] = {
     "paddleocr": "paddleocr",
     "paddle": "paddleocr",
     "rapidocr": "paddleocr",
-    "deepseek-ocr": "deepseek-ocr",
-    "deepseek": "deepseek-ocr",
-    "deepseekocr": "deepseek-ocr",
+    "mistral-ocr": "mistral-ocr",
+    "mistral": "mistral-ocr",
+    "mistralocr": "mistral-ocr",
+    "pixtral": "mistral-ocr",
+    "bedrock": "mistral-ocr",
+    "ollama": "ollama",
+    "ollama-ocr": "ollama",
 }
+
+# Canonical names of the LLM/VLM engines that return page-level markdown with
+# reading order already resolved (skip preprocessing + layout sorting).
+LLM_OCR_ENGINES: frozenset[str] = frozenset({"mistral-ocr", "ollama"})
+
+
+def is_llm_engine(engine: str) -> bool:
+    """True if *engine* (name or alias) is an LLM/VLM markdown engine."""
+    return _ENGINE_ALIASES.get(engine.lower()) in LLM_OCR_ENGINES
 
 
 def get_ocr_reader(
     engine: str = "paddleocr",
     lang: str = "eng",
     model: str | None = None,
+    region: str | None = None,
     base_url: str | None = None,
     prompt: str | None = None,
 ):
     """Return a cached OCR reader for the requested engine.
 
-    ``engine`` accepts canonical names (``paddleocr``, ``deepseek-ocr``)
-    and common aliases. Engine-specific kwargs (``model``, ``base_url``,
-    ``prompt``) are forwarded only to engines that use them — passing
-    them to PaddleOCR is a no-op.
+    ``engine`` accepts canonical names (``paddleocr``, ``mistral-ocr``,
+    ``ollama``) and common aliases. Engine-specific kwargs are forwarded
+    only to engines that use them (passing others is a no-op):
+
+    - ``mistral-ocr`` (Bedrock Pixtral): ``model``, ``region``.
+    - ``ollama`` (local VLM): ``model``, ``base_url``, ``prompt``.
     """
     canonical = _ENGINE_ALIASES.get(engine.lower())
     if canonical is None:
@@ -434,9 +450,13 @@ def get_ocr_reader(
     if canonical == "paddleocr":
         return get_paddle_reader(lang=lang)
 
-    if canonical == "deepseek-ocr":
-        from womblex.ingest.llm_ocr import get_deepseek_reader
-        return get_deepseek_reader(model=model, base_url=base_url, prompt=prompt)
+    if canonical == "mistral-ocr":
+        from womblex.ingest.llm_ocr import get_mistral_reader
+        return get_mistral_reader(model=model, region=region)
+
+    if canonical == "ollama":
+        from womblex.ingest.llm_ocr import get_ollama_reader
+        return get_ollama_reader(model=model, base_url=base_url, prompt=prompt)
 
     raise ValueError(f"unhandled engine after alias resolution: {canonical!r}")
 

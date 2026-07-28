@@ -20,15 +20,19 @@ extraction:
     include_tables: true
   ocr:
     # engine: paddleocr      — local rapidocr-onnxruntime (region-based)
-    # engine: deepseek-ocr   — local DeepSeek-OCR via Ollama (markdown, native reading order)
+    # engine: mistral-ocr    — Mistral Pixtral Large via AWS Bedrock (markdown, native reading order)
+    # engine: ollama         — local multimodal LLM via Ollama (markdown, native reading order)
     engine: paddleocr
     dpi: 300
     lang: eng
     # engine_options forwards engine-specific kwargs.
-    # For deepseek-ocr:
-    #   model:    deepseek-ocr:3b
-    #   base_url: http://localhost:11435/v1   (or set OLLAMA_BASE_URL env)
-    #   prompt:   "<image>\nFree OCR."         (also: "...\n<|grounding|>OCR this image.")
+    # For mistral-ocr (AWS Bedrock; credentials via the standard boto3 chain):
+    #   model:  mistral.pixtral-large-2502-v1:0   (or set MISTRAL_OCR_MODEL_ID env)
+    #   region: us-east-1                          (or set AWS_REGION / AWS_DEFAULT_REGION env)
+    # For ollama:
+    #   model:    llama3.2-vision
+    #   base_url: http://localhost:11435/v1        (or set OLLAMA_BASE_URL env)
+    #   prompt:   "Transcribe all text in this image verbatim, preserving reading order."
     engine_options: {}
 
 # Redaction runs as a separate pipeline stage after extraction.
