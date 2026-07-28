@@ -215,6 +215,8 @@ reconstructor is tunable without the detector in the loop.
 4. Do the new gates fail the build, or warn until the numbers settle?
 5. GT spec sign-off — the two judgement calls flagged in A.4 (participant-name
    rows) and A.5 (dash folding at compare time).
+6. ADDITIONAL SCOPE - We will remove the use of DeepSeekOCR and replace it
+   with MistralOCR inferenced via AWS Bedrock
 
 ---
 
