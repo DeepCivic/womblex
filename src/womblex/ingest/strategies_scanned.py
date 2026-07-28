@@ -28,12 +28,14 @@ from womblex.ingest.extract import (
     _text_coverage,
 )
 from womblex.ingest.interfaces.protocols import OCRRegionResult
+from womblex.ingest.ocr_tables import regions_in_rect, span_from_region
 from womblex.ingest.paddle_ocr import (
     get_layout_analyzer,
     get_ocr_reader,
     is_llm_engine,
     preprocess_for_ocr,
 )
+from womblex.ingest.table_grid import Span, cluster_x_centroids, rows_from_spans
 
 logger = logging.getLogger(__name__)
 
@@ -58,62 +60,9 @@ def _spatial_sort_regions(regions, line_tolerance: float = 0.5) -> str:
     joined with newlines.  Fixes the column-mixing failure mode where paddle
     returns table cells in detection order.
     """
-    items: list[tuple[str, float, float]] = []
-    heights: list[float] = []
-    for r in regions:
-        if not r.text.strip():
-            continue
-        xs = [p[0] for p in r.bbox]
-        ys = [p[1] for p in r.bbox]
-        cx = (min(xs) + max(xs)) / 2
-        cy = (min(ys) + max(ys)) / 2
-        items.append((r.text, cx, cy))
-        heights.append(max(ys) - min(ys))
-    if not items:
-        return ""
-
-    avg_h = sum(heights) / len(heights) if heights else 1.0
-    threshold = avg_h * line_tolerance
-    items.sort(key=lambda t: (t[2], t[1]))
-
-    rows: list[list[tuple[str, float, float]]] = [[items[0]]]
-    for item in items[1:]:
-        if abs(item[2] - rows[-1][0][2]) <= threshold:
-            rows[-1].append(item)
-        else:
-            rows.append([item])
-
-    out_lines: list[str] = []
-    for row in rows:
-        row.sort(key=lambda t: t[1])
-        out_lines.append(" ".join(t[0] for t in row))
-    return "\n".join(out_lines)
-
-
-def _regions_in_rect(
-    regions: Sequence[OCRRegionResult],
-    rect: tuple[float, float, float, float],
-) -> list[OCRRegionResult]:
-    """Select OCR regions whose bbox centroid falls inside a pixel-space rect.
-
-    Both sides must be in the same image-pixel space — the OCR render and
-    the layout render of the same page at the same dpi. Callers verify
-    that (see ``_layout_blocks_and_tables``). Centroid containment, not
-    overlap, so a detection straddling the rect edge belongs to whichever
-    side holds its middle.
-    """
-    x0, y0, x1, y1 = rect
-    inside: list[OCRRegionResult] = []
-    for r in regions:
-        if not r.text.strip():
-            continue
-        xs = [p[0] for p in r.bbox]
-        ys = [p[1] for p in r.bbox]
-        cx = (min(xs) + max(xs)) / 2
-        cy = (min(ys) + max(ys)) / 2
-        if x0 <= cx <= x1 and y0 <= cy <= y1:
-            inside.append(r)
-    return inside
+    spans = [span_from_region(r) for r in regions if r.text.strip()]
+    rows, _avg_h = rows_from_spans(spans, line_tolerance=line_tolerance)
+    return "\n".join(" ".join(s.text for s in row) for row in rows)
 
 
 def _table_aware_text(
@@ -138,32 +87,10 @@ def _table_aware_text(
     own paragraph). Everything else uses the row-major reading order from
     ``_spatial_sort_regions``.
     """
-    items: list[tuple[str, float, float]] = []
-    heights: list[float] = []
-    for r in regions:
-        if not r.text.strip():
-            continue
-        xs = [p[0] for p in r.bbox]
-        ys = [p[1] for p in r.bbox]
-        cx = (min(xs) + max(xs)) / 2
-        cy = (min(ys) + max(ys)) / 2
-        items.append((r.text, cx, cy))
-        heights.append(max(ys) - min(ys))
-    if not items:
+    spans = [span_from_region(r) for r in regions if r.text.strip()]
+    rows, avg_h = rows_from_spans(spans, line_tolerance=line_tolerance)
+    if not rows:
         return ""
-
-    avg_h = sum(heights) / len(heights) if heights else 1.0
-    row_threshold = avg_h * line_tolerance
-    items.sort(key=lambda t: (t[2], t[1]))
-
-    rows: list[list[tuple[str, float, float]]] = [[items[0]]]
-    for item in items[1:]:
-        if abs(item[2] - rows[-1][0][2]) <= row_threshold:
-            rows[-1].append(item)
-        else:
-            rows.append([item])
-    for row in rows:
-        row.sort(key=lambda t: t[1])
 
     out_blocks: list[str] = []
     i = 0
@@ -173,21 +100,23 @@ def _table_aware_text(
             out_blocks.append(_emit_columns(rows[i:end], avg_h))
             i = end
         else:
-            out_blocks.append(" ".join(t[0] for t in rows[i]))
+            out_blocks.append(" ".join(s.text for s in rows[i]))
             i += 1
     return "\n".join(out_blocks)
 
 
-def _find_table_end(rows, start: int, min_cols: int, min_start_rows: int, avg_h: float) -> int:
+def _find_table_end(
+    rows: list[list[Span]], start: int, min_cols: int, min_start_rows: int, avg_h: float,
+) -> int:
     """Return the row index just past a detected table run, or ``start`` if none."""
     if start + min_start_rows > len(rows):
         return start
     if not all(len(rows[start + k]) >= min_cols for k in range(min_start_rows)):
         return start
 
-    start_items = [it for k in range(min_start_rows) for it in rows[start + k]]
+    start_items = [s for k in range(min_start_rows) for s in rows[start + k]]
     col_gap = max(avg_h * 3.0, 30.0)
-    col_centers = _cluster_x_centroids([it[1] for it in start_items], col_gap)
+    col_centers = cluster_x_centroids([s.cx for s in start_items], col_gap)
     if len(col_centers) < min_cols:
         return start  # the start rows didn't cluster into enough distinct columns
 
@@ -198,45 +127,31 @@ def _find_table_end(rows, start: int, min_cols: int, min_start_rows: int, avg_h:
         # Continuation requires multiple items AND every item near a column.
         if len(row) < 2:
             break
-        if not all(min(abs(it[1] - c) for c in col_centers) <= fit_dist for it in row):
+        if not all(min(abs(s.cx - c) for c in col_centers) <= fit_dist for s in row):
             break
         j += 1
     return j
 
 
-def _cluster_x_centroids(xs: list[float], gap_threshold: float) -> list[float]:
-    """1-D agglomerative clustering: items within ``gap_threshold`` group together."""
-    if not xs:
-        return []
-    xs_sorted = sorted(xs)
-    clusters: list[list[float]] = [[xs_sorted[0]]]
-    for x in xs_sorted[1:]:
-        if x - clusters[-1][-1] > gap_threshold:
-            clusters.append([x])
-        else:
-            clusters[-1].append(x)
-    return [sum(c) / len(c) for c in clusters]
-
-
-def _emit_columns(table_rows, avg_h: float) -> str:
+def _emit_columns(table_rows: list[list[Span]], avg_h: float) -> str:
     """Emit a detected table block column-major, with blank lines between columns."""
-    all_items = [it for row in table_rows for it in row]
+    all_items = [s for row in table_rows for s in row]
     if not all_items:
         return ""
     col_gap = max(avg_h * 3.0, 30.0)
-    col_centers = _cluster_x_centroids([it[1] for it in all_items], col_gap)
+    col_centers = cluster_x_centroids([s.cx for s in all_items], col_gap)
     if not col_centers:
-        return " ".join(t[0] for t in all_items)
+        return " ".join(s.text for s in all_items)
 
-    columns: list[list[tuple[str, float, float]]] = [[] for _ in col_centers]
-    for it in all_items:
-        idx = min(range(len(col_centers)), key=lambda k: abs(it[1] - col_centers[k]))
-        columns[idx].append(it)
+    columns: list[list[Span]] = [[] for _ in col_centers]
+    for s in all_items:
+        idx = min(range(len(col_centers)), key=lambda k: abs(s.cx - col_centers[k]))
+        columns[idx].append(s)
 
     parts: list[str] = []
     for col in columns:
-        col.sort(key=lambda t: t[2])
-        parts.append(" ".join(t[0] for t in col))
+        col.sort(key=lambda s: s.cy)
+        parts.append(" ".join(s.text for s in col))
     return "\n\n".join(p for p in parts if p)
 
 
@@ -500,7 +415,7 @@ def _layout_blocks_and_tables(
                     logger.debug(
                         "layout table region: page=%d confidence=%.2f ocr_regions=%d",
                         page.number, region.confidence,
-                        len(_regions_in_rect(cell_source, (rx0, ry0, rx1, ry1))),
+                        len(regions_in_rect(cell_source, (rx0, ry0, rx1, ry1))),
                     )
                 blocks.append(TextBlock(
                     text="[TABLE]",

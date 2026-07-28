@@ -89,7 +89,9 @@ A corpus exists to mature Womblex capability, not host custom code. Corpus-side 
 | `ingest/elements.py` | Canonical `Element`, `Cell`, `FieldEntry`, `BBox`; kind enumeration | Touch extractor logic or parquet I/O |
 | `ingest/extract.py` | Page-level primitives (text, blocks, tables, images), `ExtractionResult` with `elements` stream + derived views, `extract_text()` entry point | Document-level routing (orchestrator does that); post-processing of text |
 | `ingest/forms.py` | Form-pair extraction: AcroForm widgets, spatial label-value pairs from `page.get_text("dict")`, line-based pairs from OCR'd text | Know about document types |
-| `ingest/spreadsheet_print.py` | Multi-page table extraction for spreadsheet-printed PDFs (FOI manifests, schedules, registers); column inference, row binning, metadata-block capture, rotation handling | Run on every doc — gated by qualifier |
+| `ingest/spreadsheet_print.py` | Multi-page table extraction for spreadsheet-printed PDFs (FOI manifests, schedules, registers); header/metadata-block capture, rotation handling; grid inference via `table_grid` | Run on every doc — gated by qualifier |
+| `ingest/table_grid.py` | Shared table-grid geometry (`Span`/`Column`, y-band binning, data-anchored column clustering, row assembly, centroid row clustering) — one algorithm for both feeders; point-space tolerances as dpi-scalable parameters | Know about PDFs, OCR engines, or parquet |
+| `ingest/ocr_tables.py` | OCR table feeder: `reconstruct_table(regions, table_rect, dpi, conf)` → `TableData` or `None` below its precision gates; quad→span reduction, `regions_in_rect` | Detect table regions (layout model does); handle LLM-OCR output (no regions) |
 | `ingest/strategies_scanned.py` | OCR primitives (`_ocr_page`, `_layout_blocks_and_tables`, `_ocr_image_regions`) used by the orchestrator + the legacy `ImageExtractor` | Doc-level extraction strategies (those are gone for PDFs) |
 | `ingest/strategies_file.py` | `DocxExtractor`, `TextExtractor`, `NonTextualExtractor` for non-PDF formats | PDF extraction |
 | `ingest/morphology.py` | Page-image morphology helpers — handwriting / glyph regularity / stroke-width variance / OCR confidence sampling | Know about document semantics |
@@ -161,7 +163,7 @@ A corpus exists to mature Womblex capability, not host custom code. Corpus-side 
 ### Dependencies
 - PyMuPDF (`fitz`) for PDF handling
 - rapidocr-onnxruntime for OCR (bundles PaddleOCR v4 ONNX det/rec/cls models, no PaddlePaddle framework)
-- boto3 (optional `[bedrock]` extra) for the `mistral-ocr` engine — Mistral Pixtral Large via AWS Bedrock (Converse API)
+- boto3 (optional `[bedrock]` extra) for the `mistral-ocr` engine — Mistral Pixtral Large via AWS Bedrock (Converse API). Imported lazily at exactly one site, `ingest/llm_ocr.py:_ensure_client` (`boto3.client("bedrock-runtime")`); nothing on the core extraction path touches it, which is why the whole suite runs without it and only the VLM benchmark skips
 - ultralytics for YOLOv8 layout analysis (bundled yolov8n.pt in `models/`)
 - opencv-python-headless for image processing (binarisation, deskew)
 - semchunk for chunking
@@ -371,4 +373,6 @@ For new shapes that fit within the existing native/OCR dispatch:
 - Log document IDs with all errors
 - Write checkpoint after each batch
 - Manage dependencies via `pyproject.toml` + `uv lock`; no separate requirements files
+- `uv.lock` carries **boto3 / s3transfer** for the optional `[bedrock]` extra (`boto3>=1.34`) — the AWS Bedrock client behind the `mistral-ocr` OCR engine, not the core pipeline. They are locked but not installed by a default `uv sync`; add `--extra bedrock` to get them. (The lock omitted this extra until 2026-07-28, so any sync rewrote it — hence boto3 turning up in unrelated diffs. Fixed; `uv lock --check` is clean.)
+- If `uv sync` rewrites `uv.lock`, that is a real dependency change, not noise — keep it out of unrelated commits (`git checkout -- uv.lock`) and land it as its own dependency-scoped change with human approval. `uv lock --check` tells you whether the lock and `pyproject.toml` agree
 - Verify mechanism claims against code or measurement before writing docs — `grep`/`Read` the file or run a probe, attach the evidence. Inferred descriptions without grounding tend to be wrong and need correcting later.

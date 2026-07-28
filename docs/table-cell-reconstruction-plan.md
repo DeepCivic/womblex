@@ -17,6 +17,33 @@ this round. Two principles carry over unchanged from the original plan:
 - **No duplicate algorithms.** One shared grid module; existing table-ish
   code is consumed or superseded, never paralleled (see A1).
 
+## Status (updated 2026-07-28)
+
+| Stage | Status |
+|---|---|
+| A0 — scope + region plumbing | **Landed** (`1f85f7e`) |
+| A1 — shared `table_grid` + OCR feeder | **Landed** (this branch, incl. QA fixes) |
+| A2 — skew refusal | Not started (~3 lines, lands with A3) |
+| A3 — wire the OCR-PDF path | Not started — **next up in Track A** |
+| A4 — route the image path | Not started |
+| A5 — conventions + lineage | Requirements landed with A1 (confidence lineage, producer marker); the "preserved by construction" claims verify when A3/A4 put a table through the pipeline |
+| B0 — fix the table metric | Not started — live doc/metric defect, **next up overall** |
+| B1 — decompose the measurement | Not started |
+| B2 — metric set + gate calibration | Not started — inherits three specifics from A1 (see Open decisions) |
+| B3 — rendered-clean GT harness | Not started (the `dense_text_548` GT itself landed, `7f756cc`) |
+| B4 — report + docs wiring | Not started |
+| B5 — regression guard | Not started |
+
+**Sequencing deviation, recorded:** A1 landed *before* B0/B3/B1.2, against
+the planned order. The consequence the original ordering was designed to
+avoid is real and accepted: the reconstructor exists but is untuned — every
+precision gate in `ocr_tables.py` is a provisional structural constant, not
+a calibrated threshold. That is why A1 refused to pick a two-line-header
+threshold and why B0 → B3 → B1.2 should still land **before A3 wires the
+reconstructor in**: wiring an unmeasured reconstructor into extraction
+would put uncalibrated grids into parquet shards. The remaining order is
+unchanged: `B0 → B3 + B1.2 → A3 (+A2) → A4 → B2 → B4/B5`.
+
 ## Where tables come from today (why this scope is enough)
 
 | Path | Mechanism | Status |
@@ -75,7 +102,7 @@ DocLayNet harness was already pinned by construction, calling
 which also pins the A3 starting point — the fallback currently collapses the
 whole page, table content included, onto one block.
 
-### A1 — one algorithm: `ingest/table_grid.py`
+### A1 — one algorithm: `ingest/table_grid.py` — **landed**
 
 **Resolved: shared module, not a duplicate.** The repo already holds three
 table-ish algorithms and must not gain a fourth:
@@ -110,6 +137,57 @@ End-state after A1:
 
 Signature: `reconstruct_table(regions, table_rect, dpi, conf) -> TableData |
 None`; returns `None` (never a partial) below the precision gates in B2.
+
+**What landed.** `ingest/table_grid.py` holds the lifted algorithm —
+`Span` / `Column`, `bin_y_bands`, `columns_from_data`, `column_for_x`,
+`bands_to_rows`, `drop_blank_rows` — with the point-space tolerances as
+parameters (`*_PT` defaults; pixel-space callers scale by `dpi/72`), plus
+`rows_from_spans` (the adaptive y-centroid row clustering) and
+`cluster_x_centroids`. `spreadsheet_print` consumes it (505 → 356 lines,
+behaviour unchanged); `_spatial_sort_regions` and `_table_aware_text` now
+share the `rows_from_spans` preamble, so the near-line-for-line
+region→rows duplication is gone. `ingest/ocr_tables.py` is the second
+feeder: `span_from_region` (the quad→bounds reduction), `regions_in_rect`
+(moved from `strategies_scanned` so the A3 import direction has no cycle)
+and `reconstruct_table(regions, table_rect, dpi, conf, *, pix_dims)` —
+`pix_dims` normalises the element position; `conf` is the layout
+detector's table-region confidence, capping the mean constituent-region
+confidence per A5, and `context["producer"] = "table_grid"` stamps the
+lineage. Columns derive from body spans (headers are commonly centred and
+would skew clusters).
+
+The header band and the body bands are binned **separately**, because
+`bands_to_rows`'s continuation rule folds a band with no leading-column
+value into the row above — right for a wrapped body cell, silently wrong
+for a first body row whose leading cell is blank (indented or grouped
+rows), which was otherwise absorbed into the header and lost.
+
+The precision gates are structural and **provisional until B2 calibrates
+them**: `MIN_COLUMNS=3`, `MIN_BODY_ROWS=3`, `MIN_ASSIGNED_RATIO=0.9`,
+plus a refusal when no header cell recovers text; each refusal is
+debug-logged. Two measured properties B2 must calibrate around rather
+than assume away:
+
+- `MIN_BODY_ROWS` is 3, not 2, because `columns_from_data` independently
+  drops any x-cluster holding fewer than 3 spans — every column of a
+  2-body-row table is filtered out, so that shape can never reconstruct
+  and a lower constant would be unreachable rather than permissive.
+- `MIN_ASSIGNED_RATIO` is **asymmetric**: `column_for_x` assigns anything
+  at or right of the first column, so the ratio gates left-edge overflow
+  only. Content right of the last column either forms its own column or
+  joins the last one — the right-edge guardrail has to come from B2's
+  false-table fixtures, not from this ratio.
+
+Known round-1 limitation, deliberately not fixed here: a two-line header's
+second line becomes a spurious first body row (only `bands[0]` is the
+header). Merging it means solving multi-line headers — deferred — and
+refusing it means a proximity threshold; `spreadsheet_print`'s
+`HEADER_MERGE_PX` scales to ~33 px at 200 dpi, which would falsely refuse
+a dense clean table whose row pitch is ~28 px. B2's cell-F1 metric should
+measure the cost against real fixtures before a threshold is picked.
+
+Nothing is wired into the layout pass yet — `tables` is still returned
+empty on every extraction path until A3.
 
 ### A2 — skew: refuse, don't solve (round-1 cut)
 
@@ -172,7 +250,14 @@ home), tables must interleave by y rather than append, the LLM branch
 rule applies identically — the page-wide paragraph currently contains the
 table text.
 
-### A5 — post-processing conventions and lineage: preserved by construction
+### A5 — post-processing conventions and lineage — **requirements landed, verification pending A3/A4**
+
+The two mandated provenance fields below landed with A1
+(`reconstruct_table` sets confidence from the constituent regions and
+stamps `context["producer"] = "table_grid"`). The convention claims that
+follow are verified at the code level but can only be *end-to-end*
+confirmed once A3/A4 put a reconstructed table through the writer,
+chunker and money stage.
 
 Because Track A produces a `TableData` and reuses `_table_to_element`, every
 downstream composed stage consumes reconstructed tables through the existing
@@ -350,10 +435,17 @@ config default change to an LLM engine can't turn the gates into no-ops.
 
 ## Sequencing
 
-`B0 → B3 rendered-GT harness + B1.2 → A1 → A3 → A4 → B2 breadth → B4/B5`.
-B0 first because it is a live doc/metric defect. The rendered-GT harness and
-B1.2 land before A3 so the reconstructor is tuned against clean grids
-without the detector in the loop.
+Planned: `B0 → B3 rendered-GT harness + B1.2 → A1 → A3 → A4 → B2 breadth →
+B4/B5`. Actual: A1 landed first (deviation recorded in Status above).
+Remaining, order unchanged:
+
+`B0 → B3 rendered-GT harness + B1.2 → A3 (+A2) → A4 → B2 breadth → B4/B5`.
+
+B0 first because it is a live doc/metric defect. The rendered-GT harness
+and B1.2 still land before A3 — with A1 already shipped, they are what
+turns its provisional gates into calibrated ones *before* reconstructed
+grids start landing in parquet shards. A2 is a three-line page-level
+refusal that rides along with A3's wiring.
 
 ## Deferred to a later round (recorded so they aren't relitigated)
 
@@ -371,6 +463,11 @@ without the detector in the loop.
 
 1. Precision-gate thresholds — set from the rendered-clean fixtures + the
    false-table set (not from `dense_text_548`, which no longer gates).
+   Three specifics inherited from A1: a right-edge overflow guardrail
+   (`MIN_ASSIGNED_RATIO` only gates the left edge), whether the
+   column-population floor of 3 should be a parameter rather than couple
+   `MIN_BODY_ROWS` to it, and whether a two-line header should merge or
+   refuse.
 2. B0 remedy: fix `_aggregate_doclaynet_blocks` for tables, or report table
    detection at region granularity with a min-span filter?
 
