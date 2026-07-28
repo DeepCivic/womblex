@@ -60,10 +60,11 @@ things came with the seam:
 - `_regions_in_rect(regions, rect)` — the OCR-quad → table-rect
   intersection by centroid containment, the primitive A1's feeder consumes.
 - A coordinate-space guard: the OCR render and the layout render are the
-  same page at the same dpi, so their pixel spaces coincide; a dimension
-  mismatch drops the regions with a warning rather than binning
-  incomparable coordinates. (Deskew is *not* caught by this — dims survive
-  `warpAffine`; that is A2's page-level refusal.)
+  same page at the same dpi, so their pixel spaces coincide. Unless the OCR
+  dimensions are supplied *and* match, the regions are dropped with a
+  warning rather than binned as incomparable coordinates. (Deskew is *not*
+  caught by this — dims survive `warpAffine`; that is A2's page-level
+  refusal.)
 - A per-table-region debug line carrying the intersecting region count, so
   the size of the gap is traceable per page before the reconstructor exists.
 

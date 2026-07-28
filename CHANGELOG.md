@@ -102,13 +102,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Two pieces of the reconstructor's foundation come with the seam:
   `_regions_in_rect()`, the OCR-quad → table-rect intersection by centroid
   containment, and a coordinate-space guard — the OCR render and the layout
-  render are the same page at the same dpi, so a dimension mismatch means the
-  coordinates are not comparable and the regions are dropped with a warning
-  rather than binned. Losing inputs is the correct failure; a mis-binned grid
-  would be confidently wrong downstream. Deskewed pages are a separate hazard
-  (dims survive `warpAffine`) handled by a later page-level refusal. Per-table
-  debug logging records how many OCR regions fall inside each detected table,
-  so the size of the gap is traceable per page before the reconstructor lands.
+  render are the same page at the same dpi, so unless the OCR render's
+  dimensions are supplied and match, the coordinates are not known to be
+  comparable and the regions are dropped with a warning rather than binned.
+  Losing inputs is the correct failure; a mis-binned grid would be confidently
+  wrong downstream. Deskewed pages are a separate hazard this check does not
+  catch (dims survive `warpAffine`), handled by a later page-level refusal.
+  Per-table debug logging records how many OCR regions fall inside each
+  detected table, so the size of the gap is traceable per page before the
+  reconstructor lands.
   Plan and sequencing in
   [docs/table-cell-reconstruction-plan.md](docs/table-cell-reconstruction-plan.md).
 

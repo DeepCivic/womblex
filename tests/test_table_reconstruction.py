@@ -45,11 +45,12 @@ class _StubAnalyzer:
 
 
 @pytest.fixture
-def blank_page() -> fitz.Page:
+def blank_page():
     doc = fitz.open()
     page = doc.new_page(width=612, height=792)
     page.insert_text((72, 100), "Some page text")
-    return page
+    yield page
+    doc.close()
 
 
 class TestRegionsInRect:
@@ -111,8 +112,36 @@ class TestLayoutPassPlumbing:
                 ocr_regions=[_region(10, 10, 100, 40)],
                 ocr_pix_dims=(int(pix.width), int(pix.height)),
             )
-        assert "render mismatch" not in caplog.text
+        assert "dropping cell regions" not in caplog.text
         # A0 ships no reconstructor — tables stay empty on every path.
+        assert tables == []
+
+    def test_debug_log_counts_regions_inside_the_table_rect(
+        self, blank_page: fitz.Page, caplog,
+    ) -> None:
+        """The gap's size is traceable per page before the reconstructor lands."""
+        pix = blank_page.get_pixmap(dpi=200)
+        with caplog.at_level(logging.DEBUG, logger="womblex.ingest.strategies_scanned"):
+            _layout_blocks_and_tables(
+                blank_page, 200, "page text", 90.0,
+                ocr_regions=[
+                    _region(10, 10, 100, 40),      # inside the table rect
+                    _region(10, 600, 100, 640),    # below it
+                ],
+                ocr_pix_dims=(int(pix.width), int(pix.height)),
+            )
+        assert "layout table region: page=0 confidence=0.96 ocr_regions=1" in caplog.text
+
+    def test_regions_without_dims_are_dropped(
+        self, blank_page: fitz.Page, caplog,
+    ) -> None:
+        """Unverifiable is treated as non-comparable: regions need their dims."""
+        with caplog.at_level(logging.WARNING, logger="womblex.ingest.strategies_scanned"):
+            _blocks, tables = _layout_blocks_and_tables(
+                blank_page, 200, "page text", 90.0,
+                ocr_regions=[_region(10, 10, 100, 40)],
+            )
+        assert "dropping cell regions" in caplog.text
         assert tables == []
 
     def test_mismatched_render_dims_drop_regions(
@@ -125,7 +154,7 @@ class TestLayoutPassPlumbing:
                 ocr_regions=[_region(10, 10, 100, 40)],
                 ocr_pix_dims=(17, 23),
             )
-        assert "render mismatch" in caplog.text
+        assert "dropping cell regions" in caplog.text
         assert tables == []
 
 

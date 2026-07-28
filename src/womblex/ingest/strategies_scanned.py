@@ -449,12 +449,14 @@ def _layout_blocks_and_tables(
 
     ``ocr_regions`` / ``ocr_pix_dims`` carry the per-detection OCR output
     that produced *text*, in image-pixel coords at *dpi* — the raw
-    material for reconstructing cells inside a detected table rect. Only
-    region-based engines (paddleocr) supply them; LLM/VLM engines resolve
-    reading order natively, return no regions, and are dispatched to
-    ``_markdown_page_block`` instead, so they never reach this function.
-    See docs/table-cell-reconstruction-plan.md (A0) — ``tables`` is still
-    returned empty until the reconstructor lands.
+    material for reconstructing cells inside a detected table rect. They
+    are supplied together or not at all: regions without their render
+    dimensions cannot be checked against this pass's own render, so they
+    are dropped. Only region-based engines (paddleocr) supply them; LLM/VLM
+    engines resolve reading order natively, return no regions, and are
+    dispatched to ``_markdown_page_block`` instead, so they never reach
+    this function. See docs/table-cell-reconstruction-plan.md (A0) —
+    ``tables`` is still returned empty until the reconstructor lands.
     """
     blocks: list[TextBlock] = []
     tables: list[TableData] = []
@@ -467,15 +469,18 @@ def _layout_blocks_and_tables(
         # The OCR render and this layout render are the same page at the
         # same dpi, so their pixel spaces coincide and region bboxes can be
         # intersected with layout rects directly. Verify rather than assume:
-        # on a mismatch the coordinates are not comparable and the regions
-        # are dropped, which costs reconstruction inputs but never produces
-        # a mis-binned grid.
+        # unless the OCR render's dimensions are supplied *and* match, the
+        # coordinates are not known to be comparable and the regions are
+        # dropped. That costs reconstruction inputs but never produces a
+        # mis-binned grid.
         cell_source = list(ocr_regions or ())
         layout_dims = (int(pix.width), int(pix.height))
-        if cell_source and ocr_pix_dims is not None and tuple(ocr_pix_dims) != layout_dims:
+        ocr_dims = tuple(ocr_pix_dims) if ocr_pix_dims is not None else None
+        if cell_source and ocr_dims != layout_dims:
             logger.warning(
-                "OCR/layout render mismatch, dropping cell regions: page=%d ocr=%s layout=%s",
-                page.number, tuple(ocr_pix_dims), layout_dims,
+                "OCR/layout renders not comparable, dropping cell regions: "
+                "page=%d ocr_dims=%s layout_dims=%s",
+                page.number, ocr_dims, layout_dims,
             )
             cell_source = []
 
@@ -489,12 +494,14 @@ def _layout_blocks_and_tables(
 
             if region.block_type == "table":
                 # Reconstruction inputs, logged so the size of the gap is
-                # traceable per page before the reconstructor exists.
-                logger.debug(
-                    "layout table region: page=%d confidence=%.2f ocr_regions=%d",
-                    page.number, region.confidence,
-                    len(_regions_in_rect(cell_source, (rx0, ry0, rx1, ry1))),
-                )
+                # traceable per page before the reconstructor exists. Gated:
+                # the intersection is real work, not a format string.
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "layout table region: page=%d confidence=%.2f ocr_regions=%d",
+                        page.number, region.confidence,
+                        len(_regions_in_rect(cell_source, (rx0, ry0, rx1, ry1))),
+                    )
                 blocks.append(TextBlock(
                     text="[TABLE]",
                     position=pos,

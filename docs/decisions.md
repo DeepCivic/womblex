@@ -265,12 +265,15 @@ markdown-pipe-table → `TableData` parser is the LLM path's separate feeder,
 deferred.
 
 `_layout_blocks_and_tables` takes the regions plus the OCR render's pixel
-dimensions. The OCR render and the layout render are the same page at the same
-dpi, so their pixel spaces coincide — verified rather than assumed: on a
-dimension mismatch the regions are dropped with a warning, costing
-reconstruction inputs but never producing a mis-binned grid. Deskewed pages are
-a distinct hazard (OCR runs on the warped image, YOLO on the raw one) handled
-separately by a page-level refusal.
+dimensions, together or not at all. The OCR render and the layout render are
+the same page at the same dpi, so their pixel spaces coincide — verified rather
+than assumed: unless the dimensions are supplied *and* match, the coordinates
+are not known to be comparable and the regions are dropped with a warning.
+Losing reconstruction inputs is the correct failure; a mis-binned grid would be
+confidently wrong downstream. Deskewed pages are a distinct hazard (OCR runs on
+the warped image, YOLO on the raw one) that this check does **not** catch —
+`warpAffine` preserves dimensions — and are handled separately by a page-level
+refusal.
 
 ## Rejected approaches / dead-ends
 
