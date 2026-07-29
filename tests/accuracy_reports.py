@@ -272,19 +272,23 @@ def _table_reconstruction_section(tables: list[dict]) -> list[str]:
     lines: list[str] = ["## Table Reconstruction", ""]
     if not tables:
         lines += [
-            "*No table-reconstruction results collected — run "
-            "`pytest tests/test_table_benchmark.py -m benchmark` in the same "
-            "session.*",
+            (
+                "*No table-reconstruction results collected — run "
+                "`pytest tests/test_table_benchmark.py -m benchmark` in the same "
+                "session.*"
+            ),
             "",
         ]
         return lines
 
     lines += [
-        "Reconstruction measured against a *known-correct* table rect — the"
-        " layout detector is not in the loop (plan B1.2). Detection is the"
-        " per-class `table` row in the DocLayNet section above (B1 stage 1);"
-        " this is stage 2. The scorer normalises NFKC + dash-fold + whitespace"
-        "-collapse; GT stays verbatim. `paddleocr` engine pinned (plan A0).",
+        (
+            "Reconstruction measured against a *known-correct* table rect — the"
+            " layout detector is not in the loop (plan B1.2). Detection is the"
+            " per-class `table` row in the DocLayNet section above (B1 stage 1);"
+            " this is stage 2. The scorer normalises NFKC + dash-fold + whitespace"
+            "-collapse; GT stays verbatim. `paddleocr` engine pinned (plan A0)."
+        ),
         "",
     ]
 
@@ -332,9 +336,11 @@ def _table_reconstruction_section(tables: list[dict]) -> list[str]:
     lines += [
         "### False-Table Cohort (Precision Guardrail)",
         "",
-        f"Pages with **no** GT table fed to the reconstructor whole — any"
-        f" emitted table is a false positive. False positives: **{fp_count}**"
-        f" of {len(probes)} (B5 gates this to 0).",
+        (
+            f"Pages with **no** GT table fed to the reconstructor whole — any"
+            f" emitted table is a false positive. False positives: **{fp_count}**"
+            f" of {len(probes)} (B5 gates this to 0)."
+        ),
         "",
         "| Fixture | Outcome | False positive |",
         "|---------|---------|----------------|",
