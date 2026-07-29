@@ -20,7 +20,7 @@ Two siblings per batch, self-contained like :mod:`womblex.store.quality_output`:
 - ``*.money_columns.parquet`` — the column-classification audit: one row per
   column considered, money or not, with the evidence that decided it. The
   column path carries ~98.7% of the corpus's amounts off a single per-column
-  verdict, and with no labelled ground truth yet (``docs/money.md``) this is
+  verdict, and with no labelled ground truth yet (``docs/money-extraction.md``) this is
   the surface that makes that verdict reviewable.
 
 ``value`` is ``decimal128(38, 4)`` — exact, not float. Aggregating 48,997

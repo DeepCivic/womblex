@@ -527,7 +527,7 @@ class MoneyConfig(BaseModel):
     Amounts are recovered along two paths: self-evidencing (a symbol, ISO code
     or currency word sits with the number) and column-evidenced (a bare number
     whose money-ness comes from its column's header or number format). See
-    ``docs/money.md``.
+    ``docs/money-extraction.md``.
     """
 
     enabled: bool = Field(default=True, description="Run the money stage.")

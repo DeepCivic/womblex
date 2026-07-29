@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `*.money_spans.parquet` (one row per amount) and `*.money_columns.parquet`
   (the column-classification audit). Offline, API-free, no ordering dependency
   on enrich, and it never rewrites element or chunk text. Implements the design
-  in [docs/money.md](docs/money.md).
+  in [docs/money-extraction.md](docs/money-extraction.md).
 
   Two evidence paths, because most of this corpus's amounts carry no currency
   marker at all:
@@ -81,7 +81,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ANAO Major Projects Report, and its `Approved Budget $m` column reconciles
   three ways — 25 project amounts summing to the table's own total row and to
   the narrative's independently written "$78.7 billion". Details and the
-  measured limits in [docs/money.md](docs/money.md).
+  measured limits in [docs/money-extraction.md](docs/money-extraction.md).
 
 - **Table-cell reconstruction on OCR'd pages (#17), step A0 — scope and
   plumbing.** The layout pass (`_layout_blocks_and_tables`) now receives the
@@ -111,8 +111,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Per-table debug logging records how many OCR regions fall inside each
   detected table, so the size of the gap is traceable per page before the
   reconstructor lands.
-  Plan and sequencing in
-  [docs/table-cell-reconstruction-plan.md](docs/table-cell-reconstruction-plan.md).
+  Plan and sequencing (now folded into the standard docs) in
+  [docs/decisions.md](docs/decisions.md) “Table-cell reconstruction on OCR
+  pages” and [docs/evaluation.md](docs/evaluation.md) §2b.
 
 - **Table-cell reconstruction on OCR'd pages (#17), step A1 — one shared
   grid algorithm, two feeders.** The row/column inference that
@@ -243,7 +244,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   view↔element mapping is in one file; its body is unchanged.
 
   Stale claims corrected in the same pass, all of which predated this work:
-  steering's "every image input … is still unchanged"; `money.md`'s note
+  steering's "every image input … is still unchanged"; `money-extraction.md`'s
+  note
   that `dense_text_548` is out of reach because it is a PNG (it is reached
   — what limits it is grid quality on a stacked-header table, which #17 B2
   owns); `get_extractor`'s docstring; CLAUDE.md's and dataflow's
@@ -300,11 +302,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plumbing and the session-scoped `write_report` finaliser renders them.
 
   Two deliberate calls beyond the plan text. **Money recall is not a
-  column:** the benchmark has no labelled money ground truth (`docs/money.md`),
+  column:** the benchmark has no labelled money ground truth
+  (`docs/money-extraction.md`),
   so no honest recall can be quoted — the section notes the omission and the
   `table_cell` locus that makes reconstructed tables column-classifiable
-  regardless, rather than fabricating a figure. **CHUNKING.md was annotated,
-  not regenerated:** its numbers predate tables landing on OCR pages and its
+  regardless, rather than fabricating a figure. **CHUNKING.md was annotated,  not regenerated:** its numbers predate tables landing on OCR pages and its
   generator is still unwritten, so the table-reconstruction knock-on is
   recorded under its Known Limitations rather than hand-edited with invented
   counts (it shifts on the next full regeneration).
@@ -316,6 +318,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fidelity, cell match, data integrity, false-table rate, A.6 GT acceptance).
   Only B5 (turning the structural/false-table asserts into build-failing CI
   gates) remains.
+
+- **Table-cell reconstruction on OCR'd pages (#17), step B5 — regression
+  guard.** The last open item on #17: the benchmark's round-1 *sanity*
+  asserts become build-failing gates, so a future regression that collapses
+  a clean grid or reintroduces a false table fails the build rather than only
+  shifting a reported number. In `tests/test_table_benchmark.py`:
+
+  - **Rendered-clean cohort — gated.** `TestRenderedCleanTables` now asserts
+    per fixture that the grid reconstructs (a refusal on a clean rendered
+    table is a reconstructor regression), the row *and* column counts match
+    the drawn GT exactly, and cell agreement clears `MIN_CELL_MATCH = 0.75`.
+    The exact row/column counts are the load-bearing structural gate (what a
+    mis-binned grid breaks); the content floor — set below the measured
+    minimum (0.844 on a fuel sheet, 9 pt glyph confusions) with headroom for
+    OCR non-determinism — catches a structurally-correct-but-garbage grid the
+    counts alone would pass, without flaking on glyph noise. `structural_fidelity`
+    (which additionally compares the exact column-*name* set) stays a reported
+    field, not a gate: gating on exact header identity would flake on a
+    single-glyph header misread — the same OCR noise the cell floor tolerates
+    — for no precision the counts + floor don't already give.
+  - **False-table cohort — gated.** `TestFalseTableCohort`'s per-fixture
+    `assert table is None` *is* the "false-table count == 0" gate: a single
+    false positive on any of the 3 non-table DocLayNet pages or 5 FUNSD forms
+    fails the build. Enforced fixture by fixture, so it holds under `-k`
+    selection and `pytest-xdist` (no probe depends on another having run) and
+    adds no OCR cost over the B2 cohort it tightens.
+  - **`dense_text_548` — tracking, ungated.** `TestDenseTextTracking` keeps
+    the sole invariant that it never emits a full false 39×11 grid; refusal
+    (the post-B2 outcome) or a partial are both valid round-1 results.
+
+  The engine is pinned to paddleocr by construction — `get_paddle_reader`
+  builds the reader directly with no config-engine indirection (A0) — so a
+  config default flipping to an LLM engine cannot silently turn these gates
+  into no-ops. With B5 landed, every stage of #17 round 1 is complete.
 
 ### Fixed
 - **A declined continental number no longer leaks its decimal tail as an

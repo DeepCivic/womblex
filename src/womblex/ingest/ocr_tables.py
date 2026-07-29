@@ -6,7 +6,7 @@ lifted binning/clustering then infers the grid. Round 1 targets flat,
 clean contemporary tables — ``reconstruct_table`` returns ``None`` (never
 a partial) whenever the grid fails its precision gates, so refusal on a
 hard shape is a correct outcome. See
-docs/table-cell-reconstruction-plan.md (A1).
+docs/decisions.md “Table-cell reconstruction on OCR pages”.
 
 All coordinates here are image pixels at the caller's render dpi; the
 point-space ``table_grid`` tolerances are scaled by ``dpi / 72``.
@@ -35,9 +35,9 @@ logger = logging.getLogger(__name__)
 
 # Precision gates. Below any gate the reconstructor refuses (returns
 # None); a wrongly-binned grid is worse than today's silence. Calibrated
-# in B2 against the rendered-clean fixtures (must pass) and the
-# false-table set (must refuse) — see tests/test_table_benchmark.py and
-# docs/table-cell-reconstruction-plan.md (B2).
+# against the rendered-clean fixtures (must pass) and the false-table set
+# (must refuse) — see tests/test_table_benchmark.py and
+# docs/evaluation.md §2b.
 MIN_COLUMNS = 3
 # Three, not two: ``columns_from_data`` independently drops any x-cluster
 # holding fewer than 3 spans, so every column of a 2-body-row table is

@@ -1,6 +1,6 @@
 """Tests for the money op's pure core.
 
-The extraction-pattern and false-positive tables in ``docs/money.md`` are the
+The extraction-pattern and false-positive tables in ``docs/money-extraction.md`` are the
 specification; each row below is one of their examples. Values are asserted as
 ``Decimal`` — a silent 10⁶ error on a magnitude expression is the failure mode
 that matters here, not a missing span.
@@ -38,7 +38,7 @@ def _one(text: str, options: MoneyOptions | None = None):
 
 
 # ---------------------------------------------------------------------------
-# Extraction patterns (docs/money.md table)
+# Extraction patterns (docs/money-extraction.md table)
 # ---------------------------------------------------------------------------
 
 
@@ -189,7 +189,7 @@ def test_unanchored_bracketed_numbers_are_not_amounts(text):
 
 
 # ---------------------------------------------------------------------------
-# Australian false positives (docs/money.md table)
+# Australian false positives (docs/money-extraction.md table)
 # ---------------------------------------------------------------------------
 
 

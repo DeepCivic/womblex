@@ -1,8 +1,9 @@
 """Shared table-grid geometry: one binning/clustering algorithm, two feeders.
 
 Lifted from ``spreadsheet_print`` (see
-docs/table-cell-reconstruction-plan.md, A1) so the OCR table feeder
-(``ingest/ocr_tables.py``) and the spreadsheet-print extractor consume the
+docs/decisions.md “Table-cell reconstruction on OCR pages”) so the OCR
+table feeder (``ingest/ocr_tables.py``) and the spreadsheet-print
+extractor consume the
 same row/column inference rather than growing a fourth table algorithm.
 Pure geometry over ``Span`` — no PyMuPDF, no OCR types.
 

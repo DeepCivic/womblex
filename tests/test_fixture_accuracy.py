@@ -172,10 +172,10 @@ _results: dict[str, list[dict]] = {
     "doclaynet_raw": [], "doclaynet_preprocessed": [],
     "womblex": [],
     "act_eci": [],
-    # B4: table reconstruction (B1.2/B2/B3). Populated by
-    # tests/test_table_benchmark.py when that module runs in the same
-    # session; the write_report finaliser below renders it into
-    # EXTRACTION.md's Table Reconstruction section.
+    # table reconstruction. Populated by tests/test_table_benchmark.py
+    # when that module runs in the same session; the write_report finaliser
+    # below renders it into EXTRACTION.md's Table Reconstruction section.
+    # See docs/evaluation.md §2b.
     "tables": [],
 }
 
@@ -583,7 +583,8 @@ class TestWomblexExtraction:
 
         # Engine pinned: these numbers describe the region-based (paddleocr)
         # path. A config default change to an LLM engine would silently
-        # measure a different pipeline. See table-cell-reconstruction-plan A0.
+        # measure a different pipeline. See docs/decisions.md “Table-cell
+        # reconstruction on OCR pages — region-based engines only”.
         results = extract_text(file_path, profile, engine="paddleocr")
         extracted = results[0].full_text
 

@@ -100,7 +100,7 @@ spellfix:
 # the narrative / table_cell / sheet_cell loci) + `*.money_columns.parquet`
 # (the column-classification audit). Never rewrites element or chunk text.
 # Narrative offsets index the processing.text_source layer below. See
-# docs/money.md.
+# docs/money-extraction.md.
 money:
   enabled: true
   # narrative: true            # Scan reassembled narrative (self-evidencing amounts).

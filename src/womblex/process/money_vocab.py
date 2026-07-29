@@ -8,7 +8,7 @@ The vocabulary is *language*-level (Australian English money conventions), not
 dataset-level, so it ships as a default rather than an empty corpus-supplied
 list. Corpus-specific additions come through ``MoneyConfig`` extension points.
 
-Currency confidence is tiered (``docs/money.md``): tier 1 is Australian, tier 2
+Currency confidence is tiered (``docs/money-extraction.md``): tier 1 is Australian, tier 2
 the internationals that recur in procurement / treasury / trade reporting, tier
 3 is the rest of ISO 4217, admitted but never on three-uppercase-letters alone
 without being a member of the list.
@@ -55,7 +55,7 @@ def currency_tier(code: str | None) -> int:
 SYMBOL_TO_CODE: dict[str, str] = {
     "AU$": "AUD", "A$": "AUD", "US$": "USD", "NZ$": "NZD", "CA$": "CAD",
     "S$": "SGD", "HK$": "HKD", "NT$": "TWD", "C$": "CAD",
-    "$": "AUD",          # Australian document convention — see docs/money.md
+    "$": "AUD",          # Australian document convention — see docs/money-extraction.md
     "€": "EUR", "£": "GBP", "¥": "JPY", "₹": "INR", "₩": "KRW",
     "₽": "RUB", "₿": "XBT", "﹩": "AUD", "＄": "AUD",
 }
@@ -153,7 +153,7 @@ _SCALE_ALT = "|".join(re.escape(s) for s in sorted(SCALES, key=len, reverse=True
 # ---------------------------------------------------------------------------
 
 # Australian: comma groups, dot decimal. `1.000,50` is deliberately not an
-# Australian amount (docs/money.md) — it is admitted only in international mode.
+# Australian amount (docs/money-extraction.md) — it is admitted only in international mode.
 NUM_AU = r"(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+"
 NUM_INTL = r"(?:\d{1,3}(?:\.\d{3})+(?:,\d+)?|\d+,\d+)"
 
@@ -277,7 +277,7 @@ STATE_RE = re.compile(r"\b(?:NSW|VIC|QLD|SA|WA|TAS|NT|ACT)\b")
 POSTCODE_RE = re.compile(r"\b\d{4}\b")
 
 # Null / absent markers in financial tables. Excluded from the numeric fraction
-# rather than counted against it (docs/money.md) — counting them as non-numeric
+# rather than counted against it (docs/money-extraction.md) — counting them as non-numeric
 # suppresses genuine money columns.
 NULL_MARKERS: frozenset[str] = frozenset({
     "", "-", "–", "—", "‒", "―", "n/a", "na", "n.a.", "nil", "none", "null",
@@ -289,7 +289,7 @@ NULL_MARKERS: frozenset[str] = frozenset({
 # Column header vocabulary
 # ---------------------------------------------------------------------------
 
-# Money vocabulary applied to *headers*, where docs/money.md measures it as the
+# Money vocabulary applied to *headers*, where docs/money-extraction.md measures it as the
 # primary signal (as opposed to narrative, where it is low precision).
 HEADER_MONEY_TERMS: frozenset[str] = frozenset(set(CONTEXT_TRIGGERS) | {
     "value", "amount", "total", "sum", "paid", "payable", "spend", "spending",

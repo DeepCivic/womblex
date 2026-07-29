@@ -6,7 +6,7 @@ Consumes ``*.elements.parquet`` + ``*.table_cells.parquet`` and writes
 An **annotation op** in the mould of ``quality``: offline, API-free, no
 ordering dependency on enrich, and it never rewrites element or chunk text.
 Its input is the extraction parquet, never the source files — a second reader
-would be a parallel extraction path, which ``docs/money.md`` rejects.
+would be a parallel extraction path, which ``docs/money-extraction.md`` rejects.
 
 Three loci, two coordinate spaces, never mixed:
 
@@ -221,7 +221,7 @@ def _table_rows(
             by_col[cell.col].append((cell.row, cell.value or ""))
 
         # No declared header row means no recoverable unit or vocabulary: bare
-        # cells are left alone rather than guessed at (docs/money.md).
+        # cells are left alone rather than guessed at (docs/money-extraction.md).
         header_rows = sorted(elem.header_rows or [])
         header_by_col = _header_texts(by_col, header_rows)
 

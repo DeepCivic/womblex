@@ -31,7 +31,7 @@ See `accuracy/` for current benchmark numbers. See `architecture.md` for how the
 | 14 | Per-document-type config overrides | High | Enables type-specific DPI, thresholds | |
 | 15 | End-to-end task metrics (Isaacus integration) | High | Measures actual application success | **In progress — I6/I7 landed Isaacus enrich/link/embed stages; PII (I8) + coverage metrics next** |
 | 16 | Handwriting via dedicated HTR model | High | Only if handwritten docs are in scope | |
-| 17 | Table-cell reconstruction for OCR'd pages | Medium | Unblocks every structural consumer on scanned documents. Measured: a scanned money table yields 1 amount of ~35 today, 30 with cells | **Open — see below** |
+| 17 | Table-cell reconstruction for OCR'd pages | Medium | Unblocks every structural consumer on scanned documents. Measured: a scanned money table yields 1 amount of ~35 today, 30 with cells | **Done** |
 
 ## Findings by Component
 
@@ -58,85 +58,63 @@ Two `DocumentType` values are still unreachable:
 
 Per-class P/R/F1 is tracked in `accuracy/EXTRACTION.md`.
 
-### Table-cell reconstruction on OCR'd pages (#17)
+### Table-cell reconstruction on OCR'd pages (#17) — **Done**
 
-**A detected table region never becomes cells.** Found while validating the
-`money` op against real documents ([docs/money.md](money.md), "First
-real-document run"); recorded here because the fix is entirely extraction-side
-and benefits every structural consumer, not just money.
+**A detected table region now becomes cells.** Found while validating the
+`money` op against real documents ([money-extraction.md](money-extraction.md),
+"First real-document run"); the fix is entirely extraction-side and benefits
+every structural consumer, not just money.
 
-What happens today, on DocLayNet `dense_text_548` (a scanned
-*Grants of Plan-Based Awards* page, four money columns, ~35 amounts):
+The original failure, on DocLayNet `dense_text_548` (a scanned
+*Grants of Plan-Based Awards* page, four money columns, ~35 amounts): OCR read
+the page well and the layout model found the table (0.96 confidence), but
+`_layout_blocks_and_tables` turned that region into a
+`TextBlock(text="[TABLE]", block_type="table")` and returned an empty `tables`
+list — so the shard carried no `table` element and no `table_cells` rows, and
+every downstream consumer of structure saw a single page-wide paragraph.
 
-1. OCR reads the page well — nearly every digit is correct in the output.
-2. The layout model **does** find the table: `analyze()` returns a `table`
-   region at 0.96 confidence.
-3. `_layout_blocks_and_tables` (`ingest/strategies_scanned.py`) turned that
-   region into `TextBlock(text="[TABLE]", block_type="table")` and returned.
-   Its `tables: list[TableData] = []` was declared, never appended to on any
-   path, and returned empty.
-4. So the shard carried no `table` element and no `table_cells` rows. Every
-   downstream consumer of structure saw a single page-wide paragraph.
+What shipped:
 
-Two changes are required, and the second is easy to miss:
-
-- **Reconstruct cells within a detected table region — done (A1 + A3).**
-  The grid algorithm was lifted from `ingest/spreadsheet_print.py` — the real
-  prior art — into the shared `ingest/table_grid.py`, and
-  `ingest/ocr_tables.py` feeds it OCR quads via `reconstruct_table(regions,
-  table_rect, dpi, conf)`. A3 wired it into the layout pass, so an OCR'd PDF
-  page now yields a cellified `table` element (and the page narrative is
-  rebuilt from the regions outside the rect, so the table isn't also chunked
-  as prose). Deskewed pages refuse outright (A2). The precision gates are
-  calibrated (B2, `MIN_ROW_FILL_RATIO=0.75`): the rendered-clean cohort
-  reconstructs, and the hard and false-table shapes refuse.
-  (`ingest/grid_projection.py`, previously cited here, projects page-level
-  prose gutters rather than cells — it was not a usable feeder.)
-- **Route standalone images through it — no route needed (A4).** This bullet
-  previously claimed image inputs (the whole DocLayNet/FUNSD fixture shape)
-  were still unchanged after A3, because `ImageExtractor.extract` never calls
-  `_layout_blocks_and_tables`. **That was wrong about which code runs.**
-  `extract_text` gates the legacy path-based dispatch on
-  `(SPREADSHEET, DOCX, TEXT)`; `IMAGE` is not in it and falls through to
-  `fitz.open()` + `extract_pdf_with_plan`, since PyMuPDF opens an image as a
-  one-page document. Images have always gone through `_apply_ocr_page`, so A3
-  fixed them at the same time as scanned PDFs — verified by driving a real
-  `.png` through `extract_text` and observing a cellified `table` element with
-  `context_producer=table_grid`. The unreachable `ImageExtractor` and
-  `get_extractor`'s dead `IMAGE` case have been deleted, and the routing is
-  pinned by `TestImageDocumentsRouteThroughTheOrchestrator`.
-
-**What remains on #17** is Track B's regression wiring (B5), not Track A,
-not gate calibration, and not the report (B4 landed). The precision gates in
-`ingest/ocr_tables.py` are calibrated (B2, 2026-07-29):
-`MIN_ROW_FILL_RATIO=0.75` refuses the hard-shape and false-table cohorts
-while the rendered-clean cohort passes. The benchmark's table results now
-surface in `accuracy/EXTRACTION.md` via a `## Table Reconstruction` section,
-and `evaluation.md` §2b records the document-table reconstruction metric set
-(B4). What is left is turning the structural/false-table asserts into
-build-failing CI gates (B5). A hard-shape table (stacked spanning headers,
-hierarchical rows) now **refuses** rather than producing a low-quality grid
-— see the plan's `dense_text_548` measurement.
+- **Reconstruct cells within a detected table region.** The grid algorithm was
+  lifted from `ingest/spreadsheet_print.py` — the real prior art — into the
+  shared `ingest/table_grid.py`, and `ingest/ocr_tables.py` feeds it OCR quads
+  via `reconstruct_table(regions, table_rect, dpi, conf)`. The layout pass now
+  emits a cellified `table` element on OCR'd PDF pages (the page narrative is
+  rebuilt from the regions outside the rect, so the table isn't also chunked as
+  prose). Deskewed pages refuse outright. The precision gates are calibrated
+  (`MIN_ROW_FILL_RATIO=0.75`): the rendered-clean cohort reconstructs, and the
+  hard and false-table shapes refuse. A hard-shape table (stacked spanning
+  headers, hierarchical rows) **refuses** rather than producing a low-quality
+  grid — no cells is better than wrong cells. The mechanism and refusal
+  rationale are in [decisions.md](decisions.md) “Table-cell reconstruction on
+  OCR pages”.
+- **Standalone images need no separate route.** `extract_text` gates the legacy
+  path-based dispatch on `(SPREADSHEET, DOCX, TEXT)`; `IMAGE` is not in it and
+  falls through to `fitz.open()` + `extract_pdf_with_plan`, since PyMuPDF opens
+  an image as a one-page document. Images have always gone through
+  `_apply_ocr_page`, so the same wiring fixed them alongside scanned PDFs —
+  verified by driving a real `.png` through `extract_text` and observing a
+  cellified `table` element with `context_producer=table_grid`. The unreachable
+  `ImageExtractor` and `get_extractor`'s dead `IMAGE` case were deleted, and the
+  routing is pinned by `TestImageDocumentsRouteThroughTheOrchestrator`.
 
 **Measured payoff.** Feeding the same page's real grid through the money op's
 column classifier recovers 30 of 30 amounts, versus 1 today — the consuming
 stage is already ready for the structure. More broadly this is the only route
 to the column-evidenced path on scanned documents, which
-[money.md](money.md) measures as where the overwhelming majority of the
-corpus's monetary amounts live.
+[money-extraction.md](money-extraction.md) measures as where the overwhelming
+majority of the corpus's monetary amounts live.
 
-**Validation this needs.** Accuracy docs are test-generated, so a
-reconstructor must be measured with `utils/tabular_metrics.py` (structural
-fidelity, data integrity, key-column preservation) over the DocLayNet
-fixtures, and `docs/accuracy/EXTRACTION.md` regenerated. Precision matters
-more than coverage here: a wrongly-binned grid produces confidently wrong
-values downstream, which is worse than the current honest silence.
-
-The implementation plan — extraction fix, benchmark/accuracy extension, and the
-ground-truth authoring spec for the anchor fixture — is in
-[table-cell-reconstruction-plan.md](table-cell-reconstruction-plan.md). The two
-corrections it recorded against this document (the stale Layout Detection
-claim, the overstated `grid_projection` fit) were applied with B0, 2026-07-28.
+**Measurement.** The reconstructor is measured with `utils/tabular_metrics.py`
+(structural fidelity, data integrity) over rendered-clean and DocLayNet
+fixtures, conditioned on a correct table rect (detection is scored separately
+as the per-class layout F1). The benchmark (`tests/test_table_benchmark.py`)
+surfaces into `accuracy/EXTRACTION.md` via a `## Table Reconstruction` section,
+and the rendered-clean / false-table asserts are build-failing gates. The
+metric set, the two-stage decomposition and the ground-truth authoring spec
+are documented in [evaluation.md](evaluation.md) §2b. Precision matters more
+than coverage here: a wrongly-binned grid produces confidently wrong values
+downstream, which is worse than honest silence.
 
 ### Reading Order
 
@@ -178,6 +156,18 @@ Measured on Throsby fixture (7 GT `<REDACTED>` tags across 3 pages); vector-firs
 
 ## Changelog
 
+### 2026-07-29: #17 complete — table reconstruction on OCR'd pages
+
+Table-cell reconstruction (#17) is fully landed: the OCR paths emit cellified
+`table` elements, the precision gates are calibrated, the benchmark surfaces
+into `accuracy/EXTRACTION.md`, and the rendered-clean / false-table asserts are
+build-failing CI gates (`dense_text_548` stays tracking, ungated). The
+implementation plan (formerly `table-cell-reconstruction-plan.md`) has been
+folded into the standard docs and removed: the mechanism and refusal rationale
+live in [decisions.md](decisions.md) “Table-cell reconstruction on OCR pages”,
+the metric set + two-stage decomposition + ground-truth authoring spec in
+[evaluation.md](evaluation.md) §2b, and the component status above.
+
 ### 2026-07-29: B4 — table reconstruction report + docs wiring
 
 Wired the table benchmark's results into the generated accuracy docs. A
@@ -190,11 +180,12 @@ the live false-positive count. `test_fixture_accuracy._results` gained a
 `"tables"` key that `tests/test_table_benchmark.py` aliases, so its entries
 flow into the existing session `write_report` finaliser with no duplicate
 plumbing. Money recall is deliberately omitted (no labelled money GT — see
-`money.md`) rather than fabricated; CHUNKING.md's table knock-on is noted
+[money-extraction.md](money-extraction.md)) rather than fabricated;
+CHUNKING.md's table knock-on is noted
 (its generator is unwritten and numbers predate tables on OCR pages).
 `evaluation.md` gained §2b (Document-Table Reconstruction Accuracy),
 distinct from §2's spreadsheet→parquet. Only B5 (CI gates) remains. See
-[table-cell-reconstruction-plan.md](table-cell-reconstruction-plan.md) B4.
+[evaluation.md](evaluation.md) §2b.
 
 ### 2026-07-29: B2 — precision-gate calibration + benchmark metric set
 
@@ -214,9 +205,8 @@ overflow signal the plan asked about measured 0 everywhere
 symmetry — is the guardrail. Benchmark additions in
 `tests/test_table_benchmark.py`: an alignment projection feeding
 `utils/tabular_metrics.py` (`structural_fidelity` + `data_integrity`), the
-false-table cohort (FP count gates), and the Appendix A.6 GT acceptance
-checker. See
-[table-cell-reconstruction-plan.md](table-cell-reconstruction-plan.md) B2.
+false-table cohort (FP count gates), and the GT acceptance
+checker. See [evaluation.md](evaluation.md) §2b.
 
 ### 2026-07-28: B0 — table metric fixed before measuring reconstruction against it
 
@@ -231,7 +221,7 @@ class TP1/FP0/FN3 (R 25%, F1 40%) → TP1/FP0/FN1 (R 50%, F1 66.7%), the
 remaining FN being `sparse_text_344`'s genuinely undetected 8-word block; all
 other classes unchanged. `docs/accuracy/EXTRACTION.md` still shows the
 pre-fix numbers until the next full accuracy-suite run regenerates it. See
-[table-cell-reconstruction-plan.md](table-cell-reconstruction-plan.md) B0.
+[evaluation.md](evaluation.md) §2b.
 
 ### 2026-03-22: Benchmark test performance + stale findings cleanup
 

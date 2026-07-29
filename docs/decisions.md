@@ -256,11 +256,10 @@ OCR quads to bin into rows and columns. Only region-based engines (paddleocr)
 produce them: LLM/VLM engines (`mistral-ocr`, `ollama`) set
 `reading_order_native` and return markdown with an **empty `regions` list**, so
 the orchestrator sends them to `_markdown_page_block` and they never reach the
-layout pass at all. Track A of
-[table-cell-reconstruction-plan.md](table-cell-reconstruction-plan.md) is
-therefore scoped to the region-based path on both the OCR-PDF and image routes,
-and any benchmark measuring it pins `engine="paddleocr"` — under a config
-default of an LLM engine the numbers would describe a different pipeline. A
+layout pass at all. Table reconstruction is therefore scoped to the
+region-based path on both the OCR-PDF and image routes, and any benchmark
+measuring it pins `engine="paddleocr"` — under a config default of an LLM
+engine the numbers would describe a different pipeline. A
 markdown-pipe-table → `TableData` parser is the LLM path's separate feeder,
 deferred.
 

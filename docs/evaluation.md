@@ -34,9 +34,9 @@ See `docs/accuracy/` for measured baselines per stage.
 
 **Scope:** OCR'd PDF page / image → `kind="table"` element with cells
 
-**Status:** Implemented in `ingest/ocr_tables.py` (`reconstruct_table`) over the shared `ingest/table_grid.py` binning; benchmarked in `docs/accuracy/EXTRACTION.md` (§ *Table Reconstruction*). Distinct from §2 — §2 measures a *spreadsheet file* → parquet (the source is already a grid); §2b measures a *table detected on a page image* being reconstructed from OCR quads, where the grid itself is inferred and can be wrong. Round-1 scope is flat, contemporary tables (see `docs/table-cell-reconstruction-plan.md`); hard shapes (skew, stacked spanning headers, hierarchical rows) are refused cleanly, not solved.
+**Status:** Implemented in `ingest/ocr_tables.py` (`reconstruct_table`) over the shared `ingest/table_grid.py` binning; benchmarked in `docs/accuracy/EXTRACTION.md` (§ *Table Reconstruction*). Distinct from §2 — §2 measures a *spreadsheet file* → parquet (the source is already a grid); §2b measures a *table detected on a page image* being reconstructed from OCR quads, where the grid itself is inferred and can be wrong. Scope is flat, contemporary tables; hard shapes (skew, stacked spanning headers, hierarchical rows) are refused cleanly, not solved — the reconstructor returns `None` rather than a partial grid below its precision gates (`MIN_ROW_FILL_RATIO` the load-bearing one). See [decisions.md](decisions.md) “Table-cell reconstruction on OCR pages” for the mechanism and refusal rationale.
 
-Measurement follows the plan's two-stage decomposition: **detection** is the per-class `table` layout F1 (§1's DocLayNet harness); **reconstruction** is scored *conditioned on a correct table rect* (B1.2 — the GT rect is fed straight to `reconstruct_table`, no detector in the loop), so the reconstruction number tracks the grid builder alone.
+Measurement follows a two-stage decomposition: **detection** is the per-class `table` layout F1 (§1's DocLayNet harness); **reconstruction** is scored *conditioned on a correct table rect* (the GT rect is fed straight to `reconstruct_table`, no detector in the loop), so the reconstruction number tracks the grid builder alone. A blended end-to-end (detection × reconstruction) stage is deferred to a scanned-document round, once real-scan GT exists to blend against.
 
 | Metric | Implementation | Location | Ground Truth Source |
 |--------|---------------|----------|---------------------|
@@ -44,9 +44,67 @@ Measurement follows the plan's two-stage decomposition: **detection** is the per
 | **Cell Match** | Positional `(row, col, text)` agreement after alignment — catches a column-shift a cell count misses. Scorer normalises NFKC + dash-fold + whitespace-collapse; GT stays verbatim. | `test_table_benchmark.py → _score()` | Rendered-clean GT strings |
 | **Data Integrity** | Same exact-match `data_integrity` as §2, over the alignment projection. | `utils/tabular_metrics.py → data_integrity()` | Rendered-clean GT |
 | **False-Table Rate** | Reconstructor run over pages with **no** GT table (non-table DocLayNet pages + FUNSD forms); any emitted table is a false positive. Makes "precision over coverage" falsifiable; calibrated `MIN_ROW_FILL_RATIO`. | `test_table_benchmark.py → TestFalseTableCohort` | Non-table fixtures (no GT needed) |
-| **GT Acceptance** | Appendix-A.6 conformance checks on any `*_table.csv` GT (rectangular, unique headers, no BOM/trailing whitespace, `n_header_rows` consistent, plausible cell count). A GT that fails is a bug in the GT. | `test_table_benchmark.py → TestGroundTruthAcceptance` | `<fixture>_table.csv` + `.meta.json` |
+| **GT Acceptance** | The [GT authoring spec](#table-ground-truth-authoring-spec) conformance checks on any `*_table.csv` GT (rectangular, unique headers, no BOM/trailing whitespace, `n_header_rows` consistent, plausible cell count). A GT that fails is a bug in the GT. | `test_table_benchmark.py → TestGroundTruthAcceptance` | `<fixture>_table.csv` + `.meta.json` |
 
-Not measured: **money recall** (the downstream payoff) — the benchmark has no labelled money ground truth (see `docs/money.md`), so no honest recall can be quoted. TEDS is the noted upgrade path if the alignment metric proves too coarse.
+Not measured: **money recall** (the downstream payoff) — the benchmark has no labelled money ground truth (see [money-extraction.md](money-extraction.md)), so no honest recall can be quoted. TEDS is the noted upgrade path if the alignment metric proves too coarse.
+
+### Table ground-truth authoring spec
+
+The normative spec for authoring a `*_table.csv` ground-truth file for a
+reconstruction fixture (the anchor fixture is DocLayNet `dense_text_548`, a
+*Grants of Plan-Based Awards* proxy table: 11 columns, a 7-line stacked header,
+hierarchical rows — the hardest realistic shape in the corpus, which is why it
+*tracks* rather than *gates*). The acceptance checks below are enforced by
+`test_table_benchmark.py → TestGroundTruthAcceptance`, parametrised over every
+`*_table.csv` beside a fixture.
+
+**Files to produce.** Beside the existing `_transcript.txt` sidecar, following
+that convention (UTF-8, `\n` line endings, RFC4180 quoting; `_table1.csv` /
+`_table2.csv` if a page has two tables):
+
+| File | Purpose |
+|---|---|
+| `fixtures/fixtures/doclaynet/<fixture>_table.csv` | the GT grid |
+| `fixtures/fixtures/doclaynet/<fixture>_table.meta.json` | `{"n_header_rows": N, "key_column": null, "notes": "..."}` |
+
+No bounding box is needed — the GT table rect derives automatically from the
+`Table`-labelled bboxes in the fixture json. Do not hand-measure it.
+
+**The governing rule: transcribe the page, not the intended table.** GT measures
+extraction fidelity, so it records *what is printed*, verbatim:
+
+- Keep thousands separators exactly as printed — `32,031`, not `32031`.
+- Keep the em-dash null marker `—` (U+2014) as its own cell value; empty and
+  `—` are different observations.
+- Keep unit annotations where printed — `($)`, `(#)`, `($/share)`.
+- Do not fix the source document's own oddities (repeating column letters,
+  interleaved footnote markers). Transcribe; do not renumber.
+- Do not correct spelling, spacing or alignment to what the table “should” be.
+
+**Header handling.** Emit **one flattened header row** as CSV row 1 with
+**unique** column names (pandas silently mangles duplicates and
+`structural_fidelity` compares column *sets*). Qualify duplicated names by their
+spanning group (`Non-Equity Threshold`, `Equity Threshold`). Record the printed
+stacked rows (units row, column-letter row) as ordinary data rows underneath,
+and set `n_header_rows` in the meta json. The reconstructor is not expected to
+flatten a spanning header; the scorer uses `n_header_rows` to compare like with
+like.
+
+**Row handling.** Participant names occupy their own rows with the data columns
+empty; sub-rows follow as their own rows. Do **not** forward-fill the name —
+that describes a normalised relational view a geometric reconstructor cannot
+produce. Names split across printed lines join with a single space. Every CSV
+row has the full column count; empty cells are empty strings.
+
+**Scoring implication.** `data_integrity` is exact string match, so the
+comparison side declares a normalisation — NFKC plus dash folding at minimum.
+**GT stays verbatim; the scorer declares its normalisation.**
+
+**Acceptance checks before a GT is used.** The checker asserts: rectangular;
+column names unique and non-empty; UTF-8 with no BOM; no trailing whitespace in
+cells; `n_header_rows` consistent with the meta; and the GT cell count within a
+sane band (0.3×–3×) of the fixture json's `Table`-labelled word count. A GT that
+fails these is a bug in the GT, not in extraction.
 
 ## 3. Geospatial Extraction Accuracy
 

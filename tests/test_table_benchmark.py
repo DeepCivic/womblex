@@ -1,13 +1,14 @@
-"""B3 + B1.2 + B2 — table reconstruction measured against rendered-clean GT.
+"""Table reconstruction measured against rendered-clean ground truth.
 
-Round-1 benchmark for #17 (docs/table-cell-reconstruction-plan.md): feed a
+Benchmark for OCR table reconstruction (#17; see docs/evaluation.md §2b and
+docs/decisions.md “Table-cell reconstruction on OCR pages”): feed a
 *known-correct* table rect straight to ``reconstruct_table`` and measure
-the grid, without the layout detector in the loop (B1.2). The primary
+the grid, without the layout detector in the loop. The primary
 fixtures are rendered from the two vendored spreadsheet sources — render →
-rasterise → OCR (paddleocr, per A0) → reconstruct → compare against the
-rendered GT (B3).
+rasterise → OCR (paddleocr) → reconstruct → compare against the
+rendered GT.
 
-B2 adds the precision half of the picture:
+The precision half of the picture:
 
 - **The metric set.** A thin alignment projection turns a reconstructed
   ``TableData`` into a DataFrame (header row → column names) so the
@@ -21,16 +22,42 @@ B2 adds the precision half of the picture:
   reconstructor whole. Any table emitted is a false positive. This is what
   makes "precision over coverage" falsifiable, and it calibrated
   ``MIN_ROW_FILL_RATIO`` in ``ocr_tables``.
-- **The A.6 GT acceptance checker** for the DocLayNet table GT (Appendix A).
+- **The GT acceptance checker** for the DocLayNet table GT (see the
+  [table ground-truth authoring spec](../docs/evaluation.md) in
+  docs/evaluation.md §2b).
 
-``dense_text_548`` (hard scan shape) tracks without a gate. Post-B2 it
+``dense_text_548`` (hard scan shape) tracks without a gate. It
 *refuses* — the density gate the false-table cohort calibrated also rejects
 its stacked-header hierarchical shape — which is the precision-first
-outcome round 1 wanted.
+outcome intended.
 
 The GT is exactly what was drawn; the scorer declares its normalisation
 (NFKC + dash folding + whitespace collapse) — GT stays verbatim.
-Hard gates are B5's; this module records outcomes.
+
+The recorded outcomes are turned into **build-failing gates**:
+
+- **Rendered-clean cohort (gated):** each fixture must reconstruct, the grid
+  must be structurally exact (row **and** column counts match the drawn GT),
+  and cell agreement must clear ``MIN_CELL_MATCH`` — a floor set below the
+  measured minimum (0.844 on the fuel sheets) with headroom for OCR
+  non-determinism, so it catches a binning/recognition catastrophe, not
+  glyph-level noise. ``structural_fidelity`` (which also compares the exact
+  column-*name* set) is **reported, not gated**: a single-glyph header
+  misread — the same OCR noise the cell floor tolerates in body cells —
+  would flip it and flake the build, so the load-bearing structural gate is
+  the row/column *counts*, which are what a mis-binned grid actually breaks.
+- **False-table cohort (gated):** every probe must refuse — the aggregate
+  false-positive count is **zero**, the precision guardrail, enforced
+  fixture by fixture (each probe asserts refusal, so a single FP anywhere
+  fails the build).
+- **``dense_text_548`` (tracking, never gated):** reported without a gate
+  until the scan round sets one; the only invariant is that it never emits a
+  full false 39x11 grid.
+
+The engine is pinned to paddleocr by construction — ``get_paddle_reader``
+constructs the reader directly, with no config-engine indirection, so a
+config default flipping to an LLM engine cannot turn these gates into
+no-ops.
 """
 
 from __future__ import annotations
@@ -64,16 +91,16 @@ FUNSD_IMAGES_DIR = FIXTURES_DIR / "funsd" / "images"
 
 # The false-table cohort: pages with no GT table. Feeding the whole page
 # rect to the reconstructor must yield a refusal — any table is a false
-# positive (the precision guardrail, B2). The DocLayNet trio are the
+# positive (the precision guardrail). The DocLayNet trio are the
 # non-table pages from the layout GT (table_0 despite its name holds no
-# Table-labelled span — see B0); the FUNSD forms are dense label/value
+# Table-labelled span); the FUNSD forms are dense label/value
 # pairs, the likeliest false positive.
 FALSE_TABLE_DOCLAYNET = ["diverse_layout_49", "formula_29", "table_0"]
 FALSE_TABLE_FUNSD = [
     "85540866", "82200067_0069", "87594142_87594144", "87528321", "87528380",
 ]
 
-# Discovered at import so the A.6 checker can parametrize per GT file.
+# Discovered at import so the GT-acceptance checker can parametrize per GT file.
 _GT_CSV_PATHS = sorted(DOCLAYNET_DIR.glob("*_table.csv"))
 
 RENDER_DPI = 200
@@ -92,6 +119,17 @@ CSV_PAGES = 3
 # differs by a footnote marker between sheets).
 XLSX_COLUMN_IDX = [0, 1, 2, 3, 7]
 XLSX_SHEETS = ["Diesel", "Gasoline", "Kerosene"]
+
+# B5 gate floor for the rendered-clean cohort. Measured baseline
+# (2026-07-28): cell agreement ran 0.844–0.987 across the six fixtures, the
+# minimum on a fuel sheet (9 pt glyph confusions: 6<->9, 0->o, a lost space).
+# 0.75 sits comfortably below that with headroom for OCR non-determinism, so
+# the gate fails on a binning/recognition collapse rather than flaking on
+# glyph noise. The exact row/column *counts* are the load-bearing structural
+# gate (what a mis-binned grid breaks); this floor guards content.
+# ``structural_fidelity`` (exact column-name set) is reported, not gated —
+# see the note on the gate asserts below.
+MIN_CELL_MATCH = 0.75
 
 # B4: publish into the shared extraction-report accumulator so the
 # ``write_report`` session finaliser in test_fixture_accuracy renders these
@@ -301,8 +339,9 @@ def _score(rt: RenderedTable, table: TableData | None) -> dict:
 
     # B2 metric set: run the tabular_metrics scorers over the alignment
     # projection so a reconstructed OCR grid is measured the same way the
-    # spreadsheet ingest is. structural_fidelity gates rows+cols+names;
-    # data_integrity is exact cell match on the shared columns.
+    # spreadsheet ingest is. structural_fidelity checks rows+cols+names
+    # (reported, not gated — see TestRenderedCleanTables); data_integrity is
+    # exact cell match on the shared columns.
     gt_frame = _table_to_frame(rt.headers, rt.rows)
     got_frame = _table_to_frame(table.headers, table.rows)
     struct = structural_fidelity(gt_frame, got_frame)
@@ -369,10 +408,27 @@ class TestRenderedCleanTables:
         entry = _score(rt, table)
         _results.append(entry)
         _log_entry(entry)
-        # Round-1 sanity (B5 formalises the gates): a clean rendered grid is
-        # exactly the target shape — refusal here is a reconstructor defect.
-        assert entry["outcome"] == "reconstructed"
-        assert entry["got_cols"] == entry["gt_cols"]
+        # B5 gates: a clean rendered grid is exactly the round-1 target
+        # shape, so anything short of an exact grid with content above the
+        # floor is a build-failing regression, not a tracked outcome. The
+        # gate is the row/column *counts* (what a mis-binned grid breaks) plus
+        # the cell-content floor — NOT ``structural_ok``, which also demands
+        # an exact column-name-set match and so would flake on a single-glyph
+        # header misread, the same OCR noise the cell floor deliberately
+        # tolerates below. ``structural_ok`` stays a reported field (B4).
+        assert entry["outcome"] == "reconstructed", (
+            f"{name}: clean rendered grid refused — reconstructor regression"
+        )
+        assert entry["got_cols"] == entry["gt_cols"], (
+            f"{name}: got {entry['got_cols']} cols, expected {entry['gt_cols']}"
+        )
+        assert entry["got_rows"] == entry["gt_rows"], (
+            f"{name}: got {entry['got_rows']} rows, expected {entry['gt_rows']}"
+        )
+        assert entry["cell_match"] >= MIN_CELL_MATCH, (
+            f"{name}: cell match {entry['cell_match']:.3f} below floor "
+            f"{MIN_CELL_MATCH} — binning/recognition regression"
+        )
 
 
 @pytest.mark.benchmark
@@ -431,12 +487,15 @@ class TestDenseTextTracking:
 
 @pytest.mark.benchmark
 class TestFalseTableCohort:
-    """B2 precision guardrail — pages with no GT table must refuse.
+    """B2 precision guardrail, B5 gate — pages with no GT table must refuse.
 
     Feeds the whole-page rect to the reconstructor. A returned table is a
-    false positive; the cohort must be clean (zero FPs). This is what makes
-    "precision over coverage" falsifiable, and it calibrated
-    ``MIN_ROW_FILL_RATIO``.
+    false positive; the cohort must be clean (zero FPs). Each probe asserts
+    refusal, so the per-fixture asserts *are* B5's "false-table count == 0"
+    gate — a single false positive anywhere fails the build, and holds under
+    ``-k`` selection and ``pytest-xdist`` because no probe depends on another
+    having run. This is what makes "precision over coverage" falsifiable, and
+    it calibrated ``MIN_ROW_FILL_RATIO``.
     """
 
     @pytest.mark.parametrize("stem", FALSE_TABLE_DOCLAYNET)
@@ -478,7 +537,7 @@ class TestFalseTableCohort:
 
 @pytest.mark.benchmark
 class TestGroundTruthAcceptance:
-    """Appendix A.6 — a table GT that fails these is a bug in the GT.
+    """GT acceptance — a table GT that fails these is a bug in the GT.
 
     Runs over every ``*_table.csv`` beside a DocLayNet fixture: rectangular,
     unique non-empty column names, UTF-8 no BOM, no trailing whitespace in

@@ -5,7 +5,7 @@ reads ``*.elements.parquet`` + ``*.table_cells.parquet`` and writes
 ``*.money_spans.parquet`` (one row per amount, across the narrative / table_cell
 / sheet_cell loci) plus ``*.money_columns.parquet`` (the column-classification
 audit) per batch. Annotation only — element and chunk text are untouched.
-Offline (no API). See ``docs/money.md``.
+Offline (no API). See ``docs/money-extraction.md``.
 """
 
 from __future__ import annotations

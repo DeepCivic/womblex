@@ -174,7 +174,7 @@ def _apply_ocr_page(
     # nothing to reconstruct cells from and the layout pass is bypassed
     # entirely. Only the region-based (paddleocr) branch carries `regions` +
     # `pix_dims` through to the layout pass. See
-    # docs/table-cell-reconstruction-plan.md (A0).
+    # docs/decisions.md “Table-cell reconstruction on OCR pages”.
     consumed: list = []
     if native_order:
         accum.blocks.extend(_markdown_page_block(page, text, conf))

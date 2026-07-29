@@ -4,7 +4,7 @@ The structural path: a bare number is money because of the *column* it sits
 in, not because of anything in the cell. This carries the overwhelming
 majority of the corpus's amounts — a 48,997-row grant register recording
 $22.7bn contains exactly one ``$`` — so symbol-keyed detection alone reaches
-almost none of it (``docs/money.md``).
+almost none of it (``docs/money-extraction.md``).
 
 A column is classified **once** and every cell beneath inherits the verdict.
 Evidence, strongest first:
@@ -207,7 +207,7 @@ def cell_amount(
 
     Bracketed values are accounting negatives here without further gating —
     inside a classified money column the column itself satisfies the gate that
-    narrative text cannot (``docs/money.md``).
+    narrative text cannot (``docs/money-extraction.md``).
     """
     if text is None:
         return None

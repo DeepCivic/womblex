@@ -345,11 +345,11 @@ def _table_reconstruction_section(tables: list[dict]) -> list[str]:
     lines.append("")
 
     # Money recall is deferred: there is no labelled money GT in the benchmark
-    # (see docs/money.md), so no honest recall figure can be quoted. Recorded
+    # (see docs/money-extraction.md), so no honest recall figure can be quoted. Recorded
     # here so the omission is deliberate, not an oversight.
     lines.append(
         "*Money recall (the downstream payoff) is not tabulated: the benchmark"
-        " has no labelled money ground truth (see `docs/money.md`), so no"
+        " has no labelled money ground truth (see `docs/money-extraction.md`), so no"
         " honest recall can be quoted. Reconstructed tables become"
         " column-classifiable by the money stage via the `table_cell` locus"
         " regardless.*"

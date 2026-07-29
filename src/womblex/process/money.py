@@ -11,11 +11,11 @@ Nothing here reads or writes parquet, and nothing rewrites text: offsets index
 the string handed in, so callers own the coordinate space.
 
 **Every extraction must have positive evidence that the number represents
-money** (``docs/money.md``). A bare number with no marker is not an extraction
+money** (``docs/money-extraction.md``). A bare number with no marker is not an extraction
 — except under ``implicit_context``, which is off by default because it is
 measurably low precision on this corpus.
 
-Patterns are applied in the priority order of ``docs/money.md``; overlap is
+Patterns are applied in the priority order of ``docs/money-extraction.md``; overlap is
 resolved by priority, then span length, then confidence.
 """
 
@@ -400,7 +400,7 @@ def _tier3_reinforced(text: str, start: int, end: int) -> bool:
     """Is a tier-3 ISO code backed by surrounding financial context?
 
     Tier 3 is "supported, but lower confidence unless reinforced by surrounding
-    context" (docs/money.md). Enforced as a gate, not just a penalty, because
+    context" (docs/money-extraction.md). Enforced as a gate, not just a penalty, because
     several ISO codes are ordinary English words in caps: without it `TOP 10
     projects` is ten Tongan paʻanga and `ALL 25 recipients` is Albanian lek.
     Tier 1 and 2 codes stand on their own.

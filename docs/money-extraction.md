@@ -1,16 +1,19 @@
 # Monetary amount recognition
 
-Design for the `money` annotation op: recovering monetary amounts from
-Womblex's extraction output, normalising them to exact values, and recording
-them as a joinable sidecar.
+The canonical reference for the `money` annotation op: how Womblex recovers
+monetary amounts from its extraction output, normalises them to exact values,
+and records them as a joinable sidecar. It sits alongside
+[extraction.md](extraction.md) as a per-feature reference; the durable
+cross-cutting rationale (offset spaces, placement of annotation ops) lives in
+[decisions.md](decisions.md) and the accuracy metric set in
+[evaluation.md](evaluation.md).
 
-Status: **shipped.** The op is built — `womblex money --shards <dir>` writes
-`*.money_spans.parquet` + `*.money_columns.parquet` per batch
-(`process/money*.py`, `store/money_output.py`). The extractor change under
-[Shipped prerequisite](#shipped-prerequisite) is merged. What remains open is
-the measurement: there is still no labelled ground truth, so no precision or
-recall figure is quoted here — see
-[Open gap: no ground truth](#open-gap-no-ground-truth).
+`womblex money --shards <dir>` writes `*.money_spans.parquet` +
+`*.money_columns.parquet` per batch (`process/money*.py`,
+`store/money_output.py`); the prerequisite spreadsheet change under
+[Number-format prerequisite](#number-format-prerequisite) is in place. There is
+still no labelled ground truth, so no precision or recall figure is quoted here
+— see [Open gap: no ground truth](#open-gap-no-ground-truth).
 
 ## Scope and naming
 
@@ -23,7 +26,7 @@ sense is a separate and cheaper win — `DateInfo.effective/expiry` and
 int; the same applies to emails, websites, phones, id_numbers and quotes.
 That work is tracked separately and is not in scope here.
 
-This file is named `money.md` rather than `currency.md` to keep the distinction
+The op is named `money` rather than `currency` to keep the distinction
 visible.
 
 ## The problem shape, as measured
@@ -261,7 +264,7 @@ column is classified once; every cell beneath inherits the verdict.
 **Evidence, strongest first:**
 
 1. **Number format carrying a currency symbol** — `$#,##0.00`. Definitive.
-   Available for spreadsheets as of the shipped prerequisite below.
+   Available for spreadsheets as of the [number-format prerequisite](#number-format-prerequisite) below.
 2. **Money-vocabulary header** — the trigger list above applied to the header
    text (`Value`, `Value (AUD)`, `Amount`, `Approved Budget $m`), combined with
    the cells being predominantly numeric.
@@ -674,7 +677,7 @@ OCR producing no table cells, not to the detector (see
 no text layer and none of those contain monetary amounts, so OCR money loss
 across the PDF set specifically remains unmeasured.
 
-## Shipped prerequisite
+## Number-format prerequisite
 
 `ingest/spreadsheet.py` read cells with pandas (`dtype=str`), which discards
 both the cell's number format and its stored type. Every `sheet_cell` element
