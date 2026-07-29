@@ -33,10 +33,11 @@ from womblex.ingest.table_grid import (
 
 logger = logging.getLogger(__name__)
 
-# Precision gates — provisional until B2 calibrates them against the
-# rendered-clean fixtures and the false-table set. Below any gate the
-# reconstructor refuses (returns None); a wrongly-binned grid is worse
-# than today's silence.
+# Precision gates. Below any gate the reconstructor refuses (returns
+# None); a wrongly-binned grid is worse than today's silence. Calibrated
+# in B2 against the rendered-clean fixtures (must pass) and the
+# false-table set (must refuse) — see tests/test_table_benchmark.py and
+# docs/table-cell-reconstruction-plan.md (B2).
 MIN_COLUMNS = 3
 # Three, not two: ``columns_from_data`` independently drops any x-cluster
 # holding fewer than 3 spans, so every column of a 2-body-row table is
@@ -46,10 +47,22 @@ MIN_BODY_ROWS = 3
 # Fraction of in-rect spans that must land in an inferred column.
 # Asymmetric by construction: ``column_for_x`` assigns anything at or
 # right of the first column, so this catches spans overflowing the *left*
-# edge only. Content right of the last column is not gated here — it
-# either forms its own column or joins the last one. B2 sets the
-# right-edge guardrail from the false-table fixtures.
+# edge only — the right edge and the hard-shape leak are caught by
+# ``MIN_ROW_FILL_RATIO`` below, which is the load-bearing precision gate.
 MIN_ASSIGNED_RATIO = 0.9
+# Mean cell occupancy across the reconstructed body, as a fraction of the
+# column count — the round-1 precision guardrail. A flat clean table fills
+# essentially every cell (measured >= 0.98 on all six rendered-clean
+# fixtures); the shapes round 1 must refuse — stacked-header hierarchical
+# tables (dense_text_548: 0.45) and non-tables the detector or a whole-page
+# rect fed in (FUNSD forms 0.38-0.41, diverse_layout_49 0.49) — all fall
+# well below. 0.75 sits in the empty gap between the two populations.
+#
+# This is the signal the asymmetric ``MIN_ASSIGNED_RATIO`` and the ``MIN_*``
+# counts could not provide: those shapes over-segment columns and over-merge
+# rows (via ``bands_to_rows``'s continuation rule) into a grid that is
+# structurally large but mostly empty. Density catches exactly that.
+MIN_ROW_FILL_RATIO = 0.75
 
 
 def span_from_region(region: OCRRegionResult) -> Span:
@@ -158,6 +171,18 @@ def reconstruct_table(
     body = drop_blank_rows(bands_to_rows(body_bands, columns, x_tolerance=x_tol))
     if len(body) < MIN_BODY_ROWS:
         logger.debug("table reconstruction refused: only %d body rows after binning", len(body))
+        return None
+
+    # Row-fill density — the precision guardrail. A sparse grid means the
+    # binning over-segmented columns or over-merged rows: a hierarchical or
+    # form shape, not a flat table. Refuse it (see MIN_ROW_FILL_RATIO).
+    filled = sum(1 for row in body for cell in row if cell)
+    fill_ratio = filled / (len(body) * len(columns))
+    if fill_ratio < MIN_ROW_FILL_RATIO:
+        logger.debug(
+            "table reconstruction refused: row fill %.2f (%d/%d cells) below %s",
+            fill_ratio, filled, len(body) * len(columns), MIN_ROW_FILL_RATIO,
+        )
         return None
 
     # Lineage, not defaults: confidence from the constituent regions

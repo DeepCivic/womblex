@@ -1,17 +1,36 @@
-"""B3 + B1.2 — table reconstruction measured against rendered-clean GT.
+"""B3 + B1.2 + B2 — table reconstruction measured against rendered-clean GT.
 
 Round-1 benchmark for #17 (docs/table-cell-reconstruction-plan.md): feed a
 *known-correct* table rect straight to ``reconstruct_table`` and measure
 the grid, without the layout detector in the loop (B1.2). The primary
 fixtures are rendered from the two vendored spreadsheet sources — render →
 rasterise → OCR (paddleocr, per A0) → reconstruct → compare against the
-rendered GT (B3). ``dense_text_548`` (hard scan shape) tracks without a
-gate; refusal is a correct round-1 outcome there.
+rendered GT (B3).
+
+B2 adds the precision half of the picture:
+
+- **The metric set.** A thin alignment projection turns a reconstructed
+  ``TableData`` into a DataFrame (header row → column names) so the
+  ``utils.tabular_metrics`` scorers (``structural_fidelity``,
+  ``data_integrity``, ``key_column_preservation``) apply directly — the
+  same metrics the spreadsheet ingest uses. Cell-content agreement is
+  scored on ``(row, col, text)`` after alignment, which catches a
+  column-shift a raw cell count misses.
+- **The false-table cohort** (the precision guardrail): fixtures with *no*
+  GT table — the non-table DocLayNet pages and the FUNSD forms — fed to the
+  reconstructor whole. Any table emitted is a false positive. This is what
+  makes "precision over coverage" falsifiable, and it calibrated
+  ``MIN_ROW_FILL_RATIO`` in ``ocr_tables``.
+- **The A.6 GT acceptance checker** for the DocLayNet table GT (Appendix A).
+
+``dense_text_548`` (hard scan shape) tracks without a gate. Post-B2 it
+*refuses* — the density gate the false-table cohort calibrated also rejects
+its stacked-header hierarchical shape — which is the precision-first
+outcome round 1 wanted.
 
 The GT is exactly what was drawn; the scorer declares its normalisation
 (NFKC + dash folding + whitespace collapse) — GT stays verbatim.
-Hard gates are B5's; this module records outcomes so B2 can calibrate the
-provisional precision gates in ``ocr_tables``.
+Hard gates are B5's; this module records outcomes.
 """
 
 from __future__ import annotations
@@ -30,6 +49,7 @@ pytest.importorskip("rapidocr_onnxruntime")
 from womblex.ingest.extract import TableData
 from womblex.ingest.ocr_tables import reconstruct_table
 from womblex.ingest.paddle_ocr import get_paddle_reader
+from womblex.utils.tabular_metrics import data_integrity, structural_fidelity
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +59,22 @@ DOCLAYNET_DIR = FIXTURES_DIR / "doclaynet"
 
 CSV_SOURCE = SPREADSHEETS_DIR / "Approved-providers-au-export_20260204.csv"
 XLSX_SOURCE = SPREADSHEETS_DIR / "mso-statistics-sept-qtr-2025.xlsx"
+
+FUNSD_IMAGES_DIR = FIXTURES_DIR / "funsd" / "images"
+
+# The false-table cohort: pages with no GT table. Feeding the whole page
+# rect to the reconstructor must yield a refusal — any table is a false
+# positive (the precision guardrail, B2). The DocLayNet trio are the
+# non-table pages from the layout GT (table_0 despite its name holds no
+# Table-labelled span — see B0); the FUNSD forms are dense label/value
+# pairs, the likeliest false positive.
+FALSE_TABLE_DOCLAYNET = ["diverse_layout_49", "formula_29", "table_0"]
+FALSE_TABLE_FUNSD = [
+    "85540866", "82200067_0069", "87594142_87594144", "87528321", "87528380",
+]
+
+# Discovered at import so the A.6 checker can parametrize per GT file.
+_GT_CSV_PATHS = sorted(DOCLAYNET_DIR.glob("*_table.csv"))
 
 RENDER_DPI = 200
 FONT = "helv"
@@ -65,6 +101,33 @@ _DASHES = str.maketrans({c: "-" for c in "‐‑‒–—―"})
 def _norm(s: str) -> str:
     """The scorer's declared normalisation: NFKC + dash fold + ws collapse."""
     return " ".join(unicodedata.normalize("NFKC", s).translate(_DASHES).split())
+
+
+def _table_to_frame(headers: list[str], rows: list[list[str]]):
+    """B2 alignment projection: a reconstructed grid → a normalised DataFrame.
+
+    Header row becomes the column names, body rows the data, everything
+    passed through ``_norm`` so ``tabular_metrics`` compares like with like
+    (the scorer declares its normalisation; the GT frame is built the same
+    way). Duplicate/blank header names are uniquified positionally so the
+    frame is well-formed — a spanning-header collision is a reconstruction
+    signal the structural metric already reflects via the column count.
+    """
+    import pandas as pd
+
+    cols: list[str] = []
+    seen: dict[str, int] = {}
+    for i, h in enumerate(headers):
+        name = _norm(h) or f"col{i}"
+        if name in seen:
+            seen[name] += 1
+            name = f"{name}.{seen[name]}"
+        else:
+            seen[name] = 0
+        cols.append(name)
+    data = [[_norm(c) for c in row[:len(cols)]] + [""] * (len(cols) - len(row))
+            for row in rows]
+    return pd.DataFrame(data, columns=cols)
 
 
 def _fmt_cell(v: object) -> str:
@@ -176,6 +239,25 @@ def _reconstruct_rendered(
     )
 
 
+def _reconstruct_whole_page(reader, img_path: Path) -> TableData | None:
+    """Feed a real page image's whole rect to the reconstructor.
+
+    Used by the false-table cohort: there is no GT table rect, so the
+    reconstructor sees the entire page. DocLayNet renders US-letter pages,
+    so the tolerance dpi follows from the image width (8.5 in).
+    """
+    import cv2
+
+    img = cv2.imread(str(img_path))
+    result = reader.read_page(img)
+    dpi = round(img.shape[1] / 8.5)
+    return reconstruct_table(
+        result.regions,
+        (0.0, 0.0, float(img.shape[1]), float(img.shape[0])),
+        dpi, 1.0, pix_dims=(img.shape[1], img.shape[0]),
+    )
+
+
 def _score(rt: RenderedTable, table: TableData | None) -> dict:
     entry: dict = {
         "fixture": rt.name,
@@ -204,6 +286,17 @@ def _score(rt: RenderedTable, table: TableData | None) -> dict:
     entry["cell_hits"] = hits
     entry["cell_match"] = hits / total if total else 0.0
     entry["mismatches"] = mismatches
+
+    # B2 metric set: run the tabular_metrics scorers over the alignment
+    # projection so a reconstructed OCR grid is measured the same way the
+    # spreadsheet ingest is. structural_fidelity gates rows+cols+names;
+    # data_integrity is exact cell match on the shared columns.
+    gt_frame = _table_to_frame(rt.headers, rt.rows)
+    got_frame = _table_to_frame(table.headers, table.rows)
+    struct = structural_fidelity(gt_frame, got_frame)
+    integ = data_integrity(gt_frame, got_frame)
+    entry["structural_ok"] = struct.passed
+    entry["data_integrity"] = integ.score
     return entry
 
 
@@ -314,6 +407,135 @@ class TestDenseTextTracking:
             "outcome": outcome, "tracking": True,
         })
         logger.info("table bench dense_text_548 (tracking): %s", outcome)
-        # Tracking only: either refusal or a partial grid is a valid round-1
-        # outcome for this shape (7-line stacked header, hierarchical rows).
-        assert True
+        # Post-B2 this shape refuses: the density gate (MIN_ROW_FILL_RATIO)
+        # the false-table cohort calibrated also rejects the 7-line stacked
+        # header + hierarchical rows here (it binned to a sparse ~0.45-fill
+        # grid). Refusal is the precision-first outcome round 1 wanted.
+        # Tracking, not gated: if a future recogniser change flips this to a
+        # partial, that is still a valid round-1 outcome — assert the
+        # invariant that matters (never a *full* false 39x11 grid).
+        assert table is None or len(table.rows) < 39
+
+
+@pytest.mark.benchmark
+class TestFalseTableCohort:
+    """B2 precision guardrail — pages with no GT table must refuse.
+
+    Feeds the whole-page rect to the reconstructor. A returned table is a
+    false positive; the cohort must be clean (zero FPs). This is what makes
+    "precision over coverage" falsifiable, and it calibrated
+    ``MIN_ROW_FILL_RATIO``.
+    """
+
+    @pytest.mark.parametrize("stem", FALSE_TABLE_DOCLAYNET)
+    def test_doclaynet_non_table_refuses(self, stem: str, reader) -> None:
+        img_path = DOCLAYNET_DIR / f"{stem}.png"
+        if not img_path.exists():
+            pytest.skip(f"Fixture missing: {img_path}")
+        table = _reconstruct_whole_page(reader, img_path)
+        self._record(f"doclaynet/{stem}", table)
+        assert table is None, (
+            f"false table on non-table page {stem}: "
+            f"{None if table is None else (len(table.rows), len(table.headers))}"
+        )
+
+    @pytest.mark.parametrize("stem", FALSE_TABLE_FUNSD)
+    def test_funsd_form_refuses(self, stem: str, reader) -> None:
+        img_path = FUNSD_IMAGES_DIR / f"{stem}.png"
+        if not img_path.exists():
+            pytest.skip(f"Fixture missing: {img_path}")
+        table = _reconstruct_whole_page(reader, img_path)
+        self._record(f"funsd/{stem}", table)
+        assert table is None, (
+            f"false table on FUNSD form {stem}: "
+            f"{None if table is None else (len(table.rows), len(table.headers))}"
+        )
+
+    @staticmethod
+    def _record(name: str, table: TableData | None) -> None:
+        outcome = "refused" if table is None else (
+            f"FALSE TABLE {len(table.rows)}x{len(table.headers)}"
+        )
+        _results.append({
+            "fixture": name, "false_table_probe": True,
+            "outcome": outcome,
+            "false_positive": table is not None,
+        })
+        logger.info("table bench false-table %s: %s", name, outcome)
+
+
+@pytest.mark.benchmark
+class TestGroundTruthAcceptance:
+    """Appendix A.6 — a table GT that fails these is a bug in the GT.
+
+    Runs over every ``*_table.csv`` beside a DocLayNet fixture: rectangular,
+    unique non-empty column names, UTF-8 no BOM, no trailing whitespace in
+    cells, ``n_header_rows`` consistent with the meta, and the cell count
+    within a sane band of the fixture json's Table-labelled word count.
+    """
+
+    def _gt_csvs(self) -> list[Path]:
+        return sorted(DOCLAYNET_DIR.glob("*_table.csv"))
+
+    def test_at_least_one_gt_present(self) -> None:
+        if not self._gt_csvs():
+            pytest.skip("No DocLayNet table GT vendored")
+
+    @pytest.mark.parametrize(
+        "csv_path",
+        _GT_CSV_PATHS or [pytest.param(None, marks=pytest.mark.skip(reason="no GT"))],
+        ids=lambda p: p.stem if p is not None else "none",
+    )
+    def test_gt_conforms(self, csv_path: Path) -> None:
+        import csv
+        import json
+
+        raw = csv_path.read_bytes()
+        assert not raw.startswith(b"\xef\xbb\xbf"), "GT has a UTF-8 BOM"
+        text = raw.decode("utf-8")  # asserts valid UTF-8
+
+        rows = list(csv.reader(text.splitlines()))
+        assert rows, "empty GT"
+        header, *body = rows
+        width = len(header)
+
+        # Rectangular.
+        for i, r in enumerate(rows):
+            assert len(r) == width, f"row {i} has {len(r)} cells, expected {width}"
+        # Unique, non-empty column names.
+        assert all(h.strip() for h in header), "blank column name"
+        assert len(set(header)) == width, "duplicate column names"
+        # No trailing whitespace in any cell.
+        for i, r in enumerate(rows):
+            for c in r:
+                assert c == c.strip() or not c.strip(), (
+                    f"row {i} cell has trailing/leading whitespace: {c!r}"
+                )
+
+        # n_header_rows consistent with the meta and the file.
+        meta_path = csv_path.with_suffix(".meta.json")
+        assert meta_path.exists(), f"missing {meta_path.name}"
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        n_header = meta["n_header_rows"]
+        assert 1 <= n_header <= len(rows), f"n_header_rows {n_header} out of range"
+
+        # Cell count within a sane band of the fixture's Table-labelled words.
+        ann_path = DOCLAYNET_DIR / f"{csv_path.stem.replace('_table', '')}.json"
+        if ann_path.exists():
+            from tests.test_fixture_accuracy import DOCLAYNET_LABELS
+            ann = json.loads(ann_path.read_text(encoding="utf-8"))
+            labels = [DOCLAYNET_LABELS.get(lbl, "Unknown") for lbl in ann["labels"]]
+            table_words = sum(
+                len(str(w).split())
+                for w, lbl in zip(ann.get("words", []), labels)
+                if lbl == "Table"
+            )
+            gt_cells = sum(1 for r in body for c in r if c.strip())
+            if table_words:
+                # Loose band: transcription splits/merges words vs the
+                # annotation, so allow a wide 0.3x-3x window — this catches a
+                # GT off by an order of magnitude, not fine differences.
+                assert 0.3 * table_words <= gt_cells <= 3.0 * table_words, (
+                    f"GT cell count {gt_cells} implausible vs "
+                    f"{table_words} Table-labelled words"
+                )

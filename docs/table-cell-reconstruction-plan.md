@@ -17,7 +17,7 @@ this round. Two principles carry over unchanged from the original plan:
 - **No duplicate algorithms.** One shared grid module; existing table-ish
   code is consumed or superseded, never paralleled (see A1).
 
-## Status (updated 2026-07-28)
+## Status (updated 2026-07-29)
 
 | Stage | Status |
 |---|---|
@@ -29,8 +29,7 @@ this round. Two principles carry over unchanged from the original plan:
 | A5 — conventions + lineage | **Verified** — element projection, producer marker and single-markdown chunker view observed end-to-end on the OCR path (A3), which is the path images take too |
 | B0 — fix the table metric | **Landed** (`#26`) — steering corrected; GT aggregation drops stray Table runs (`MIN_TABLE_GT_SPANS=3`); EXTRACTION.md refreshes on next full accuracy run |
 | B1 — decompose the measurement | **B1.2 landed** (`#26`, `tests/test_table_benchmark.py`) — GT-rect-conditioned reconstruction, no detector in the loop. Stage 1 is the existing per-class F1 (fixed by B0); stage 3 (end-to-end, detector included) is now *possible* on the OCR-PDF path after A3 but is not yet written — it rides with B4 |
-| B2 — metric set + gate calibration | Not started — inherits three specifics from A1 plus the `dense_text_548` partial-grid finding from B3 (see Open decisions) |
-| B3 — rendered-clean GT harness | **Landed** (`#26`) — 6 rendered fixtures reconstruct with exact structure; `sparse_text_344` off-spec GT removed; the A.6 checker still rides with B2 |
+| B2 — metric set + gate calibration | **Landed** — `MIN_ROW_FILL_RATIO=0.75` (row-fill density) added to `ocr_tables`, calibrated against the rendered-clean cohort (fill ≥ 0.98, all pass) and the false-table set (fill ≤ 0.49, all refuse). Metric set (`tabular_metrics` via an alignment projection), false-table cohort, and the A.6 GT checker landed in `tests/test_table_benchmark.py` |
 | B4 — report + docs wiring | Not started |
 | B5 — regression guard | Not started |
 
@@ -38,11 +37,11 @@ this round. Two principles carry over unchanged from the original plan:
 the planned order — the reconstructor existed before any measurement of it
 did. The correction held: B0 → B3 → B1.2 all landed **before A3 wired the
 reconstructor in**, so A3 went live against a measured baseline rather than
-putting unmeasured grids into parquet shards. What remains true is that the
-precision gates in `ocr_tables.py` are still provisional structural
-constants, not calibrated thresholds — B2 owns that, and it now calibrates
-against a live path rather than a dormant one. Remaining order:
-`B2 → B4/B5`.
+putting unmeasured grids into parquet shards. The precision gates in
+`ocr_tables.py` were provisional structural constants until **B2 calibrated
+them against a live path** — a density gate now refuses the shapes the
+false-table cohort and the hard fixture exposed. Remaining order:
+`B4/B5`.
 
 ## Where tables come from today (why this scope is enough)
 
@@ -163,11 +162,12 @@ value into the row above — right for a wrapped body cell, silently wrong
 for a first body row whose leading cell is blank (indented or grouped
 rows), which was otherwise absorbed into the header and lost.
 
-The precision gates are structural and **provisional until B2 calibrates
-them**: `MIN_COLUMNS=3`, `MIN_BODY_ROWS=3`, `MIN_ASSIGNED_RATIO=0.9`,
-plus a refusal when no header cell recovers text; each refusal is
-debug-logged. Two measured properties B2 must calibrate around rather
-than assume away:
+The precision gates began as structural constants and were **calibrated in
+B2**: `MIN_COLUMNS=3`, `MIN_BODY_ROWS=3`, `MIN_ASSIGNED_RATIO=0.9`, a
+refusal when no header cell recovers text, and — added by B2 as the
+load-bearing precision gate — `MIN_ROW_FILL_RATIO=0.75` (mean cell
+occupancy across the body). Each refusal is debug-logged. Two measured
+properties B2 confirmed rather than assumed away:
 
 - `MIN_BODY_ROWS` is 3, not 2, because `columns_from_data` independently
   drops any x-cluster holding fewer than 3 spans — every column of a
@@ -176,8 +176,11 @@ than assume away:
 - `MIN_ASSIGNED_RATIO` is **asymmetric**: `column_for_x` assigns anything
   at or right of the first column, so the ratio gates left-edge overflow
   only. Content right of the last column either forms its own column or
-  joins the last one — the right-edge guardrail has to come from B2's
-  false-table fixtures, not from this ratio.
+  joins the last one. B2 confirmed the right-edge overflow signal was
+  0 across every false/hard fixture (`column_for_x` absorbs it), so the
+  right-edge guardrail is **not** an assigned-ratio symmetry — it is the
+  density gate `MIN_ROW_FILL_RATIO`, which catches the over-segmented
+  sparse grid those shapes produce.
 
 Known round-1 limitation, deliberately not fixed here: a two-line header's
 second line becomes a spurious first body row (only `bands[0]` is the
@@ -484,7 +487,7 @@ detector recall:
    A1, tunable without the detector in the loop.
 3. **End-to-end** — real pipeline, detector included; the product of 1 × 2.
 
-### B2 — the metric set
+### B2 — the metric set — **landed**
 
 `tabular_metrics` assumes aligned DataFrames with matching column names,
 which a reconstructed OCR grid will not have. Add a thin alignment
@@ -509,6 +512,41 @@ projection (`cells → DataFrame`, header row → column names), then:
 
 Not proposing TEDS — it needs a tree edit-distance dependency. Note it as
 the upgrade path if the alignment metric proves too coarse.
+
+**What landed.** The calibration ran the reconstructor over the false-table
+cohort under the *provisional* gates and found **three false positives**:
+`diverse_layout_49` (32×3), `funsd/82200067_0069` (15×8), `funsd/87528321`
+(21×6) — plus the already-known `dense_text_548` 12×12 partial. The
+`MIN_ASSIGNED_RATIO` / `MIN_*` count gates could not see any of them: those
+shapes over-segment columns and over-merge rows (via `bands_to_rows`'s
+continuation rule) into a grid that is structurally large but mostly empty.
+
+The discriminating signal is **row-fill density** — mean cell occupancy
+across the reconstructed body as a fraction of the column count. Measured,
+the two populations do not overlap:
+
+| Cohort | Fixtures | fill_ratio |
+|---|---|---|
+| Rendered-clean (must pass) | approved_providers ×3, mso fuel ×3 | **0.978 – 1.00** |
+| False table (must refuse) | diverse_layout_49 / funsd forms | 0.375 – 0.49 |
+| Hard scan (must refuse) | dense_text_548 | 0.45 |
+
+`MIN_ROW_FILL_RATIO = 0.75` sits in the empty gap. Added to `ocr_tables`
+as the final gate (after body binning), it is a clean sweep: **6/6 clean
+reconstruct, all 8 false-table probes refuse, and `dense_text_548` now
+refuses** rather than emitting the 12×12 partial — the precision-first
+outcome round 1 wanted, achieved by a density signal, not by tightening
+the count constants.
+
+The metric set landed in the benchmark: `_table_to_frame` is the alignment
+projection (header row → uniquified column names, all cells `_norm`'d), and
+`_score` now runs `structural_fidelity` + `data_integrity` from
+`utils.tabular_metrics` over it alongside the existing positional cell
+match. The false-table cohort is `TestFalseTableCohort` (whole-page rect →
+refusal asserted; the FP count is 0 and gates the build). The A.6 GT
+checker is `TestGroundTruthAcceptance` (see Appendix A.6). Deferred as
+planned: `key_column_preservation` wiring (the CSV's key column is not in
+the rendered subset) and the money task metric (rides with B4's report).
 
 ### B3 — ground truth: rendered-clean is primary, dense scan tracks
 
@@ -558,22 +596,19 @@ Measured (round-1 baseline, 2026-07-28):
 |---|---|---|---|---|
 | approved_providers_p1–p3 | 30×5 | 30×5 exact | 5/5 | 96.0–98.7% |
 | mso_diesel / gasoline / kerosene | 9×5 | 9×5 exact | 5/5 | 84.4–95.6% |
-| dense_text_548 (tracking, GT rect) | 39×11 | **partial 12×12** | — | — |
+| dense_text_548 (tracking, GT rect) | 39×11 | **refused** (was 12×12 pre-B2) | — | — |
 
 Every rendered-clean cell mismatch is glyph-level OCR recognition, not
 binning: a lost space (`PO Box1213`), `0`→`o` on single-char cells,
-`6`↔`9` at 9 pt. The grid itself is exact on all six. Two structural
-asserts already gate (reconstruction happened; column count exact) — B5
-formalises the rest.
+`6`↔`9` at 9 pt. The grid itself is exact on all six.
 
-**The tracking fixture did not refuse** — the provisional gates passed a
+**The tracking fixture now refuses** — pre-B2 the provisional gates passed a
 12×12 partial grid against the 39×11 GT (over-segmented columns,
-under-merged rows). Round 1 said "refusal or a partial score; either is
-fine, both are visible" — but this is now a *measured* input to B2:
-precision-first wants the stacked-header hierarchical shape refused (or
-scored low), so gate calibration must add a signal this shape trips
-(e.g. assigned-ratio symmetry, header-band coherence) rather than assume
-`MIN_*` constants catch it.
+under-merged rows). B2's `MIN_ROW_FILL_RATIO` gate catches exactly that
+sparse grid (~0.45 fill), so the stacked-header hierarchical shape is
+refused — the precision-first round-1 outcome. It remains tracking, not
+gated: the benchmark asserts only the invariant that it never emits a full
+false 39×11 grid.
 
 ### B4 — report + docs wiring
 
@@ -609,8 +644,8 @@ Planned: `B0 → B3 rendered-GT harness + B1.2 → A1 → A3 → A4 → B2 bread
 B4/B5`. Actual: A1 landed first (deviation recorded in Status above), and
 A4 turned out to be a no-op — the path it targeted was unreachable, so it
 closed by deleting dead code rather than by adding any. Remaining:
-**`B2 breadth → B4/B5`** — Track A is complete for the region-based
-engines it was scoped to (A0).
+**`B4/B5`** — Track A is complete for the region-based engines it was
+scoped to (A0), and B2 has calibrated the gates.
 
 B0 went first because it was a live doc/metric defect. The rendered-GT
 harness and B1.2 landed before A3 as planned — the measurement existed
@@ -618,16 +653,15 @@ before the reconstructor was wired in, and it surfaced one calibration
 input immediately (the `dense_text_548` partial grid, above). A2 rode
 along with A3's wiring as intended.
 
-One consequence of the ordering to keep in view: A3 is live but B2 has not
-calibrated the gates, so the constants in `ocr_tables.py` remain
-provisional *in production*, not just in the abstract — and A4 established
-that this covers image inputs too, not just PDFs. The rendered-clean
-cohort says they are safe on
-the target shape (6/6 exact structure); the `dense_text_548` partial says
-they do not yet refuse the hard shape. Until B2 lands, a hard-shape table
-on an OCR'd page can produce a low-quality grid rather than silence —
-visible in the parquet via `meta["context_producer"] = "table_grid"` and
-the element confidence.
+The ordering consequence — A3 live with uncalibrated gates — is now
+**closed by B2**: the `ocr_tables.py` constants are calibrated against the
+rendered-clean cohort (must pass, fill ≥ 0.98) and the false-table set
+(must refuse, fill ≤ 0.49), and A4 established this covers image inputs
+too. A hard-shape table on an OCR'd page no longer produces a low-quality
+grid — it refuses via `MIN_ROW_FILL_RATIO`. What B2 did *not* do is wire
+these benchmark gates into `EXTRACTION.md` or make them fail a normal
+CI run: that is B5 (the false-table `assert` and the rendered structural
+asserts live in the `benchmark`-marked module today).
 
 ## Deferred to a later round (recorded so they aren't relitigated)
 
@@ -643,23 +677,25 @@ the element confidence.
 
 ## Open decisions
 
-1. Precision-gate thresholds — **now the highest-priority open item**, because
-   A3 made the gates load-bearing in production rather than dormant. Set them
-   from the rendered-clean fixtures + the false-table set (not from
-   `dense_text_548`, which no longer gates).
-   Three specifics inherited from A1: a right-edge overflow guardrail
-   (`MIN_ASSIGNED_RATIO` only gates the left edge), whether the
-   column-population floor of 3 should be a parameter rather than couple
-   `MIN_BODY_ROWS` to it, and whether a two-line header should merge or
-   refuse. Plus one measured by B3: the current gates pass a 12×12 partial
-   grid on `dense_text_548` (39×11 GT) — the stacked-header hierarchical
-   shape needs a refusal signal, not just tighter `MIN_*` constants.
+1. Precision-gate thresholds — **resolved by B2.** The load-bearing gate is
+   `MIN_ROW_FILL_RATIO = 0.75` (row-fill density), calibrated against the
+   rendered-clean cohort (fill ≥ 0.98) and the false-table set (fill ≤ 0.49)
+   — not against `dense_text_548`, which the same gate now refuses. The three
+   A1 specifics resolved with it: the right-edge overflow guardrail is the
+   density gate, not assigned-ratio symmetry (the overflow signal measured 0
+   everywhere — `column_for_x` absorbs right-edge content); the
+   column-population floor of 3 stays coupled to `MIN_BODY_ROWS` (no fixture
+   needed it decoupled); and the two-line-header question is moot for the
+   round-1 shapes — a hierarchical header now trips the density gate rather
+   than needing a merge-or-refuse proximity threshold.
 Resolved this revision: shared `table_grid.py` (A1 — anti-duplication);
 `_table_aware_text` end-state (A1); skew handling (A2 — refuse);
 gate-vs-warn (B5 — gate clean, track dense); GT sign-off (landed in
 `7f756cc`, conventions as recommended); `sparse_text_344` (B3 — non-GT);
 B0 remedy (landed: min-span filter `MIN_TABLE_GT_SPANS=3` in
-`_aggregate_doclaynet_blocks`, dropping — not merging — stray Table runs).
+`_aggregate_doclaynet_blocks`, dropping — not merging — stray Table runs);
+B2 gate calibration (landed: `MIN_ROW_FILL_RATIO=0.75`, false-table cohort
+clean, A.6 checker built).
 
 ---
 
@@ -667,7 +703,8 @@ B0 remedy (landed: min-span filter `MIN_TABLE_GT_SPANS=3` in
 
 Retained as the normative spec for any future table GT (the scan round will
 add more). The landed `dense_text_548_table.csv` follows it; the A.6
-checker remains to be built in B2.
+checker landed in B2 (`TestGroundTruthAcceptance`, parametrised over every
+`*_table.csv` beside a DocLayNet fixture).
 
 The page is a *Grants of Plan-Based Awards* proxy table: **11 columns**, a
 7-line stacked header, and hierarchical rows (participant name, then award
@@ -727,8 +764,9 @@ scorer declares its normalisation.**
 
 ### A.6 Acceptance checks before a GT is used
 
-A small checker (part of B2) asserts: rectangular, column names unique and
-non-empty, UTF-8 with no BOM, no trailing whitespace in cells,
-`n_header_rows` consistent with the file, and the GT cell count within a
-sane band of the fixture json's Table-labelled word count. A GT that fails
-these is a bug in the GT, not in extraction.
+A small checker (landed in B2 as `TestGroundTruthAcceptance`) asserts:
+rectangular, column names unique and non-empty, UTF-8 with no BOM, no
+trailing whitespace in cells, `n_header_rows` consistent with the meta,
+and the GT cell count within a sane band (0.3×–3×) of the fixture json's
+Table-labelled word count. A GT that fails these is a bug in the GT, not
+in extraction.

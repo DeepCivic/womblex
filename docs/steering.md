@@ -88,7 +88,8 @@ Two changes are required, and the second is easy to miss:
   page now yields a cellified `table` element (and the page narrative is
   rebuilt from the regions outside the rect, so the table isn't also chunked
   as prose). Deskewed pages refuse outright (A2). The precision gates are
-  still provisional pending B2 calibration.
+  calibrated (B2, `MIN_ROW_FILL_RATIO=0.75`): the rendered-clean cohort
+  reconstructs, and the hard and false-table shapes refuse.
   (`ingest/grid_projection.py`, previously cited here, projects page-level
   prose gutters rather than cells — it was not a usable feeder.)
 - **Route standalone images through it — no route needed (A4).** This bullet
@@ -105,12 +106,14 @@ Two changes are required, and the second is easy to miss:
   `get_extractor`'s dead `IMAGE` case have been deleted, and the routing is
   pinned by `TestImageDocumentsRouteThroughTheOrchestrator`.
 
-**What remains on #17** is Track B, not Track A: the precision gates in
-`ingest/ocr_tables.py` are structural constants that have not been calibrated
-(B2), and the benchmark's table section and regression gates are not yet wired
-into `accuracy/EXTRACTION.md` (B4/B5). Until B2 lands, a hard-shape table
-(stacked spanning headers, hierarchical rows) can produce a low-quality grid
-rather than refusing — see the plan's `dense_text_548` measurement.
+**What remains on #17** is Track B report/regression wiring, not Track A and
+not gate calibration. The precision gates in `ingest/ocr_tables.py` are
+calibrated (B2, 2026-07-29): `MIN_ROW_FILL_RATIO=0.75` refuses the
+hard-shape and false-table cohorts while the rendered-clean cohort passes.
+What is left is wiring the benchmark's table section and regression gates
+into `accuracy/EXTRACTION.md` (B4/B5). A hard-shape table (stacked spanning
+headers, hierarchical rows) now **refuses** rather than producing a
+low-quality grid — see the plan's `dense_text_548` measurement.
 
 **Measured payoff.** Feeding the same page's real grid through the money op's
 column classifier recovers 30 of 30 amounts, versus 1 today — the consuming
@@ -171,6 +174,28 @@ Measured on Throsby fixture (7 GT `<REDACTED>` tags across 3 pages); vector-firs
 - **Open — scanned/raster cohort precision.** Direct-Complaint forms with dark form-field backgrounds (02737-class scanned_mixed docs) still trigger the area-threshold contour detector even with `max_area_ratio=0.05`. Higher precision on this cohort would need a different detection signal (e.g. layout-aware classes that distinguish form fields from redaction bars). See `stories/STATUS.md` §11.
 
 ## Changelog
+
+### 2026-07-29: B2 — precision-gate calibration + benchmark metric set
+
+Calibrated the OCR table reconstructor's precision gates against the
+rendered-clean cohort (must pass) and a false-table cohort (must refuse).
+Added `MIN_ROW_FILL_RATIO = 0.75` to `ingest/ocr_tables.py` — mean cell
+occupancy across the reconstructed body. Measured, the two populations do
+not overlap: rendered-clean fill 0.98–1.00, false/hard shapes 0.375–0.49.
+The gate is a clean sweep — all six rendered-clean fixtures reconstruct,
+all eight false-table probes (3 non-table DocLayNet pages + 5 FUNSD forms)
+refuse, and `dense_text_548` now **refuses** rather than emitting the
+pre-B2 12×12 partial against its 39×11 GT. Three false positives the
+provisional gates had let through (`diverse_layout_49`,
+`funsd/82200067_0069`, `funsd/87528321`) are closed. The right-edge
+overflow signal the plan asked about measured 0 everywhere
+(`column_for_x` absorbs right content), so density — not assigned-ratio
+symmetry — is the guardrail. Benchmark additions in
+`tests/test_table_benchmark.py`: an alignment projection feeding
+`utils/tabular_metrics.py` (`structural_fidelity` + `data_integrity`), the
+false-table cohort (FP count gates), and the Appendix A.6 GT acceptance
+checker. See
+[table-cell-reconstruction-plan.md](table-cell-reconstruction-plan.md) B2.
 
 ### 2026-07-28: B0 — table metric fixed before measuring reconstruction against it
 

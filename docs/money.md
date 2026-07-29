@@ -620,11 +620,13 @@ below. The rest, as measurements:
 
   What still limits this fixture is grid *quality*, not routing: it is the
   hard shape round 1 does not solve (7-line stacked spanning header,
-  hierarchical rows), and the B3 benchmark measures the provisional gates
-  passing a 12×12 partial grid against its 39×11 ground truth. So the column
-  path now reaches a table here — just a badly binned one — and the
-  measurement above still describes the fixture until #17 step B2 calibrates
-  the gates to refuse or repair that shape.
+  hierarchical rows). As of #17 step B2 the reconstructor **refuses** this
+  shape rather than emitting a grid — the row-fill density gate
+  (`MIN_ROW_FILL_RATIO`) rejects the sparse ~0.45-fill grid it binned to
+  (pre-B2 it passed a 12×12 partial against the 39×11 ground truth). So the
+  column path reaches a `[TABLE]` placeholder here again, not cells — the
+  precision-first outcome: no cells is better than wrong cells. Repairing
+  (rather than refusing) this shape is the deferred scan round.
 
   Fed the same page's real structure, the column path recovers **30 of 30**.
   The op is ready; the remaining missing piece is extraction-side, tracked as

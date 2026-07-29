@@ -129,8 +129,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `reconstruct_table(regions, table_rect, dpi, conf)` reduces the OCR quads
   inside a layout-detected table rect to spans and reconstructs the grid as
   a `TableData` — or returns `None`, never a partial, below its precision
-  gates (minimum columns/rows, a left-edge column-fit ratio, and header text
-  actually recovering; provisional until B2 calibrates them, each refusal
+  gates (minimum columns/rows, a left-edge column-fit ratio, header text
+  actually recovering, and a row-fill density floor added in B2; each refusal
   debug-logged). Refusal on a hard shape is a correct round-1 outcome. The
   header band and body bands bin separately, so a first body row with a blank
   leading cell — an indented or grouped row — is no longer folded into the
@@ -161,9 +161,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rendered-clean fixtures reconstruct with exact structure and full header
   recovery; cell accuracy 84–99%, every mismatch glyph-level OCR
   recognition rather than grid binning. The hard scan fixture
-  `dense_text_548` tracks without a gate and yielded a 12×12 partial grid
-  against its 39×11 GT — recorded as a B2 gate-calibration input (the
-  provisional gates should refuse that shape). The off-spec
+  `dense_text_548` tracks without a gate and **refuses** (the row-fill
+  density gate B2 added rejects its sparse ~0.45-fill grid; pre-B2 it
+  yielded a 12×12 partial against the 39×11 GT). The off-spec
   `sparse_text_344` CSV/meta GT is removed (declared non-GT).
 
 - **Table-cell reconstruction on OCR'd pages (#17), steps A3 + A2 — the
@@ -249,6 +249,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   owns); `get_extractor`'s docstring; CLAUDE.md's and dataflow's
   "non-PDFs via `get_extractor`"; and the generated EXTRACTION.md
   strategy-matrix row `| IMAGE | ImageExtractor (legacy) | Direct PaddleOCR |`.
+
+- **Table-cell reconstruction on OCR'd pages (#17), step B2 — precision
+  gates calibrated.** The reconstructor's precision gates were provisional
+  structural constants; B2 calibrated them against the rendered-clean
+  cohort (must reconstruct) and a false-table cohort (must refuse). A new
+  `MIN_ROW_FILL_RATIO = 0.75` gate in `ingest/ocr_tables.py` — mean cell
+  occupancy across the reconstructed body — is the load-bearing signal:
+  measured, the clean fixtures fill 0.98–1.00 and the hard/false shapes
+  0.375–0.49, so 0.75 sits in the empty gap. The over-segmented,
+  over-merged grid a hierarchical or form shape produces is structurally
+  large but mostly empty, which the existing `MIN_*` count gates and the
+  left-edge `MIN_ASSIGNED_RATIO` could not see; density does.
+
+  Effect: all six rendered-clean fixtures still reconstruct, the eight
+  false-table probes (3 non-table DocLayNet pages + 5 FUNSD forms) all
+  refuse — closing three false positives the provisional gates had let
+  through (`diverse_layout_49` 32×3, `funsd/82200067_0069` 15×8,
+  `funsd/87528321` 21×6) — and `dense_text_548` refuses rather than
+  emitting its pre-B2 12×12 partial. The plan's right-edge overflow
+  question is resolved by measurement: the overflow signal is 0 on every
+  fixture (`column_for_x` absorbs right-of-last-column content), so density,
+  not assigned-ratio symmetry, is the guardrail.
+
+  Benchmark additions in `tests/test_table_benchmark.py`: an alignment
+  projection (`cells → DataFrame`, header row → uniquified column names)
+  feeding `utils/tabular_metrics.py` (`structural_fidelity` +
+  `data_integrity`), so a reconstructed OCR grid is scored by the same
+  metrics the spreadsheet ingest uses; the false-table cohort
+  (`TestFalseTableCohort`, false-positive count gates the build); and the
+  Appendix A.6 GT acceptance checker (`TestGroundTruthAcceptance`,
+  parametrised over every `*_table.csv` beside a DocLayNet fixture). Wiring
+  these into the generated `EXTRACTION.md` and the CI-level regression gate
+  remains B4/B5.
 
 ### Fixed
 - **A declined continental number no longer leaks its decimal tail as an
