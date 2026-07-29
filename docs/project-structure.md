@@ -27,8 +27,8 @@ womblex/
 │   │   ├── spreadsheet_print.py # Multi-page table extractor for spreadsheet-printed PDFs
 │   │   ├── morphology.py        # Page-image morphology helpers (handwriting / glyph regularity)
 │   │   ├── grid_projection.py   # Column-aware text reconstruction (block-aware paragraph emission)
-│   │   ├── strategies.py        # Re-export shim — non-PDF extractors + legacy ImageExtractor
-│   │   ├── strategies_scanned.py # OCR primitives (_ocr_page, _layout_blocks_and_tables) + ImageExtractor
+│   │   ├── strategies.py        # Re-export shim — path-based (non-fitz) extractors
+│   │   ├── strategies_scanned.py # OCR primitives (_ocr_page, _layout_blocks_and_tables)
 │   │   ├── strategies_file.py   # Non-PDF extractors (DOCX, plain text, non-textual)
 │   │   ├── interfaces/
 │   │   │   └── protocols.py     # Backend protocols (OCRReader, LayoutAnalyzer, Preprocessor)

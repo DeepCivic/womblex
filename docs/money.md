@@ -607,13 +607,24 @@ below. The rest, as measurements:
   is right to decline.
 
   **Partly closed, 2026-07-28.** `_layout_blocks_and_tables` now reconstructs
-  cells inside a detected table region (#17 step A3), so an OCR'd **PDF** page
-  yields a real `table` element and the column path reaches it. This fixture
-  is not yet among them: `dense_text_548` is a PNG, and image inputs route
-  through `ImageExtractor`, which still never calls the layout pass (#17 step
-  A4). The measurement above therefore still describes this fixture; the
-  mechanism sentence it originally gave — that `tables` is never populated on
-  any code path — no longer holds.
+  cells inside a detected table region (#17 step A3), so an OCR'd page yields
+  a real `table` element and the column path reaches it. The mechanism
+  sentence this note originally gave — that `tables` is never populated on any
+  code path — no longer holds.
+
+  This applies to `dense_text_548` too, despite it being a PNG: an earlier
+  revision of this note said image inputs route through `ImageExtractor`,
+  which never calls the layout pass. **That was wrong** — `extract_text`
+  sends everything `fitz` can open, images included, through the orchestrator,
+  and `ImageExtractor` has since been deleted as unreachable (#17 step A4).
+
+  What still limits this fixture is grid *quality*, not routing: it is the
+  hard shape round 1 does not solve (7-line stacked spanning header,
+  hierarchical rows), and the B3 benchmark measures the provisional gates
+  passing a 12×12 partial grid against its 39×11 ground truth. So the column
+  path now reaches a table here — just a badly binned one — and the
+  measurement above still describes the fixture until #17 step B2 calibrates
+  the gates to refuse or repair that shape.
 
   Fed the same page's real structure, the column path recovers **30 of 30**.
   The op is ready; the remaining missing piece is extraction-side, tracked as

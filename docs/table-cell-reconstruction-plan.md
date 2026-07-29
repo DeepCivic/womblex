@@ -25,8 +25,8 @@ this round. Two principles carry over unchanged from the original plan:
 | A1 — shared `table_grid` + OCR feeder | **Landed** (`#25`, incl. QA fixes) |
 | A2 — skew refusal | **Landed** (with A3) |
 | A3 — wire the OCR-PDF path | **Landed** — the OCR-PDF path emits table elements; narrative subtracted, form pairs de-duplicated |
-| A4 — route the image path | Not started — **next up in Track A** |
-| A5 — conventions + lineage | **Verified for the OCR-PDF path** — element projection, producer marker and single-markdown chunker view observed end-to-end; the image path repeats the check at A4 |
+| A4 — route the image path | **Closed — no such path.** Images already route through the orchestrator (`extract_text` sends everything `fitz` opens there), so A3 covered them. The unreachable `ImageExtractor` was deleted rather than wired up; routing is now pinned by test |
+| A5 — conventions + lineage | **Verified** — element projection, producer marker and single-markdown chunker view observed end-to-end on the OCR path (A3), which is the path images take too |
 | B0 — fix the table metric | **Landed** (`#26`) — steering corrected; GT aggregation drops stray Table runs (`MIN_TABLE_GT_SPANS=3`); EXTRACTION.md refreshes on next full accuracy run |
 | B1 — decompose the measurement | **B1.2 landed** (`#26`, `tests/test_table_benchmark.py`) — GT-rect-conditioned reconstruction, no detector in the loop. Stage 1 is the existing per-class F1 (fixed by B0); stage 3 (end-to-end, detector included) is now *possible* on the OCR-PDF path after A3 but is not yet written — it rides with B4 |
 | B2 — metric set + gate calibration | Not started — inherits three specifics from A1 plus the `dense_text_548` partial-grid finding from B3 (see Open decisions) |
@@ -42,7 +42,7 @@ putting unmeasured grids into parquet shards. What remains true is that the
 precision gates in `ocr_tables.py` are still provisional structural
 constants, not calibrated thresholds — B2 owns that, and it now calibrates
 against a live path rather than a dormant one. Remaining order:
-`A4 → B2 → B4/B5`.
+`B2 → B4/B5`.
 
 ## Where tables come from today (why this scope is enough)
 
@@ -51,14 +51,14 @@ against a live path rather than a dormant one. Remaining order:
 | Native PDF | `_find_native_tables` — PyMuPDF `find_tables` (lines + text strategies), cross-checked, cellified (`orchestrator.py:104`, `:124`) | **Works.** Covers the digital-native majority of the round-1 corpus |
 | Spreadsheet-print PDF | `ingest/spreadsheet_print.py` behind its qualifier | **Works** |
 | OCR'd PDF page | `_layout_blocks_and_tables` detects the region → `reconstruct_table` cellifies it | **Works** as of A3 (refuses below the gates, and on deskewed pages per A2) |
-| OCR'd image file | `ImageExtractor` never calls the layout pass | **The remaining gap.** A4 closes it |
+| OCR'd image file | Same route as an OCR'd PDF page — `fitz` opens the image as a one-page doc, the orchestrator dispatches `_apply_ocr_page` | **Works** as of A3. Not a separate path; the `ImageExtractor` this table once named was unreachable (see A4) |
 | LLM-OCR (mistral-ocr, ollama) | Markdown, no regions | Out of scope (A0) |
 
-Everything downstream of `TableData` already works: `_table_to_element`
-(`orchestrator.py:250`) cellifies it, `_accum_to_elements` (:295) places it
-by (y, x), the writer denormalises to `table_cells.parquet`. **The only
-missing piece is producing a `TableData` on the OCR paths.** No schema
-change, no new element kind.
+Everything downstream of `TableData` already works: `table_to_element`
+(`views.py`) cellifies it,
+`_accum_to_elements` places it by (y, x), the writer denormalises to
+`table_cells.parquet`. **The only missing piece was producing a
+`TableData` on the OCR paths.** No schema change, no new element kind.
 
 ---
 
@@ -211,8 +211,11 @@ between OCR and YOLO as a shortcut — sharing the preprocessed image feeds
 the layout model binarised grayscale, a distribution shift that silently
 moves B1's detection metric.
 
-`ImageExtractor` doesn't preprocess (:518-520), so the image path has no
-mismatch and no refusal condition.
+(The original plan text noted that `ImageExtractor` doesn't preprocess, so
+"the image path has no mismatch and no refusal condition". A4 established
+there is no separate image path: images go through `_apply_ocr_page`,
+which *does* preprocess, so a skewed image page refuses exactly as a
+skewed PDF page does.)
 
 **What landed.** `_layout_blocks_and_tables` gained `page_deskewed: bool`,
 which drops the cell source alongside the A0 dimension guard — the two
@@ -288,18 +291,75 @@ runs *before* the form call so it has the consumed set to filter with (forms
 are collected separately and appended per page, so element order is
 unaffected). The `SCANNED_MACHINEWRITTEN` grid fallback was left alone.
 
-### A4 — route the image path
+### A4 — route the image path — **closed: the path did not exist**
 
-`ImageExtractor.extract` (:500) never calls `_layout_blocks_and_tables` —
-one page-wide paragraph per page (:533). It already holds
-`page_result.regions` and `pix`. Wrinkles: it builds `Element`s directly
-rather than via `_accum_to_elements` (so `_table_to_element` needs a shared
-home), tables must interleave by y rather than append, the LLM branch
-(:521-524) passes through untouched per A0, and the A3 narrative-subtraction
-rule applies identically — the page-wide paragraph currently contains the
-table text.
+**The premise was wrong, and QA caught it after the first implementation.**
+A4 was written against `ImageExtractor.extract`, which never called
+`_layout_blocks_and_tables` and emitted one page-wide paragraph per page.
+That description of the *class* was accurate. What it got wrong is that
+the class is reachable at all.
 
-### A5 — post-processing conventions and lineage — **verified for the OCR-PDF path**
+`extract_text` gates the legacy path-based dispatch on
+`doc_type in (SPREADSHEET, DOCX, TEXT)` (`extract.py`). **`IMAGE` is not in
+that tuple** — it falls through to `fitz.open()` +
+`extract_pdf_with_plan`, because PyMuPDF opens a standalone image as a
+one-page document. So `get_extractor`'s `DocumentType.IMAGE` case was
+unreachable from the only call site that existed, and `ImageExtractor` was
+dead on every production *and* measurement path (the accuracy suites call
+`extract_text` or `get_paddle_reader` directly).
+
+Measured, not inferred — a real `.png` through the real `extract_text()`
+with OCR and layout stubbed:
+
+```
+ImageExtractor reached: False
+element kinds: ['paragraph', 'table']
+  paragraph text: 'Narrative line one\nNarrative line two'
+  table meta: {'context_producer': 'table_grid'} extractor: ocr_paddle
+  header row: ['H1', 'H2', 'H3', 'H4']
+```
+
+Table element, producer marker, narrative subtracted. **A3 closed the
+image gap when it wired the orchestrator** — images had been going through
+`_apply_ocr_page` all along.
+
+**What landed instead.** The first A4 implementation (wiring the layout
+pass into `ImageExtractor`, ~45 lines plus 9 tests) was reverted: it
+changed no production behaviour and made a dead class a *more* faithful
+parallel of the orchestrator, against this plan's own anti-duplication
+principle and CLAUDE.md's "delete the Womblex code rather than carrying a
+parallel implementation". Deleted instead:
+
+- `ImageExtractor` itself, and the now-orphaned imports it held.
+- `get_extractor`'s unreachable `DocumentType.IMAGE` case. Its `dpi` /
+  `lang` / `engine` / `engine_options` parameters went with it — they
+  existed only to construct `ImageExtractor`, and a function that silently
+  ignores an `engine=` argument is a trap. The signature is now
+  `get_extractor(profile)` and the return type narrows to
+  `PathExtractionStrategy`, dropping a `type: ignore` at the call site.
+- The `strategies.py` re-export.
+
+`table_to_element` stays in `ingest/views.py` (moved out of the
+orchestrator during the reverted attempt) — with the reverse projections
+it is the whole view↔element mapping in one file. It has one caller.
+
+Tests: `TestImageDocumentsRouteThroughTheOrchestrator` replaces the
+deleted cohort — it drives a real `.png` through `extract_text` and
+asserts the table element, its producer marker, the subtracted narrative,
+and that `get_extractor` now refuses `IMAGE`. That pins the routing, so a
+future change reintroducing an image bypass fails here rather than
+silently losing table reconstruction on every image input.
+
+**Stale claims this corrected**, all of which predated the attempt: the
+"Where tables come from today" row calling the image path "the remaining
+gap"; steering's "every image input (the whole DocLayNet/FUNSD fixture
+shape) is still unchanged — this is now the largest remaining piece of
+#17"; `money.md`'s "through `ImageExtractor`, which still never calls the
+layout pass"; `get_extractor`'s docstring listing IMAGE among the types it
+handles; and the generated `EXTRACTION.md` strategy-matrix row
+`| IMAGE | ImageExtractor (legacy) | Direct PaddleOCR |`.
+
+### A5 — post-processing conventions and lineage — **verified on both OCR paths**
 
 The two mandated provenance fields below landed with A1
 (`reconstruct_table` sets confidence from the constituent regions and
@@ -311,10 +371,11 @@ cellified `kind="table"` with `header_rows=[0]`, that
 `meta["context_producer"] == "table_grid"` survives the existing
 `context_* → meta` copy with no schema change, that the narrative
 paragraph beside it holds no table text, and that
-`collect_tables_from_elements` yields exactly one markdown table. The
-image path repeats the check at A4.
+`collect_tables_from_elements` yields exactly one markdown table.
+`TestImageDocumentsRouteThroughTheOrchestrator` observes the same
+conventions from the `extract_text` entry point on an image input (A4).
 
-Because Track A produces a `TableData` and reuses `_table_to_element`, every
+Because Track A produces a `TableData` and reuses `table_to_element`, every
 downstream composed stage consumes reconstructed tables through the existing
 conventions — verified, not assumed:
 
@@ -545,9 +606,11 @@ config default change to an LLM engine can't turn the gates into no-ops.
 ## Sequencing
 
 Planned: `B0 → B3 rendered-GT harness + B1.2 → A1 → A3 → A4 → B2 breadth →
-B4/B5`. Actual: A1 landed first (deviation recorded in Status above).
-Everything since has followed the plan. Remaining: **`A4 → B2 breadth →
-B4/B5`**.
+B4/B5`. Actual: A1 landed first (deviation recorded in Status above), and
+A4 turned out to be a no-op — the path it targeted was unreachable, so it
+closed by deleting dead code rather than by adding any. Remaining:
+**`B2 breadth → B4/B5`** — Track A is complete for the region-based
+engines it was scoped to (A0).
 
 B0 went first because it was a live doc/metric defect. The rendered-GT
 harness and B1.2 landed before A3 as planned — the measurement existed
@@ -557,12 +620,14 @@ along with A3's wiring as intended.
 
 One consequence of the ordering to keep in view: A3 is live but B2 has not
 calibrated the gates, so the constants in `ocr_tables.py` remain
-provisional *in production*, not just in the abstract. The rendered-clean
-cohort says they are safe on the target shape (6/6 exact structure); the
-`dense_text_548` partial says they do not yet refuse the hard shape. Until
-B2 lands, a hard-shape table on an OCR'd page can produce a low-quality
-grid rather than silence — visible in the parquet via
-`meta["context_producer"] = "table_grid"` and the element confidence.
+provisional *in production*, not just in the abstract — and A4 established
+that this covers image inputs too, not just PDFs. The rendered-clean
+cohort says they are safe on
+the target shape (6/6 exact structure); the `dense_text_548` partial says
+they do not yet refuse the hard shape. Until B2 lands, a hard-shape table
+on an OCR'd page can produce a low-quality grid rather than silence —
+visible in the parquet via `meta["context_producer"] = "table_grid"` and
+the element confidence.
 
 ## Deferred to a later round (recorded so they aren't relitigated)
 

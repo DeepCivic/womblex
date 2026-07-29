@@ -91,11 +91,26 @@ Two changes are required, and the second is easy to miss:
   still provisional pending B2 calibration.
   (`ingest/grid_projection.py`, previously cited here, projects page-level
   prose gutters rather than cells — it was not a usable feeder.)
-- **Route standalone images through it — still open (A4).**
-  `ImageExtractor.extract` emits one page-wide `paragraph` element per page
-  and never calls `_layout_blocks_and_tables` at all. With only the OCR-PDF
-  path fixed, every image input (the whole DocLayNet/FUNSD fixture shape) is
-  still unchanged — this is now the largest remaining piece of #17.
+- **Route standalone images through it — no route needed (A4).** This bullet
+  previously claimed image inputs (the whole DocLayNet/FUNSD fixture shape)
+  were still unchanged after A3, because `ImageExtractor.extract` never calls
+  `_layout_blocks_and_tables`. **That was wrong about which code runs.**
+  `extract_text` gates the legacy path-based dispatch on
+  `(SPREADSHEET, DOCX, TEXT)`; `IMAGE` is not in it and falls through to
+  `fitz.open()` + `extract_pdf_with_plan`, since PyMuPDF opens an image as a
+  one-page document. Images have always gone through `_apply_ocr_page`, so A3
+  fixed them at the same time as scanned PDFs — verified by driving a real
+  `.png` through `extract_text` and observing a cellified `table` element with
+  `context_producer=table_grid`. The unreachable `ImageExtractor` and
+  `get_extractor`'s dead `IMAGE` case have been deleted, and the routing is
+  pinned by `TestImageDocumentsRouteThroughTheOrchestrator`.
+
+**What remains on #17** is Track B, not Track A: the precision gates in
+`ingest/ocr_tables.py` are structural constants that have not been calibrated
+(B2), and the benchmark's table section and regression gates are not yet wired
+into `accuracy/EXTRACTION.md` (B4/B5). Until B2 lands, a hard-shape table
+(stacked spanning headers, hierarchical rows) can produce a low-quality grid
+rather than refusing — see the plan's `dense_text_548` measurement.
 
 **Measured payoff.** Feeding the same page's real grid through the money op's
 column classifier recovers 30 of 30 amounts, versus 1 today — the consuming

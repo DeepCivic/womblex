@@ -1,8 +1,14 @@
-"""Extraction strategies for scanned and hybrid PDF documents.
+"""OCR primitives for scanned pages, consumed by the orchestrator.
 
 Covers SCANNED_MACHINEWRITTEN, SCANNED_HANDWRITTEN, SCANNED_MIXED,
 HYBRID, and IMAGE document types — all requiring OCR (PaddleOCR by
 default, or an LLM/VLM engine such as Mistral OCR via AWS Bedrock).
+
+These are page-level primitives, not document-level strategies: every
+one of the types above is dispatched per page by
+``orchestrator.extract_with_plan``. Images are no exception — ``fitz``
+opens one as a single-page document, so it reaches the same
+``_apply_ocr_page`` path a scanned PDF page does.
 """
 
 from __future__ import annotations
@@ -14,18 +20,12 @@ import fitz
 
 from womblex.ingest.elements import TEXT_KINDS
 from womblex.ingest.extract import (
-    ExtractionMetadata,
-    ExtractionResult,
-    PageResult,
     TableData,
     TextBlock,
-    _extract_images_from_page,
     _normalise_bbox,
     _normalise_rect,
     _ocr_text_block,
-    _page_to_gray,
     _pixmap_to_array,
-    _text_coverage,
 )
 from womblex.ingest.interfaces.protocols import OCRRegionResult
 from womblex.ingest.ocr_tables import reconstruct_table, regions_in_rect, span_from_region
@@ -513,90 +513,3 @@ def _layout_blocks_and_tables(
             blocks = [block]
 
     return blocks, tables, consumed
-
-
-# ---------------------------------------------------------------------------
-# 8. image
-# ---------------------------------------------------------------------------
-
-
-class ImageExtractor:
-    """Extract text and metadata from standalone image files / image PDFs."""
-
-    def __init__(
-        self,
-        dpi: int = 200,
-        lang: str = "eng",
-        engine: str = "paddleocr",
-        engine_options: dict | None = None,
-    ) -> None:
-        self.dpi = dpi
-        self.lang = lang
-        self.engine = engine
-        self.engine_options = engine_options or {}
-
-    def extract(self, doc: fitz.Document) -> ExtractionResult:
-        from womblex.ingest.elements import Element
-        from womblex.ingest.heuristics_cv2 import calculate_blur_score
-
-        pages: list[PageResult] = []
-        elements: list[Element] = []
-        order = 0
-        confidences: list[float] = []
-        steps: list[str] = []
-
-        reader = get_ocr_reader(engine=self.engine, lang=self.lang, **self.engine_options)
-
-        for page in doc:
-            gray = _page_to_gray(page, dpi=self.dpi)
-            blur = calculate_blur_score(gray)
-            if blur is not None and blur < 50:
-                steps.append("low_blur_warning")
-
-            pix = page.get_pixmap(dpi=self.dpi)
-            img = _pixmap_to_array(pix)
-            page_result = reader.read_page(img)
-            if page_result.reading_order_native and page_result.markdown is not None:
-                text = page_result.markdown.strip()
-            else:
-                text = "\n".join(r.text for r in page_result.regions if r.text.strip())
-            avg_conf = page_result.confidence * 100.0
-            confidences.append(avg_conf)
-
-            pages.append(PageResult(page_number=page.number, text=text, method="ocr"))
-
-            pw, ph = page.rect.width, page.rect.height
-            page_conf = avg_conf / 100 if avg_conf else 0.0
-            if text.strip():
-                elements.append(Element(
-                    order=order, kind="paragraph", extractor="ocr_paddle",
-                    page=page.number,
-                    bbox=_normalise_bbox((0, 0, pw, ph), pw, ph),
-                    text=text.strip(), confidence=page_conf,
-                ))
-                order += 1
-            for im in _extract_images_from_page(page):
-                elements.append(Element(
-                    order=order, kind="image", extractor="figure_image",
-                    page=page.number, bbox=im.position,
-                    alt_text=im.alt_text, confidence=im.confidence,
-                ))
-                order += 1
-
-        avg_conf_doc = sum(confidences) / len(confidences) if confidences else 0.0
-        coverage = _text_coverage(pages)
-        unique_steps = sorted(set(steps))
-
-        return ExtractionResult(
-            pages=pages,
-            elements=elements,
-            method="image",
-            metadata=ExtractionMetadata(
-                extraction_strategy="image",
-                confidence=avg_conf_doc / 100 if avg_conf_doc else 0.0,
-                processing_time=0.0,
-                page_count=len(doc),
-                text_coverage=coverage,
-                preprocessing_steps=unique_steps,
-            ),
-        )

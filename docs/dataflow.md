@@ -26,7 +26,8 @@ Raw files (PDF / DOCX / CSV / XLSX)
 ┌───────────────────┐
 │   extract_text    │  → list[ExtractionResult]  (single-element list per source)
 │  (ingest/extract) │    PDFs route via orchestrator (per-page dispatch);
-│                   │    non-PDFs via get_extractor (DOCX / spreadsheet / text / image).
+│                   │    images too (fitz opens one as a 1-page doc);
+│                   │    only DOCX / spreadsheet / text via get_extractor.
 └───────────────────┘
         │
         ▼
@@ -102,7 +103,9 @@ For each file processed via `operations.py`:
       └── Spreadsheet: reads first 500 rows → _classify_sheet() per sheet
             └── populates DocumentProfile.sheet_meta: list[SheetInfo]
 
-2. get_extractor(profile) → ExtractionStrategy | SpreadsheetExtractor | DocxExtractor
+2. get_extractor(profile) → SpreadsheetExtractor | DocxExtractor | TextExtractor
+      (path-based formats only; every fitz-openable input, images included,
+       goes to the orchestrator instead)
 
 3. extract_text(path, profile) → list[ExtractionResult]  (single-element list per source)
       ├── PDF path → orchestrator (page-by-page dispatch)

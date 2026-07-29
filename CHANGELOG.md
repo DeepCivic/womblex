@@ -203,7 +203,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deskewed space is deferred to the round that targets real scans. Flat
   contemporary documents, round 1's target, almost never trip deskew.
 
-  The image path (`ImageExtractor`) is still untouched — that is A4.
+  The image path is untouched by A3 — that was A4's scope, which turned
+  out to be a no-op (below).
+
+- **Table-cell reconstruction on OCR'd pages (#17), step A4 — images were
+  never a separate path; the dead extractor is gone.** A4 was scoped to
+  route `ImageExtractor` through the layout pass, on the premise that
+  standalone images bypassed table reconstruction. The premise was wrong:
+  `extract_text` gates the legacy path-based dispatch on
+  `(SPREADSHEET, DOCX, TEXT)`, and `IMAGE` is not in it — it falls through
+  to `fitz.open()` + `extract_pdf_with_plan`, because PyMuPDF opens an
+  image as a one-page document. Images have always reached
+  `_apply_ocr_page`, so **A3 already gave them table reconstruction**;
+  verified by driving a real `.png` through `extract_text` and observing a
+  cellified `table` element carrying `context_producer=table_grid` beside a
+  narrative paragraph with the table text subtracted.
+
+  `ImageExtractor` was therefore unreachable from every production and
+  measurement path (the accuracy suites call `extract_text` or
+  `get_paddle_reader` directly). It is deleted, along with `get_extractor`'s
+  unreachable `DocumentType.IMAGE` case and the `strategies.py` re-export.
+  `get_extractor`'s `dpi` / `lang` / `engine` / `engine_options` parameters
+  go with it — they existed only to construct `ImageExtractor`, and a
+  function that silently ignores an `engine=` argument is a trap; the
+  signature is now `get_extractor(profile)`, returning
+  `PathExtractionStrategy`.
+
+  This is a **breaking change for direct importers** of
+  `womblex.ingest.strategies.ImageExtractor`,
+  `womblex.ingest.strategies_scanned.ImageExtractor`, or `get_extractor`'s
+  removed keyword arguments. Nothing inside womblex used any of them. Route
+  images through `extract_text` instead — it is what the pipeline does.
+
+  `TestImageDocumentsRouteThroughTheOrchestrator` pins the routing from the
+  `extract_text` entry point, so a future change reintroducing an image
+  bypass fails there rather than silently losing table reconstruction on
+  every image input. `table_to_element` moved from the orchestrator to
+  `ingest/views.py`, joining the reverse projections so the whole
+  view↔element mapping is in one file; its body is unchanged.
+
+  Stale claims corrected in the same pass, all of which predated this work:
+  steering's "every image input … is still unchanged"; `money.md`'s note
+  that `dense_text_548` is out of reach because it is a PNG (it is reached
+  — what limits it is grid quality on a stacked-header table, which #17 B2
+  owns); `get_extractor`'s docstring; CLAUDE.md's and dataflow's
+  "non-PDFs via `get_extractor`"; and the generated EXTRACTION.md
+  strategy-matrix row `| IMAGE | ImageExtractor (legacy) | Direct PaddleOCR |`.
 
 ### Fixed
 - **A declined continental number no longer leaks its decimal tail as an

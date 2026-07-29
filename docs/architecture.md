@@ -38,8 +38,8 @@ src/womblex/
 │   ├── spreadsheet_print.py   # Multi-page table extractor for spreadsheet-printed PDFs
 │   ├── morphology.py          # Page-image morphology helpers (handwriting / glyph regularity)
 │   ├── grid_projection.py     # Column-aware text reconstruction (block-aware paragraph emission)
-│   ├── strategies.py          # Re-export shim — non-PDF extractors + legacy ImageExtractor
-│   ├── strategies_scanned.py  # OCR primitives (_ocr_page, _layout_blocks_and_tables) + ImageExtractor
+│   ├── strategies.py          # Re-export shim — path-based (non-fitz) extractors
+│   ├── strategies_scanned.py  # OCR primitives (_ocr_page, _layout_blocks_and_tables)
 │   ├── strategies_file.py     # Non-PDF extractors (DOCX, plain text, non-textual)
 │   ├── interfaces/
 │   │   └── protocols.py       # Backend protocols: OCRReader, LayoutAnalyzer, Preprocessor
@@ -158,7 +158,7 @@ Defensive classification: uncertain documents route to `UNKNOWN` rather than a w
 
 ### 2. Ingest — Extraction
 
-`extract.py` defines the `ExtractionStrategy` and `PathExtractionStrategy` protocols, shared helpers, and the `extract_text()` dispatcher. PDFs route via the per-page orchestrator (`ingest/orchestrator.py` + `ingest/page_profile.py`); the per-doc `Native*` / `Scanned*` / `Hybrid` / `Structured` strategy classes have been removed and their bodies inlined into the orchestrator's per-page operations (`_apply_native_page`, `_apply_ocr_page`). Non-PDF extractors live in `strategies_scanned.py` (OCR primitives + the legacy `ImageExtractor`) and `strategies_file.py` (DOCX, plain text); `strategies.py` re-exports for back-compat. `spreadsheet.py` handles CSV and Excel files.
+`extract.py` defines the `ExtractionStrategy` and `PathExtractionStrategy` protocols, shared helpers, and the `extract_text()` dispatcher. PDFs route via the per-page orchestrator (`ingest/orchestrator.py` + `ingest/page_profile.py`); the per-doc `Native*` / `Scanned*` / `Hybrid` / `Structured` strategy classes have been removed and their bodies inlined into the orchestrator's per-page operations (`_apply_native_page`, `_apply_ocr_page`). Standalone images take the orchestrator path too — `fitz` opens one as a single-page document, so it reaches the same `_apply_ocr_page` dispatch a scanned PDF page does; `get_extractor()` is reached only by the path-based formats. OCR primitives live in `strategies_scanned.py` and the file-format extractors in `strategies_file.py` (DOCX, plain text); `strategies.py` re-exports for back-compat. `spreadsheet.py` handles CSV and Excel files.
 
 `extract_text()` logs the strategy selection (`doc, type, confidence, strategy`) at INFO level, then always returns `list[ExtractionResult]`. PDF, DOCX, and spreadsheet paths each return a single-element list (one result per source file). The list shape is retained for call-site symmetry. Spreadsheet cells live as `kind='sheet_cell'` elements on the single result; `_classify_sheet` survives as a detection-time metadata helper but no longer routes extraction.
 

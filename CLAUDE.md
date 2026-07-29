@@ -51,8 +51,11 @@ result, not a switch. PDF strategy classes (`Native*`, `Scanned*`,
 into the orchestrator's per-page operations
 (`_apply_native_page`, `_apply_ocr_page`).
 
-`get_extractor()` only handles non-PDF types (DOCX, SPREADSHEET, TEXT,
-IMAGE). For any PDF, `extract_text()` calls `extract_pdf_with_plan()`.
+`get_extractor()` only handles the path-based formats (DOCX, SPREADSHEET,
+TEXT). Everything `fitz` can open — PDFs **and standalone images** —
+routes through `extract_text()` → `extract_pdf_with_plan()`; PyMuPDF
+opens an image as a one-page document, so it gets the same per-page OCR
+dispatch a scanned PDF page does. There is no separate image extractor.
 
 ### Redaction is a post-extraction concern
 Redaction runs as a separate operation after extraction via `redact/stage.py`. The redaction detector misfires on form fields, chart regions, and diagram fills when called inside `_ocr_page()`, suppressing legitimate text. Do not call `pre_ocr_mask` from within extraction strategies.
@@ -92,7 +95,7 @@ A corpus exists to mature Womblex capability, not host custom code. Corpus-side 
 | `ingest/spreadsheet_print.py` | Multi-page table extraction for spreadsheet-printed PDFs (FOI manifests, schedules, registers); header/metadata-block capture, rotation handling; grid inference via `table_grid` | Run on every doc — gated by qualifier |
 | `ingest/table_grid.py` | Shared table-grid geometry (`Span`/`Column`, y-band binning, data-anchored column clustering, row assembly, centroid row clustering) — one algorithm for both feeders; point-space tolerances as dpi-scalable parameters | Know about PDFs, OCR engines, or parquet |
 | `ingest/ocr_tables.py` | OCR table feeder: `reconstruct_table(regions, table_rect, dpi, conf)` → `TableData` or `None` below its precision gates; quad→span reduction, `regions_in_rect` | Detect table regions (layout model does); handle LLM-OCR output (no regions) |
-| `ingest/strategies_scanned.py` | OCR primitives (`_ocr_page`, `_layout_blocks_and_tables`, `_ocr_image_regions`) used by the orchestrator + the legacy `ImageExtractor` | Doc-level extraction strategies (those are gone for PDFs) |
+| `ingest/strategies_scanned.py` | OCR primitives (`_ocr_page`, `_layout_blocks_and_tables`, `_ocr_image_regions`) used by the orchestrator | Doc-level extraction strategies (gone for PDFs *and* images — `ImageExtractor` was deleted as unreachable) |
 | `ingest/strategies_file.py` | `DocxExtractor`, `TextExtractor`, `NonTextualExtractor` for non-PDF formats | PDF extraction |
 | `ingest/morphology.py` | Page-image morphology helpers — handwriting / glyph regularity / stroke-width variance / OCR confidence sampling | Know about document semantics |
 | `ingest/records.py` | Pre-extracted text records → element shards that *feed* the NLP pipeline (`source_hash = sha256(id+text)`, one paragraph element per blank-line block, provenance sidecar). Corpus-agnostic via `RecordFieldMapping` | Extract from files; bypass the pipeline (that's the register ingests) |
@@ -325,12 +328,15 @@ For new shapes that fit within the existing native/OCR dispatch:
    into `extract_text()` → `extract_pdf_with_plan()`
 
 ### Adding a new non-PDF document type
+Only for formats `fitz` cannot open — anything it can (images included)
+belongs on the orchestrator path, not here.
 1. Add enum value to `DocumentType`
 2. Add detection logic to `detect.py`
 3. Create extractor class in `strategies_file.py` (or a new file-based
    module)
-4. Register in `get_extractor()` in `extract.py` and add to
-   `strategies.py` re-export shim
+4. Register in `get_extractor()` in `extract.py`, add the type to
+   `extract_text()`'s path-based guard, and add to the `strategies.py`
+   re-export shim
 ### Adding a new Isaacus capability
 1. Add wrapper in `analyse/`
 2. Add config section

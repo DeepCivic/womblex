@@ -385,28 +385,22 @@ def _build_text_blocks(page: fitz.Page) -> list[TextBlock]:
 # ---------------------------------------------------------------------------
 
 
-def get_extractor(
-    profile: DocumentProfile,
-    dpi: int = 200,
-    lang: str = "eng",
-    engine: str = "paddleocr",
-    engine_options: dict | None = None,
-) -> ExtractionStrategy | PathExtractionStrategy:
-    """Select the legacy extractor for non-orchestrator document types.
+def get_extractor(profile: DocumentProfile) -> PathExtractionStrategy:
+    """Select the legacy extractor for the path-based, non-orchestrator types.
 
-    Native and scanned PDFs are handled by `extract_pdf_with_plan`
-    (per-page profile + orchestrator) — those types do not appear here.
-    Only IMAGE, SPREADSHEET, DOCX, and TEXT still use the legacy strategy
-    classes.
+    Only SPREADSHEET, DOCX and TEXT reach here — exactly the set
+    ``extract_text`` routes to this function. Everything else, **IMAGE
+    included**, is opened with ``fitz`` and dispatched through
+    ``extract_pdf_with_plan`` (per-page profile + orchestrator): PyMuPDF
+    opens a standalone image as a one-page document, the profiler marks
+    that page as needing OCR, and ``_apply_ocr_page`` handles it with the
+    same layout pass, table reconstruction and form extraction a scanned
+    PDF page gets.
     """
     from womblex.ingest.spreadsheet import SpreadsheetExtractor
     from womblex.ingest.strategies_file import DocxExtractor, TextExtractor
-    from womblex.ingest.strategies_scanned import ImageExtractor
 
-    opts = engine_options or {}
     match profile.doc_type:
-        case DocumentType.IMAGE:
-            return ImageExtractor(dpi=dpi, lang=lang, engine=engine, engine_options=opts)
         case DocumentType.SPREADSHEET:
             return SpreadsheetExtractor(profile=profile)
         case DocumentType.DOCX:
@@ -415,8 +409,9 @@ def get_extractor(
             return TextExtractor()
         case _:
             raise ValueError(
-                f"get_extractor() only handles non-PDF types; got {profile.doc_type}. "
-                "PDFs route through extract_pdf_with_plan."
+                f"get_extractor() only handles SPREADSHEET/DOCX/TEXT; got "
+                f"{profile.doc_type}. Everything else routes through "
+                "extract_pdf_with_plan."
             )
 
 
@@ -445,12 +440,12 @@ def extract_text(
     forwards engine-specific kwargs (e.g. ``model``, ``region``,
     ``base_url``, ``prompt``).
     """
-    # Non-PDF path-based extractors keep the legacy strategy switch for now;
-    # the Phase 2 orchestrator covers PDFs only.
+    # The path-based formats keep the legacy strategy switch: `fitz` cannot
+    # open them, so there are no pages to profile. Everything it *can* open
+    # falls through to the orchestrator below — images included, since a
+    # standalone image opens as a one-page document.
     if profile.doc_type in (DocumentType.SPREADSHEET, DocumentType.DOCX, DocumentType.TEXT):
-        extractor: PathExtractionStrategy = get_extractor(  # type: ignore[assignment]
-            profile, dpi=dpi, lang=lang, engine=engine, engine_options=engine_options,
-        )
+        extractor: PathExtractionStrategy = get_extractor(profile)
         logger.info(
             "strategy selected: doc=%s type=%s confidence=%.2f strategy=%s",
             path.name, profile.doc_type.value, profile.confidence,

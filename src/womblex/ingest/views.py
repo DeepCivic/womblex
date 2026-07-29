@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from womblex.ingest.elements import TEXT_KINDS, BBox, Element
+from womblex.ingest.elements import TEXT_KINDS, BBox, Cell, Element
 
 if TYPE_CHECKING:
     from womblex.redact.stage import RedactionReport
@@ -67,6 +67,37 @@ class TextBlock:
     position: Position
     block_type: str
     confidence: float
+
+
+# ---------------------------------------------------------------------------
+# Forward projection (view -> element)
+# ---------------------------------------------------------------------------
+
+
+def table_to_element(
+    t: TableData, page: int | None, extractor: str, order: int,
+) -> Element:
+    """Build a kind='table' element by re-cellifying a legacy TableData.
+
+    Headers become row 0; data rows shift to rows 1..n. Header row index
+    captured in ``header_rows`` so the legacy projection round-trips.
+
+    Sits beside the ``TableData`` view it reads and the reverse projections
+    below, so both directions of the view↔element mapping are in one file.
+    """
+    cells: list[Cell] = []
+    for col_idx in range(len(t.headers)):
+        cells.append(Cell(row=0, col=col_idx, value=t.headers[col_idx]))
+    for row_idx, row in enumerate(t.rows, start=1):
+        for col_idx in range(len(row)):
+            cells.append(Cell(row=row_idx, col=col_idx, value=row[col_idx]))
+    return Element(
+        order=order, kind="table", extractor=extractor,
+        page=page, bbox=t.position,
+        cells=cells, header_rows=[0] if t.headers else [],
+        confidence=t.confidence,
+        meta={**({"context_" + k: v for k, v in t.context.items()} if t.context else {})},
+    )
 
 
 # ---------------------------------------------------------------------------
