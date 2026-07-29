@@ -28,9 +28,9 @@ this round. Two principles carry over unchanged from the original plan:
 | A4 — route the image path | **Closed — no such path.** Images already route through the orchestrator (`extract_text` sends everything `fitz` opens there), so A3 covered them. The unreachable `ImageExtractor` was deleted rather than wired up; routing is now pinned by test |
 | A5 — conventions + lineage | **Verified** — element projection, producer marker and single-markdown chunker view observed end-to-end on the OCR path (A3), which is the path images take too |
 | B0 — fix the table metric | **Landed** (`#26`) — steering corrected; GT aggregation drops stray Table runs (`MIN_TABLE_GT_SPANS=3`); EXTRACTION.md refreshes on next full accuracy run |
-| B1 — decompose the measurement | **B1.2 landed** (`#26`, `tests/test_table_benchmark.py`) — GT-rect-conditioned reconstruction, no detector in the loop. Stage 1 is the existing per-class F1 (fixed by B0); stage 3 (end-to-end, detector included) is now *possible* on the OCR-PDF path after A3 but is not yet written — it rides with B4 |
+| B1 — decompose the measurement | **B1.2 landed** (`#26`, `tests/test_table_benchmark.py`) — GT-rect-conditioned reconstruction, no detector in the loop. Stage 1 is the existing per-class F1 (fixed by B0); stage 3 (end-to-end, detector included) is now *possible* on the OCR-PDF path after A3 but is **still unwritten** — B4 wired the B1.2 numbers into the report, not a stage-3 harness. Deferred to the scan round with the other end-to-end work |
 | B2 — metric set + gate calibration | **Landed** — `MIN_ROW_FILL_RATIO=0.75` (row-fill density) added to `ocr_tables`, calibrated against the rendered-clean cohort (fill ≥ 0.98, all pass) and the false-table set (fill ≤ 0.49, all refuse). Metric set (`tabular_metrics` via an alignment projection), false-table cohort, and the A.6 GT checker landed in `tests/test_table_benchmark.py` |
-| B4 — report + docs wiring | Not started |
+| B4 — report + docs wiring | **Landed** — `## Table Reconstruction` section in `generate_extraction_report` (three cohorts: rendered-clean/tracking/false-table), directly under the per-class layout section it decomposes; `_results["tables"]` populated by `test_table_benchmark.py` (aliased into the shared accumulator, so the existing `write_report` finaliser renders it). `evaluation.md` §2b added (document-table reconstruction, distinct from §2's spreadsheet→parquet); CHUNKING.md knock-on noted. EXTRACTION.md refreshes on next full accuracy run |
 | B5 — regression guard | Not started |
 
 **Sequencing deviation, resolved:** A1 landed *before* B0/B3/B1.2, against
@@ -41,7 +41,7 @@ putting unmeasured grids into parquet shards. The precision gates in
 `ocr_tables.py` were provisional structural constants until **B2 calibrated
 them against a live path** — a density gate now refuses the shapes the
 false-table cohort and the hard fixture exposed. Remaining order:
-`B4/B5`.
+`B5`.
 
 ## Where tables come from today (why this scope is enough)
 
@@ -486,6 +486,10 @@ detector recall:
    `reconstruct_table` and measure the grid. This is the number that tracks
    A1, tunable without the detector in the loop.
 3. **End-to-end** — real pipeline, detector included; the product of 1 × 2.
+   *Not written in round 1.* B1.2 (stage 2) is what tracks the reconstructor,
+   and A3 makes stage 3 *possible* on the OCR-PDF path, but a detector-in-the-
+   loop harness is deferred to the scan round (see Deferred) — B4 reports the
+   stage-2 numbers, not a blended end-to-end score.
 
 ### B2 — the metric set — **landed**
 
@@ -546,7 +550,8 @@ match. The false-table cohort is `TestFalseTableCohort` (whole-page rect →
 refusal asserted; the FP count is 0 and gates the build). The A.6 GT
 checker is `TestGroundTruthAcceptance` (see Appendix A.6). Deferred as
 planned: `key_column_preservation` wiring (the CSV's key column is not in
-the rendered subset) and the money task metric (rides with B4's report).
+the rendered subset) and the money task metric (no labelled money GT
+exists — B4 records the omission rather than quoting a fabricated recall).
 
 ### B3 — ground truth: rendered-clean is primary, dense scan tracks
 
@@ -610,7 +615,7 @@ refused — the precision-first round-1 outcome. It remains tracking, not
 gated: the benchmark asserts only the invariant that it never emits a full
 false 39×11 grid.
 
-### B4 — report + docs wiring
+### B4 — report + docs wiring — **landed**
 
 - New `_results["tables"]` entries → a `## Table Reconstruction` section in
   `generate_extraction_report` (extend EXTRACTION.md, directly under the
@@ -625,6 +630,42 @@ false 39×11 grid.
 - **Knock-on: CHUNKING.md.** Landing tables on OCR pages changes chunk
   counts and composition — regenerate and sanity-check in the same run.
 - All regeneration via the test run (`write_report`, :725). Never hand-edit.
+
+**What landed.** `_table_reconstruction_section` in
+`tests/accuracy_reports.py` emits `## Table Reconstruction` directly under
+the DocLayNet per-class layout section it decomposes, in three sub-tables:
+**Rendered-Clean + Tracking** (fixture, GT r×c, got r×c, outcome, cell
+match, data integrity, structural pass/fail, gate/track status) and a
+separate **False-Table Cohort** table so the precision guardrail is visible
+rather than buried, headed by the live FP count. `test_fixture_accuracy`'s
+`_results` accumulator gained a `"tables"` key, and
+`tests/test_table_benchmark.py` now *aliases* its module `_results` list to
+that key (falling back to a private list if the module is imported in
+isolation) — so every entry it already records lands in the shared
+accumulator with no duplicate plumbing, and the existing session-scoped
+`write_report` finaliser renders it into `EXTRACTION.md` on the next full
+run. No new fixture session, no second report writer.
+
+Two deliberate calls beyond the plan text:
+
+- **Money recall is *not* a column.** The plan listed it, but there is no
+  labelled money ground truth in the benchmark (`docs/money.md`), so no
+  honest recall figure can be quoted — a fabricated column is worse than an
+  explicit omission. The section notes the omission and points at the
+  `table_cell` locus that makes reconstructed tables column-classifiable
+  regardless; the money task metric remains deferred (B2 already deferred it).
+- **CHUNKING.md was annotated, not regenerated.** Its numbers date from
+  2026-03-22 and its generator is still unwritten (per CHANGELOG); rather
+  than hand-edit fabricated counts, the table-reconstruction knock-on is
+  recorded under Known Limitations #4 with the note that the counts predate
+  tables landing on OCR pages and shift on the next full regeneration.
+
+`docs/evaluation.md` gained §2b (Document-Table Reconstruction Accuracy),
+kept distinct from §2 (spreadsheet-file → parquet): §2b's grid is *inferred*
+from OCR quads and can be wrong, §2's source is already a grid. It records
+the two-stage decomposition (detection = §1's layout F1; reconstruction =
+B1.2 conditioned on a correct rect) and the full metric set including the
+false-table rate and A.6 GT acceptance.
 
 ### B5 — regression guard
 
@@ -644,8 +685,11 @@ Planned: `B0 → B3 rendered-GT harness + B1.2 → A1 → A3 → A4 → B2 bread
 B4/B5`. Actual: A1 landed first (deviation recorded in Status above), and
 A4 turned out to be a no-op — the path it targeted was unreachable, so it
 closed by deleting dead code rather than by adding any. Remaining:
-**`B4/B5`** — Track A is complete for the region-based engines it was
-scoped to (A0), and B2 has calibrated the gates.
+**`B5`** — the report and docs wiring landed in B4 (the benchmark section,
+`evaluation.md` §2b, the CHUNKING.md knock-on note); Track A is complete
+for the region-based engines it was scoped to (A0), and B2 has calibrated
+the gates. What is left is turning the benchmark's structural/false-table
+asserts into build-failing CI gates (B5).
 
 B0 went first because it was a live doc/metric defect. The rendered-GT
 harness and B1.2 landed before A3 as planned — the measurement existed
@@ -674,6 +718,10 @@ asserts live in the `benchmark`-marked module today).
   third feeder (mistral-ocr / ollama emit no regions).
 - **TEDS** if the alignment metric proves too coarse.
 - **More real-scan GT** from the full DocLayNet clone.
+- **Stage-3 (end-to-end, detector-in-the-loop) benchmark**: B1's third stage —
+  the product of detection F1 × reconstruction — is possible on the OCR-PDF
+  path after A3 but unwritten; it belongs with the scan round's other
+  end-to-end work, measured once real-scan GT exists to blend against.
 
 ## Open decisions
 

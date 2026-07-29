@@ -172,6 +172,11 @@ _results: dict[str, list[dict]] = {
     "doclaynet_raw": [], "doclaynet_preprocessed": [],
     "womblex": [],
     "act_eci": [],
+    # B4: table reconstruction (B1.2/B2/B3). Populated by
+    # tests/test_table_benchmark.py when that module runs in the same
+    # session; the write_report finaliser below renders it into
+    # EXTRACTION.md's Table Reconstruction section.
+    "tables": [],
 }
 
 

@@ -93,7 +93,19 @@ CSV_PAGES = 3
 XLSX_COLUMN_IDX = [0, 1, 2, 3, 7]
 XLSX_SHEETS = ["Diesel", "Gasoline", "Kerosene"]
 
-_results: list[dict] = []
+# B4: publish into the shared extraction-report accumulator so the
+# ``write_report`` session finaliser in test_fixture_accuracy renders these
+# rows into EXTRACTION.md's Table Reconstruction section. Aliasing the list
+# (not copying) keeps a single source of truth — every append here lands in
+# ``_results["tables"]`` there. Falls back to a private list when that module
+# can't import (e.g. the benchmark OCR stack — cv2 — is absent, or this file
+# is exercised in isolation), so the asserts below still run stand-alone.
+try:
+    from tests.test_fixture_accuracy import _results as _extraction_results
+
+    _results: list[dict] = _extraction_results["tables"]
+except ImportError:  # pragma: no cover - isolated-run fallback
+    _results = []
 
 _DASHES = str.maketrans({c: "-" for c in "‐‑‒–—―"})
 

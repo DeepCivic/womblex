@@ -30,6 +30,24 @@ See `docs/accuracy/` for measured baselines per stage.
 | **Key Column Preservation** | Verifies unique IDs are 100% preserved without duplication. Reports missing keys and duplicate keys. | `utils/tabular_metrics.py → key_column_preservation()` | Source key columns (e.g. `Provider Approval Number`) |
 | **Schema Conformance** | `pyarrow.Schema.equals` — each shard parquet matches its canonical schema (`ELEMENT_SCHEMA`, `TABLE_CELLS_SCHEMA`, `FORM_FIELDS_SCHEMA`, `MANIFEST_SCHEMA`). | `utils/tabular_metrics.py → schema_conformance()` | `store/output.py` schema defs |
 
+## 2b. Document-Table Reconstruction Accuracy
+
+**Scope:** OCR'd PDF page / image → `kind="table"` element with cells
+
+**Status:** Implemented in `ingest/ocr_tables.py` (`reconstruct_table`) over the shared `ingest/table_grid.py` binning; benchmarked in `docs/accuracy/EXTRACTION.md` (§ *Table Reconstruction*). Distinct from §2 — §2 measures a *spreadsheet file* → parquet (the source is already a grid); §2b measures a *table detected on a page image* being reconstructed from OCR quads, where the grid itself is inferred and can be wrong. Round-1 scope is flat, contemporary tables (see `docs/table-cell-reconstruction-plan.md`); hard shapes (skew, stacked spanning headers, hierarchical rows) are refused cleanly, not solved.
+
+Measurement follows the plan's two-stage decomposition: **detection** is the per-class `table` layout F1 (§1's DocLayNet harness); **reconstruction** is scored *conditioned on a correct table rect* (B1.2 — the GT rect is fed straight to `reconstruct_table`, no detector in the loop), so the reconstruction number tracks the grid builder alone.
+
+| Metric | Implementation | Location | Ground Truth Source |
+|--------|---------------|----------|---------------------|
+| **Structural Fidelity** | Same `structural_fidelity` as §2, over an alignment projection (`cells → DataFrame`, header row → uniquified column names). Rows/cols/column-name agreement. | `utils/tabular_metrics.py → structural_fidelity()`; projection in `test_table_benchmark.py → _table_to_frame()` | Rendered-clean GT (source spreadsheet drawn to a page) + `dense_text_548_table.csv` |
+| **Cell Match** | Positional `(row, col, text)` agreement after alignment — catches a column-shift a cell count misses. Scorer normalises NFKC + dash-fold + whitespace-collapse; GT stays verbatim. | `test_table_benchmark.py → _score()` | Rendered-clean GT strings |
+| **Data Integrity** | Same exact-match `data_integrity` as §2, over the alignment projection. | `utils/tabular_metrics.py → data_integrity()` | Rendered-clean GT |
+| **False-Table Rate** | Reconstructor run over pages with **no** GT table (non-table DocLayNet pages + FUNSD forms); any emitted table is a false positive. Makes "precision over coverage" falsifiable; calibrated `MIN_ROW_FILL_RATIO`. | `test_table_benchmark.py → TestFalseTableCohort` | Non-table fixtures (no GT needed) |
+| **GT Acceptance** | Appendix-A.6 conformance checks on any `*_table.csv` GT (rectangular, unique headers, no BOM/trailing whitespace, `n_header_rows` consistent, plausible cell count). A GT that fails is a bug in the GT. | `test_table_benchmark.py → TestGroundTruthAcceptance` | `<fixture>_table.csv` + `.meta.json` |
+
+Not measured: **money recall** (the downstream payoff) — the benchmark has no labelled money ground truth (see `docs/money.md`), so no honest recall can be quoted. TEDS is the noted upgrade path if the alignment metric proves too coarse.
+
 ## 3. Geospatial Extraction Accuracy
 
 **Scope:** SHP → GeoParquet

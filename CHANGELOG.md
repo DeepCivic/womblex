@@ -283,6 +283,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   these into the generated `EXTRACTION.md` and the CI-level regression gate
   remains B4/B5.
 
+- **Table-cell reconstruction on OCR'd pages (#17), step B4 — report + docs
+  wiring.** The benchmark's table results now surface in the generated
+  `docs/accuracy/EXTRACTION.md`. `generate_extraction_report` gains a
+  `## Table Reconstruction` section (`tests/accuracy_reports.py →
+  _table_reconstruction_section`) placed directly under the DocLayNet
+  per-class layout section it decomposes: detection is stage 1 there,
+  reconstruction (conditioned on a correct rect, B1.2) is this section. It
+  renders three cohorts — rendered-clean (gated), the `dense_text_548`
+  tracking row, and a **separate false-table table** headed by the live
+  false-positive count so the precision guardrail is visible rather than
+  buried. `test_fixture_accuracy`'s `_results` accumulator gains a `"tables"`
+  key, and `tests/test_table_benchmark.py` *aliases* its module `_results`
+  list to that key (private-list fallback if imported in isolation), so its
+  existing entries flow into the shared accumulator with no duplicate
+  plumbing and the session-scoped `write_report` finaliser renders them.
+
+  Two deliberate calls beyond the plan text. **Money recall is not a
+  column:** the benchmark has no labelled money ground truth (`docs/money.md`),
+  so no honest recall can be quoted — the section notes the omission and the
+  `table_cell` locus that makes reconstructed tables column-classifiable
+  regardless, rather than fabricating a figure. **CHUNKING.md was annotated,
+  not regenerated:** its numbers predate tables landing on OCR pages and its
+  generator is still unwritten, so the table-reconstruction knock-on is
+  recorded under its Known Limitations rather than hand-edited with invented
+  counts (it shifts on the next full regeneration).
+
+  `docs/evaluation.md` gains §2b (Document-Table Reconstruction Accuracy),
+  kept distinct from §2 (spreadsheet-file → parquet, where the source is
+  already a grid): §2b's grid is *inferred* from OCR quads and can be wrong.
+  It records the two-stage decomposition and the full metric set (structural
+  fidelity, cell match, data integrity, false-table rate, A.6 GT acceptance).
+  Only B5 (turning the structural/false-table asserts into build-failing CI
+  gates) remains.
+
 ### Fixed
 - **A declined continental number no longer leaks its decimal tail as an
   amount.** In Australian (default) mode `find_money` correctly refuses to read

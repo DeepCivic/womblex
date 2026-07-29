@@ -245,6 +245,120 @@ def generate_pii_report(
 
 
 # ---------------------------------------------------------------------------
+# Table reconstruction section (B4)
+# ---------------------------------------------------------------------------
+
+
+def _table_reconstruction_section(tables: list[dict]) -> list[str]:
+    """Render the ``## Table Reconstruction`` section from ``_results['tables']``.
+
+    Sits directly under the DocLayNet per-class layout section it decomposes
+    (B1): stage 1 there is detection; this is stage 2, reconstruction
+    *conditioned on a correct table rect* (B1.2 — no detector in the loop),
+    plus the B2 precision guardrail.
+
+    Three cohorts, three tables:
+
+    - **Rendered-clean** (gates in B5): the flat contemporary shape round 1
+      ships for — exact structure expected.
+    - **Tracking** (``dense_text_548``, reported never gated): the hard scan
+      shape round 1 refuses cleanly.
+    - **False-table** (the precision guardrail): pages with no GT table; any
+      emitted table is a false positive.
+
+    Populated by ``tests/test_table_benchmark.py`` (``benchmark``-marked); the
+    section is emitted only when that module ran in the same session.
+    """
+    lines: list[str] = ["## Table Reconstruction", ""]
+    if not tables:
+        lines += [
+            "*No table-reconstruction results collected — run "
+            "`pytest tests/test_table_benchmark.py -m benchmark` in the same "
+            "session.*",
+            "",
+        ]
+        return lines
+
+    lines += [
+        "Reconstruction measured against a *known-correct* table rect — the"
+        " layout detector is not in the loop (plan B1.2). Detection is the"
+        " per-class `table` row in the DocLayNet section above (B1 stage 1);"
+        " this is stage 2. The scorer normalises NFKC + dash-fold + whitespace"
+        "-collapse; GT stays verbatim. `paddleocr` engine pinned (plan A0).",
+        "",
+    ]
+
+    probes = [t for t in tables if t.get("false_table_probe")]
+    grids = [t for t in tables if not t.get("false_table_probe")]
+    clean = [t for t in grids if not t.get("tracking")]
+    tracking = [t for t in grids if t.get("tracking")]
+
+    def _grid_rows(rows: list[dict], gate_label: str) -> None:
+        for r in rows:
+            gt = f"{r['gt_rows']}×{r['gt_cols']}"
+            if r["outcome"] == "reconstructed":
+                got = f"{r['got_rows']}×{r['got_cols']}"
+                struct = "pass" if r.get("structural_ok") else "fail"
+                cell = f"{r['cell_match']:.1%}"
+                integ = (f"{r['data_integrity']:.1%}"
+                         if r.get("data_integrity") is not None else "—")
+            else:
+                got = struct = cell = integ = "—"
+            lines.append(
+                f"| `{r['fixture']}` | {gt} | {got} | {r['outcome']} "
+                f"| {cell} | {integ} | {struct} | {gate_label} |"
+            )
+
+    lines += [
+        "### Rendered-Clean + Tracking",
+        "",
+        "| Fixture | GT r×c | Got r×c | Outcome | Cell match | Data integrity | Structural | Gate |",
+        "|---------|-------|---------|---------|-----------|----------------|-----------|------|",
+    ]
+    _grid_rows(clean, "gated")
+    _grid_rows(tracking, "tracking")
+    lines.append("")
+    lines.append(
+        "Every rendered-clean cell mismatch is glyph-level OCR recognition,"
+        " not binning — the grid is exact on the clean cohort. `dense_text_548`"
+        " (7-line stacked header + hierarchical rows) refuses via the density"
+        " gate; refusal is the precision-first round-1 outcome, reported not"
+        " gated."
+    )
+    lines.append("")
+
+    # False-table cohort — the precision guardrail, kept in its own table.
+    fp_count = sum(1 for p in probes if p.get("false_positive"))
+    lines += [
+        "### False-Table Cohort (Precision Guardrail)",
+        "",
+        f"Pages with **no** GT table fed to the reconstructor whole — any"
+        f" emitted table is a false positive. False positives: **{fp_count}**"
+        f" of {len(probes)} (B5 gates this to 0).",
+        "",
+        "| Fixture | Outcome | False positive |",
+        "|---------|---------|----------------|",
+    ]
+    for p in probes:
+        fp = "**YES**" if p.get("false_positive") else "no"
+        lines.append(f"| `{p['fixture']}` | {p['outcome']} | {fp} |")
+    lines.append("")
+
+    # Money recall is deferred: there is no labelled money GT in the benchmark
+    # (see docs/money.md), so no honest recall figure can be quoted. Recorded
+    # here so the omission is deliberate, not an oversight.
+    lines.append(
+        "*Money recall (the downstream payoff) is not tabulated: the benchmark"
+        " has no labelled money ground truth (see `docs/money.md`), so no"
+        " honest recall can be quoted. Reconstructed tables become"
+        " column-classifiable by the money stage via the `table_cell` locus"
+        " regardless.*"
+    )
+    lines.append("")
+    return lines
+
+
+# ---------------------------------------------------------------------------
 # Extraction accuracy report
 # ---------------------------------------------------------------------------
 
@@ -253,7 +367,7 @@ def generate_extraction_report(results: dict[str, list[dict]]) -> str:
     """Build EXTRACTION.md content from accumulated benchmark results.
 
     *results* keys: funsd_raw, funsd_preprocessed, iam, doclaynet_raw,
-    doclaynet_preprocessed, womblex.
+    doclaynet_preprocessed, womblex, act_eci, tables.
     """
     lines: list[str] = []
 
@@ -418,6 +532,10 @@ def generate_extraction_report(results: dict[str, list[dict]]) -> str:
         lines.append("*No DocLayNet results collected.*")
     lines.append("")
 
+    # --- Table reconstruction (B4) --- directly under the per-class layout
+    # section it decomposes (detection stage 1 above, reconstruction here).
+    lines += _table_reconstruction_section(results.get("tables", []))
+
     # --- Womblex-collection ---
     lines.append("## Womblex-Collection — Extraction Fidelity")
     lines.append("")
@@ -537,6 +655,26 @@ def generate_extraction_report(results: dict[str, list[dict]]) -> str:
     lines.append("- **Recall**: GT layout blocks matched by a prediction with correct label (IoU >= 0.3).")
     lines.append("- **F1**: Harmonic mean of precision and recall.")
     lines.append("- **Avg Confidence**: Mean per-region OCR confidence from RapidOCR (0\u20131).")
+    lines.append("")
+    lines.append("Table Reconstruction (§ *Table Reconstruction*, plan B1.2/B2 — scored on "
+                 "a known-correct table rect, no layout detector in the loop):")
+    lines.append("")
+    lines.append("- **GT r×c / Got r×c**: ground-truth vs reconstructed row × column counts.")
+    lines.append("- **Outcome**: `reconstructed` (grid cleared the precision gates), "
+                 "`refused` (returned `None` — the precision-first default), or "
+                 "`partial NxM` (a tracking-fixture grid below full GT).")
+    lines.append("- **Cell match**: fraction of `(row, col)` positions whose text matches "
+                 "GT after normalisation (NFKC + dash-fold + whitespace-collapse); "
+                 "catches a column-shift a raw cell count misses.")
+    lines.append("- **Data integrity**: `utils/tabular_metrics.py → data_integrity()` exact "
+                 "cell match over the alignment projection (`cells → DataFrame`) — the "
+                 "same scorer the spreadsheet ingest uses.")
+    lines.append("- **Structural**: `structural_fidelity()` pass/fail on rows + columns + "
+                 "column names.")
+    lines.append("- **Gate**: `gated` (rendered-clean cohort, fails the build in B5) vs "
+                 "`tracking` (hard scan shape, reported never gated in round 1).")
+    lines.append("- **False positive** (False-Table Cohort): a table emitted on a page "
+                 "with no GT table. The precision guardrail; B5 gates the count to 0.")
     lines.append("")
 
     return "\n".join(lines)

@@ -114,8 +114,7 @@ datasets prevents this.
 3. **No semantic coherence metric** — chunks are evaluated by size, not by whether they
    contain semantically complete units. Future work could measure topic coherence or
    downstream retrieval performance.
-4. **Table chunking not evaluated** — `chunk_tables=true` converts tables to markdown
-   before chunking, but no fixtures have table-specific chunking ground truth.
+4. **Table chunking not re-measured for OCR-reconstructed tables** — `chunk_tables=true` converts any `kind='table'` element to markdown before chunking. As of #17 round 1 the OCR paths now emit `kind='table'` elements too (reconstructed from a detected region — see `docs/table-cell-reconstruction-plan.md` and `docs/evaluation.md` §2b), so a scanned page carrying a clean table now contributes a markdown-table chunk in place of the narrative run it previously produced, and the narrative block beside it no longer double-counts the table text. **The counts in this doc predate that change** (2026-03-22, before tables landed on OCR pages) and will shift on the next full regeneration; no table-specific chunking ground truth exists yet.
 5. **Spreadsheet row-level chunking is trivial** — CSV/XLSX rows are short enough that
    most become single chunks. The chunker adds little value here; it's the
    element-stream shape (one `kind='sheet_cell'` element per cell) that determines
