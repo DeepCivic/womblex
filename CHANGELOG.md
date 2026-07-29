@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-29
+
+Minor under 0.x: additive on the whole (the `money` op, its CLI command and its
+two parquet sidecars; the shared table-grid algorithm), with two changes a
+consumer can observe — a scanned page carrying a clean table now emits a
+`kind='table'` element where it previously emitted a `[TABLE]` placeholder text
+block, and the unreachable `ImageExtractor` was removed. **No extraction schema
+changed**: `ELEMENT_SCHEMA`, `TABLE_CELLS_SCHEMA`, `FORM_FIELDS_SCHEMA`,
+`CHUNKS_SCHEMA` and `EMBEDDINGS_SCHEMA` are byte-identical to `0.2.0`.
+
 ### Added
 - **`money` annotation op** (`womblex money --shards`). Recovers monetary
   amounts from the extraction parquet and writes two siblings per batch:
@@ -1509,6 +1519,7 @@ Eight concrete fixes K1-K8 written up in "Open follow-ups" above. K1 / K3 / K4 /
   boundaries. Structural OCR-engine limit; not addressable in
   Womblex without a layout-aware OCR backend.
 
-[Unreleased]: https://github.com/DeepCivic/womblex/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/DeepCivic/womblex/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/DeepCivic/womblex/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/DeepCivic/womblex/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/DeepCivic/womblex/releases/tag/v0.1.0
