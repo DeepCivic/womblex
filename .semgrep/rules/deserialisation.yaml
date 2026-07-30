@@ -1,0 +1,83 @@
+# Unsafe deserialisation — formats that carry executable state.
+#
+# Vendored from DeepCivic/runwAI at f67a2c5a8e2289817d7a65e1920fa5d67953d3e6
+# (Apache-2.0), controls/rules/deserialisation.yaml. The JS/TS rule in the
+# upstream file is dropped — womblex is Python only. Rule IDs are kept verbatim
+# so a finding here can be traced back to the upstream rule it came from.
+#
+# Deserialising untrusted data in a format that can carry executable state is
+# remote code execution, not a parsing bug.
+#
+# This is the ruleset with the most womblex-specific bite. The pipeline loads
+# model artefacts at runtime (`utils/models.py` resolves local paths for
+# rapidocr, YOLOv8 and sentence-transformers), and a `.pt` checkpoint is a
+# pickle: loading one executes whatever it was built to execute. Today no
+# womblex code calls `torch.load` or `joblib.load` directly — the bundled
+# `yolov8n.pt` is loaded inside ultralytics — so these rules are silent. They
+# are here to stay silent, and to fire the day somebody adds a load path for a
+# checkpoint fetched from somewhere less trusted than `models/`.
+#
+# KNOWN FALSE-POSITIVE CLASSES
+#
+#   pickle used for a local cache the application itself wrote
+#     The sink match ignores provenance. Suppress with a reason.
+#   joblib.load of a checkpoint produced in the same pipeline
+#     Same. Suppress, or move to safetensors.
+#
+# Suppress individually with a reason after `--`, never blanket. A bare
+# `# nosemgrep` with no justification should fail review.
+rules:
+  - id: runwai-python-unsafe-pickle
+    languages: [python]
+    severity: ERROR
+    message: >-
+      pickle and marshal execute arbitrary code during deserialisation. Validate the
+      source, or use a data-only format such as JSON.
+    metadata:
+      category: security
+      confidence: HIGH
+      source: runwAI controls/rules/deserialisation.yaml (RWA-0022 / ISM-2058)
+    patterns:
+      - pattern-either:
+          - pattern: pickle.load(...)
+          - pattern: pickle.loads(...)
+          - pattern: cPickle.load(...)
+          - pattern: cPickle.loads(...)
+          - pattern: marshal.load(...)
+          - pattern: marshal.loads(...)
+          - pattern: shelve.open(...)
+
+  - id: runwai-python-unsafe-yaml
+    languages: [python]
+    severity: ERROR
+    message: >-
+      yaml.load without SafeLoader can instantiate arbitrary Python objects. Use
+      yaml.safe_load.
+    metadata:
+      category: security
+      confidence: HIGH
+      source: runwAI controls/rules/deserialisation.yaml (RWA-0022 / ISM-2058)
+    patterns:
+      - pattern-either:
+          - pattern: yaml.load($D)
+          - pattern: yaml.load($D, Loader=yaml.Loader)
+          - pattern: yaml.load($D, Loader=yaml.UnsafeLoader)
+          - pattern: yaml.load($D, Loader=yaml.FullLoader)
+          - pattern: yaml.unsafe_load(...)
+
+  - id: runwai-python-model-pickle-load
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Loading a model from a pickle-backed format executes code at load time. Store
+      models in a non-executable format such as safetensors.
+    metadata:
+      category: security
+      confidence: MEDIUM
+      source: runwAI controls/rules/deserialisation.yaml (RWA-0074 / ISM-2072)
+    patterns:
+      - pattern-either:
+          - pattern: torch.load($P)
+          - pattern: torch.load($P, weights_only=False, ...)
+          - pattern: joblib.load(...)
+      - pattern-not: torch.load($P, weights_only=True, ...)
