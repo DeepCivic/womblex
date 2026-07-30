@@ -70,10 +70,16 @@ jobs:
         # The commit hook scans staged files only. This is the same scanner,
         # same baseline, over everything tracked — so a secret introduced with
         # `--no-verify`, or before the hook existed, is still caught.
+        # NUL-separated rather than $(git ls-files): an unquoted command
+        # substitution word-splits, so one tracked filename containing a space
+        # would silently turn into two paths that do not exist. No such file
+        # exists today, which is exactly why the failure would be missed later.
         run: |
+          set -euo pipefail
           pip install detect-secrets==1.5.0
-          detect-secrets-hook --baseline .secrets.baseline $(git ls-files \
-            | grep -vE '^(\.secrets\.baseline|src/womblex/_models/|fixtures/|models/|uv\.lock|docs/accuracy/)')
+          git ls-files -z \
+            | grep -zvE '^(\.secrets\.baseline|src/womblex/_models/|fixtures/|models/|uv\.lock|docs/accuracy/)' \
+            | xargs -0 --no-run-if-empty detect-secrets-hook --baseline .secrets.baseline
 
       - name: Static analysis (semgrep)
         # Blocking: SAST over our own source with the Python + OWASP rulesets,

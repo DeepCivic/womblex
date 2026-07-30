@@ -120,8 +120,13 @@ if [ -f config.schema.json ]; then
 fi
 
 if [ $((${#declared_vars[@]} + ${#optional_vars[@]})) -gt 0 ]; then
+  # ${arr[@]+"${arr[@]}"} rather than a bare "${arr[@]}" throughout: under `set -u`,
+  # bash before 4.4 treats expanding an empty array as an unbound variable and aborts.
+  # macOS still ships bash 3.2, and womblex's own case reaches here with declared_vars
+  # empty and only optional_vars populated — so the bare form would fail on exactly the
+  # machine a developer is most likely to run this from.
   missing=()
-  for name in "${declared_vars[@]}"; do
+  for name in ${declared_vars[@]+"${declared_vars[@]}"}; do
     if [ -z "${!name-}" ]; then
       missing+=("$name")
     fi
@@ -176,7 +181,8 @@ if [ $((${#declared_vars[@]} + ${#optional_vars[@]})) -gt 0 ]; then
         ''|*[!A-Za-z0-9_]*) continue ;;
       esac
       found=0
-      for declared in "${declared_vars[@]}" "${optional_vars[@]}"; do
+      for declared in ${declared_vars[@]+"${declared_vars[@]}"} \
+                      ${optional_vars[@]+"${optional_vars[@]}"}; do
         [ "$declared" = "$name" ] && { found=1; break; }
       done
       [ "$found" -eq 0 ] && undeclared+=("$name")
@@ -199,7 +205,8 @@ if [ $((${#declared_vars[@]} + ${#optional_vars[@]})) -gt 0 ]; then
   # on any directory — so in a container that runs as root only the existence check can
   # fail. That is the kernel's answer, not a gap here, and it is worth knowing before
   # someone concludes the check is broken.
-  for name in "${declared_vars[@]}" "${optional_vars[@]}"; do
+  for name in ${declared_vars[@]+"${declared_vars[@]}"} \
+              ${optional_vars[@]+"${optional_vars[@]}"}; do
     case "$name" in
       *_DIR|*_PATH|*_ROOT|*_HOME) ;;
       *) continue ;;
