@@ -364,6 +364,45 @@ uv run ruff check src/
 
 Accuracy docs (`docs/accuracy/*.md`) are regenerated automatically at the end of each test run — no manual editing needed.
 
+### Commit hook
+
+Two checks run on the files you stage: a secret scan (`detect-secrets`) and SAST over the
+local semgrep rulesets in `.semgrep/rules/`. Install it once per clone:
+
+```bash
+pip install pre-commit==4.6.1 && pre-commit install
+
+# Run both over the whole tree rather than just staged files
+pre-commit run --all-files
+```
+
+`pre-commit` is deliberately not in the `[dev]` extra — adding it would change
+`pyproject.toml` and rewrite `uv.lock`, which is a dependency-scoped decision of its own.
+
+The hook is the **only** thing here that stops an action, and `git commit --no-verify`
+walks straight past it. CI re-runs both over the whole tree and adds a scan of reachable
+history, which is what catches a credential committed behind `--no-verify` and removed
+later. Nothing blocks a merge — that is branch protection, a GitHub setting.
+
+If a scan flags something you have checked and know to be safe, record the reason rather
+than switching the check off: `# pragma: allowlist secret` for detect-secrets, or
+`# nosemgrep: <rule-id> -- <reason>` for semgrep. Both rulesets document their known
+false-positive classes in their file headers. When a new benign finding is real drift
+rather than a one-off, regenerate the baseline with the exclusions recorded in
+`.pre-commit-config.yaml` and review every new entry before committing it.
+
+### Environment check
+
+```bash
+bash .github/scripts/doctor.sh
+```
+
+Compares what `.env.example` declares against what is actually set, and any declared
+runtime pins (`mise.toml`, `.tool-versions`) against the interpreters on PATH. It reads
+variable *names* only and never prints a value. Variables under an `# Optional:` comment
+are reported but never failed, so an unset `ISAACUS_API_KEY` on an extraction-only clone
+is a note rather than an error. Not wired into CI, where none of these are set.
+
 ## License
 
 Apache 2.0

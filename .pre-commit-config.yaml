@@ -1,0 +1,70 @@
+# Commit-time checks. Adapted from DeepCivic/runwAI at
+# f67a2c5a8e2289817d7a65e1920fa5d67953d3e6 (Apache-2.0); the five hooks that
+# validate runwAI's own structure are dropped, leaving the two that read code.
+#
+# This is the only place in womblex where a check stops an action, and
+# `git commit --no-verify` walks straight past it. CI re-runs both over the
+# whole tree, plus a history pass the hook cannot do. Nothing here blocks a
+# merge — that is branch protection, a GitHub setting, not a file.
+#
+# Both hooks are pinned to an exact version. An unpinned scanner is a check
+# whose verdict can change under you with no commit in between, which is the
+# same failure the ruff ceiling in pyproject.toml exists to prevent.
+#
+# Install (one-off, per clone):
+#     pip install pre-commit==4.6.1 && pre-commit install
+#
+# pre-commit is deliberately NOT in the [dev] extra: adding it would change
+# pyproject.toml's dependencies and rewrite uv.lock, which CLAUDE.md reserves
+# for a human-approved, dependency-scoped commit.
+minimum_pre_commit_version: "4.0.0"
+
+repos:
+  - repo: local
+    hooks:
+      # --- credentials, before they reach history ---------------------------
+      # The one class of defect a commit hook is genuinely the right place for:
+      # a key that lands in history stays there whether or not a later commit
+      # removes it, so catching it at push time is already too late.
+      #
+      # The exclusions below must match the ones used to generate the baseline,
+      # or a regeneration will produce a file that disagrees with the hook:
+      #     detect-secrets scan --exclude-files \
+      #       '^(src/womblex/_models/|fixtures/|models/|uv\.lock$|docs/accuracy/)' \
+      #       > .secrets.baseline
+      #
+      # Vendored model artefacts, benchmark fixtures and the generated accuracy
+      # docs are excluded because they are third-party or generated data, and
+      # their high-entropy content (tokeniser vocabularies, base64 image blobs)
+      # is noise no reviewer can triage.
+      - id: womblex-detect-secrets
+        name: "Secret scan (detect-secrets)"
+        entry: detect-secrets-hook --baseline .secrets.baseline
+        language: python
+        additional_dependencies: ["detect-secrets==1.5.0"]
+        exclude: |
+          (?x)^(
+            \.secrets\.baseline|
+            src/womblex/_models/|
+            fixtures/|
+            models/|
+            uv\.lock|
+            docs/accuracy/
+          )
+
+      # --- injection, deserialisation and path-traversal sinks --------------
+      # --error is what makes this a gate rather than a report. Without it
+      # semgrep prints findings and exits zero, which is the most common way a
+      # scanner ends up installed but enforcing nothing.
+      #
+      # Only the local rulesets run here: the registry rulesets CI uses
+      # (p/python, p/owasp-top-ten) are fetched over the network at scan time,
+      # which a commit hook must not depend on.
+      - id: womblex-semgrep
+        name: "SAST (semgrep, local rulesets)"
+        entry: >-
+          semgrep scan --error --metrics=off --quiet
+          --config .semgrep/rules
+        language: python
+        additional_dependencies: ["semgrep==1.171.0"]
+        types: [python]

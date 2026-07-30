@@ -193,6 +193,9 @@ def _shard_paths(output_path: Path) -> dict[str, Path]:
     ``batch-0001.parquet``). Sibling sidecar files share its stem.
     """
     base = output_path.parent / output_path.stem
+    # base is the caller's own output path; the only interpolated segment is a
+    # module-constant suffix, so there is no caller-supplied path component here.
+    # nosemgrep: runwai-python-path-traversal-sink -- suffix is a module constant
     return {role: Path(f"{base}{_SHARD_SUFFIX[role]}") for role in _SHARD_ROLES}
 
 
