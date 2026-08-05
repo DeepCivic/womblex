@@ -61,10 +61,15 @@ class StageRunSummary:
     published: int = 0
     bases: int = 0
     not_ready_missing: set[str] = field(default_factory=set)
+    discovery_failed: bool = False
 
     @property
     def exit_code(self) -> int:
         if self.failed:
+            return 1
+        # Nothing to discover means a bad prefix, a typo'd --run-id or an empty
+        # run. Exiting 0 there would read as success in `run-stage … && next`.
+        if self.discovery_failed:
             return 1
         # Every base blocked on an absent upstream sidecar is a stage-ordering
         # error, not a still-draining fleet.
@@ -84,9 +89,10 @@ class StageRunSummary:
 class NotReady(Exception):
     """A required input is absent for this base — upstream has not produced it."""
 
-    def __init__(self, suffix: str):
+    def __init__(self, suffix: str, stem: str):
         self.suffix = suffix
-        super().__init__(suffix)
+        self.stem = stem
+        super().__init__(f"{stem}{suffix}")
 
 
 class InputContractError(Exception):
@@ -119,7 +125,8 @@ def remote_bases(keys: list[str]) -> list[str]:
             if not name.endswith(suffix):
                 continue
             stem = name[: -len(suffix)]
-            if stem.endswith(".corrupt"):
+            # A bare `.elements.parquet` has no stem to key a base on.
+            if not stem or stem.endswith(".corrupt"):
                 break
             seen.add(stem)
             break
@@ -152,7 +159,7 @@ def _resolve_inputs(
         for stem in stems:
             key = _key(shard_prefix, stem, suffix)
             if key not in present:
-                raise NotReady(suffix)
+                raise NotReady(suffix, stem)
             keys.append(key)
 
     for cond in contract.conditional_inputs(config):
@@ -189,10 +196,16 @@ def _publish(
     contract: StageContract, config: WomblexConfig, store: RemoteStore,
     shard_prefix: str, stems: list[str], local_dir: Path,
 ) -> int:
-    """Upload every declared output, or none of them.
+    """Verify every declared output exists locally, then upload them all.
 
-    Verifying before uploading is what keeps the skip rule honest: a base whose
-    outputs are half-written must not look complete on the next run.
+    This is a pre-upload check, not an atomic multi-object write — object stores
+    give no such primitive. What it buys is that the *stage* can never leave a
+    half-written set behind. A transport failure part-way through the uploads
+    still can, and that case is covered by the skip rule rather than by
+    atomicity: skip fires only when **every** declared output is present, so a
+    partial set never reads as complete and the next run redoes the base and
+    overwrites. The same reasoning covers `graph-refresh`, which is never
+    skipped and recomputes both sidecars from the same offsets.
     """
     pending: list[tuple[Path, str]] = []
     for stem in stems:
@@ -283,6 +296,7 @@ def run_stage_remote(
             "Downstream sidecars alone cannot drive discovery.",
             shard_prefix, ", ".join(DISCOVERY_SUFFIXES),
         )
+        summary.discovery_failed = True
         return summary
 
     units = [stems] if contract.scope is StageScope.WHOLE_RUN else [[s] for s in stems]
@@ -324,9 +338,12 @@ def run_stage_remote(
                 summary.processed += 1
             except NotReady as nr:
                 producer = PRODUCER_OF.get(nr.suffix, "the upstream stage")
+                # Name the offending base, not the unit — on a run-scoped stage
+                # one un-chunked batch blocks the whole pass, and "3 base(s)
+                # missing" would send you looking in the wrong place.
                 logger.warning(
-                    "%s: %s missing %s — %s has not produced it yet",
-                    contract.name, label, nr.suffix, producer,
+                    "%s: %s missing %s (blocking %s) — %s has not produced it yet",
+                    contract.name, nr.stem, nr.suffix, label, producer,
                 )
                 summary.not_ready += 1
                 summary.not_ready_missing.add(nr.suffix)

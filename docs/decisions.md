@@ -152,10 +152,16 @@ Decisions inside it:
   extraction-role siblings only; `*.form_fields.parquet` makes a base
   discoverable but is read by no stage, so it is never downloaded. A
   `*.chunks.parquet` with no extraction sibling is not a batch.
-- **All declared outputs publish, or none do**, which is what makes
-  skip-by-published-output honest — a half-written base can never read as
-  complete. Paired with that, the runner is idempotent and re-runnable as more
-  batches land, exactly as `finalize` already is.
+- **All declared outputs are verified before any is uploaded**, so the *stage*
+  can never leave a half-written set behind. That is a pre-upload check, not an
+  atomic multi-object write — object stores offer no such primitive, and a
+  transport failure part-way through the uploads can still leave a partial set.
+  What covers that case is the skip rule, not atomicity: skip fires only when
+  **every** declared output is present, so a partial set never reads as complete
+  and the next run redoes the base and overwrites. The runner is therefore
+  idempotent and re-runnable as more batches land, exactly as `finalize` is.
+  Nothing-to-do exits non-zero — a typo'd `--run-id` must not read as success in
+  `run-stage … && next-step`.
 - **`manifest` is excluded**, because `finalize` is it. Duplicating it in the
   runner inventory would give one job two commands.
 - **`graph-refresh` is modelled explicitly as an in-place mutator.** Its outputs

@@ -35,9 +35,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Bases are discovered from **extraction-role siblings only** — a
     `*.chunks.parquet` with no extraction sibling is not a batch, and
     `*.form_fields.parquet` is discovery-only so it is never downloaded.
-  - **All declared outputs publish or none do**, which is what makes
-    skip-by-published-output honest. The runner is idempotent: re-run it as
-    more batches land and only the new ones are processed.
+  - **Every declared output is verified before any is uploaded**, so a stage
+    cannot leave a half-written set behind. Skip fires only when *all* declared
+    outputs are present, so even a transport failure mid-publish never reads as
+    complete — the next run redoes the base. Idempotent: re-run as more batches
+    land and only the new ones are processed. Finding nothing to do exits 1, so
+    a typo'd `--run-id` is not mistaken for success.
   - `graph-refresh` is modelled explicitly as an **in-place mutator** (outputs ⊆
     inputs): never skipped, both sidecars re-uploaded unconditionally, resting on
     its existing idempotency.

@@ -168,6 +168,22 @@ def test_downstream_sidecars_cannot_drive_discovery():
     assert remote_bases([*keys, "runs/r/documents/batch-0001._manifest.parquet"]) == ["batch-0001"]
 
 
+def test_a_bare_suffix_is_not_a_base():
+    assert remote_bases(["p/.elements.parquet", "p/._manifest.parquet"]) == []
+
+
+def test_finding_nothing_to_do_exits_non_zero(tmp_path):
+    """A typo'd --run-id must not read as success in `run-stage … && next-step`."""
+    store_root = tmp_path / "store"
+    RemoteStore.from_uri(str(store_root))
+    rc = cmd_run_stage(argparse.Namespace(
+        stage="normalise", store=str(store_root), shards=None, run_id="no-such-run",
+        output_prefix=None, config=None, dsn=None, force=False,
+        stage_checkpoints=False, dataset="runner",
+    ))
+    assert rc == 1
+
+
 def test_discovery_uses_every_extraction_role_and_skips_corrupt():
     keys = [
         "p/batch-0001.elements.parquet",
