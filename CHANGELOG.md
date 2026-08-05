@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`womblex run-stage` — remote per-batch shard-stage runner.** Runs a
+  downstream `*_shards()` stage directly against object storage, so a
+  distributed run no longer has to be synced down before it can be chunked,
+  enriched, embedded or masked.
+
+  ```bash
+  womblex run-stage --stage chunk --store s3://womblex --run-id <run_id> \
+      --config configs/example.yaml
+  womblex run-stage --stage chunk --shards out/<run_id>/documents   # local
+  ```
+
+  It generalises `finalize`, which already downloads one sidecar class,
+  calls an unchanged library function against a temp `Path`, and uploads the
+  result. **No `*_shards()` signature changed.** Covers `normalise`, `spellfix`,
+  `chunk`, `money`, `enrich`, `embed`, `link`, `pii`, `graph-refresh` and
+  `quality`; `manifest` is deliberately absent because `finalize` is it.
+
+  - Stage contracts are declarative (`cloud/stage_contracts.py`), with
+    conditional inputs and produced outputs resolved from **config**, not from
+    the stage name: `chunk` pulls `*.enrichment_doc.parquet` only when
+    `chunking_model` is set; `chunk`/`enrich`/`money` pull the overlay sidecar
+    named by `processing.text_source` (`money.text_source` outranks it); `pii`
+    declares `*.clean_text.parquet` only when `write_clean_text`; `enrich`
+    declares `*.enrichment_doc.parquet` only when persisting.
+  - Bases are discovered from **extraction-role siblings only** — a
+    `*.chunks.parquet` with no extraction sibling is not a batch, and
+    `*.form_fields.parquet` is discovery-only so it is never downloaded.
+  - **All declared outputs publish or none do**, which is what makes
+    skip-by-published-output honest. The runner is idempotent: re-run it as
+    more batches land and only the new ones are processed.
+  - `graph-refresh` is modelled explicitly as an **in-place mutator** (outputs ⊆
+    inputs): never skipped, both sidecars re-uploaded unconditionally, resting on
+    its existing idempotency.
+  - `quality` is **run-scoped**, staging every batch's chunks in one pass —
+    per-batch execution would miss cross-batch duplicates *and* emit colliding
+    cluster ids, since `_cluster_ids` numbers clusters per pass.
+  - Stages needing the Isaacus API now **fail non-zero** rather than
+    publishing nothing (`chunk_shards` otherwise warns and returns empty);
+    `link` preflights that its worker-local reference register resolves.
+  - `--stage-checkpoints` optionally stages the stage's checkpoint *directory*
+    in and out; the default remains output-exists skip, which is race-free
+    across concurrent runners.
+
+  Stage *ordering* is the caller's: `embed` needs `chunk`, `pii` is terminal
+  after `enrich` and `embed`, `spellfix` chains off `normalise`. A base whose
+  required inputs are absent is reported as not-ready (the fleet may still be
+  draining); if *every* base is, that is a stage-ordering error and exits 1.
+
 ## [0.3.0] - 2026-07-29
 
 Minor under 0.x: additive on the whole (the `money` op, its CLI command and its

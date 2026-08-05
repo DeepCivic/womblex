@@ -21,9 +21,18 @@ import os
 import tempfile
 from pathlib import Path
 
-from womblex.cli._shared import SUPPORTED_EXTENSIONS, Command
+from womblex.cli._shared import SUPPORTED_EXTENSIONS, Command, make_isaacus_client
 
 logger = logging.getLogger("womblex")
+
+#: Stages the runner can execute, spelled here so `womblex --help` does not
+#: import the contract table (and pyarrow with it). `test_stage_runner.py`
+#: asserts this equals `stage_contracts.STAGE_NAMES`, so it cannot drift.
+#: `manifest` is absent by design — `womblex finalize` already covers it.
+RUN_STAGE_CHOICES = (
+    "normalise", "spellfix", "chunk", "money", "enrich",
+    "embed", "link", "pii", "graph-refresh", "quality",
+)
 
 
 def _resolve_dsn(args: argparse.Namespace) -> str | None:
@@ -262,10 +271,173 @@ def cmd_finalize(args: argparse.Namespace) -> int:
     return 0
 
 
+# --- run-stage ---------------------------------------------------------------
+
+
+def _register_run_stage(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--stage", required=True, choices=RUN_STAGE_CHOICES,
+                   help="Downstream shard stage to run. `manifest` is absent by "
+                        "design — `womblex finalize` already does it.")
+    target = p.add_mutually_exclusive_group()
+    target.add_argument("--store", help="Object-store base URI (or $WOMBLEX_STORE_URI)")
+    target.add_argument("--shards", type=Path, default=None,
+                        help="Local shard dir — run the same contract without a store.")
+    p.add_argument("--run-id", default=None, help="Run to operate on (required with --store)")
+    p.add_argument(
+        "--output-prefix", default=None,
+        help="Store-relative outputs dir (default: runs/<run_id>). "
+             "Reads and writes <output-prefix>/documents/.",
+    )
+    p.add_argument("--config", type=Path, default=None,
+                   help="Config YAML. Conditional inputs and declared outputs are "
+                        "resolved from it (e.g. chunking_model, text_source).")
+    p.add_argument("--dsn", default=None,
+                   help="Optional Postgres DSN — warn if extraction jobs are still draining")
+    p.add_argument("--force", action="store_true",
+                   help="Re-run bases whose declared outputs already exist")
+    p.add_argument("--stage-checkpoints", action="store_true",
+                   help="Stage the stage's checkpoint dir in/out of the store. "
+                        "Single-invocation per run — concurrent runners would clobber it.")
+    p.add_argument("--dataset", default="runner", help="Checkpoint dataset name. Default: 'runner'.")
+
+
+def _runner_config(config_path: Path | None):  # type: ignore[no-untyped-def]
+    """Load the config, or a defaults instance when ``--config`` is omitted.
+
+    The runner never reads ``dataset`` / ``paths`` — it operates on a shard
+    prefix — but ``WomblexConfig`` requires them, so absent a config file we
+    supply placeholders and let every stage section fall back to its defaults.
+    """
+    from womblex.config import WomblexConfig, load_config
+
+    if config_path is not None:
+        return load_config(config_path)
+    return WomblexConfig(
+        dataset={"name": "runner"},
+        paths={"input_root": ".", "output_root": ".", "checkpoint_dir": "."},
+    )
+
+
+def cmd_run_stage(args: argparse.Namespace) -> int:
+    """Run one downstream shard stage against object storage, a batch at a time.
+
+    The generalisation of ``finalize``: that command downloads one sidecar class
+    (``*._manifest.parquet``), calls an unchanged library function against a temp
+    ``Path``, and uploads the result. This does the same for the per-batch stages,
+    driven by the declarations in :mod:`womblex.cloud.stage_contracts`.
+
+    Idempotent — completed bases skip on their published outputs, so re-running
+    as more batches land processes only the new ones. Stage *ordering* is the
+    caller's: ``embed`` needs ``chunk`` to have run, ``pii`` is terminal after
+    ``enrich`` and ``embed``.
+    """
+    from womblex.cloud.stage_contracts import STAGE_CONTRACTS, RunContext
+    from womblex.cloud.stage_runner import (
+        checkpoint_prefix_for,
+        run_stage_local,
+        run_stage_remote,
+    )
+
+    contract = STAGE_CONTRACTS[args.stage]
+    config = _runner_config(args.config)
+
+    if contract.preflight is not None:
+        try:
+            contract.preflight(config)
+        except Exception as e:
+            logger.error("%s preflight failed: %s", args.stage, e)
+            return 1
+
+    ctx = RunContext()
+    if contract.needs_isaacus_api:
+        from womblex.utils.availability import isaacus_available
+
+        if not isaacus_available():
+            # `chunk_shards` would otherwise warn, write nothing and return
+            # cleanly — a remote no-op that looks like success.
+            logger.error(
+                "%s needs the Isaacus API (isaacus SDK + ISAACUS_API_KEY); neither "
+                "is resolvable. Refusing to run rather than publishing nothing.",
+                args.stage,
+            )
+            return 1
+    if contract.needs_client:
+        try:
+            ctx.client = make_isaacus_client()
+        except ImportError:
+            logger.error("isaacus SDK not installed. Install with: uv sync --extra isaacus")
+            return 1
+        except Exception as e:
+            # Logs the exception, not the key — the rule trips on "API_KEY" in the literal.
+            # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
+            logger.error("Could not construct Isaacus client (is ISAACUS_API_KEY set?): %s", e)
+            return 1
+
+    if args.shards is not None:
+        if not args.shards.is_dir():
+            logger.error("--shards path is not a directory: %s", args.shards)
+            return 1
+        logger.info("run-stage %s --shards %s", args.stage, args.shards)
+        summary = run_stage_local(contract, args.shards, config, ctx=ctx)
+        summary.log()
+        return summary.exit_code
+
+    store_uri = _resolve_store(args)
+    if not store_uri:
+        logger.error("No target (pass --shards, or --store / $WOMBLEX_STORE_URI)")
+        return 1
+    if not args.run_id:
+        logger.error("--run-id is required with --store")
+        return 1
+
+    from womblex.store.remote import RemoteStore
+
+    output_prefix = (args.output_prefix or f"runs/{args.run_id}").strip("/")
+    shard_prefix = f"{output_prefix}/documents"
+    store = RemoteStore.from_uri(store_uri)
+
+    _warn_if_draining(args, args.run_id)
+
+    ckpt_prefix = checkpoint_prefix_for(contract, output_prefix) if args.stage_checkpoints else None
+    logger.info("run-stage %s: %s/%s (scope=%s, mutation=%s)",
+                args.stage, store_uri, shard_prefix,
+                contract.scope.value, contract.mutation.value)
+    summary = run_stage_remote(
+        contract, store, shard_prefix, config,
+        ctx=ctx, force=args.force,
+        checkpoint_prefix=ckpt_prefix, checkpoint_dataset=args.dataset,
+    )
+    summary.log()
+    return summary.exit_code
+
+
+def _warn_if_draining(args: argparse.Namespace, run_id: str) -> None:
+    """Advisory only — running against a still-draining fleet yields partial outputs."""
+    dsn = _resolve_dsn(args)
+    if not dsn:
+        return
+    from womblex.cloud.queue import JobQueue
+
+    with JobQueue(dsn) as queue:
+        stats = queue.stats(run_id)
+    unfinished = stats.get("pending", 0) + stats.get("running", 0)
+    if unfinished:
+        logger.warning(
+            "run %s has %d unfinished extraction job(s) (%s) — this stage will "
+            "cover only the batches present so far. Re-run when the fleet drains.",
+            run_id, unfinished, stats,
+        )
+    if stats.get("failed"):
+        logger.warning("run %s has %d failed job(s); their docs are absent",
+                       run_id, stats["failed"])
+
+
 COMMANDS = [
     Command("enqueue", "Plan batches into the cloud job queue", _register_enqueue, cmd_enqueue),
     Command("worker", "Process batches from the cloud job queue", _register_worker, cmd_worker),
     Command("jobs", "Show cloud job-queue status", _register_jobs, cmd_jobs),
     Command("finalize", "Consolidate a distributed run's manifest in object storage",
             _register_finalize, cmd_finalize),
+    Command("run-stage", "Run a downstream shard stage against object storage",
+            _register_run_stage, cmd_run_stage),
 ]
