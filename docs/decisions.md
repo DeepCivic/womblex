@@ -119,6 +119,86 @@ The load-bearing invariant: `cmd_run` and the worker call **one** shared
 shards by construction — the same reasoning as "per-stage and E2E feed the same
 engines".
 
+### The remote shard-stage runner generalises `finalize`
+Extraction went distributed in 2026-06; everything downstream of it stopped at
+the local filesystem, so a store-backed run had to be pulled down before any
+`*_shards()` stage could touch it. `womblex run-stage` (2026-08) closes that,
+and it does so by generalising a shape that already existed rather than
+inventing one. `finalize` lists one sidecar class under the run's shard prefix,
+downloads it to a temp dir, calls an unchanged library function against that
+`Path`, and uploads the result. The runner does exactly that, per batch, for the
+downstream stages — which keeps the stage-in/stage-out decision above intact:
+**no `*_shards()` signature changed and no filesystem abstraction was threaded
+through them.**
+
+Decisions inside it:
+
+- **Stage contracts are data, and two fields are functions of *config*, not of
+  stage name** (`cloud/stage_contracts.py`). `chunk` reads
+  `*.enrichment_doc.parquet` only when `chunking.chunking_model` is set; `chunk`
+  / `enrich` / `money` read the overlay sidecar named by `processing.text_source`
+  (with `money.text_source` outranking it); `pii` writes `*.clean_text.parquet`
+  only when `write_clean_text`; `enrich` writes `*.enrichment_doc.parquet` only
+  when persisting. Resolving either from the stage name would download the wrong
+  files and — worse — let the output-exists skip fire on an incomplete set.
+- **A selected-but-absent overlay is a hard failure, not a fallback.**
+  `load_overlay` warns and returns `None`, so locally a missing
+  `*.normalised_text.parquet` degrades to verbatim text with a zero exit code.
+  Remotely that would publish a sidecar built from the wrong text layer and look
+  like success, so the runner refuses the base instead. The
+  `spellfix → normalised` chain is exempt: it passes `warn_if_missing=False`, so
+  absence there is legitimate.
+- **Discovery is separate from required inputs.** Bases come from
+  extraction-role siblings only; `*.form_fields.parquet` makes a base
+  discoverable but is read by no stage, so it is never downloaded. A
+  `*.chunks.parquet` with no extraction sibling is not a batch.
+- **All declared outputs are verified before any is uploaded**, so the *stage*
+  can never leave a half-written set behind. That is a pre-upload check, not an
+  atomic multi-object write — object stores offer no such primitive, and a
+  transport failure part-way through the uploads can still leave a partial set.
+  What covers that case is the skip rule, not atomicity: skip fires only when
+  **every** declared output is present, so a partial set never reads as complete
+  and the next run redoes the base and overwrites. The runner is therefore
+  idempotent and re-runnable as more batches land, exactly as `finalize` is.
+  Nothing-to-do exits non-zero — a typo'd `--run-id` must not read as success in
+  `run-stage … && next-step`.
+- **`manifest` is excluded**, because `finalize` is it. Duplicating it in the
+  runner inventory would give one job two commands.
+- **`graph-refresh` is modelled explicitly as an in-place mutator.** Its outputs
+  (`*.enrichment_entities.parquet`, `*.graph_edges.parquet`) are a *subset* of
+  its inputs, so it breaks the disjoint required-input/produced-output model that
+  output-exists skip depends on. Rather than exclude it, the contract carries
+  `MutationMode.IN_PLACE`: never skipped, both sidecars re-uploaded
+  unconditionally, correctness resting on the stage's existing idempotency
+  (recomputing from the same character offsets yields the same `chunk_index` and
+  the same `mentioned_in` edges). Atomicity is the same all-or-nothing publish,
+  so a mid-batch failure leaves the store untouched.
+- **`quality` is run-scoped, not per-batch.** Per-batch execution is not a weaker
+  version of the same output; it is a differently-meaning column with the same
+  name. `_cluster_ids` numbers clusters `0,1,2,…` in first-occurrence order
+  *within a pass*, so batch-local passes both miss cross-batch duplicates and
+  emit colliding ids that mean different things in different files. It gets
+  `StageScope.WHOLE_RUN` and stages every batch's chunks in one pass —
+  text-only sidecars, and the same download-compute-upload shape as `finalize`,
+  just at run scope. It is also the one stage with no `CheckpointManager`, by its
+  own design.
+- **Runtime clients fail explicitly.** `chunk_shards` warns and returns
+  `ChunkStageResult(0, 0, 0)` when the Isaacus API is unresolvable — remotely
+  that is a clean-looking run that published nothing, so the runner checks
+  `isaacus_available()` before touching the store and exits non-zero.
+  `link`'s reference register is a worker-*local* file, not a store object, so it
+  gets a preflight that resolves the path.
+- **Checkpoint staging is opt-in and single-invocation.** Checkpoint state is a
+  directory, not a shard suffix, and per-base temp staging gives it nowhere to
+  live. The default is the runner-level output-exists skip — the right
+  distributed idiom, and consistent with "concurrent workers writing one
+  checkpoint file would race". `--stage-checkpoints` stages the dir in/out for
+  the single-runner case.
+
+*Known cost:* per-batch `chunk` loses the cross-batch `semchunk` memoise cache
+(`chunk_shards` builds one chunker and reuses it across bases). Output is
+byte-identical; only warm-cache speed is lost.
+
 ### Reference registers — dedicated ingests; document formats — generic
 Two pathways, chosen deliberately (2026-06). Widely-used reference registers
 with novel format quirks (G-NAF PSV, ABN bulk extract XML) get **dedicated

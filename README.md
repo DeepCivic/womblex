@@ -135,14 +135,32 @@ womblex jobs --run-id <run_id>     # pending/running/done/failed counts
 #    into <store>/runs/<run_id>/manifest.parquet (the local `run` does this at
 #    its end; a distributed run has no single end, so it's an explicit step).
 womblex finalize --store s3://womblex --run-id <run_id>
+
+# 5. Run downstream stages in the store, without syncing the run down.
+#    `run-stage` generalises finalize's shape to the per-batch sidecar stages:
+#    one batch staged in at a time, all declared outputs published or none.
+#    Idempotent — re-run as more batches land. Ordering is yours to pick.
+womblex run-stage --stage normalise --store s3://womblex --run-id <run_id>
+womblex run-stage --stage chunk --store s3://womblex --run-id <run_id> \
+    --config configs/example.yaml
+womblex run-stage --stage embed --store s3://womblex --run-id <run_id>
 ```
+
+`run-stage` covers `normalise`, `spellfix`, `chunk`, `money`, `enrich`, `embed`,
+`link`, `pii`, `graph-refresh` and `quality`. `manifest` is deliberately absent —
+`finalize` already does it. Two stages are special: `graph-refresh` rewrites
+`*.enrichment_entities.parquet` / `*.graph_edges.parquet` **in place**, so it is
+never skipped by output existence and relies on its own idempotency; `quality`
+is **run-scoped**, staging every batch's chunks in one pass because its
+duplicate-cluster ids are corpus-wide. Pass `--shards <dir>` instead of
+`--store`/`--run-id` to run the same contract locally.
 
 Connection details come from `--store`/`WOMBLEX_STORE_URI`, `--dsn`/`WOMBLEX_DB_DSN`
 (or `DATABASE_URL`), and the standard `AWS_*` / `WOMBLEX_S3_ENDPOINT` env vars
 (MinIO works as an S3 endpoint). Shards land at `<store>/runs/<run_id>/documents/`
 in the **ordinary layout**, so once synced down, `womblex manifest` /
 `chunk --shards` / every per-stage command consume a distributed run exactly
-like a local one.
+like a local one — or run them in place with `run-stage`, above.
 
 A ready-to-run stack (Postgres + MinIO + scalable workers) lives in
 `docker-compose.yml`:
