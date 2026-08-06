@@ -17,8 +17,8 @@ import pytest
 
 pytest.importorskip("fsspec")
 
-from womblex.cli.cloud import RUN_STAGE_CHOICES, cmd_run_stage  # noqa: E402
-from womblex.cloud.stage_contracts import (  # noqa: E402
+from womblex.cli.cloud import RUN_STAGE_CHOICES, cmd_run_stage
+from womblex.cloud.stage_contracts import (
     STAGE_CONTRACTS,
     STAGE_NAMES,
     ConditionalInput,
@@ -27,9 +27,9 @@ from womblex.cloud.stage_contracts import (  # noqa: E402
     StageContract,
     StageScope,
 )
-from womblex.cloud.stage_runner import remote_bases, run_stage_remote  # noqa: E402
-from womblex.config import WomblexConfig  # noqa: E402
-from womblex.store.remote import RemoteStore  # noqa: E402
+from womblex.cloud.stage_runner import remote_bases, run_stage_remote
+from womblex.config import WomblexConfig
+from womblex.store.remote import RemoteStore
 
 MANIFEST = "._manifest.parquet"
 ELEMENTS = ".elements.parquet"
@@ -38,10 +38,10 @@ FORM_FIELDS = ".form_fields.parquet"
 
 
 def _config(**kw) -> WomblexConfig:
-    base = dict(
-        dataset={"name": "t"},
-        paths={"input_root": ".", "output_root": ".", "checkpoint_dir": "."},
-    )
+    base = {
+        "dataset": {"name": "t"},
+        "paths": {"input_root": ".", "output_root": ".", "checkpoint_dir": "."},
+    }
     base.update(kw)
     return WomblexConfig(**base)
 
@@ -472,7 +472,7 @@ def test_local_and_remote_paths_produce_identical_bytes(extraction_run, tmp_path
 
 
 def test_checkpoint_directory_is_staged_in_and_out(extraction_run, tmp_path):
-    store, store_root, prefix, _local = extraction_run
+    store, store_root, _prefix, _local = extraction_run
 
     rc = cmd_run_stage(argparse.Namespace(
         stage="normalise", store=str(store_root), shards=None, run_id="rs",
@@ -506,7 +506,7 @@ def test_isaacus_stage_refuses_to_run_without_the_api(monkeypatch, extraction_ru
 
 def test_link_preflight_rejects_a_missing_reference_register(extraction_run, tmp_path):
     """The register is a worker-local file, not a store object."""
-    store, store_root, _prefix, _local = extraction_run
+    _store, store_root, _prefix, _local = extraction_run
     cfg_path = tmp_path / "link.yaml"
     cfg_path.write_text(
         "dataset:\n  name: t\n"

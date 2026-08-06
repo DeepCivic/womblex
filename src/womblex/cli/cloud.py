@@ -312,10 +312,13 @@ def _runner_config(config_path: Path | None):  # type: ignore[no-untyped-def]
 
     if config_path is not None:
         return load_config(config_path)
-    return WomblexConfig(
-        dataset={"name": "runner"},
-        paths={"input_root": ".", "output_root": ".", "checkpoint_dir": "."},
-    )
+    # Validated from a mapping rather than passed as keywords: the fields are
+    # typed as their models, so keyword dicts are a type error even though
+    # pydantic coerces them at runtime.
+    return WomblexConfig.model_validate({
+        "dataset": {"name": "runner"},
+        "paths": {"input_root": ".", "output_root": ".", "checkpoint_dir": "."},
+    })
 
 
 def cmd_run_stage(args: argparse.Namespace) -> int:

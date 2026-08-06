@@ -351,8 +351,8 @@ def run_stage_remote(
                 # Actionable, not a crash — no traceback.
                 logger.error("%s: %s refused: %s", contract.name, label, e)
                 summary.failed += 1
-            except Exception as e:  # one bad base must not stop the run
-                logger.exception("%s: %s failed: %s", contract.name, label, e)
+            except Exception:  # one bad base must not stop the run
+                logger.exception("%s: %s failed", contract.name, label)
                 summary.failed += 1
 
     if summary.not_ready:
