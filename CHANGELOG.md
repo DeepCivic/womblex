@@ -8,6 +8,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Money: financial values expressed in narrative structure.** The detector
+  read amounts written as digits beside a symbol; the forms prose actually uses
+  around them were missed, and two of them were stored *wrong* rather than
+  skipped. See [docs/money-extraction.md](docs/money-extraction.md).
+
+  - **Worded amounts (pattern 11)** — `two million dollars`, `five hundred
+    thousand dollars`, `fifty cents`, `half a million dollars`, `one and a half
+    million dollars`, parsed to exact `Decimal`s by `process/money_words.py`.
+    A currency word is required, so a worded number on its own is not money:
+    the corpus's only worded-number phrase (`more than one million
+    Australians`) is a headcount and is declined. Measured: zero worded false
+    positives across 1.6 MB of real government text.
+  - **Space-grouped thousands** — `$10 000`, `$1 500 000` (AGPS convention,
+    plus the no-break and thin spaces a PDF text layer emits). Previously
+    `Penalty: $10 000` was stored as **ten dollars**; a group is exactly three
+    digits and may not be followed by another, so `$5 2020` no longer binds an
+    amount to the year beside it.
+  - **`$US`/`$A` symbol order** — `$US655.5m`, `$A250,000`, `$AUD1.2m`. Also
+    fixes the blocker that lost them: the metre pattern matches at `5m` inside
+    `$US655.5m`, and the currency check behind it now steps back over the
+    number's own digits (this silently affected `US$655.5m` too).
+  - **Restatement** — `one million dollars ($1,000,000)` read as an accounting
+    negative (−1,000,000) and, once worded amounts existed, counted the same
+    money twice. The restating half is now dropped, in either order. Two
+    bracketed *digit* amounts of equal value are left alone: `$5,000 (5,000)`
+    is this year and last, not one amount written twice.
+  - **Signs and brackets** — a leading true minus (`−$5.2 million`) is a
+    negative, while the en dash stays the range separator; `$(1,234.50)` is an
+    accounting negative like `($1,234.50)`; `50¢` is a sub-unit.
+  - **Declines a second dotted group** — `$3.219.3m` (a real ANAO typo for
+    `$3,219.3m`) yielded `$3.219`, three dollars for a $3.2 billion budget.
+    Repairing the typo would be a guess; the amount is now declined.
+  - Cell scanning no longer skips prose cells outright — the pre-filter admits
+    a currency word, so a worded amount in a contract table is reachable.
+  - Qualifier vocabulary gains the drafting forms (`not exceeding`, `a maximum
+    of`, `in the order of`), stored separately from the value as before.
+
+  Measured over the benchmark fixtures, comparing spans by offset: two values
+  corrected, three amounts recovered, **no span lost**. `find_money` over the
+  1.3 MB ANAO report costs 1.42s → 1.83s.
+
+  `process/money.py` passed the 750-line cap, so number reading, currency
+  resolution and false-positive blocking moved to `process/money_numbers.py`;
+  every name is re-exported from `money.py` and no import site changed.
+
 - **`womblex run-stage` — remote per-batch shard-stage runner.** Runs a
   downstream `*_shards()` stage directly against object storage, so a
   distributed run no longer has to be synced down before it can be chunked,

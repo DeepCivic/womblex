@@ -141,14 +141,32 @@ class, resolves through its `$` rather than to Albanian lek.
 ```
 1        10        100
 1,000    10,000    100,000
+10 000   1 500 000            (space-grouped)
 1.50     100.00    1,000.50
--100     -$100     AUD -50
+-100     -$100     AUD -50    −$5.2m   (true minus sign)
 .50      0.50
 ```
 
 Australia does not use comma decimals. `1.000,50` is therefore **not**
 interpreted as an Australian amount. Inferring locale automatically introduces
 false positives for no benefit on this corpus.
+
+**Space-grouped thousands** are the Australian Government Publishing Service
+convention and appear verbatim in legislative penalties. They are not a recall
+nicety: `Penalty: $10 000` matched as `$10` and stored a value wrong by 10³,
+which is the failure this op exists to prevent. A group is exactly three digits
+and may not be followed by another — otherwise `$5 2020` binds an amount to the
+year beside it.
+
+A leading **true minus sign** (U+2212) is a negative, as PDF text layers emit
+it as readily as the ASCII hyphen; reading `−$5.2 million` as positive inverts
+the sign rather than missing the amount. The en dash is deliberately excluded:
+it is the range separator, and admitting it would turn `$10–20m` negative.
+
+A number carrying a **second dotted group** is declined rather than partly
+read. `$3.219.3m` — a real ANAO typo for `$3,219.3m` — yields `$3.219` if the
+readable prefix is taken, three dollars for a $3.2 billion project budget.
+Repairing the typo would be a guess; declining is the only honest outcome.
 
 ### Optional international mode
 
@@ -157,8 +175,16 @@ Configurable, off by default. When enabled, accepts `1.000,50` and
 
 ## Currency indicators
 
-**Symbols** — `$`, `A$`, `AU$`, `US$`, `NZ$`, `€`, `£`, `¥`, `₹`, `₩`, `₽`, `₿`,
-including Unicode variants.
+**Symbols** — `$`, `A$`, `AU$`, `US$`, `NZ$`, `¢`, `€`, `£`, `¥`, `₹`, `₩`, `₽`,
+`₿`, including Unicode variants.
+
+The **symbol-then-letters** order (`$US655.5m`, `$A250,000`, `$AUD1.2m`) is the
+Australian reporting convention, not a typo of `US$`: the ANAO Major Projects
+Report writes foreign-military-sales case values that way throughout. Without
+it the `$` matches alone, the letters read as the start of the next word, and
+the amount is lost entirely.
+
+`¢` is a sub-unit: `50¢` is half a dollar, not fifty of them.
 
 **ISO codes** — recognised only if in the ISO 4217 list.
 
@@ -183,8 +209,49 @@ resolution.
 | 6 | Magnitude expression | `$5 million`, `AUD 12 billion`, `$4.2bn`, `$500k` | Very high |
 | 7 | Range | `$10–20 million`, `$100-$150`, `between $5 and $10` | Inherits |
 | 8 | Approximate value | `about $100`, `~$50`, `up to $50,000` | Inherits |
-| 9 | Accounting negative | `($100)`, `AUD (500)` | Context-gated |
+| 9 | Accounting negative | `($100)`, `$(100)`, `AUD (500)` | Context-gated |
 | 10 | Implicit financial context | `The estimated cost is 250.` | Low |
+| 11 | Worded amount | `two million dollars`, `fifty cents`, `half a million dollars` | High |
+
+### Worded amounts
+
+Prose and legal drafting write the amount out where a table prints digits, and
+the digit-keyed patterns cannot see those at all — there is no number to anchor
+on. Pattern 11 parses the spelled-out number (units, teens, tens, `hundred`,
+the scale words, and the fraction forms `half a million` / `three quarters of a
+million` / `one and a half million`) to an exact `Decimal`.
+
+**The currency word is the gate**, exactly as it is for pattern 4. A worded
+number on its own is not money, and in this corpus that is the shape that
+actually occurs: `more than one million Australians overseas` is the only
+worded-number phrase in the benchmark DOCX, and it is a headcount. Requiring
+the currency word costs nothing there and is what keeps the pattern from
+counting every spelled-out number in a document.
+
+The articles are read the way English uses them: `a million dollars` is one
+million (the article stands in for the number), while a bare `a dollar` is not
+an amount at all — `a dollar figure`, `a dollar amount` are the common uses.
+`of` and `and` are the sentence's, not the amount's, and are trimmed from the
+span.
+
+### Restatement
+
+Drafting writes one amount twice, once in words and once in digits:
+
+```
+The contract value is one million dollars ($1,000,000).
+```
+
+Both readings of that bracket were wrong. It is the accounting-negative shape,
+so the sentence yielded **−1,000,000**; and once worded amounts are recognised
+it also yielded the same money **twice**. A parenthesised amount that restates
+the one immediately before it is neither: the restating half is dropped and the
+primary kept, in whichever order the pair is written.
+
+The two halves must differ in form — one worded, one in digits. Two bracketed
+*digit* amounts of equal value are the ordinary financial-statement shape
+(`$5,000 (5,000)` is this year and last), and collapsing those would discard a
+real negative.
 
 ### Magnitude suffixes
 
@@ -213,7 +280,8 @@ folded into it.
 ### Accounting negatives
 
 Bracketed amounts are read as negative **only when accounting context is
-detected**. Ungated, this pattern is the single worst source of false positives
+detected**. The symbol sits inside or outside the bracket depending on house
+style — `($100)` and `$(100)` mark the same thing. Ungated, this pattern is the single worst source of false positives
 in the corpus: an unanchored bracketed-number scan fired 656 times and was
 almost entirely `s167(1)`, `(02) 6203 7300` and `(2018)`. Within a classified
 money column, brackets *are* accounting negatives and the gate is satisfied by
@@ -312,9 +380,11 @@ Context influences confidence rather than gating extraction outright:
 | `Funding of $10 million` | Very high |
 | `$#,##0.00` number format on the column | Very high |
 | Money header + numeric column | High |
+| `Funding of ten million dollars` | High |
 | `Funding of 10 million` | High |
 | `Funding of 10` | Medium |
 | Bare `10` | Very low — not extracted |
+| `ten million` with no currency word | Not extracted |
 
 ## Normalisation
 
@@ -459,8 +529,12 @@ choice is recorded alongside the spans and the space stays self-describing.
 per-stage `CheckpointManager` like every other stage.
 
 **As built:** `womblex money --shards <dir>`, config under `money:`.
-`process/money.py` (self-evidencing patterns) and `process/money_columns.py`
-(column classification) are pure cores over strings and cell lists;
+`process/money.py` (self-evidencing patterns), `process/money_words.py` (the
+worded-amount parser behind pattern 11), `process/money_numbers.py` (number
+reading and false-positive blocking, split out when the pattern set outgrew the
+750-line cap; its names are re-exported from `money.py`) and
+`process/money_columns.py` (column classification) are pure cores over strings
+and cell lists;
 `process/money_stage.py` walks the shard directory, applies the selected
 text-source overlay, and writes both sidecars; `store/money_output.py` owns
 the schemas. A classified money column owns its cells — the column supplies
@@ -493,7 +567,11 @@ Presidio, LayoutLMv3. **Decision: no new dependency.**
   ~1.3% — it has nothing to say about a bare `50000` in a column.
   **Revisit if the corpus grows to legislation and contracts**, where worded
   amounts ("a sum not exceeding five hundred thousand dollars") and penalty
-  units become common; both scored zero on the current corpus.
+  units become common; both scored zero on the current corpus. The worded half
+  of that revisit has since been written in-house as pattern 11 — a ~60-line
+  number-word parser over a closed vocabulary, which is the same "small and
+  stable residual surface" argument as the rest of the pattern set. Penalty
+  units remain deferred.
 - **`pint`** — solves unit *dimensionality and conversion*. Currency is not a
   physical dimension, the conversion analogue is exchange rates (which pint
   does not carry and this corpus does not need), and it is float-first. What we
@@ -555,10 +633,19 @@ PDFs have no text layer, and reporting those as failures would bury real ones).
   is where percentage columns leak in. Left un-extracted.
 - **Implicit financial context in narrative** — specified above, default off,
   pending a precision measurement.
-- **Worded amounts** (`two million dollars`) — zero occurrences measured;
-  revisit with a legislation/contract corpus.
 - **Penalty units** — zero occurrences across all 29 benchmark PDFs. These are
   audit, FOI and budget documents, not legislation.
+
+Worded amounts were on this list ("zero occurrences measured; revisit with a
+legislation/contract corpus") and are now implemented as pattern 11. The
+occurrence count has not changed — still zero in the benchmark — so this is a
+capability decision, not a measured recall win: the corpus these documents are
+a sample of does contain drafted instruments, and an amount written in words is
+invisible to every other pattern rather than merely lower-confidence. What the
+benchmark *does* supply is the precision evidence, which is the part that
+matters: the one worded-number phrase in it is a headcount, and the
+currency-word gate declines it (measured: zero worded spans across 1.6 MB of
+real text).
 
 ## First real-document run
 
@@ -655,6 +742,42 @@ below. The rest, as measurements:
   performance-measure or glossary tables (confirmed against the source with
   `python-docx`); its money is narrative, and 47 amounts were recovered there.
   Zero money columns is correct, not a miss.
+
+## Narrative-expression round, measured
+
+The patterns above were re-run over the same fixtures before and after the
+narrative-expression work (worded amounts, space-grouped thousands, the
+`$US`/`$A` symbol order, the true minus sign, `$(…)`, `¢`, restatement),
+comparing spans by offset so a moved value shows up as a pair rather than a
+count that happens to match.
+
+| Fixture | Spans before → after | Change |
+|---|---|---|
+| ACT regulatory notice (PDF) | 2 → 2 | both **values corrected**: `$10` → `$10 000`, `$50` → `$50 000` |
+| ANAO Major Projects Report (PDF, full) | 1,078 → 1,081 | `$US655.5m`, `$US617.7m`, `$US601.9m` recovered |
+| ANAO, first 30pp + transcript | 42 → 42 | unchanged |
+| DFAT PBS 2025–26 (DOCX) | 59 → 59 | unchanged |
+
+Three things this says, and one it does not:
+
+- **The two corrected values are the point of the round.** They were not
+  missing, they were *wrong by 10³* — a legislative penalty of $10 000 stored
+  as ten dollars. A miss is visible in a count; a silently wrong magnitude is
+  not, which is why the comparison is by offset and value rather than volume.
+- **The three `$US` amounts were lost to a false-positive blocker, not to the
+  patterns.** The metre pattern matches at `5m` inside `$US655.5m` — there is
+  no word boundary before `655`, so the match starts mid-number and the
+  currency check behind it saw `655.` rather than the `$`. The check now steps
+  back over the number's own digits first. The same defect silently affected
+  `US$655.5m`.
+- **Nothing regressed.** No span present before is absent after, on any
+  fixture.
+- **It is still not a recall measurement.** Worded amounts contributed zero
+  spans here because the corpus contains none, and the scanned-money gap
+  described below is untouched by any of this.
+
+Cost: `find_money` over the 1.3 MB ANAO report goes 1.42s → 1.83s, of which
+0.22s is the worded scan.
 
 ## Open gap: no ground truth
 

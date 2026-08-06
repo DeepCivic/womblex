@@ -7,6 +7,11 @@ number whose money-ness comes from its column) lives in
 :mod:`womblex.process.money_columns`; the per-stage driver that applies both
 over a shard directory is :mod:`womblex.process.money_stage`.
 
+The number itself may be written in words (``two million dollars``); that
+parser is :mod:`womblex.process.money_words`, and the layer beneath the
+patterns — number reading, currency resolution, false-positive blocking — is
+:mod:`womblex.process.money_numbers`, re-exported here.
+
 Nothing here reads or writes parquet, and nothing rewrites text: offsets index
 the string handed in, so callers own the coordinate space.
 
@@ -22,10 +27,22 @@ resolved by priority, then span length, then confidence.
 from __future__ import annotations
 
 import re
-from bisect import bisect_left, bisect_right
+from bisect import bisect_right
 from dataclasses import dataclass
 from decimal import Decimal
 
+# Number reading and false-positive blocking live in `money_numbers`; they are
+# re-exported here so `from womblex.process.money import parse_number` — the
+# established import site — keeps working.
+from womblex.process.money_numbers import (
+    IntervalIndex,
+    ambiguous_number_spans,
+    apply_scale,
+    blocked_spans,
+    parse_number,
+    resolve_iso,
+    resolve_symbol,
+)
 from womblex.process.money_vocab import (
     _SCALE_ALT,
     _SUFFIX_SYMBOL_ALT,
@@ -33,22 +50,17 @@ from womblex.process.money_vocab import (
     _WORD_ALT,
     ACCOUNTING_RE,
     AMBIGUOUS_SCALES,
-    CODE_ALIASES,
     CONTEXT_RE,
     CURRENCY_WORDS,
-    FALSE_POSITIVE_PATTERNS,
-    ISO_4217,
     MODIFIER_RE,
     NUM_AU,
     NUM_INTL,
-    POSTCODE_RE,
-    SCALE_CANONICAL,
-    SCALES,
-    STATE_RE,
+    SUBUNIT_SYMBOLS,
     SUBUNIT_WORDS,
     SYMBOL_TO_CODE,
     currency_tier,
 )
+from womblex.process.money_words import find_worded_amounts
 
 # ---------------------------------------------------------------------------
 # Model
@@ -89,11 +101,11 @@ class MoneyOptions:
 # and claim their whole span, so a range endpoint is never re-claimed.
 # Accounting negatives outrank the symbol patterns because they *enclose* one:
 # `($100)` must resolve to -100, not to the `$100` sitting inside it.
-_PRIORITY = {"p7": 0, "p9": 0, "p1": 1, "p6": 1, "p2": 2, "p4": 4, "p3": 5,
-             "p5": 6, "p10": 9}
+_PRIORITY = {"p7": 0, "p9": 0, "p1": 1, "p6": 1, "p2": 2, "p4": 4, "p11": 4,
+             "p3": 5, "p5": 6, "p10": 9}
 
 _CONFIDENCE = {"p1": 0.99, "p6": 0.99, "p2": 0.99, "p3": 0.90, "p4": 0.90,
-               "p5": 0.75, "p9": 0.90, "p10": 0.35}
+               "p5": 0.75, "p9": 0.90, "p10": 0.35, "p11": 0.90}
 
 # Whitespace inside a pattern may span at most one line break, so no match can
 # cross the ``\n\n`` element join `reassemble_narrative` writes — a pattern that
@@ -103,8 +115,14 @@ _CONFIDENCE = {"p1": 0.99, "p6": 0.99, "p2": 0.99, "p3": 0.90, "p4": 0.90,
 _GAP = r"[^\S\n]*\n?[^\S\n]*"
 _HGAP = r"[^\S\n]*"
 
+# A PDF text layer renders a leading minus as the true minus sign as often as
+# the ASCII hyphen, and reading `−$5.2 million` as positive inverts the sign
+# rather than missing the amount. The en dash is deliberately *not* here: it is
+# the range separator, and admitting it would turn `$10–20m` into a negative.
+_MINUS = r"[-−]"
+
 _SCALE_TAIL = rf"(?:{_GAP}(?P<scale>{_SCALE_ALT})(?![A-Za-z]))?"
-_NEG = rf"(?P<neg>-{_HGAP})?"
+_NEG = rf"(?P<neg>{_MINUS}{_HGAP})?"
 
 
 def _num_alt(international: bool) -> str:
@@ -115,7 +133,7 @@ def _compile(international: bool) -> dict[str, re.Pattern[str]]:
     """Build the pattern set for a locale mode (cached by :func:`_patterns`)."""
     num = _num_alt(international)
     scale_tail = rf"(?:{_GAP}(?P<scale_a>{_SCALE_ALT})(?![A-Za-z]))?"
-    left = rf"(?:(?P<sym_a>{_SYMBOL_ALT}){_HGAP})?(?P<neg_a>-{_HGAP})?(?P<num_a>{num})" \
+    left = rf"(?:(?P<sym_a>{_SYMBOL_ALT}){_HGAP})?(?P<neg_a>{_MINUS}{_HGAP})?(?P<num_a>{num})" \
            rf"{scale_tail}"
     right = rf"(?:(?P<sym_b>{_SYMBOL_ALT}){_HGAP})?(?P<num_b>{num})" \
             rf"(?:{_HGAP}(?P<scale_b>{_SCALE_ALT})(?![A-Za-z]))?"
@@ -147,8 +165,11 @@ def _compile(international: bool) -> dict[str, re.Pattern[str]]:
         "p5": re.compile(
             rf"(?<![A-Za-z0-9]){_NEG}(?P<num>{num}){_HGAP}"
             rf"(?P<sym>{_SUFFIX_SYMBOL_ALT})(?![0-9])"),
-        # 9 — accounting negative (`($100)`, `(6,550.1)` under context).
+        # 9 — accounting negative (`($100)`, `$(100)`, `(6,550.1)` under
+        # context). The symbol sits inside or outside the bracket depending on
+        # the statement's house style; both mark the same thing.
         "p9": re.compile(
+            rf"(?:(?P<sym_out>{_SYMBOL_ALT}){_HGAP})?"
             rf"\({_HGAP}(?P<sym>{_SYMBOL_ALT})?{_HGAP}(?P<num>{num})"
             rf"{_SCALE_TAIL}{_HGAP}\)", re.IGNORECASE),
         # 10 — bare number, implicit financial context. Off by default.
@@ -167,164 +188,12 @@ def _patterns(international: bool) -> dict[str, re.Pattern[str]]:
 
 
 # ---------------------------------------------------------------------------
-# Number / currency normalisation
-# ---------------------------------------------------------------------------
-
-
-def parse_number(raw: str, *, international: bool = False) -> Decimal | None:
-    """Parse an Australian (or, opt-in, international) formatted number."""
-    s = raw.strip()
-    if not s:
-        return None
-    if international and ("." in s and "," in s and s.rindex(",") > s.rindex(".")):
-        s = s.replace(".", "").replace(",", ".")
-    elif international and "," in s and "." not in s and re.fullmatch(r"\d+,\d+", s):
-        s = s.replace(",", ".")
-    else:
-        s = s.replace(",", "")
-    try:
-        return Decimal(s)
-    except Exception:
-        return None
-
-
-def apply_scale(value: Decimal, scale: str | None) -> tuple[Decimal, str | None]:
-    """Multiply by a magnitude suffix. Returns ``(value, canonical_suffix)``.
-
-    The suffix returned is the canonical name for the magnitude, not the token
-    the document happened to use: ``$1.2m`` and ``$1.2 million`` both report
-    ``million``, so the persisted ``multiplier`` is one value per magnitude.
-    """
-    if not scale:
-        return value, None
-    key = scale.lower()
-    factor = SCALES.get(key)
-    if factor is None:
-        return value, None
-    return value * factor, SCALE_CANONICAL[key]
-
-
-def resolve_symbol(sym: str) -> str:
-    return SYMBOL_TO_CODE.get(sym, SYMBOL_TO_CODE.get(sym.upper(), "AUD"))
-
-
-def resolve_iso(code: str) -> str | None:
-    """Return the ISO code if *code* is a real currency code, else ``None``."""
-    upper = code.upper()
-    if upper in CODE_ALIASES:
-        return CODE_ALIASES[upper]
-    return upper if upper in ISO_4217 else None
-
-
-# ---------------------------------------------------------------------------
-# False-positive blocking
-# ---------------------------------------------------------------------------
-
-
-def blocked_spans(text: str) -> list[tuple[int, int, str]]:
-    """Spans covering Australian false-positive classes (dates, ABNs, …).
-
-    A candidate overlapping one of these is discarded. Measurement and
-    percentage matches are skipped where a currency marker immediately
-    precedes the number, so ``$100 m`` stays a magnitude expression while
-    ``100m road`` does not.
-    """
-    out: list[tuple[int, int, str]] = []
-    for name, pattern in FALSE_POSITIVE_PATTERNS.items():
-        for m in pattern.finditer(text):
-            if name in ("measurement", "temperature") and _preceded_by_currency(text, m.start()):
-                continue
-            if name == "incident_ref" and _iso_prefixed(m.group(0)):
-                continue  # `USD100` is an amount, not a reference number
-            out.append((m.start(), m.end(), name))
-    for m in POSTCODE_RE.finditer(text):
-        window = text[max(0, m.start() - 40):m.end() + 40]
-        if STATE_RE.search(window):
-            out.append((m.start(), m.end(), "postcode"))
-    return out
-
-
-_NUMBER_RUN_RE = re.compile(r"\d[\d,.]*")
-_CONTINENTAL_RUN_RE = re.compile(r"\d{1,3}(?:\.\d{3})+,\d+")
-_MALFORMED_RUN_RE = re.compile(r"\d+(?:,\d{3})*,\d{1,2}")
-
-
-def ambiguous_number_spans(
-    text: str, *, international: bool = False,
-) -> list[tuple[int, int, str]]:
-    """Numeric runs this locale cannot read, blocked whole.
-
-    :func:`_ambiguous_continuation` declines the candidate that *starts* at
-    such a run, but declining is not enough on its own: the run's decimal tail
-    is itself a complete match for a suffix pattern, so in Australian mode
-    ``1.234,56 EUR`` came back as ``56 EUR`` — the value wrong by 10³, which is
-    the failure this guard exists to prevent. Blocking the whole run keeps
-    every pattern off it, so the amount is missed rather than misread.
-
-    Prefix-marker forms were already safe (``€1.000,50`` yields nothing,
-    because the tail has no leading marker to match), which is why only the
-    ISO-suffix, currency-word and symbol-suffix patterns leaked.
-    """
-    if international:
-        return []  # the continental reading is the correct one in this mode
-    out: list[tuple[int, int, str]] = []
-    for m in _NUMBER_RUN_RE.finditer(text):
-        raw = m.group(0).rstrip(".,")
-        if _CONTINENTAL_RUN_RE.fullmatch(raw) or _MALFORMED_RUN_RE.fullmatch(raw):
-            out.append((m.start(), m.start() + len(raw), "ambiguous_number"))
-    return out
-
-
-def _iso_prefixed(token: str) -> bool:
-    """True for `USD100`-shaped tokens whose letters are a real currency code."""
-    m = re.match(r"([A-Z]{2,4})", token)
-    return m is not None and resolve_iso(m.group(1)) is not None
-
-
-def _preceded_by_currency(text: str, pos: int) -> bool:
-    """True when a currency symbol or ISO code sits just before *pos*."""
-    prefix = text[max(0, pos - 8):pos]
-    stripped = prefix.rstrip()
-    if not stripped:
-        return False
-    if any(stripped.endswith(sym) for sym in SYMBOL_TO_CODE):
-        return True
-    tail = stripped[-3:]
-    return bool(re.fullmatch(r"[A-Z]{3}", tail)) and resolve_iso(tail) is not None
-
-
-class _IntervalIndex:
-    """Sorted interval set answering "does anything overlap [start, end)?".
-
-    A linear scan per candidate is quadratic in document length — measured at
-    3s on a 300 KB narrative, which is an ordinary FOI bundle. Sorting by start
-    and carrying a running maximum end answers each query with one bisect: an
-    overlap exists iff some interval starting before ``end`` reaches past
-    ``start``, and the prefix maximum is exactly that reach.
-    """
-
-    __slots__ = ("_max_end", "_starts")
-
-    def __init__(self, spans: list[tuple[int, int]]) -> None:
-        items = sorted(spans)
-        self._starts = [s for s, _ in items]
-        self._max_end: list[int] = []
-        reach = -1
-        for _, end in items:
-            reach = max(reach, end)
-            self._max_end.append(reach)
-
-    def overlaps(self, start: int, end: int) -> bool:
-        i = bisect_left(self._starts, end)
-        return i > 0 and self._max_end[i - 1] > start
-
-
-# ---------------------------------------------------------------------------
 # Candidate generation
 # ---------------------------------------------------------------------------
 
 
 _MALFORMED_GROUP_RE = re.compile(r",\d{1,2}(?!\d)")
+_DOTTED_CONTINUATION_RE = re.compile(r"\.\d")
 
 
 def _ambiguous_continuation(m: re.Match[str], num_group: str, international: bool) -> bool:
@@ -336,9 +205,13 @@ def _ambiguous_continuation(m: re.Match[str], num_group: str, international: boo
       10³. ``international_numbers`` is the deliberate opt-in for that format.
     - ``$1,23`` has a malformed thousands group; the pattern consumes ``$1`` and
       drops the rest, reporting one dollar instead of a hundred-odd.
+    - ``$3.219.3m`` (a real ANAO typo for ``$3,219.3m``) has a second dotted
+      group; the pattern consumes ``$3.219`` and reports three dollars for a
+      $3.2 billion project budget. Repairing the typo would be a guess, so the
+      amount is declined.
     """
     tail = m.string[m.end(num_group):m.end(num_group) + 4]
-    if _MALFORMED_GROUP_RE.match(tail):
+    if _MALFORMED_GROUP_RE.match(tail) or _DOTTED_CONTINUATION_RE.match(tail):
         return True
     if international:
         return False
@@ -462,11 +335,37 @@ def _scan_word(text: str, pats, opts: MoneyOptions) -> list[MoneySpan]:
 def _scan_symbol_suffix(text: str, pats, opts: MoneyOptions) -> list[MoneySpan]:
     out = []
     for m in pats["p5"].finditer(text):
-        span = _candidate(m, "p5", currency=resolve_symbol(m.group("sym")),
+        sym = m.group("sym")
+        span = _candidate(m, "p5", currency=resolve_symbol(sym),
                           currency_source="symbol",
-                          international=opts.international_numbers)
+                          international=opts.international_numbers,
+                          subunit=sym in SUBUNIT_SYMBOLS)
         if span:
             out.append(span)
+    return out
+
+
+def _scan_worded(text: str, pats, opts: MoneyOptions) -> list[MoneySpan]:
+    """Pattern 11 — amounts written in words (`two million dollars`).
+
+    The phrase is parsed by :mod:`womblex.process.money_words`; the currency
+    word it required is resolved here, so worded and digit amounts share one
+    currency model and one sub-unit rule (``fifty cents`` is 0.50).
+    """
+    out = []
+    for amount in find_worded_amounts(text):
+        code = CURRENCY_WORDS.get(amount.unit, opts.default_currency)
+        value = amount.value / 100 if amount.unit in SUBUNIT_WORDS else amount.value
+        conf = _CONFIDENCE["p11"]
+        if code is not None and currency_tier(code) == 3:
+            conf = max(0.1, conf - 0.10)
+        out.append(MoneySpan(
+            text=text[amount.start:amount.end],
+            start=amount.start, end=amount.end, value=value, currency=code,
+            currency_source="word", evidence="p11", confidence=round(conf, 4),
+            multiplier=amount.scale or (
+                "cents" if amount.unit in SUBUNIT_WORDS else None),
+        ))
     return out
 
 
@@ -481,7 +380,7 @@ def _scan_accounting(text: str, pats, opts: MoneyOptions) -> list[MoneySpan]:
     """
     out = []
     for m in pats["p9"].finditer(text):
-        sym = m.group("sym")
+        sym = m.group("sym") or m.group("sym_out")
         currency = resolve_symbol(sym) if sym else None
         source = "symbol"
         confidence = _CONFIDENCE["p9"]
@@ -534,7 +433,7 @@ def _scan_implicit(text: str, pats, opts: MoneyOptions) -> list[MoneySpan]:
 
 
 def _scan_ranges(
-    text: str, pats, opts: MoneyOptions, blocked: _IntervalIndex,
+    text: str, pats, opts: MoneyOptions, blocked: IntervalIndex,
 ) -> tuple[list[MoneySpan], list[tuple[int, int]]]:
     """Both endpoints, linked by ``range_group``; the whole span is claimed.
 
@@ -624,6 +523,43 @@ def _attach_modifier(text: str, span: MoneySpan) -> None:
         span.modifier = m.group(0).strip().lower()
 
 
+def _is_restatement(text: str, prev: MoneySpan, cur: MoneySpan) -> bool:
+    """Is *cur* a parenthesised restatement of *prev* rather than a new amount?
+
+    Drafting writes one amount twice — ``one million dollars ($1,000,000)`` —
+    and both readings of that bracket were wrong: the bracket is an accounting
+    negative, so the sentence yielded −1,000,000, and once worded amounts are
+    recognised it also yielded the same money twice.
+
+    The two forms must differ — one worded, one in digits. Two bracketed
+    *digit* amounts of equal value are the ordinary financial-table shape
+    (``5,000 (5,000)`` is this year and last), and collapsing those would
+    discard a real negative.
+    """
+    if abs(cur.value) != abs(prev.value):
+        return False
+    if (cur.evidence == "p11") == (prev.evidence == "p11"):
+        return False
+    gap = text[prev.end:cur.start]
+    if "\n" in gap:
+        return False
+    if cur.text.startswith("(") and cur.text.endswith(")"):
+        return not gap.strip()                      # `… dollars ($1,000,000)`
+    if gap.strip() != "(":
+        return False
+    return text[cur.end:cur.end + 2].lstrip().startswith(")")  # `$1m (one million dollars)`
+
+
+def _collapse_restatements(text: str, spans: list[MoneySpan]) -> list[MoneySpan]:
+    """Drop the restating half of a `worded (digits)` pair. *spans* is sorted."""
+    kept: list[MoneySpan] = []
+    for span in spans:
+        if kept and _is_restatement(text, kept[-1], span):
+            continue
+        kept.append(span)
+    return kept
+
+
 def context_for(text: str, span: MoneySpan, width: int) -> str:
     """Surrounding sentence-ish window, capped at *width* characters."""
     if width <= 0:
@@ -639,6 +575,18 @@ def context_for(text: str, span: MoneySpan, width: int) -> str:
 # ---------------------------------------------------------------------------
 
 
+_AMOUNT_SIGNAL_RE = re.compile(r"\d|\b(?:dollars?|cents?)\b", re.IGNORECASE)
+
+
+def has_amount_signal(text: str) -> bool:
+    """Could *text* hold an amount at all? A pre-filter for per-cell scanning.
+
+    Every digit pattern needs a digit, and the worded pattern needs a currency
+    word — so a prose cell with neither can be skipped without a scan.
+    """
+    return _AMOUNT_SIGNAL_RE.search(text) is not None
+
+
 def find_money(text: str, options: MoneyOptions | None = None) -> list[MoneySpan]:
     """Extract self-evidencing monetary amounts from *text*.
 
@@ -649,18 +597,18 @@ def find_money(text: str, options: MoneyOptions | None = None) -> list[MoneySpan
         return []
     opts = options or MoneyOptions()
     pats = _patterns(opts.international_numbers)
-    blocked = _IntervalIndex([
+    blocked = IntervalIndex([
         (s, e) for s, e, _ in
         blocked_spans(text)
         + ambiguous_number_spans(text, international=opts.international_numbers)
     ])
 
     ranges, claimed = _scan_ranges(text, pats, opts, blocked)
-    claimed_index = _IntervalIndex(claimed)
+    claimed_index = IntervalIndex(claimed)
 
     candidates: list[MoneySpan] = []
     for scan in (_scan_symbol_prefix, _scan_iso_prefix, _scan_iso_suffix,
-                 _scan_word, _scan_symbol_suffix, _scan_accounting):
+                 _scan_word, _scan_worded, _scan_symbol_suffix, _scan_accounting):
         candidates.extend(scan(text, pats, opts))
     if opts.implicit_context:
         candidates.extend(_scan_implicit(text, pats, opts))
@@ -673,6 +621,7 @@ def find_money(text: str, options: MoneyOptions | None = None) -> list[MoneySpan
 
     resolved = _resolve_overlaps(candidates) + ranges
     resolved.sort(key=lambda c: (c.start, c.end))
+    resolved = _collapse_restatements(text, resolved)
 
     out = []
     for span in resolved:
@@ -691,6 +640,7 @@ __all__ = [
     "blocked_spans",
     "context_for",
     "find_money",
+    "has_amount_signal",
     "parse_number",
     "resolve_iso",
     "resolve_symbol",

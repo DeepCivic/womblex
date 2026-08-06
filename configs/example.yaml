@@ -103,7 +103,8 @@ spellfix:
 # docs/money-extraction.md.
 money:
   enabled: true
-  # narrative: true            # Scan reassembled narrative (self-evidencing amounts).
+  # narrative: true            # Scan reassembled narrative (self-evidencing amounts,
+                               # digits or words — `two million dollars`).
   # default_currency: AUD      # `$` means AUD unless a document establishes otherwise.
   # international_numbers: false  # Accept 1.000,50. Off: Australia has no comma decimals.
   # implicit_context: false    # Pattern 10 (bare number near "cost"/"fee"/…). Low precision.
