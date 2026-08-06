@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-06
+
+Minor under 0.x: additive in surface (the `run-stage` command and its stage
+contracts; no new schema, no new config key), with one change a consumer can
+observe — **the `money` op's narrative output changes for text it already
+read**. Amounts written with space-grouped thousands were stored wrong by 10³
+(`$10 000` as ten dollars) and are now correct; `$US`-marked amounts, worded
+amounts and parenthesised restatements now resolve where they previously
+yielded nothing or the wrong sign. Re-run `womblex money` over any shard
+directory whose spans were produced by 0.3.0: the sidecar is regenerated in
+place and no other stage depends on it.
+
+**No parquet schema changed**: `ELEMENT_SCHEMA`, `TABLE_CELLS_SCHEMA`,
+`FORM_FIELDS_SCHEMA`, `CHUNKS_SCHEMA`, `EMBEDDINGS_SCHEMA`,
+`MONEY_SPANS_SCHEMA` and `MONEY_COLUMNS_SCHEMA` are byte-identical to `0.3.0`.
+`money_spans.evidence` carries one new value, `p11`, in its existing string
+column.
+
 ### Added
 - **Money: financial values expressed in narrative structure.** The detector
   read amounts written as digits beside a symbol; the forms prose actually uses
