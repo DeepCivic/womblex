@@ -32,7 +32,13 @@ from womblex.config import MoneyConfig
 from womblex.ingest.elements import Element
 from womblex.process.chunk_stage import _batch_bases, _load_elements
 from womblex.process.chunker import reassemble_narrative
-from womblex.process.money import MoneyOptions, MoneySpan, context_for, find_money
+from womblex.process.money import (
+    MoneyOptions,
+    MoneySpan,
+    context_for,
+    find_money,
+    has_amount_signal,
+)
 from womblex.process.money_columns import (
     ColumnOptions,
     ColumnVerdict,
@@ -338,8 +344,8 @@ def _cell_spans(
         return rows
 
     for row_idx, text in body:
-        if not any(ch.isdigit() for ch in text):
-            continue  # every pattern needs a digit; skip the scan on prose cells
+        if not has_amount_signal(text):
+            continue  # no digit and no currency word: nothing can match
         for span in find_money(text, opts):
             stored = quantise(span.value)
             if stored is None:

@@ -52,20 +52,31 @@ def currency_tier(code: str | None) -> int:
 # ---------------------------------------------------------------------------
 
 # Longest-first: `AU$` must win over `$`, `US$` over `$`.
+#
+# The symbol-then-letters forms (`$US655.5m`, `$A250,000`) are the Australian
+# press and reporting convention, not a typo of `US$` — the ANAO Major Projects
+# Report writes foreign-military-sales case values that way throughout, and
+# without them the `$` matches alone and the letters are read as the start of
+# the next word, losing the currency.
 SYMBOL_TO_CODE: dict[str, str] = {
     "AU$": "AUD", "A$": "AUD", "US$": "USD", "NZ$": "NZD", "CA$": "CAD",
     "S$": "SGD", "HK$": "HKD", "NT$": "TWD", "C$": "CAD",
+    "$AUD": "AUD", "$AU": "AUD", "$A": "AUD",
+    "$USD": "USD", "$US": "USD", "$NZD": "NZD", "$NZ": "NZD",
     "$": "AUD",          # Australian document convention — see docs/money-extraction.md
     "€": "EUR", "£": "GBP", "¥": "JPY", "₹": "INR", "₩": "KRW",
-    "₽": "RUB", "₿": "XBT", "﹩": "AUD", "＄": "AUD",
+    "₽": "RUB", "₿": "XBT", "﹩": "AUD", "＄": "AUD", "¢": "AUD",
 }
 
 _SYMBOL_ALT = "|".join(re.escape(s) for s in sorted(SYMBOL_TO_CODE, key=len, reverse=True))
 
-# Suffix symbols only — `100$`, `50€`. Prefixed-letter forms (`A$`) never
+# Symbols denoting a sub-unit: `50¢` is half a dollar, not fifty of them.
+SUBUNIT_SYMBOLS: frozenset[str] = frozenset({"¢"})
+
+# Suffix symbols only — `100$`, `50€`, `50¢`. Prefixed-letter forms (`A$`) never
 # trail a number in this corpus and admitting them would match `5 US$`-style
 # noise, so the suffix set is the bare symbols.
-_SUFFIX_SYMBOLS = ("$", "€", "£", "¥", "₹", "₩", "₽")
+_SUFFIX_SYMBOLS = ("$", "€", "£", "¥", "₹", "₩", "₽", "¢")
 _SUFFIX_SYMBOL_ALT = "|".join(re.escape(s) for s in _SUFFIX_SYMBOLS)
 
 
@@ -152,9 +163,26 @@ _SCALE_ALT = "|".join(re.escape(s) for s in sorted(SCALES, key=len, reverse=True
 # Numbers
 # ---------------------------------------------------------------------------
 
+# Space characters that group digits: ordinary space plus the no-break and thin
+# forms a PDF text layer emits for the same typographic gap.
+GROUP_SPACES = " \u00a0\u2007\u2009\u202f"
+
 # Australian: comma groups, dot decimal. `1.000,50` is deliberately not an
 # Australian amount (docs/money-extraction.md) — it is admitted only in international mode.
-NUM_AU = r"(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+"
+#
+# Space-grouped thousands (`$10 000`) are the Australian Government Publishing
+# Service convention and appear in legislative penalties verbatim. They are not
+# a recall nicety: without the group, `$10 000` matched as `$10` and was stored
+# wrong by 10³, which is the failure mode this op exists to avoid.
+#
+# The trailing `(?!\d)` is load-bearing. Groups are three digits, but without
+# it the run stops *inside* a longer number: `$5 2020` consumed `$5 202`,
+# binding an amount to the year beside it. With it the space alternative fails
+# there and the plain `\d+` reading (`$5`) wins.
+NUM_AU = (
+    rf"(?:\d{{1,3}}(?:,\d{{3}})+|\d{{1,3}}(?:[{GROUP_SPACES}]\d{{3}})+(?!\d)|\d+)"
+    r"(?:\.\d+)?|\.\d+"
+)
 NUM_INTL = r"(?:\d{1,3}(?:\.\d{3})+(?:,\d+)?|\d+,\d+)"
 
 
@@ -162,11 +190,17 @@ NUM_INTL = r"(?:\d{1,3}(?:\.\d{3})+(?:,\d+)?|\d+,\d+)"
 # Modifiers (qualifiers) — stored separately, never folded into the value
 # ---------------------------------------------------------------------------
 
+# The `exceeding` forms are drafting language — a penalty or a delegation limit
+# is written `a sum not exceeding …`, and the bound is a qualifier on the
+# amount exactly as `up to` is, not part of it.
 MODIFIERS: tuple[str, ...] = (
     "approximately", "approx.", "approx", "about", "around", "circa",
     "no more than", "not more than", "no less than", "not less than",
     "at least", "at most", "up to", "more than", "less than",
     "greater than", "in excess of", "over", "under", "nearly", "almost",
+    "not exceeding", "not to exceed", "exceeding", "up to a maximum of",
+    "to a maximum of", "a maximum of", "a minimum of", "in the order of",
+    "of the order of",
     "~", ">=", "<=", ">", "<",
 )
 
@@ -333,6 +367,7 @@ __all__ = [
     "CONTEXT_TRIGGERS",
     "CURRENCY_WORDS",
     "FALSE_POSITIVE_PATTERNS",
+    "GROUP_SPACES",
     "HEADER_MONEY_TERMS",
     "HEADER_VETO_TERMS",
     "ISO_4217",
@@ -345,6 +380,7 @@ __all__ = [
     "SCALES",
     "SCALE_CANONICAL",
     "STATE_RE",
+    "SUBUNIT_SYMBOLS",
     "SUBUNIT_WORDS",
     "SYMBOL_TO_CODE",
     "TIER1",

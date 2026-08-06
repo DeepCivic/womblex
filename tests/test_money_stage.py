@@ -319,6 +319,22 @@ def test_prose_cells_without_digits_are_skipped(tmp_path: Path):
     assert [r["value"] for r in read_money_spans(base).to_pylist()] == [Decimal("50.0000")]
 
 
+def test_a_worded_amount_in_a_cell_is_still_scanned(tmp_path: Path):
+    """The digit fast-path skipped prose cells outright, so an amount written
+    in words in a contract table was unreachable. The pre-filter now admits a
+    currency word too."""
+    elements = [_element(0, "table", header_rows=[0])]
+    cells = [
+        _cell(0, 0, 0, "Consideration"), _cell(0, 1, 0, "Two million dollars"),
+        _cell(0, 2, 0, "no amount here"),
+    ]
+    base = _build_shard(tmp_path, elements, cells)
+    money_shards(tmp_path, MoneyConfig())
+    rows = read_money_spans(base).to_pylist()
+    assert [(r["locus"], r["value"], r["evidence"]) for r in rows] == [
+        ("table_cell", Decimal("2000000.0000"), "p11")]
+
+
 def test_exactly_one_anchor_group_per_row(tmp_path: Path):
     """The documented schema contract: `locus` says which anchor group is
     populated, and the others stay null. Mixing coordinate spaces on one row
