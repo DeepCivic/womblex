@@ -54,6 +54,21 @@ def test_worded_amounts(text, value, currency):
     assert span.text == text
 
 
+@pytest.mark.parametrize(("text", "value", "modifier"), [
+    ("a sum not exceeding five hundred thousand dollars", Decimal(500_000),
+     "not exceeding"),
+    ("a fee not to exceed two thousand dollars", Decimal(2000), "not to exceed"),
+    ("a penalty not exceeding $50 000", Decimal(50_000), "not exceeding"),
+    ("grants up to a maximum of $100,000", Decimal(100_000), "up to a maximum of"),
+])
+def test_drafting_qualifiers_are_stored_separately(text, value, modifier):
+    """A delegation limit or a penalty is written `a sum not exceeding …`. The
+    bound qualifies the amount; it is never folded into the value."""
+    span = _one(text)
+    assert span.value == value
+    assert span.modifier == modifier
+
+
 def test_worded_amount_reports_its_magnitude_in_the_canonical_lane():
     assert _one("a grant of two million dollars").multiplier == "million"
     assert _one("a fee of fifty cents").multiplier == "cents"
@@ -98,6 +113,50 @@ def test_number_word_parser_declines_what_it_cannot_read(phrase):
 
 def test_zero_is_an_absence_not_an_amount():
     assert find_worded_amounts("zero dollars were spent") == []
+
+
+# ---------------------------------------------------------------------------
+# Grammar — phrases English does not write as one number
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("text", [
+    # A range, not a sum: adding the endpoints reports thirty dollars.
+    "quotes of between ten and twenty dollars",
+    "quotes of ten and twenty dollars",
+    "quotes of ten-twenty dollars",
+    "quotes of ten–twenty dollars",
+    "fifty and one hundred dollars",
+    # A year, and two numbers run together.
+    "the nineteen fifty dollars figure",
+    "five six dollars",
+])
+def test_two_numbers_run_together_are_declined(text):
+    """The failure this guards is a *wrong* value, not a missing one — the
+    phrase parses arithmetically and reports money the document never wrote."""
+    assert find_money(text) == []
+
+
+@pytest.mark.parametrize("text", [
+    "Amounts are in million dollars.",
+    "The table shows thousand dollars.",
+    "Figures are hundred dollars.",
+])
+def test_a_bare_scale_word_is_a_unit_declaration_not_an_amount(text):
+    """`in million dollars` names the table's unit. Only an article or a number
+    makes it an amount: `a million dollars` is one million."""
+    assert find_money(text) == []
+
+
+@pytest.mark.parametrize(("text", "value"), [
+    ("a hundred dollars", Decimal(100)),
+    ("fifteen hundred dollars", Decimal(1500)),
+    ("one hundred fifty five dollars", Decimal(155)),
+    ("two thousand and five dollars", Decimal(2005)),
+    ("ninety nine cents", Decimal("0.99")),
+])
+def test_grammar_still_admits_what_english_writes(text, value):
+    assert _one(f"a charge of {text} applies").value == value
 
 
 # ---------------------------------------------------------------------------

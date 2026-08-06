@@ -67,7 +67,7 @@ MONEY_SPANS_SCHEMA = pa.schema([
     ("value", VALUE_TYPE),
     ("currency", pa.string()),         # nullable — money-marked, currency unresolved
     ("currency_source", pa.string()),  # symbol|iso|word|number_format|column_header|document_default
-    ("evidence", pa.string()),         # p1..p10 | number_format | header+numeric | header_currency
+    ("evidence", pa.string()),         # p1..p11 | number_format | header+numeric | header_currency
     ("modifier", pa.string()),         # approximately | up to | … — never folded into value
     ("multiplier", pa.string()),       # thousand | million | billion | trillion | cents
     ("negative", pa.bool_()),

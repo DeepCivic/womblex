@@ -31,7 +31,7 @@ from womblex.process.money_vocab import SCALE_CANONICAL
 # ---------------------------------------------------------------------------
 
 UNITS: dict[str, int] = {
-    "zero": 0, "nil": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
     "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11,
     "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16,
     "seventeen": 17, "eighteen": 18, "nineteen": 19,
@@ -54,17 +54,24 @@ BIG: dict[str, Decimal] = {
 # `half a million dollars` is ordinary Australian reporting prose, and dropping
 # the fraction reports the wrong order of magnitude rather than nothing.
 FRACTIONS: dict[str, Decimal] = {
-    "half": Decimal("0.5"), "halves": Decimal("0.5"),
-    "quarter": Decimal("0.25"), "quarters": Decimal("0.25"),
+    "half": Decimal("0.5"), "quarter": Decimal("0.25"), "quarters": Decimal("0.25"),
 }
 
-# Grammatical filler inside an amount phrase. `a` is filler rather than 1: `a
-# dollar` must not become an amount (`a dollar figure`, `a dollar amount` are
-# the common uses), while `a million dollars` is licensed by its scale word.
+# `and` joins a hundred or a scale to what follows it (`one hundred and
+# fifty`, `two thousand and five`) or introduces a fraction (`one and a half
+# million`). It never joins two plain numbers: `between ten and twenty dollars`
+# is a range, and adding its endpoints reports thirty dollars.
+_AND_ANCHORS: frozenset[str] = frozenset({"hundred"}) | frozenset(BIG)
+
+# Grammatical filler inside an amount phrase. `a` carries no value of its own —
+# `a dollar` must not become an amount, since `a dollar figure` and `a dollar
+# amount` are the common uses — but it does license a bare magnitude, which is
+# what separates the amount `a million dollars` from the unit declaration
+# `in million dollars`.
 FILLERS: frozenset[str] = frozenset({"and", "a", "an", "of"})
 
 # Articles belong to the amount (`a million dollars` is one million) and stay
-# in the span text; `of` and `and` are the sentence's, not the amount's.
+# in the span text; a leading `of` or `and` is the sentence's, not the amount's.
 _ARTICLES: frozenset[str] = frozenset({"a", "an"})
 _LEADING_TRIM: frozenset[str] = FILLERS - _ARTICLES
 
@@ -78,6 +85,11 @@ _PHRASE_WORD_ALT = "|".join(_PHRASE_WORDS)
 # break — never two, because the reassembled narrative joins elements with
 # `\n\n` and a phrase spanning that join would bind unrelated paragraphs
 # (docs/money-extraction.md).
+#
+# The en dash is a separator here, unlike in the digit patterns where it marks
+# a range. That is deliberate: `ten–twenty dollars` is then consumed whole and
+# declined by the grammar below, rather than leaving `twenty dollars` behind as
+# if the range's upper endpoint were the amount.
 _SEP = r"(?:[^\S\n]*[-‐‑–][^\S\n]*|[^\S\n]*\n[^\S\n]*|[^\S\n]+)"
 
 # Repetition is bounded: the longest real phrase (`one million two hundred and
@@ -114,45 +126,72 @@ def _tokens(phrase: str) -> list[str]:
 def parse_number_words(phrase: str) -> tuple[Decimal, str | None] | None:
     """Parse a spelled-out number to ``(value, canonical_scale)``.
 
-    Returns ``None`` when the phrase carries no number at all (bare filler, as
-    in ``a``/``and``) or reads as a magnitude sequence no real amount uses —
-    ``million thousand million``. Declining an unreadable phrase is the right
-    failure: a partial parse of a worded amount is wrong by a power of ten.
+    Returns ``None`` for anything English does not write as a single number:
+    a phrase with no number in it (``a``, ``and``), a magnitude sequence no
+    amount uses (``million thousand million``), a bare scale word with nothing
+    to scale (``million dollars`` is a unit declaration, ``a million dollars``
+    is an amount), and two plain numbers run together (``ten and twenty``,
+    ``ten–twenty``) — which is a *range*, and adding its endpoints reports
+    thirty dollars.
+
+    Declining is the right failure throughout: a partial or recombined parse of
+    a worded amount is wrong by a power of ten, and a wrong value is worse than
+    a missing one.
     """
+    tokens = _tokens(phrase)
     total = Decimal(0)
     current = Decimal(0)
     seen_number = False
     pending_and = False
+    article = False
+    last_was_unit = False             # a unit word closes its group
     last_big: Decimal | None = None
     largest: str | None = None
 
-    for token in _tokens(phrase):
+    for i, token in enumerate(tokens):
         if token in UNITS:
+            # A unit opens a group or follows a tens word (`twenty-five`).
+            # Two units running (`five six`) is not one number.
+            if last_was_unit:
+                return None
             current += UNITS[token]
-            seen_number = True
+            last_was_unit = seen_number = True
         elif token in TENS:
+            # `ten twenty` / `nineteen fifty` are a range and a year, not
+            # numbers: a tens word opens its group or follows a hundred.
+            if current % 100:
+                return None
             current += TENS[token]
-            seen_number = True
+            last_was_unit, seen_number = False, True
         elif token == "hundred":
+            if not current and not article:
+                return None       # bare `hundred dollars` declares a unit
             current = (current or Decimal(1)) * 100
-            seen_number = True
+            last_was_unit, seen_number = False, True
         elif token in FRACTIONS:
             # `one and a half million` adds; `three quarters of a million`
             # multiplies. The conjunction is what distinguishes them.
             frac = FRACTIONS[token]
             current = current + frac if (pending_and or not current) else current * frac
-            seen_number = True
+            last_was_unit, seen_number = False, True
         elif token in BIG:
             factor = BIG[token]
             if last_big is not None and factor >= last_big:
-                return None  # `thousand million`-style sequence: decline it
+                return None       # `thousand million`-style sequence
+            if not current and not article:
+                return None       # `in million dollars` is a unit declaration
             total += (current or Decimal(1)) * factor
             current = Decimal(0)
-            last_big = factor
+            last_was_unit, last_big = False, factor
             largest = largest or SCALE_CANONICAL[token]
             seen_number = True
+        elif token == "and":
+            if not _and_licensed(tokens, i):
+                return None
         elif token not in FILLERS:
             return None
+
+        article = token in _ARTICLES
         if token == "and":
             pending_and = True
         elif token not in _ARTICLES:
@@ -165,14 +204,24 @@ def parse_number_words(phrase: str) -> tuple[Decimal, str | None] | None:
     return total + current, largest
 
 
+def _and_licensed(tokens: list[str], i: int) -> bool:
+    """Is the ``and`` at *i* joining a number, or two of them?"""
+    previous = tokens[i - 1] if i else ""
+    following = next((t for t in tokens[i + 1:] if t not in _ARTICLES), "")
+    return previous in _AND_ANCHORS or following in FRACTIONS
+
+
+_LEADING_TRIM_RE = re.compile(
+    rf"(?:(?:{'|'.join(sorted(_LEADING_TRIM))})(?:{_SEP}|$))+", re.IGNORECASE)
+
+
 def _trim_fillers(phrase: str) -> int:
     """Leading characters to drop from a match — ``of`` in ``of ten dollars``.
 
     The span is what the document wrote for the amount; the preposition that
     attached it to the sentence is not part of it.
     """
-    m = re.match(
-        rf"(?:(?:{'|'.join(sorted(_LEADING_TRIM))})(?:{_SEP}|$))+", phrase, re.IGNORECASE)
+    m = _LEADING_TRIM_RE.match(phrase)
     return m.end() if m else 0
 
 

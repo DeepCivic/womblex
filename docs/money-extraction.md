@@ -230,9 +230,23 @@ counting every spelled-out number in a document.
 
 The articles are read the way English uses them: `a million dollars` is one
 million (the article stands in for the number), while a bare `a dollar` is not
-an amount at all — `a dollar figure`, `a dollar amount` are the common uses.
-`of` and `and` are the sentence's, not the amount's, and are trimmed from the
-span.
+an amount at all — `a dollar figure`, `a dollar amount` are the common uses. A
+*leading* `of` or `and` belongs to the sentence rather than the amount and is
+trimmed from the span; an `and` inside the number (`one hundred and fifty`) is
+part of it.
+
+**What the parser declines**, because each of these parses arithmetically into
+a number the document never wrote — and a wrong value is worse than a missing
+one:
+
+| Phrase | Naive reading | Why it is declined |
+|---|---|---|
+| `between ten and twenty dollars` | 30 | a range; `and` joins a hundred or a scale (`one hundred and fifty`), never two plain numbers |
+| `ten–twenty dollars`, `ten-twenty dollars` | 30 | the same range, hyphenated. The dash forms are *phrase* separators here so the pair is consumed and declined whole, rather than leaving `twenty dollars` behind |
+| `nineteen fifty dollars` | 1,950 | a year: a tens word opens its group or follows a hundred |
+| `in million dollars`, `thousand dollars` | 1,000,000 / 1,000 | a table's unit declaration. A number or an article is what makes it an amount |
+| `one thousand million` | 10⁹ | scale words must strictly decrease |
+| `zero dollars`, `nil dollars` | 0 | states an absence, not an amount |
 
 ### Restatement
 
@@ -445,7 +459,7 @@ populated, and **exactly one group is non-null per row**:
 | `table_cell` | `parent_elem_order`, `row`, `col` |
 | `sheet_cell` | `sheet`, `row`, `col`, `elem_order` |
 
-Beyond the JSON above the row also carries `evidence` (`p1`–`p10` for the
+Beyond the JSON above the row also carries `evidence` (`p1`–`p11` for the
 narrative patterns, `number_format` / `header+numeric` / `header_currency` for
 the column path), `range_group` + `range_role` (which link a range's two
 endpoints — the JSON record has no way to express the relationship the design
@@ -568,10 +582,12 @@ Presidio, LayoutLMv3. **Decision: no new dependency.**
   **Revisit if the corpus grows to legislation and contracts**, where worded
   amounts ("a sum not exceeding five hundred thousand dollars") and penalty
   units become common; both scored zero on the current corpus. The worded half
-  of that revisit has since been written in-house as pattern 11 — a ~60-line
-  number-word parser over a closed vocabulary, which is the same "small and
-  stable residual surface" argument as the rest of the pattern set. Penalty
-  units remain deferred.
+  of that revisit has since been written in-house as pattern 11 — one module
+  (`process/money_words.py`) of number-word tables, a phrase regex and a
+  parser, which is the same "small and stable residual surface" argument as
+  the rest of the pattern set, and it returns exact `Decimal`s rather than the
+  floats that were half the reason for rejecting the library. Penalty units
+  remain deferred.
 - **`pint`** — solves unit *dimensionality and conversion*. Currency is not a
   physical dimension, the conversion analogue is exchange rates (which pint
   does not carry and this corpus does not need), and it is float-first. What we

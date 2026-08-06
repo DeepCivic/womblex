@@ -20,6 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the corpus's only worded-number phrase (`more than one million
     Australians`) is a headcount and is declined. Measured: zero worded false
     positives across 1.6 MB of real government text.
+
+    The parser declines what English does not write as one number, because
+    each of these parses arithmetically into money the document never wrote:
+    `between ten and twenty dollars` and `ten–twenty dollars` (a range —
+    reading 30), `nineteen fifty dollars` (a year), `in million dollars` (a
+    table's unit declaration, where only a number or an article makes it an
+    amount), `one thousand million`, and `zero`/`nil dollars`.
   - **Space-grouped thousands** — `$10 000`, `$1 500 000` (AGPS convention,
     plus the no-break and thin spaces a PDF text layer emits). Previously
     `Penalty: $10 000` was stored as **ten dollars**; a group is exactly three
