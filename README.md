@@ -2,6 +2,30 @@
 
 Document extraction pipeline for converting Australian government documents into ML-friendly corpus or collections. Extracts text from PDFs and Word documents (native, scanned, forms, hybrid). Spreadsheets are ingested as cell-grained element streams with automatic header/preamble detection, ready for per-record semantic analysis. Reference registers (G-NAF, ABN bulk extract, geospatial) have standalone Parquet ingests that bypass the NLP pipeline.
 
+## Runs on your laptop, scales to a cluster
+
+**Local is the default and always works.** `pip install womblex` gives you the
+entire pipeline — extraction, OCR, chunking, PII — running CPU-only against the
+local filesystem. No cloud account, no object store, no database, no API key,
+no network access at runtime (models are bundled or resolved from `models/`).
+A Chromebook is a supported deployment, not a degraded one.
+
+**Cloud is additive, not a different product.** When one machine stops being
+enough, the same wheel runs behind object storage and a shared job queue, and
+you buy throughput by adding workers — `--scale worker=8` is the whole
+operation. What does *not* change when you scale out:
+
+- the extraction logic (`womblex run` and the cloud worker call a byte-identical
+  `process_batch` body)
+- the OCR engine (the bundled CPU one, unless you explicitly opt into `[cloud-ocr]`)
+- the output layout (distributed runs land the ordinary shard layout, so every
+  local `--shards` command consumes them unchanged)
+
+Scaling out is not a lock-in: a distributed run's shards sync down and every
+local per-stage command (`womblex manifest`, `chunk --shards`, …) consumes them
+unchanged, or you run those stages in place with `run-stage` and never sync at
+all. See [Environment-Agnostic Execution](#environment-agnostic-execution).
+
 ## Design disclosure
 This project is designed for everyone with a focus on inexpensive processing. This means Womblex doesn't include many of the more robust 'all in one' OCR models.
 
@@ -21,15 +45,33 @@ One-size-fits-all OCR fails because each format and sub-type needs a different e
 
 ## Installation
 
-```bash
-pip install womblex
-```
+Pick the row that matches where you are running it. The pipeline logic is
+identical in every row — the extras add *reach* (object storage, a shared
+queue, hosted APIs), never a different extraction path.
 
-With Isaacus enrichment:
+| Deployment | Install | Adds |
+|---|---|---|
+| **Local CPU** (laptop, Chromebook, air-gapped box) | `pip install womblex` | — the base install is the local deployment |
+| **Cloud CPU** (scalable, S3 + Postgres) | `pip install womblex[cloud]` | fsspec + s3fs staging, psycopg3 job queue |
+| Enrichment / embeddings | `pip install womblex[isaacus]` | Isaacus SDK (needs `ISAACUS_API_KEY`) |
+| Hosted VLM OCR *(advanced)* | `pip install womblex[cloud-ocr]` | boto3 → Mistral Pixtral Large via AWS Bedrock |
 
-```bash
-pip install womblex[isaacus]
-```
+`pip install womblex[local]` is accepted and resolves to the plain base
+install — it exists so a deployment can state which mode it is, and so
+`[local]` and `[cloud]` read as a pair.
+
+Two things worth being explicit about, because they are the usual source of
+over-installing:
+
+- **`[cloud]` does not pull in `[cloud-ocr]`.** S3 access goes through
+  s3fs → aiobotocore → botocore; boto3 is imported at exactly one site,
+  `ingest/llm_ocr.py`, for the Bedrock OCR engine. So a scalable AWS-native
+  deployment keeps the cheap, bundled CPU OCR engine unless you opt in.
+  `[cloud-ocr]` is the only extra that changes OCR cost and behaviour —
+  per-token billing, network egress, and a Pixtral Large model grant.
+- **Local vs cloud is a runtime choice, not a build-time one.** The same
+  wheel does both; see [Environment-Agnostic Execution](#environment-agnostic-execution).
+  Installing `[cloud]` does not commit you to running in the cloud.
 
 For development:
 
@@ -113,9 +155,37 @@ to distributed cloud clusters without altering extraction behavior.
 Configurable "knobs," such as parallel thread limits, allow you to optimize 
 resource usage for your specific infrastructure.
 
+**You do not need any of this to use Womblex.** Everything below is the
+scale-out path for when a single machine is the bottleneck; `womblex run` on a
+local directory remains fully supported and produces the same shards.
+
 ```bash
 pip install womblex[cloud]   # fsspec + s3fs + psycopg3
 ```
+
+### Selecting the backend
+
+There is no `STORAGE_TYPE` / `QUEUE_TYPE` switch to set, because there is no
+branch for one to select. Both choices fall out of what you already pass:
+
+| Choice | Local | Cloud | Selected by |
+|---|---|---|---|
+| Storage | `--store /data/runs` | `--store s3://womblex` | the URI scheme |
+| Execution | `womblex run` | `womblex enqueue` + `womblex worker` | which command you invoke |
+
+`RemoteStore.from_uri` hands the URI to `fsspec.core.url_to_fs`, which returns
+a `LocalFileSystem` for a bare path or `file://` and an `S3FileSystem` for
+`s3://` (likewise `gs://`, `az://`). The staging code above it is one code
+path — a local `--store` runs the whole stage-in → `process_batch` → stage-out
+cycle with s3fs never imported. Credentials follow the same rule: the standard
+`AWS_*` vars and `WOMBLEX_S3_ENDPOINT` (for MinIO) are read only for `s3://`,
+so a local store needs no configuration at all.
+
+Execution mode is the command, not a setting. `womblex run` processes batches
+in-process and checkpoints to `CheckpointManager`; `enqueue`/`worker` put the
+same `process_batch` body behind the Postgres queue, where the job row's
+`status` *is* the checkpoint. Both call byte-identical pipeline code, which is
+why a distributed run's output is the ordinary shard layout.
 
 ```bash
 # 1. Plan: list source docs in object storage, split into batches, enqueue.
@@ -162,6 +232,17 @@ in the **ordinary layout**, so once synced down, `womblex manifest` /
 `chunk --shards` / every per-stage command consume a distributed run exactly
 like a local one — or run them in place with `run-stage`, above.
 
+### Scaling out
+
+Throughput is workers. Each one claims batches with `FOR UPDATE SKIP LOCKED`,
+so they cooperate without a broker, without double-processing, and without
+coordinating with each other — which means you can add and remove workers
+mid-run, on the same host or across hosts, with no reconfiguration and no
+restart of the ones already going. A worker that dies mid-batch is not a lost
+batch: `--stale-timeout` returns its claim to `pending` and another worker
+picks it up. `--idle-timeout` exits a worker that finds no work, so a fleet can
+scale to zero on its own once the run drains.
+
 A ready-to-run stack (Postgres + MinIO + scalable workers) lives in
 `docker-compose.yml`:
 
@@ -169,7 +250,7 @@ A ready-to-run stack (Postgres + MinIO + scalable workers) lives in
 docker compose up -d postgres minio createbuckets init
 docker compose run --rm womblex enqueue --input-prefix inputs/demo \
     --config configs/example.yaml --create-schema
-docker compose up --scale worker=4 worker
+docker compose up --scale worker=4 worker     # raise or lower at any time
 ```
 
 ## How It Works

@@ -161,6 +161,26 @@ A corpus exists to mature Womblex capability, not host custom code. Corpus-side 
 - Pydantic for config/validation
 - Australian spelling in comments and docs
 - **750 line hard cap per file** — validate after every file save with `wc -l`; split if exceeded
+- **500 line hard cap per merge** — see [Change size](#change-size)
+
+### Change size
+A merge lands at most **500 changed lines** (added + removed) against the
+branch it merges into. Check before opening or updating a PR:
+```bash
+git diff --stat $(git merge-base HEAD origin/main)..HEAD
+```
+Generated and vendored files don't count toward the cap — `uv.lock`,
+`docs/accuracy/*.md` (written by the test suite), and anything under
+`fixtures/`. Everything else does, including tests and docs.
+
+Over the cap means the change is doing more than one thing. Split it into
+sequential merges that each stand alone: land the mechanical part
+(renames, moves, signature threading) first, then the behaviour change on
+top. Don't split a change so the halves leave the tree broken or the
+suite red — each merge must pass tests on its own. If a single coherent
+change genuinely can't fit (a schema migration touching every stage, a
+library-wide rename), say so in the PR body with the reason and get human
+approval rather than quietly exceeding it.
 
 ### Error Handling
 - Individual document failures shouldn't stop the batch
@@ -170,7 +190,8 @@ A corpus exists to mature Womblex capability, not host custom code. Corpus-side 
 ### Dependencies
 - PyMuPDF (`fitz`) for PDF handling
 - rapidocr-onnxruntime for OCR (bundles PaddleOCR v4 ONNX det/rec/cls models, no PaddlePaddle framework)
-- boto3 (optional `[bedrock]` extra) for the `mistral-ocr` engine — Mistral Pixtral Large via AWS Bedrock (Converse API). Imported lazily at exactly one site, `ingest/llm_ocr.py:_ensure_client` (`boto3.client("bedrock-runtime")`); nothing on the core extraction path touches it, which is why the whole suite runs without it and only the VLM benchmark skips
+- boto3 (optional `[bedrock]` extra, aliased `[cloud-ocr]`) for the `mistral-ocr` engine — Mistral Pixtral Large via AWS Bedrock (Converse API). Imported lazily at exactly one site, `ingest/llm_ocr.py:_ensure_client` (`boto3.client("bedrock-runtime")`); nothing on the core extraction path touches it, which is why the whole suite runs without it and only the VLM benchmark skips
+- **`[cloud]` must never depend on boto3.** s3fs reaches S3 via aiobotocore → botocore, so object-storage staging needs no boto3; putting it in `[cloud]` would drag the hosted-VLM dependency into every distributed CPU deployment. Extras are deployment-shaped: `[local]` (empty — the base install), `[cloud]` (fsspec + s3fs + psycopg3), `[cloud-ocr]` (the one extra that changes OCR cost/behaviour)
 - ultralytics for YOLOv8 layout analysis (bundled yolov8n.pt in `models/`)
 - opencv-python-headless for image processing (binarisation, deskew)
 - semchunk for chunking
@@ -364,6 +385,7 @@ belongs on the orchestrator path, not here.
 - Add heavy ML dependencies (keep extraction lightweight)
 - Modify `pyproject.toml` dependencies without human approval
 - Create oversized files — stay under 750 lines unless justified
+- Land oversized merges — stay under 500 changed lines; split into sequential merges instead
 - Add TODOs or FIXMEs — fix issues immediately or document in issues
 - Over-engineer — no premature abstractions or "strategy patterns"
 - Reject unusual data — warn about it, but continue processing
