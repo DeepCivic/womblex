@@ -21,15 +21,33 @@ One-size-fits-all OCR fails because each format and sub-type needs a different e
 
 ## Installation
 
-```bash
-pip install womblex
-```
+Pick the row that matches where you are running it. The pipeline logic is
+identical in every row — the extras add *reach* (object storage, a shared
+queue, hosted APIs), never a different extraction path.
 
-With Isaacus enrichment:
+| Deployment | Install | Adds |
+|---|---|---|
+| **Local CPU** (laptop, Chromebook, air-gapped box) | `pip install womblex` | — the base install is the local deployment |
+| **Cloud CPU** (scalable, S3 + Postgres) | `pip install womblex[cloud]` | fsspec + s3fs staging, psycopg3 job queue |
+| Enrichment / embeddings | `pip install womblex[isaacus]` | Isaacus SDK (needs `ISAACUS_API_KEY`) |
+| Hosted VLM OCR *(advanced)* | `pip install womblex[cloud-ocr]` | boto3 → Mistral Pixtral Large via AWS Bedrock |
 
-```bash
-pip install womblex[isaacus]
-```
+`pip install womblex[local]` is accepted and resolves to the plain base
+install — it exists so a deployment can state which mode it is, and so
+`[local]` and `[cloud]` read as a pair.
+
+Two things worth being explicit about, because they are the usual source of
+over-installing:
+
+- **`[cloud]` does not pull in `[cloud-ocr]`.** S3 access goes through
+  s3fs → aiobotocore → botocore; boto3 is imported at exactly one site,
+  `ingest/llm_ocr.py`, for the Bedrock OCR engine. So a scalable AWS-native
+  deployment keeps the cheap, bundled CPU OCR engine unless you opt in.
+  `[cloud-ocr]` is the only extra that changes OCR cost and behaviour —
+  per-token billing, network egress, and a Pixtral Large model grant.
+- **Local vs cloud is a runtime choice, not a build-time one.** The same
+  wheel does both; see [Environment-Agnostic Execution](#environment-agnostic-execution).
+  Installing `[cloud]` does not commit you to running in the cloud.
 
 For development:
 
@@ -116,6 +134,30 @@ resource usage for your specific infrastructure.
 ```bash
 pip install womblex[cloud]   # fsspec + s3fs + psycopg3
 ```
+
+### Selecting the backend
+
+There is no `STORAGE_TYPE` / `QUEUE_TYPE` switch to set, because there is no
+branch for one to select. Both choices fall out of what you already pass:
+
+| Choice | Local | Cloud | Selected by |
+|---|---|---|---|
+| Storage | `--store /data/runs` | `--store s3://womblex` | the URI scheme |
+| Execution | `womblex run` | `womblex enqueue` + `womblex worker` | which command you invoke |
+
+`RemoteStore.from_uri` hands the URI to `fsspec.core.url_to_fs`, which returns
+a `LocalFileSystem` for a bare path or `file://` and an `S3FileSystem` for
+`s3://` (likewise `gs://`, `az://`). The staging code above it is one code
+path — a local `--store` runs the whole stage-in → `process_batch` → stage-out
+cycle with s3fs never imported. Credentials follow the same rule: the standard
+`AWS_*` vars and `WOMBLEX_S3_ENDPOINT` (for MinIO) are read only for `s3://`,
+so a local store needs no configuration at all.
+
+Execution mode is the command, not a setting. `womblex run` processes batches
+in-process and checkpoints to `CheckpointManager`; `enqueue`/`worker` put the
+same `process_batch` body behind the Postgres queue, where the job row's
+`status` *is* the checkpoint. Both call byte-identical pipeline code, which is
+why a distributed run's output is the ordinary shard layout.
 
 ```bash
 # 1. Plan: list source docs in object storage, split into batches, enqueue.

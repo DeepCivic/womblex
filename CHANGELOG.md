@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Deployment-shaped install extras.** `[local]` (deliberately empty — the
+  base install *is* the local CPU deployment) and `[cloud-ocr]` (an alias of
+  `[bedrock]`, named for what it buys rather than the vendor) join the
+  existing `[cloud]` / `[isaacus]` / `[bedrock]`, so an install can state
+  which deployment it is. No package versions changed; `uv.lock` moves only
+  its extras metadata.
+- **README installation matrix** mapping deployment → extra → what it adds,
+  plus a "Selecting the backend" table for the local/cloud runtime split.
+
+### Changed
+- `[cloud]` documented as explicitly *not* implying `[cloud-ocr]`: s3fs reaches
+  S3 through aiobotocore → botocore, so object-storage staging needs no boto3,
+  and a scalable cloud deployment keeps the bundled CPU OCR engine unless it
+  opts into the hosted VLM engine. boto3 stays confined to its single import
+  site, `ingest/llm_ocr.py`.
+
 ## [0.4.0] - 2026-08-06
 
 Minor under 0.x: additive in surface (the `run-stage` command and its stage

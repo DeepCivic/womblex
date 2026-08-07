@@ -190,7 +190,8 @@ approval rather than quietly exceeding it.
 ### Dependencies
 - PyMuPDF (`fitz`) for PDF handling
 - rapidocr-onnxruntime for OCR (bundles PaddleOCR v4 ONNX det/rec/cls models, no PaddlePaddle framework)
-- boto3 (optional `[bedrock]` extra) for the `mistral-ocr` engine — Mistral Pixtral Large via AWS Bedrock (Converse API). Imported lazily at exactly one site, `ingest/llm_ocr.py:_ensure_client` (`boto3.client("bedrock-runtime")`); nothing on the core extraction path touches it, which is why the whole suite runs without it and only the VLM benchmark skips
+- boto3 (optional `[bedrock]` extra, aliased `[cloud-ocr]`) for the `mistral-ocr` engine — Mistral Pixtral Large via AWS Bedrock (Converse API). Imported lazily at exactly one site, `ingest/llm_ocr.py:_ensure_client` (`boto3.client("bedrock-runtime")`); nothing on the core extraction path touches it, which is why the whole suite runs without it and only the VLM benchmark skips
+- **`[cloud]` must never depend on boto3.** s3fs reaches S3 via aiobotocore → botocore, so object-storage staging needs no boto3; putting it in `[cloud]` would drag the hosted-VLM dependency into every distributed CPU deployment. Extras are deployment-shaped: `[local]` (empty — the base install), `[cloud]` (fsspec + s3fs + psycopg3), `[cloud-ocr]` (the one extra that changes OCR cost/behaviour)
 - ultralytics for YOLOv8 layout analysis (bundled yolov8n.pt in `models/`)
 - opencv-python-headless for image processing (binarisation, deskew)
 - semchunk for chunking

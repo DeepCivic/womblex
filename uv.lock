@@ -3716,6 +3716,9 @@ cloud = [
     { name = "psycopg", extra = ["binary"] },
     { name = "s3fs" },
 ]
+cloud-ocr = [
+    { name = "boto3" },
+]
 dev = [
     { name = "mypy" },
     { name = "pytest" },
@@ -3754,9 +3757,10 @@ requires-dist = [
     { name = "spylls", specifier = ">=0.1.7" },
     { name = "tqdm" },
     { name = "ultralytics", specifier = ">=8.0" },
+    { name = "womblex", extras = ["bedrock"], marker = "extra == 'cloud-ocr'" },
     { name = "womblex", extras = ["isaacus", "bedrock", "cloud", "dev"], marker = "extra == 'all'" },
 ]
-provides-extras = ["isaacus", "bedrock", "cloud", "dev", "all"]
+provides-extras = ["local", "cloud", "isaacus", "bedrock", "cloud-ocr", "dev", "all"]
 
 [[package]]
 name = "wrapt"
