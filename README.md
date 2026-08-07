@@ -2,6 +2,30 @@
 
 Document extraction pipeline for converting Australian government documents into ML-friendly corpus or collections. Extracts text from PDFs and Word documents (native, scanned, forms, hybrid). Spreadsheets are ingested as cell-grained element streams with automatic header/preamble detection, ready for per-record semantic analysis. Reference registers (G-NAF, ABN bulk extract, geospatial) have standalone Parquet ingests that bypass the NLP pipeline.
 
+## Runs on your laptop, scales to a cluster
+
+**Local is the default and always works.** `pip install womblex` gives you the
+entire pipeline — extraction, OCR, chunking, PII — running CPU-only against the
+local filesystem. No cloud account, no object store, no database, no API key,
+no network access at runtime (models are bundled or resolved from `models/`).
+A Chromebook is a supported deployment, not a degraded one.
+
+**Cloud is additive, not a different product.** When one machine stops being
+enough, the same wheel runs behind object storage and a shared job queue, and
+you buy throughput by adding workers — `--scale worker=8` is the whole
+operation. What does *not* change when you scale out:
+
+- the extraction logic (`womblex run` and the cloud worker call a byte-identical
+  `process_batch` body)
+- the OCR engine (the bundled CPU one, unless you explicitly opt into `[cloud-ocr]`)
+- the output layout (distributed runs land the ordinary shard layout, so every
+  local `--shards` command consumes them unchanged)
+
+Scaling out is not a lock-in: a distributed run's shards sync down and every
+local per-stage command (`womblex manifest`, `chunk --shards`, …) consumes them
+unchanged, or you run those stages in place with `run-stage` and never sync at
+all. See [Environment-Agnostic Execution](#environment-agnostic-execution).
+
 ## Design disclosure
 This project is designed for everyone with a focus on inexpensive processing. This means Womblex doesn't include many of the more robust 'all in one' OCR models.
 
@@ -131,6 +155,10 @@ to distributed cloud clusters without altering extraction behavior.
 Configurable "knobs," such as parallel thread limits, allow you to optimize 
 resource usage for your specific infrastructure.
 
+**You do not need any of this to use Womblex.** Everything below is the
+scale-out path for when a single machine is the bottleneck; `womblex run` on a
+local directory remains fully supported and produces the same shards.
+
 ```bash
 pip install womblex[cloud]   # fsspec + s3fs + psycopg3
 ```
@@ -204,6 +232,17 @@ in the **ordinary layout**, so once synced down, `womblex manifest` /
 `chunk --shards` / every per-stage command consume a distributed run exactly
 like a local one — or run them in place with `run-stage`, above.
 
+### Scaling out
+
+Throughput is workers. Each one claims batches with `FOR UPDATE SKIP LOCKED`,
+so they cooperate without a broker, without double-processing, and without
+coordinating with each other — which means you can add and remove workers
+mid-run, on the same host or across hosts, with no reconfiguration and no
+restart of the ones already going. A worker that dies mid-batch is not a lost
+batch: `--stale-timeout` returns its claim to `pending` and another worker
+picks it up. `--idle-timeout` exits a worker that finds no work, so a fleet can
+scale to zero on its own once the run drains.
+
 A ready-to-run stack (Postgres + MinIO + scalable workers) lives in
 `docker-compose.yml`:
 
@@ -211,7 +250,7 @@ A ready-to-run stack (Postgres + MinIO + scalable workers) lives in
 docker compose up -d postgres minio createbuckets init
 docker compose run --rm womblex enqueue --input-prefix inputs/demo \
     --config configs/example.yaml --create-schema
-docker compose up --scale worker=4 worker
+docker compose up --scale worker=4 worker     # raise or lower at any time
 ```
 
 ## How It Works
