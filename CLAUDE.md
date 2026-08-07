@@ -161,6 +161,26 @@ A corpus exists to mature Womblex capability, not host custom code. Corpus-side 
 - Pydantic for config/validation
 - Australian spelling in comments and docs
 - **750 line hard cap per file** — validate after every file save with `wc -l`; split if exceeded
+- **500 line hard cap per merge** — see [Change size](#change-size)
+
+### Change size
+A merge lands at most **500 changed lines** (added + removed) against the
+branch it merges into. Check before opening or updating a PR:
+```bash
+git diff --stat $(git merge-base HEAD origin/main)..HEAD
+```
+Generated and vendored files don't count toward the cap — `uv.lock`,
+`docs/accuracy/*.md` (written by the test suite), and anything under
+`fixtures/`. Everything else does, including tests and docs.
+
+Over the cap means the change is doing more than one thing. Split it into
+sequential merges that each stand alone: land the mechanical part
+(renames, moves, signature threading) first, then the behaviour change on
+top. Don't split a change so the halves leave the tree broken or the
+suite red — each merge must pass tests on its own. If a single coherent
+change genuinely can't fit (a schema migration touching every stage, a
+library-wide rename), say so in the PR body with the reason and get human
+approval rather than quietly exceeding it.
 
 ### Error Handling
 - Individual document failures shouldn't stop the batch
@@ -364,6 +384,7 @@ belongs on the orchestrator path, not here.
 - Add heavy ML dependencies (keep extraction lightweight)
 - Modify `pyproject.toml` dependencies without human approval
 - Create oversized files — stay under 750 lines unless justified
+- Land oversized merges — stay under 500 changed lines; split into sequential merges instead
 - Add TODOs or FIXMEs — fix issues immediately or document in issues
 - Over-engineer — no premature abstractions or "strategy patterns"
 - Reject unusual data — warn about it, but continue processing
