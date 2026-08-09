@@ -664,7 +664,7 @@ class TestReconstructedTableDownstream:
         elements = self._elements(blank_page, monkeypatch)
         tables = collect_tables_from_elements(elements)
         assert len(tables) == 1
-        _page, markdown = tables[0]
+        _page, _elem_order, markdown = tables[0]
         assert "H1" in markdown
         assert markdown.count("r1c1") == 1
 

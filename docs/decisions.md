@@ -607,7 +607,8 @@ is the only requirement, not a hard dependency.
   inputs are typically large tabular/reference data that should not be routed to
   the enricher at all (reference data belongs on the graph/reference path).
 - **No projection carries narrative ↔ table document order into chunks.**
-  *Candidate for review — verified 2026-08, not yet scoped.* `build_chunk_input`
+  *Anchor shipped 2026-08 (option b below); the interleaved-projection question
+  stays open.* `build_chunk_input`
   (`chunker.py:517`) splits the element stream into two disjoint projections:
   `reassemble_narrative` takes TEXT_KINDS only (tables skipped, `:475`) and
   `collect_tables_from_elements` takes `kind='table'` only (`:502`).
@@ -633,10 +634,32 @@ is the only requirement, not a hard dependency.
   Not obviously a defect: separate table chunking is deliberate (table markdown
   chunks in token mode with no overlap, `:360`, because semantically chunking a
   markdown grid is meaningless), so folding tables into the narrative stream is
-  a design change with real trade-offs. Two shapes to weigh when this is picked
-  up: (a) a third document-order projection alongside the existing two, or
-  (b) the cheaper option — an `elem_order` anchor on table chunks, letting
-  consumers reconstruct order without disturbing the chunking strategy.
+  a design change with real trade-offs. Two shapes were weighed: (a) a third
+  document-order projection alongside the existing two, or (b) an `elem_order`
+  anchor on table chunks, letting consumers reconstruct order without
+  disturbing the chunking strategy.
+
+  **(b) shipped 2026-08.** `CHUNKS_SCHEMA.elem_order` is populated for table
+  chunks only; sort narrative chunks by `start_char` and table chunks by
+  `elem_order` to recover document order. Chosen over (a) because it changes no
+  coordinate space — narrative chunks, the enrichment input and the mention↔chunk
+  offset mapping are untouched, so no existing offsets shift and no
+  re-enrichment is needed. `read_chunks` back-fills nulls for older shards.
+
+  **(a) remains open, and is a cost decision rather than an engineering one.**
+  Folding tables into `reassemble_narrative` would change the coordinate space
+  for all four of its consumers at once (`chunk_stage`, `enrich_stage`,
+  `money_stage`, plus the byte-identity claim in `records.py`), which means:
+  every existing shard's offsets are invalidated (they live *inside* the
+  enrichment/money/chunk sidecars, so this cannot be a sidecar migration);
+  `money_stage`'s `narrative` locus would double-count every amount its
+  `table_cell` locus already finds, needing an explicit suppression rule; and
+  table markdown is token-dense, so the enrich token budget and over-ceiling
+  split path get hit far harder — an unmeasured Kanon-2 cost increase. Only
+  worth paying if the goal is specifically that the *enricher and embedder* see
+  tables in surrounding context, which is a retrieval-quality hypothesis and is
+  cheap to test offline (build the interleaved string for a sample, compare
+  retrieval) before committing to any schema change.
 
 ### Modality routing — prose / tabular / register as the primary fork — *proposed (2026-06), not yet implemented*
 Extraction currently makes its coarsest cut by *format* (`extract_text` splits

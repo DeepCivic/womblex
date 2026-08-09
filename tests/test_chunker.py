@@ -237,10 +237,22 @@ class TestCollectTablesFromElements:
         elements = [_table_elem(0, 3, [["A", "B"], ["1", "2"]], header_rows=[0])]
         out = collect_tables_from_elements(elements)
         assert len(out) == 1
-        page, md = out[0]
+        page, elem_order, md = out[0]
         assert page == 3
+        assert elem_order == 0
         assert "| A | B |" in md
         assert "| 1 | 2 |" in md
+
+    def test_elem_order_tracks_the_source_element(self) -> None:
+        # Two tables at distinct positions — each carries its own anchor.
+        elements = [
+            _para(0, "intro", 1),
+            _table_elem(1, 1, [["A"], ["1"]], header_rows=[0]),
+            _para(2, "middle", 1),
+            _table_elem(3, 1, [["B"], ["2"]], header_rows=[0]),
+        ]
+        out = collect_tables_from_elements(elements)
+        assert [elem_order for _, elem_order, _ in out] == [1, 3]
 
     def test_sheet_cells_aggregated_as_synthetic_table(self) -> None:
         # Two sheet_cell elements → one synthetic table.
@@ -254,8 +266,11 @@ class TestCollectTablesFromElements:
         ]
         out = collect_tables_from_elements(elements)
         assert len(out) == 1
-        page, md = out[0]
+        page, elem_order, md = out[0]
         assert page is None
+        # A sheet aggregates many sheet_cells and has no narrative to be
+        # ordered against, so it carries no anchor.
+        assert elem_order is None
         assert "H1" in md and "H2" in md
 
 
@@ -304,13 +319,40 @@ class TestChunkBatch:
         chunker = _make_test_chunker(chunk_size=50)
         ci = ChunkInput(
             source_hash="a", narrative="",
-            tables=[(2, "| A | B |\n| --- | --- |\n| 1 | 2 |")],
+            tables=[(2, 7, "| A | B |\n| --- | --- |\n| 1 | 2 |")],
         )
         out = chunk_batch([ci], chunker)
         chunks = out["a"]
         assert chunks
         assert all(c.content_type == "table" for c in chunks)
         assert all(c.page_start == 2 and c.page_end == 2 for c in chunks)
+        assert all(c.elem_order == 7 for c in chunks)
+
+    def test_narrative_chunks_carry_no_elem_order(self) -> None:
+        # Narrative chunks straddle elements, so the anchor stays None —
+        # only table chunks are attributable to one element.
+        chunker = _make_test_chunker(chunk_size=50)
+        ci = ChunkInput(source_hash="a", narrative="hello world")
+        out = chunk_batch([ci], chunker)
+        assert all(c.elem_order is None for c in out["a"])
+
+    def test_document_order_reconstructable_from_anchors(self) -> None:
+        # The point of the anchor: recover which table followed which prose.
+        chunker = _make_test_chunker(chunk_size=50)
+        elements = [
+            _para(0, "alpha", 1),
+            _table_elem(1, 1, [["A"], ["1"]], header_rows=[0]),
+            _para(2, "beta", 1),
+            _table_elem(3, 1, [["B"], ["2"]], header_rows=[0]),
+        ]
+        ci = build_chunk_input("a", elements)
+        out = chunk_batch([ci], chunker)
+        tables = sorted(
+            (c for c in out["a"] if c.content_type == "table"),
+            key=lambda c: c.elem_order or 0,
+        )
+        assert [c.elem_order for c in tables] == [1, 3]
+        assert "A" in tables[0].text and "B" in tables[1].text
 
     def test_multiple_docs_keyed_by_source_hash(self) -> None:
         chunker = _make_test_chunker(chunk_size=50)
@@ -351,7 +393,7 @@ class TestChunkBatch:
         chunker = _make_test_chunker(chunk_size=50)
         ci = ChunkInput(
             source_hash="a", narrative="",
-            tables=[(1, table_to_markdown(["H"], [["v"]]))],
+            tables=[(1, 0, table_to_markdown(["H"], [["v"]]))],
         )
         out = chunk_batch([ci], chunker)
         assert out["a"]

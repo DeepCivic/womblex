@@ -47,7 +47,10 @@ def _chunk_doc(full_text, chunker, tables=None):
     ci = ChunkInput(
         source_hash="d",
         narrative=full_text or "",
-        tables=[(None, table_to_markdown(t.headers, t.rows)) for t in (tables or [])],
+        tables=[
+            (None, i, table_to_markdown(t.headers, t.rows))
+            for i, t in enumerate(tables or [])
+        ],
     )
     return chunk_batch([ci], chunker).get("d", [])
 

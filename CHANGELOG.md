@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`elem_order` document-order anchor on table chunks.** `CHUNKS_SCHEMA` gains
+  a nullable `elem_order` column, populated **only** for `content_type='table'`
+  chunks with the `elem_order` of the table element the chunk came from.
+  Consumers can now recover narrative ↔ table document order — sort narrative
+  chunks by `start_char`, table chunks by `elem_order` — which the two disjoint
+  chunk projections (one narrative string, one markdown string per table)
+  otherwise lost. Null for narrative chunks (they straddle elements, so no
+  single anchor exists) and for spreadsheet sheets (a sheet aggregates many
+  `sheet_cell`s and has no narrative to be ordered against).
+
+  Deliberately *not* a coordinate-space change: narrative chunks, the
+  reassembled enrichment input, and the Kanon-2 mention↔chunk offset mapping
+  are all untouched, so no existing shard's offsets shift and no re-enrichment
+  is needed. `read_chunks` back-fills the column with nulls for shards written
+  before it, so pre-existing chunk shards stay readable; genuinely missing
+  columns still raise as before.
 - **Deployment-shaped install extras.** `[local]` (deliberately empty — the
   base install *is* the local CPU deployment) and `[cloud-ocr]` (an alias of
   `[bedrock]`, named for what it buys rather than the vendor) join the
