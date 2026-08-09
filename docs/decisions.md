@@ -638,6 +638,13 @@ is the only requirement, not a hard dependency.
   (b) the cheaper option — an `elem_order` anchor on table chunks, letting
   consumers reconstruct order without disturbing the chunking strategy.
 
+  **It has a blocked consumer.** The benchmark's tabular and financial review
+  surface is a document-order spine with tables anchored in position, and the
+  ANAO and DFAT ground truth is built through it; both wait on this. The
+  benchmark deliberately does not derive an ordering of its own — a review file
+  it renders itself would have a reviewer correcting the benchmark's guess
+  instead of the pipeline's output.
+
 ### Modality routing — prose / tabular / register as the primary fork — *proposed (2026-06), not yet implemented*
 Extraction currently makes its coarsest cut by *format* (`extract_text` splits
 non-PDF SPREADSHEET/DOCX/TEXT vs PDF, `extract.py:449`), and the prose-vs-tabular
