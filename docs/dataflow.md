@@ -245,6 +245,8 @@ table-shaped surface.
 | `chunk_index` | `int` | Sequential index within the document |
 | `content_type` | `str` | `"narrative"` or `"table"` |
 | `has_redaction` | `bool` | True if source pages contain redacted regions (flag mode) |
+| `page_start` / `page_end` | `int \| None` | Pages covering the chunk; `None` for sources without page semantics |
+| `elem_order` | `int \| None` | Document-order anchor; set for table chunks only |
 
 ### Parquet Output
 
@@ -265,7 +267,9 @@ matching `(source_hash, elem_order)` with the corresponding kind.
 Written as a fifth sibling next to the four extraction shards. Joins
 back to elements on `source_hash` plus offset-range overlap with the
 reassembled element-stream text — not via `elem_order`, because a
-chunk straddles multiple elements.
+narrative chunk straddles multiple elements. Table chunks are the
+exception: each comes from exactly one table element, so they carry that
+element's `elem_order` as a document-order anchor (see below).
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -278,6 +282,7 @@ chunk straddles multiple elements.
 | `has_redaction` | bool | True if the chunk text contains the `<REDACTED>` marker (set by chunk_batch). Flag-mode redaction may flip this later. |
 | `page_start` | int32 (nullable) | Page covering `start_char`; `null` for sources without page semantics (DOCX, spreadsheets) |
 | `page_end` | int32 (nullable) | Page covering `end_char-1`; `null` for sources without page semantics |
+| `elem_order` | int32 (nullable) | Document-order anchor: the `elem_order` of the table element this chunk came from. Set for `content_type='table'` only — `null` for narrative chunks (they straddle elements) and for spreadsheet sheets (a sheet aggregates many `sheet_cell`s and has no narrative to be ordered against). Sort narrative chunks by `start_char` and table chunks by `elem_order` to recover narrative ↔ table document order. Back-filled as `null` when reading shards written before the column existed. |
 
 Embedding, classification, and classification_score were deferred from
 the original sketch — they belong to the enrichment / P4 layer, not
