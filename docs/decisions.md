@@ -606,6 +606,37 @@ is the only requirement, not a hard dependency.
   documents currently 400 instead of auto-chunking. Low priority — oversized
   inputs are typically large tabular/reference data that should not be routed to
   the enricher at all (reference data belongs on the graph/reference path).
+- **No projection carries narrative ↔ table document order into chunks.**
+  *Candidate for review — verified 2026-08, not yet scoped.* `build_chunk_input`
+  (`chunker.py:517`) splits the element stream into two disjoint projections:
+  `reassemble_narrative` takes TEXT_KINDS only (tables skipped, `:475`) and
+  `collect_tables_from_elements` takes `kind='table'` only (`:502`).
+  `chunk_batch` then runs two separate semchunk calls and appends all table
+  chunks after all narrative chunks. A table chunk's `start_char`/`end_char`
+  index *its own markdown string*, not the narrative (`:371`), so its only
+  positional anchor is `page_start`/`page_end` — page granularity on PDFs, and
+  nothing at all on DOCX/spreadsheets, where `Element.page` is `None` by design
+  (see the nullable-page note in `store/output.py:27`). No `elem_order` link
+  recovers it: chunks join to elements by offset-range overlap, "not via
+  `elem_order`" (`store/output.py:25-27`), and table-chunk offsets are in a
+  different coordinate space.
+
+  Worth reviewing because `elem_order` was introduced precisely to preserve
+  this: `docs/extraction.md:257-269` records that the pre-element schema made
+  "the budget-statement class of documents (narrative interleaved with tables)
+  unrepresentable", and the DOCX fixture in the suite is a portfolio budget
+  statement (`test_output.py:41`). Extraction preserves the interleaving; the
+  projection that feeds Isaacus discards it. Nothing is lost on disk —
+  `*.elements.parquet` retains `elem_order` — so this is a projection gap, not
+  data loss.
+
+  Not obviously a defect: separate table chunking is deliberate (table markdown
+  chunks in token mode with no overlap, `:360`, because semantically chunking a
+  markdown grid is meaningless), so folding tables into the narrative stream is
+  a design change with real trade-offs. Two shapes to weigh when this is picked
+  up: (a) a third document-order projection alongside the existing two, or
+  (b) the cheaper option — an `elem_order` anchor on table chunks, letting
+  consumers reconstruct order without disturbing the chunking strategy.
 
 ### Modality routing — prose / tabular / register as the primary fork — *proposed (2026-06), not yet implemented*
 Extraction currently makes its coarsest cut by *format* (`extract_text` splits
