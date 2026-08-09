@@ -86,6 +86,13 @@ class TextChunk:
     has_redaction: bool = False
     page_start: int | None = None
     page_end: int | None = None
+    # Document-order anchor for table chunks: the `elem_order` of the table
+    # element this chunk came from. Always None for narrative chunks — they
+    # straddle multiple elements, which is why chunks otherwise join to
+    # elements by offset overlap rather than by elem_order. Lets a consumer
+    # reconstruct narrative ↔ table document order, which the two disjoint
+    # projections (narrative string vs per-table markdown) otherwise lose.
+    elem_order: int | None = None
 
 
 @dataclass
@@ -96,14 +103,14 @@ class ChunkInput:
     elements in ``elem_order``. ``page_breaks`` is a sorted list of
     ``(end_char_exclusive, page_number)`` pairs covering ``narrative``;
     empty for sources without page semantics (DOCX, spreadsheets).
-    ``tables`` is one ``(page, markdown)`` per table — ``page`` may be
-    ``None``.
+    ``tables`` is one ``(page, elem_order, markdown)`` per table — ``page``
+    and ``elem_order`` may both be ``None`` (spreadsheet sheets).
     """
 
     source_hash: str
     narrative: str
     page_breaks: list[tuple[int, int]] = field(default_factory=list)
-    tables: list[tuple[int | None, str]] = field(default_factory=list)
+    tables: list[tuple[int | None, int | None, str]] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -245,6 +252,7 @@ def _repair_redaction_splits(chunks: list[TextChunk]) -> list[TextChunk]:
                     has_redaction=True,
                     page_start=chunk.page_start,
                     page_end=nxt.page_end if nxt.page_end is not None else chunk.page_end,
+                    elem_order=chunk.elem_order,
                 )
             )
             i += 2
@@ -324,16 +332,16 @@ def chunk_batch(
     narrative_texts: list[object] = []  # str | ILGSDocument (mixed; semchunk handles both)
     narrative_owners: list[int] = []
     table_texts: list[str] = []
-    table_owners: list[tuple[int, int | None]] = []
+    table_owners: list[tuple[int, int | None, int | None]] = []
 
     for i, doc in enumerate(inputs):
         if doc.narrative.strip():
             narrative_texts.append(_resolve_narrative_input(doc, overrides))
             narrative_owners.append(i)
-        for page, md in doc.tables:
+        for page, elem_order, md in doc.tables:
             if md.strip():
                 table_texts.append(md)
-                table_owners.append((i, page))
+                table_owners.append((i, page, elem_order))
 
     out: dict[str, list[TextChunk]] = {doc.source_hash: [] for doc in inputs}
 
@@ -359,7 +367,7 @@ def chunk_batch(
             chunker, table_texts,
             overlap=None, processes=processes, progress=False,
         )
-        for (owner_idx, table_page), chunks, offsets in zip(
+        for (owner_idx, table_page, table_elem_order), chunks, offsets in zip(
             table_owners, t_chunks_all, t_offsets_all,
         ):
             doc = inputs[owner_idx]
@@ -374,6 +382,7 @@ def chunk_batch(
                         has_redaction=_REDACTED_MARKER in text,
                         page_start=table_page,
                         page_end=table_page,
+                        elem_order=table_elem_order,
                     )
                 )
 
@@ -490,26 +499,29 @@ def reassemble_narrative(
 
 def collect_tables_from_elements(
     elements: list[Element],
-) -> list[tuple[int | None, str]]:
-    """Materialise ``(page, markdown)`` per table for :func:`chunk_batch`.
+) -> list[tuple[int | None, int | None, str]]:
+    """Materialise ``(page, elem_order, markdown)`` per table for :func:`chunk_batch`.
 
     Mirrors :pyattr:`ExtractionResult.tables`: one entry per
     ``kind='table'`` element followed by one synthetic entry per
-    spreadsheet sheet (page is ``None`` for sheets).
+    spreadsheet sheet. ``page`` and ``elem_order`` are both ``None`` for
+    sheets — a sheet aggregates many ``sheet_cell`` elements rather than
+    sitting at one position, and a spreadsheet has no narrative to be
+    ordered against, so the anchor would be meaningless there.
     """
-    out: list[tuple[int | None, str]] = []
+    out: list[tuple[int | None, int | None, str]] = []
     for e in elements:
         if e.kind != "table":
             continue
         td = _element_to_table_data(e)
         md = table_to_markdown(td.headers, td.rows)
         if md.strip():
-            out.append((e.page, md))
+            out.append((e.page, e.order, md))
 
     for sheet_td in _sheets_to_table_data(elements):
         md = table_to_markdown(sheet_td.headers, sheet_td.rows)
         if md.strip():
-            out.append((None, md))
+            out.append((None, None, md))
 
     return out
 

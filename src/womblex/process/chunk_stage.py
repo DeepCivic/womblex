@@ -371,6 +371,7 @@ def _chunks_to_rows(
                 "has_redaction": c.has_redaction,
                 "page_start": c.page_start,
                 "page_end": c.page_end,
+                "elem_order": c.elem_order,
             })
     return rows
 

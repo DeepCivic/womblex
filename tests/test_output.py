@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 from womblex.ingest.strategies_file import DocxExtractor
@@ -149,6 +151,7 @@ _SAMPLE_CHUNK_ROWS = [
         "has_redaction": False,
         "page_start": 1,
         "page_end": 1,
+        "elem_order": None,
     },
     {
         "source_hash": "h" * 64,
@@ -160,6 +163,19 @@ _SAMPLE_CHUNK_ROWS = [
         "has_redaction": True,
         "page_start": 1,
         "page_end": 2,
+        "elem_order": None,
+    },
+    {
+        "source_hash": "h" * 64,
+        "chunk_index": 2,
+        "text": "| H |\n| --- |\n| v |",
+        "start_char": 0,
+        "end_char": 19,
+        "content_type": "table",
+        "has_redaction": False,
+        "page_start": 3,
+        "page_end": 3,
+        "elem_order": 4,
     },
 ]
 
@@ -172,11 +188,20 @@ class TestChunksSchemaRoundTrip:
         assert target.exists() and target.stat().st_size > 0
         out = read_chunks(base)
         assert out.schema.equals(CHUNKS_SCHEMA)
-        assert out.num_rows == 2
+        assert out.num_rows == 3
         row = out.to_pylist()[1]
         assert row["text"] == "second <REDACTED>"
         assert row["has_redaction"] is True
         assert row["page_end"] == 2
+
+    def test_elem_order_anchors_table_chunks_only(self, tmp_path):
+        base = tmp_path / "batch-0001.parquet"
+        write_chunks(_SAMPLE_CHUNK_ROWS, base)
+        rows = read_chunks(base).to_pylist()
+        narrative = [r for r in rows if r["content_type"] == "narrative"]
+        table = [r for r in rows if r["content_type"] == "table"]
+        assert all(r["elem_order"] is None for r in narrative)
+        assert [r["elem_order"] for r in table] == [4]
 
     def test_empty_write_yields_schema_correct_file(self, tmp_path):
         base = tmp_path / "batch-0002.parquet"
@@ -189,7 +214,7 @@ class TestChunksSchemaRoundTrip:
         write_chunks(_SAMPLE_CHUNK_ROWS, tmp_path / "batch-0001.parquet")
         write_chunks(_SAMPLE_CHUNK_ROWS[:1], tmp_path / "batch-0002.parquet")
         out = read_chunks(tmp_path)
-        assert out.num_rows == 3
+        assert out.num_rows == 4
 
     def test_nullable_pages(self, tmp_path):
         # DOCX / spreadsheet sources omit page semantics.
@@ -202,6 +227,39 @@ class TestChunksSchemaRoundTrip:
         out = read_chunks(base).to_pylist()
         assert out[0]["page_start"] is None
         assert out[0]["page_end"] is None
+
+    def test_pre_elem_order_shard_backfills(self, tmp_path):
+        # Shards written before the elem_order column must stay readable —
+        # the compat shim back-fills nulls instead of failing the read.
+        legacy_schema = pa.schema([
+            f for f in CHUNKS_SCHEMA if f.name != "elem_order"
+        ])
+        legacy_rows = [
+            {k: v for k, v in r.items() if k != "elem_order"}
+            for r in _SAMPLE_CHUNK_ROWS
+        ]
+        target = chunks_path_for(tmp_path / "batch-0001.parquet")
+        pq.write_table(
+            pa.Table.from_pylist(legacy_rows, schema=legacy_schema), str(target),
+        )
+        out = read_chunks(target)
+        assert out.schema.equals(CHUNKS_SCHEMA)
+        assert out.num_rows == len(_SAMPLE_CHUNK_ROWS)
+        assert all(r["elem_order"] is None for r in out.to_pylist())
+
+    def test_genuinely_missing_column_still_raises(self, tmp_path):
+        # The shim is scoped to elem_order; other gaps remain hard errors.
+        broken_schema = pa.schema([
+            f for f in CHUNKS_SCHEMA if f.name != "content_type"
+        ])
+        rows = [
+            {k: v for k, v in r.items() if k != "content_type"}
+            for r in _SAMPLE_CHUNK_ROWS
+        ]
+        target = chunks_path_for(tmp_path / "batch-0001.parquet")
+        pq.write_table(pa.Table.from_pylist(rows, schema=broken_schema), str(target))
+        with pytest.raises(ValueError, match="content_type"):
+            read_chunks(target)
 
 
 class TestChunksIntegrity:

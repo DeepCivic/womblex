@@ -26,6 +26,13 @@ Chunks join back to elements via ``source_hash`` plus offset-range overlap
 with the reassembled element text — not via ``elem_order``, since a chunk
 straddles multiple elements. ``page_start`` / ``page_end`` are nullable
 for sources without page semantics (DOCX, spreadsheets).
+
+The one exception is ``elem_order``, which is populated **only** for table
+chunks (a table chunk comes from exactly one element, so the anchor is
+well-defined). It is the document-order anchor: sort narrative chunks by
+``start_char`` and table chunks by ``elem_order`` to recover narrative ↔
+table order, which the two disjoint chunk projections otherwise lose. Null
+for narrative chunks and for spreadsheet sheets.
 """
 
 from __future__ import annotations
@@ -125,7 +132,13 @@ CHUNKS_SCHEMA = pa.schema([
     ("has_redaction", pa.bool_()),
     ("page_start", pa.int32()),
     ("page_end", pa.int32()),
+    ("elem_order", pa.int32()),
 ])
+
+# Columns added to CHUNKS_SCHEMA after parser 2.0. Shards written before them
+# are back-filled with nulls on read instead of failing — the compat shim
+# `_read_chunks_shard` asks for.
+_CHUNKS_BACKFILL: tuple[str, ...] = ("elem_order",)
 
 # Entity-link sidecar (link stage). Generic by design: a link is a resolved
 # (or attempted) attribution of a document mention to a canonical reference
@@ -384,10 +397,14 @@ def read_chunks(path: Path) -> pa.Table:
 def _read_chunks_shard(path: Path) -> pa.Table:
     raw = pq.read_table(str(path))
     missing = [f.name for f in CHUNKS_SCHEMA if f.name not in raw.schema.names]
-    if missing:
+    hard = [n for n in missing if n not in _CHUNKS_BACKFILL]
+    if hard:
         raise ValueError(
-            f"chunks shard {path} missing columns {missing}; schema bump without compat shim?"
+            f"chunks shard {path} missing columns {hard}; schema bump without compat shim?"
         )
+    for name in missing:
+        fld = CHUNKS_SCHEMA.field(name)
+        raw = raw.append_column(fld, pa.nulls(raw.num_rows, type=fld.type))
     return raw.select([f.name for f in CHUNKS_SCHEMA]).cast(CHUNKS_SCHEMA)
 
 
