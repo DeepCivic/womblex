@@ -108,6 +108,18 @@ def test_ai_chunking_client_is_none_without_chunking_model():
 # ---------------------------------------------------------------------------
 
 
+def test_hosted_api_client_strips_a_pasted_key(monkeypatch):
+    """The whitespace strip moved modules with the factory — a trailing newline
+    otherwise reaches httpx as an illegal header value."""
+    pytest.importorskip("isaacus")
+    from womblex.utils.isaacus_client import make_isaacus_client
+
+    monkeypatch.delenv(ENDPOINTS_ENV, raising=False)
+    monkeypatch.setenv("ISAACUS_API_KEY", "iuak_pasted_with_a_newline\n")
+    client = make_isaacus_client(models=["kanon-2-embedder"])
+    assert client.api_key == "iuak_pasted_with_a_newline"
+
+
 def test_sagemaker_client_rejects_undeployed_model(monkeypatch):
     pytest.importorskip("isaacus")
     pytest.importorskip("isaacus_sagemaker")

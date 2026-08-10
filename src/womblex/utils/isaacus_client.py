@@ -165,7 +165,7 @@ def _sagemaker_client(endpoints: list[SageMakerEndpoint], models: Iterable[str])
             "Install with: uv sync --extra isaacus"
         ) from e
 
-    missing = [m for m in dict.fromkeys(models) if m and not is_model_served(m, endpoints)]
+    missing = unserved_models(models)
     if missing:
         raise ValueError(
             f"No SageMaker endpoint serves {', '.join(missing)}. {ENDPOINTS_ENV} "
@@ -206,7 +206,8 @@ def _require_region(
     surfaces as a bare ``AssertionError`` mid-run (and is skipped entirely
     under ``python -O``). Resolving it here turns that into a fixable message.
     """
-    if region is None:
+    if region is None and any(not e.region for e in endpoints):
+        # Only consult AWS for a default when some endpoint actually needs one.
         import boto3
 
         try:

@@ -375,7 +375,10 @@ def cmd_run_stage(args: argparse.Namespace) -> int:
         except Exception as e:
             # Logs the exception, not the key — the rule trips on "API_KEY" in the literal.
             # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
-            logger.error("Could not construct Isaacus client (is ISAACUS_API_KEY set?): %s", e)
+            logger.error(
+                "Could not construct Isaacus client (check ISAACUS_API_KEY, or "
+                "ISAACUS_SAGEMAKER_ENDPOINTS for a private deployment): %s", e,
+            )
             return 1
 
     if args.shards is not None:
