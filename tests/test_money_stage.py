@@ -118,6 +118,54 @@ def test_narrative_can_be_disabled(tmp_path: Path):
     assert read_money_spans(base).num_rows == 0
 
 
+def test_narrative_span_carries_its_element_and_element_relative_offsets(tmp_path: Path):
+    """A whole-document offset is unjoinable per element; both anchors ship."""
+    second = "The grant was $2.5 million in total."
+    base = _build_shard(tmp_path, [
+        _element(0, "paragraph", text="An opening paragraph carrying no amount."),
+        _element(7, "paragraph", text=second),
+    ])
+
+    money_shards(tmp_path, MoneyConfig())
+
+    row = read_money_spans(base).to_pylist()[0]
+    assert row["elem_order"] == 7
+    assert second[row["elem_start_char"]:row["elem_end_char"]] == "$2.5 million"
+    # The document-level anchor still resolves, against the concatenation.
+    assert row["start_char"] > row["elem_start_char"]
+
+
+def test_element_relative_offsets_survive_the_text_source_overlay(tmp_path: Path):
+    """The element anchor indexes the same layer the document anchor does."""
+    raw = "The  grant  was  $2.5 million."
+    cleaned = "The grant was $2.5 million."
+    base = _build_shard(tmp_path, [_element(0, "paragraph", text=raw)])
+    pq.write_table(
+        pa.Table.from_pylist(
+            [{"source_hash": DOC, "elem_order": 0, "kind": "paragraph",
+              "text": cleaned, "changed": True}],
+            schema=NORMALISED_TEXT_SCHEMA,
+        ),
+        str(tmp_path / "batch-0001.normalised_text.parquet"),
+    )
+
+    money_shards(tmp_path, MoneyConfig(), text_source="normalised")
+
+    row = read_money_spans(base).to_pylist()[0]
+    assert cleaned[row["elem_start_char"]:row["elem_end_char"]] == "$2.5 million"
+
+
+def test_cell_rows_carry_no_element_relative_offsets(tmp_path: Path):
+    """Element-relative offsets are a narrative anchor and nothing else."""
+    base = _table_shard(tmp_path)
+
+    money_shards(tmp_path, MoneyConfig())
+
+    cells = [r for r in read_money_spans(base).to_pylist() if r["locus"] == "table_cell"]
+    assert cells
+    assert all(r["elem_start_char"] is None and r["elem_end_char"] is None for r in cells)
+
+
 # ---------------------------------------------------------------------------
 # table_cell locus
 # ---------------------------------------------------------------------------
@@ -365,10 +413,16 @@ def test_exactly_one_anchor_group_per_row(tmp_path: Path):
         if r["locus"] == "narrative":
             assert r["text_source"] == "elements"
             assert r["sheet"] is None and r["parent_elem_order"] is None
+            # `elem_order` is shared with sheet_cell; the element-relative
+            # offsets are what make it a narrative anchor rather than a cell one.
+            assert r["elem_order"] is not None
+            assert r["elem_start_char"] is not None and r["elem_end_char"] is not None
         if r["locus"] == "table_cell":
             assert r["parent_elem_order"] is not None and r["sheet"] is None
+            assert r["elem_start_char"] is None and r["elem_end_char"] is None
         if r["locus"] == "sheet_cell":
             assert r["sheet"] is not None and r["parent_elem_order"] is None
+            assert r["elem_start_char"] is None and r["elem_end_char"] is None
 
 
 def test_quantise_drops_unstorable_values():

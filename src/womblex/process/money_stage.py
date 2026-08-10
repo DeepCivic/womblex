@@ -12,7 +12,10 @@ Three loci, two coordinate spaces, never mixed:
 
 - ``narrative`` — character offsets into the reassembled narrative, in the
   element-text layer named by ``text_source`` (stamped on every row), so the
-  spans share enrichment's coordinate space;
+  spans share enrichment's coordinate space. Each row *also* carries
+  ``(elem_order, elem_start_char, elem_end_char)``, the same span against the
+  element's own text, because a whole-document offset is unjoinable for a
+  consumer working per element. Null when the span straddles two elements;
 - ``table_cell`` — ``(parent_elem_order, row, col)`` on the table_cells sidecar;
 - ``sheet_cell`` — ``(sheet, row, col)``.
 
@@ -22,6 +25,7 @@ skip-existing on resume, batch-level isolation.
 
 from __future__ import annotations
 
+import bisect
 import logging
 from collections import Counter, defaultdict
 from dataclasses import dataclass
@@ -31,7 +35,7 @@ from pathlib import Path
 from womblex.config import MoneyConfig
 from womblex.ingest.elements import Element
 from womblex.process.chunk_stage import _batch_bases, _load_elements
-from womblex.process.chunker import reassemble_narrative
+from womblex.process.chunker import narrative_element_spans, reassemble_narrative
 from womblex.process.money import (
     MoneyOptions,
     MoneySpan,
@@ -95,6 +99,7 @@ def money_shards(
         implicit_context=config.implicit_context,
         min_confidence=config.min_confidence,
         context_chars=config.context_chars,
+        subunit_context_chars=config.subunit_context_chars,
     )
     col_opts = ColumnOptions(
         default_currency=config.default_currency,
@@ -182,6 +187,7 @@ def _narrative_rows(
     text, page_breaks = reassemble_narrative(elements)
     if not text:
         return []
+    elem_spans = narrative_element_spans(elements)
     rows = []
     for span in find_money(text, opts):
         value = quantise(span.value)
@@ -191,11 +197,14 @@ def _narrative_rows(
                 source_hash, span.text, span.start,
             )
             continue
+        order, elem_start, elem_end = _element_for(span.start, span.end, elem_spans)
         rows.append(_span_row(
             source_hash, span, value, locus="narrative", text_source=text_source,
             start_char=span.start, end_char=span.end,
             page=_page_for(span.start, page_breaks),
             context=context_for(text, span, opts.context_chars),
+            elem_order=order,
+            elem_start_char=elem_start, elem_end_char=elem_end,
         ))
     return rows
 
@@ -206,6 +215,26 @@ def _page_for(offset: int, page_breaks: list[tuple[int, int]]) -> int | None:
         if offset < end:
             return page
     return None
+
+
+def _element_for(
+    start: int, end: int, elem_spans: list[tuple[int, int, int]],
+) -> tuple[int | None, int | None, int | None]:
+    """Re-express a narrative span against the element that carries it.
+
+    Returns ``(elem_order, elem_start_char, elem_end_char)``, all ``None``
+    unless the span sits wholly inside one element. A span reaching across the
+    joiner has no single element to belong to, and inventing one would put a
+    wrong offset in a sidecar built to be joined on.
+    """
+    starts = [s for s, _, _ in elem_spans]
+    i = bisect.bisect_right(starts, start) - 1
+    if i < 0:
+        return None, None, None
+    elem_start, elem_end, order = elem_spans[i]
+    if end > elem_end:
+        return None, None, None
+    return order, start - elem_start, end - elem_start
 
 
 # ---------------------------------------------------------------------------
@@ -404,6 +433,7 @@ def _dominant_format(formats: list[str | None]) -> str | None:
 
 _EMPTY_ROW: dict[str, object] = {f: None for f in (
     "source_hash", "locus", "text_source", "start_char", "end_char", "page",
+    "elem_start_char", "elem_end_char",
     "elem_order", "parent_elem_order", "sheet", "row", "col", "text", "value",
     "currency", "currency_source", "evidence", "modifier", "multiplier",
     "negative", "confidence", "range_group", "range_role", "column_id", "context",
@@ -413,11 +443,15 @@ _EMPTY_ROW: dict[str, object] = {f: None for f in (
 def _span_row(
     source_hash: str, span: MoneySpan, value: Decimal, *, locus: str,
     text_source: str, start_char: int, end_char: int, page: int | None, context: str,
+    elem_order: int | None = None,
+    elem_start_char: int | None = None, elem_end_char: int | None = None,
 ) -> dict:
     row = dict(_EMPTY_ROW)
     row.update({
         "source_hash": source_hash, "locus": locus, "text_source": text_source,
         "start_char": start_char, "end_char": end_char, "page": page,
+        "elem_order": elem_order,
+        "elem_start_char": elem_start_char, "elem_end_char": elem_end_char,
         "text": span.text, "value": value, "currency": span.currency,
         "currency_source": span.currency_source, "evidence": span.evidence,
         "modifier": span.modifier, "multiplier": span.multiplier,

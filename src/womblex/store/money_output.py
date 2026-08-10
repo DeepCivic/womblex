@@ -58,7 +58,13 @@ MONEY_SPANS_SCHEMA = pa.schema([
     ("start_char", pa.int32()),        # narrative anchor
     ("end_char", pa.int32()),
     ("page", pa.int32()),
-    ("elem_order", pa.int32()),        # sheet_cell anchor
+    # narrative rows also carry the element they landed in, and the same span
+    # re-expressed against that element's own text — a whole-document offset is
+    # unjoinable for any consumer working per element. Null when the span
+    # straddles the joiner between two elements.
+    ("elem_start_char", pa.int32()),
+    ("elem_end_char", pa.int32()),
+    ("elem_order", pa.int32()),        # narrative + sheet_cell anchor
     ("parent_elem_order", pa.int32()),  # table_cell anchor
     ("sheet", pa.string()),
     ("row", pa.int32()),

@@ -23,6 +23,7 @@ from womblex.process.chunker import (
     chunk_batch,
     collect_tables_from_elements,
     create_chunker,
+    narrative_element_spans,
     reassemble_narrative,
     table_to_markdown,
 )
@@ -230,6 +231,35 @@ class TestReassembleNarrative:
         elements = [_para(0, "alpha", None), _para(1, "beta", None)]
         _, page_breaks = reassemble_narrative(elements)
         assert page_breaks == []
+
+
+class TestNarrativeElementSpans:
+    def test_each_span_slices_back_to_its_element_text(self) -> None:
+        elements = [_para(0, "alpha", 1), _para(4, "beta gamma", 1), _para(9, "delta", 2)]
+        text, _ = reassemble_narrative(elements)
+        spans = narrative_element_spans(elements)
+
+        assert [order for _, _, order in spans] == [0, 4, 9]
+        for (start, end, order), element in zip(spans, elements):
+            assert text[start:end] == element.text, order
+
+    def test_skips_exactly_what_reassembly_skips(self) -> None:
+        elements = [
+            _para(0, "x", 1),
+            _para(1, "", 1),                         # empty
+            _table_elem(2, 1, [["a"]], None),        # not a text kind
+            _para(3, "y", 1),
+        ]
+        assert [order for _, _, order in narrative_element_spans(elements)] == [0, 3]
+
+    def test_the_joiner_belongs_to_neither_element(self) -> None:
+        elements = [_para(0, "alpha", 1), _para(1, "beta", 1)]
+        spans = narrative_element_spans(elements)
+        assert spans[0][1] == 5          # "alpha" ends at 5
+        assert spans[1][0] == 7          # "beta" starts after the two joiner chars
+
+    def test_empty_input_yields_no_spans(self) -> None:
+        assert narrative_element_spans([]) == []
 
 
 class TestCollectTablesFromElements:

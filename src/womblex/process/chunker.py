@@ -55,7 +55,7 @@ from __future__ import annotations
 
 import bisect
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import Any, cast
 
@@ -464,6 +464,32 @@ def _build_narrative_chunk(
 # ---------------------------------------------------------------------------
 
 
+def _narrative_pieces(
+    elements: list[Element],
+) -> Iterator[tuple[Element, str, int, int]]:
+    """Walk the narrative-contributing elements once.
+
+    Yields ``(element, piece, text_start, end)`` where ``piece`` is what the
+    element contributes to the concatenation (the joiner included for every
+    element but the first) and ``text_start`` is where the element's own text
+    begins — so ``text[text_start:end]`` is exactly ``element.text``.
+
+    One walk, because :func:`reassemble_narrative` and
+    :func:`narrative_element_spans` must agree on offsets by construction
+    rather than by two loops staying in step.
+    """
+    cursor = 0
+    first = True
+    for e in elements:
+        if e.kind not in TEXT_KINDS or not e.text:
+            continue
+        piece = e.text if first else NARRATIVE_JOIN + e.text
+        first = False
+        end = cursor + len(piece)
+        yield e, piece, end - len(e.text), end
+        cursor = end
+
+
 def reassemble_narrative(
     elements: list[Element],
 ) -> tuple[str, list[tuple[int, int]]]:
@@ -478,23 +504,35 @@ def reassemble_narrative(
     """
     parts: list[str] = []
     spans: list[list] = []
-    cursor = 0
 
-    for e in elements:
-        if e.kind not in TEXT_KINDS or not e.text:
-            continue
-        piece = e.text if not parts else NARRATIVE_JOIN + e.text
+    for e, piece, _, end in _narrative_pieces(elements):
         parts.append(piece)
-        next_cursor = cursor + len(piece)
         if e.page is not None:
-            if spans and spans[-1][2] == e.page:
-                spans[-1][1] = next_cursor
+            if spans and spans[-1][1] == e.page:
+                spans[-1][0] = end
             else:
-                spans.append([cursor, next_cursor, e.page])
-        cursor = next_cursor
+                spans.append([end, e.page])
 
-    page_breaks = [(end, page) for _, end, page in spans]
+    page_breaks = [(end, page) for end, page in spans]
     return "".join(parts), page_breaks
+
+
+def narrative_element_spans(
+    elements: list[Element],
+) -> list[tuple[int, int, int]]:
+    """Where each element's text lands in :func:`reassemble_narrative` output.
+
+    Returns ``[(text_start, end_exclusive, elem_order), ...]``, ascending and
+    non-overlapping — the joiner between elements belongs to neither, so an
+    offset can fall in the gap.
+
+    Narrative money spans are anchored on the whole-document concatenation,
+    which no per-element consumer can join against; this is the mapping back.
+    """
+    return [
+        (start, end, e.order)
+        for e, _, start, end in _narrative_pieces(elements)
+    ]
 
 
 def collect_tables_from_elements(
