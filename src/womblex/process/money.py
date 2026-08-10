@@ -55,6 +55,7 @@ from womblex.process.money_vocab import (
     MODIFIER_RE,
     NUM_AU,
     NUM_INTL,
+    PER_SHARE_RE,
     SUBUNIT_SYMBOLS,
     SUBUNIT_WORDS,
     SYMBOL_TO_CODE,
@@ -95,6 +96,10 @@ class MoneyOptions:
     implicit_context: bool = False
     min_confidence: float = 0.5
     context_chars: int = 160
+    # How far a per-share trigger licenses a bare `c` cents suffix (pattern 12),
+    # either side. 80 covers a highlights tile and a table column header; the
+    # trigger vocabulary, not the reach, is what holds precision.
+    subunit_context_chars: int = 80
 
 
 # Priority drives overlap resolution (lower wins). Ranges are resolved first
@@ -102,10 +107,10 @@ class MoneyOptions:
 # Accounting negatives outrank the symbol patterns because they *enclose* one:
 # `($100)` must resolve to -100, not to the `$100` sitting inside it.
 _PRIORITY = {"p7": 0, "p9": 0, "p1": 1, "p6": 1, "p2": 2, "p4": 4, "p11": 4,
-             "p3": 5, "p5": 6, "p10": 9}
+             "p3": 5, "p5": 6, "p12": 7, "p10": 9}
 
 _CONFIDENCE = {"p1": 0.99, "p6": 0.99, "p2": 0.99, "p3": 0.90, "p4": 0.90,
-               "p5": 0.75, "p9": 0.90, "p10": 0.35, "p11": 0.90}
+               "p5": 0.75, "p9": 0.90, "p10": 0.35, "p11": 0.90, "p12": 0.75}
 
 # Whitespace inside a pattern may span at most one line break, so no match can
 # cross the ``\n\n`` element join `reassemble_narrative` writes — a pattern that
@@ -175,6 +180,12 @@ def _compile(international: bool) -> dict[str, re.Pattern[str]]:
         # 10 — bare number, implicit financial context. Off by default.
         "p10": re.compile(rf"(?<![A-Za-z0-9.,]){_NEG}(?P<num>{num})"
                           rf"{_SCALE_TAIL}(?![A-Za-z0-9])", re.IGNORECASE),
+        # 12 — bare `c` cents suffix, licensed by per-share context. Case
+        # matters and the pattern is *not* IGNORECASE: every corpus instance of
+        # an uppercase `C` after digits is a designation, not an amount
+        # (`MQ-4C Triton`, `39 C-17`, `0 C-RAM` in the ANAO Major Projects
+        # Report), so the lowercase gate removes that whole class for free.
+        "p12": re.compile(rf"(?<![A-Za-z0-9.,]){_NEG}(?P<num>{num})c(?![A-Za-z0-9])"),
     }
 
 
@@ -436,6 +447,38 @@ def _scan_accounting(text: str, pats, opts: MoneyOptions) -> list[MoneySpan]:
     return out
 
 
+def _scan_subunit_suffix(text: str, pats, opts: MoneyOptions) -> list[MoneySpan]:
+    """Pattern 12 — a bare ``c`` cents suffix under per-share context.
+
+    ``68c`` and ``138.2c`` are dividends and earnings per share in ASX
+    reporting, unambiguously money — but the marker is one lowercase letter,
+    and a letter is not evidence on its own. ``148.9 cents`` in the same
+    document resolves through the currency-word path precisely because the word
+    *is* evidence; this pattern reaches the abbreviation without pretending it
+    is self-evidencing, by requiring the reporting vocabulary that licenses it
+    within ``subunit_context_chars`` on either side.
+
+    Either side, unlike :func:`_scan_implicit`'s forward-only window, because a
+    highlights panel or a table column puts the label above the figure as often
+    as beside it.
+    """
+    reach = opts.subunit_context_chars
+    triggers = [(m.start(), m.end()) for m in PER_SHARE_RE.finditer(text)]
+    if not triggers:
+        return []
+    out = []
+    for m in pats["p12"].finditer(text):
+        if not any(m.start() < e + reach and s - reach < m.end() for s, e in triggers):
+            continue
+        span = _candidate(
+            m, "p12", currency=opts.default_currency, currency_source="symbol",
+            international=opts.international_numbers, subunit=True,
+        )
+        if span:
+            out.append(span)
+    return out
+
+
 def _scan_implicit(text: str, pats, opts: MoneyOptions) -> list[MoneySpan]:
     """Pattern 10 — bare numbers near financial trigger vocabulary."""
     windows = [(m.start(), m.end() + 60) for m in CONTEXT_RE.finditer(text)]
@@ -646,7 +689,8 @@ def find_money(text: str, options: MoneyOptions | None = None) -> list[MoneySpan
 
     candidates: list[MoneySpan] = []
     for scan in (_scan_symbol_prefix, _scan_iso_prefix, _scan_iso_suffix,
-                 _scan_word, _scan_worded, _scan_symbol_suffix, _scan_accounting):
+                 _scan_word, _scan_worded, _scan_symbol_suffix, _scan_accounting,
+                 _scan_subunit_suffix):
         candidates.extend(scan(text, pats, opts))
     if opts.implicit_context:
         candidates.extend(_scan_implicit(text, pats, opts))

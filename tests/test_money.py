@@ -427,6 +427,54 @@ def test_a_legitimate_trailing_run_still_reads(text: str, value: Decimal):
     assert _one(text).value == value
 
 
+@pytest.mark.parametrize("text,value", [
+    ("Dividends per share (DPS) 68c", Decimal("0.68")),
+    ("Earnings per share (EPS) 138.2c", Decimal("1.382")),
+    ("Final dividend of 36c per share, fully franked.", Decimal("0.36")),
+    ("DPS 68c", Decimal("0.68")),
+])
+def test_a_bare_c_reads_as_cents_under_per_share_context(text: str, value: Decimal):
+    """The ASX convention for DPS/EPS. `148.9 cents` resolves through the
+    currency-word path; this reaches the abbreviation."""
+    span = _one(text)
+    assert span.value == value
+    assert span.evidence == "p12"
+    assert span.multiplier == "cents"
+    assert span.currency == "AUD"
+
+
+@pytest.mark.parametrize("text", [
+    # Australian unit-and-street numbers — 11 of these in the benchmark's
+    # childcare provider register, and the reason `c` is not a bare symbol.
+    "Address: 8c Newcastle Street",
+    "78c Bradleys Rd, NORTH AVOCA",
+    "U 64c  14 Wolseley St",
+    "345c Macquarie Street, DUBBO",
+    # Uppercase `C` after digits is a designation, not an amount (ANAO).
+    "MQ-4C Triton Remotely Piloted Aircraft System",
+    "39 C-17 Heavy Airlift",
+    "Dividends per share (DPS) 68C",
+    # Right shape, no licensing vocabulary anywhere near it.
+    "Item 68c of the schedule",
+])
+def test_a_bare_c_without_per_share_context_is_not_money(text: str):
+    assert find_money(text) == []
+
+
+def test_per_share_reach_is_configurable_and_zero_disables_it():
+    near = "Dividends per share (DPS) 68c"
+    assert _one(near).value == Decimal("0.68")
+    assert find_money(near, MoneyOptions(subunit_context_chars=0)) == []
+    assert find_money("Dividends per share (DPS)" + " x" * 80 + " 68c") == []
+
+
+def test_a_cents_word_still_beats_the_bare_suffix():
+    """`cents` is evidence in its own right and needs no trigger."""
+    span = _one("FY2022 EPS was 148.9 cents.")
+    assert span.value == Decimal("1.489")
+    assert span.evidence != "p12"
+
+
 def test_a_range_with_a_corrupt_scale_declines_both_endpoints():
     """Releasing the span would let the single-amount patterns report `$10`,
     which is the same wrong-by-a-scale answer the guard exists to refuse."""

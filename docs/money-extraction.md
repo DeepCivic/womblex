@@ -184,7 +184,9 @@ Report writes foreign-military-sales case values that way throughout. Without
 it the `$` matches alone, the letters read as the start of the next word, and
 the amount is lost entirely.
 
-`¢` is a sub-unit: `50¢` is half a dollar, not fifty of them.
+`¢` is a sub-unit: `50¢` is half a dollar, not fifty of them. Its bare-letter
+abbreviation `c` is *not* a symbol — it is reached through pattern 12 below,
+under per-share context, for the reasons set out there.
 
 **ISO codes** — recognised only if in the ISO 4217 list.
 
@@ -212,6 +214,31 @@ resolution.
 | 9 | Accounting negative | `($100)`, `$(100)`, `AUD (500)` | Context-gated |
 | 10 | Implicit financial context | `The estimated cost is 250.` | Low |
 | 11 | Worded amount | `two million dollars`, `fifty cents`, `half a million dollars` | High |
+| 12 | Bare `c` cents suffix | `68c`, `138.2c` under per-share context | Medium, trigger-gated |
+
+### The bare `c` suffix (pattern 12)
+
+ASX reporting writes dividends and earnings per share with a bare lowercase
+`c` — `Dividends per share (DPS) 68c`, `Earnings per share (EPS) 138.2c`.
+Unambiguously money to a reader, and the same document's `148.9 cents` resolves
+through pattern 4 without difficulty. But **one lowercase letter is not
+evidence**, so `c` is deliberately *not* in `SYMBOL_TO_CODE` beside `¢`.
+
+Measured over the benchmark corpus, a bare-`c` rule admitted as a suffix symbol
+fires on Australian unit-and-street numbers — `8c Newcastle Street`,
+`78c Bradleys Rd`, `345c Macquarie Street`, `U 64c 14 Wolseley St`: eleven in
+the childcare provider register alone. Uppercase `C` after digits is worse
+still and always a designation (`MQ-4C Triton`, `39 C-17`, `0 C-RAM` in the
+ANAO Major Projects Report).
+
+So the pattern is reached through **the reporting vocabulary that licenses it**
+(`PER_SHARE_TRIGGERS`: `per share`, `dividend(s)`, `distribution`, `franked`,
+`DPS`, `EPS`) within `money.subunit_context_chars` (default 80) on either side,
+and matches lowercase only. Either side, unlike pattern 10's forward-only
+window, because a highlights panel or a table column puts the label above the
+figure as often as beside it. On the benchmark corpus that yields the two
+genuine Credit Corp amounts and nothing else — the register's eleven street
+numbers included. Set `subunit_context_chars: 0` to disable it.
 
 ### Worded amounts
 
@@ -455,11 +482,22 @@ populated, and **exactly one group is non-null per row**:
 
 | Locus | Non-null anchor columns |
 |---|---|
-| `narrative` | `text_source`, `start_char`, `end_char`, `page` |
+| `narrative` | `text_source`, `start_char`, `end_char`, `page`, `elem_order`, `elem_start_char`, `elem_end_char` |
 | `table_cell` | `parent_elem_order`, `row`, `col` |
 | `sheet_cell` | `sheet`, `row`, `col`, `elem_order` |
 
-Beyond the JSON above the row also carries `evidence` (`p1`–`p11` for the
+A narrative row carries **two** anchors for one span: the document-level offset
+into the reassembled narrative, and the same span re-expressed against the
+element that holds it. The second exists because the first is unjoinable for
+any consumer working per element — the element stream is the shape every other
+sidecar is keyed on, and a whole-document offset names nothing in it.
+`elem_start_char` / `elem_end_char` are null when a span straddles the joiner
+between two elements: there is no single element it belongs to, and picking one
+would put a wrong offset in a sidecar built to be joined on. `elem_order` is
+the one anchor column shared with `sheet_cell`; the element-relative offsets
+are what make it a narrative anchor rather than a cell one.
+
+Beyond the JSON above the row also carries `evidence` (`p1`–`p12` for the
 narrative patterns, `number_format` / `header+numeric` / `header_currency` for
 the column path), `range_group` + `range_role` (which link a range's two
 endpoints — the JSON record has no way to express the relationship the design
@@ -530,7 +568,7 @@ extraction path, which this design explicitly rejects.
 
 | Locus | Anchor |
 |---|---|
-| `narrative` | character offset into the reassembled narrative — the same space enrichment mentions use, so they join, and map to chunks as `graph_refresh` does |
+| `narrative` | character offset into the reassembled narrative — the same space enrichment mentions use, so they join, and map to chunks as `graph_refresh` does — plus `(elem_order, elem_start_char, elem_end_char)` for consumers keyed on the element stream |
 | `sheet_cell` | `(sheet, row, col)` |
 | `table_cell` | `(parent_elem_order, row, col)` on the `table_cells` sidecar |
 

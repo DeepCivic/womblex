@@ -557,6 +557,15 @@ class MoneyConfig(BaseModel):
         default=0.5, ge=0.0, le=1.0,
         description="Drop narrative candidates scoring below this.",
     )
+    subunit_context_chars: int = Field(
+        default=80, ge=0,
+        description="Pattern 12 — how far a per-share trigger (`per share`, "
+                    "`dividend`, `DPS`, `EPS`) licenses a bare lowercase `c` cents "
+                    "suffix, either side. `68c` and `138.2c` are the ASX per-share "
+                    "convention; the trigger vocabulary is what holds precision, so "
+                    "widening this reaches further for little added risk. 0 disables "
+                    "the pattern.",
+    )
     context_chars: int = Field(
         default=160, ge=0,
         description="Characters of surrounding text stored with each narrative span.",

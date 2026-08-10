@@ -111,6 +111,22 @@ CURRENCY_WORDS: dict[str, str | None] = {
 # Sub-unit words divide rather than multiply.
 SUBUNIT_WORDS: frozenset[str] = frozenset({"cent", "cents"})
 
+# Per-share reporting vocabulary. This licenses the bare lowercase `c` cents
+# suffix (`68c`, `138.2c`) — the ASX convention for dividends and earnings per
+# share — and *only* that. A bare `c` is not self-evidencing: measured over the
+# benchmark corpus it also names Australian unit-and-street numbers (`8c
+# Newcastle Street`, `78c Bradleys Rd`, `345c Macquarie Street`), which is why
+# `c` is absent from SYMBOL_TO_CODE and reached through a trigger instead.
+PER_SHARE_TRIGGERS: tuple[str, ...] = (
+    "per share", "dividend", "dividends", "distribution", "franked",
+    "dps", "eps",
+)
+
+PER_SHARE_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(t) for t in PER_SHARE_TRIGGERS) + r")\b",
+    re.IGNORECASE,
+)
+
 _WORD_ALT = "|".join(
     re.escape(w) for w in sorted(CURRENCY_WORDS, key=len, reverse=True)
 )
@@ -376,6 +392,8 @@ __all__ = [
     "NULL_MARKERS",
     "NUM_AU",
     "NUM_INTL",
+    "PER_SHARE_RE",
+    "PER_SHARE_TRIGGERS",
     "POSTCODE_RE",
     "SCALES",
     "SCALE_CANONICAL",
