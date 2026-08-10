@@ -249,6 +249,36 @@ attribution of a document mention to a reference entity; `entity_type` is a free
 value, no domain columns). The corpus declares which register columns play
 which role (`linking`/`reference` config).
 
+### Isaacus deployment is environment-shaped, and endpoints are declared, not assumed
+SageMaker support (2026-08) lets an air-gapped AWS account serve Kanon-2 with no
+API key and no egress. Three choices behind `utils/isaacus_client.py`:
+
+- **Environment, not YAML.** Which deployment answers a call is a property of
+  *where Womblex is running*, like `ISAACUS_API_KEY`, `WOMBLEX_STORE_URI` and
+  the AWS credentials themselves — not of the dataset being processed. So
+  `ISAACUS_SAGEMAKER_ENDPOINTS` is read where the client is built and nothing
+  is threaded through the stages. *Rejected:* an `isaacus:` config section,
+  which would have to reach every call site (embed, enrich, chunk, run-stage)
+  to configure something no config file should differ on.
+- **The user declares the endpoint topology; Womblex assumes none.**
+  Subscriptions are per model *and* there is a universal one, so deployments
+  legitimately range from one endpoint serving everything to one per feature,
+  mixed. The spec grammar (`name[@region][=model|model|...]`, no `=models`
+  meaning "serves all") mirrors `IsaacusSageMakerRuntimeEndpoint` exactly, so
+  the integration's own router — not a Womblex re-implementation — resolves
+  each request. *Rejected:* probing SageMaker to discover what is deployed (an
+  API call, IAM surface and failure mode in exchange for guessing).
+- **Reachability is checked before the first request, not at it.** Stages pass
+  the model ids they will call, so an undeployed subscription fails with the
+  model named and the served set listed — not the integration's `No SageMaker
+  endpoints registered for model` mid-batch, nor (when no region resolves) a
+  bare `AssertionError` that vanishes under `python -O`. A malformed spec
+  raises for the same reason: falling back to the hosted API means reaching for
+  a key an air-gapped install does not have.
+
+Only *API* calls move; the vendored tokeniser makes offline chunking identical
+in both deployments.
+
 ### PII — graph-driven detection, masking after Isaacus
 PII detection **is** the enrichment graph: select PII-typed entities (`natural`
 → PERSON, `address` → ADDRESS), map their mention offsets onto chunks, mask.

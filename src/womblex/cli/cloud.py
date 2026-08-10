@@ -21,7 +21,8 @@ import os
 import tempfile
 from pathlib import Path
 
-from womblex.cli._shared import SUPPORTED_EXTENSIONS, Command, make_isaacus_client
+from womblex.cli._shared import SUPPORTED_EXTENSIONS, Command
+from womblex.utils.isaacus_client import make_isaacus_client
 
 logger = logging.getLogger("womblex")
 
@@ -359,21 +360,25 @@ def cmd_run_stage(args: argparse.Namespace) -> int:
             # `chunk_shards` would otherwise warn, write nothing and return
             # cleanly — a remote no-op that looks like success.
             logger.error(
-                "%s needs the Isaacus API (isaacus SDK + ISAACUS_API_KEY); neither "
-                "is resolvable. Refusing to run rather than publishing nothing.",
+                "%s needs Isaacus (isaacus SDK + ISAACUS_API_KEY, or "
+                "ISAACUS_SAGEMAKER_ENDPOINTS for a private deployment); none is "
+                "resolvable. Refusing to run rather than publishing nothing.",
                 args.stage,
             )
             return 1
     if contract.needs_client:
         try:
-            ctx.client = make_isaacus_client()
-        except ImportError:
-            logger.error("isaacus SDK not installed. Install with: uv sync --extra isaacus")
+            ctx.client = make_isaacus_client(models=contract.models(config))
+        except ImportError as e:
+            logger.error("Isaacus SDK not usable (uv sync --extra isaacus): %s", e)
             return 1
         except Exception as e:
             # Logs the exception, not the key — the rule trips on "API_KEY" in the literal.
             # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
-            logger.error("Could not construct Isaacus client (is ISAACUS_API_KEY set?): %s", e)
+            logger.error(
+                "Could not construct Isaacus client (check ISAACUS_API_KEY, or "
+                "ISAACUS_SAGEMAKER_ENDPOINTS for a private deployment): %s", e,
+            )
             return 1
 
     if args.shards is not None:

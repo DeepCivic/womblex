@@ -70,7 +70,12 @@ cloud = [
 ]
 
 # Isaacus enrichment - pip install womblex[isaacus]
-isaacus = ["isaacus>=0.19"]
+# isaacus-sagemaker bootstraps the same SDK against a private, air-gapped
+# SageMaker deployment (ISAACUS_SAGEMAKER_ENDPOINTS); it is imported lazily and
+# only when that variable is set, so a hosted-API install never touches it. It
+# does pull boto3 in, which is why the boto3-free rule stays scoped to [cloud]:
+# a distributed CPU deployment that skips enrichment still skips boto3.
+isaacus = ["isaacus>=0.19", "isaacus-sagemaker>=0.1.4"]
 
 # Mistral OCR via AWS Bedrock - pip install womblex[bedrock]
 # The mistral-ocr OCR engine invokes Pixtral Large through bedrock-runtime.
@@ -189,6 +194,8 @@ module = [
     "yaml",
     "isaacus",
     "isaacus.*",
+    "isaacus_sagemaker",
+    "isaacus_sagemaker.*",
     "spylls",
     "spylls.*",
     "fsspec",

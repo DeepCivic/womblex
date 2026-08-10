@@ -163,9 +163,10 @@ def cmd_run(args: argparse.Namespace) -> int:
     )
     if chunk_will_skip:
         logger.warning(
-            "chunking.enabled but the Isaacus API is unavailable (needs the isaacus "
-            "SDK + ISAACUS_API_KEY) — the chunk stage will be skipped for every batch; "
-            "no chunks will be written."
+            "chunking.enabled but Isaacus is unavailable (needs the isaacus SDK + "
+            "ISAACUS_API_KEY, or ISAACUS_SAGEMAKER_ENDPOINTS for a private "
+            "deployment) — the chunk stage will be skipped for every batch; no "
+            "chunks will be written."
         )
 
     for batch_idx, i in enumerate(range(0, total_files, batch_size), start=1):
