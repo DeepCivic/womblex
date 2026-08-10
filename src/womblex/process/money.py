@@ -126,6 +126,12 @@ _HGAP = r"[^\S\n]*"
 # the range separator, and admitting it would turn `$10–20m` into a negative.
 _MINUS = r"[-−]"
 
+# Change indicators in a financial highlights panel (`↑79% vs PCP`). They mark
+# a movement, never an amount, so a number carrying one is not money however
+# its suffix reads. Used by pattern 12, where a corrupted `%` would otherwise
+# be indistinguishable from a cents figure in the same tile.
+_CHANGE_ARROW = r"(?<![↑↓▲▼⬆⬇])"
+
 _SCALE_TAIL = rf"(?:{_GAP}(?P<scale>{_SCALE_ALT})(?![A-Za-z]))?"
 _NEG = rf"(?P<neg>{_MINUS}{_HGAP})?"
 
@@ -185,7 +191,16 @@ def _compile(international: bool) -> dict[str, re.Pattern[str]]:
         # an uppercase `C` after digits is a designation, not an amount
         # (`MQ-4C Triton`, `39 C-17`, `0 C-RAM` in the ANAO Major Projects
         # Report), so the lowercase gate removes that whole class for free.
-        "p12": re.compile(rf"(?<![A-Za-z0-9.,]){_NEG}(?P<num>{num})c(?![A-Za-z0-9])"),
+        #
+        # `_CHANGE_ARROW` is the guard against the one confusion that survives
+        # the trigger: a highlights tile prints its per-share figure and its
+        # movement side by side (`Dividends per share (DPS) 68c ↑79% vs PCP`),
+        # so a `%` misread as `c` lands *inside* the licensing window and no
+        # reach setting separates them. The arrow does — it marks a change and
+        # is never part of an amount. The true minus stays admissible, because
+        # a loss per share is a real negative figure.
+        "p12": re.compile(
+            rf"(?<![A-Za-z0-9.,]){_CHANGE_ARROW}{_NEG}(?P<num>{num})c(?![A-Za-z0-9])"),
     }
 
 
