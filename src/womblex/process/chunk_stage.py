@@ -47,6 +47,7 @@ from womblex.store.output import (
     write_chunks,
 )
 from womblex.utils.availability import isaacus_available
+from womblex.utils.isaacus_client import make_ai_chunking_client
 
 logger = logging.getLogger(__name__)
 
@@ -90,10 +91,10 @@ def chunk_shards(
 
     if not isaacus_available():
         logger.warning(
-            "chunk_shards: Isaacus API not available (needs the isaacus SDK + "
-            "ISAACUS_API_KEY) — skipping chunking for %s. The chunk-size "
-            "tokeniser is the Kanon-2 tokeniser, obtainable only via the API; "
-            "no *.chunks.parquet written.", shard_dir,
+            "chunk_shards: Isaacus not available (needs the isaacus SDK + "
+            "ISAACUS_API_KEY, or ISAACUS_SAGEMAKER_ENDPOINTS) — skipping chunking "
+            "for %s. The chunk-size tokeniser is the Kanon-2 tokeniser, obtainable "
+            "only via the API; no *.chunks.parquet written.", shard_dir,
         )
         return ChunkStageResult(0, 0, 0)
 
@@ -101,6 +102,7 @@ def chunk_shards(
         tokenizer=chunking_config.tokenizer,
         chunk_size=chunking_config.chunk_size,
         chunking_model=chunking_config.chunking_model,
+        isaacus_client=make_ai_chunking_client(chunking_config.chunking_model),
         tokenizer_kwargs=chunking_config.tokenizer_kwargs,
         memoize=chunking_config.memoize,
         cache_maxsize=chunking_config.cache_maxsize,

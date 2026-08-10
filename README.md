@@ -53,7 +53,7 @@ queue, hosted APIs), never a different extraction path.
 |---|---|---|
 | **Local CPU** (laptop, Chromebook, air-gapped box) | `pip install womblex` | — the base install is the local deployment |
 | **Cloud CPU** (scalable, S3 + Postgres) | `pip install womblex[cloud]` | fsspec + s3fs staging, psycopg3 job queue |
-| Enrichment / embeddings | `pip install womblex[isaacus]` | Isaacus SDK (needs `ISAACUS_API_KEY`) |
+| Enrichment / embeddings | `pip install womblex[isaacus]` | Isaacus SDK — hosted API (`ISAACUS_API_KEY`) or a private SageMaker deployment (`ISAACUS_SAGEMAKER_ENDPOINTS`) |
 | Hosted VLM OCR *(advanced)* | `pip install womblex[cloud-ocr]` | boto3 → Mistral Pixtral Large via AWS Bedrock |
 
 `pip install womblex[local]` is accepted and resolves to the plain base
@@ -110,6 +110,33 @@ Or export directly:
 ```bash
 export ISAACUS_API_KEY="your-key-here"
 ```
+
+### Isaacus on Amazon SageMaker (private deployment)
+
+Isaacus models can also run [inside your own AWS
+account](https://docs.isaacus.com/integrations/amazon-sagemaker), fully
+air-gapped — no API key, no egress. Deploy the Marketplace package(s), then set
+`ISAACUS_SAGEMAKER_ENDPOINTS` *instead of* `ISAACUS_API_KEY`; every stage that
+calls Kanon-2 (`chunk` with AI chunking, `enrich`, `embed`) routes through the
+endpoints with no other change.
+
+Subscriptions are per model plus a universal one, so declare what you actually
+deployed — comma-separated `name[@region][=model|model|...]`, where an entry
+with no `=models` part serves every model:
+
+```bash
+export ISAACUS_SAGEMAKER_ENDPOINTS="kanon-2-universal-001"                        # one endpoint, all models
+export ISAACUS_SAGEMAKER_ENDPOINTS="embed-001=kanon-2-embedder,enrich-001=kanon-2-enricher"  # per-feature
+export ISAACUS_SAGEMAKER_ENDPOINTS="embed-001=kanon-2-embedder,universal-001"     # mixed: plus a catch-all
+
+export ISAACUS_SAGEMAKER_REGION="ap-southeast-2"   # optional; else the AWS SDK default
+export ISAACUS_SAGEMAKER_PROFILE="my-aws-profile"  # optional; else the AWS SDK default
+```
+
+A stage whose model no endpoint serves fails before its first request, naming
+the model and listing what the endpoints do serve. AWS credentials are resolved
+by boto3 as usual (SigV4-signed `/invocations` calls). Chunk-size token
+counting is unaffected: the Kanon-2 tokeniser is vendored and stays local.
 
 ## Quick Start
 

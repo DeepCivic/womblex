@@ -8,6 +8,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Isaacus on Amazon SageMaker (private, air-gapped deployment).** Every
+  Isaacus call — AI chunking, `enrich`, `embed` — now routes to SageMaker
+  endpoints in the user's own AWS account when `ISAACUS_SAGEMAKER_ENDPOINTS` is
+  set, instead of the hosted API. No API key is involved (the integration signs
+  requests with AWS credentials); `isaacus_available()` accepts either
+  deployment, so the chunk gate no longer demands a key that an air-gapped
+  install cannot have.
+
+  Subscriptions are per model plus a universal one, and Womblex assumes no
+  shape: the variable declares comma-separated `name[@region][=model|model|...]`
+  entries, an entry *without* `=models` serving everything. The two mix freely
+  — a dedicated embedder endpoint alongside a catch-all resolves the way the
+  integration's own router does. Region falls back to
+  `ISAACUS_SAGEMAKER_REGION` then the AWS SDK's; `ISAACUS_SAGEMAKER_PROFILE`
+  selects a profile.
+
+  Stages name the model they call, so an undeployed subscription fails at
+  client construction — naming the model, listing what is served — rather than
+  as `No SageMaker endpoints registered for model` mid-batch, or a bare
+  `AssertionError` when no region resolves. AI chunking now passes an
+  explicitly built client to semchunk instead of letting it construct one from
+  `ISAACUS_API_KEY`. Token counting is unchanged: the tokeniser stays local.
+
+  `[isaacus]` gains `isaacus-sagemaker` (imported lazily, only when the
+  variable is set). It pulls boto3 in, which is why the boto3-free rule stays
+  scoped to `[cloud]`.
 - **`elem_order` document-order anchor on table chunks.** `CHUNKS_SCHEMA` gains
   a nullable `elem_order` column, populated **only** for `content_type='table'`
   chunks with the `elem_order` of the table element the chunk came from.

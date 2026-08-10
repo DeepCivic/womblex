@@ -106,6 +106,11 @@ class ConditionalInput:
     reason: str
 
 
+def _no_models(_config: WomblexConfig) -> tuple[str, ...]:
+    """Stage calls no Isaacus model."""
+    return ()
+
+
 @dataclass
 class RunContext:
     """Runtime dependencies the runner constructs once, before any base."""
@@ -127,6 +132,10 @@ class StageContract:
     run: Callable[[Path, WomblexConfig, RunContext], None]
     needs_isaacus_api: bool = False
     needs_client: bool = False
+    # Isaacus model ids the stage calls. Checked against the deployed endpoints
+    # when the run targets a SageMaker deployment (subscriptions are per model,
+    # so an endpoint need not serve all of them); ignored on the hosted API.
+    models: Callable[[WomblexConfig], tuple[str, ...]] = _no_models
     checkpoint_dirname: str | None = None
     preflight: Callable[[WomblexConfig], None] | None = None
 
@@ -397,6 +406,7 @@ STAGE_CONTRACTS: dict[str, StageContract] = {
         run=_run_enrich,
         needs_isaacus_api=True,
         needs_client=True,
+        models=lambda c: (c.enrichment.model,),
         checkpoint_dirname=".enrich-checkpoint",
     ),
     "embed": StageContract(
@@ -409,6 +419,7 @@ STAGE_CONTRACTS: dict[str, StageContract] = {
         run=_run_embed,
         needs_isaacus_api=True,
         needs_client=True,
+        models=lambda c: (c.embedding.model,),
         checkpoint_dirname=".embed-checkpoint",
     ),
     "link": StageContract(
