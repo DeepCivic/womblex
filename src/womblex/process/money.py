@@ -219,6 +219,35 @@ def _ambiguous_continuation(m: re.Match[str], num_group: str, international: boo
     return bool(re.fullmatch(r"\d{1,3}\.\d{3}", raw)) and bool(re.match(r",\d", tail))
 
 
+_CORRUPT_SCALE_RE = re.compile(r"[a-z]{3,}")
+
+
+def _runs_into_a_word(text: str, end: int) -> bool:
+    """True when the match ends flush against a word it could not read.
+
+    ``$2biion`` is a real Credit Corp extraction of ``$2 billion``: the scale
+    word is corrupt, so the pattern consumes ``$2`` and reports two dollars for
+    two billion. Declining is the only safe answer — the amount is unreadable,
+    and repairing the word would be a guess (``spellfix`` cannot reach it
+    either: ``biion``→``billion`` is two insertions, past its edit-1 gate).
+    A wrong number is worse than a missing one, the same rule
+    :func:`~womblex.store.money_output.quantise` applies to unstorable values.
+
+    Deliberately narrow, because a trailing run is usually legitimate:
+
+    - **Three letters or more**, so the Australian rate suffixes survive —
+      ``$300pw``, ``$1,200pa``, ``$25ea`` all report the right amount.
+    - **Lowercase only**, so a number jammed against the next cell of an OCR'd
+      table (``$1,500Alpha``) keeps its correct value; a corrupted scale word
+      is lowercase like the word it corrupts.
+    - **Not a currency word**, so ``$100dollars`` and ``$50cents`` still read.
+
+    ISO codes need no exemption — ``$100AUD`` is uppercase.
+    """
+    m = _CORRUPT_SCALE_RE.match(text, end)
+    return bool(m) and m.group(0) not in CURRENCY_WORDS
+
+
 def _candidate(
     m: re.Match[str], evidence: str, *,
     currency: str | None, currency_source: str,
@@ -227,6 +256,8 @@ def _candidate(
     international: bool = False, subunit: bool = False,
 ) -> MoneySpan | None:
     if _ambiguous_continuation(m, num_group, international):
+        return None
+    if _runs_into_a_word(m.string, m.end()):
         return None
     value = parse_number(m.group(num_group), international=international)
     if value is None:
@@ -457,6 +488,13 @@ def _scan_ranges(
             if any(_ambiguous_continuation(m, g, opts.international_numbers)
                    for g in ("num_a", "num_b")):
                 continue  # malformed / continental endpoint — decline the pair
+            if _runs_into_a_word(text, m.end()):
+                # `$10–20biion` — the upper endpoint's scale is corrupt, so the
+                # pair is unreadable. Claim the span anyway: releasing it lets
+                # the single-amount patterns report `$10`, which is the same
+                # wrong-by-a-scale answer the guard exists to refuse.
+                claimed.append((m.start(), m.end()))
+                continue
             lo = parse_number(m.group("num_a"), international=opts.international_numbers)
             hi = parse_number(m.group("num_b"), international=opts.international_numbers)
             if lo is None or hi is None:

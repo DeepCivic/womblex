@@ -395,6 +395,46 @@ def test_malformed_thousands_group_is_declined():
     assert _one("$1,234").value == Decimal(1234)
 
 
+@pytest.mark.parametrize("text", [
+    "$2biion in total loans",   # Credit Corp p6, a real extraction of `$2 billion`
+    "$2bilion",
+    "$2.5milion",
+    "$40mill",
+    "US$2biion",
+    "($2biion)",
+    "$5xyz",
+])
+def test_a_number_running_into_an_unreadable_word_is_declined(text: str):
+    """A corrupt scale word would otherwise report the number bare.
+
+    `$2biion` consumed as `$2` is two dollars for two billion. The amount is
+    unreadable and repairing the word would be a guess, so nothing is emitted.
+    """
+    assert find_money(text) == []
+
+
+@pytest.mark.parametrize("text,value", [
+    ("$300pw", Decimal(300)),          # rate suffixes are under the length gate
+    ("$1,200pa", Decimal(1200)),
+    ("$25ea", Decimal(25)),
+    ("$100AUD", Decimal(100)),         # ISO codes are uppercase
+    ("$100dollars", Decimal(100)),     # a currency word is not a corrupt scale
+    ("$50cents", Decimal(50)),
+    ("$1,500Alpha", Decimal(1500)),    # a jammed OCR cell keeps its right value
+    ("$2billion", Decimal(2000000000)),
+])
+def test_a_legitimate_trailing_run_still_reads(text: str, value: Decimal):
+    assert _one(text).value == value
+
+
+def test_a_range_with_a_corrupt_scale_declines_both_endpoints():
+    """Releasing the span would let the single-amount patterns report `$10`,
+    which is the same wrong-by-a-scale answer the guard exists to refuse."""
+    assert find_money("$10–20biion") == []
+    assert find_money("between $5 and $10biion") == []
+    assert len(find_money("$10–20 million")) == 2
+
+
 def test_large_document_stays_linear():
     """Guards the interval index: a linear rescan here was 3s on 300 KB."""
     import time

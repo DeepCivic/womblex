@@ -446,6 +446,14 @@ page, and chunking reads `elements` rather than `pages[i].text`.
 - **Verbatim policy.** Extraction emits producer bytes; OCR/font-map errors
   (letterhead typos etc.) are preserved. Systematic cleanup belongs to a
   downstream `clean_text`-style op, not extraction.
+- **A corrupted scale word costs the amount, not just the scale.** Credit Corp
+  page 6 extracts as `$2biion in total loans`. `money` declines it rather than
+  reporting `$2` (see `_runs_into_a_word`), so the amount is a miss rather than
+  a 10⁹ error — but it is still a miss, and no stage recovers it. `spellfix`
+  cannot: `biion`→`billion` is two insertions, past Tier B's edit-1 gate, and
+  the same page's `350,0oo+` needs a *letter→digit* substitution where Tier A
+  only goes digit→letter. Widening either gate to reach these would cost the
+  precision both tiers exist to hold, so this stays a known miss.
 
 ## Deferred / backlog
 
