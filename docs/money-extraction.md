@@ -240,19 +240,6 @@ figure as often as beside it. On the benchmark corpus that yields the two
 genuine Credit Corp amounts and nothing else — the register's eleven street
 numbers included. Set `subunit_context_chars: 0` to disable it.
 
-**A leading change arrow (`↑ ↓ ▲ ▼`) disqualifies the number outright.** This
-is the one confusion the trigger cannot resolve: a highlights tile prints the
-per-share figure and its movement side by side —
-`Dividends per share (DPS) 68c ↑79% vs PCP` — so a `%` misread as `c` lands
-*inside* the licensing window, roughly four characters from the genuine amount.
-No reach setting separates them (measured: tightening to 20 characters still
-admits three of four on Credit Corp page 1). The arrow does, because it marks a
-change and is never part of an amount. Under a simulated corruption of every
-`%` on that page, the pattern still returns exactly `68c` and `138.2c`.
-
-The **true minus stays admissible** — `-12.3c` is a loss per share, a real
-negative figure, where an arrow is only ever an indicator.
-
 ### Worded amounts
 
 Prose and legal drafting write the amount out where a table prints digits, and

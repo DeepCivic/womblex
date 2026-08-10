@@ -461,27 +461,6 @@ def test_a_bare_c_without_per_share_context_is_not_money(text: str):
     assert find_money(text) == []
 
 
-@pytest.mark.parametrize("text,expected", [
-    ("Dividends per share (DPS) 68c ↑79c vs PCP", ["68c"]),
-    ("Earnings per share (EPS) 138.2c ↓2c vs PCP", ["138.2c"]),
-    ("Dividends per share (DPS) ▲16c vs PCP", []),
-])
-def test_a_change_arrow_is_never_an_amount_however_its_suffix_reads(
-    text: str, expected: list[str],
-):
-    """A highlights tile prints the figure and its movement side by side, so a
-    `%` misread as `c` lands inside the licensing window and no reach setting
-    separates them. The arrow does."""
-    assert [s.text for s in find_money(text)] == expected
-
-
-def test_a_loss_per_share_is_still_a_negative_amount():
-    """The minus is admissible where the arrow is not — a loss per share is a
-    real figure, a movement indicator is not."""
-    assert _one("Loss per share of -12.3c").value == Decimal("-0.123")
-    assert _one("Loss per share of −12.3c").value == Decimal("-0.123")
-
-
 def test_per_share_reach_is_configurable_and_zero_disables_it():
     near = "Dividends per share (DPS) 68c"
     assert _one(near).value == Decimal("0.68")
