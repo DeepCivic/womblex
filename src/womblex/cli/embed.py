@@ -11,7 +11,8 @@ import argparse
 import logging
 from pathlib import Path
 
-from womblex.cli._shared import Command, make_isaacus_client
+from womblex.cli._shared import Command
+from womblex.utils.isaacus_client import make_isaacus_client
 
 logger = logging.getLogger("womblex")
 
@@ -57,9 +58,12 @@ def cmd_embed(args: argparse.Namespace) -> int:
     embedding_config = load_config(args.config).embedding if args.config else EmbeddingConfig()
 
     try:
-        client = make_isaacus_client()  # imports isaacus + reads/strips ISAACUS_API_KEY
-    except ImportError:
-        logger.error("isaacus SDK not installed. Install with: uv sync --extra isaacus")
+        # Hosted API (ISAACUS_API_KEY) or SageMaker (ISAACUS_SAGEMAKER_ENDPOINTS),
+        # whichever the environment declares; the model is checked against the
+        # deployed endpoints up front.
+        client = make_isaacus_client(models=[embedding_config.model])
+    except ImportError as e:
+        logger.error("Isaacus SDK not usable (uv sync --extra isaacus): %s", e)
         return 1
     except Exception as e:
         # Logs the exception, not the key — the rule trips on "API_KEY" in the literal.
