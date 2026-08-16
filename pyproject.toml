@@ -89,6 +89,17 @@ bedrock = ["boto3>=1.34"]
 # and a distributed run does not need it.
 cloud-ocr = ["womblex[bedrock]"]
 
+# Console sidecar - pip install womblex[ui]
+# `womblex ui` serves a read-only API over artefacts the pipeline already
+# writes (docs/ui-plan.md). fastapi + uvicorn and nothing else: the console
+# adds no pipeline logic, so it stays as CPU-light as the worker it sits
+# beside. Reading a *distributed* run's object storage additionally needs
+# [cloud]; this extra pulls no boto3 of its own, matching [cloud]'s rule.
+ui = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+]
+
 # Development tools - pip install womblex[dev]
 dev = [
     "pytest>=8.0",
@@ -100,10 +111,13 @@ dev = [
     # deliberate commit that also clears whatever the new rules flag.
     "ruff>=0.16,<0.17",
     "mypy",
+    # Starlette's TestClient transport, for the [ui] route tests. Test-only:
+    # the console itself never makes an HTTP request, so this stays out of [ui].
+    "httpx>=0.27",
 ]
 
 # Full install - pip install womblex[all]
-all = ["womblex[isaacus,bedrock,cloud,dev]"]  # [local] is empty, [cloud-ocr] == [bedrock]
+all = ["womblex[isaacus,bedrock,cloud,ui,dev]"]  # [local] is empty, [cloud-ocr] == [bedrock]
 
 [project.urls]
 Homepage = "https://github.com/DeepCivic/womblex"

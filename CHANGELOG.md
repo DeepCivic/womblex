@@ -8,6 +8,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Console read API skeleton (`womblex ui`).** The first code merge of the
+  optional console (`docs/ui-plan.md` merge 2): a `[ui]` extra
+  (`fastapi` + `uvicorn`, no boto3), a `womblex ui [--output-root DIR |
+  --store URI] [--port 8080]` command, and two read-only endpoints —
+  `/api/runs` (the run selector, from `describe_run()`) and
+  `/api/runs/{run_id}/manifest` (the documents table, `MANIFEST_SCHEMA`).
+
+  Remote reads are in scope from this merge rather than deferred, because a
+  cloud sidecar has no filesystem to read: a store-backed request stages the
+  (small) manifest into a temp dir and hands it to the *same* local reader,
+  which is the shape `womblex finalize` already uses — so the parquet logic
+  has one implementation and `RemoteStore` only ever moves bytes. Both paths
+  prefer a consolidated `manifest.parquet` and fall back to the per-batch
+  shard manifests, so a distributed run reads correctly before and after
+  `finalize`.
+
+  No pipeline logic lives in `ui/` — every read goes through the existing
+  `store/` readers, per the plan's governing rule. The app binds one run
+  source at construction, so no endpoint can be talked into reading a
+  directory the operator did not mount, and it binds to loopback by default
+  (the console has no auth by design; `--host` is the explicit opt-out).
 - **Run index: `describe_run()` and `RemoteStore.list_dirs()`.** `list_runs()`
   returns paths; a run selector wants what is *in* a run. `describe_run()`
   summarises a run root as run_id, document count, the stages present, and
