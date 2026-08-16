@@ -12,7 +12,7 @@ womblex/
 ├── fixtures/          # Test fixtures (separate repo, see ../THIRD_PARTY_DATA.md)
 ├── src/womblex/
 │   ├── cli/                # CLI subpackage — per-topic modules: pipeline, cloud, redact, link, embed,
-│   │                       #   normalise, spellfix, quality, money, pii, ingest, score, profile, verify
+│   │                       #   normalise, spellfix, quality, money, pii, ingest, score, profile, verify, ui
 │   ├── config.py           # Pydantic config models
 │   ├── batch.py            # process_batch() — shared per-batch pipeline body (extract → redact/chunk/pii)
 │   ├── operations/         # Independent operations, one module each: extract, redact, chunk, pii, enrich
@@ -107,6 +107,12 @@ womblex/
 │   │   ├── worker.py           # run_worker() — claim/stage/process/publish loop
 │   │   ├── stage_contracts.py  # Declarative StageContract per downstream stage (inputs/outputs/scope)
 │   │   └── stage_runner.py     # Execute a contract against an object store
+│   ├── ui/                     # Console sidecar (`womblex ui`) — read-only FastAPI over pipeline artefacts
+│   │   ├── app.py              # create_app() — binds one run source for the app's lifetime
+│   │   ├── deps.py             # UISettings — local output_root vs store-backed, resolved from args/env
+│   │   ├── readers.py          # Thin pyarrow readers, local and store-backed, over the same store/ modules
+│   │   └── routes/
+│   │       └── runs.py         # /api/runs, /api/runs/{run_id}/manifest
 │   ├── utils/
 │   │   ├── metrics.py       # WER/CER accuracy metrics
 │   │   ├── tabular_metrics.py # Tabular extraction accuracy (structural fidelity, data integrity)

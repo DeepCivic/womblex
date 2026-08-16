@@ -26,6 +26,7 @@ Usage:
     womblex ingest-gnaf          <input> -o output/gnaf
     womblex ingest-geo           <input> -o output/geo
     womblex ingest-abn           <input> -o output/abn
+    womblex ui                   [--output-root DIR | --store URI] [--port 8080]
 """
 from __future__ import annotations
 
@@ -47,6 +48,7 @@ from womblex.cli import (
     redact,
     score,
     spellfix,
+    ui,
     verify,
 )
 from womblex.cli._shared import setup_logging
@@ -69,6 +71,7 @@ ALL_COMMANDS = [
     *score.COMMANDS,
     *profile.COMMANDS,
     *verify.COMMANDS,
+    *ui.COMMANDS,
 ]
 
 
