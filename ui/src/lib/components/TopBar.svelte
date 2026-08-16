@@ -7,7 +7,12 @@
 <header
 	class="flex h-14 items-center gap-4 border-b border-border bg-surface-raised px-4"
 >
-	<a href="/" class="flex h-10 w-10 shrink-0 flex-col items-center justify-center rounded-md bg-foreground text-background">
+	<a
+		href="/"
+		aria-label="Womblex console home"
+		class="flex h-10 w-10 shrink-0 flex-col items-center justify-center rounded-md bg-foreground
+			text-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+	>
 		<span class="font-display text-[9px] leading-none tracking-wide">WOMB</span>
 		<span class="font-display text-[9px] leading-none tracking-wide">LEX</span>
 	</a>

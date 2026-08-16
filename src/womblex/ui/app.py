@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -71,6 +71,11 @@ def resolve_spa_path(spa_dir: Path, full_path: str) -> Path:
     return root / "index.html"
 
 
+def _is_api_path(full_path: str) -> bool:
+    """Whether the catch-all was reached by a request into the API namespace."""
+    return full_path == "api" or full_path.startswith("api/")
+
+
 def _mount_spa(app: FastAPI, spa_dir: Path) -> None:
     """Serve the SvelteKit build, with an SPA fallback for client-side routes.
 
@@ -85,4 +90,10 @@ def _mount_spa(app: FastAPI, spa_dir: Path) -> None:
 
     @app.get("/{full_path:path}", include_in_schema=False)
     def serve_spa(full_path: str) -> FileResponse:
+        # An unmatched path under /api/ is a wrong endpoint, not a client
+        # route: serving index.html there would answer a bad API call with
+        # 200 and an HTML body, which a JSON client reports as a parse error
+        # rather than the 404 it actually is.
+        if _is_api_path(full_path):
+            raise HTTPException(status_code=404, detail=f"no such endpoint: /{full_path}")
         return FileResponse(resolve_spa_path(spa_dir, full_path))
