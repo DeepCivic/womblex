@@ -5,10 +5,15 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
+from womblex.store.output import ELEMENTS_SUFFIX, MANIFEST_SCHEMA
 from womblex.store.retention import (
+    RunDescription,
     apply_retention,
+    describe_run,
     generate_run_id,
     list_runs,
     most_recent_run,
@@ -20,6 +25,24 @@ def _make_run(output_root: Path, name: str) -> Path:
     run_dir.mkdir(parents=True)
     (run_dir / "batch-0001.elements.parquet").write_bytes(b"stub")
     return output_root / name
+
+
+def _manifest_row(doc_id: str) -> dict:
+    return {
+        "source_hash": f"hash-{doc_id}", "collection_id": "test", "doc_id": doc_id,
+        "filename": f"{doc_id}.pdf", "ext": ".pdf", "extraction_method": "native",
+        "elements_count": 3, "table_cells_count": 0, "form_fields_count": 0,
+        "status": "ok", "error": "", "extracted_at_iso": "2026-08-16T00:00:00Z",
+        "parser_version": "2.0",
+    }
+
+
+def _write_manifest_shard(shard_dir: Path, doc_ids: list[str]) -> None:
+    """A real, schema-correct manifest shard — enough for describe_run's count."""
+    shard_dir.mkdir(parents=True, exist_ok=True)
+    table = pa.Table.from_pylist([_manifest_row(d) for d in doc_ids], schema=MANIFEST_SCHEMA)
+    pq.write_table(table, str(shard_dir / "batch-0001._manifest.parquet"))
+    (shard_dir / f"batch-0001{ELEMENTS_SUFFIX}").write_bytes(b"stub")
 
 
 def _make_checkpoint(checkpoint_dir: Path, name: str) -> Path:
@@ -257,3 +280,40 @@ class TestApplyRetentionValidation:
             current_run_id="run-x", policy="rolling", keep=2,
         )
         assert purged == []
+
+
+class TestDescribeRun:
+    def test_no_documents_dir_yet(self, tmp_path: Path) -> None:
+        run_dir = tmp_path / "run-empty"
+        run_dir.mkdir()
+        assert describe_run(run_dir) == RunDescription(
+            run_id="run-empty", document_count=None, stages=(),
+            created_at=None, updated_at=None,
+        )
+
+    def test_shard_manifest_only(self, tmp_path: Path) -> None:
+        run_dir = tmp_path / "run-a"
+        _write_manifest_shard(run_dir / "documents", ["doc-a", "doc-b"])
+        desc = describe_run(run_dir)
+        assert desc.run_id == "run-a"
+        assert desc.document_count == 2
+        assert desc.stages == ("extract",)
+        assert desc.created_at is not None
+        assert desc.updated_at is not None
+        assert desc.created_at <= desc.updated_at
+
+    def test_prefers_consolidated_manifest_over_shards(self, tmp_path: Path) -> None:
+        run_dir = tmp_path / "run-a"
+        _write_manifest_shard(run_dir / "documents", ["doc-a"])
+        # Consolidated manifest disagrees with the shard — describe_run must
+        # read the consolidated one, the way `womblex manifest` publishes it.
+        table = pa.Table.from_pylist([_manifest_row("doc-a"), _manifest_row("doc-b")], schema=MANIFEST_SCHEMA)
+        pq.write_table(table, str(run_dir / "manifest.parquet"))
+        assert describe_run(run_dir).document_count == 2
+
+    def test_stages_reflect_sidecars_present(self, tmp_path: Path) -> None:
+        shard_dir = tmp_path / "run-a" / "documents"
+        _write_manifest_shard(shard_dir, ["doc-a"])
+        (shard_dir / "batch-0001.chunks.parquet").write_bytes(b"stub")
+        (shard_dir / "batch-0001.money_spans.parquet").write_bytes(b"stub")
+        assert describe_run(tmp_path / "run-a").stages == ("extract", "chunk", "money")

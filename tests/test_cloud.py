@@ -88,6 +88,19 @@ def test_remote_store_download_to_dir_and_upload_glob(tmp_path):
     assert not store.exists("runs/r1/documents/other.txt")
 
 
+def test_remote_store_list_dirs(tmp_path):
+    store = RemoteStore.from_uri(str(tmp_path / "store"))
+    (tmp_path / "store" / "runs" / "run-a" / "documents").mkdir(parents=True)
+    (tmp_path / "store" / "runs" / "run-b" / "documents").mkdir(parents=True)
+    (tmp_path / "store" / "runs" / "stray.txt").write_text("x")
+
+    assert store.list_dirs("runs") == ["run-a", "run-b"]
+    # Files under the prefix are not directories.
+    assert "stray.txt" not in store.list_dirs("runs")
+    # A prefix that doesn't exist yet returns empty, not an error.
+    assert store.list_dirs("missing") == []
+
+
 # --- finalize (local store, no Postgres) -------------------------------------
 
 
