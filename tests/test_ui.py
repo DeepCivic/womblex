@@ -24,10 +24,12 @@ from fastapi.testclient import TestClient
 
 from womblex.cli import ALL_COMMANDS
 from womblex.store.enrichment_output import ENRICHMENT_ENTITIES_SUFFIX, ENTITY_SCHEMA
+from womblex.store.feedback_output import write_feedback_record
 from womblex.store.money_output import MONEY_SPANS_SCHEMA, MONEY_SPANS_SUFFIX
 from womblex.store.output import CHUNKS_SCHEMA, CHUNKS_SUFFIX, ELEMENTS_SUFFIX, MANIFEST_SCHEMA
 from womblex.store.pii_output import PII_SPANS_SCHEMA, PII_SPANS_SUFFIX
 from womblex.store.quality_output import CHUNK_QUALITY_SCHEMA, CHUNK_QUALITY_SUFFIX
+from womblex.ui import readers
 from womblex.ui.app import create_app
 from womblex.ui.deps import UISettings, resolve_settings
 
@@ -99,6 +101,21 @@ class TestResolveSettings:
         with pytest.raises(ValueError, match="only one"):
             resolve_settings(tmp_path, "s3://bucket")
 
+    def test_feedback_dir_explicit_arg_wins(self, tmp_path: Path) -> None:
+        fb = tmp_path / "elsewhere"
+        settings = resolve_settings(tmp_path, None, feedback_dir=fb)
+        assert settings.feedback_dir == fb
+
+    def test_feedback_dir_env_fallback(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fb = tmp_path / "elsewhere"
+        monkeypatch.setenv("WOMBLEX_UI_FEEDBACK_DIR", str(fb))
+        assert resolve_settings(tmp_path, None).feedback_dir == fb
+
+    def test_feedback_dir_defaults_to_none(self, tmp_path: Path) -> None:
+        assert resolve_settings(tmp_path, None).feedback_dir is None
+
 
 @pytest.fixture(params=["local", "remote"])
 def api_client(request: pytest.FixtureRequest, tmp_path: Path) -> tuple[TestClient, Path]:
@@ -108,6 +125,27 @@ def api_client(request: pytest.FixtureRequest, tmp_path: Path) -> tuple[TestClie
         store_root = tmp_path / "store"
         return TestClient(create_app(store_uri=str(store_root))), store_root / "runs"
     return TestClient(create_app(output_root=tmp_path)), tmp_path
+
+
+@pytest.fixture(params=["local", "remote"])
+def feedback_client(request: pytest.FixtureRequest, tmp_path: Path) -> tuple[TestClient, Path, Path]:
+    """(client, run_root, feedback_root) — feedback_root is where reports land.
+
+    Separate from ``api_client`` because the two run sources put feedback in
+    different places relative to ``run_root`` (docs/ui-plan.md §4): nested
+    under ``output_root`` locally (a plain dir, not a ``run-*`` one, so
+    retention never touches it) but a sibling *of* ``runs/`` remotely — the
+    store root has no read-only mount to work around.
+    """
+    if request.param == "remote":
+        pytest.importorskip("fsspec")
+        store_root = tmp_path / "store"
+        return (
+            TestClient(create_app(store_uri=str(store_root))),
+            store_root / "runs",
+            store_root / "feedback",
+        )
+    return TestClient(create_app(output_root=tmp_path)), tmp_path, tmp_path / "feedback"
 
 
 class TestRunsApi:
@@ -192,6 +230,123 @@ class TestRunsApi:
     def test_audit_404(self, api_client: tuple[TestClient, Path]) -> None:
         client, _ = api_client
         assert client.get("/api/runs/nope/audit").status_code == 404
+
+
+class TestFeedbackApi:
+    """The report action (docs/ui-plan.md §4, merge 7): one file per report."""
+
+    def test_writes_one_file_per_report(
+        self, feedback_client: tuple[TestClient, Path, Path]
+    ) -> None:
+        client, run_root, feedback_root = feedback_client
+        _write_manifest_shard(run_root / "run-a" / "documents", _ROWS[:1])
+        resp = client.post(
+            "/api/runs/run-a/feedback",
+            json={
+                "record_type": "chunk", "source_hash": "hash-a", "chunk_index": 3,
+                "row": {"text": "…", "content_type": "narrative", "has_redaction": True},
+                "note": "PERSON mask missed a signature block",
+            },
+        )
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["run_id"] == "run-a"
+        assert body["record_type"] == "chunk"
+        assert body["source_hash"] == "hash-a"
+        assert body["chunk_index"] == 3
+        assert body["note"] == "PERSON mask missed a signature block"
+        assert body["reported_at"].endswith("Z")
+
+        files = list((feedback_root / "run-a").glob("*.json"))
+        assert len(files) == 1
+        assert json.loads(files[0].read_text()) == body
+        # Never nested inside the run directory it reports on.
+        assert not (run_root / "run-a" / "feedback").exists()
+
+    def test_two_reports_never_collide(
+        self, feedback_client: tuple[TestClient, Path, Path]
+    ) -> None:
+        client, run_root, feedback_root = feedback_client
+        _write_manifest_shard(run_root / "run-a" / "documents", _ROWS[:1])
+        for _ in range(2):
+            resp = client.post(
+                "/api/runs/run-a/feedback",
+                json={"record_type": "document", "source_hash": "hash-a", "row": {}, "note": "dup"},
+            )
+            assert resp.status_code == 201
+        assert len(list((feedback_root / "run-a").glob("*.json"))) == 2
+
+    def test_404_when_run_missing(self, feedback_client: tuple[TestClient, Path, Path]) -> None:
+        client, _run_root, _feedback_root = feedback_client
+        resp = client.post(
+            "/api/runs/nope/feedback",
+            json={"record_type": "document", "source_hash": "hash-a", "row": {}, "note": ""},
+        )
+        assert resp.status_code == 404
+
+    def test_reported_by_from_header(
+        self, feedback_client: tuple[TestClient, Path, Path]
+    ) -> None:
+        client, run_root, _feedback_root = feedback_client
+        _write_manifest_shard(run_root / "run-a" / "documents", _ROWS[:1])
+        resp = client.post(
+            "/api/runs/run-a/feedback",
+            headers={"X-Womblex-Reported-By": "reviewer@example.com"},
+            json={"record_type": "document", "source_hash": "hash-a", "row": {}, "note": ""},
+        )
+        assert resp.json()["reported_by"] == "reviewer@example.com"
+
+    def test_reported_by_defaults_to_none_without_a_header_or_env_var(
+        self, feedback_client: tuple[TestClient, Path, Path], monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.delenv("WOMBLEX_UI_REPORTED_BY", raising=False)
+        client, run_root, _feedback_root = feedback_client
+        _write_manifest_shard(run_root / "run-a" / "documents", _ROWS[:1])
+        resp = client.post(
+            "/api/runs/run-a/feedback",
+            json={"record_type": "document", "source_hash": "hash-a", "row": {}, "note": ""},
+        )
+        assert resp.json()["reported_by"] is None
+
+    def test_a_traversing_run_id_cannot_escape_the_feedback_root(self, tmp_path: Path) -> None:
+        """``..`` in a run_id must not walk the write back up into ``runs/``.
+
+        Routing already stops this over HTTP (a path param never matches
+        ``/``), so this exercises ``readers.write_feedback`` directly — it is
+        library API, and the sibling-of-runs invariant (docs/ui-plan.md §4)
+        is the module's guarantee, not the router's.
+        """
+        output_root = tmp_path / "runs"
+        _write_manifest_shard(output_root / "run-a" / "documents", _ROWS[:1])
+        settings = UISettings(output_root=output_root, store_uri=None)
+        # `output_root/../runs/run-a` resolves to a real directory, so an
+        # is_dir() check alone admits it.
+        assert readers.write_feedback(
+            settings, "../runs/run-a", record_type="document", source_hash="hash-a",
+            chunk_index=None, row={}, note="", reported_by=None,
+        ) is None
+        assert list(tmp_path.rglob("*.json")) == []
+
+    def test_write_feedback_record_refuses_an_unsafe_run_id(self, tmp_path: Path) -> None:
+        """The root/run_id join is where containment is enforced."""
+        for run_id in ["../escape", "a/b", "..", ".", "", "/abs"]:
+            with pytest.raises(ValueError, match="unsafe run_id"):
+                write_feedback_record(tmp_path, run_id, {"run_id": run_id})
+        assert list(tmp_path.rglob("*.json")) == []
+
+    def test_feedback_dir_override_is_honoured_in_local_mode(self, tmp_path: Path) -> None:
+        """A deployment that mounts output_root read-only needs this escape hatch."""
+        output_root = tmp_path / "runs"
+        feedback_dir = tmp_path / "elsewhere"
+        _write_manifest_shard(output_root / "run-a" / "documents", _ROWS[:1])
+        client = TestClient(create_app(output_root=output_root, feedback_dir=feedback_dir))
+        resp = client.post(
+            "/api/runs/run-a/feedback",
+            json={"record_type": "document", "source_hash": "hash-a", "row": {}, "note": ""},
+        )
+        assert resp.status_code == 201
+        assert len(list((feedback_dir / "run-a").glob("*.json"))) == 1
+        assert not (output_root / "feedback").exists()
 
 
 _CHUNK_ROW = {

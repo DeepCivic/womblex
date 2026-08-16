@@ -30,6 +30,12 @@ def _register_ui(p: argparse.ArgumentParser) -> None:
     p.add_argument("--host", default="127.0.0.1", help="Bind address. Default: 127.0.0.1.")
     p.add_argument("--port", type=int, default=8080, help="Bind port. Default: 8080.")
     p.add_argument(
+        "--feedback-dir", type=Path, default=None,
+        help="Local mode only: writable dir for report-action files "
+             "(or $WOMBLEX_UI_FEEDBACK_DIR). Defaults to <output-root>/feedback. "
+             "Remote mode always writes under the store's own feedback/ prefix.",
+    )
+    p.add_argument(
         "--allow-execute", action="store_true",
         help="Reserved for the execution endpoints (docs/ui-plan.md merge 11). "
              "None exist yet, so today every deployment is audit-only either way.",
@@ -48,7 +54,10 @@ def cmd_ui(args: argparse.Namespace) -> int:
         return 1
 
     try:
-        settings = resolve_settings(args.output_root, args.store, allow_execute=args.allow_execute)
+        settings = resolve_settings(
+            args.output_root, args.store,
+            allow_execute=args.allow_execute, feedback_dir=args.feedback_dir,
+        )
     except ValueError as e:
         logger.error("%s", e)
         return 1
@@ -57,6 +66,7 @@ def cmd_ui(args: argparse.Namespace) -> int:
         output_root=settings.output_root,
         store_uri=settings.store_uri,
         allow_execute=settings.allow_execute,
+        feedback_dir=settings.feedback_dir,
     )
     source = settings.store_uri or settings.output_root
     logger.info("womblex ui: serving %s on %s:%d", source, args.host, args.port)

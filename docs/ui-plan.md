@@ -5,8 +5,11 @@ Screen requirements: the *Womblex Platform UX Requirements* brief (five domains 
 Dashboard, Pipeline Composer, Corpus Inspector, Semantic Chunk Inspector,
 Resources Console).
 
-Status: merges 1–3 landed (design system, read API skeleton, sidecar image).
-Merge 4 onward — no frontend exists yet.
+Status: merges 1–4 landed (design system, read API skeleton, sidecar image,
+frontend shell), plus the read APIs for merges 5–6 and the write API for
+merge 7. The Corpus and Chunk Inspector screens themselves are still
+`ScreenStub` placeholders — each inspector's endpoints landed ahead of its
+screen, so the `ReportIssue` control has nothing to attach to yet.
 
 ## 1. The governing principle
 
@@ -211,7 +214,7 @@ tree green.
 | 4 | **Frontend shell** | `ui/` SvelteKit workspace + the SPA build stage, tokens from `DESIGN.md`, top bar + side nav, run selector, theme + density toggles |
 | 5 | **Corpus Inspector** | Documents grid, lifecycle-checkpoint switcher, failure filter, `verify-shards` action |
 | 6 | **Chunk Inspector** | Chunk reader endpoints, `ChunkCard`, entity/PII/money overlays |
-| 7 | **Report action** | `ReportIssue` control + append-only `feedback.jsonl` writer, both inspectors |
+| 7 | **Report action** | One-file-per-report writer + `POST /api/runs/{id}/feedback`; `ReportIssue` control once the inspector screens exist |
 | 8 | **Dashboard** | Queue stats, job list, stale detection, fleet view from `locked_by`, KPI tiles and throughput |
 | 9 | **Pipeline Composer** | `STAGE_CONTRACTS` graph endpoint, config form, validation, YAML download |
 | 10 | **Resources Console** | Connection cards, credential masking, test actions, fleet + queue-depth state |

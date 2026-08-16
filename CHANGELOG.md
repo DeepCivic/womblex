@@ -8,6 +8,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Console report action (`docs/ui-plan.md` merge 7).** The console's first
+  and only write path: `POST /api/runs/{run_id}/feedback` files a reviewer's
+  note about a record as **one JSON file per report** — never an append, so
+  there is no read-modify-write and no lost update when two reviewers click at
+  once (measured: 40 concurrent posts, 40 distinct files). Reports land under a
+  `feedback/<run_id>/` root that is always a *sibling* of the runs, never
+  inside one, so re-running a stage or purging a run neither disturbs
+  accumulated feedback nor is disturbed by it — locally beneath `output_root`
+  (retention only purges `run-*`), remotely at the store's own `feedback/`
+  prefix. `--feedback-dir` / `$WOMBLEX_UI_FEEDBACK_DIR` covers deployments that
+  mount `output_root` read-only. `reported_by` resolves from a trusted header
+  or env var, never the client body, and stays advisory — there is no auth to
+  verify it against (plan §6).
+
+  `store/feedback_output.py` owns the root/run_id join and so enforces its
+  containment (`is_safe_run_id`). Found by probing, not by reading the diff: a
+  `..` run_id passes an `is_dir()` check and lands a report at `runs/runs/<id>/`,
+  escaping the feedback root. HTTP routing never allowed it (a path param cannot
+  match `/`), but `readers.write_feedback` is library API and the
+  sibling-of-runs invariant is the module's guarantee, not the router's.
+
+  Backend only: the `ReportIssue` control waits on the Corpus and Chunk
+  Inspector screens, still `ScreenStub` placeholders after merges 5–6 landed
+  each inspector's read endpoints ahead of its screen.
 - **Console frontend shell (`docs/ui-plan.md` merge 4).** `ui/` — a Svelte 5 +
   SvelteKit workspace, built to static files by a Node stage in
   `Dockerfile.ui` and served by `womblex.ui.app.create_app` alongside the
