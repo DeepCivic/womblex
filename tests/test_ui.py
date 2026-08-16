@@ -231,9 +231,11 @@ _QUALITY_ROW = {
 }
 
 
-def _write_shard(shard_dir: Path, suffix: str, schema: pa.Schema, rows: list[dict]) -> None:
+def _write_shard(
+    shard_dir: Path, suffix: str, schema: pa.Schema, rows: list[dict], *, batch: str = "batch-0001",
+) -> None:
     shard_dir.mkdir(parents=True, exist_ok=True)
-    pq.write_table(pa.Table.from_pylist(rows, schema=schema), str(shard_dir / f"batch-0001{suffix}"))
+    pq.write_table(pa.Table.from_pylist(rows, schema=schema), str(shard_dir / f"{batch}{suffix}"))
 
 
 class TestChunkDetailApi:
@@ -282,6 +284,42 @@ class TestChunkDetailApi:
 
         assert len(body["quality"]) == 1
         assert body["quality"][0]["char_len"] == 19
+
+    def test_drifted_shard_rows_keep_the_canonical_key_set(
+        self, api_client: tuple[TestClient, Path]
+    ) -> None:
+        """A run spanning a schema bump must not hand the frontend ragged rows.
+
+        `elem_order` post-dates parser 2.0 (`store.output._CHUNKS_BACKFILL`),
+        so a long-lived run can hold batches on either side of it.
+        """
+        client, run_root = api_client
+        shard_dir = run_root / "run-a" / "documents"
+        _write_manifest_shard(shard_dir, _ROWS[:1])
+        old_schema = pa.schema([f for f in CHUNKS_SCHEMA if f.name != "elem_order"])
+        pre_bump = {k: v for k, v in _CHUNK_ROW_0.items() if k != "elem_order"}
+        pq.write_table(
+            pa.Table.from_pylist([pre_bump], schema=old_schema),
+            str(shard_dir / f"batch-0001{CHUNKS_SUFFIX}"),
+        )
+        _write_shard(shard_dir, CHUNKS_SUFFIX, CHUNKS_SCHEMA, [_CHUNK_ROW], batch="batch-0002")
+
+        chunks = client.get("/api/runs/run-a/chunks/hash-a").json()["chunks"]
+        assert len(chunks) == 2
+        assert {frozenset(c) for c in chunks} == {frozenset(CHUNKS_SCHEMA.names)}
+        assert chunks[0]["elem_order"] is None  # back-filled, not absent
+        assert chunks[1]["elem_order"] == 3
+
+    def test_a_corrupt_sidecar_narrows_the_answer_rather_than_blanking_it(
+        self, api_client: tuple[TestClient, Path]
+    ) -> None:
+        client, run_root = api_client
+        shard_dir = run_root / "run-a" / "documents"
+        _write_manifest_shard(shard_dir, _ROWS[:1])
+        _write_shard(shard_dir, CHUNKS_SUFFIX, CHUNKS_SCHEMA, [_CHUNK_ROW_0])
+        (shard_dir / f"batch-0002{CHUNKS_SUFFIX}").write_bytes(b"not parquet")
+        body = client.get("/api/runs/run-a/chunks/hash-a").json()
+        assert [c["chunk_index"] for c in body["chunks"]] == [0]
 
 
 class TestSpaMount:
