@@ -19,6 +19,12 @@ from fastapi import Request
 class UISettings:
     """Where the console reads run state from. Exactly one of the two is set.
 
+    ``db_dsn`` is the optional job queue the dashboard reads. It is
+    orthogonal to the run source rather than paired with it: a queue is
+    present whenever one is configured (env or argument) and absent
+    otherwise, and a deployment with no queue falls back to the per-stage
+    checkpoints inside the run itself (docs/ui-plan.md §2).
+
     ``feedback_dir`` is local-mode only — the report action's writable
     surface (docs/ui-plan.md §4). ``None`` means the default,
     ``<output_root>/feedback``; an explicit value is the escape hatch for a
@@ -32,6 +38,7 @@ class UISettings:
     store_uri: str | None
     allow_execute: bool = False
     feedback_dir: Path | None = None
+    db_dsn: str | None = None
 
     def __post_init__(self) -> None:
         if bool(self.output_root) == bool(self.store_uri):
@@ -48,6 +55,7 @@ def resolve_settings(
     *,
     allow_execute: bool = False,
     feedback_dir: Path | None = None,
+    db_dsn: str | None = None,
 ) -> UISettings:
     """Resolve settings from explicit arguments, falling back to env vars.
 
@@ -58,6 +66,10 @@ def resolve_settings(
     deployment behind an empty run list. ``$WOMBLEX_UI_FEEDBACK_DIR`` is the
     env fallback for ``feedback_dir``, read only when the explicit argument
     is absent.
+
+    ``$WOMBLEX_DB_DSN`` / ``$DATABASE_URL`` name the job queue, the same
+    pair ``womblex worker`` reads. Absent is not an error: the dashboard
+    falls back to checkpoints.
     """
     root = output_root
     if root is None and "WOMBLEX_UI_OUTPUT_ROOT" in os.environ:
@@ -73,8 +85,10 @@ def resolve_settings(
             "no run source: pass --output-root or --store "
             "(or set $WOMBLEX_UI_OUTPUT_ROOT / $WOMBLEX_STORE_URI)"
         )
+    dsn = db_dsn or os.environ.get("WOMBLEX_DB_DSN") or os.environ.get("DATABASE_URL")
     return UISettings(
-        output_root=root, store_uri=store, allow_execute=allow_execute, feedback_dir=fb_dir,
+        output_root=root, store_uri=store, allow_execute=allow_execute,
+        feedback_dir=fb_dir, db_dsn=dsn,
     )
 
 

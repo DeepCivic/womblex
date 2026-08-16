@@ -15,6 +15,15 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
+CHECKPOINT_GLOB = "*_checkpoint.json"
+
+#: Shortest ``started_at`` → ``updated_at`` span that can carry a rate.
+#: Below this the two timestamps are effectively the same write — a run whose
+#: first batch has just landed — and dividing by it manufactures a throughput
+#: figure out of clock jitter rather than measuring one.
+_MIN_RATE_SPAN_SECONDS = 1.0
+
+
 @dataclass
 class CheckpointState:
     """State of a pipeline run for resumability."""
@@ -49,6 +58,72 @@ class CheckpointState:
             started_at=data.get("started_at", ""),
             updated_at=data.get("updated_at", ""),
         )
+
+
+@dataclass(frozen=True)
+class CheckpointProgress:
+    """One checkpoint file read for display, rather than for resuming.
+
+    ``documents_per_minute`` is the run's average over its own lifetime
+    (``started_at`` → ``updated_at``), not an instantaneous rate: a
+    checkpoint is written once per batch, so anything finer would be
+    fiction (docs/ui-plan.md §4). ``None`` when the timestamps are unusable
+    or too close together to divide by — see :data:`_MIN_RATE_SPAN_SECONDS`.
+    """
+
+    name: str
+    processed: int
+    succeeded: int
+    failed: int
+    last_batch: int
+    started_at: str
+    updated_at: str
+    documents_per_minute: float | None
+
+
+def read_checkpoints(checkpoint_dir: Path) -> list[CheckpointProgress]:
+    """Every ``*_checkpoint.json`` in *checkpoint_dir*, as progress summaries.
+
+    Read-only and tolerant: an unreadable checkpoint is warned about and
+    skipped rather than failing the caller, since progress is an annotation
+    and one bad file should not blank the others. Returns ``[]`` for a
+    directory that does not exist — a stage that has never run.
+    """
+    if not checkpoint_dir.is_dir():
+        return []
+    progress: list[CheckpointProgress] = []
+    for path in sorted(checkpoint_dir.glob(CHECKPOINT_GLOB)):
+        try:
+            with open(path) as f:
+                state = CheckpointState.from_dict(json.load(f))
+        except (OSError, json.JSONDecodeError, TypeError) as e:
+            logger.warning("Skipping unreadable checkpoint %s: %s", path.name, e)
+            continue
+        progress.append(
+            CheckpointProgress(
+                name=path.stem.removesuffix("_checkpoint"),
+                processed=state.total_processed,
+                succeeded=state.total_succeeded,
+                failed=state.total_failed,
+                last_batch=state.last_batch,
+                started_at=state.started_at,
+                updated_at=state.updated_at,
+                documents_per_minute=_rate(state),
+            )
+        )
+    return progress
+
+
+def _rate(state: CheckpointState) -> float | None:
+    try:
+        started = datetime.fromisoformat(state.started_at)
+        updated = datetime.fromisoformat(state.updated_at)
+    except ValueError:
+        return None
+    seconds = (updated - started).total_seconds()
+    if seconds < _MIN_RATE_SPAN_SECONDS:
+        return None
+    return state.total_processed / (seconds / 60.0)
 
 
 class CheckpointManager:

@@ -8,6 +8,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Console dashboard read API (`docs/ui-plan.md` merge 8).**
+  `GET /api/dashboard` serves queue state and per-stage progress from two
+  sources the pipeline already writes, with no new schema or instrumentation.
+  `JobQueue` grows four read-only views beside `stats()` — `list_jobs()`,
+  `workers()` (the fleet, from `locked_by` on running rows), `stale_jobs()`
+  and `throughput()` (completions per minute, derived from `updated_at`).
+  `stale_jobs()` is the read-only twin of `requeue_stale`: same predicate, no
+  recovery, so the console names a stalled batch and a worker fixes it.
+
+  The queue-less half needed no configuration at all. Every shard stage
+  already checkpoints to a dot-directory *inside the run*
+  (`<run>/.chunk-checkpoint/` and friends) which `STAGE_CONTRACTS` names via
+  `checkpoint_dirname` — so `store/checkpoint.py`'s new `read_checkpoints()`
+  reads stage progress out of the run the console is already pointed at, in
+  both deployments, deriving the map from the contracts rather than re-typing
+  it. Throughput there is the checkpoint's own `started_at` → `updated_at`
+  span, labelled batch-granular because that is what a per-batch write can
+  honestly support (plan §4).
+
+  A queue is optional and orthogonal to the run source: `--dsn` /
+  `$WOMBLEX_DB_DSN` when there is one, and an unreachable queue reports
+  `queue_error` rather than 500ing, so checkpoint progress still renders next
+  to it. Backend only — the Dashboard screen is still a `ScreenStub`, as the
+  inspector screens have been since merges 5–6.
 - **Console report action (`docs/ui-plan.md` merge 7).** The console's first
   and only write path: `POST /api/runs/{run_id}/feedback` files a reviewer's
   note about a record as **one JSON file per report** — never an append, so
