@@ -5,7 +5,8 @@ Screen requirements: the *Womblex Platform UX Requirements* brief (five domains 
 Dashboard, Pipeline Composer, Corpus Inspector, Semantic Chunk Inspector,
 Resources Console).
 
-Status: **proposal, nothing implemented.**
+Status: merges 1–3 landed (design system, read API skeleton, sidecar image).
+Merge 4 onward — no frontend exists yet.
 
 ## 1. The governing principle
 
@@ -206,8 +207,8 @@ tree green.
 |---|---|---|
 | 1 | **Design system** | `DESIGN.md` + this plan *(this change)* |
 | 2 | **Read API skeleton** | `[ui]` extra, `src/womblex/ui/app.py`, `womblex ui` command, `describe_run()`, `/api/runs` + `/api/runs/{id}/manifest`, local and store-backed, tests against a fixture shard dir |
-| 3 | **Sidecar image** | `Dockerfile.ui`, the compose `ui` service, read-only mount, SPA build stage |
-| 4 | **Frontend shell** | `ui/` SvelteKit workspace, tokens from `DESIGN.md`, top bar + side nav, run selector, theme + density toggles |
+| 3 | **Sidecar image** | `Dockerfile.ui`, the compose `ui` service, read-only container |
+| 4 | **Frontend shell** | `ui/` SvelteKit workspace + the SPA build stage, tokens from `DESIGN.md`, top bar + side nav, run selector, theme + density toggles |
 | 5 | **Corpus Inspector** | Documents grid, lifecycle-checkpoint switcher, failure filter, `verify-shards` action |
 | 6 | **Chunk Inspector** | Chunk reader endpoints, `ChunkCard`, entity/PII/money overlays |
 | 7 | **Report action** | `ReportIssue` control + append-only `feedback.jsonl` writer, both inspectors |
@@ -218,6 +219,11 @@ tree green.
 
 Merges 2–7 deliver a useful auditing console; everything from 8 on is additive,
 and the sequence can stop anywhere without leaving a half-built screen.
+
+The SPA build stage moved from merge 3 to merge 4 when 3 was built: a build
+stage for a directory that does not exist yet cannot build, and defining one
+that nothing references is dead weight. It lands with `ui/`, where it can be
+exercised.
 
 ## 6. Decisions
 

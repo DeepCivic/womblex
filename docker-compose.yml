@@ -9,6 +9,8 @@
 #   docker compose up --scale worker=4 worker
 #   # once drained, consolidate the run manifest:
 #   docker compose run --rm womblex finalize --run-id <run_id>
+#   # optional read-only console over the same bucket, at :8080:
+#   docker compose up -d ui
 #
 # Inputs and outputs share the s3://womblex bucket; shards land at
 # runs/<run_id>/documents/.
@@ -101,6 +103,29 @@ services:
       - ./configs:/app/configs
     command: ["worker", "--config", "configs/example.yaml",
               "--poll-interval", "5", "--stale-timeout", "900"]
+
+  # Optional read-only console (`womblex ui`, docs/ui-plan.md), at :8080.
+  # Reads the same s3://womblex bucket the workers publish to — the shared
+  # cloud-env anchor supplies WOMBLEX_STORE_URI, which is the run source the
+  # CLI resolves when neither --output-root nor --store is passed.
+  #
+  # read_only: true is the container-level statement of the plan's rule that
+  # no screen writes to a stage output; /tmp is tmpfs because a store-backed
+  # read stages the manifest through a temp dir (ui/readers.py). Verified the
+  # console needs no other writable path, HOME included.
+  ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.ui
+    depends_on:
+      createbuckets:
+        condition: service_completed_successfully
+    environment: *cloud-env
+    ports:
+      - "8080:8080"
+    read_only: true
+    tmpfs:
+      - /tmp
 
 volumes:
   pgdata:

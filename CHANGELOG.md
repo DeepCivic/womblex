@@ -8,6 +8,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Console sidecar image (`docs/ui-plan.md` merge 3).** `Dockerfile.ui` and a
+  `ui` service in `docker-compose.yml`, so the console deploys the way the
+  plan's §2 describes it — its own container beside the workers, same image
+  shape and same env vars, reading shared state rather than running in-process
+  with the pipeline. `docker compose up -d ui` serves the read API at :8080
+  over the same `s3://womblex` bucket the workers publish to.
+
+  Installs `womblex[ui,cloud]`: fastapi/uvicorn plus the object-storage reads
+  a distributed run needs, and still no boto3 in either extra. It carries the
+  same `libglib`/`libGL` system libraries as the pipeline image, because the
+  console's `store/` readers reach `ingest.extract` for `ExtractionResult` and
+  so load PyMuPDF — verified by import trace, which also confirms ultralytics,
+  torch, sentence-transformers and cv2 stay out of the console's import path.
+
+  The container is hardened `read_only: true`, which is the container-level
+  statement of the plan's rule that no screen writes to a stage output, with a
+  `tmpfs` `/tmp` for the temp dir a store-backed read stages the manifest
+  through (`ui/readers.py`). Confirmed the console needs no other writable
+  path, `$HOME` included, by serving both endpoints with `HOME` pointed at a
+  directory that does not exist.
+
+  A separate Dockerfile rather than a build-arg variant of the existing one
+  because the two diverge once the SPA lands. The SvelteKit build stage is
+  **not** here, though the plan listed it under this merge: a stage that
+  `COPY`s a directory which does not exist yet cannot build, and one defined
+  but never referenced is dead weight — so it arrives in merge 4 with `ui/`
+  itself, where it can be exercised. What this merge ships builds and runs.
+
+  `tests/test_ui.py` gains the drift guard the deployment files otherwise
+  lack: the image's `ENTRYPOINT` is parsed against the real CLI parser (a
+  renamed or removed `womblex ui` flag fails the test rather than the
+  container), the bind address is asserted non-loopback, and the compose
+  service is checked for exactly one run source — two would make
+  `resolve_settings` raise and the container exit 1.
 - **Console read API skeleton (`womblex ui`).** The first code merge of the
   optional console (`docs/ui-plan.md` merge 2): a `[ui]` extra
   (`fastapi` + `uvicorn`, no boto3), a `womblex ui [--output-root DIR |
