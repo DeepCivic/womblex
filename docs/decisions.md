@@ -446,6 +446,18 @@ page, and chunking reads `elements` rather than `pages[i].text`.
 - **Verbatim policy.** Extraction emits producer bytes; OCR/font-map errors
   (letterhead typos etc.) are preserved. Systematic cleanup belongs to a
   downstream `clean_text`-style op, not extraction.
+- **Console base tokens are a best-effort fill, not a verified match
+  (`ui/src/app.css`, merge 4).** `DESIGN.md` states the console-specific
+  tokens explicitly (surfaces, status fills, `--font-mono`, both themes) but
+  names several base tokens — `--background`/`--foreground`/`--border` in
+  light mode, `--muted-foreground` in light mode, `--ring` — as
+  DeepCivic-inherited without restating their hex; that table lives in
+  DeepCivic's own `DESIGN.md`, in a separate repository this one has no
+  access to. The values shipped satisfy what `DESIGN.md` *does* state (the
+  measured-contrast table's dark-mode figures, lime/purple never doubling as
+  page background or body text, `#18182a` as the pill near-black) but are
+  not verified against DeepCivic's actual values. Reconcile once that
+  repository is reachable from a Womblex session.
 
 ## Deferred / backlog
 

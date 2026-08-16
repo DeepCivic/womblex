@@ -13,3 +13,7 @@ venv/
 fixtures/fixtures/
 docs/accuracy/
 *.egg-info/
+# Built by Dockerfile.ui's frontend-builder stage, not the base build context.
+ui/node_modules/
+ui/build/
+ui/.svelte-kit/
