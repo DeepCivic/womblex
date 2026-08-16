@@ -52,3 +52,14 @@ def get_audit(run_id: str, settings: UISettings = Depends(get_settings)) -> dict
     if report is None:
         raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
     return report
+
+
+@router.get("/{run_id}/chunks/{source_hash}")
+def get_chunk_detail(
+    run_id: str, source_hash: str, settings: UISettings = Depends(get_settings),  # noqa: B008
+) -> dict:
+    """One document's chunks plus entity/PII/money overlays — the Chunk Inspector's data."""
+    detail = readers.get_chunk_detail(settings, run_id, source_hash)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
+    return {"run_id": run_id, "source_hash": source_hash, **detail}

@@ -15,7 +15,16 @@ from typing import TYPE_CHECKING, cast
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from womblex.store.output import _SHARD_SUFFIX, read_manifest
+from womblex.store.enrichment_output import ENRICHMENT_ENTITIES_SUFFIX, ENTITY_SCHEMA
+from womblex.store.money_output import MONEY_SPANS_SCHEMA, MONEY_SPANS_SUFFIX
+from womblex.store.output import (
+    _SHARD_SUFFIX,
+    CHUNKS_SCHEMA,
+    CHUNKS_SUFFIX,
+    read_manifest,
+)
+from womblex.store.pii_output import PII_SPANS_SCHEMA, PII_SPANS_SUFFIX
+from womblex.store.quality_output import CHUNK_QUALITY_SCHEMA, CHUNK_QUALITY_SUFFIX
 from womblex.store.retention import STAGE_SUFFIXES, RunDescription, describe_run, list_runs
 from womblex.store.run_manifest import RUN_MANIFEST_FILENAME
 from womblex.store.shard_audit import ARCHIVE_SUFFIX, audit_shard_directory
@@ -77,6 +86,41 @@ def get_shard_audit(settings: UISettings, run_id: str) -> dict | None:
     return audit_shard_directory(run_dir / "documents").as_dict()
 
 
+# The Chunk Inspector's overlay sidecars (docs/ui-plan.md §3), each filtered
+# to one document: (response key, suffix, canonical schema, join column).
+# Suffix and schema are taken from the same store module so a renamed suffix
+# cannot drift away from the schema it describes. `entities` alone joins on
+# `document_id` — see `enrichment_output.py`'s note that the sharded layout
+# writes the source_hash into that column.
+_CHUNK_DETAIL_SIDECARS: tuple[tuple[str, str, pa.Schema, str], ...] = (
+    ("chunks", CHUNKS_SUFFIX, CHUNKS_SCHEMA, "source_hash"),
+    ("entities", ENRICHMENT_ENTITIES_SUFFIX, ENTITY_SCHEMA, "document_id"),
+    ("pii_spans", PII_SPANS_SUFFIX, PII_SPANS_SCHEMA, "source_hash"),
+    ("money_spans", MONEY_SPANS_SUFFIX, MONEY_SPANS_SCHEMA, "source_hash"),
+    ("quality", CHUNK_QUALITY_SUFFIX, CHUNK_QUALITY_SCHEMA, "source_hash"),
+)
+
+
+def get_chunk_detail(settings: UISettings, run_id: str, source_hash: str) -> dict | None:
+    """Chunks + overlay sidecars for one document — the Chunk Inspector's data.
+
+    None if run_id doesn't exist. An empty ``chunks`` list is a legitimate
+    answer (chunk stage not yet run, or source_hash absent from this run) —
+    the same "present, not missing" shape as :func:`get_stage_presence`.
+    """
+    if settings.is_remote:
+        return _remote_chunk_detail(cast(str, settings.store_uri), run_id, source_hash)
+    run_dir = cast(Path, settings.output_root) / run_id
+    if not run_dir.is_dir():
+        return None
+    shard_dir = run_dir / "documents"  # glob yields nothing if it doesn't exist yet
+    paths = {
+        suffix: [str(p) for p in sorted(shard_dir.glob(f"*{suffix}"))]
+        for _key, suffix, _schema, _column in _CHUNK_DETAIL_SIDECARS
+    }
+    return _chunk_detail(paths, source_hash)
+
+
 # ---------------------------------------------------------------------------
 # Local
 # ---------------------------------------------------------------------------
@@ -87,6 +131,81 @@ def _local_manifest_table(run_dir: Path) -> pa.Table:
     if manifest_path.exists():
         return pq.read_table(str(manifest_path))
     return read_manifest(run_dir / "documents")
+
+
+def _conform(table: pa.Table, schema: pa.Schema) -> pa.Table:
+    """Reindex *table* to *schema*, null-filling columns a drifted shard predates.
+
+    The same compat shim ``store.output._read_chunks_shard`` applies (see
+    ``_CHUNKS_BACKFILL``): a run written before a column existed must not
+    hand the frontend rows whose key set differs batch to batch.
+    """
+    for field in schema:
+        if field.name not in table.schema.names:
+            table = table.append_column(field, pa.nulls(table.num_rows, type=field.type))
+    return table.select([f.name for f in schema]).cast(schema)
+
+
+def _read_filtered(
+    paths: list[str],
+    schema: pa.Schema,
+    column: str,
+    value: str,
+    *,
+    filesystem: object | None = None,
+) -> list[dict]:
+    """Rows with ``column == value`` across *paths*, conformed to *schema*.
+
+    The predicate is pushed into the parquet reader rather than applied after
+    a full read, so a whole-corpus sidecar costs only the row groups whose
+    statistics admit *value*. Same skip-unreadable-and-warn policy as
+    :func:`_scan_stage_presence` — one corrupt batch narrows a document's
+    overlay data, it doesn't blank the screen.
+    """
+    rows: list[dict] = []
+    for p in paths:
+        try:
+            table = pq.read_table(p, filesystem=filesystem, filters=[(column, "=", value)])
+            rows.extend(_conform(table, schema).to_pylist())
+        except Exception as e:
+            logger.warning("chunk-detail: skipping unreadable sidecar %s: %s", p, e)
+            continue
+    return rows
+
+
+def _chunk_detail(
+    paths_by_suffix: dict[str, list[str]],
+    source_hash: str,
+    *,
+    filesystem: object | None = None,
+) -> dict:
+    """Assemble the Chunk Inspector payload from already-located sidecar paths.
+
+    Local and store-backed reads share this body; only path resolution and
+    the filesystem differ.
+    """
+    detail: dict = {}
+    for key, suffix, schema, column in _CHUNK_DETAIL_SIDECARS:
+        detail[key] = _read_filtered(
+            paths_by_suffix.get(suffix, []), schema, column, source_hash,
+            filesystem=filesystem,
+        )
+    # The sharded enrichment layout writes source_hash into `document_id`;
+    # present it under the name every other sidecar joins on.
+    for entity in detail["entities"]:
+        entity["source_hash"] = entity.pop("document_id")
+    # chunk_index is re-sequenced per document across narrative *and* table
+    # chunks (process/chunker.py), so it totally orders a document's chunks.
+    detail["chunks"].sort(key=lambda r: r["chunk_index"])
+    # Only narrative-locus money anchors to chunk text; table_cell / sheet_cell
+    # spans anchor to the cell sidecars and have no offset to overlay here.
+    detail["money_spans"] = [r for r in detail["money_spans"] if r["locus"] == "narrative"]
+    # `value` is decimal128(38,4) — exact by contract. FastAPI's encoder turns
+    # a Decimal into a float, which silently loses that exactness, so it goes
+    # over the wire as a string.
+    for span in detail["money_spans"]:
+        span["value"] = None if span["value"] is None else str(span["value"])
+    return detail
 
 
 def _scan_stage_presence(shard_dir: Path, suffix: str) -> list[str]:
@@ -188,6 +307,30 @@ def _remote_stage_presence(store_uri: str, run_id: str, suffix: str) -> list[str
         tmp_dir = Path(tmp)
         store.download_to_dir(keys, tmp_dir)
         return _scan_stage_presence(tmp_dir, suffix)
+
+
+def _remote_chunk_detail(store_uri: str, run_id: str, source_hash: str) -> dict | None:
+    """Read the overlay sidecars in place, filtered to one document.
+
+    The only reader here that does **not** stage into a temp dir first. The
+    others answer whole-run questions about small files (manifests) or must
+    read every shard anyway (the audit); this one wants one document out of
+    sidecars that span the entire corpus, so staging them would transfer
+    every chunk of every document to render one page. Reading through the
+    store's own fsspec filesystem pushes the ``source_hash`` predicate into
+    the parquet reader instead.
+    """
+    store = _open_store(store_uri)
+    if run_id not in store.list_dirs("runs"):
+        return None
+    prefix = f"runs/{run_id}/documents"
+    # `list_files` returns store-relative keys; pyarrow needs them rooted the
+    # way RemoteStore roots its own filesystem calls.
+    paths = {
+        suffix: [f"{store.root}/{key}" for key in store.list_files(prefix, f"*{suffix}")]
+        for _key, suffix, _schema, _column in _CHUNK_DETAIL_SIDECARS
+    }
+    return _chunk_detail(paths, source_hash, filesystem=store.fs)
 
 
 def _remote_shard_audit(store_uri: str, run_id: str) -> dict | None:
