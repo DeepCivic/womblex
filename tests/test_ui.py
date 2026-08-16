@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+from decimal import Decimal
 from pathlib import Path
 
 import pyarrow as pa
@@ -22,7 +23,11 @@ pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
 
 from womblex.cli import ALL_COMMANDS
-from womblex.store.output import ELEMENTS_SUFFIX, MANIFEST_SCHEMA
+from womblex.store.enrichment_output import ENRICHMENT_ENTITIES_SUFFIX, ENTITY_SCHEMA
+from womblex.store.money_output import MONEY_SPANS_SCHEMA, MONEY_SPANS_SUFFIX
+from womblex.store.output import CHUNKS_SCHEMA, CHUNKS_SUFFIX, ELEMENTS_SUFFIX, MANIFEST_SCHEMA
+from womblex.store.pii_output import PII_SPANS_SCHEMA, PII_SPANS_SUFFIX
+from womblex.store.quality_output import CHUNK_QUALITY_SCHEMA, CHUNK_QUALITY_SUFFIX
 from womblex.ui.app import create_app
 from womblex.ui.deps import UISettings, resolve_settings
 
@@ -187,6 +192,96 @@ class TestRunsApi:
     def test_audit_404(self, api_client: tuple[TestClient, Path]) -> None:
         client, _ = api_client
         assert client.get("/api/runs/nope/audit").status_code == 404
+
+
+_CHUNK_ROW = {
+    "source_hash": "hash-a", "chunk_index": 1, "text": "second chunk",
+    "start_char": 20, "end_char": 32, "content_type": "narrative",
+    "has_redaction": False, "page_start": 1, "page_end": 1, "elem_order": 3,
+}
+_CHUNK_ROW_0 = {**_CHUNK_ROW, "chunk_index": 0, "text": "first chunk", "start_char": 0, "end_char": 19}
+_OTHER_DOC_CHUNK = {**_CHUNK_ROW, "source_hash": "hash-b"}
+
+_ENTITY_ROW = {
+    "document_id": "hash-a", "entity_id": "PR-1", "entity_label": "person",
+    "name": "Jane Citizen", "entity_type": "natural", "role": "other",
+    "mention_start": 0, "mention_end": 12, "chunk_index": 0,
+}
+
+_PII_ROW = {
+    "source_hash": "hash-a", "chunk_index": 0, "content_type": "narrative",
+    "start": 0, "end": 12, "text": "Jane Citizen", "entity_type": "PERSON",
+    "entity_id": "PR-1", "detector": "enrichment", "score": 0.9, "replacement": "<PERSON_1>",
+}
+
+_MONEY_ROW = {
+    "source_hash": "hash-a", "locus": "narrative", "text_source": "elements",
+    "start_char": 5, "end_char": 10, "page": 1, "elem_order": 3, "parent_elem_order": None,
+    "sheet": None, "row": None, "col": None, "text": "$100", "value": Decimal("100.0000"),
+    "currency": "AUD", "currency_source": "symbol", "evidence": "p1", "modifier": None,
+    "multiplier": None, "negative": False, "confidence": 0.9, "range_group": None,
+    "range_role": None, "column_id": None, "context": "",
+}
+_MONEY_ROW_TABLE_CELL = {**_MONEY_ROW, "locus": "table_cell", "start_char": None, "end_char": None}
+
+_QUALITY_ROW = {
+    "source_hash": "hash-a", "chunk_index": 0, "content_type": "narrative",
+    "char_len": 19, "alpha_frac": 0.9, "is_short": False, "boilerplate_flag": False,
+    "exact_dup_id": None, "near_dup_id": None,
+}
+
+
+def _write_shard(shard_dir: Path, suffix: str, schema: pa.Schema, rows: list[dict]) -> None:
+    shard_dir.mkdir(parents=True, exist_ok=True)
+    pq.write_table(pa.Table.from_pylist(rows, schema=schema), str(shard_dir / f"batch-0001{suffix}"))
+
+
+class TestChunkDetailApi:
+    def test_404_when_run_missing(self, api_client: tuple[TestClient, Path]) -> None:
+        client, _ = api_client
+        assert client.get("/api/runs/nope/chunks/hash-a").status_code == 404
+
+    def test_empty_when_chunk_stage_not_run(self, api_client: tuple[TestClient, Path]) -> None:
+        client, run_root = api_client
+        _write_manifest_shard(run_root / "run-a" / "documents", _ROWS[:1])
+        body = client.get("/api/runs/run-a/chunks/hash-a").json()
+        assert body == {
+            "run_id": "run-a", "source_hash": "hash-a",
+            "chunks": [], "entities": [], "pii_spans": [], "money_spans": [], "quality": [],
+        }
+
+    def test_returns_chunks_ordered_and_scoped_overlays(
+        self, api_client: tuple[TestClient, Path]
+    ) -> None:
+        client, run_root = api_client
+        shard_dir = run_root / "run-a" / "documents"
+        _write_manifest_shard(shard_dir, _ROWS)
+        _write_shard(shard_dir, CHUNKS_SUFFIX, CHUNKS_SCHEMA, [_CHUNK_ROW, _CHUNK_ROW_0, _OTHER_DOC_CHUNK])
+        _write_shard(shard_dir, ENRICHMENT_ENTITIES_SUFFIX, ENTITY_SCHEMA, [_ENTITY_ROW])
+        _write_shard(shard_dir, PII_SPANS_SUFFIX, PII_SPANS_SCHEMA, [_PII_ROW])
+        _write_shard(
+            shard_dir, MONEY_SPANS_SUFFIX, MONEY_SPANS_SCHEMA, [_MONEY_ROW, _MONEY_ROW_TABLE_CELL],
+        )
+        _write_shard(shard_dir, CHUNK_QUALITY_SUFFIX, CHUNK_QUALITY_SCHEMA, [_QUALITY_ROW])
+
+        body = client.get("/api/runs/run-a/chunks/hash-a").json()
+        assert [c["chunk_index"] for c in body["chunks"]] == [0, 1]
+        assert all(c["source_hash"] == "hash-a" for c in body["chunks"])
+
+        assert len(body["entities"]) == 1
+        assert body["entities"][0]["source_hash"] == "hash-a"
+        assert "document_id" not in body["entities"][0]
+
+        assert [p["entity_type"] for p in body["pii_spans"]] == ["PERSON"]
+
+        # Only the narrative-locus span is returned — table_cell spans anchor
+        # to table_cells.parquet, not chunk text, so they don't overlay here.
+        assert len(body["money_spans"]) == 1
+        assert body["money_spans"][0]["locus"] == "narrative"
+        assert body["money_spans"][0]["value"] == "100.0000"
+
+        assert len(body["quality"]) == 1
+        assert body["quality"][0]["char_len"] == 19
 
 
 class TestSpaMount:

@@ -77,6 +77,37 @@ def get_shard_audit(settings: UISettings, run_id: str) -> dict | None:
     return audit_shard_directory(run_dir / "documents").as_dict()
 
 
+# The Chunk Inspector's overlay sidecars (docs/ui-plan.md §3), each filtered
+# to one document. `entities` alone keys on `document_id`, not
+# `source_hash` — see `enrichment_output.py`'s note that the sharded layout
+# writes the source_hash into that column.
+_CHUNK_DETAIL_SIDECARS: tuple[tuple[str, str, str], ...] = (
+    ("chunks", STAGE_SUFFIXES["chunk"], "source_hash"),
+    ("entities", STAGE_SUFFIXES["enrich"], "document_id"),
+    ("pii_spans", STAGE_SUFFIXES["pii"], "source_hash"),
+    ("money_spans", STAGE_SUFFIXES["money"], "source_hash"),
+    ("quality", STAGE_SUFFIXES["quality"], "source_hash"),
+)
+
+
+def get_chunk_detail(settings: UISettings, run_id: str, source_hash: str) -> dict | None:
+    """Chunks + overlay sidecars for one document — the Chunk Inspector's data.
+
+    None if run_id doesn't exist. An empty ``chunks`` list is a legitimate
+    answer (chunk stage not yet run, or source_hash absent from this run) —
+    the same "present, not missing" shape as :func:`get_stage_presence`.
+    """
+    if settings.is_remote:
+        return _remote_chunk_detail(cast(str, settings.store_uri), run_id, source_hash)
+    run_dir = cast(Path, settings.output_root) / run_id
+    if not run_dir.is_dir():
+        return None
+    shard_dir = run_dir / "documents"
+    if not shard_dir.is_dir():
+        return _empty_chunk_detail()
+    return _local_chunk_detail(shard_dir, source_hash)
+
+
 # ---------------------------------------------------------------------------
 # Local
 # ---------------------------------------------------------------------------
@@ -87,6 +118,42 @@ def _local_manifest_table(run_dir: Path) -> pa.Table:
     if manifest_path.exists():
         return pq.read_table(str(manifest_path))
     return read_manifest(run_dir / "documents")
+
+
+def _empty_chunk_detail() -> dict:
+    return {"chunks": [], "entities": [], "pii_spans": [], "money_spans": [], "quality": []}
+
+
+def _read_filtered(shard_dir: Path, suffix: str, column: str, value: str) -> list[dict]:
+    """Rows with ``column == value`` across every ``*<suffix>`` sidecar in shard_dir.
+
+    Same skip-unreadable-and-warn policy as :func:`_scan_stage_presence` — one
+    corrupt batch narrows a document's overlay data, it doesn't blank the
+    screen.
+    """
+    rows: list[dict] = []
+    for p in sorted(shard_dir.glob(f"*{suffix}")):
+        if p.name.endswith(ARCHIVE_SUFFIX):
+            continue
+        try:
+            rows.extend(pq.read_table(str(p), filters=[(column, "=", value)]).to_pylist())
+        except Exception as e:
+            logger.warning("chunk-detail: skipping unreadable sidecar %s: %s", p.name, e)
+            continue
+    return rows
+
+
+def _local_chunk_detail(shard_dir: Path, source_hash: str) -> dict:
+    detail: dict = {}
+    for key, suffix, column in _CHUNK_DETAIL_SIDECARS:
+        detail[key] = _read_filtered(shard_dir, suffix, column, source_hash)
+    for entity in detail["entities"]:
+        entity["source_hash"] = entity.pop("document_id")
+    detail["chunks"].sort(key=lambda r: r["chunk_index"])
+    detail["money_spans"] = [r for r in detail["money_spans"] if r["locus"] == "narrative"]
+    for span in detail["money_spans"]:
+        span["value"] = None if span["value"] is None else str(span["value"])
+    return detail
 
 
 def _scan_stage_presence(shard_dir: Path, suffix: str) -> list[str]:
@@ -188,6 +255,27 @@ def _remote_stage_presence(store_uri: str, run_id: str, suffix: str) -> list[str
         tmp_dir = Path(tmp)
         store.download_to_dir(keys, tmp_dir)
         return _scan_stage_presence(tmp_dir, suffix)
+
+
+def _remote_chunk_detail(store_uri: str, run_id: str, source_hash: str) -> dict | None:
+    """Stage the overlay sidecars into a temp dir and filter them locally.
+
+    Downloads whole sidecar files rather than pushing the ``source_hash``
+    filter to the object store — these sidecars are per-document overlays,
+    not the multi-gigabyte embeddings/enrichment-doc siblings the shard
+    audit avoids pulling.
+    """
+    store = _open_store(store_uri)
+    if run_id not in store.list_dirs("runs"):
+        return None
+    prefix = f"runs/{run_id}/documents"
+    with tempfile.TemporaryDirectory(prefix="womblex-ui-") as tmp:
+        tmp_dir = Path(tmp)
+        for _key, suffix, _column in _CHUNK_DETAIL_SIDECARS:
+            keys = store.list_files(prefix, f"*{suffix}")
+            if keys:
+                store.download_to_dir(keys, tmp_dir)
+        return _local_chunk_detail(tmp_dir, source_hash)
 
 
 def _remote_shard_audit(store_uri: str, run_id: str) -> dict | None:
