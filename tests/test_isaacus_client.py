@@ -115,9 +115,12 @@ def test_hosted_api_client_strips_a_pasted_key(monkeypatch):
     from womblex.utils.isaacus_client import make_isaacus_client
 
     monkeypatch.delenv(ENDPOINTS_ENV, raising=False)
-    monkeypatch.setenv("ISAACUS_API_KEY", "iuak_pasted_with_a_newline\n")
+    # Deliberately not key-shaped. The strip is what is under test, and a value
+    # wearing the real `iuak_` prefix reads as a live credential to every scanner
+    # that walks this repo.
+    monkeypatch.setenv("ISAACUS_API_KEY", "trailing-whitespace-probe\n")
     client = make_isaacus_client(models=["kanon-2-embedder"])
-    assert client.api_key == "iuak_pasted_with_a_newline"  # pragma: allowlist secret
+    assert client.api_key == "trailing-whitespace-probe"  # pragma: allowlist secret
 
 
 def test_sagemaker_client_rejects_undeployed_model(monkeypatch):

@@ -33,17 +33,24 @@ hash:ad9858116e63b0c5a4d7dc7f50f034c7247e56838dae22c1832712ffde48e694 ; reason="
 hash:1a32c4e7a732c34e81dfc1d41e93899e372ff649197de48d902c2f39698c3602 ; reason=".env.example: same DSN against localhost, shipped commented out as a template"
 
 # --- Test corpus -------------------------------------------------------------
-# Third-party Australian government documents, vendored per THIRD_PARTY_DATA.md
-# as extraction fixtures. Each value was read at the offset the scanner
-# reported:
+# The whole fixture tree, by path. This is the one place a path rule is the
+# right shape rather than a shortcut: `fixtures/` is not our source. It is
+# third-party Australian government documents vendored per THIRD_PARTY_DATA.md,
+# read only by the test suite, and a credential *is* a legitimate thing to find
+# there — a dummy key in a document is exactly the kind of input an extraction
+# fixture exists to carry. detect-secrets is excluded from the same tree in
+# `.github/workflows/ci.yml` for the same reason.
 #
-#   * Both PDF hits are body text behind a custom font encoding — the high
-#     entropy is the encoding, not a secret. The reported token decodes to
-#     ordinary prose under a three-letter shift ("7KHU…EOLF" is "The…blic").
-#   * The CSV is the ACECQA approved-provider register (approval number, legal
-#     name, trading name, street address); the offset lands mid-record on a
-#     provider's name.
+# Scanning it produced three findings, all read at the reported offset and all
+# artefacts of what these documents are:
+#
+#   * Two PDF hits are body text behind a custom font encoding — the entropy is
+#     the encoding, not a secret ("7KHU…EOLF" decodes to "The…blic").
+#   * One CSV hit is a record in the ACECQA approved-provider register
+#     (approval number, legal name, trading name, street address).
+#
+# Nothing here is on a deployment path, so a real credential in this tree could
+# not leak from it — and the value would still have to reach a fixture through
+# a reviewed commit.
 
-hash:eb53a19da88395ce99f68000e4a115f16b6938a9e05621ddad34acde7cb07204 ; reason="fixture PDF Auditor-General_Report_2020-21_19: shift-encoded body text, high entropy from the font map"
-hash:f8c51ea39af584257d1529cb9a3a9d6a2f717a730b4652708f256f66ec9b6f8d ; reason="fixture PDF 00768-213A-270825-Throsby…_Redacted: shift-encoded body text"
-hash:534e536ff7c19b2d7f9740b097083f75827abed0e03bea6cc4ca6bd503a9bfe4 ; reason="fixture CSV Approved-providers-au-export: public provider register record, not a key"
+path:fixtures/** ; reason="vendored third-party test corpus, not source; may legitimately contain document-borne credentials"
