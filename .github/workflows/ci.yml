@@ -128,6 +128,19 @@ jobs:
       - name: KeyHog (working tree)
         uses: santhreal/keyhog@19bb6b0945584ff28341e4fd5e7a32c1b90602c7 # v0.5.47
         with:
+          # Load-bearing, and not redundant with the SHA above. The action reads
+          # its own ref to decide how to install: a tag ref downloads the signed
+          # release binary, while "branch / SHA / other non-release refs" take
+          # the source-build path — so the SHA pin was making every run compile
+          # a Rust workspace of 923 detectors from scratch. That was 6m30s of an
+          # 8m22s job, and it never amortised: the action's rust-cache step runs
+          # with CACHE_ON_FAILURE false, so a failing job saves nothing and the
+          # next run rebuilds. Stating the version explicitly takes the release
+          # path while the SHA keeps the action's own code immutable, and the
+          # binary arrives with a detached minisign signature checked against a
+          # public key pinned inside the action plus an adjacent SHA-256 — a
+          # stronger provenance claim than the source build it replaces.
+          version: '0.5.47'
           path: .
           # Lower than the action's `high` default. A leaked credential graded
           # medium is still a leaked credential.

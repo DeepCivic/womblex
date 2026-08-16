@@ -1,0 +1,56 @@
+# KeyHog allowlist — the counterpart to `.secrets.baseline` for the scanner CI
+# runs over the working tree *and* over reachable history.
+#
+# Every entry is one reviewed value, keyed by the SHA-256 of the value itself
+# (`hash:`), never by path and never by detector. That is deliberate:
+#
+#   * A path rule would hide a real credential added to the same file later.
+#   * A detector rule would hide it anywhere in the repository.
+#   * Inline `keyhog:ignore` comments are read from working-tree source text
+#     only — they do not suppress a match in git history, which is half of what
+#     CI scans, and three of these values sit in files no comment can annotate.
+#
+# So a hash entry retires exactly one value, in the tree and in history, and
+# stops matching the moment that value changes. Read the reason before adding
+# one; delete the entry when the value goes away.
+#
+# Regenerate a candidate line from a finding you have actually opened:
+#
+#   keyhog scan <path> --format json \
+#     | jq -r '.[] | select(.location.line == <n>) | "hash:" + .credential_hash'
+
+# --- Local development stack -------------------------------------------------
+# docker-compose.yml stands up Postgres and MinIO on localhost for `womblex
+# enqueue` / `worker`. Each value below is the container's own fixed default,
+# declared in the same file that starts the container and reachable only from
+# the compose network — it authenticates nothing off a developer's machine.
+# .env.example is the commented template a developer copies to .env; its DSN is
+# the compose one with `localhost` for the host. detect-secrets was shown the
+# same three values and they are recorded in `.secrets.baseline`.
+
+hash:63d1a133bf06c0146511372fd1c738064b64b9c60fcf95f40f7553f437f35075 ; reason="docker-compose.yml: local queue DSN, womblex:womblex@postgres, compose network only"
+hash:ad9858116e63b0c5a4d7dc7f50f034c7247e56838dae22c1832712ffde48e694 ; reason="docker-compose.yml: MinIO's own documented default root user, set beside the service that uses it"
+hash:1a32c4e7a732c34e81dfc1d41e93899e372ff649197de48d902c2f39698c3602 ; reason=".env.example: same DSN against localhost, shipped commented out as a template"
+
+# --- Test corpus -------------------------------------------------------------
+# The whole fixture tree, by path. This is the one place a path rule is the
+# right shape rather than a shortcut: `fixtures/` is not our source. It is
+# third-party Australian government documents vendored per THIRD_PARTY_DATA.md,
+# read only by the test suite, and a credential *is* a legitimate thing to find
+# there — a dummy key in a document is exactly the kind of input an extraction
+# fixture exists to carry. detect-secrets is excluded from the same tree in
+# `.github/workflows/ci.yml` for the same reason.
+#
+# Scanning it produced three findings, all read at the reported offset and all
+# artefacts of what these documents are:
+#
+#   * Two PDF hits are body text behind a custom font encoding — the entropy is
+#     the encoding, not a secret ("7KHU…EOLF" decodes to "The…blic").
+#   * One CSV hit is a record in the ACECQA approved-provider register
+#     (approval number, legal name, trading name, street address).
+#
+# Nothing here is on a deployment path, so a real credential in this tree could
+# not leak from it — and the value would still have to reach a fixture through
+# a reviewed commit.
+
+path:fixtures/** ; reason="vendored third-party test corpus, not source; may legitimately contain document-borne credentials"
