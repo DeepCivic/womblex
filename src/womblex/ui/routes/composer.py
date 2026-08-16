@@ -34,7 +34,13 @@ def get_schema() -> dict:
 
 @router.post("/validate")
 def post_validate(raw: dict[str, Any]) -> dict:
-    """Whether *raw* builds a valid `WomblexConfig`, and Pydantic's own errors if not."""
+    """Whether *raw* builds a valid `WomblexConfig`, plus Pydantic's own errors.
+
+    `unknown_keys` lists submitted keys the schema does not claim. These do
+    not make a config invalid — the CLI ignores them too — but they are the
+    one mistake a config editor must never swallow silently, since a typo'd
+    key validates clean and then vanishes from the rendered YAML.
+    """
     return composer.validate_config(raw)
 
 
@@ -44,7 +50,9 @@ def post_yaml(raw: dict[str, Any]) -> Response:
 
     422 with Pydantic's own errors on an invalid config — the same shape
     `/validate` reports — there is no separate "download anyway" path for a
-    config the CLI would reject.
+    config the CLI would reject. Keys the schema does not claim are dropped
+    (as `load_config` would drop them) but named in a comment header, so the
+    file itself records what it lost.
     """
     try:
         text = composer.render_yaml(raw)

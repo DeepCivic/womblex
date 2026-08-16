@@ -16,10 +16,10 @@ read a run's artefacts:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 import yaml
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from womblex.cloud.stage_contracts import (
     DISCOVERY_SUFFIXES,
@@ -57,12 +57,15 @@ def get_stage_graph() -> dict[str, Any]:
 
     Edges come from `required_inputs` only — the hard ordering guardrail the
     plan's §3 names ("ensuring extraction precedes chunking"). Conditional
-    inputs ride along on each node instead of adding edges of their own:
-    they are `Callable[[WomblexConfig], ...]`, so an edge for one would only
-    be true for whatever config the composer form happens to hold at that
-    moment, and a graph that changes shape as an operator edits a batch size
-    would be harder to read than a fixed structure annotated with what a
-    stage might additionally read.
+    inputs ride along on each node instead: they are config-derived, so an
+    edge for one would hold only for whatever config the form happens to
+    have, and a graph that reshapes as an operator edits a batch size reads
+    worse than a fixed one annotated with what a stage *might* also read.
+
+    One edge per ordered pair, carrying every suffix that justifies it:
+    "must run after" is a relation two stages either stand in or do not, and
+    emitting `chunk`'s three extraction sidecars separately would have every
+    renderer dedupe them back to avoid parallel arrows.
     """
     nodes: list[dict[str, Any]] = [
         {
@@ -76,7 +79,8 @@ def get_stage_graph() -> dict[str, Any]:
             "outputs": list(DISCOVERY_SUFFIXES),
         }
     ]
-    edges: list[dict[str, str]] = []
+    # (producer, consumer) -> the suffixes justifying it, insertion-ordered.
+    edges: dict[tuple[str, str], list[str]] = {}
     for name in STAGE_NAMES:
         contract = STAGE_CONTRACTS[name]
         conditional = [
@@ -98,8 +102,52 @@ def get_stage_graph() -> dict[str, Any]:
         for suffix in contract.required_inputs:
             producer = _producer(suffix)
             if producer is not None:
-                edges.append({"from": producer, "to": name, "suffix": suffix})
-    return {"nodes": nodes, "edges": edges}
+                edges.setdefault((producer, name), []).append(suffix)
+    return {
+        "nodes": nodes,
+        "edges": [
+            {"from": producer, "to": consumer, "suffixes": suffixes}
+            for (producer, consumer), suffixes in edges.items()
+        ],
+    }
+
+
+def _nested_model(annotation: Any) -> type[BaseModel] | None:
+    """The `BaseModel` in *annotation*, seeing through `X | None`.
+
+    Returns `None` for a plain container — `normalise.substitutions` is a
+    free-form `dict[str, str]` of letterhead replacements, and recursing into
+    it would report every one of an operator's own substitution keys as an
+    unrecognised config field.
+    """
+    for candidate in get_args(annotation) or (annotation,):
+        if isinstance(candidate, type) and issubclass(candidate, BaseModel):
+            return candidate
+    return None
+
+
+def unknown_keys(
+    raw: dict[str, Any], model: type[BaseModel] = WomblexConfig, prefix: str = ""
+) -> list[str]:
+    """Dotted paths in *raw* that no field of *model* claims.
+
+    Pydantic ignores unrecognised keys, which for a *config editor* is the
+    worst failure mode available: `chunkng:` for `chunking:` validates clean
+    and then vanishes from the rendered YAML, leaving a file that does not
+    do what the operator typed and no signal anything was dropped. Naming
+    them keeps that visible without making the composer stricter than the
+    CLI (see `validate_config`).
+    """
+    found: list[str] = []
+    for key, value in raw.items():
+        field = model.model_fields.get(key)
+        if field is None:
+            found.append(f"{prefix}{key}")
+            continue
+        nested = _nested_model(field.annotation)
+        if nested is not None and isinstance(value, dict):
+            found.extend(unknown_keys(value, nested, f"{prefix}{key}."))
+    return found
 
 
 def get_config_schema() -> dict[str, Any]:
@@ -114,13 +162,20 @@ def validate_config(raw: dict[str, Any]) -> dict[str, Any]:
     Uses `WomblexConfig(**raw)` — the same construction `load_config` uses —
     so a config the composer accepts is one the CLI accepts too, and there is
     no separate composer-side notion of validity.
+
+    `unknown_keys` is reported *beside* `valid` rather than folded into it,
+    for exactly that reason: the CLI loads a config with a stray key without
+    complaint, so failing it here would make the composer reject configs that
+    run fine. It is a warning the operator has almost certainly made a typo,
+    not a verdict on the config.
     """
+    unknown = unknown_keys(raw)
     try:
         WomblexConfig(**raw)
     except ValidationError as e:
         errors = e.errors(include_url=False, include_context=False, include_input=False)
-        return {"valid": False, "errors": errors}
-    return {"valid": True, "errors": []}
+        return {"valid": False, "errors": errors, "unknown_keys": unknown}
+    return {"valid": True, "errors": [], "unknown_keys": unknown}
 
 
 def render_yaml(raw: dict[str, Any]) -> str:
@@ -132,9 +187,28 @@ def render_yaml(raw: dict[str, Any]) -> str:
     `womblex run --config <this file>` would actually see, not whatever the
     browser happened to send.
 
+    Dropped keys are recorded as a YAML comment at the top of the file. The
+    warning belongs on the artefact, not only in the `/validate` response:
+    the downloaded file is what gets committed and mailed around, and a
+    config that quietly lost a mistyped section should say so wherever it
+    ends up. Comments are inert to `yaml.safe_load`, so `load_config` reads
+    the file exactly as it would without them.
+
     Raises `pydantic.ValidationError` on an invalid config; the route
     translates that to a 422 with the same error shape `validate_config`
     returns.
     """
     config = WomblexConfig(**raw)
-    return str(yaml.safe_dump(config.model_dump(mode="json"), sort_keys=False))
+    body = str(yaml.safe_dump(config.model_dump(mode="json"), sort_keys=False))
+    unknown = unknown_keys(raw)
+    if not unknown:
+        return body
+    header = "\n".join(
+        [
+            f"# WARNING: {len(unknown)} submitted key(s) are not in the Womblex config",
+            "# schema and were dropped from this file (likely typos):",
+            *(f"#   {key}" for key in unknown),
+            "",
+        ]
+    )
+    return f"{header}{body}"

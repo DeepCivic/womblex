@@ -29,7 +29,7 @@ from womblex.store.money_output import MONEY_SPANS_SCHEMA, MONEY_SPANS_SUFFIX
 from womblex.store.output import CHUNKS_SCHEMA, CHUNKS_SUFFIX, ELEMENTS_SUFFIX, MANIFEST_SCHEMA
 from womblex.store.pii_output import PII_SPANS_SCHEMA, PII_SPANS_SUFFIX
 from womblex.store.quality_output import CHUNK_QUALITY_SCHEMA, CHUNK_QUALITY_SUFFIX
-from womblex.ui import composer, dashboard, readers
+from womblex.ui import dashboard, readers
 from womblex.ui.app import create_app
 from womblex.ui.deps import UISettings, resolve_settings
 
@@ -608,6 +608,13 @@ class TestDashboardApi:
         assert read_checkpoints(ckpt_dir)[0].documents_per_minute is None
 
 
+_MINIMAL_CONFIG = {
+    "dataset": {"name": "t"},
+    "paths": {"input_root": ".", "output_root": ".", "checkpoint_dir": "."},
+}
+_NO_DATASET = {"paths": _MINIMAL_CONFIG["paths"]}
+
+
 class TestComposerApi:
     """The Pipeline Composer reads no run — `config.py` and
     `cloud/stage_contracts.py` are static (docs/ui-plan.md merge 9), so
@@ -625,16 +632,42 @@ class TestComposerApi:
         body = client.get("/api/composer/graph").json()
         assert [n["id"] for n in body["nodes"]] == ["extract", *STAGE_NAMES]
 
-    def test_graph_edges_resolve_extraction_and_stage_producers(self, client: TestClient) -> None:
+    def test_graph_edges_are_one_per_pair_and_resolve_their_producers(
+        self, client: TestClient
+    ) -> None:
+        """chunk reading three extraction sidecars is one dependency, not three —
+        otherwise every renderer dedupes to avoid parallel arrows."""
         body = client.get("/api/composer/graph").json()
-        edges = {(e["from"], e["to"], e["suffix"]) for e in body["edges"]}
-        # chunk reads the elements sidecar extraction itself produces.
-        assert ("extract", "chunk", ".elements.parquet") in edges
+        pairs = [(e["from"], e["to"]) for e in body["edges"]]
+        assert len(pairs) == len(set(pairs))
+        edges = {(e["from"], e["to"]): e["suffixes"] for e in body["edges"]}
+        assert edges[("extract", "chunk")] == [
+            ".elements.parquet", ".table_cells.parquet", "._manifest.parquet",
+        ]
         # embed reads chunk's own output — a stage-to-stage edge, not extract.
-        assert ("chunk", "embed", ".chunks.parquet") in edges
+        assert edges[("chunk", "embed")] == [".chunks.parquet"]
 
-    def test_graph_matches_the_pure_function(self, client: TestClient) -> None:
-        assert client.get("/api/composer/graph").json() == composer.get_stage_graph()
+    def test_graph_is_acyclic_and_every_stage_descends_from_extract(
+        self, client: TestClient
+    ) -> None:
+        from womblex.cloud.stage_contracts import STAGE_NAMES
+
+        body = client.get("/api/composer/graph").json()
+        adjacency: dict[str, set[str]] = {}
+        for edge in body["edges"]:
+            adjacency.setdefault(edge["from"], set()).add(edge["to"])
+        reached: set[str] = set()
+
+        def walk(node: str, seen: frozenset[str]) -> None:
+            for nxt in adjacency.get(node, ()):
+                assert nxt not in seen, f"cycle through {nxt}"
+                reached.add(nxt)
+                walk(nxt, seen | {nxt})
+
+        walk("extract", frozenset({"extract"}))
+        # A stage unreachable from extract would be one the composer cannot
+        # order — the plan's guardrail is precisely this reachability.
+        assert reached == set(STAGE_NAMES)
 
     def test_schema_is_the_womblex_config_schema(self, client: TestClient) -> None:
         body = client.get("/api/composer/schema").json()
@@ -642,40 +675,99 @@ class TestComposerApi:
         assert "dataset" in body.get("required", [])
 
     def test_validate_accepts_a_minimal_config(self, client: TestClient) -> None:
-        resp = client.post(
-            "/api/composer/validate",
-            json={"dataset": {"name": "t"}, "paths": {
-                "input_root": ".", "output_root": ".", "checkpoint_dir": ".",
-            }},
-        )
-        assert resp.json() == {"valid": True, "errors": []}
+        resp = client.post("/api/composer/validate", json=_MINIMAL_CONFIG)
+        assert resp.json() == {"valid": True, "errors": [], "unknown_keys": []}
+
+    def test_validate_names_typos_the_schema_would_silently_drop(
+        self, client: TestClient
+    ) -> None:
+        """Pydantic ignores unrecognised keys, so a typo validates clean and then
+        vanishes from the download. The composer must say so."""
+        resp = client.post("/api/composer/validate", json={
+            **_MINIMAL_CONFIG,
+            "chunkng": {"chunk_size": 99},            # typo'd section
+            "chunking": {"chnk_size": 99},            # typo'd field in a real section
+        })
+        body = resp.json()
+        # Still valid: the CLI loads this file too, so failing it would make the
+        # composer stricter than the thing it configures.
+        assert body["valid"] is True
+        assert sorted(body["unknown_keys"]) == ["chunking.chnk_size", "chunkng"]
+
+    def test_validate_does_not_mistake_free_form_dict_values_for_typos(
+        self, client: TestClient
+    ) -> None:
+        """`normalise.substitutions` is an operator's own letterhead map — its keys
+        are data, not config fields, and must not be walked into."""
+        resp = client.post("/api/composer/validate", json={
+            **_MINIMAL_CONFIG,
+            "normalise": {"substitutions": {"Depatment": "Department", "AB C": "ABC"}},
+        })
+        assert resp.json()["unknown_keys"] == []
+
+    def test_validate_walks_through_an_optional_nested_model(
+        self, client: TestClient
+    ) -> None:
+        """`linking.reference` is `ReferenceConfig | None` — a union, still walkable."""
+        resp = client.post("/api/composer/validate", json={
+            **_MINIMAL_CONFIG,
+            "linking": {"reference": {"path": "r.csv", "nonsense_key": 1}},
+        })
+        assert resp.json()["unknown_keys"] == ["linking.reference.nonsense_key"]
+
+    def test_validate_reports_unknown_keys_on_an_invalid_config_too(
+        self, client: TestClient
+    ) -> None:
+        resp = client.post("/api/composer/validate", json={"chunkng": {}})
+        body = resp.json()
+        assert body["valid"] is False
+        assert body["unknown_keys"] == ["chunkng"]
 
     def test_validate_reports_pydantic_errors_for_a_missing_field(self, client: TestClient) -> None:
-        resp = client.post("/api/composer/validate", json={"paths": {
-            "input_root": ".", "output_root": ".", "checkpoint_dir": ".",
-        }})
+        resp = client.post("/api/composer/validate", json=_NO_DATASET)
         body = resp.json()
         assert body["valid"] is False
         assert any(err["loc"] == ["dataset"] for err in body["errors"])
 
+    def test_validate_touches_no_filesystem(self, client: TestClient) -> None:
+        """Paths are validated as strings, never resolved — otherwise an unauthenticated
+        endpoint (plan §6) would answer "does this file exist?" for any path."""
+        resp = client.post("/api/composer/validate", json={
+            "dataset": {"name": "t"},
+            "paths": {"input_root": "/nonexistent/xyz", "output_root": "/root/.ssh",
+                      "checkpoint_dir": "/etc/shadow"},
+        })
+        assert resp.json()["valid"] is True
+
     def test_yaml_download_roundtrips_a_valid_config(self, client: TestClient) -> None:
-        resp = client.post(
-            "/api/composer/yaml",
-            json={"dataset": {"name": "t"}, "paths": {
-                "input_root": ".", "output_root": ".", "checkpoint_dir": ".",
-            }},
-        )
+        resp = client.post("/api/composer/yaml", json=_MINIMAL_CONFIG)
         assert resp.status_code == 200
         assert resp.headers["content-disposition"] == "attachment; filename=womblex.yaml"
         parsed = yaml.safe_load(resp.text)
         assert parsed["dataset"]["name"] == "t"
         # Pydantic-applied defaults are in the download, not just what was posted.
         assert "chunking" in parsed
+        # The download's whole purpose: `load_config` must accept it back.
+        from womblex.config import WomblexConfig
+
+        assert WomblexConfig(**parsed).dataset.name == "t"
+        assert not resp.text.startswith("#")  # nothing dropped, so no warning header
+
+    def test_yaml_download_records_the_keys_it_dropped(self, client: TestClient) -> None:
+        """The warning rides on the artefact, not only the /validate response — the
+        file is what gets committed and mailed around."""
+        resp = client.post("/api/composer/yaml", json={
+            **_MINIMAL_CONFIG, "chunkng": {"chunk_size": 99},
+        })
+        assert resp.status_code == 200
+        assert "chunkng" in resp.text.partition("\n\n")[0]
+        assert "WARNING" in resp.text
+        # Comments are inert: the file still loads, and the typo is genuinely gone.
+        parsed = yaml.safe_load(resp.text)
+        assert "chunkng" not in parsed
 
     def test_yaml_download_422s_on_an_invalid_config(self, client: TestClient) -> None:
-        resp = client.post("/api/composer/yaml", json={"paths": {
-            "input_root": ".", "output_root": ".", "checkpoint_dir": ".",
-        }})
+        resp = client.post("/api/composer/yaml", json=_NO_DATASET)
         assert resp.status_code == 422
         assert any(err["loc"] == ["dataset"] for err in resp.json()["detail"])
 

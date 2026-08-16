@@ -13,24 +13,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   composer's four data sources, none of them run-scoped, so unlike every
   other console route these take no `UISettings` dependency.
 
-  The graph endpoint renders `cloud/stage_contracts.py`'s `STAGE_CONTRACTS`
-  as nodes and edges instead of the frontend hand-coding a DAG (plan §3):
-  edges come from each stage's `required_inputs` only — the hard ordering
-  guardrail the plan calls out ("ensuring extraction precedes chunking") —
-  resolved to a producer stage via the existing `PRODUCER_OF` map, with a
-  synthetic `extract` node for the element-stream sidecars extraction itself
-  writes. Config-derived `conditional_inputs` ride along per node as
-  metadata rather than adding edges, since an edge for one would only be
-  true for whatever config the form happens to hold.
+  The graph endpoint renders `STAGE_CONTRACTS` as nodes and edges instead of
+  the frontend hand-coding a DAG (plan §3). Edges come from each stage's
+  `required_inputs` — the ordering guardrail the plan calls out ("ensuring
+  extraction precedes chunking") — resolved through the existing
+  `PRODUCER_OF` map, with a synthetic `extract` node for the sidecars
+  extraction itself writes. Config-derived `conditional_inputs` ride along
+  per node rather than adding edges, since an edge for one would only be
+  true for whatever config the form happens to hold. One edge per ordered
+  pair carries every suffix justifying it (25 → 15); tests pin what matters
+  — acyclic, every stage reachable from `extract`.
 
-  `/schema` is `WomblexConfig.model_json_schema()` verbatim — no hand-typed
-  mirror of `config.py` to fall out of sync. `/validate` and `/yaml` both
-  construct `WomblexConfig(**raw)`, the same call `load_config` makes, so a
-  config the composer accepts (or downloads) is exactly one the CLI accepts;
-  `/yaml` round-trips through `model_dump(mode="json")` so the download
-  reflects Pydantic-applied defaults, not just what the browser posted, and
-  reports the same Pydantic error shape as `/validate` on a 422 rather than
-  a second notion of invalidity.
+  `/schema` is `WomblexConfig.model_json_schema()` verbatim, so no hand-typed
+  mirror of `config.py` can drift. `/validate` and `/yaml` both construct
+  `WomblexConfig(**raw)`, the call `load_config` makes, so a config the
+  composer accepts is one the CLI accepts; `/yaml` round-trips through
+  `model_dump(mode="json")`, carrying Pydantic-applied defaults rather than
+  just what the browser posted.
+
+  **A typo'd key no longer validates clean and then vanishes.** Found by
+  probing, not by reading the diff: Pydantic ignores unrecognised keys, so
+  `chunkng:` (or `chnk_size:` inside a correct section) returned
+  `{"valid": true, "errors": []}` and rendered a YAML with the setting gone
+  and `chunk_size` back at its 480 default — for a config *editor*, the
+  worst failure mode available. `/validate` now reports `unknown_keys`
+  beside `valid`, and `/yaml` names dropped keys in a comment header so the
+  warning rides on the artefact that gets committed and mailed around.
+  Warnings, not errors: the CLI loads such a file too, so failing it here
+  would make the composer stricter than the thing it configures. The walk
+  sees through `X | None` unions but deliberately not into free-form
+  `dict[str, str]` fields — recursing into `normalise.substitutions` would
+  report an operator's own letterhead replacements as typos. Probing also
+  confirmed no config validator touches the filesystem, so this
+  unauthenticated endpoint (plan §6) is not a file-existence oracle — now a
+  test rather than an assumption.
 
   Backend only — the Pipeline Composer screen is still a `ScreenStub`, as
   the other inspector screens have been since merges 5–6 and 8.
