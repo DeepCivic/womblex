@@ -8,6 +8,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Console sidecar image (`docs/ui-plan.md` merge 3).** `Dockerfile.ui` and
+  a `ui` service in `docker-compose.yml`, alongside `postgres`/`minio`/
+  `worker` rather than folded into the existing `Dockerfile`, because it adds
+  a Node build stage the pipeline image has no reason to carry.
+
+  The image is two stages: `ui-build` compiles the SvelteKit SPA
+  (`docs/ui-plan.md` merge 4) to static assets, then a Python stage matching
+  `Dockerfile`'s base installs `womblex[ui,cloud]` — fastapi/uvicorn plus the
+  object-storage reads a distributed run needs, still no boto3 — and copies
+  the built assets in. `ui/` doesn't exist until merge 4, so `ui-build` fails
+  at its first `COPY` today; that's expected, documented in the Dockerfile,
+  and doesn't affect CI, which builds no images. Once merge 4 lands `ui/` and
+  a later merge wires `app.py` to serve the compiled assets as static files,
+  this stage starts working with no further Dockerfile change.
+
+  The compose `ui` service reads the same `s3://womblex` bucket the workers
+  publish to (`WOMBLEX_STORE_URI` via the shared `cloud-env` anchor) and
+  writes to none of it — enforced at the container level with `read_only:
+  true` and a `tmpfs` `/tmp` for the manifest staging `ui/readers.py` already
+  does for a store-backed run, rather than relying on the app's own
+  read-only convention alone.
 - **Console read API skeleton (`womblex ui`).** The first code merge of the
   optional console (`docs/ui-plan.md` merge 2): a `[ui]` extra
   (`fastapi` + `uvicorn`, no boto3), a `womblex ui [--output-root DIR |

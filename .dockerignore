@@ -13,3 +13,6 @@ venv/
 fixtures/fixtures/
 docs/accuracy/
 *.egg-info/
+# ui/ (docs/ui-plan.md merge 4) — local dev artifacts, not the build context.
+ui/node_modules/
+ui/build/

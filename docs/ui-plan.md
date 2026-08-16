@@ -5,7 +5,8 @@ Screen requirements: the *Womblex Platform UX Requirements* brief (five domains 
 Dashboard, Pipeline Composer, Corpus Inspector, Semantic Chunk Inspector,
 Resources Console).
 
-Status: **proposal, nothing implemented.**
+Status: merges 1–3 landed (design system, read API skeleton, sidecar image).
+Merge 4 onward — no frontend exists yet.
 
 ## 1. The governing principle
 
