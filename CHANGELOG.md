@@ -30,7 +30,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A queue is optional and orthogonal to the run source: `--dsn` /
   `$WOMBLEX_DB_DSN` when there is one, and an unreachable queue reports
   `queue_error` rather than 500ing, so checkpoint progress still renders next
-  to it. Backend only — the Dashboard screen is still a `ScreenStub`, as the
+  to it. `JobQueue` gained an optional `connect_timeout` for that reason —
+  workers may block until the OS gives up, but a polled console facing a
+  routable-but-dead host would pin a request thread per poll (measured: 5s
+  and a `queue_error`, against an unbounded wait before).
+
+  `run_id` reaches this endpoint as a *query* parameter, not a path segment,
+  so no routing normalisation precedes it: the local checkpoint join
+  contains itself with the same `is_safe_run_id` guard the feedback writer
+  uses, matching the containment the remote branch already got from its
+  `list_dirs` check. `read_checkpoints` skips well-formed-but-unusable JSON
+  (a top-level list) and keeps the counters of a checkpoint whose timestamps
+  are null, withholding only the rate they cannot support.
+
+  Backend only — the Dashboard screen is still a `ScreenStub`, as the
   inspector screens have been since merges 5–6.
 - **Console report action (`docs/ui-plan.md` merge 7).** The console's first
   and only write path: `POST /api/runs/{run_id}/feedback` files a reviewer's

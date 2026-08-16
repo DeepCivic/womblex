@@ -55,8 +55,11 @@ class CheckpointState:
             total_succeeded=data.get("total_succeeded", 0),
             total_failed=data.get("total_failed", 0),
             last_batch=data.get("last_batch", 0),
-            started_at=data.get("started_at", ""),
-            updated_at=data.get("updated_at", ""),
+            # `or ""` rather than a default: a key present with a null value
+            # returns None from .get, which would put None in a str field and
+            # crash anything that parses it.
+            started_at=data.get("started_at") or "",
+            updated_at=data.get("updated_at") or "",
         )
 
 
@@ -93,14 +96,14 @@ def read_checkpoints(checkpoint_dir: Path) -> list[CheckpointProgress]:
         return []
     progress: list[CheckpointProgress] = []
     for path in sorted(checkpoint_dir.glob(CHECKPOINT_GLOB)):
+        # Parsing *and* projection sit inside the guard: a checkpoint whose
+        # JSON is well-formed can still be unusable (a null timestamp, a
+        # top-level list), and skipping only parse failures would let those
+        # escape as a 500 from a reader documented to skip and warn.
         try:
             with open(path) as f:
                 state = CheckpointState.from_dict(json.load(f))
-        except (OSError, json.JSONDecodeError, TypeError) as e:
-            logger.warning("Skipping unreadable checkpoint %s: %s", path.name, e)
-            continue
-        progress.append(
-            CheckpointProgress(
+            entry = CheckpointProgress(
                 name=path.stem.removesuffix("_checkpoint"),
                 processed=state.total_processed,
                 succeeded=state.total_succeeded,
@@ -110,7 +113,10 @@ def read_checkpoints(checkpoint_dir: Path) -> list[CheckpointProgress]:
                 updated_at=state.updated_at,
                 documents_per_minute=_rate(state),
             )
-        )
+        except (OSError, json.JSONDecodeError, AttributeError, TypeError, ValueError) as e:
+            logger.warning("Skipping unreadable checkpoint %s: %s", path.name, e)
+            continue
+        progress.append(entry)
     return progress
 
 
@@ -118,7 +124,7 @@ def _rate(state: CheckpointState) -> float | None:
     try:
         started = datetime.fromisoformat(state.started_at)
         updated = datetime.fromisoformat(state.updated_at)
-    except ValueError:
+    except (TypeError, ValueError):
         return None
     seconds = (updated - started).total_seconds()
     if seconds < _MIN_RATE_SPAN_SECONDS:
