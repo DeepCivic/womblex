@@ -7,8 +7,6 @@ Resources Console).
 
 Status: **proposal, nothing implemented.**
 
----
-
 ## 1. The governing principle
 
 **The console reads artefacts the pipeline already writes. It adds no pipeline
@@ -27,9 +25,10 @@ Three consequences worth stating up front:
   §4 is the honest list of what that costs.
 - **No writes to stage outputs.** Reviewers report problems; they do not edit
   parquet (§4).
-- **Read-only by default.** Execution controls ship behind an explicit
-  `--allow-execute` flag. A console that can enqueue jobs is a different
-  security object from one that can only look at parquet.
+- **The whole designed workflow, on a screen.** The mission is that someone can
+  use Womblex as designed without a CLI or a coding agent — so the console
+  covers configure, run, per-stage run, verify and inspect, not a read-only
+  subset (§4).
 
 ## 2. Architecture — the console is a sidecar
 
@@ -46,8 +45,7 @@ src/womblex/ui/
 ├── deps.py        # Resolve store / output_root / optional JobQueue per request
 ├── routes/        # runs, corpus, chunks, stages, resources, jobs
 └── readers.py     # Thin pyarrow readers over the shard sidecars
-
-ui/                # SvelteKit SPA; built during the image build, not vendored
+ui/                     # SvelteKit SPA; built during the image build
 src/womblex/cli/ui.py   # `womblex ui [--port 8080] [--allow-execute]`
 ```
 
@@ -59,13 +57,8 @@ configuration surface:
 | Local | `output_root` bind-mounted read-only | Absent; dashboard falls back to checkpoints |
 | Cloud | `WOMBLEX_STORE_URI` + `WOMBLEX_S3_ENDPOINT` via `store/remote.py` | `WOMBLEX_DB_DSN` via `JobQueue` |
 
-```yaml
-  ui:                       # added to docker-compose.yml
-    build: {context: ., dockerfile: Dockerfile.ui}
-    environment: *cloud-env
-    ports: ["8080:8080"]
-    command: ["ui", "--port", "8080"]
-```
+A `ui` service joins `docker-compose.yml` alongside `worker`, sharing the same
+`x-cloud-env` anchor and publishing one port.
 
 Because the cloud sidecar reads a bucket rather than a filesystem, **remote
 reads are in scope from the first merge**, not deferred behind a flag. Runs are
@@ -84,9 +77,8 @@ pipeline's no-network-at-runtime property should not be broken by its own UI.
 
 ## 3. Screen → data source
 
-Every screen maps onto artefacts that exist today. This is the plan's main
-finding: the pipeline is already instrumented for this UI, largely by accident of
-having been built shard-first.
+Every screen maps onto artefacts that exist today — the pipeline is already
+instrumented for this UI, largely by accident of having been built shard-first.
 
 | Screen | Reads | Notes |
 |---|---|---|
@@ -129,38 +121,51 @@ the system does not record, v1 shows less rather than growing instrumentation.
 
 The one genuinely missing read is a **run index**: `store/retention.list_runs()`
 returns paths, and the run selector wants run_id, document count, stages present
-and timestamps. That is a small `describe_run()` helper the CLI benefits from
-too.
+and timestamps — a small `describe_run()` helper the CLI benefits from too.
 
 ### Editing settings without becoming a secret store
 
 The Resources Console and Pipeline Composer share **one writable config volume**
 — the only mount besides feedback that is not read-only. Both write YAML that
-Pydantic has already validated, and changes take effect on restart of whatever
-reads them. Restart is the activation path throughout: leaner than live reload,
+Pydantic has already validated, activated by restart: leaner than live reload,
 and it keeps a running job's config immutable for its whole life.
 
-**Secrets stay in the environment.** The console displays them masked, labelled
-as env-provided, and never offers a field that accepts one. Everything else —
-bucket URIs, endpoints, paths, poll and stale intervals, batch sizes, stage
-toggles — is editable in the UI. This is the line that keeps the console cheap:
-the moment it accepts a credential it has to store one, and storing one means
-encryption at rest, key rotation and an access log. Worth doing deliberately
-later if wanted; not worth acquiring by accident in v1.
+**Secrets stay in the environment**, displayed masked and labelled as
+env-provided, with no field that accepts one. Everything else — bucket URIs,
+endpoints, paths, intervals, batch sizes, stage toggles — is editable. That line
+is what keeps the console cheap: accepting a credential means storing one, and
+storing one means encryption at rest, key rotation and an access log. Worth
+doing deliberately later; not worth acquiring by accident in v1.
+
+### Running the pipeline from the screen
+
+The console reaches the whole designed workflow **by calling the same library
+functions the CLI calls** — `process_batch()`, `chunk_shards()`,
+`enrich_shards()` — never by shelling out. The CLI is already a thin argparse
+wrapper over those functions and the console is a second one over the same
+ones, so no web request can become an arbitrary command.
+
+Dispatch is the queue in both deployments: the console enqueues, workers do the
+work, which is what makes an hours-long job observable and survivable. The cost
+is that a screen-driven local deployment runs the compose stack (Postgres +
+MinIO, already in `docker-compose.yml`) rather than a bare `womblex run`; a
+queue-less local console would need its own background runner and progress
+reporting. Deferred, and worth revisiting if that requirement bites.
+
+`--allow-execute` remains the switch: off gives a pure auditing console.
 
 ### Scale-to-zero is in scope, and already supported
 
 Womblex is event-driven by construction. `run_worker()` already takes `once` and
 `idle_timeout`: a worker that finds an empty queue exits and the container goes
-away. Enqueue is the event, drain is the shutdown signal, and cold start on the
-next enqueue has the same latency character as invoking the CLI locally — which
-is how the pipeline is used today.
+away. Enqueue is the event, drain is the shutdown signal, and cold start has the
+same latency character as invoking the CLI locally.
 
 So the Resources Console shows fleet state (workers holding batches, queue
 depth, idle timeout) and can enqueue work, which is what brings workers up.
 Womblex still implements no scheduler: the platform starts containers — compose
 `--scale`, a Kubernetes Job, an ECS task — and Womblex contributes a worker that
-knows how to exit. That division is what makes scale-to-zero free rather than a
+knows how to exit. That division makes scale-to-zero free rather than a
 feature.
 
 ### Reporting a bad record, instead of editing it
@@ -188,12 +193,9 @@ Same layout in both deployments — only the storage location differs, so one
 code path serves both. **Feedback cannot affect a run**: it is a sibling of
 `runs/`, so re-running a stage, applying retention, or deleting a run neither
 disturbs accumulated feedback nor is disturbed by it. The row is embedded
-rather than referenced for the same reason — the report stays meaningful after
-a re-run replaces the shard it came from.
-
-`reported_by` is populated from an env var or a trusted header. It is
-**advisory, not verified** — there is no auth (§6) — but it costs one string
-now and a migration later.
+rather than referenced for the same reason. `reported_by` comes from an env var
+or trusted header and is **advisory, not verified** — there is no auth (§6) —
+but it costs one string now and a migration later.
 
 ## 5. Delivery sequence
 
@@ -212,7 +214,7 @@ tree green.
 | 8 | **Dashboard** | Queue stats, job list, stale detection, fleet view from `locked_by`, KPI tiles and throughput |
 | 9 | **Pipeline Composer** | `STAGE_CONTRACTS` graph endpoint, config form, validation, YAML download |
 | 10 | **Resources Console** | Connection cards, credential masking, test actions, fleet + queue-depth state |
-| 11 | **Execution controls** | `--allow-execute`, enqueue, log streaming |
+| 11 | **Execution controls** | `--allow-execute`, configure-and-run, per-stage runs, log streaming |
 
 Merges 2–7 deliver a useful auditing console; everything from 8 on is additive,
 and the sequence can stop anywhere without leaving a half-built screen.
@@ -229,9 +231,8 @@ and the sequence can stop anywhere without leaving a half-built screen.
 | Feedback store | One file per report, sibling of `runs/`, same layout local and remote (§4) |
 | Settings | Editable via a shared writable config volume; secrets env-only; restart activates |
 | Auth | **None.** Not deployed discoverably at any layer. `reported_by` is advisory |
-| Execution | `--allow-execute` permits enqueue through `JobQueue` and nothing else — no subprocess, no CLI shell-out. The console can ask for work to be done; it cannot run commands |
+| Execution | The console covers the full designed workflow, calling the same library functions the CLI calls — no subprocess, no shell-out. Dispatch is always the queue. `--allow-execute` switches it off for audit-only deployments |
 
-One deferred, to revisit when it stops being true: the plan assumes a small
-number of trusted operators. Multi-user means auth, per-user preferences and a
-real audit log — a substantially larger project, and the point at which
-`reported_by` needs to be verified rather than declared.
+One deferred item: the plan assumes a small number of trusted operators.
+Multi-user means auth, per-user preferences and a real audit log — a larger
+project, and the point at which `reported_by` must be verified, not declared.
