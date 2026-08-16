@@ -256,7 +256,7 @@ def _runs_into_a_word(text: str, end: int) -> bool:
     ISO codes need no exemption — ``$100AUD`` is uppercase.
     """
     m = _CORRUPT_SCALE_RE.match(text, end)
-    return bool(m) and m.group(0) not in CURRENCY_WORDS
+    return m is not None and m.group(0) not in CURRENCY_WORDS
 
 
 def _candidate(
