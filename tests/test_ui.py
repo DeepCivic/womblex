@@ -142,6 +142,52 @@ class TestRunsApi:
         client, _ = api_client
         assert client.get("/api/runs/nope/manifest").status_code == 404
 
+    def test_stage_presence(self, api_client: tuple[TestClient, Path]) -> None:
+        client, run_root = api_client
+        shard_dir = run_root / "run-a" / "documents"
+        _write_manifest_shard(shard_dir, _ROWS)
+        chunks_path = shard_dir / "batch-0001.chunks.parquet"
+        pq.write_table(pa.table({"source_hash": ["hash-a"]}), str(chunks_path))
+        body = client.get("/api/runs/run-a/stage-presence/chunk").json()
+        assert body == {"run_id": "run-a", "stage": "chunk", "source_hashes": ["hash-a"]}
+        # A stage with no sidecar in this run reports present, not missing.
+        empty = client.get("/api/runs/run-a/stage-presence/embed").json()
+        assert empty["source_hashes"] == []
+
+    def test_stage_presence_skips_an_unreadable_sidecar(
+        self, api_client: tuple[TestClient, Path]
+    ) -> None:
+        """One corrupt batch must not blank the other batches' answer."""
+        client, run_root = api_client
+        shard_dir = run_root / "run-a" / "documents"
+        _write_manifest_shard(shard_dir, _ROWS)
+        pq.write_table(
+            pa.table({"source_hash": ["hash-a"]}), str(shard_dir / "batch-0001.chunks.parquet")
+        )
+        (shard_dir / "batch-0002.chunks.parquet").write_bytes(b"not parquet")
+        body = client.get("/api/runs/run-a/stage-presence/chunk").json()
+        assert body["source_hashes"] == ["hash-a"]
+
+    def test_stage_presence_unknown_stage(self, api_client: tuple[TestClient, Path]) -> None:
+        client, run_root = api_client
+        _write_manifest_shard(run_root / "run-a" / "documents", _ROWS[:1])
+        assert client.get("/api/runs/run-a/stage-presence/nope").status_code == 400
+
+    def test_stage_presence_404(self, api_client: tuple[TestClient, Path]) -> None:
+        client, _ = api_client
+        assert client.get("/api/runs/nope/stage-presence/chunk").status_code == 404
+
+    def test_audit(self, api_client: tuple[TestClient, Path]) -> None:
+        client, run_root = api_client
+        _write_manifest_shard(run_root / "run-a" / "documents", _ROWS)
+        report = client.get("/api/runs/run-a/audit").json()
+        assert report["manifest_row_count"] == 0  # the stub elements file makes the batch unreadable
+        assert len(report["corrupted_batches"]) == 1
+
+    def test_audit_404(self, api_client: tuple[TestClient, Path]) -> None:
+        client, _ = api_client
+        assert client.get("/api/runs/nope/audit").status_code == 404
+
 
 class TestSpaMount:
     """The console serves the built SPA (docs/ui-plan.md merge 4) when one is
