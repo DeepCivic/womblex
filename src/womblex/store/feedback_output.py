@@ -21,6 +21,27 @@ from typing import Any
 
 FEEDBACK_DIRNAME = "feedback"
 
+# A run id becomes a path segment under the feedback root. Anything that can
+# re-root or climb out of that join is refused rather than sanitised: real run
+# ids are single segments (``retention.generate_run_id`` emits
+# ``run-YYYYMMDDTHHMMSSZ``), so there is nothing legitimate to rewrite.
+_UNSAFE_IN_RUN_ID = ("/", "\\", "\x00")
+
+
+def is_safe_run_id(run_id: str) -> bool:
+    """True if *run_id* is a single path segment safe to join onto a root.
+
+    The feedback root is a sibling of the run directories, never a child of
+    one (docs/ui-plan.md §4). A ``..`` segment would break that invariant by
+    walking the write back up into ``runs/`` — measured, not theorised: it
+    lands a report at ``runs/runs/<id>/`` instead of ``feedback/<id>/``.
+    """
+    return (
+        bool(run_id)
+        and run_id not in {".", ".."}
+        and not any(c in run_id for c in _UNSAFE_IN_RUN_ID)
+    )
+
 
 def feedback_filename() -> str:
     """A sortable, collision-resistant filename for one report.
@@ -61,8 +82,12 @@ def write_feedback_record(feedback_root: Path, run_id: str, record: dict[str, An
 
     ``feedback_root`` is never a run directory itself (docs/ui-plan.md §4)
     — callers resolve it as a sibling location, not a child of any run, so
-    retention purges and re-runs cannot disturb accumulated feedback.
+    retention purges and re-runs cannot disturb accumulated feedback. This
+    function owns the root/run_id join, so it is where that containment is
+    enforced: an unsafe *run_id* raises rather than writing somewhere else.
     """
+    if not is_safe_run_id(run_id):
+        raise ValueError(f"unsafe run_id for a feedback path: {run_id!r}")
     target_dir = feedback_root / run_id
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / feedback_filename()
@@ -74,5 +99,6 @@ __all__ = [
     "FEEDBACK_DIRNAME",
     "build_feedback_record",
     "feedback_filename",
+    "is_safe_run_id",
     "write_feedback_record",
 ]

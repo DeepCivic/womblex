@@ -97,6 +97,7 @@ womblex/
 │   │   ├── quality_output.py     # *.chunk_quality.parquet schema + IO
 │   │   ├── money_output.py  # *.money_spans.parquet (decimal128 values) + *.money_columns.parquet schemas + IO
 │   │   ├── provenance_output.py  # *.provenance.parquet sidecar + manifest for pre-extracted-record corpora
+│   │   ├── feedback_output.py    # One-file-per-report console feedback records (JSON, not parquet)
 │   │   ├── run_manifest.py  # Consolidate per-batch manifests into a run-root manifest.parquet
 │   │   ├── register_manifest.py  # Manifest for standalone register ingests (G-NAF/ABN/geospatial)
 │   │   ├── remote.py        # fsspec stage-in/stage-out object-storage adapter for distributed runs
@@ -107,12 +108,13 @@ womblex/
 │   │   ├── worker.py           # run_worker() — claim/stage/process/publish loop
 │   │   ├── stage_contracts.py  # Declarative StageContract per downstream stage (inputs/outputs/scope)
 │   │   └── stage_runner.py     # Execute a contract against an object store
-│   ├── ui/                     # Console sidecar (`womblex ui`) — read-only FastAPI over pipeline artefacts
+│   ├── ui/                     # Console sidecar (`womblex ui`) — FastAPI over pipeline artefacts; reads runs, never writes to one
 │   │   ├── app.py              # create_app() — binds one run source for the app's lifetime
 │   │   ├── deps.py             # UISettings — local output_root vs store-backed, resolved from args/env
 │   │   ├── readers.py          # Thin pyarrow readers, local and store-backed, over the same store/ modules
 │   │   └── routes/
-│   │       └── runs.py         # /api/runs, /api/runs/{run_id}/manifest
+│   │       ├── runs.py         # /api/runs — manifest, stage-presence, audit, chunk detail
+│   │       └── feedback.py     # POST /api/runs/{run_id}/feedback — the report action (writes a feedback/ sibling)
 │   ├── utils/
 │   │   ├── metrics.py       # WER/CER accuracy metrics
 │   │   ├── tabular_metrics.py # Tabular extraction accuracy (structural fidelity, data integrity)

@@ -24,10 +24,12 @@ from fastapi.testclient import TestClient
 
 from womblex.cli import ALL_COMMANDS
 from womblex.store.enrichment_output import ENRICHMENT_ENTITIES_SUFFIX, ENTITY_SCHEMA
+from womblex.store.feedback_output import write_feedback_record
 from womblex.store.money_output import MONEY_SPANS_SCHEMA, MONEY_SPANS_SUFFIX
 from womblex.store.output import CHUNKS_SCHEMA, CHUNKS_SUFFIX, ELEMENTS_SUFFIX, MANIFEST_SCHEMA
 from womblex.store.pii_output import PII_SPANS_SCHEMA, PII_SPANS_SUFFIX
 from womblex.store.quality_output import CHUNK_QUALITY_SCHEMA, CHUNK_QUALITY_SUFFIX
+from womblex.ui import readers
 from womblex.ui.app import create_app
 from womblex.ui.deps import UISettings, resolve_settings
 
@@ -305,6 +307,32 @@ class TestFeedbackApi:
             json={"record_type": "document", "source_hash": "hash-a", "row": {}, "note": ""},
         )
         assert resp.json()["reported_by"] is None
+
+    def test_a_traversing_run_id_cannot_escape_the_feedback_root(self, tmp_path: Path) -> None:
+        """``..`` in a run_id must not walk the write back up into ``runs/``.
+
+        Routing already stops this over HTTP (a path param never matches
+        ``/``), so this exercises ``readers.write_feedback`` directly — it is
+        library API, and the sibling-of-runs invariant (docs/ui-plan.md §4)
+        is the module's guarantee, not the router's.
+        """
+        output_root = tmp_path / "runs"
+        _write_manifest_shard(output_root / "run-a" / "documents", _ROWS[:1])
+        settings = UISettings(output_root=output_root, store_uri=None)
+        # `output_root/../runs/run-a` resolves to a real directory, so an
+        # is_dir() check alone admits it.
+        assert readers.write_feedback(
+            settings, "../runs/run-a", record_type="document", source_hash="hash-a",
+            chunk_index=None, row={}, note="", reported_by=None,
+        ) is None
+        assert list(tmp_path.rglob("*.json")) == []
+
+    def test_write_feedback_record_refuses_an_unsafe_run_id(self, tmp_path: Path) -> None:
+        """The root/run_id join is where containment is enforced."""
+        for run_id in ["../escape", "a/b", "..", ".", "", "/abs"]:
+            with pytest.raises(ValueError, match="unsafe run_id"):
+                write_feedback_record(tmp_path, run_id, {"run_id": run_id})
+        assert list(tmp_path.rglob("*.json")) == []
 
     def test_feedback_dir_override_is_honoured_in_local_mode(self, tmp_path: Path) -> None:
         """A deployment that mounts output_root read-only needs this escape hatch."""

@@ -7,7 +7,6 @@ uses, so there is one code path for the parquet logic.
 """
 from __future__ import annotations
 
-import json
 import logging
 import tempfile
 from pathlib import Path
@@ -20,7 +19,7 @@ from womblex.store.enrichment_output import ENRICHMENT_ENTITIES_SUFFIX, ENTITY_S
 from womblex.store.feedback_output import (
     FEEDBACK_DIRNAME,
     build_feedback_record,
-    feedback_filename,
+    is_safe_run_id,
     write_feedback_record,
 )
 from womblex.store.money_output import MONEY_SPANS_SCHEMA, MONEY_SPANS_SUFFIX
@@ -148,7 +147,13 @@ def write_feedback(
     under ``output_root`` (a plain directory, not a run-id one, so
     retention's ``run-*`` purge never touches it); remotely it is the
     store's own ``feedback/`` prefix, parallel to ``runs/``.
+
+    A run_id that is not a single path segment is refused here as
+    "no such run", so a caller reaching this function directly gets the
+    same answer the HTTP route's own path matching already produces.
     """
+    if not is_safe_run_id(run_id):
+        return None
     record = build_feedback_record(
         run_id=run_id, record_type=record_type, source_hash=source_hash,
         chunk_index=chunk_index, row=row, note=note, reported_by=reported_by,
@@ -157,11 +162,11 @@ def write_feedback(
         store = _open_store(cast(str, settings.store_uri))
         if run_id not in store.list_dirs("runs"):
             return None
+        # Serialise via the same writer the local branch uses, then publish —
+        # one definition of a report's filename and bytes for both branches.
         with tempfile.TemporaryDirectory(prefix="womblex-ui-") as tmp:
-            name = feedback_filename()
-            tmp_path = Path(tmp) / name
-            tmp_path.write_text(json.dumps(record, indent=2), encoding="utf-8")
-            store.upload_file(tmp_path, f"{FEEDBACK_DIRNAME}/{run_id}/{name}")
+            written = write_feedback_record(Path(tmp), run_id, record)
+            store.upload_file(written, f"{FEEDBACK_DIRNAME}/{run_id}/{written.name}")
         return record
     run_dir = cast(Path, settings.output_root) / run_id
     if not run_dir.is_dir():
