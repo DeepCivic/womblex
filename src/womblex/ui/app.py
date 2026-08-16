@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from womblex.ui.deps import UISettings
-from womblex.ui.routes import dashboard, feedback, runs
+from womblex.ui.routes import composer, dashboard, feedback, runs
 
 # `ui/` is not vendored into the wheel (docs/ui-plan.md §6 "SPA delivery") —
 # only Dockerfile.ui's builder stage produces this directory, at the
@@ -61,6 +61,7 @@ def create_app(
     app.include_router(runs.router)
     app.include_router(feedback.router)
     app.include_router(dashboard.router)
+    app.include_router(composer.router)
 
     @app.get("/api/health")
     def health() -> dict:

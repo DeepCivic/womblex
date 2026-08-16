@@ -29,7 +29,7 @@ from womblex.store.money_output import MONEY_SPANS_SCHEMA, MONEY_SPANS_SUFFIX
 from womblex.store.output import CHUNKS_SCHEMA, CHUNKS_SUFFIX, ELEMENTS_SUFFIX, MANIFEST_SCHEMA
 from womblex.store.pii_output import PII_SPANS_SCHEMA, PII_SPANS_SUFFIX
 from womblex.store.quality_output import CHUNK_QUALITY_SCHEMA, CHUNK_QUALITY_SUFFIX
-from womblex.ui import dashboard, readers
+from womblex.ui import composer, dashboard, readers
 from womblex.ui.app import create_app
 from womblex.ui.deps import UISettings, resolve_settings
 
@@ -606,6 +606,78 @@ class TestDashboardApi:
         )
         # Dividing by a 0.1ms span would report ~1.8M documents/minute.
         assert read_checkpoints(ckpt_dir)[0].documents_per_minute is None
+
+
+class TestComposerApi:
+    """The Pipeline Composer reads no run — `config.py` and
+    `cloud/stage_contracts.py` are static (docs/ui-plan.md merge 9), so
+    `api_client`'s local/remote parametrisation is irrelevant here; a bare
+    `TestClient` is enough.
+    """
+
+    @pytest.fixture
+    def client(self, tmp_path: Path) -> TestClient:
+        return TestClient(create_app(output_root=tmp_path))
+
+    def test_graph_nodes_cover_extract_plus_every_stage(self, client: TestClient) -> None:
+        from womblex.cloud.stage_contracts import STAGE_NAMES
+
+        body = client.get("/api/composer/graph").json()
+        assert [n["id"] for n in body["nodes"]] == ["extract", *STAGE_NAMES]
+
+    def test_graph_edges_resolve_extraction_and_stage_producers(self, client: TestClient) -> None:
+        body = client.get("/api/composer/graph").json()
+        edges = {(e["from"], e["to"], e["suffix"]) for e in body["edges"]}
+        # chunk reads the elements sidecar extraction itself produces.
+        assert ("extract", "chunk", ".elements.parquet") in edges
+        # embed reads chunk's own output — a stage-to-stage edge, not extract.
+        assert ("chunk", "embed", ".chunks.parquet") in edges
+
+    def test_graph_matches_the_pure_function(self, client: TestClient) -> None:
+        assert client.get("/api/composer/graph").json() == composer.get_stage_graph()
+
+    def test_schema_is_the_womblex_config_schema(self, client: TestClient) -> None:
+        body = client.get("/api/composer/schema").json()
+        assert set(body["properties"]) >= {"dataset", "paths", "chunking", "pii"}
+        assert "dataset" in body.get("required", [])
+
+    def test_validate_accepts_a_minimal_config(self, client: TestClient) -> None:
+        resp = client.post(
+            "/api/composer/validate",
+            json={"dataset": {"name": "t"}, "paths": {
+                "input_root": ".", "output_root": ".", "checkpoint_dir": ".",
+            }},
+        )
+        assert resp.json() == {"valid": True, "errors": []}
+
+    def test_validate_reports_pydantic_errors_for_a_missing_field(self, client: TestClient) -> None:
+        resp = client.post("/api/composer/validate", json={"paths": {
+            "input_root": ".", "output_root": ".", "checkpoint_dir": ".",
+        }})
+        body = resp.json()
+        assert body["valid"] is False
+        assert any(err["loc"] == ["dataset"] for err in body["errors"])
+
+    def test_yaml_download_roundtrips_a_valid_config(self, client: TestClient) -> None:
+        resp = client.post(
+            "/api/composer/yaml",
+            json={"dataset": {"name": "t"}, "paths": {
+                "input_root": ".", "output_root": ".", "checkpoint_dir": ".",
+            }},
+        )
+        assert resp.status_code == 200
+        assert resp.headers["content-disposition"] == "attachment; filename=womblex.yaml"
+        parsed = yaml.safe_load(resp.text)
+        assert parsed["dataset"]["name"] == "t"
+        # Pydantic-applied defaults are in the download, not just what was posted.
+        assert "chunking" in parsed
+
+    def test_yaml_download_422s_on_an_invalid_config(self, client: TestClient) -> None:
+        resp = client.post("/api/composer/yaml", json={"paths": {
+            "input_root": ".", "output_root": ".", "checkpoint_dir": ".",
+        }})
+        assert resp.status_code == 422
+        assert any(err["loc"] == ["dataset"] for err in resp.json()["detail"])
 
 
 class TestSpaMount:

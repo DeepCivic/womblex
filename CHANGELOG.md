@@ -8,6 +8,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Console Pipeline Composer read API (`docs/ui-plan.md` merge 9).**
+  `GET /api/composer/graph`, `/schema`, `POST /validate` and `/yaml` — the
+  composer's four data sources, none of them run-scoped, so unlike every
+  other console route these take no `UISettings` dependency.
+
+  The graph endpoint renders `cloud/stage_contracts.py`'s `STAGE_CONTRACTS`
+  as nodes and edges instead of the frontend hand-coding a DAG (plan §3):
+  edges come from each stage's `required_inputs` only — the hard ordering
+  guardrail the plan calls out ("ensuring extraction precedes chunking") —
+  resolved to a producer stage via the existing `PRODUCER_OF` map, with a
+  synthetic `extract` node for the element-stream sidecars extraction itself
+  writes. Config-derived `conditional_inputs` ride along per node as
+  metadata rather than adding edges, since an edge for one would only be
+  true for whatever config the form happens to hold.
+
+  `/schema` is `WomblexConfig.model_json_schema()` verbatim — no hand-typed
+  mirror of `config.py` to fall out of sync. `/validate` and `/yaml` both
+  construct `WomblexConfig(**raw)`, the same call `load_config` makes, so a
+  config the composer accepts (or downloads) is exactly one the CLI accepts;
+  `/yaml` round-trips through `model_dump(mode="json")` so the download
+  reflects Pydantic-applied defaults, not just what the browser posted, and
+  reports the same Pydantic error shape as `/validate` on a 422 rather than
+  a second notion of invalidity.
+
+  Backend only — the Pipeline Composer screen is still a `ScreenStub`, as
+  the other inspector screens have been since merges 5–6 and 8.
 - **Console dashboard read API (`docs/ui-plan.md` merge 8).**
   `GET /api/dashboard` serves queue state and per-stage progress from two
   sources the pipeline already writes, with no new schema or instrumentation.

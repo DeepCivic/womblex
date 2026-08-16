@@ -6,11 +6,11 @@ Dashboard, Pipeline Composer, Corpus Inspector, Semantic Chunk Inspector,
 Resources Console).
 
 Status: merges 1–4 landed (design system, read API skeleton, sidecar image,
-frontend shell), plus the read APIs for merges 5–6 and 8 and the write API
-for merge 7. The Corpus Inspector, Chunk Inspector and Dashboard screens
-themselves are still `ScreenStub` placeholders — each screen's endpoints
-landed ahead of it, so the `ReportIssue` control has nothing to attach to
-yet.
+frontend shell), plus the read APIs for merges 5–6, 8 and 9 and the write API
+for merge 7. The Corpus Inspector, Chunk Inspector, Dashboard and Pipeline
+Composer screens themselves are still `ScreenStub` placeholders — each
+screen's endpoints landed ahead of it, so the `ReportIssue` control has
+nothing to attach to yet.
 
 ## 1. The governing principle
 
