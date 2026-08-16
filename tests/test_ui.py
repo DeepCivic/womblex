@@ -143,6 +143,63 @@ class TestRunsApi:
         assert client.get("/api/runs/nope/manifest").status_code == 404
 
 
+class TestSpaMount:
+    """The console serves the built SPA (docs/ui-plan.md merge 4) when one is
+    present alongside it, and falls back to the API-only shape when not —
+    the same image serves cloud and audit-only deployments.
+    """
+
+    @pytest.fixture
+    def spa_dir(self, tmp_path: Path) -> Path:
+        build = tmp_path / "spa"
+        (build / "_app").mkdir(parents=True)
+        (build / "index.html").write_text("<html><body>console shell</body></html>")
+        (build / "_app" / "app.js").write_text("console.log('spa')")
+        return build
+
+    def test_no_spa_dir_serves_api_only(self, tmp_path: Path) -> None:
+        client = TestClient(create_app(output_root=tmp_path, spa_dir=tmp_path / "nope"))
+        assert client.get("/api/health").status_code == 200
+        assert client.get("/").status_code == 404
+
+    def test_serves_index_at_root(self, tmp_path: Path, spa_dir: Path) -> None:
+        client = TestClient(create_app(output_root=tmp_path, spa_dir=spa_dir))
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert "console shell" in resp.text
+
+    def test_serves_index_for_client_side_routes(self, tmp_path: Path, spa_dir: Path) -> None:
+        """`/corpus` is a SvelteKit client route, not a file — the SPA router takes over."""
+        client = TestClient(create_app(output_root=tmp_path, spa_dir=spa_dir))
+        resp = client.get("/corpus")
+        assert resp.status_code == 200
+        assert "console shell" in resp.text
+
+    def test_serves_real_asset_files(self, tmp_path: Path, spa_dir: Path) -> None:
+        client = TestClient(create_app(output_root=tmp_path, spa_dir=spa_dir))
+        resp = client.get("/_app/app.js")
+        assert resp.status_code == 200
+        assert "spa" in resp.text
+
+    def test_api_routes_win_over_the_spa_fallback(self, tmp_path: Path, spa_dir: Path) -> None:
+        client = TestClient(create_app(output_root=tmp_path, spa_dir=spa_dir))
+        assert client.get("/api/runs").json() == {"runs": []}
+
+    def test_path_traversal_falls_back_to_index_instead_of_escaping(
+        self, tmp_path: Path, spa_dir: Path
+    ) -> None:
+        """Unit-tested directly: an HTTP client may normalise `..` in the URL
+        before it ever reaches the server, which would let this pass without
+        exercising the containment check at all.
+        """
+        from womblex.ui.app import resolve_spa_path
+
+        secret = tmp_path / "secret.txt"
+        secret.write_text("outside the SPA root")
+        resolved = resolve_spa_path(spa_dir, f"../{secret.name}")
+        assert resolved == spa_dir / "index.html"
+
+
 class TestSidecarImage:
     """The console container is only correct if it agrees with the CLI and the app.
 
@@ -182,6 +239,43 @@ class TestSidecarImage:
         env = _compose_service("ui")["environment"]
         assert "WOMBLEX_STORE_URI" in env
         assert "WOMBLEX_UI_OUTPUT_ROOT" not in env
+
+    def test_frontend_builder_stage_runs_a_real_package_script(self) -> None:
+        """The builder stage's `npm run build` must name a script `ui/package.json` declares."""
+        dockerfile = (REPO_ROOT / "Dockerfile.ui").read_text()
+        match = re.search(r"^RUN npm run (\S+)$", dockerfile, re.MULTILINE)
+        assert match, "Dockerfile.ui has no `npm run <script>` build step"
+        scripts = json.loads((REPO_ROOT / "ui" / "package.json").read_text())["scripts"]
+        assert match.group(1) in scripts
+
+    def test_final_stage_copies_the_builder_stages_declared_output(self) -> None:
+        """`svelte.config.js`'s adapter output dir must match what the Dockerfile COPYs out."""
+        svelte_config = (REPO_ROOT / "ui" / "svelte.config.js").read_text()
+        assert "pages: 'build'" in svelte_config
+        dockerfile = (REPO_ROOT / "Dockerfile.ui").read_text()
+        assert "COPY --from=frontend-builder /app/ui/build /app/ui/build" in dockerfile
+
+
+class TestFrontendCi:
+    """`ui/`'s CI job (docs/ui-plan.md §6 "CI") must call scripts that still exist —
+    otherwise a rename here silently stops linting or building the SPA.
+    """
+
+    def test_frontend_job_runs_declared_package_scripts(self) -> None:
+        workflow = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text())
+        frontend = workflow["jobs"]["frontend"]
+        scripts = json.loads((REPO_ROOT / "ui" / "package.json").read_text())["scripts"]
+        run_steps = [
+            step["run"] for step in frontend["steps"]
+            if step.get("working-directory") == "ui" and "run" in step
+        ]
+        assert run_steps, "no step in the frontend job runs anything in ui/"
+        for run in run_steps:
+            match = re.match(r"npm (run )?(\S+)$", run.strip())
+            assert match, f"unrecognised frontend CI step: {run!r}"
+            script = match.group(2)
+            if script != "ci":  # `npm ci` installs; it isn't a package.json script
+                assert script in scripts, f"ui/package.json has no {script!r} script"
 
 
 class TestCliUi:

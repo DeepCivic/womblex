@@ -5,11 +5,18 @@
 # Node build stage that the worker image has no reason to carry, and it
 # installs a different extras set.
 #
-# The SvelteKit build stage arrives with `ui/` itself in merge 4 — a stage
-# that COPYs a directory which does not exist yet cannot build, and a stage
-# defined but never referenced is dead weight. Until then this serves the
-# read-only API (`/api/runs`, `/api/runs/{id}/manifest`), which is the whole
-# of the console that currently exists.
+# The builder stage compiles `ui/` to static JS/CSS/HTML; only those files
+# cross into the final stage, so no Node runtime ships in the image
+# (docs/ui-plan.md §6 "Frontend"). `womblex.ui.app.create_app` mounts
+# `ui/build` if it finds it there and serves the read API alone otherwise —
+# same image shape as before merge 4, just with the frontend now present.
+FROM node:22-slim AS frontend-builder
+WORKDIR /app/ui
+COPY ui/package.json ui/package-lock.json ./
+RUN npm ci
+COPY ui/ .
+RUN npm run build
+
 FROM python:3.11-slim AS base
 
 ENV PYTHONUNBUFFERED=1 \
@@ -27,6 +34,7 @@ RUN apt-get update \
 
 WORKDIR /app
 COPY . /app
+COPY --from=frontend-builder /app/ui/build /app/ui/build
 
 # [ui] is fastapi + uvicorn only; [cloud] adds the object-storage reads a
 # distributed run needs (docs/ui-plan.md §2 — remote reads are in scope from

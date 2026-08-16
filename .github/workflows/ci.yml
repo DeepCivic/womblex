@@ -41,6 +41,38 @@ jobs:
       - name: Fast tests
         run: python -m pytest tests/ -v
 
+  frontend:
+    name: Console frontend (ui/)
+    runs-on: ubuntu-latest
+    # Separate from `test`'s Python matrix (docs/ui-plan.md §6 "CI") — a
+    # broken SvelteKit build must fail its own job, not hide inside (or
+    # block on) a pipeline test run it has nothing to do with.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install
+        working-directory: ui
+        run: npm ci
+
+      - name: Lint (eslint)
+        working-directory: ui
+        run: npm run lint
+
+      - name: Type-check (svelte-check)
+        working-directory: ui
+        run: npm run check
+
+      - name: Build (vite)
+        working-directory: ui
+        run: npm run build
+
   security:
     runs-on: ubuntu-latest
     steps:

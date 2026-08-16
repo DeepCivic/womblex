@@ -8,6 +8,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Console frontend shell (`docs/ui-plan.md` merge 4).** `ui/` — a Svelte 5 +
+  SvelteKit workspace, built to static files by a Node stage in
+  `Dockerfile.ui` and served by `womblex.ui.app.create_app` alongside the
+  existing read API. No JavaScript runtime ships in the image: the final
+  stage `COPY --from=frontend-builder`s only the compiled `ui/build`, and
+  `create_app`'s new `spa_dir` mounts it if present — a bare `womblex[ui]`
+  install with no SvelteKit build alongside it still serves `/api/*` alone,
+  same as before this merge.
+
+  Ships the chrome the plan calls for and nothing past it: a top bar (logo,
+  global search input, run selector, density toggle, theme toggle) and a
+  collapsible side nav routing between the five domains named in §3, each
+  currently a stub page naming its data source and the merge that fills it
+  in. Theme and density are `localStorage`-persisted preferences applied via
+  `data-theme` / `data-density` on `<html>`, matching `DESIGN.md`'s "shell
+  attribute, not a per-table prop" rule; dark is the default, per the design
+  system's dark-first principle.
+
+  Tokens follow `DESIGN.md` §"Colour" for every value it states explicitly
+  (surfaces, status fills, `--font-mono`); the base tokens it names but
+  doesn't restate the hex for (DeepCivic's own `DESIGN.md` lives in a
+  separate repository, not available here) are a best-effort fill picked to
+  satisfy what *is* stated — the measured-contrast table, lime/purple never
+  doubling as page background or body text — and flagged as such in
+  `docs/decisions.md` rather than asserted as a pixel-exact match. Barlow
+  Condensed and Inclusive Sans are self-hosted via `@fontsource`, so the
+  console makes no Google Fonts request, per the design system's
+  air-gapped-friendly rule.
+
+  A Node job in `ci.yml`, independent of the Python matrix, lints
+  (`eslint`), type-checks (`svelte-check`) and builds the SPA on every push —
+  a broken frontend now fails its own job instead of hiding inside a Python
+  test run. `tests/test_ui.py` gained the same kind of drift guard merge 3's
+  image tests did: the Dockerfile's builder-stage script and output
+  directory are checked against `ui/package.json` and `svelte.config.js`
+  rather than asserted separately, and the SPA-mount fallback (client routes
+  resolve to `index.html`, `/api/*` still wins over the catch-all) is
+  exercised directly.
 - **Console sidecar image (`docs/ui-plan.md` merge 3).** `Dockerfile.ui` and a
   `ui` service in `docker-compose.yml`, so the console deploys the way the
   plan's §2 describes it — its own container beside the workers, same image
