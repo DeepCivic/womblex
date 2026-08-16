@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, cast
 
 from womblex.cloud.stage_contracts import STAGE_CONTRACTS
 from womblex.store.checkpoint import CHECKPOINT_GLOB, CheckpointProgress, read_checkpoints
+from womblex.store.feedback_output import is_safe_run_id
 from womblex.ui.deps import UISettings
 
 if TYPE_CHECKING:
@@ -39,6 +40,11 @@ DEFAULT_STALE_AFTER = 900.0
 
 #: Default trailing window for the throughput tile, in seconds.
 DEFAULT_THROUGHPUT_WINDOW = 3600.0
+
+#: Seconds to wait for the queue connection before reporting it unreachable.
+#: The dashboard is polled, so an unbounded connect to a routable-but-dead
+#: host would pin a request thread per poll until the OS gave up.
+QUEUE_CONNECT_TIMEOUT = 5.0
 
 #: Stage name -> the dot-directory its checkpoint lands in, taken from the
 #: contracts rather than re-typed here so a renamed directory cannot drift.
@@ -99,7 +105,7 @@ def _queue_section(
     try:
         from womblex.cloud.queue import JobQueue
 
-        with JobQueue(settings.db_dsn) as queue:
+        with JobQueue(settings.db_dsn, connect_timeout=QUEUE_CONNECT_TIMEOUT) as queue:
             stats = queue.stats(run_id)
             jobs = queue.list_jobs(run_id, limit=job_limit)
             workers = queue.workers(run_id)
@@ -113,7 +119,12 @@ def _queue_section(
         "total": sum(stats.values()),
         "jobs": [asdict(j) for j in jobs],
         "workers": [asdict(w) for w in workers],
-        "stale_job_ids": [j.id for j in stale],
+        # Whole rows, not ids: `jobs` is capped by `job_limit` ordered on
+        # `updated_at DESC`, and a stale row's `updated_at` is by definition
+        # among the oldest — so it is the first thing to fall outside that
+        # window, and ids alone would be unresolvable exactly when they
+        # matter. Bounded by the running set, so it stays small.
+        "stale": [asdict(j) for j in stale],
         "throughput": asdict(throughput),
     }, None
 
@@ -124,7 +135,16 @@ def _stage_progress(settings: UISettings, run_id: str) -> list[dict]:
     Only stages with a checkpoint on disk appear — an absent directory means
     the stage has not run for this run, which the Corpus Inspector's stage
     presence already reports from the sidecars themselves.
+
+    ``run_id`` arrives as a *query* parameter here, not a path segment, so
+    nothing has already rejected ``../``: unlike the other console reads,
+    this one must contain the join itself. A run_id that is not a single
+    path segment reads as "no such run", which is the same answer the
+    remote branch's ``list_dirs`` check already gives — the two deployments
+    must not disagree about what is reachable.
     """
+    if not is_safe_run_id(run_id):
+        return []
     if settings.is_remote:
         found = _remote_checkpoints(cast(str, settings.store_uri), run_id)
     else:

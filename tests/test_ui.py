@@ -591,6 +591,45 @@ class TestDashboardApi:
         )
         assert read_checkpoints(ckpt_dir)[0].documents_per_minute == 60.0
 
+    def test_run_id_cannot_escape_the_run_root(self, tmp_path: Path) -> None:
+        """`run_id` is a query param, so nothing upstream rejects `../`.
+
+        The remote branch is contained by its `list_dirs` check; the local
+        join has to contain itself, or the two deployments disagree about
+        what is reachable.
+        """
+        outside = tmp_path / "outside"
+        _write_checkpoint(outside, "chunk", processed=9)
+        run_root = tmp_path / "runs"
+        run_root.mkdir()  # must exist, or the OS cannot resolve `..` through it
+        client = TestClient(create_app(output_root=run_root))
+        body = client.get("/api/dashboard", params={"run_id": "../outside"}).json()
+        assert body["stages"] == []
+
+    def test_malformed_checkpoints_are_skipped_not_raised(self, tmp_path: Path) -> None:
+        """Well-formed JSON can still be unusable; the reader must survive it."""
+        from womblex.store.checkpoint import read_checkpoints
+
+        ckpt_dir = tmp_path / ".chunk-checkpoint"
+        ckpt_dir.mkdir()
+        # A null timestamp reaches `datetime.fromisoformat(None)`; a top-level
+        # list reaches `.get` on a list. Both parse as JSON, neither is a
+        # checkpoint, and neither may escape as a 500.
+        (ckpt_dir / "null_checkpoint.json").write_text(
+            json.dumps({"total_processed": 1, "started_at": None, "updated_at": None})
+        )
+        (ckpt_dir / "list_checkpoint.json").write_text("[1, 2, 3]")
+        (ckpt_dir / "ok_checkpoint.json").write_text(
+            json.dumps({"total_processed": 1, "started_at": "", "updated_at": ""})
+        )
+        progress = {p.name: p for p in read_checkpoints(ckpt_dir)}
+        # The list is not a checkpoint at all, so it is dropped. The null
+        # timestamps are: its counters are real progress and are kept — only
+        # the rate they cannot support is withheld.
+        assert set(progress) == {"null", "ok"}
+        assert progress["null"].processed == 1
+        assert progress["null"].documents_per_minute is None
+
     def test_no_rate_from_a_single_write(self, tmp_path: Path) -> None:
         """A just-started run's two timestamps are one write, not an interval."""
         from womblex.store.checkpoint import read_checkpoints

@@ -178,12 +178,23 @@ def _require_psycopg():  # type: ignore[no-untyped-def]
 class JobQueue:
     """Synchronous Postgres job queue over a single ``womblex_jobs`` table."""
 
-    def __init__(self, dsn: str):
+    def __init__(self, dsn: str, *, connect_timeout: float | None = None):
+        """Open the queue connection.
+
+        ``connect_timeout`` (seconds) bounds the connect attempt. Workers
+        leave it unset — a worker blocking until the OS gives up is fine,
+        it has nothing else to do. A request-serving caller should set it:
+        a routable-but-dead host otherwise holds the request for the TCP
+        timeout, and a polling console would pin every thread it has.
+        """
         psycopg = _require_psycopg()
         self._psycopg = psycopg
         # Pin UTF-8 so text columns decode to ``str`` regardless of server
         # encoding (an SQL_ASCII cluster otherwise hands back ``bytes``).
-        self.conn = psycopg.connect(dsn, autocommit=False, client_encoding="UTF8")
+        extra = {} if connect_timeout is None else {"connect_timeout": int(connect_timeout)}
+        self.conn = psycopg.connect(
+            dsn, autocommit=False, client_encoding="UTF8", **extra,
+        )
 
     def close(self) -> None:
         self.conn.close()
