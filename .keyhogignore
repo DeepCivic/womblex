@@ -1,0 +1,49 @@
+# KeyHog allowlist — the counterpart to `.secrets.baseline` for the scanner CI
+# runs over the working tree *and* over reachable history.
+#
+# Every entry is one reviewed value, keyed by the SHA-256 of the value itself
+# (`hash:`), never by path and never by detector. That is deliberate:
+#
+#   * A path rule would hide a real credential added to the same file later.
+#   * A detector rule would hide it anywhere in the repository.
+#   * Inline `keyhog:ignore` comments are read from working-tree source text
+#     only — they do not suppress a match in git history, which is half of what
+#     CI scans, and three of these values sit in files no comment can annotate.
+#
+# So a hash entry retires exactly one value, in the tree and in history, and
+# stops matching the moment that value changes. Read the reason before adding
+# one; delete the entry when the value goes away.
+#
+# Regenerate a candidate line from a finding you have actually opened:
+#
+#   keyhog scan <path> --format json \
+#     | jq -r '.[] | select(.location.line == <n>) | "hash:" + .credential_hash'
+
+# --- Local development stack -------------------------------------------------
+# docker-compose.yml stands up Postgres and MinIO on localhost for `womblex
+# enqueue` / `worker`. Each value below is the container's own fixed default,
+# declared in the same file that starts the container and reachable only from
+# the compose network — it authenticates nothing off a developer's machine.
+# .env.example is the commented template a developer copies to .env; its DSN is
+# the compose one with `localhost` for the host. detect-secrets was shown the
+# same three values and they are recorded in `.secrets.baseline`.
+
+hash:63d1a133bf06c0146511372fd1c738064b64b9c60fcf95f40f7553f437f35075 ; reason="docker-compose.yml: local queue DSN, womblex:womblex@postgres, compose network only"
+hash:ad9858116e63b0c5a4d7dc7f50f034c7247e56838dae22c1832712ffde48e694 ; reason="docker-compose.yml: MinIO's own documented default root user, set beside the service that uses it"
+hash:1a32c4e7a732c34e81dfc1d41e93899e372ff649197de48d902c2f39698c3602 ; reason=".env.example: same DSN against localhost, shipped commented out as a template"
+
+# --- Test corpus -------------------------------------------------------------
+# Third-party Australian government documents, vendored per THIRD_PARTY_DATA.md
+# as extraction fixtures. Each value was read at the offset the scanner
+# reported:
+#
+#   * Both PDF hits are body text behind a custom font encoding — the high
+#     entropy is the encoding, not a secret. The reported token decodes to
+#     ordinary prose under a three-letter shift ("7KHU…EOLF" is "The…blic").
+#   * The CSV is the ACECQA approved-provider register (approval number, legal
+#     name, trading name, street address); the offset lands mid-record on a
+#     provider's name.
+
+hash:eb53a19da88395ce99f68000e4a115f16b6938a9e05621ddad34acde7cb07204 ; reason="fixture PDF Auditor-General_Report_2020-21_19: shift-encoded body text, high entropy from the font map"
+hash:f8c51ea39af584257d1529cb9a3a9d6a2f717a730b4652708f256f66ec9b6f8d ; reason="fixture PDF 00768-213A-270825-Throsby…_Redacted: shift-encoded body text"
+hash:534e536ff7c19b2d7f9740b097083f75827abed0e03bea6cc4ca6bd503a9bfe4 ; reason="fixture CSV Approved-providers-au-export: public provider register record, not a key"

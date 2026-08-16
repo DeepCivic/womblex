@@ -40,7 +40,7 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
-API_KEY_ENV = "ISAACUS_API_KEY"
+API_KEY_ENV = "ISAACUS_API_KEY"  # pragma: allowlist secret -- env var name, not a key
 ENDPOINTS_ENV = "ISAACUS_SAGEMAKER_ENDPOINTS"
 REGION_ENV = "ISAACUS_SAGEMAKER_REGION"
 PROFILE_ENV = "ISAACUS_SAGEMAKER_PROFILE"

@@ -117,7 +117,7 @@ def test_hosted_api_client_strips_a_pasted_key(monkeypatch):
     monkeypatch.delenv(ENDPOINTS_ENV, raising=False)
     monkeypatch.setenv("ISAACUS_API_KEY", "iuak_pasted_with_a_newline\n")
     client = make_isaacus_client(models=["kanon-2-embedder"])
-    assert client.api_key == "iuak_pasted_with_a_newline"
+    assert client.api_key == "iuak_pasted_with_a_newline"  # pragma: allowlist secret
 
 
 def test_sagemaker_client_rejects_undeployed_model(monkeypatch):
