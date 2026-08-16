@@ -86,11 +86,17 @@ Raw files (PDF / DOCX / CSV / XLSX)
         │
         ▼
 ┌───────────────────┐
-│ verify_shard_      │  → integrity check (row counts, orphaned
-│ persistence         │    parent_elem_order, required columns)
-│ (store/output)     │
+│ verify_shard_     │  → cumulative on-disk size (raises
+│ persistence       │    ShardVerificationError on any anomaly)
+│ (store/output)    │
 └───────────────────┘
 ```
+
+`verify_shard_persistence()` checks that every shard file exists, is
+non-empty and readable; that the manifest row count matches the expected
+document count; that every `(source_hash, parent_elem_order)` in
+`table_cells` / `form_fields` references an element of the matching kind;
+and that the shard directory has not shrunk (overwrite guard).
 
 `verify/engine.py`'s `run_verifications` (structural checks + weak-signal
 scan) is defined but not wired into the batch pipeline — its

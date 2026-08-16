@@ -16,8 +16,8 @@ womblex/
 │   ├── config.py           # Pydantic config models
 │   ├── batch.py            # process_batch() — shared per-batch pipeline body (extract → redact/chunk/pii)
 │   ├── operations/         # Independent operations, one module each: extract, redact, chunk, pii, enrich
-│   │   ├── models.py       # Shared operation result dataclasses
-│   │   └── persist.py      # Shared parquet-write helpers used by the operations
+│   │   ├── models.py       # DocumentResult / BatchResult dataclasses + PreconditionError
+│   │   └── persist.py      # write_batch_parquet / write_batch_enrichment
 │   ├── score.py            # womblex score subcommand — labels-vs-parquet CER scoring
 │   ├── profile/            # womblex profile subcommand — column schema inference
 │   ├── ingest/
@@ -114,7 +114,7 @@ womblex/
 │   │   ├── checksum.py      # Shared streamed MD5 helper for the standalone register ingests
 │   │   ├── isaacus_client.py # Build the Isaacus SDK client (hosted API or private SageMaker)
 │   │   ├── token_packer.py  # TokenCounter, pack_by_tokens, split_on_boundaries for token-budgeted API batching
-│   │   └── availability.py  # Model/backend availability checks
+│   │   └── availability.py  # isaacus_available() — gates stages that need the API-only Kanon-2 tokeniser
 │   └── verify/
 │       └── engine.py        # Two-pass extraction quality verification
 └── tests/

@@ -205,8 +205,7 @@ the amount is lost entirely.
 ## Extraction patterns
 
 The `#` column below is a pattern catalogue index (also the internal `pN`
-evidence code), **not** the overlap-resolution order — a number of readers
-have assumed 1 beats 9 here, which is backwards. When two patterns match
+evidence code), **not** the overlap-resolution order. When two patterns match
 overlapping text, `money.py`'s `_PRIORITY` table decides the winner, in this
 order (lowest number wins first): accounting-negative (`p9`) and range
 (`p7`, pre-claimed before overlap resolution runs, so it never actually
@@ -422,13 +421,14 @@ Context influences confidence rather than gating extraction outright:
 | `Funding of ten million dollars` | High |
 | `Funding of 10 million` (implicit context, no currency marker) | Low (0.35, flat — no distinction by magnitude suffix) |
 | `Funding of 10` (implicit context, no currency marker) | Low (0.35) |
-
-Implicit-context confidence (0.35) is below the default `min_confidence`
-(0.5), so with default settings neither of the two rows above is extracted
-at all — `implicit_context=True` alone is not enough; `min_confidence` must
-also be lowered.
 | Bare `10` | Very low — not extracted |
 | `ten million` with no currency word | Not extracted |
+
+Implicit-context confidence is a flat 0.35 regardless of whether a magnitude
+suffix is present, and 0.35 is below the default `min_confidence` (0.5) — so
+under default settings the two implicit-context rows above are not extracted
+either. `implicit_context=True` alone is not enough; `min_confidence` must
+also be lowered below 0.35.
 
 ## Normalisation
 

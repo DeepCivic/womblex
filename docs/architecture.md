@@ -93,12 +93,12 @@ src/womblex/
 │   ├── pii_output.py, normalise_output.py, spellfix_output.py, quality_output.py, money_output.py
 │   │                       # Per-stage sidecar parquet schemas + IO (self-contained, one per stage)
 │   ├── provenance_output.py / run_manifest.py / register_manifest.py  # Manifest consolidation (NLP run + registers)
-│   ├── remote.py           # fsspec stage-in/stage-out object-storage adapter for distributed runs
+│   ├── remote.py          # fsspec stage-in/stage-out object-storage adapter for distributed runs
 │   ├── retention.py       # run_id-based retention policy
 │   └── checkpoint.py      # JSON-based checkpoint manager for resumable batch runs
 ├── cloud/                 # Distributed run support (queue.py, worker.py, stage_contracts.py, stage_runner.py)
 ├── verify/
-│   └── engine.py          # Two-pass verification: structural checks + weak-signal scan
+│   └── engine.py          # Two-pass verification (structural + weak-signal) — defined, not wired in; see §11
 ├── utils/
 │   ├── models.py          # Local model path resolution (models/ dir + HF snapshot layout)
 │   ├── metrics.py         # CER, WER, CER-s accuracy metrics (numpy-accelerated Levenshtein + spatial sort)
@@ -108,7 +108,7 @@ src/womblex/
 │   └── token_packer.py    # Token-budgeted batching for enrichment API calls
 ├── profile/               # Column schema inference (womblex profile subcommand)
 ├── score.py               # Labels-vs-parquet CER scoring (womblex score subcommand)
-├── batch.py                # process_batch() — shared per-batch pipeline body (local run + cloud worker)
+├── batch.py               # process_batch() — shared per-batch pipeline body (local run + cloud worker)
 ├── cli/                   # CLI subpackage — per-topic modules:
 │   ├── __init__.py        # main() + ALL_COMMANDS aggregation + dispatch
 │   ├── _shared.py         # Command NamedTuple, setup_logging, discover_files
@@ -123,7 +123,7 @@ src/womblex/
 │   └── verify.py          # verify-shards subcommand
 ├── config.py              # Pydantic config models and YAML loader
 └── operations/            # Independent operations (extract/redact/chunk/pii/enrich, one module each,
-                            # plus models.py / persist.py shared helpers) — no orchestrator, callers compose directly
+                           # plus models.py / persist.py shared helpers) — callers compose directly
 ```
 
 ## Stage Detail
@@ -312,12 +312,12 @@ Wrappers in `analyse/` call the Isaacus SDK:
 
 ### 11. Verify — Quality Checks
 
-`verify/engine.py` runs two-pass verification on the output Parquet:
+Two separate mechanisms, neither of which is `verify/engine.py`:
 
-1. **Structural** — schema validation (required columns present), uniqueness (no duplicate `document_id`), type constraints (confidence in [0,1], non-negative page counts).
-2. **Weak-signal scan** — flags documents with low confidence, page count anomalies, garbled text (high non-alphanumeric ratio), or garbled redaction patterns.
+- **Per-batch integrity** — `verify_shard_persistence()` (`store/output.py`) runs after every batch write from `cli/pipeline.py`, checking row counts and sidecar joinability.
+- **Directory-level audit** — `womblex verify-shards` (`cli/verify.py`) uses `store/shard_audit.py` (`audit_shard_directory` / `scan_shard_directory`), optionally diffing across runs.
 
-Results are classified as `passed`, `warning`, or `failed` based on the ratio of flagged documents.
+`verify/engine.py`'s `run_verifications` (two-pass structural + weak-signal scan, classifying results `passed` / `warning` / `failed`) is defined and exported but **not wired into the pipeline** — its `required_columns` default (`document_id`, `source_path`, `text`) predates the element-stream schema.
 
 ### 12. Additional Per-Stage Sidecars
 
