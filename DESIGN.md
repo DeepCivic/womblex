@@ -198,7 +198,17 @@ count, char range and content type.
 
 **`ConnectionCard`** — Resources Console. Label, mono connection string
 (secrets masked to the last 4 characters), StatusPill, and a "Test" action.
-**Never render a credential in full**, in the DOM or in a copy buffer.
+**Never render a credential in full**, in the DOM or in a copy buffer. The
+fleet variant adds queue depth and the workers currently holding batches;
+workers are ephemeral and scale to zero, so an empty fleet is a normal resting
+state and must not render as an error.
+
+**`ReportIssue`** — the console never edits a stage output, so this is the only
+way a reviewer acts on a bad record. An icon button on any row or chunk opens a
+note field; submitting appends the record plus the note to an append-only
+feedback log. Confirmation is a toast, not a modal — reporting should cost one
+click and no attention. The reported row keeps its normal appearance
+afterwards: a report is an observation, not a state change.
 
 **Cards generally**: DeepCivic's `.card-offset` layered purple shadow is a
 poster device — **not used in the console**. Panels are separated by

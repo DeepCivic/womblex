@@ -20,31 +20,58 @@ invocation and output formatting* over library functions. Any iteration,
 aggregation or orchestration it appears to need belongs in Womblex proper, behind
 a normal Python API that the CLI can call too.
 
-Two consequences worth stating up front:
+Three consequences worth stating up front:
 
-- **No new schemas for the UI's benefit.** If a screen needs a number that isn't
-  written today, the fix is a library change that the CLI also gets (§4), not a
-  UI-only side table.
+- **v1 surfaces only what already exists.** No new schemas, no new columns, no
+  new instrumentation for the UI's benefit. Where a screen wants a number the
+  system does not record, the screen shows less — it does not grow a side table.
+  §4 is the honest list of what that costs.
+- **No writes to stage outputs.** Reviewers report problems; they do not edit
+  parquet (§4).
 - **Read-only by default.** Execution controls ship behind an explicit
-  `--allow-execute` flag. A console that can start jobs is a different security
-  object from one that can only look at parquet.
+  `--allow-execute` flag. A console that can enqueue jobs is a different
+  security object from one that can only look at parquet.
 
-## 2. Architecture
+## 2. Architecture — the console is a sidecar
+
+**The UI runs as its own container, never in-process with the pipeline.** It is
+a separate process reading shared state, so the same image serves a local
+operator and a cloud deployment with nothing but env vars changing — the shape
+`docker-compose.yml` already uses for workers.
 
 ```
 womblex[ui]  →  fastapi + uvicorn        (no new core dependencies)
 
 src/womblex/ui/
-├── app.py         # FastAPI app factory; mounts the built SPA as static files
-├── deps.py        # Resolve config / output_root / optional JobQueue per request
+├── app.py         # FastAPI app factory; serves the built SPA as static files
+├── deps.py        # Resolve store / output_root / optional JobQueue per request
 ├── routes/        # runs, corpus, chunks, stages, resources, jobs
 └── readers.py     # Thin pyarrow readers over the shard sidecars
 
-ui/                # SvelteKit SPA, static-adapter build, output vendored at
-                   # src/womblex/ui/static/ so `pip install womblex[ui]` is enough
-
-src/womblex/cli/ui.py   # `womblex ui --config … [--port 8080] [--allow-execute]`
+ui/                # SvelteKit SPA; built during the image build, not vendored
+src/womblex/cli/ui.py   # `womblex ui [--port 8080] [--allow-execute]`
 ```
+
+State reaches the sidecar exactly the way it reaches a worker — no new
+configuration surface:
+
+| Deployment | Runs | Queue |
+|---|---|---|
+| Local | `output_root` bind-mounted read-only | Absent; dashboard falls back to checkpoints |
+| Cloud | `WOMBLEX_STORE_URI` + `WOMBLEX_S3_ENDPOINT` via `store/remote.py` | `WOMBLEX_DB_DSN` via `JobQueue` |
+
+```yaml
+  ui:                       # added to docker-compose.yml
+    build: {context: ., dockerfile: Dockerfile.ui}
+    environment: *cloud-env
+    ports: ["8080:8080"]
+    command: ["ui", "--port", "8080"]
+```
+
+Because the cloud sidecar reads a bucket rather than a filesystem, **remote
+reads are in scope from the first merge**, not deferred behind a flag. The
+mount is read-only in both shapes; the console has no code path that writes to
+a run.
 
 Frontend stack matches DeepCivic exactly — SvelteKit, Tailwind v4 `@theme inline`
 tokens, shadcn-svelte, svelte-motion, Material Symbols — so components and token
@@ -63,7 +90,7 @@ having been built shard-first.
 
 | Screen | Reads | Notes |
 |---|---|---|
-| **Dashboard** | `JobQueue.stats()`; per-stage `CheckpointState` JSON; shard mtimes | Queue counts are exact. Throughput is derived from batch completion times; CPU/memory is **not** available — see §4 |
+| **Dashboard** | `JobQueue.stats()`; per-stage `CheckpointState` JSON; shard mtimes | Queue counts are exact. Throughput is derived from batch completion times; CPU/memory is **not** recorded and v1 does not show it — see §4 |
 | **Pipeline Composer** | `config.py` Pydantic models; `cloud/stage_contracts.py` | The composer is a form over the config models plus a graph drawn from `STAGE_CONTRACTS` |
 | **Corpus Inspector** | `<run_id>/manifest.parquet`; `store/shard_audit.audit_shard_directory()` | `MANIFEST_SCHEMA` is already the documents table: `doc_id`, `filename`, `ext`, `extraction_method`, element/cell/field counts, `status`, `error` |
 | **Chunk Inspector** | `*.chunks.parquet`, `*.enrichment_entities.parquet`, `*.graph_edges.parquet`, `*.pii_spans.parquet`, `*.clean_text.parquet`, `*.money_spans.parquet`, `*.chunk_quality.parquet` | All joinable on `source_hash` (+ `chunk_index`) |
@@ -89,31 +116,67 @@ per stage.
 calls `format_audit_json`, so the Corpus Inspector's "trigger shard-level
 integrity verification" action is an existing function call, not new work.
 
-## 4. Gaps — what the UI needs that does not exist
+## 4. What v1 does not show, and why
 
-Honest accounting. Each is a library change, sized, and each stands alone.
+The console surfaces what the system records. Where the brief asks for something
+the system does not record, v1 shows less rather than growing instrumentation.
 
-| Gap | Needed by | Proposal | Size |
-|---|---|---|---|
-| **No run index API** | Every screen (run selector) | `store/retention.list_runs()` exists; add `describe_run(path)` returning run_id, doc count, stages present, timestamps | Small |
-| **No worker telemetry** | Dashboard CPU/memory/fleet status | `womblex_jobs` has no heartbeat or metrics columns. Add `heartbeat_at`, `worker_meta JSONB`; workers update on claim and completion | Medium — schema migration |
-| **No local-run progress stream** | Dashboard, for `womblex run` | Checkpoint JSON updates once per batch, so local progress is batch-granular and only readable *after* a batch. Accept this: label local runs "batch-granular" rather than faking a stream | None (scope decision) |
-| **Throughput is not recorded** | Dashboard | Derive from `updated_at` deltas on queue rows; for local runs, derive from checkpoint mtimes. No new schema | Small |
-| **Config round-trip** | Pipeline Composer save | Pydantic gives load + validate; needs a YAML writer preserving comments, or an accepted lossy re-emit | Small–medium |
-| **No auth** | Anything beyond localhost | Bind localhost-only by default; document that remote exposure is the deployer's problem | None (scope decision) |
+| Brief asks for | Recorded today? | v1 behaviour |
+|---|---|---|
+| Cluster CPU / memory | **No.** `womblex_jobs` has no heartbeat or metrics columns | Not shown. Adding them is a queue schema migration — a library change on its own merits, not a UI prerequisite |
+| Real-time throughput | Derivable | Shown, from `updated_at` deltas on queue rows and checkpoint mtimes. No new schema |
+| Live local-run progress | Batch-granular | Shown as batch-granular and labelled as such. `CheckpointState` writes once per batch; a smoother bar would be fiction |
+| Stalled-job identification | Yes | Shown. A `running` row past `--stale-timeout` is exactly what `requeue_stale` already acts on |
+| Worker fleet status | Partly | Shown from `locked_by` on running rows: which workers hold which batches. Not liveness — an exited worker leaves a stale lock, which reads as stalled |
 
-Two things the brief implies that I recommend **against** building:
+Two smaller scope decisions in the same spirit: the **Pipeline Composer** loads
+and validates config through the existing Pydantic models and offers the result
+as a YAML download — the server does not write config files. **Auth** is out of
+scope; the sidecar binds inside the deployment's network and exposure is the
+deployer's problem, as it already is for Postgres and MinIO.
 
-- **"Scale worker fleets (scale-to-zero)" from the Resources Console.** Womblex
-  workers are processes against a Postgres queue; it has no scheduler and should
-  not grow one. The console can show fleet state and link out to whatever runs
-  the containers. Owning autoscaling here would be exactly the "corpus hosting
-  custom code" anti-pattern, one level up.
-- **Editing chunks or PII masks in the Chunk Inspector.** The brief asks for
-  *review* of masking effectiveness and boundary accuracy — read plus flag, not
-  write. Masking is terminal by design; a UI that rewrites `clean_text.parquet`
-  would put a second, unversioned producer on an output the pipeline owns.
-  Flags should land as an audit sidecar, if they land at all.
+The one genuinely missing read is a **run index**: `store/retention.list_runs()`
+returns paths, and the run selector wants run_id, document count, stages present
+and timestamps. That is a small `describe_run()` helper the CLI benefits from
+too.
+
+### Scale-to-zero is in scope, and already supported
+
+Womblex is event-driven by construction, and the console should reflect that.
+`run_worker()` already takes `once` and `idle_timeout`: a worker that finds an
+empty queue exits, and the container goes away. Enqueue is the event; drain is
+the shutdown signal. Cold start on the next enqueue is acceptable — it is the
+same latency character as invoking the CLI locally, which is how the pipeline is
+used today.
+
+So the Resources Console shows fleet state (workers holding batches, queue
+depth, idle timeout) and can enqueue work, which is what causes workers to come
+up. Womblex still does not implement a scheduler: the platform starts containers
+— compose `--scale`, a Kubernetes Job, an ECS task — and Womblex's contribution
+is a worker that knows how to exit. That division is what makes scale-to-zero
+free rather than a feature.
+
+### Reporting a bad record, instead of editing it
+
+No screen writes to a stage output. Masking is terminal by design and the
+pipeline owns its parquet; a console that rewrote `clean_text.parquet` would be
+a second, unversioned producer of it.
+
+Instead, any record in the Corpus Inspector or Chunk Inspector carries a
+**report action**. Reporting appends one JSON line to a feedback log —
+`<run_root>/feedback.jsonl`, or the store equivalent — containing the row
+itself plus the reviewer's note:
+
+```json
+{"reported_at": "2026-08-16T04:11:09Z", "run_id": "run-20260816-0353",
+ "record_type": "chunk", "source_hash": "9f2c…", "chunk_index": 47,
+ "row": {"text": "…", "content_type": "narrative", "has_redaction": true},
+ "note": "PERSON mask missed a signature block"}
+```
+
+Append-only, human-readable, outside the shard schemas, and useful as an
+evaluation input later. The row is embedded rather than referenced so the log
+stays meaningful after a re-run replaces the shard.
 
 ## 5. Delivery sequence
 
@@ -123,34 +186,32 @@ tree green.
 | # | Merge | Contents |
 |---|---|---|
 | 1 | **Design system** | `DESIGN.md` + this plan *(this change)* |
-| 2 | **Read API skeleton** | `[ui]` extra, `src/womblex/ui/app.py`, `womblex ui` command, `/api/runs` + `/api/runs/{id}/manifest`, tests against a fixture shard dir |
-| 3 | **Frontend shell** | `ui/` SvelteKit workspace, tokens from `DESIGN.md`, top bar + side nav, run selector, theme + density toggles |
-| 4 | **Corpus Inspector** | Documents grid, lifecycle-checkpoint switcher, failure filter, `verify-shards` action |
-| 5 | **Chunk Inspector** | Chunk reader endpoints, `ChunkCard`, entity/PII/money overlays |
-| 6 | **Dashboard (queue)** | Queue stats, job list, stale detection, KPI tiles and throughput |
-| 7 | **Worker telemetry** | Queue schema migration + worker heartbeat *(library change; lands before or after 6, independent)* |
-| 8 | **Pipeline Composer** | `STAGE_CONTRACTS` graph endpoint, config form, validation, YAML round-trip |
-| 9 | **Resources Console** | Connection cards, credential masking, test actions |
-| 10 | **Execution controls** | `--allow-execute`, job submission, log streaming |
+| 2 | **Read API skeleton** | `[ui]` extra, `src/womblex/ui/app.py`, `womblex ui` command, `describe_run()`, `/api/runs` + `/api/runs/{id}/manifest`, local and store-backed, tests against a fixture shard dir |
+| 3 | **Sidecar image** | `Dockerfile.ui`, the compose `ui` service, read-only mount, SPA build stage |
+| 4 | **Frontend shell** | `ui/` SvelteKit workspace, tokens from `DESIGN.md`, top bar + side nav, run selector, theme + density toggles |
+| 5 | **Corpus Inspector** | Documents grid, lifecycle-checkpoint switcher, failure filter, `verify-shards` action |
+| 6 | **Chunk Inspector** | Chunk reader endpoints, `ChunkCard`, entity/PII/money overlays |
+| 7 | **Report action** | `ReportIssue` control + append-only `feedback.jsonl` writer, both inspectors |
+| 8 | **Dashboard** | Queue stats, job list, stale detection, fleet view from `locked_by`, KPI tiles and throughput |
+| 9 | **Pipeline Composer** | `STAGE_CONTRACTS` graph endpoint, config form, validation, YAML download |
+| 10 | **Resources Console** | Connection cards, credential masking, test actions, fleet + queue-depth state |
+| 11 | **Execution controls** | `--allow-execute`, enqueue, log streaming |
 
-Merges 2–5 deliver a genuinely useful auditing console. Everything from 6 on is
+Merges 2–7 deliver a genuinely useful auditing console. Everything from 8 on is
 additive; the sequence can stop at any point without leaving a half-built screen.
 
 ## 6. Open decisions
 
-These change the work materially and are the user's call, not mine:
+Two remain — both change the work materially and are the user's call, not mine:
 
-1. **Ship the built SPA in the wheel, or require a Node build?** Vendoring built
-   assets makes `pip install womblex[ui]` sufficient and keeps the console
-   installable in an air-gapped environment; it also puts build output in the
-   repo. Recommendation: vendor it, in its own commit, excluded from the merge
-   cap the way `fixtures/` is.
-2. **Separate repo for `ui/`, or a workspace in this one?** Same-repo keeps the
-   API and its client honest with each other. Recommendation: same repo.
-3. **Does the console need to read remote (S3) runs, or only local paths?**
-   `store/remote.py` makes remote reads possible; doing it in a request path
-   raises latency and credential questions. Recommendation: local paths for
-   merges 2–5, remote behind a flag afterwards.
-4. **Multi-user, or single-operator?** The plan assumes single-operator on
-   localhost. Multi-user means auth, per-user preferences and an audit log —
-   a substantially larger project.
+1. **Separate repo for `ui/`, or a workspace in this one?** Same-repo keeps the
+   API and its client honest with each other, and the sidecar image build needs
+   both. Recommendation: same repo.
+2. **Multi-user, or single-operator?** The plan assumes one operator reaching a
+   sidecar inside a trusted network. Multi-user means auth, per-user preferences
+   and an audit log — a substantially larger project, and the point at which
+   `feedback.jsonl` needs an author field.
+
+Settled by the sidecar decision: the SPA is built during the image build rather
+than vendored into the wheel, and remote (S3) reads are in scope from merge 2,
+because a cloud sidecar has no filesystem to read.
