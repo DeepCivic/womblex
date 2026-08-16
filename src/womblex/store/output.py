@@ -162,9 +162,11 @@ ENTITY_LINKS_SCHEMA = pa.schema([
 ])
 
 
+ELEMENTS_SUFFIX = ".elements.parquet"
+
 _SHARD_ROLES = ("elements", "table_cells", "form_fields", "manifest")
 _SHARD_SUFFIX = {
-    "elements": ".elements.parquet",
+    "elements": ELEMENTS_SUFFIX,
     "table_cells": ".table_cells.parquet",
     "form_fields": ".form_fields.parquet",
     "manifest": "._manifest.parquet",

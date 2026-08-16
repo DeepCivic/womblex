@@ -100,7 +100,7 @@ womblex/
 │   │   ├── run_manifest.py  # Consolidate per-batch manifests into a run-root manifest.parquet
 │   │   ├── register_manifest.py  # Manifest for standalone register ingests (G-NAF/ABN/geospatial)
 │   │   ├── remote.py        # fsspec stage-in/stage-out object-storage adapter for distributed runs
-│   │   ├── retention.py     # run_id-based retention policy
+│   │   ├── retention.py     # run_id-based retention policy + describe_run() (doc count, stages, timestamps)
 │   │   └── checkpoint.py    # Per-stage CheckpointManager
 │   ├── cloud/                  # Distributed run support — `womblex-cloud` counterpart to local `womblex run`
 │   │   ├── queue.py            # JobQueue — Postgres FOR UPDATE SKIP LOCKED batch queue

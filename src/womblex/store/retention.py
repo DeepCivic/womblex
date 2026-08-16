@@ -1,9 +1,13 @@
-"""Run-output retention: list, generate, and purge run directories.
+"""Run directories: generate, list, describe, and purge.
 
 Each pipeline run writes its outputs under ``<output_root>/<run_id>/`` and
 its checkpoint state under ``<checkpoint_dir>/<run_id>/``. Multiple runs
 co-exist for stage-vs-stage comparison; retention controls how many old
 runs are kept on disk.
+
+:func:`describe_run` summarises a single run — document count, which stages
+have run, timestamps — for a run selector. It reads only artefacts the
+pipeline already writes and never mutates a run.
 
 Two policies:
 
@@ -20,10 +24,45 @@ from __future__ import annotations
 
 import logging
 import shutil
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pyarrow.parquet as pq
+
+from womblex.store.enrichment_output import ENRICHMENT_ENTITIES_SUFFIX
+from womblex.store.money_output import MONEY_SPANS_SUFFIX
+from womblex.store.normalise_output import NORMALISED_TEXT_SUFFIX
+from womblex.store.output import (
+    CHUNKS_SUFFIX,
+    ELEMENTS_SUFFIX,
+    EMBEDDINGS_SUFFIX,
+    ENTITY_LINKS_SUFFIX,
+    read_manifest,
+)
+from womblex.store.pii_output import PII_SPANS_SUFFIX
+from womblex.store.quality_output import CHUNK_QUALITY_SUFFIX
+from womblex.store.run_manifest import RUN_MANIFEST_FILENAME
+from womblex.store.spellfix_output import SPELLFIX_TEXT_SUFFIX
+
 logger = logging.getLogger(__name__)
+
+#: Stage name -> the sidecar suffix that stage writes, in pipeline order.
+#: Presence of a matching file in a shard dir is what "this stage has run"
+#: means on disk. Redaction is deliberately absent: it rewrites element text
+#: in memory and leaves no sidecar of its own to detect.
+STAGE_SUFFIXES: dict[str, str] = {
+    "extract": ELEMENTS_SUFFIX,
+    "normalise": NORMALISED_TEXT_SUFFIX,
+    "spellfix": SPELLFIX_TEXT_SUFFIX,
+    "chunk": CHUNKS_SUFFIX,
+    "quality": CHUNK_QUALITY_SUFFIX,
+    "money": MONEY_SPANS_SUFFIX,
+    "pii": PII_SPANS_SUFFIX,
+    "link": ENTITY_LINKS_SUFFIX,
+    "enrich": ENRICHMENT_ENTITIES_SUFFIX,
+    "embed": EMBEDDINGS_SUFFIX,
+}
 
 
 def generate_run_id() -> str:
@@ -67,6 +106,71 @@ def most_recent_run(output_root: Path) -> Path | None:
     """Return the newest run directory under ``output_root``, or None."""
     runs = list_runs(output_root)
     return runs[-1] if runs else None
+
+
+@dataclass(frozen=True)
+class RunDescription:
+    """Summary of one run directory, for a run selector (console or CLI).
+
+    ``document_count`` is ``None`` when there is no manifest to count yet —
+    an empty or not-yet-extracted run — which is distinct from a run that
+    genuinely extracted zero documents. ``stages`` names only the stages with
+    an on-disk sidecar to show for themselves (see :data:`STAGE_SUFFIXES`), so
+    a run that also redacted still reports ``("extract",)``. Timestamps are
+    ISO-8601 UTC derived from file mtimes, since a run directory carries no
+    timestamp of its own.
+    """
+
+    run_id: str
+    document_count: int | None
+    stages: tuple[str, ...]
+    created_at: str | None
+    updated_at: str | None
+
+
+def describe_run(run_dir: Path) -> RunDescription:
+    """Describe a run root (``<output_root>/<run_id>/``) — the shape :func:`list_runs` returns.
+
+    Reads only artefacts the pipeline already writes: the consolidated
+    ``manifest.parquet`` when a run has been finalised, else the per-batch
+    shard manifests under ``documents/``.
+    """
+    shard_dir = run_dir / "documents"
+    created_at, updated_at = _run_timestamps(run_dir)
+    return RunDescription(
+        run_id=run_dir.name,
+        document_count=_document_count(run_dir, shard_dir),
+        stages=_stages_present(shard_dir),
+        created_at=created_at,
+        updated_at=updated_at,
+    )
+
+
+def _document_count(run_dir: Path, shard_dir: Path) -> int | None:
+    manifest_path = run_dir / RUN_MANIFEST_FILENAME
+    if manifest_path.exists():
+        return int(pq.ParquetFile(str(manifest_path)).metadata.num_rows)
+    if not shard_dir.is_dir():
+        return None
+    return int(read_manifest(shard_dir).num_rows)
+
+
+def _stages_present(shard_dir: Path) -> tuple[str, ...]:
+    if not shard_dir.is_dir():
+        return ()
+    return tuple(
+        stage for stage, suffix in STAGE_SUFFIXES.items() if any(shard_dir.glob(f"*{suffix}"))
+    )
+
+
+def _run_timestamps(run_dir: Path) -> tuple[str | None, str | None]:
+    mtimes = [p.stat().st_mtime for p in run_dir.rglob("*") if p.is_file()]
+    if not mtimes:
+        return None, None
+    return (
+        datetime.fromtimestamp(min(mtimes), tz=UTC).isoformat(),
+        datetime.fromtimestamp(max(mtimes), tz=UTC).isoformat(),
+    )
 
 
 def apply_retention(

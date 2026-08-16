@@ -8,6 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Run index: `describe_run()` and `RemoteStore.list_dirs()`.** `list_runs()`
+  returns paths; a run selector wants what is *in* a run. `describe_run()`
+  summarises a run root as run_id, document count, the stages present, and
+  created/updated timestamps — reading only artefacts the pipeline already
+  writes (the consolidated `manifest.parquet` when a run has been finalised,
+  else the per-batch shard manifests). "Stages present" is defined by the new
+  `STAGE_SUFFIXES` table: stage name → the sidecar suffix that stage writes,
+  so presence of a matching file *is* the lifecycle checkpoint. Redaction is
+  absent from it deliberately — it rewrites element text in memory and leaves
+  no sidecar to detect.
+
+  `RemoteStore` gains `list_dirs()`, which surfaces fsspec's common-prefix
+  pseudo-directories so a caller can enumerate `runs/<run_id>/` in object
+  storage without knowing the run ids ahead of time. `store/output.py` exports
+  `ELEMENTS_SUFFIX` alongside the other sidecar-suffix constants rather than
+  leaving the elements one spelled out inline.
+
+  Groundwork for the console's run selector (`docs/ui-plan.md` §4 names this
+  as the one genuinely missing read), but the CLI benefits from it too.
 - **Isaacus on Amazon SageMaker (private, air-gapped deployment).** Every
   Isaacus call — AI chunking, `enrich`, `embed` — now routes to SageMaker
   endpoints in the user's own AWS account when `ISAACUS_SAGEMAKER_ENDPOINTS` is

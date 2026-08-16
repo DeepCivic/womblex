@@ -105,6 +105,24 @@ class RemoteStore:
         prefix = self.root + "/"
         return [m.removeprefix(prefix) for m in matches]
 
+    def list_dirs(self, rel: str) -> list[str]:
+        """List immediate child directory names under *rel* (name only, not full path).
+
+        Object stores have no real directories, but fsspec surfaces the
+        common-prefix convention (keys with more path segments beneath *rel*)
+        as pseudo-directory entries. That is what lets a caller enumerate
+        ``runs/<run_id>/`` without knowing the run ids ahead of time.
+        """
+        full = self._full(rel)
+        if not self.fs.exists(full):  # type: ignore[attr-defined]
+            return []
+        entries: list[dict] = self.fs.ls(full, detail=True)  # type: ignore[attr-defined]
+        return sorted(
+            e["name"].rstrip("/").rsplit("/", 1)[-1]
+            for e in entries
+            if e.get("type") == "directory"
+        )
+
     def download_file(self, rel: str, local_path: Path) -> Path:
         local_path.parent.mkdir(parents=True, exist_ok=True)
         self.fs.get_file(self._full(rel), str(local_path))  # type: ignore[attr-defined]
