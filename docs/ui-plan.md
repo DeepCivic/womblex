@@ -14,11 +14,10 @@ Status: **proposal, nothing implemented.**
 **The console reads artefacts the pipeline already writes. It adds no pipeline
 logic.**
 
-This is the [CLAUDE.md](../CLAUDE.md) thin-adapter rule applied to a new surface,
-and the corpus-vs-library rule pointed the other way: the UI is *configuration,
-invocation and output formatting* over library functions. Any iteration,
-aggregation or orchestration it appears to need belongs in Womblex proper, behind
-a normal Python API that the CLI can call too.
+This is the [CLAUDE.md](../CLAUDE.md) thin-adapter rule on a new surface: the UI
+is *configuration, invocation and output formatting* over library functions. Any
+iteration, aggregation or orchestration it appears to need belongs in Womblex
+proper, behind a Python API the CLI can call too.
 
 Three consequences worth stating up front:
 
@@ -69,9 +68,10 @@ configuration surface:
 ```
 
 Because the cloud sidecar reads a bucket rather than a filesystem, **remote
-reads are in scope from the first merge**, not deferred behind a flag. The
-mount is read-only in both shapes; the console has no code path that writes to
-a run.
+reads are in scope from the first merge**, not deferred behind a flag. Runs are
+mounted read-only in both shapes and the console has no code path that writes to
+one; its only writable surface is the feedback prefix (§4), a sibling of `runs/`
+rather than a child of any run.
 
 Frontend stack matches DeepCivic exactly — SvelteKit, Tailwind v4 `@theme inline`
 tokens, shadcn-svelte, svelte-motion, Material Symbols — so components and token
@@ -95,8 +95,6 @@ having been built shard-first.
 | **Corpus Inspector** | `<run_id>/manifest.parquet`; `store/shard_audit.audit_shard_directory()` | `MANIFEST_SCHEMA` is already the documents table: `doc_id`, `filename`, `ext`, `extraction_method`, element/cell/field counts, `status`, `error` |
 | **Chunk Inspector** | `*.chunks.parquet`, `*.enrichment_entities.parquet`, `*.graph_edges.parquet`, `*.pii_spans.parquet`, `*.clean_text.parquet`, `*.money_spans.parquet`, `*.chunk_quality.parquet` | All joinable on `source_hash` (+ `chunk_index`) |
 | **Resources Console** | `store/remote.storage_options_from_env()`, `is_remote_uri`; `utils/isaacus_client.unserved_models()`; `JobQueue` connectivity | Connection *testing* already exists as library code |
-
-Three of these deserve emphasis:
 
 **`STAGE_CONTRACTS` is the Pipeline Composer's graph.** Each `StageContract`
 already declares `required_inputs`, config-derived `conditional_inputs`,
@@ -129,32 +127,41 @@ the system does not record, v1 shows less rather than growing instrumentation.
 | Stalled-job identification | Yes | Shown. A `running` row past `--stale-timeout` is exactly what `requeue_stale` already acts on |
 | Worker fleet status | Partly | Shown from `locked_by` on running rows: which workers hold which batches. Not liveness — an exited worker leaves a stale lock, which reads as stalled |
 
-Two smaller scope decisions in the same spirit: the **Pipeline Composer** loads
-and validates config through the existing Pydantic models and offers the result
-as a YAML download — the server does not write config files. **Auth** is out of
-scope; the sidecar binds inside the deployment's network and exposure is the
-deployer's problem, as it already is for Postgres and MinIO.
-
 The one genuinely missing read is a **run index**: `store/retention.list_runs()`
 returns paths, and the run selector wants run_id, document count, stages present
 and timestamps. That is a small `describe_run()` helper the CLI benefits from
 too.
 
+### Editing settings without becoming a secret store
+
+The Resources Console and Pipeline Composer share **one writable config volume**
+— the only mount besides feedback that is not read-only. Both write YAML that
+Pydantic has already validated, and changes take effect on restart of whatever
+reads them. Restart is the activation path throughout: leaner than live reload,
+and it keeps a running job's config immutable for its whole life.
+
+**Secrets stay in the environment.** The console displays them masked, labelled
+as env-provided, and never offers a field that accepts one. Everything else —
+bucket URIs, endpoints, paths, poll and stale intervals, batch sizes, stage
+toggles — is editable in the UI. This is the line that keeps the console cheap:
+the moment it accepts a credential it has to store one, and storing one means
+encryption at rest, key rotation and an access log. Worth doing deliberately
+later if wanted; not worth acquiring by accident in v1.
+
 ### Scale-to-zero is in scope, and already supported
 
-Womblex is event-driven by construction, and the console should reflect that.
-`run_worker()` already takes `once` and `idle_timeout`: a worker that finds an
-empty queue exits, and the container goes away. Enqueue is the event; drain is
-the shutdown signal. Cold start on the next enqueue is acceptable — it is the
-same latency character as invoking the CLI locally, which is how the pipeline is
-used today.
+Womblex is event-driven by construction. `run_worker()` already takes `once` and
+`idle_timeout`: a worker that finds an empty queue exits and the container goes
+away. Enqueue is the event, drain is the shutdown signal, and cold start on the
+next enqueue has the same latency character as invoking the CLI locally — which
+is how the pipeline is used today.
 
 So the Resources Console shows fleet state (workers holding batches, queue
-depth, idle timeout) and can enqueue work, which is what causes workers to come
-up. Womblex still does not implement a scheduler: the platform starts containers
-— compose `--scale`, a Kubernetes Job, an ECS task — and Womblex's contribution
-is a worker that knows how to exit. That division is what makes scale-to-zero
-free rather than a feature.
+depth, idle timeout) and can enqueue work, which is what brings workers up.
+Womblex still implements no scheduler: the platform starts containers — compose
+`--scale`, a Kubernetes Job, an ECS task — and Womblex contributes a worker that
+knows how to exit. That division is what makes scale-to-zero free rather than a
+feature.
 
 ### Reporting a bad record, instead of editing it
 
@@ -163,20 +170,30 @@ pipeline owns its parquet; a console that rewrote `clean_text.parquet` would be
 a second, unversioned producer of it.
 
 Instead, any record in the Corpus Inspector or Chunk Inspector carries a
-**report action**. Reporting appends one JSON line to a feedback log —
-`<run_root>/feedback.jsonl`, or the store equivalent — containing the row
-itself plus the reviewer's note:
+**report action** that writes **one file per report** — never an append, so
+there is no read-modify-write and no lost update when two reviewers click at
+once:
 
-```json
-{"reported_at": "2026-08-16T04:11:09Z", "run_id": "run-20260816-0353",
+```
+<store>/feedback/<run_id>/<iso8601>-<short-uuid>.json     # S3 in cloud
+<feedback_dir>/<run_id>/<iso8601>-<short-uuid>.json       # disk locally
+
+{"reported_at": "2026-08-16T04:11:09Z", "reported_by": "…", "run_id": "…",
  "record_type": "chunk", "source_hash": "9f2c…", "chunk_index": 47,
  "row": {"text": "…", "content_type": "narrative", "has_redaction": true},
  "note": "PERSON mask missed a signature block"}
 ```
 
-Append-only, human-readable, outside the shard schemas, and useful as an
-evaluation input later. The row is embedded rather than referenced so the log
-stays meaningful after a re-run replaces the shard.
+Same layout in both deployments — only the storage location differs, so one
+code path serves both. **Feedback cannot affect a run**: it is a sibling of
+`runs/`, so re-running a stage, applying retention, or deleting a run neither
+disturbs accumulated feedback nor is disturbed by it. The row is embedded
+rather than referenced for the same reason — the report stays meaningful after
+a re-run replaces the shard it came from.
+
+`reported_by` is populated from an env var or a trusted header. It is
+**advisory, not verified** — there is no auth (§6) — but it costs one string
+now and a migration later.
 
 ## 5. Delivery sequence
 
@@ -197,21 +214,24 @@ tree green.
 | 10 | **Resources Console** | Connection cards, credential masking, test actions, fleet + queue-depth state |
 | 11 | **Execution controls** | `--allow-execute`, enqueue, log streaming |
 
-Merges 2–7 deliver a genuinely useful auditing console. Everything from 8 on is
-additive; the sequence can stop at any point without leaving a half-built screen.
+Merges 2–7 deliver a useful auditing console; everything from 8 on is additive,
+and the sequence can stop anywhere without leaving a half-built screen.
 
-## 6. Open decisions
+## 6. Decisions
 
-Two remain — both change the work materially and are the user's call, not mine:
+| Decision | Resolution |
+|---|---|
+| Repo layout | `ui/` lives in this repo. Same project, separate containers; the image build needs both halves |
+| Frontend | **Svelte 5 + SvelteKit**, matching DeepCivic (its `DESIGN.md` uses runes — `$effect`). Node is a *build-time* tool only: Vite compiles the app to static JS/CSS and the sidecar serves those files from FastAPI. **No JavaScript runtime ships in the image** |
+| CI | A Node job lints and builds the SPA on changes under `ui/`, independent of the Python matrix, so a frontend break never masks a pipeline break |
+| SPA delivery | Built during the image build, not vendored into the wheel |
+| Remote reads | In scope from merge 2 — a cloud sidecar has no filesystem to read |
+| Feedback store | One file per report, sibling of `runs/`, same layout local and remote (§4) |
+| Settings | Editable via a shared writable config volume; secrets env-only; restart activates |
+| Auth | **None.** Not deployed discoverably at any layer. `reported_by` is advisory |
+| Execution | `--allow-execute` permits enqueue through `JobQueue` and nothing else — no subprocess, no CLI shell-out. The console can ask for work to be done; it cannot run commands |
 
-1. **Separate repo for `ui/`, or a workspace in this one?** Same-repo keeps the
-   API and its client honest with each other, and the sidecar image build needs
-   both. Recommendation: same repo.
-2. **Multi-user, or single-operator?** The plan assumes one operator reaching a
-   sidecar inside a trusted network. Multi-user means auth, per-user preferences
-   and an audit log — a substantially larger project, and the point at which
-   `feedback.jsonl` needs an author field.
-
-Settled by the sidecar decision: the SPA is built during the image build rather
-than vendored into the wheel, and remote (S3) reads are in scope from merge 2,
-because a cloud sidecar has no filesystem to read.
+One deferred, to revisit when it stops being true: the plan assumes a small
+number of trusted operators. Multi-user means auth, per-user preferences and a
+real audit log — a substantially larger project, and the point at which
+`reported_by` needs to be verified rather than declared.
