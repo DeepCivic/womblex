@@ -55,6 +55,39 @@ _CLAIM_RUN = (
 _STATS_ALL = "SELECT status, count(*) FROM womblex_jobs GROUP BY status"
 _STATS_RUN = "SELECT status, count(*) FROM womblex_jobs WHERE run_id = %s GROUP BY status"
 
+# The read-only queries behind the console dashboard (docs/ui-plan.md §3).
+# Their optional run filter is expressed as `(%s::text IS NULL OR ...)` rather
+# than a second spelled-out variant: the parameter carries the value, so each
+# query stays one literal string no matter how the caller scopes it. The cast
+# is what lets Postgres type an untyped NULL parameter.
+_RUN_FILTER = "(%s::text IS NULL OR run_id = %s::text)"
+_JOB_COLS = (
+    "id, run_id, batch_num, status, attempts, max_attempts, "
+    "locked_by, locked_at, error, created_at, updated_at"
+)
+_LIST_JOBS = (
+    f"SELECT {_JOB_COLS} FROM womblex_jobs WHERE {_RUN_FILTER} "
+    f"AND (%s::text IS NULL OR status = %s::text) "
+    f"ORDER BY updated_at DESC, batch_num DESC LIMIT %s"
+)
+# Same predicate `requeue_stale` acts on, without the UPDATE — the dashboard
+# reports what a worker's `--stale-timeout` would recover, it never recovers it.
+_STALE_JOBS = (
+    f"SELECT {_JOB_COLS} FROM womblex_jobs "
+    f"WHERE status = 'running' AND locked_at < now() - make_interval(secs => %s) "
+    f"AND {_RUN_FILTER} ORDER BY locked_at"
+)
+_WORKERS = (
+    "SELECT locked_by, count(*), min(locked_at), max(locked_at) FROM womblex_jobs "
+    f"WHERE status = 'running' AND locked_by IS NOT NULL AND {_RUN_FILTER} "
+    "GROUP BY locked_by ORDER BY locked_by"
+)
+_THROUGHPUT = (
+    "SELECT count(*), max(updated_at) FROM womblex_jobs "
+    "WHERE status = 'done' AND updated_at >= now() - make_interval(secs => %s) "
+    f"AND {_RUN_FILTER}"
+)
+
 
 @dataclass
 class JobSpec:
@@ -76,6 +109,57 @@ class Job:
     input_keys: list[str]
     shard_prefix: str
     attempts: int
+
+
+@dataclass(frozen=True)
+class JobRow:
+    """One ``womblex_jobs`` row as read (not claimed) — the job list's grain.
+
+    Timestamps are ISO-8601 strings rather than ``datetime``: every consumer
+    so far either prints them or serialises them to JSON, and converting once
+    here keeps the queue's tz-aware values from being re-derived per caller.
+    """
+
+    id: int
+    run_id: str
+    batch_num: int
+    status: str
+    attempts: int
+    max_attempts: int
+    locked_by: str | None
+    locked_at: str | None
+    error: str | None
+    created_at: str | None
+    updated_at: str | None
+
+
+@dataclass(frozen=True)
+class WorkerState:
+    """A worker's live hold on the queue, derived from ``locked_by``.
+
+    This is *not* liveness: an exited worker leaves its locks behind, so a
+    row here past the stale threshold means orphaned work, not a busy worker
+    (docs/ui-plan.md §4).
+    """
+
+    worker_id: str
+    running: int
+    oldest_locked_at: str | None
+    newest_locked_at: str | None
+
+
+@dataclass(frozen=True)
+class Throughput:
+    """Completions inside a trailing window — the dashboard's rate tile."""
+
+    window_seconds: float
+    completed: int
+    per_minute: float
+    last_completed_at: str | None
+
+
+def _iso(value: object) -> str | None:
+    return value.isoformat() if isinstance(value, datetime) else None
 
 
 def _require_psycopg():  # type: ignore[no-untyped-def]
@@ -213,9 +297,73 @@ class JobQueue:
         rows = self.conn.execute(sql, params).fetchall()
         return {status: count for status, count in rows}
 
+    # --- read-only views (the console dashboard; docs/ui-plan.md §3) ---------
+
+    def list_jobs(
+        self, run_id: str | None = None, *, status: str | None = None, limit: int = 200,
+    ) -> list[JobRow]:
+        """Recent jobs, newest activity first, optionally scoped by run and status."""
+        rows = self.conn.execute(
+            _LIST_JOBS, (run_id, run_id, status, status, limit)
+        ).fetchall()
+        return [_job_row(r) for r in rows]
+
+    def stale_jobs(
+        self, older_than_seconds: float, run_id: str | None = None,
+    ) -> list[JobRow]:
+        """``running`` jobs locked longer than the threshold, oldest lock first.
+
+        The read-only twin of :meth:`requeue_stale`: same predicate, no
+        recovery. A worker requeues these; the console only names them.
+        """
+        rows = self.conn.execute(
+            _STALE_JOBS, (older_than_seconds, run_id, run_id)
+        ).fetchall()
+        return [_job_row(r) for r in rows]
+
+    def workers(self, run_id: str | None = None) -> list[WorkerState]:
+        """Which workers hold which batches right now — the fleet view."""
+        rows = self.conn.execute(_WORKERS, (run_id, run_id)).fetchall()
+        return [
+            WorkerState(
+                worker_id=worker_id, running=running,
+                oldest_locked_at=_iso(oldest), newest_locked_at=_iso(newest),
+            )
+            for worker_id, running, oldest, newest in rows
+        ]
+
+    def throughput(
+        self, run_id: str | None = None, *, window_seconds: float = 3600.0,
+    ) -> Throughput:
+        """Batches completed in the trailing window, as a rate.
+
+        Derived from ``updated_at`` on ``done`` rows — no new schema
+        (docs/ui-plan.md §4). A retried batch that later succeeds counts once,
+        because only its final transition leaves the row ``done``.
+        """
+        row = self.conn.execute(
+            _THROUGHPUT, (window_seconds, run_id, run_id)
+        ).fetchone()
+        completed = int(row[0]) if row else 0
+        return Throughput(
+            window_seconds=window_seconds,
+            completed=completed,
+            per_minute=completed / (window_seconds / 60.0) if window_seconds > 0 else 0.0,
+            last_completed_at=_iso(row[1]) if row else None,
+        )
+
+
+def _job_row(row: tuple) -> JobRow:
+    return JobRow(
+        id=row[0], run_id=row[1], batch_num=row[2], status=row[3],
+        attempts=row[4], max_attempts=row[5], locked_by=row[6],
+        locked_at=_iso(row[7]), error=row[8],
+        created_at=_iso(row[9]), updated_at=_iso(row[10]),
+    )
+
 
 def utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-__all__ = ["Job", "JobQueue", "JobSpec", "utcnow"]
+__all__ = ["Job", "JobQueue", "JobRow", "JobSpec", "Throughput", "WorkerState", "utcnow"]

@@ -6,10 +6,11 @@ Dashboard, Pipeline Composer, Corpus Inspector, Semantic Chunk Inspector,
 Resources Console).
 
 Status: merges 1–4 landed (design system, read API skeleton, sidecar image,
-frontend shell), plus the read APIs for merges 5–6 and the write API for
-merge 7. The Corpus and Chunk Inspector screens themselves are still
-`ScreenStub` placeholders — each inspector's endpoints landed ahead of its
-screen, so the `ReportIssue` control has nothing to attach to yet.
+frontend shell), plus the read APIs for merges 5–6 and 8 and the write API
+for merge 7. The Corpus Inspector, Chunk Inspector and Dashboard screens
+themselves are still `ScreenStub` placeholders — each screen's endpoints
+landed ahead of it, so the `ReportIssue` control has nothing to attach to
+yet.
 
 ## 1. The governing principle
 
@@ -86,7 +87,7 @@ instrumented for this UI, largely by accident of having been built shard-first.
 
 | Screen | Reads | Notes |
 |---|---|---|
-| **Dashboard** | `JobQueue.stats()`; per-stage `CheckpointState` JSON; shard mtimes | Queue counts are exact. Throughput is derived from batch completion times; CPU/memory is **not** recorded and v1 does not show it — see §4 |
+| **Dashboard** | `JobQueue.stats()` + its read-only views (`list_jobs`, `workers`, `stale_jobs`, `throughput`); per-stage `CheckpointState` JSON | Queue counts are exact. Throughput is derived from batch completion times; CPU/memory is **not** recorded and v1 does not show it — see §4 |
 | **Pipeline Composer** | `config.py` Pydantic models; `cloud/stage_contracts.py` | The composer is a form over the config models plus a graph drawn from `STAGE_CONTRACTS` |
 | **Corpus Inspector** | `<run_id>/manifest.parquet`; `store/shard_audit.audit_shard_directory()` | `MANIFEST_SCHEMA` is already the documents table: `doc_id`, `filename`, `ext`, `extraction_method`, element/cell/field counts, `status`, `error` |
 | **Chunk Inspector** | `*.chunks.parquet`, `*.enrichment_entities.parquet`, `*.graph_edges.parquet`, `*.pii_spans.parquet`, `*.clean_text.parquet`, `*.money_spans.parquet`, `*.chunk_quality.parquet` | All joinable on `source_hash` (+ `chunk_index`) |
@@ -100,6 +101,14 @@ requirement that the composer be "the only place logical guardrails are enforced
 existing structure — the guardrail is `chunk.required_inputs` naming the
 elements sidecar, not a rule re-typed in TypeScript. **Do not hand-code the DAG
 in the frontend**; serve it from `STAGE_CONTRACTS` so it cannot drift.
+
+**Stage checkpoints live inside the run.** Every shard stage writes its
+`CheckpointState` to a dot-directory under the run root
+(`<run>/.chunk-checkpoint/`), and `StageContract.checkpoint_dirname` already
+names each one. So the queue-less dashboard reads stage progress out of the
+run the console is *already* pointed at — no checkpoint path to configure,
+and the same code serves local and store-backed deployments. Derive that map
+from `STAGE_CONTRACTS`, as with the composer's DAG; do not re-type it.
 
 **Lifecycle checkpoints are sidecar presence.** "Jump between Raw → Extracted →
 Redacted → Enriched" is, concretely, which sidecar suffixes exist for a given

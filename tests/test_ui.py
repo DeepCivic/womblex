@@ -29,7 +29,7 @@ from womblex.store.money_output import MONEY_SPANS_SCHEMA, MONEY_SPANS_SUFFIX
 from womblex.store.output import CHUNKS_SCHEMA, CHUNKS_SUFFIX, ELEMENTS_SUFFIX, MANIFEST_SCHEMA
 from womblex.store.pii_output import PII_SPANS_SCHEMA, PII_SPANS_SUFFIX
 from womblex.store.quality_output import CHUNK_QUALITY_SCHEMA, CHUNK_QUALITY_SUFFIX
-from womblex.ui import readers
+from womblex.ui import dashboard, readers
 from womblex.ui.app import create_app
 from womblex.ui.deps import UISettings, resolve_settings
 
@@ -475,6 +475,137 @@ class TestChunkDetailApi:
         (shard_dir / f"batch-0002{CHUNKS_SUFFIX}").write_bytes(b"not parquet")
         body = client.get("/api/runs/run-a/chunks/hash-a").json()
         assert [c["chunk_index"] for c in body["chunks"]] == [0]
+
+
+def _write_checkpoint(run_dir: Path, stage: str, **counters: int) -> None:
+    """Write a stage checkpoint where the pipeline itself writes one.
+
+    Goes through ``CheckpointManager`` rather than hand-rolling the JSON so
+    the dashboard is tested against the real writer's filename and shape.
+    """
+    from womblex.store.checkpoint import CheckpointManager
+
+    dirname = dashboard.CHECKPOINT_DIRNAMES[stage]
+    mgr = CheckpointManager(run_dir / dirname, f"testset_{stage}")
+    mgr.load()
+    mgr.update(
+        [f"doc-{i}" for i in range(counters.get("processed", 1))],
+        succeeded=counters.get("succeeded", 1),
+        failed=counters.get("failed", 0),
+        batch_num=counters.get("batch_num", 1),
+    )
+
+
+class TestDashboardApi:
+    """The Dashboard reads the queue when there is one and the run's own
+    per-stage checkpoints always (docs/ui-plan.md merge 8). These exercise
+    the queue-less shape — a plain local deployment — and the checkpoint
+    half, which is the same in both.
+    """
+
+    def test_checkpoint_dirnames_come_from_the_contracts(self) -> None:
+        """The map is derived, not re-typed: a renamed dir cannot drift."""
+        from womblex.cloud.stage_contracts import STAGE_CONTRACTS
+
+        assert dashboard.CHECKPOINT_DIRNAMES["chunk"] == ".chunk-checkpoint"
+        assert "quality" not in dashboard.CHECKPOINT_DIRNAMES  # whole-run scope, no checkpoint
+        for stage, dirname in dashboard.CHECKPOINT_DIRNAMES.items():
+            assert STAGE_CONTRACTS[stage].checkpoint_dirname == dirname
+
+    def test_no_queue_is_not_an_error(self, api_client: tuple[TestClient, Path]) -> None:
+        client, _ = api_client
+        body = client.get("/api/dashboard").json()
+        assert body["queue"] is None
+        assert body["queue_error"] is None  # absent by configuration, not by failure
+        assert body["stages"] == []
+
+    def test_unreachable_queue_reports_rather_than_raises(self, tmp_path: Path) -> None:
+        """A dead DSN must not take the checkpoint half of the screen down with it."""
+        client = TestClient(create_app(output_root=tmp_path, db_dsn="postgresql://nope:1/nope"))
+        _write_checkpoint(tmp_path / "run-a", "chunk", processed=2)
+        body = client.get("/api/dashboard", params={"run_id": "run-a"}).json()
+        assert body["queue"] is None
+        assert body["queue_error"]
+        assert [s["stage"] for s in body["stages"]] == ["chunk"]
+
+    def test_stage_progress_from_checkpoints(
+        self, api_client: tuple[TestClient, Path]
+    ) -> None:
+        client, run_root = api_client
+        run_dir = run_root / "run-a"
+        _write_manifest_shard(run_dir / "documents", _ROWS)
+        _write_checkpoint(run_dir, "chunk", processed=4, succeeded=3, failed=1, batch_num=2)
+        _write_checkpoint(run_dir, "pii", processed=1)
+        body = client.get("/api/dashboard", params={"run_id": "run-a"}).json()
+        by_stage = {s["stage"]: s for s in body["stages"]}
+        assert set(by_stage) == {"chunk", "pii"}
+        assert by_stage["chunk"]["processed"] == 4
+        assert by_stage["chunk"]["succeeded"] == 3
+        assert by_stage["chunk"]["failed"] == 1
+        assert by_stage["chunk"]["last_batch"] == 2
+        assert by_stage["chunk"]["name"] == "testset_chunk"
+
+    def test_stages_empty_without_a_run_id(self, api_client: tuple[TestClient, Path]) -> None:
+        """Checkpoints are per-run artefacts, so there is no cross-run answer."""
+        client, run_root = api_client
+        _write_checkpoint(run_root / "run-a", "chunk", processed=2)
+        assert client.get("/api/dashboard").json()["stages"] == []
+
+    def test_missing_run_is_empty_not_404(self, api_client: tuple[TestClient, Path]) -> None:
+        """An enqueued run whose first batch hasn't landed has no directory yet."""
+        client, _ = api_client
+        resp = client.get("/api/dashboard", params={"run_id": "run-nope"})
+        assert resp.status_code == 200
+        assert resp.json()["stages"] == []
+
+    def test_rejects_a_non_positive_window(self, api_client: tuple[TestClient, Path]) -> None:
+        client, _ = api_client
+        assert client.get("/api/dashboard", params={"stale_after": 0}).status_code == 422
+
+    def test_unreadable_checkpoint_is_skipped(self, tmp_path: Path) -> None:
+        """One corrupt checkpoint narrows the answer; it doesn't blank the screen."""
+        from womblex.store.checkpoint import read_checkpoints
+
+        ckpt_dir = tmp_path / ".chunk-checkpoint"
+        ckpt_dir.mkdir()
+        (ckpt_dir / "bad_checkpoint.json").write_text("{not json")
+        (ckpt_dir / "good_checkpoint.json").write_text(
+            json.dumps({"total_processed": 3, "started_at": "", "updated_at": ""})
+        )
+        progress = read_checkpoints(ckpt_dir)
+        assert [p.name for p in progress] == ["good"]
+        # Unusable timestamps mean no rate to report, rather than a fabricated one.
+        assert progress[0].documents_per_minute is None
+
+    def test_documents_per_minute_spans_the_checkpoint(self, tmp_path: Path) -> None:
+        from womblex.store.checkpoint import read_checkpoints
+
+        ckpt_dir = tmp_path / ".chunk-checkpoint"
+        ckpt_dir.mkdir()
+        (ckpt_dir / "run_checkpoint.json").write_text(
+            json.dumps({
+                "total_processed": 120,
+                "started_at": "2026-08-16T00:00:00+00:00",
+                "updated_at": "2026-08-16T00:02:00+00:00",
+            })
+        )
+        assert read_checkpoints(ckpt_dir)[0].documents_per_minute == 60.0
+
+    def test_no_rate_from_a_single_write(self, tmp_path: Path) -> None:
+        """A just-started run's two timestamps are one write, not an interval."""
+        from womblex.store.checkpoint import read_checkpoints
+
+        ckpt_dir = tmp_path / ".chunk-checkpoint"
+        ckpt_dir.mkdir()
+        (ckpt_dir / "run_checkpoint.json").write_text(
+            json.dumps({
+                "total_processed": 3,
+                "started_at": "2026-08-16T00:00:00.000100+00:00",
+                "updated_at": "2026-08-16T00:00:00.000200+00:00",
+            })
+        )
+        # Dividing by a 0.1ms span would report ~1.8M documents/minute.
+        assert read_checkpoints(ckpt_dir)[0].documents_per_minute is None
 
 
 class TestSpaMount:

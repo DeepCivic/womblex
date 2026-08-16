@@ -213,3 +213,68 @@ def test_claim_complete_and_fail(queue):
     assert job2b is not None and job2b.batch_num == 2
     q.fail(job2b.id, "boom again")  # attempts now 2 == max -> failed
     assert q.stats(run_id).get("failed") == 1
+
+
+# --- the dashboard's read-only views (docs/ui-plan.md merge 8) ----------------
+
+
+def test_list_jobs_and_fleet(queue):
+    """The job list and the fleet view are the queue table and `locked_by`."""
+    from womblex.cloud.queue import JobSpec
+
+    q, run_id = queue
+    q.enqueue(run_id, [
+        JobSpec(batch_num=1, input_keys=["a.pdf"], shard_prefix="p"),
+        JobSpec(batch_num=2, input_keys=["b.pdf"], shard_prefix="p"),
+    ])
+    claimed = q.claim("worker-1", run_id)
+    assert claimed is not None
+
+    rows = q.list_jobs(run_id)
+    assert {r.batch_num for r in rows} == {1, 2}
+    running = next(r for r in rows if r.status == "running")
+    assert running.locked_by == "worker-1"
+    assert running.locked_at is not None  # ISO string, not a datetime
+    assert running.attempts == 1
+
+    # Status filter and run scoping both narrow rather than re-query.
+    assert [r.batch_num for r in q.list_jobs(run_id, status="pending")] == [2]
+    assert q.list_jobs("no-such-run") == []
+
+    fleet = q.workers(run_id)
+    assert [(w.worker_id, w.running) for w in fleet] == [("worker-1", 1)]
+    assert fleet[0].oldest_locked_at is not None
+
+
+def test_stale_jobs_matches_requeue_stale(queue):
+    """The read-only twin must name exactly the rows `requeue_stale` recovers."""
+    from womblex.cloud.queue import JobSpec
+
+    q, run_id = queue
+    q.enqueue(run_id, [JobSpec(batch_num=1, input_keys=["a.pdf"], shard_prefix="p")])
+    claimed = q.claim("worker-1", run_id)
+    assert claimed is not None
+
+    # A just-claimed job is not stale; the same job against a zero threshold is.
+    assert q.stale_jobs(3600, run_id) == []
+    assert [j.id for j in q.stale_jobs(0, run_id)] == [claimed.id]
+    # Unscoped, the read names exactly the rows the recovery acts on.
+    assert len(q.stale_jobs(0)) == q.requeue_stale(0)
+    assert q.stale_jobs(0, run_id) == []  # no longer running, so no longer stale
+
+
+def test_throughput_counts_completions_in_the_window(queue):
+    from womblex.cloud.queue import JobSpec
+
+    q, run_id = queue
+    q.enqueue(run_id, [JobSpec(batch_num=1, input_keys=["a.pdf"], shard_prefix="p")])
+    claimed = q.claim("worker-1", run_id)
+    assert claimed is not None
+    q.complete(claimed.id)
+
+    recent = q.throughput(run_id, window_seconds=3600)
+    assert recent.completed == 1
+    assert recent.per_minute == pytest.approx(1 / 60)
+    assert recent.last_completed_at is not None
+    # Scoped: another run's completions are not this run's throughput.
+    assert q.throughput("no-such-run").completed == 0

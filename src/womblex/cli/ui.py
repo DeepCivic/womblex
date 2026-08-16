@@ -36,6 +36,12 @@ def _register_ui(p: argparse.ArgumentParser) -> None:
              "Remote mode always writes under the store's own feedback/ prefix.",
     )
     p.add_argument(
+        "--dsn", default=None,
+        help="Postgres DSN for the job queue the dashboard reads "
+             "(or $WOMBLEX_DB_DSN / $DATABASE_URL). Optional: without one the "
+             "dashboard falls back to the run's per-stage checkpoints.",
+    )
+    p.add_argument(
         "--allow-execute", action="store_true",
         help="Reserved for the execution endpoints (docs/ui-plan.md merge 11). "
              "None exist yet, so today every deployment is audit-only either way.",
@@ -57,6 +63,7 @@ def cmd_ui(args: argparse.Namespace) -> int:
         settings = resolve_settings(
             args.output_root, args.store,
             allow_execute=args.allow_execute, feedback_dir=args.feedback_dir,
+            db_dsn=args.dsn,
         )
     except ValueError as e:
         logger.error("%s", e)
@@ -67,6 +74,7 @@ def cmd_ui(args: argparse.Namespace) -> int:
         store_uri=settings.store_uri,
         allow_execute=settings.allow_execute,
         feedback_dir=settings.feedback_dir,
+        db_dsn=settings.db_dsn,
     )
     source = settings.store_uri or settings.output_root
     logger.info("womblex ui: serving %s on %s:%d", source, args.host, args.port)

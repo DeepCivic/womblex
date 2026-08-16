@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from womblex.ui.deps import UISettings
-from womblex.ui.routes import feedback, runs
+from womblex.ui.routes import dashboard, feedback, runs
 
 # `ui/` is not vendored into the wheel (docs/ui-plan.md §6 "SPA delivery") —
 # only Dockerfile.ui's builder stage produces this directory, at the
@@ -29,6 +29,7 @@ def create_app(
     store_uri: str | None = None,
     allow_execute: bool = False,
     feedback_dir: Path | None = None,
+    db_dsn: str | None = None,
     spa_dir: Path | None = DEFAULT_SPA_DIR,
 ) -> FastAPI:
     """Build the console app, bound to one run source for its lifetime.
@@ -43,18 +44,23 @@ def create_app(
     (default ``<output_root>/feedback``); see ``UISettings``. Ignored in
     remote mode, which always uses the store's own ``feedback/`` prefix.
 
+    ``db_dsn`` is the optional job queue the Dashboard reads. Omitted means
+    no queue, which is a normal local deployment — the dashboard falls back
+    to the run's own per-stage checkpoints.
+
     ``spa_dir`` is mounted only if it exists — a bare ``womblex[ui]`` install
     with no SvelteKit build alongside it still serves the read API, just
     without the frontend.
     """
     settings = UISettings(
         output_root=output_root, store_uri=store_uri,
-        allow_execute=allow_execute, feedback_dir=feedback_dir,
+        allow_execute=allow_execute, feedback_dir=feedback_dir, db_dsn=db_dsn,
     )
     app = FastAPI(title="Womblex Console")
     app.state.settings = settings
     app.include_router(runs.router)
     app.include_router(feedback.router)
+    app.include_router(dashboard.router)
 
     @app.get("/api/health")
     def health() -> dict:
