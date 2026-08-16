@@ -143,6 +143,8 @@ fails these is a bug in the GT, not in extraction.
 
 **Scope:** Chunks → Entity Mentions / Knowledge Graph
 
+**Status:** Not yet implemented. No `graph.jsonl` or `fixtures/isaacus/enrichment/` ground truth exists, and there is no `docs/accuracy/ENRICHMENT.md` or `GRAPH.md` benchmark doc (`tests/test_graph.py` / `tests/test_enrich.py` are unit tests, not accuracy benchmarks). `docs/accuracy/PII_CLEANING.md` notes the Isaacus enrichment fixtures are not yet available. The table below is the proposed metric set, not a measured baseline.
+
 | Metric | Candidate Technology | Implementation Note | Ground Truth Source | Dependency Status |
 |--------|---------------------|---------------------|---------------------|-------------------|
 | **Entity Resolution Accuracy** | Custom ID Matching | % of extracted entities correctly linked to canonical forms. | Isaacus `enrichment/` fixtures | ✅ Pure Python |

@@ -29,7 +29,7 @@ See `accuracy/` for current benchmark numbers. See `architecture.md` for how the
 | 12 | Replace YOLO COCO model with document-specific layout model | High | YOLOv8n produces 0 predictions on all DocLayNet fixtures — general COCO model has no document layout classes | **Done — K7(b) DocLayNet `yolo11n_doc_layout.pt` swap, 2026-05-25** |
 | 13 | ~~Layout class coverage (heading, footer, caption, figure)~~ | — | Subsumed by #12 — entire layout pipeline needs a document-trained model | **Merged into #12** |
 | 14 | Per-document-type config overrides | High | Enables type-specific DPI, thresholds | |
-| 15 | End-to-end task metrics (Isaacus integration) | High | Measures actual application success | **In progress — I6/I7 landed Isaacus enrich/link/embed stages; PII (I8) + coverage metrics next** |
+| 15 | End-to-end task metrics (Isaacus integration) | High | Measures actual application success | **In progress — I6-I10 landed (enrich/link/embed + graph-driven PII); end-to-end coverage metrics still pending** |
 | 16 | Handwriting via dedicated HTR model | High | Only if handwritten docs are in scope | |
 | 17 | Table-cell reconstruction for OCR'd pages | Medium | Unblocks every structural consumer on scanned documents. Measured: a scanned money table yields 1 amount of ~35 today, 30 with cells | **Done** |
 
@@ -130,7 +130,7 @@ PaddleOCR v4 cannot recognise handwriting (IAM WER 1.000). Not worth investing u
 
 ### PII Cleaning
 
-Measured on Throsby fixture (12 GT entities across 6 types). Only PERSON is currently detected (regex + `all-MiniLM-L6-v2` context validation).
+PERSON and ADDRESS are now both detected (regex + `all-MiniLM-L6-v2` context validation for PERSON; street-type anchor regex for ADDRESS; both also gain graph-derived candidates at `post_enrichment`). See [`docs/accuracy/PII_CLEANING.md`](accuracy/PII_CLEANING.md) for the current measured baseline — the Throsby ground-truth recall/precision run below predates ADDRESS support and needs re-running; the GT counts against the 12-entity/6-type fixture are retained for the remaining gaps.
 
 | Entity Type | GT | Supported | Notes |
 |-------------|-----|-----------|-------|
@@ -138,12 +138,12 @@ Measured on Throsby fixture (12 GT entities across 6 types). Only PERSON is curr
 | WEBSITE | 4 | No | URL regex — low effort |
 | PHONE | 1 | No | Phone regex — low effort |
 | EMAIL | 1 | No | Email regex — low effort |
-| ADDRESS | 1 | No | Address regex or NER |
-| PERSON | 1 | Yes | Recall 100%, precision 16.7% (5 FP) |
+| ADDRESS | 1 | Yes | Street-type anchor regex + graph candidates; not yet re-measured against this fixture |
+| PERSON | 1 | Yes | Regex + context validation + graph candidates; earlier measured run: recall 100%, precision 16.7% (5 FP), predates graph-derived candidates |
 
 **Open issues:**
-- 11/12 GT entities unsupported. URL/phone/email regex would close 6 of those for minimal effort.
-- PERSON precision of 16.7% (1 TP, 5 FP) — false positives come from OCR artefacts, state abbreviations, and partial organisation name fragments that escape `_COMMON_WORDS` filtering. Uniform regulatory vocabulary makes cosine similarity poorly discriminative at the 0.35 threshold.
+- ORGANISATION, WEBSITE, PHONE, EMAIL still unsupported. URL/phone/email regex would close 3 of those for minimal effort.
+- PERSON precision of 16.7% (1 TP, 5 FP) in the last dedicated run — false positives come from OCR artefacts, state abbreviations, and partial organisation name fragments that escape `_COMMON_WORDS` filtering. Uniform regulatory vocabulary makes cosine similarity poorly discriminative at the 0.35 threshold. Needs re-running now that graph-derived candidates and ADDRESS are wired in.
 - NER via Presidio Analyzer + spaCy would handle ORGANISATION and improve PERSON precision, but adds a large dependency. Assess against real-document PII inventory before adding.
 
 ### Redaction Handling
@@ -152,7 +152,7 @@ Measured on Throsby fixture (7 GT `<REDACTED>` tags across 3 pages); vector-firs
 
 - **Native cohort recall significantly improved post vector-first detection.** `redact/stage.py:detect_redactions` now tries `page.get_drawings()` for filled near-black rectangles before falling back to the raster CV2 contour detector. On the §1 residual pages (01093 / 01094 / 01349) recall jumped 6→14, 7→13, 3→68 without regressing FOI master (0 regions preserved).
 - **Filters** (each surfaced during validation): near-black RGB/CMYK fill; `min_width ≥ 3pt` excludes narrow vertical separators in manifest tables; `min_height ≥ 8pt` excludes glyph-rendering small filled rects on PDFs that draw text as filled-path glyphs (01125-class regression: 14,184 false positives → 144 actual).
-- **Open — scanned/raster cohort precision.** Direct-Complaint forms with dark form-field backgrounds (02737-class scanned_mixed docs) still trigger the area-threshold contour detector even with `max_area_ratio=0.05`. Higher precision on this cohort would need a different detection signal (e.g. layout-aware classes that distinguish form fields from redaction bars). See `stories/STATUS.md` §11.
+- **Open — scanned/raster cohort precision.** Direct-Complaint forms with dark form-field backgrounds (02737-class scanned_mixed docs) still trigger the area-threshold contour detector even with `max_area_ratio=0.05`. Higher precision on this cohort would need a different detection signal (e.g. layout-aware classes that distinguish form fields from redaction bars). `stories/STATUS.md` was retired into [CHANGELOG.md](../CHANGELOG.md) "Historical engineering notes" — see the vector-first redaction detection entry there for the original write-up of this cohort.
 
 ## Changelog
 

@@ -63,35 +63,67 @@ src/womblex/
 │   ├── cleaner.py         # PERSON + ADDRESS candidate detection (regex + cosine similarity context); emits <ENTITY_TYPE> tags
 │   └── stage.py           # PII cleaning operation (post_extraction / post_chunk / post_enrichment)
 ├── process/
-│   └── chunker.py         # semchunk integration with configurable tokeniser; repairs split <REDACTED> markers
+│   ├── chunker.py         # semchunk integration with configurable tokeniser; repairs split <REDACTED> markers
+│   ├── chunk_stage.py     # chunk_shards() over a shard dir — drives `womblex chunk --shards`
+│   ├── normalise.py / normalise_stage.py   # Text-cleaning transforms + per-stage driver
+│   ├── spellfix.py / spellfix_stage.py     # Hunspell-gated OCR character-confusion repair + driver
+│   ├── quality.py / quality_stage.py       # Chunk-quality annotation heuristics + driver
+│   ├── money.py, money_numbers.py, money_words.py, money_vocab.py, money_columns.py, money_stage.py
+│   │                       # Money recognition: patterns, number/currency resolution, worded amounts,
+│   │                       # vocab tables, column classification, per-stage driver — see money-extraction.md
+│   └── text_overlay.py    # Shared overlay read/merge helper for the offline text layers
+├── link/
+│   ├── matcher.py         # Generic record-linkage: alias / address-exact / token-set name-fuzzy
+│   ├── reference.py       # Reference-register → normalised ReferenceTable via corpus-declared column roles
+│   ├── normalise.py       # Minimal name/address normalisation for matching
+│   └── stage.py           # link_shards() over a shard dir — drives `womblex link --shards`
 ├── analyse/
 │   ├── enrich.py          # Isaacus enrichment API wrapper (kanon-2-enricher)
+│   ├── enrich_stage.py    # enrich_shards() — drives `womblex enrich --shards`
+│   ├── enrich_merge.py    # Stitch per-segment results of a split long document into one
+│   ├── graph_refresh.py   # refresh_graph_edges() — offline mention→chunk edge rebuild after AI chunking
+│   ├── embed.py / embed_stage.py  # Isaacus embeddings.create wrapper + per-stage driver
 │   ├── graph.py           # Entity graph construction from enrichment results
 │   ├── models.py          # ILGS data models (Span, Segment, Person, Location, Term, etc.)
 │   └── query.py           # Load enrichment graph from Parquet for PII masking and internal use
 ├── store/
 │   ├── output.py          # Parquet output: elements + table_cells + form_fields + manifest sidecars
-│   ├── enrichment_output.py # Parquet output for entity mentions, graph edges, enrichment metadata
+│   ├── shard_audit.py     # Directory-level shard integrity + reconcile-with-checkpoint
+│   ├── enrichment_output.py / enrichment_doc.py  # Enrichment sidecars + raw ILGS Document for AI-chunking reuse
+│   ├── pii_output.py, normalise_output.py, spellfix_output.py, quality_output.py, money_output.py
+│   │                       # Per-stage sidecar parquet schemas + IO (self-contained, one per stage)
+│   ├── provenance_output.py / run_manifest.py / register_manifest.py  # Manifest consolidation (NLP run + registers)
+│   ├── remote.py          # fsspec stage-in/stage-out object-storage adapter for distributed runs
+│   ├── retention.py       # run_id-based retention policy
 │   └── checkpoint.py      # JSON-based checkpoint manager for resumable batch runs
+├── cloud/                 # Distributed run support (queue.py, worker.py, stage_contracts.py, stage_runner.py)
 ├── verify/
-│   └── engine.py          # Two-pass verification: structural checks + weak-signal scan
+│   └── engine.py          # Two-pass verification (structural + weak-signal) — defined, not wired in; see §11
 ├── utils/
 │   ├── models.py          # Local model path resolution (models/ dir + HF snapshot layout)
 │   ├── metrics.py         # CER, WER, CER-s accuracy metrics (numpy-accelerated Levenshtein + spatial sort)
 │   ├── tabular_metrics.py # Tabular extraction accuracy (structural fidelity, data integrity, key preservation)
-│   └── checksum.py        # Shared streamed MD5 helper for the standalone register ingests
+│   ├── checksum.py        # Shared streamed MD5 helper for the standalone register ingests
+│   ├── isaacus_client.py  # Build the Isaacus SDK client (hosted API or private SageMaker)
+│   └── token_packer.py    # Token-budgeted batching for enrichment API calls
 ├── profile/               # Column schema inference (womblex profile subcommand)
 ├── score.py               # Labels-vs-parquet CER scoring (womblex score subcommand)
+├── batch.py               # process_batch() — shared per-batch pipeline body (local run + cloud worker)
 ├── cli/                   # CLI subpackage — per-topic modules:
 │   ├── __init__.py        # main() + ALL_COMMANDS aggregation + dispatch
 │   ├── _shared.py         # Command NamedTuple, setup_logging, discover_files
 │   ├── pipeline.py        # run, extract, chunk subcommands
+│   ├── cloud.py           # enqueue / worker / jobs / finalize / run-stage subcommands
 │   ├── redact.py          # redact, annotate-redactions, validate-redactions subcommands
+│   ├── link.py, embed.py, normalise.py, spellfix.py, quality.py, money.py, pii.py
+│   │                       # link, embed, normalise, spellfix, quality, money, pii subcommands
 │   ├── ingest.py          # ingest-gnaf, ingest-geo, ingest-abn subcommands
 │   ├── score.py           # score subcommand
-│   └── profile.py         # profile subcommand
+│   ├── profile.py         # profile subcommand
+│   └── verify.py          # verify-shards subcommand
 ├── config.py              # Pydantic config models and YAML loader
-└── operations/            # Independent operations (one module each) — no orchestrator, callers compose directly
+└── operations/            # Independent operations (extract/redact/chunk/pii/enrich, one module each,
+                           # plus models.py / persist.py shared helpers) — callers compose directly
 ```
 
 ## Stage Detail
@@ -280,12 +312,25 @@ Wrappers in `analyse/` call the Isaacus SDK:
 
 ### 11. Verify — Quality Checks
 
-`verify/engine.py` runs two-pass verification on the output Parquet:
+Two separate mechanisms, neither of which is `verify/engine.py`:
 
-1. **Structural** — schema validation (required columns present), uniqueness (no duplicate `document_id`), type constraints (confidence in [0,1], non-negative page counts).
-2. **Weak-signal scan** — flags documents with low confidence, page count anomalies, garbled text (high non-alphanumeric ratio), or garbled redaction patterns.
+- **Per-batch integrity** — `verify_shard_persistence()` (`store/output.py`) runs after every batch write from `cli/pipeline.py`, checking row counts and sidecar joinability.
+- **Directory-level audit** — `womblex verify-shards` (`cli/verify.py`) uses `store/shard_audit.py` (`audit_shard_directory` / `scan_shard_directory`), optionally diffing across runs.
 
-Results are classified as `passed`, `warning`, or `failed` based on the ratio of flagged documents.
+`verify/engine.py`'s `run_verifications` (two-pass structural + weak-signal scan, classifying results `passed` / `warning` / `failed`) is defined and exported but **not wired into the pipeline** — its `required_columns` default (`document_id`, `source_path`, `text`) predates the element-stream schema.
+
+### 12. Additional Per-Stage Sidecars
+
+Later stages follow the same `<stage>_shards()` over a shard dir + `womblex <stage> --shards` pattern as chunk/enrich/embed above, each writing its own sidecar(s) joinable on `source_hash`:
+
+- **normalise** (`process/normalise_stage.py`) — text-cleaning transforms, writes `*.normalised_text.parquet`
+- **spellfix** (`process/spellfix_stage.py`) — Hunspell-gated OCR character-confusion repair, writes `*.spellfix_text.parquet` + `*.spellfix_corrections.parquet` (audit)
+- **quality** (`process/quality_stage.py`) — chunk-quality annotation heuristics, writes `*.chunk_quality.parquet`
+- **money** (`process/money_stage.py`) — money-span recognition across narrative/table/sheet loci, writes `*.money_spans.parquet` + `*.money_columns.parquet`; see [`money-extraction.md`](money-extraction.md)
+- **link** (`link/stage.py`) — record-linkage against a reference register, writes `*.entity_links.parquet`
+- **pii** (`pii/pii_stage.py`) — graph-driven PII masking, writes `*.pii_spans.parquet` + `*.clean_text.parquet`
+
+Distributed (cloud) runs execute the same stage bodies via `cloud/stage_runner.py` against a declarative `StageContract` per stage (`cloud/stage_contracts.py`), reading/writing an object store instead of local disk. See the module-responsibility table in [`../CLAUDE.md`](../CLAUDE.md) for the full per-module breakdown.
 
 ## Key Design Decisions
 

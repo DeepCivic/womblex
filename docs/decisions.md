@@ -562,10 +562,15 @@ page, and chunking reads `elements` rather than `pages[i].text`.
   - *Re-joining redaction-induced paragraph breaks* — a cross-element op; needs
     a reassembly join-hint (`reassemble_narrative` decides the `\n\n` boundary),
     not an intra-element text edit. Not yet wired.
-  - *Consumption* — the sidecar is written but no downstream stage reads it yet
-    (chunking still consumes raw `elements`). Same write-first / consume-later
-    shape the PII stage used (`pii_spans` then `clean_text`); wiring chunking to
-    prefer normalised text behind a flag is the next step.
+
+  **Consumption — shipped.** `process/text_overlay.py` (`load_overlay` /
+  `apply_overlay`) resolves the normalise / spellfix element-text layer
+  selected by one pipeline setting (`processing.text_source`:
+  `elements` | `normalised` | `spellfix`), applied before reassembly at both
+  the `chunk` and `enrich` sites so they share one coordinate space
+  (`money.text_source` outranks the pipeline default for the `money` stage;
+  `spellfix` chains off `normalise` when both run). `score --text-source`
+  reports CER of extraction vs normalisation over the same ground truth.
 
   **Scope — fidelity-neutral, not OCR-error correction (measured 2026-06).** The
   normalise op cleans *formatting* (whitespace, footer glyphs, known typos); it

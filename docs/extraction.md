@@ -41,6 +41,7 @@ verbatim text because the writer reads `elements`, not `pages`.
 | `caption` | figure / table caption — emitted by the DocLayNet layout model's `Caption` class on OCR'd pages |
 | `header` | short text in top 8% of page (letterhead-style content) |
 | `footer` | page-number footer or short text in bottom 8% of page |
+| `footnote` | sub-paragraph note — emitted by the DocLayNet layout model's `Footnote` class on OCR'd pages |
 | `signature` | signatory block (reserved; not currently emitted) |
 | `figure` | layout-detected visual region (no extracted image data). A full-page scan whose dominant layout region is a figure but which OCR's to substantial text (≥5 words) is reclassified to `paragraph` so its content reaches chunking — only sparse regions (page-number stamps, bare logos) stay `figure`. See [decisions.md](decisions.md) "Element-kind classification" |
 | `image` | extracted image with alt text |
@@ -165,7 +166,7 @@ One row per source file in the batch.
 
 | column | type |
 |---|---|
-| `source_hash`, `collection_id`, `filename`, `ext` | string |
+| `source_hash`, `collection_id`, `doc_id`, `filename`, `ext` | string |
 | `extraction_method` | string |
 | `elements_count`, `table_cells_count`, `form_fields_count` | int64 |
 | `status` | string — `completed` or `error` |

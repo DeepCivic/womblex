@@ -11,9 +11,13 @@ womblex/
 ├── docs/              # Architecture docs, ADRs, accuracy reports
 ├── fixtures/          # Test fixtures (separate repo, see ../THIRD_PARTY_DATA.md)
 ├── src/womblex/
-│   ├── cli/                # CLI subpackage — per-topic modules (pipeline, redact, ingest, score, profile)
+│   ├── cli/                # CLI subpackage — per-topic modules: pipeline, cloud, redact, link, embed,
+│   │                       #   normalise, spellfix, quality, money, pii, ingest, score, profile, verify
 │   ├── config.py           # Pydantic config models
-│   ├── operations/         # Independent operations (extract/redact/chunk/pii/enrich), one module each
+│   ├── batch.py            # process_batch() — shared per-batch pipeline body (extract → redact/chunk/pii)
+│   ├── operations/         # Independent operations, one module each: extract, redact, chunk, pii, enrich
+│   │   ├── models.py       # DocumentResult / BatchResult dataclasses + PreconditionError
+│   │   └── persist.py      # write_batch_parquet / write_batch_enrichment
 │   ├── score.py            # womblex score subcommand — labels-vs-parquet CER scoring
 │   ├── profile/            # womblex profile subcommand — column schema inference
 │   ├── ingest/
@@ -61,6 +65,8 @@ womblex/
 │   │   ├── quality.py       # Chunk-quality annotation heuristics
 │   │   ├── quality_stage.py # quality_shards() — drives `womblex quality --shards`; writes *.chunk_quality.parquet
 │   │   ├── money.py         # Self-evidencing money recognition (find_money) — patterns, FP blocking, exact Decimals
+│   │   ├── money_numbers.py # Number reading, currency symbol/ISO resolution, Australian false-positive blocking
+│   │   ├── money_words.py   # Worded amounts (find_worded_amounts, parse_number_words)
 │   │   ├── money_vocab.py   # Currency tiers / ISO 4217 / scale / false-positive / header vocabulary tables (data only)
 │   │   ├── money_columns.py # Column-evidenced money — classify_column + per-cell parsing
 │   │   ├── money_stage.py   # money_shards() — drives `womblex money --shards`; writes *.money_spans.parquet + *.money_columns.parquet
@@ -73,6 +79,8 @@ womblex/
 │   ├── analyse/
 │   │   ├── enrich.py        # Isaacus enrichment wrappers
 │   │   ├── enrich_stage.py  # enrich_shards() — drives `womblex enrich --shards`; writes *.enrichment_entities.parquet
+│   │   ├── enrich_merge.py  # Stitch per-segment results of a split long document back into one
+│   │   ├── graph_refresh.py # refresh_graph_edges() — offline mention→chunk edge rebuild after AI chunking
 │   │   ├── embed.py         # Thin wrapper over Isaacus embeddings.create (kanon-2-embedder)
 │   │   ├── embed_stage.py   # embed_shards() — drives `womblex embed --shards`; writes *.embeddings.parquet
 │   │   ├── graph.py         # Entity graph construction
@@ -82,16 +90,31 @@ womblex/
 │   │   ├── output.py        # Parquet output: elements + table_cells + form_fields + manifest + chunks sidecars + integrity checks
 │   │   ├── shard_audit.py   # Directory-level shard integrity + chunks-side audit + reconcile-with-checkpoint
 │   │   ├── enrichment_output.py  # Enrichment-specific output
+│   │   ├── enrichment_doc.py     # *.enrichment_doc.parquet — raw ILGS Document, for AI-chunking reuse
 │   │   ├── pii_output.py    # pii_spans + clean_text parquet schemas + IO
 │   │   ├── normalise_output.py   # *.normalised_text.parquet schema + IO
+│   │   ├── spellfix_output.py    # *.spellfix_text.parquet + *.spellfix_corrections.parquet schemas + IO
+│   │   ├── quality_output.py     # *.chunk_quality.parquet schema + IO
 │   │   ├── money_output.py  # *.money_spans.parquet (decimal128 values) + *.money_columns.parquet schemas + IO
+│   │   ├── provenance_output.py  # *.provenance.parquet sidecar + manifest for pre-extracted-record corpora
+│   │   ├── run_manifest.py  # Consolidate per-batch manifests into a run-root manifest.parquet
+│   │   ├── register_manifest.py  # Manifest for standalone register ingests (G-NAF/ABN/geospatial)
+│   │   ├── remote.py        # fsspec stage-in/stage-out object-storage adapter for distributed runs
 │   │   ├── retention.py     # run_id-based retention policy
 │   │   └── checkpoint.py    # Per-stage CheckpointManager
+│   ├── cloud/                  # Distributed run support — `womblex-cloud` counterpart to local `womblex run`
+│   │   ├── queue.py            # JobQueue — Postgres FOR UPDATE SKIP LOCKED batch queue
+│   │   ├── worker.py           # run_worker() — claim/stage/process/publish loop
+│   │   ├── stage_contracts.py  # Declarative StageContract per downstream stage (inputs/outputs/scope)
+│   │   └── stage_runner.py     # Execute a contract against an object store
 │   ├── utils/
 │   │   ├── metrics.py       # WER/CER accuracy metrics
 │   │   ├── tabular_metrics.py # Tabular extraction accuracy (structural fidelity, data integrity)
 │   │   ├── models.py        # Local model path resolution (models/ dir, HF snapshot layout)
-│   │   └── checksum.py      # Shared streamed MD5 helper for the standalone register ingests
+│   │   ├── checksum.py      # Shared streamed MD5 helper for the standalone register ingests
+│   │   ├── isaacus_client.py # Build the Isaacus SDK client (hosted API or private SageMaker)
+│   │   ├── token_packer.py  # TokenCounter, pack_by_tokens, split_on_boundaries for token-budgeted API batching
+│   │   └── availability.py  # isaacus_available() — gates stages that need the API-only Kanon-2 tokeniser
 │   └── verify/
 │       └── engine.py        # Two-pass extraction quality verification
 └── tests/

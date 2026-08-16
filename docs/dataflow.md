@@ -86,10 +86,23 @@ Raw files (PDF / DOCX / CSV / XLSX)
         │
         ▼
 ┌───────────────────┐
-│  run_verifications│  → VerificationResult
-│  (verify/engine)  │    (structural checks + weak-signal scan)
+│ verify_shard_     │  → cumulative on-disk size (raises
+│ persistence       │    ShardVerificationError on any anomaly)
+│ (store/output)    │
 └───────────────────┘
 ```
+
+`verify_shard_persistence()` checks that every shard file exists, is
+non-empty and readable; that the manifest row count matches the expected
+document count; that every `(source_hash, parent_elem_order)` in
+`table_cells` / `form_fields` references an element of the matching kind;
+and that the shard directory has not shrunk (overwrite guard).
+
+`verify/engine.py`'s `run_verifications` (structural checks + weak-signal
+scan) is defined but not wired into the batch pipeline — its
+`required_columns` default predates the element-stream schema. The
+`womblex verify-shards` CLI command instead uses `store/shard_audit.py`
+(`audit_shard_directory` / `scan_shard_directory`), a different module.
 
 ## Per-Document Flow
 
@@ -176,6 +189,10 @@ For each file processed via `operations.py`:
       │     ├── *.enrichment_entities.parquet + *.enrichment_meta.parquet
       │     │     + *.graph_edges.parquet                            (enrich — I7; graph
       │     │       edges gain mention→chunk links when *.chunks.parquet exists)
+      │     ├── graph-refresh (analyse/graph_refresh — offline, API-free): when
+      │     │     chunking runs *after* enrichment (AI-chunking reuse), rewrites
+      │     │     enrichment_entities.chunk_index and the mentioned_in edges in
+      │     │     place from the already-persisted mention + chunk offsets
       │     ├── *.entity_links.parquet                              (link — I7)
       │     ├── *.embeddings.parquet                                (embed — I7)
       │     └── *.pii_spans.parquet + *.clean_text.parquet          (pii — terminal mask, after enrich/embed)
@@ -288,17 +305,20 @@ Embedding, classification, and classification_score were deferred from
 the original sketch — they belong to the enrichment / P4 layer, not
 the chunking stage.
 
-**entities.parquet** — one row per entity mention (from enrichment)
+**entities.parquet** — one row per entity *mention* (from enrichment)
 
 | Column | Description |
 |--------|-------------|
 | `document_id` | FK to `_manifest.parquet` (joined via `source_hash`) |
-| `entity_type` | Entity category (person, location, term, etc.) |
-| `entity_name` | Resolved entity name |
-| `mention_spans` | List of (start, end) offsets in document text |
-| `chunk_indices` | Chunk indices where the entity appears |
+| `entity_id` | Entity identifier (shared across a person/location/term's mentions) |
+| `entity_label` | `person` \| `location` \| `term` \| `external_document` |
+| `name` | Resolved entity name |
+| `entity_type` | Entity subtype (`natural`, `corporate`, `politic`, `country`, `state`, etc.) |
+| `role` | Person role (`seller`, `buyer`, `other`, …); empty for non-person entities |
+| `mention_start`, `mention_end` | Offset of this single mention in the document text |
+| `chunk_index` | Chunk this mention falls in; `-1` if not mapped to a chunk |
 
-**graph_edges.parquet** — one row per relationship (from enrichment)
+**graph_edges.parquet** — one row per relationship edge *property* (from enrichment)
 
 | Column | Description |
 |--------|-------------|
@@ -306,16 +326,20 @@ the chunking stage.
 | `source_id` | Source node identifier |
 | `target_id` | Target node identifier |
 | `relation` | Relationship type |
+| `prop_key`, `prop_value` | One edge-property pair per row; empty-string pair for edges with no properties |
 
 **enrichment_meta.parquet** — one row per enriched document
 
 | Column | Description |
 |--------|-------------|
 | `document_id` | FK to `_manifest.parquet` (joined via `source_hash`) |
+| `doc_type_enriched` | `statute` \| `regulation` \| `decision` \| `contract` \| `other` |
+| `jurisdiction`, `title` | Document-level metadata Kanon-2 inferred |
 | `segment_count` | Number of structural segments |
 | `person_count` | Number of persons identified |
 | `location_count` | Number of locations identified |
 | `term_count` | Number of defined terms |
+| `external_doc_count`, `date_count`, `heading_count`, `junk_span_count` | Further per-document enrichment counts |
 
 ## G-NAF Standalone Ingest
 
@@ -404,4 +428,4 @@ On resume (`--resume` flag), the CLI reads the checkpoint JSON and skips already
 
 The remaining unimplemented data flow capabilities. Everything above this line is current state.
 
-1. **AI/Semantic Chunking** — provider-agnostic semantic chunking mode using enrichment spans as boundary hints. Adds `analyse/boundaries.py` for span-to-boundary extraction and `chunk_document_semantic()` to `process/chunker.py`. Enabled via `chunking.semantic: true` in config. Full design in `architecture.md` § AI/Semantic Chunking.
+1. **AI/Semantic Chunking** — ✅ **Shipped 2026-06 via a different mechanism than originally sketched here.** The `analyse/boundaries.py` / `chunk_document_semantic()` / `chunking.semantic` design below was superseded by semchunk 4's native AI chunking: `chunking.chunking_model` switches the narrative path to boundaries picked from the persisted Kanon-2 enrichment Document (`*.enrichment_doc.parquet`, reused via a byte-identity guard — see the chunk-stage steps above and `docs/decisions.md` "AI chunking — single-enrichment graph reuse"). No `boundaries.py` module or `chunking.semantic` flag exists in the codebase.
