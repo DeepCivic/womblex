@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from womblex.ui.deps import UISettings
-from womblex.ui.routes import runs
+from womblex.ui.routes import feedback, runs
 
 # `ui/` is not vendored into the wheel (docs/ui-plan.md §6 "SPA delivery") —
 # only Dockerfile.ui's builder stage produces this directory, at the
@@ -28,6 +28,7 @@ def create_app(
     output_root: Path | None = None,
     store_uri: str | None = None,
     allow_execute: bool = False,
+    feedback_dir: Path | None = None,
     spa_dir: Path | None = DEFAULT_SPA_DIR,
 ) -> FastAPI:
     """Build the console app, bound to one run source for its lifetime.
@@ -38,14 +39,22 @@ def create_app(
     is what keeps the run source out of the URL space — no endpoint can be
     talked into reading a directory the operator did not mount.
 
+    ``feedback_dir`` overrides where local-mode report-action files land
+    (default ``<output_root>/feedback``); see ``UISettings``. Ignored in
+    remote mode, which always uses the store's own ``feedback/`` prefix.
+
     ``spa_dir`` is mounted only if it exists — a bare ``womblex[ui]`` install
     with no SvelteKit build alongside it still serves the read API, just
     without the frontend.
     """
-    settings = UISettings(output_root=output_root, store_uri=store_uri, allow_execute=allow_execute)
+    settings = UISettings(
+        output_root=output_root, store_uri=store_uri,
+        allow_execute=allow_execute, feedback_dir=feedback_dir,
+    )
     app = FastAPI(title="Womblex Console")
     app.state.settings = settings
     app.include_router(runs.router)
+    app.include_router(feedback.router)
 
     @app.get("/api/health")
     def health() -> dict:

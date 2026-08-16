@@ -7,6 +7,7 @@ uses, so there is one code path for the parquet logic.
 """
 from __future__ import annotations
 
+import json
 import logging
 import tempfile
 from pathlib import Path
@@ -16,6 +17,12 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from womblex.store.enrichment_output import ENRICHMENT_ENTITIES_SUFFIX, ENTITY_SCHEMA
+from womblex.store.feedback_output import (
+    FEEDBACK_DIRNAME,
+    build_feedback_record,
+    feedback_filename,
+    write_feedback_record,
+)
 from womblex.store.money_output import MONEY_SPANS_SCHEMA, MONEY_SPANS_SUFFIX
 from womblex.store.output import (
     _SHARD_SUFFIX,
@@ -119,6 +126,49 @@ def get_chunk_detail(settings: UISettings, run_id: str, source_hash: str) -> dic
         for _key, suffix, _schema, _column in _CHUNK_DETAIL_SIDECARS
     }
     return _chunk_detail(paths, source_hash)
+
+
+def write_feedback(
+    settings: UISettings,
+    run_id: str,
+    *,
+    record_type: str,
+    source_hash: str,
+    chunk_index: int | None,
+    row: dict,
+    note: str,
+    reported_by: str | None,
+) -> dict | None:
+    """Write one report-action file for run_id; None if the run doesn't exist.
+
+    Local and remote both land at a ``feedback/<run_id>/`` sibling of the
+    run directories, never inside one (docs/ui-plan.md §4) — see
+    :mod:`womblex.store.feedback_output`'s module docstring for why. The
+    two branches differ only in where that sibling sits: locally it nests
+    under ``output_root`` (a plain directory, not a run-id one, so
+    retention's ``run-*`` purge never touches it); remotely it is the
+    store's own ``feedback/`` prefix, parallel to ``runs/``.
+    """
+    record = build_feedback_record(
+        run_id=run_id, record_type=record_type, source_hash=source_hash,
+        chunk_index=chunk_index, row=row, note=note, reported_by=reported_by,
+    )
+    if settings.is_remote:
+        store = _open_store(cast(str, settings.store_uri))
+        if run_id not in store.list_dirs("runs"):
+            return None
+        with tempfile.TemporaryDirectory(prefix="womblex-ui-") as tmp:
+            name = feedback_filename()
+            tmp_path = Path(tmp) / name
+            tmp_path.write_text(json.dumps(record, indent=2), encoding="utf-8")
+            store.upload_file(tmp_path, f"{FEEDBACK_DIRNAME}/{run_id}/{name}")
+        return record
+    run_dir = cast(Path, settings.output_root) / run_id
+    if not run_dir.is_dir():
+        return None
+    feedback_root = settings.feedback_dir or cast(Path, settings.output_root) / FEEDBACK_DIRNAME
+    write_feedback_record(feedback_root, run_id, record)
+    return record
 
 
 # ---------------------------------------------------------------------------
