@@ -4,7 +4,9 @@ This document describes Womblex's architecture for composable operations.
 
 ## Completed Refactor
 
-`pipeline.py` has been split into the `operations/` package (one module per operation, re-exported from `operations/__init__.py`); the thin CLI command layer lives in `cli/pipeline.py`. The orchestrator (`run_pipeline`, `STAGE_REGISTRY`, `_resolve_stages`, `process_file`, `process_batch`) and `config.stages` have been removed. Operations are independent functions (`run_extraction`, `run_chunking`, …) that callers compose directly.
+`pipeline.py` has been split into the `operations/` package (one module per operation — `extract.py`, `redact.py`, `chunk.py`, `pii.py`, `enrich.py` — plus two shared-helper modules, `models.py` (`DocumentResult`, `BatchResult`, `PreconditionError`) and `persist.py` (`write_batch_parquet`, `write_batch_enrichment`), re-exported from `operations/__init__.py`); the thin CLI command layer lives in `cli/pipeline.py`. `config.stages` and the old registry-driven orchestrator (`STAGE_REGISTRY`, `_resolve_stages`, `process_file`) have been removed. Operations are independent functions (`run_extraction`, `run_chunking`, …) — each takes/mutates a `list[DocumentResult]` batch gated by its own `config.<stage>.enabled` flag — that callers compose directly.
+
+A `process_batch()` was later reintroduced in `src/womblex/batch.py` (I7, cloud scale-out) — not the removed orchestrator, but a plain sequencing of the same composable operations (`run_extraction → run_redaction → run_chunking → run_pii_cleaning → write_batch_parquet`) so `womblex run` (local) and the cloud worker (`cloud/worker.py`) execute byte-identically. It does not reintroduce `STAGE_REGISTRY`/`config.stages`.
 
 ## Target Model
 
@@ -33,7 +35,7 @@ The single-file `.txt` output is a CLI convenience for single-unit extractions o
 
 ### Transform Operations
 
-Each transform is a standalone function. The only contract is: provide the right input type.
+Each transform is a standalone function. The only contract is: provide the right input type. The names below are shorthand for the composition pattern, not literal function names — the real entry points are `run_extraction` / `run_redaction` / `run_chunking` / `run_pii_cleaning` / `run_enrichment` in `operations/`, each operating on a `list[DocumentResult]` batch (`operations/models.py`), not a bare `ExtractionResult`.
 
 ```
 Operation               Input                    Output                   Precondition
@@ -47,7 +49,7 @@ embed(chunks)           list[TextChunk]          list[Embedding]          chunks
 link(enrich entities)   entity mentions          entity_links             enrichment exists (impl: link/stage.py, I7)
 build_graph(enrichment) EnrichmentResult         DocumentGraph            enrichment exists
 pii_clean(chunks, graph) list[TextChunk] + graph list[TextChunk]          graph exists
-load_graph(parquet_dir) Parquet files            EntityMention + Edge     enrichment Parquet exists
+load_graph(parquet_dir) Parquet files            EntityMention + Edge     enrichment Parquet exists (impl: analyse/query.py's load_entity_mentions / load_graph_edges)
 ```
 
 ### Valid Compositions (examples, not exhaustive)
