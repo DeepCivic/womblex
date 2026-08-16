@@ -178,3 +178,64 @@ class TestResourcesApi:
 
     def test_mask_dsn_none_is_none(self) -> None:
         assert resources._mask_dsn(None) is None
+
+    def test_mask_dsn_covers_the_libpq_keyword_form(self) -> None:
+        """psycopg takes either DSN form, so the mask must too.
+
+        The keyword form has no netloc for ``urlsplit`` to find a password
+        in, so a URI-only mask returns it verbatim — a full credential leak
+        from an endpoint with no auth in front of it (plan §6).
+        """
+        masked = resources._mask_dsn(
+            "host=db.internal user=ops password=hunter2 dbname=womblex"  # pragma: allowlist secret
+        )
+        assert masked is not None
+        assert "hunter2" not in masked
+        assert "host=db.internal" in masked and "dbname=womblex" in masked
+
+    def test_mask_dsn_covers_a_quoted_keyword_password(self) -> None:
+        """``\\S+`` alone would leave the tail of a password containing a space."""
+        masked = resources._mask_dsn("host=db password='two words' dbname=w")
+        assert masked is not None
+        assert "two words" not in masked and "words" not in masked
+
+    def test_mask_dsn_covers_a_password_query_parameter(self) -> None:
+        """``?password=`` is not ``parts.password`` either."""
+        masked = resources._mask_dsn("postgresql://ops@db:5432/w?password=hunter2")
+        assert masked is not None
+        assert "hunter2" not in masked
+
+    def test_mask_dsn_keeps_a_password_containing_an_at_sign(self) -> None:
+        masked = resources._mask_dsn("postgresql://ops:p@ss@db:5432/w")
+        assert masked is not None
+        assert "p@ss" not in masked
+        assert masked.endswith("@db:5432/w")
+
+    def test_mask_secret_does_not_reveal_a_short_secret_whole(self) -> None:
+        assert resources._mask_secret("abcd") == "•" * 8
+
+    def test_isaacus_models_are_read_off_the_config_fields(self) -> None:
+        """Derived, not re-typed — a changed default cannot drift out of sync
+        (the same rule the composer's `/schema` endpoint follows)."""
+        from womblex.config import EmbeddingConfig, EnrichmentConfig
+
+        assert set(resources.ISAACUS_MODELS) == {
+            EmbeddingConfig.model_fields["model"].default,
+            EnrichmentConfig.model_fields["model"].default,
+        }
+
+    def test_store_reachability_asymmetry_is_deliberate(self, tmp_path: Path) -> None:
+        """The same missing path is a failure locally and not remotely.
+
+        Locally it is a bind mount that did not land. Remotely it is an
+        object store with no ``runs/`` prefix yet, which is every valid
+        store before its first run — so the remote check asks only that the
+        listing completed. Pinned because the two verdicts look like a bug
+        until you know which question each is answering.
+        """
+        pytest.importorskip("fsspec")
+        missing = tmp_path / "gone"
+        local = TestClient(create_app(output_root=missing))
+        remote = TestClient(create_app(store_uri=str(missing)))
+        assert local.post("/api/resources/test/store").json()["reachable"] is False
+        assert remote.post("/api/resources/test/store").json()["reachable"] is True

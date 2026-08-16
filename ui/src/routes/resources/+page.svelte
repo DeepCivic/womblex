@@ -25,6 +25,22 @@
 		return err instanceof Error ? err.message : String(err);
 	}
 
+	// A hosted deployment with no API key is not "Configured" — it cannot make
+	// a single call — but it has no unserved models either (that check only
+	// means anything once endpoints are declared), so keying the pill on
+	// coverage alone showed a green pill above an "API key: Not set" row.
+	let isaacusState = $derived.by((): { status: 'done' | 'warning'; label: string } => {
+		const card = cards?.isaacus;
+		if (!card) return { status: 'warning', label: 'Unknown' };
+		if (card.deployment === 'hosted' && !card.api_key_configured) {
+			return { status: 'warning', label: 'No API key' };
+		}
+		if (card.unserved_models.length > 0) {
+			return { status: 'warning', label: 'Missing coverage' };
+		}
+		return { status: 'done', label: 'Configured' };
+	});
+
 	$effect(() => {
 		loading = true;
 		error = null;
@@ -57,13 +73,19 @@
 	}
 </script>
 
-{#snippet testButton(label: string, testing: boolean, onclick: () => void)}
+{#snippet testButton(
+	label: string,
+	testing: boolean,
+	onclick: () => void,
+	disabled: boolean = false
+)}
 	<button
 		type="button"
 		class="rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-foreground/5
-			focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+			focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50
+			disabled:hover:bg-transparent"
 		{onclick}
-		disabled={testing}
+		disabled={testing || disabled}
 	>
 		{testing ? 'Testing…' : label}
 	</button>
@@ -170,10 +192,14 @@
 						<p class="text-xs text-muted-foreground">No workers currently hold a lock.</p>
 					{/if}
 				{/if}
+				<!-- Disabled without a DSN: the endpoint would answer "no queue
+					 configured", which is what the card already says. A button whose
+					 only outcome is to restate its own label is not an action. -->
 				{@render testButton(
 					cards.queue.configured ? 'Test connection' : 'No queue configured',
 					queueTesting,
-					runQueueTest
+					runQueueTest,
+					!cards.queue.configured
 				)}
 			</section>
 
@@ -181,11 +207,7 @@
 			<section class="flex flex-col gap-3 rounded-md border border-border bg-surface-raised p-4">
 				<div class="flex items-center justify-between gap-2">
 					<h2 class="font-display text-sm">Isaacus</h2>
-					{#if cards.isaacus.unserved_models.length > 0}
-						<StatusPill status="warning" label="Missing coverage" />
-					{:else}
-						<StatusPill status="done" label="Configured" />
-					{/if}
+					<StatusPill status={isaacusState.status} label={isaacusState.label} />
 				</div>
 				<dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
 					<dt class="text-muted-foreground">Deployment</dt>

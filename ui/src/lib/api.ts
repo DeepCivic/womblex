@@ -87,11 +87,20 @@ export async function getAudit(
 
 // The Resources Console's connection cards (docs/ui-plan.md merge 10). Cheap,
 // network-free reads — each card's live check is a separate `test*` call.
+export interface StoreOptions {
+	credentials_configured: boolean;
+	endpoint_url: string | null;
+	region: string | null;
+}
+
 export interface StoreCard {
 	kind: 'local' | 'remote';
 	uri: string;
 	is_object_store: boolean;
-	options: { credentials_configured: boolean; endpoint_url: string | null; region: string | null };
+	// Empty in local mode — there are no fsspec storage options for a plain
+	// directory. Partial rather than required, so reading a field outside the
+	// `kind === 'remote'` guard is a type error rather than a runtime undefined.
+	options: Partial<StoreOptions>;
 }
 
 export interface QueueCard {

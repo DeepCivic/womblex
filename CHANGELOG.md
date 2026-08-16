@@ -8,6 +8,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Console Resources Console (`docs/ui-plan.md` merge 10).** `GET
+  /api/resources` returns three connection cards — run store, job queue,
+  Isaacus — plus `POST /api/resources/test/store` and `/test/queue` as the
+  live checks behind each card's action, and the screen itself replaces its
+  `ScreenStub`.
+
+  No new detection logic: the plan's §3 row for this screen says connection
+  *testing* already exists as library code, so the store card reads
+  `is_remote_uri` / `storage_options_from_env`, the Isaacus card reads
+  `unserved_models()`, and the queue card reuses `dashboard.queue_section`
+  (renamed from a private helper) rather than reimplementing
+  connect-and-read — so its fleet and queue-depth state is by construction
+  the same view the Dashboard shows. The models checked for Isaacus coverage
+  are read off `EmbeddingConfig` / `EnrichmentConfig`'s `model` field
+  defaults rather than re-typed, the same rule `/schema` and
+  `CHECKPOINT_DIRNAMES` already follow.
+
+  Configuration is split from reachability deliberately: the `GET` makes no
+  network call, so one dead connection cannot stall the page load, and only
+  the card an operator actually clicks pays the timeout.
+
+  **Credentials do not leave the process.** The store card reports whether
+  AWS keys are configured, never their values, and the queue DSN is masked.
+  Found by probing that masker rather than by reading it: it handled only
+  the URI DSN form, so libpq's equally-valid keyword form (`host=…
+  password=…`, which psycopg accepts and `JobQueue` passes straight through)
+  has no netloc for `urlsplit` to find a password in and was returned
+  verbatim — a full credential leak from an endpoint with no auth in front
+  of it (plan §6). Both forms are masked now, along with a `?password=`
+  query parameter and a secret too short to have a non-revealing tail.
+
+  The store test answers a deliberately different question per deployment —
+  locally that the mount landed, remotely that the listing completed, since
+  an object store has no `runs/` prefix until its first run finishes. A
+  genuinely unreachable store still fails, because the connection error
+  propagates rather than flattening to an empty result. Documented and
+  pinned, because the two verdicts look like a bug until you know which
+  question each is answering.
 - **Console Pipeline Composer read API (`docs/ui-plan.md` merge 9).**
   `GET /api/composer/graph`, `/schema`, `POST /validate` and `/yaml` — the
   composer's four data sources, none of them run-scoped, so unlike every

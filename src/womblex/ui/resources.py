@@ -25,10 +25,12 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from pathlib import Path
 from typing import cast
 from urllib.parse import urlsplit, urlunsplit
 
+from womblex.config import EmbeddingConfig, EnrichmentConfig
 from womblex.store.remote import is_remote_uri, storage_options_from_env
 from womblex.ui import dashboard
 from womblex.ui.deps import UISettings
@@ -40,34 +42,66 @@ from womblex.utils.isaacus_client import (
 
 logger = logging.getLogger(__name__)
 
-#: Models the pipeline actually calls today (embed + enrich stages), so the
-#: Isaacus card's "unserved" check means something concrete rather than an
-#: arbitrary probe list.
-ISAACUS_MODELS = ("kanon-2-embedder", "kanon-2-enricher")
+#: The models the pipeline actually calls, read off the config fields that
+#: name them rather than re-typed here — the same rule the composer's schema
+#: endpoint follows ("no hand-typed mirror of `config.py`") and the dashboard's
+#: `CHECKPOINT_DIRNAMES` follows for `STAGE_CONTRACTS`. These are the schema
+#: *defaults*: the sidecar loads no config (a run's own config is not among the
+#: artefacts it reads), so a deployment that overrides `enrichment.model` is
+#: checking coverage for the stock model here. That is the honest scope of the
+#: check, and the card names which models it checked.
+ISAACUS_MODELS: tuple[str, ...] = tuple(
+    dict.fromkeys(
+        str(config.model_fields["model"].default)
+        for config in (EmbeddingConfig, EnrichmentConfig)
+    )
+)
+
+#: libpq's keyword/value DSN form (``host=… password=…``), which psycopg
+#: accepts alongside the URI form. Quoted values are matched whole so a
+#: password with a space in it does not leave its tail behind.
+_KEYWORD_PASSWORD_RE = re.compile(r"(password\s*=\s*)('[^']*'|\S+)", re.IGNORECASE)
 
 
 def _mask_secret(value: str | None) -> str | None:
-    """Enough of *value* to recognise it, never enough to reuse it."""
+    """Enough of *value* to recognise it, never enough to reuse it.
+
+    A value too short to have a non-revealing tail is masked whole rather
+    than shown — the tail convention exists to aid recognition, not to make
+    an exception for the secrets it would print in full.
+    """
     if not value:
         return None
-    tail = value[-4:] if len(value) > 4 else value
-    return f"{'•' * 8}{tail}"
+    if len(value) <= 4:
+        return "•" * 8
+    return f"{'•' * 8}{value[-4:]}"
 
 
 def _mask_dsn(dsn: str | None) -> str | None:
-    """*dsn* with its password blanked; everything else (host, db) is not a secret."""
+    """*dsn* with its password blanked; everything else (host, db) is not a secret.
+
+    Covers both DSN forms psycopg accepts, because ``JobQueue`` passes
+    whatever the operator set straight through: the URI form
+    (``postgresql://user:pw@host/db``), whose password ``urlsplit`` finds,
+    and libpq's keyword/value form (``host=… password=…``), which has no
+    netloc at all and so would otherwise be returned verbatim — a full
+    credential leak from an endpoint with no auth in front of it (plan §6).
+    """
     if not dsn:
         return None
     try:
         parts = urlsplit(dsn)
     except ValueError:
         return "***"
-    if not parts.password:
-        return dsn
-    creds, _, host = parts.netloc.rpartition("@")
-    user = creds.split(":", 1)[0]
-    netloc = f"{user}:***@{host}"
-    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    if parts.password:
+        creds, _, host = parts.netloc.rpartition("@")
+        user = creds.split(":", 1)[0]
+        dsn = urlunsplit(
+            (parts.scheme, f"{user}:***@{host}", parts.path, parts.query, parts.fragment)
+        )
+    # Runs over the whole string, so it also catches a password handed in as a
+    # URI query parameter (`?password=…`), which is not `parts.password` either.
+    return _KEYWORD_PASSWORD_RE.sub(r"\1***", dsn)
 
 
 def _store_options_summary(uri: str) -> dict:
@@ -131,7 +165,19 @@ def get_resources(settings: UISettings) -> dict:
 
 
 def test_store(settings: UISettings) -> dict:
-    """Live reachability check behind the store card's "Test" action."""
+    """Live reachability check behind the store card's "Test" action.
+
+    The two deployments answer deliberately different questions, and a
+    nonexistent path reads differently under each. Locally, a missing
+    ``output_root`` is the classic misconfiguration — a bind mount that did
+    not land — so it is a failure worth naming. Remotely, the check is that
+    the listing call *completed*: an object store has no real directories,
+    so a valid but still-empty bucket has no ``runs/`` prefix, and demanding
+    one would report every store unreachable until its first run finished.
+    A store that genuinely cannot be reached still fails here, because the
+    connection error propagates out of the listing rather than being
+    flattened into an empty result.
+    """
     if not settings.is_remote:
         root = cast(Path, settings.output_root)
         ok = root.is_dir()
