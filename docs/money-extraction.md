@@ -175,8 +175,10 @@ Configurable, off by default. When enabled, accepts `1.000,50` and
 
 ## Currency indicators
 
-**Symbols** — `$`, `A$`, `AU$`, `US$`, `NZ$`, `¢`, `€`, `£`, `¥`, `₹`, `₩`, `₽`,
-`₿`, including Unicode variants.
+**Symbols** — `$`, `A$`, `AU$`, `US$`, `NZ$`, `CA$`, `C$`, `S$`, `HK$`, `NT$`,
+`¢`, `€`, `£`, `¥`, `₹`, `₩`, `₽`, `₿`, plus prefixed forms `$AUD`, `$AU`,
+`$A`, `$USD`, `$US`, `$NZD`, `$NZ`, including Unicode/full-width variants
+(`﹩`, `＄`).
 
 The **symbol-then-letters** order (`$US655.5m`, `$A250,000`, `$AUD1.2m`) is the
 Australian reporting convention, not a typo of `US$`: the ANAO Major Projects
@@ -191,13 +193,30 @@ the amount is lost entirely.
 **Currency words** —
 
 - Australian: `dollar`, `dollars`, `cent`, `cents`, `Australian dollar(s)`
+- Other dollar-denominated: `US dollar(s)`, `United States dollar(s)`,
+  `New Zealand dollar(s)`, `Canadian dollar(s)`, `Singapore dollar(s)`,
+  `Hong Kong dollar(s)`
 - International: `euro(s)`, `pound(s)`, `sterling`, `yen`, `yuan`, `renminbi`,
-  `rupee(s)`, `peso(s)`, `franc(s)`, `won`, `ruble`/`rouble`, `dirham`
+  `rupee(s)`, `peso(s)`, `franc(s)`, `won`, `ruble`/`rouble`, `dirham` — `peso(s)`
+  and `franc(s)` are ambiguous across countries, so they resolve to a
+  money-marked span with **no** currency code (`"10 pesos"` → value 10,
+  currency `None`) rather than guessing an ISO code
 
 ## Extraction patterns
 
-Applied in strict priority order. Priority matters: it drives overlap
-resolution.
+The `#` column below is a pattern catalogue index (also the internal `pN`
+evidence code), **not** the overlap-resolution order — a number of readers
+have assumed 1 beats 9 here, which is backwards. When two patterns match
+overlapping text, `money.py`'s `_PRIORITY` table decides the winner, in this
+order (lowest number wins first): accounting-negative (`p9`) and range
+(`p7`, pre-claimed before overlap resolution runs, so it never actually
+competes) tie for highest priority, then symbol-prefix/magnitude
+(`p1`/`p6`), then ISO-prefix (`p2`), then currency-word/worded-amount tied
+(`p4`/`p11`), then ISO-suffix (`p3`), then symbol-suffix (`p5`), then
+implicit-context (`p10`) last. Concretely: `($100)` resolves to `-100` via
+the accounting-negative pattern, not `100` via the symbol-prefix pattern
+sitting inside it — accounting negatives must outrank the symbol pattern
+they enclose.
 
 | # | Pattern | Examples | Confidence |
 |---|---|---|---|
@@ -287,9 +306,15 @@ the relationship between them preserved, rather than collapsing to one value.
 
 ### Approximate values
 
-`about`, `approximately`, `around`, `~`, `>`, `<`, `at least`, `up to`,
-`no more than`. The qualifier is stored **separately** from the value — never
-folded into it.
+`about`, `approximately`, `around`, `circa`, `approx.`/`approx`, `~`, `>`,
+`<`, `>=`, `<=`, `at least`, `up to`, `no more than`, `not more than`,
+`no less than`, `not less than`, `at most`, `more than`, `less than`,
+`greater than`, `in excess of`, `over`, `under`, `nearly`, `almost`,
+`not exceeding`/`not to exceed`/`exceeding` (the drafting-language family
+also seen in "a sum not exceeding …" worded amounts), `up to a maximum of`,
+`to a maximum of`, `a maximum of`, `a minimum of`, `in the order of`,
+`of the order of`. The qualifier is stored **separately** from the value —
+never folded into it.
 
 ### Accounting negatives
 
@@ -395,8 +420,13 @@ Context influences confidence rather than gating extraction outright:
 | `$#,##0.00` number format on the column | Very high |
 | Money header + numeric column | High |
 | `Funding of ten million dollars` | High |
-| `Funding of 10 million` | High |
-| `Funding of 10` | Medium |
+| `Funding of 10 million` (implicit context, no currency marker) | Low (0.35, flat — no distinction by magnitude suffix) |
+| `Funding of 10` (implicit context, no currency marker) | Low (0.35) |
+
+Implicit-context confidence (0.35) is below the default `min_confidence`
+(0.5), so with default settings neither of the two rows above is extracted
+at all — `implicit_context=True` alone is not enough; `min_confidence` must
+also be lowered.
 | Bare `10` | Very low — not extracted |
 | `ten million` with no currency word | Not extracted |
 
