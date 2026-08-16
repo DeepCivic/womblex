@@ -84,3 +84,92 @@ export async function getAudit(
 	if (!resp.ok) throw new Error(`GET /api/runs/${runId}/audit: ${resp.status}`);
 	return (await resp.json()) as ShardAudit;
 }
+
+// The Resources Console's connection cards (docs/ui-plan.md merge 10). Cheap,
+// network-free reads — each card's live check is a separate `test*` call.
+export interface StoreCard {
+	kind: 'local' | 'remote';
+	uri: string;
+	is_object_store: boolean;
+	options: { credentials_configured: boolean; endpoint_url: string | null; region: string | null };
+}
+
+export interface QueueCard {
+	configured: boolean;
+	dsn_masked: string | null;
+}
+
+export interface IsaacusEndpoint {
+	name: string;
+	region: string | null;
+	models: string[] | null;
+}
+
+export interface IsaacusCard {
+	deployment: 'hosted' | 'sagemaker';
+	endpoints: IsaacusEndpoint[];
+	api_key_configured: boolean;
+	api_key_masked: string | null;
+	models_checked: string[];
+	unserved_models: string[];
+}
+
+export interface ResourcesCards {
+	store: StoreCard;
+	queue: QueueCard;
+	isaacus: IsaacusCard;
+}
+
+export async function getResources(fetchImpl: typeof fetch = fetch): Promise<ResourcesCards> {
+	const resp = await fetchImpl('/api/resources');
+	if (!resp.ok) throw new Error(`GET /api/resources: ${resp.status}`);
+	return (await resp.json()) as ResourcesCards;
+}
+
+export interface ReachabilityResult {
+	reachable: boolean;
+	error: string | null;
+}
+
+export async function testStoreConnection(
+	fetchImpl: typeof fetch = fetch
+): Promise<ReachabilityResult> {
+	const resp = await fetchImpl('/api/resources/test/store', { method: 'POST' });
+	if (!resp.ok) throw new Error(`POST /api/resources/test/store: ${resp.status}`);
+	return (await resp.json()) as ReachabilityResult;
+}
+
+// Fleet + queue-depth state, from the same `JobQueue` views the Dashboard
+// reads (docs/ui-plan.md merge 8) — the queue card's "test" action doubles as
+// that read. `WorkerState` / `Throughput` field names mirror `cloud/queue.py`
+// exactly (`asdict()` is what the API serialises).
+export interface QueueWorker {
+	worker_id: string;
+	running: number;
+	oldest_locked_at: string | null;
+	newest_locked_at: string | null;
+}
+
+export interface QueueThroughput {
+	window_seconds: number;
+	completed: number;
+	per_minute: number;
+	last_completed_at: string | null;
+}
+
+export interface QueueTestResult extends ReachabilityResult {
+	queue: {
+		stats: Record<string, number>;
+		total: number;
+		workers: QueueWorker[];
+		throughput: QueueThroughput;
+	} | null;
+}
+
+export async function testQueueConnection(
+	fetchImpl: typeof fetch = fetch
+): Promise<QueueTestResult> {
+	const resp = await fetchImpl('/api/resources/test/queue', { method: 'POST' });
+	if (!resp.ok) throw new Error(`POST /api/resources/test/queue: ${resp.status}`);
+	return (await resp.json()) as QueueTestResult;
+}

@@ -5,12 +5,12 @@ Screen requirements: the *Womblex Platform UX Requirements* brief (five domains 
 Dashboard, Pipeline Composer, Corpus Inspector, Semantic Chunk Inspector,
 Resources Console).
 
-Status: merges 1–5 landed (design system, read API skeleton, sidecar image,
-frontend shell, Corpus Inspector), plus the read APIs for merges 6, 8, 9 and
-10 and the write API for merge 7. The Chunk Inspector, Dashboard, Pipeline
-Composer and Resources Console screens themselves are still `ScreenStub`
-placeholders — each screen's endpoints landed ahead of it, so the
-`ReportIssue` control has nothing to attach to yet.
+Status: merges 1–5 and 10 landed (design system, read API skeleton, sidecar
+image, frontend shell, Corpus Inspector, Resources Console), plus the read
+APIs for merges 6, 8 and 9 and the write API for merge 7. The Chunk
+Inspector, Dashboard and Pipeline Composer screens themselves are still
+`ScreenStub` placeholders — each screen's endpoints landed ahead of it, so
+the `ReportIssue` control has nothing to attach to yet.
 
 ## 1. The governing principle
 
