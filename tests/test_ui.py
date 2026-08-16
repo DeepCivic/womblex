@@ -8,18 +8,30 @@ each test exercises both read paths through one body.
 """
 from __future__ import annotations
 
+import argparse
+import json
+import re
 from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+import yaml
 
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
 
+from womblex.cli import ALL_COMMANDS
 from womblex.store.output import ELEMENTS_SUFFIX, MANIFEST_SCHEMA
 from womblex.ui.app import create_app
 from womblex.ui.deps import UISettings, resolve_settings
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _compose_service(name: str) -> dict:
+    compose = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())
+    return compose["services"][name]
 
 _OK_ROW = {
     "source_hash": "hash-a", "collection_id": "test", "doc_id": "doc-a",
@@ -129,6 +141,47 @@ class TestRunsApi:
     def test_get_manifest_404(self, api_client: tuple[TestClient, Path]) -> None:
         client, _ = api_client
         assert client.get("/api/runs/nope/manifest").status_code == 404
+
+
+class TestSidecarImage:
+    """The console container is only correct if it agrees with the CLI and the app.
+
+    Nothing else in the suite reads the deployment files, so a renamed flag or
+    a second run source would otherwise surface as a container that exits 1 in
+    someone's compose stack.
+    """
+
+    def test_entrypoint_parses_against_the_real_cli(self) -> None:
+        """`womblex ui`'s flags are the image's entrypoint — they must still exist."""
+        match = re.search(
+            r"^ENTRYPOINT (\[.*\])$", (REPO_ROOT / "Dockerfile.ui").read_text(), re.MULTILINE
+        )
+        assert match, "Dockerfile.ui has no JSON-form ENTRYPOINT"
+        entrypoint = json.loads(match.group(1))
+        assert entrypoint[0] == "womblex"
+
+        parser = argparse.ArgumentParser()
+        sub = parser.add_subparsers(dest="command")
+        for cmd in ALL_COMMANDS:
+            cmd.register(sub.add_parser(cmd.name))
+        args = parser.parse_args(entrypoint[1:])  # SystemExit if a flag is gone
+        assert args.command == "ui"
+        # Loopback is the CLI default, and inside a container it would refuse
+        # every request arriving via the published port.
+        assert args.host == "0.0.0.0"
+
+    def test_compose_ui_service_is_read_only_with_tmpfs(self) -> None:
+        ui = _compose_service("ui")
+        assert ui["build"]["dockerfile"] == "Dockerfile.ui"
+        assert ui["read_only"] is True
+        # A store-backed read stages the manifest through a temp dir.
+        assert "/tmp" in ui["tmpfs"]
+
+    def test_compose_ui_service_resolves_exactly_one_run_source(self) -> None:
+        """Two sources make resolve_settings raise, so the container would exit 1."""
+        env = _compose_service("ui")["environment"]
+        assert "WOMBLEX_STORE_URI" in env
+        assert "WOMBLEX_UI_OUTPUT_ROOT" not in env
 
 
 class TestCliUi:

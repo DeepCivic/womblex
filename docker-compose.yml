@@ -104,12 +104,15 @@ services:
     command: ["worker", "--config", "configs/example.yaml",
               "--poll-interval", "5", "--stale-timeout", "900"]
 
-  # Optional read-only console (`womblex ui`, docs/ui-plan.md). Reads the
-  # same s3://womblex bucket the workers publish to; adds no pipeline logic
-  # and writes nothing to it. Hardened as a read-only container — its own
-  # code path only ever writes the (not-yet-implemented) feedback prefix —
-  # with /tmp writable for the manifest staging `ui/readers.py` does when
-  # reading a distributed run.
+  # Optional read-only console (`womblex ui`, docs/ui-plan.md), at :8080.
+  # Reads the same s3://womblex bucket the workers publish to — the shared
+  # cloud-env anchor supplies WOMBLEX_STORE_URI, which is the run source the
+  # CLI resolves when neither --output-root nor --store is passed.
+  #
+  # read_only: true is the container-level statement of the plan's rule that
+  # no screen writes to a stage output; /tmp is tmpfs because a store-backed
+  # read stages the manifest through a temp dir (ui/readers.py). Verified the
+  # console needs no other writable path, HOME included.
   ui:
     build:
       context: .
@@ -123,7 +126,6 @@ services:
     read_only: true
     tmpfs:
       - /tmp
-    command: ["ui", "--host", "0.0.0.0", "--port", "8080"]
 
 volumes:
   pgdata:

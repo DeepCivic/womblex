@@ -280,6 +280,24 @@ docker compose run --rm womblex enqueue --input-prefix inputs/demo \
 docker compose up --scale worker=4 worker     # raise or lower at any time
 ```
 
+### Console (optional)
+
+`womblex ui` serves a read-only HTTP API over artefacts a run has already
+written — `/api/runs` and `/api/runs/{run_id}/manifest` today. It is a sidecar,
+never in-process with the pipeline, and reads either a local run root or the
+object store a distributed run published to:
+
+```bash
+pip install womblex[ui]                        # add [cloud] to read a store
+womblex ui --output-root output/               # local runs, at :8080
+docker compose up -d ui                        # or beside the stack above
+```
+
+It adds no pipeline logic and writes nothing to a run — the compose service
+runs `read_only`. There is no authentication, so it binds to loopback unless
+`--host` says otherwise; put your own control in front of anything wider. The
+screens that consume this API are planned in [`docs/ui-plan.md`](docs/ui-plan.md).
+
 ## How It Works
 
 ### 1. Per-page profiling + plan-driven orchestrator
