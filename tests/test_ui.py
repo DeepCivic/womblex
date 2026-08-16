@@ -519,6 +519,24 @@ class TestSpaMount:
         client = TestClient(create_app(output_root=tmp_path, spa_dir=spa_dir))
         assert client.get("/api/runs").json() == {"runs": []}
 
+    def test_unmatched_api_path_404s_instead_of_serving_the_shell(
+        self, tmp_path: Path, spa_dir: Path
+    ) -> None:
+        """A wrong endpoint must not answer 200 + HTML — a JSON client would
+        report that as a parse error rather than the 404 it is.
+        """
+        client = TestClient(create_app(output_root=tmp_path, spa_dir=spa_dir))
+        resp = client.get("/api/bogus")
+        assert resp.status_code == 404
+        assert resp.headers["content-type"].startswith("application/json")
+
+    def test_client_routes_still_serve_the_shell_when_api_404s(
+        self, tmp_path: Path, spa_dir: Path
+    ) -> None:
+        """The /api guard must not catch routes that merely start with 'api'."""
+        client = TestClient(create_app(output_root=tmp_path, spa_dir=spa_dir))
+        assert "console shell" in client.get("/apiary").text
+
     def test_path_traversal_falls_back_to_index_instead_of_escaping(
         self, tmp_path: Path, spa_dir: Path
     ) -> None:

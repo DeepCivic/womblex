@@ -5,13 +5,13 @@
 <div class="flex h-full flex-col items-start gap-2 p-8">
 	<h1 class="font-display text-2xl">{title}</h1>
 	<p class="max-w-prose text-sm text-muted-foreground">
+		<!-- No outbound link: the console is often air-gapped (DESIGN.md
+		     adaptation principle 3), so a github.com href would be dead where
+		     it matters most. `text-accent` is also unavailable as body copy —
+		     DESIGN.md measures #7b6ff0 at 4.4:1, "Fails body", and this
+		     confirms 4.42:1 dark / 3.64:1 light. -->
 		Reads <code class="font-mono">{reads}</code>. Ships in
-		<a
-			href="https://github.com/DeepCivic/womblex/blob/main/docs/ui-plan.md"
-			class="text-accent underline underline-offset-2"
-		>
-			delivery merge {merge}
-		</a>
-		 (docs/ui-plan.md §5).
+		<span class="text-foreground">delivery merge {merge}</span> — see
+		<code class="font-mono">docs/ui-plan.md</code> §5.
 	</p>
 </div>

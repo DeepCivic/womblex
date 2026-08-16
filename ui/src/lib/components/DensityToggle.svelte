@@ -13,14 +13,20 @@
 	}
 </script>
 
-<div class="flex items-center rounded-md border border-border p-0.5 text-xs" role="radiogroup" aria-label="Row density">
+<!--
+	`aria-pressed` toggle buttons in a labelled group, not role="radiogroup".
+	A radiogroup announces itself as one tab stop navigated by arrow keys;
+	these are three ordinary tab stops, so declaring that role would promise
+	the screen reader a keyboard contract the component does not honour.
+-->
+<div class="flex items-center rounded-md border border-border p-0.5 text-xs" role="group" aria-label="Row density">
 	{#each LEVELS as level (level.value)}
 		<button
 			type="button"
-			role="radio"
-			aria-checked={preferences.density === level.value}
+			aria-pressed={preferences.density === level.value}
 			class={[
 				'rounded-sm px-2 py-1.5',
+				'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
 				preferences.density === level.value
 					? 'bg-primary text-primary-foreground'
 					: 'text-muted-foreground hover:text-foreground'

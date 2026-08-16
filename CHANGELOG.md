@@ -61,15 +61,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   console makes no Google Fonts request, per the design system's
   air-gapped-friendly rule.
 
+  The SPA catch-all serves `index.html` for client routes but **404s the
+  `/api/` namespace explicitly**. Without that guard a wrong or future
+  endpoint answered `200` with an HTML body, which a JSON client surfaces as
+  a parse error rather than the 404 it is; `/apiary` and friends still reach
+  the shell, so the guard is the namespace, not the prefix. The fallback
+  also resolves and containment-checks the requested path before touching
+  the filesystem, so `..` traversal returns the shell instead of escaping
+  `ui/build`.
+
+  Accessibility was verified by measurement, not inspection, and two of
+  `DESIGN.md`'s rules turned out not to survive its own light theme — the
+  system is dark-first and its figures were computed against the dark page.
+  Lime as the active-nav *label* colour measures 11.86:1 on the dark nav but
+  1.32:1 on the light one (`--surface-raised` is `#ffffff` there), so lime
+  stays as the 2px active rule — a fill, always legible — and the label
+  carries the state in weight and `--foreground` (13.72:1 / 17.46:1). The
+  purple `--accent` is likewise not used as body copy (4.42:1 dark, 3.64:1
+  light), matching the doc's own "structural / large text only". Every one
+  of the shell's nine tab stops was confirmed to render the `--ring`
+  indicator. The related finding that `DESIGN.md`'s status-pill rule holds
+  only in dark mode is recorded in `docs/decisions.md` for merge 5's
+  `StatusPill`, which is the first component it would bite. The density
+  control drives the side-nav row height (48/40/32px) rather than only
+  taking effect once the grids land, so the shipped control does something
+  and the mechanism is proven before merge 5 depends on it.
+
   A Node job in `ci.yml`, independent of the Python matrix, lints
   (`eslint`), type-checks (`svelte-check`) and builds the SPA on every push —
   a broken frontend now fails its own job instead of hiding inside a Python
   test run. `tests/test_ui.py` gained the same kind of drift guard merge 3's
   image tests did: the Dockerfile's builder-stage script and output
   directory are checked against `ui/package.json` and `svelte.config.js`
-  rather than asserted separately, and the SPA-mount fallback (client routes
-  resolve to `index.html`, `/api/*` still wins over the catch-all) is
-  exercised directly.
+  rather than asserted separately, and the SPA-mount behaviour (client-route
+  fallback, `/api/` 404s, traversal containment) is exercised directly.
 - **Console sidecar image (`docs/ui-plan.md` merge 3).** `Dockerfile.ui` and a
   `ui` service in `docker-compose.yml`, so the console deploys the way the
   plan's §2 describes it — its own container beside the workers, same image

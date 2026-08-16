@@ -458,6 +458,29 @@ page, and chunking reads `elements` rather than `pages[i].text`.
   page background or body text, `#18182a` as the pill near-black) but are
   not verified against DeepCivic's actual values. Reconcile once that
   repository is reachable from a Womblex session.
+- **`DESIGN.md`'s light theme is underspecified, and two of its rules do not
+  hold there.** The system is dark-first, and its stated rules were checked
+  against the dark page; measured against the light one they break. Recorded
+  because merge 5's `StatusPill` is the first component that would inherit
+  the contradiction. All figures below are WCAG 2.1 ratios computed from the
+  tokens `DESIGN.md` itself lists.
+  - **The status-pill rule holds only in dark mode.** "A status pill or dot
+    is always a solid `--status-*` fill with near-black `#18182a` text …
+    identical in light and dark mode and needs no per-theme override." Over
+    the *dark* fills that is exact — 4.64:1 (failed) to 13.18:1 (running),
+    matching the doc's stated "4.6:1 through 13.1:1". Over the *light* fills
+    the same near-black gives pending 1.47:1, warning 3.48:1, done 3.48:1,
+    failed 3.53:1 — only running passes. Those light values are tuned for
+    **white** text (4.94:1 to 11.88:1), so the pill does need a per-theme
+    text colour, contrary to the rule. `StatusPill` should either flip its
+    text colour per theme or use the dark fills in both.
+  - **Lime cannot be an active-nav *text* colour in light mode.** "Active
+    item takes a lime left rule + lime icon" works on the dark nav
+    (`#c8ef35` on `#22222e` = 11.86:1) but not the light one, where
+    `--surface-raised` is `#ffffff` and the same lime computes to 1.32:1.
+    The shell therefore uses lime for the 2px rule (a fill, always legible)
+    and carries the active state in the label's weight and `--foreground`
+    (13.72:1 dark / 17.46:1 light).
 
 ## Deferred / backlog
 
