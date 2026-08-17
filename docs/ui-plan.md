@@ -14,14 +14,15 @@ still a `ScreenStub` placeholder — which is why that screen renders the
 "Ships in delivery merge N" message. Merge 7 is **partial**: the feedback
 write path (`POST /api/runs/{id}/feedback` + one-file-per-report writer) is
 in, but the `ReportIssue` control is not wired into any screen yet. Merge 11
-(execution controls) is **backend-only**: `GET /api/execute/status` and
-`POST /api/execute/enqueue` have landed (gated by `--allow-execute`,
-dispatch is always the queue), but no execution *screen* exists yet.
+(execution controls) is now complete end to end: `GET /api/execute/status`
+and `POST /api/execute/enqueue` are joined by `ui/src/routes/execute` — a
+capability banner that names the missing piece when the console cannot
+dispatch, and a configure-and-run form that enqueues an extraction run and
+points the run selector at it.
 
-In short: every planned *endpoint* now exists; one *screen* each for the
-Dashboard (8) and Execution Controls (11), plus one *control* (7), remain to
-be built on top of endpoints that are already there. Per-merge state is
-tracked in the §5 table.
+In short: every planned *endpoint* now exists; one *screen* (the Dashboard,
+8) plus one *control* (7) remain to be built on top of endpoints that are
+already there. Per-merge state is tracked in the §5 table.
 
 ## 1. The governing principle
 
@@ -251,12 +252,12 @@ tree green.
 | 8 | **Dashboard** | Queue stats, job list, stale detection, fleet view from `locked_by`, KPI tiles and throughput | ⚠️ Endpoint only — `/api/dashboard` landed; screen is still `ScreenStub` |
 | 9 | **Pipeline Composer** | `STAGE_CONTRACTS` graph endpoint, config form, validation, YAML download | ✅ Done (endpoints + screen; landed as two commits — graph, then form) |
 | 10 | **Resources Console** | Connection cards, credential masking, test actions, fleet + queue-depth state | ✅ Done (endpoints + screen) |
-| 11 | **Execution controls** | `--allow-execute`, configure-and-run, per-stage runs, log streaming | ⚠️ Backend only — `GET /api/execute/status` + `POST /api/execute/enqueue` landed (queue dispatch, `--allow-execute` guard); no execution screen yet |
+| 11 | **Execution controls** | `--allow-execute`, configure-and-run, per-stage runs, log streaming | ✅ Done (endpoints + screen; configure-and-run enqueues, capability banner names the missing piece — "log streaming" is the Dashboard's queue/checkpoint feed, not duplicated here) |
 
-**Remaining work is two screens (8, 11) plus one control (7)**, all over
+**Remaining work is one screen (8) plus one control (7)**, both over
 endpoints that already exist and are tested. The next merges are
-frontend-only: build `ui/src/routes/dashboard` and the execution controls
-against their landed APIs, then attach `ReportIssue` to the inspector screens.
+frontend-only: build `ui/src/routes/dashboard` against its landed API, then
+attach `ReportIssue` to the inspector screens.
 
 Merge 9 came in two commits — the DAG, then the config form over it — because
 a screen carrying both a graph renderer and a recursive JSON-Schema form does

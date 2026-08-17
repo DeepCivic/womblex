@@ -403,3 +403,76 @@ export async function renderConfigYaml(
 	if (!resp.ok) throw new Error(`POST /api/composer/yaml: ${resp.status}`);
 	return await resp.text();
 }
+
+// The Execution Controls (docs/ui-plan.md merge 11) — the one writable-to-a-run
+// surface. `ExecutionCapability.as_dict()`: whether this deployment can dispatch
+// work, and which of the three requirements is missing if not (§4 "Running the
+// pipeline from the screen"). `stages` is `STAGE_NAMES`, served so the frontend
+// re-types no stage list.
+export interface ExecutionStatus {
+	can_execute: boolean;
+	allow_execute: boolean;
+	has_store: boolean;
+	has_queue: boolean;
+	stages: string[];
+}
+
+export async function getExecutionStatus(
+	fetchImpl: typeof fetch = fetch
+): Promise<ExecutionStatus> {
+	const resp = await fetchImpl('/api/execute/status');
+	if (!resp.ok) throw new Error(`GET /api/execute/status: ${resp.status}`);
+	return (await resp.json()) as ExecutionStatus;
+}
+
+// The configure-and-run form. `input_prefix` is store-relative; `run_id`
+// omitted mints a fresh timestamped id, and supplying an existing one resumes
+// it (enqueue is idempotent on `(run_id, batch_num)`).
+export interface EnqueueRequest {
+	input_prefix: string;
+	run_id?: string | null;
+	batch_size?: number;
+	max_attempts?: number;
+}
+
+// `EnqueueResult.as_dict()`. `newly_enqueued` distinguishes a fresh run from a
+// resume (a resume inserts only the batches a run is missing); `run_id` is what
+// the Dashboard and Corpus Inspector are then pointed at to watch it drain.
+export interface EnqueueResult {
+	run_id: string;
+	document_count: number;
+	batch_count: number;
+	newly_enqueued: number;
+	shard_prefix: string;
+}
+
+/**
+ * An enqueue the console refused or could not serve. `status` carries the HTTP
+ * code so the screen can tell the three failure shapes apart without parsing
+ * the message: 403 (audit-only, a deliberate choice), 409 (no store or queue
+ * configured — a wiring gap), 400 (bad input, e.g. no documents under the
+ * prefix). These mirror `ui/execute.py`'s guard and `ValueError` paths.
+ */
+export class EnqueueRefused extends Error {
+	status: number;
+	constructor(status: number, detail: string) {
+		super(detail);
+		this.name = 'EnqueueRefused';
+		this.status = status;
+	}
+}
+
+export async function enqueueExtraction(
+	req: EnqueueRequest,
+	fetchImpl: typeof fetch = fetch
+): Promise<EnqueueResult> {
+	const resp = await fetchImpl('/api/execute/enqueue', {
+		...JSON_POST,
+		body: JSON.stringify(req)
+	});
+	if (!resp.ok) {
+		const detail = ((await resp.json().catch(() => ({}))) as { detail?: string }).detail;
+		throw new EnqueueRefused(resp.status, detail ?? `POST /api/execute/enqueue: ${resp.status}`);
+	}
+	return (await resp.json()) as EnqueueResult;
+}

@@ -7,6 +7,7 @@ import FolderSearch from '@lucide/svelte/icons/folder-search';
 import ScrollText from '@lucide/svelte/icons/scroll-text';
 import Workflow from '@lucide/svelte/icons/workflow';
 import Plug from '@lucide/svelte/icons/plug';
+import Play from '@lucide/svelte/icons/play';
 import type { Component } from 'svelte';
 
 export interface NavItem {
@@ -20,5 +21,6 @@ export const NAV_ITEMS: NavItem[] = [
 	{ label: 'Corpus Inspector', href: '/corpus', icon: FolderSearch },
 	{ label: 'Chunk Inspector', href: '/chunks', icon: ScrollText },
 	{ label: 'Pipeline Composer', href: '/composer', icon: Workflow },
-	{ label: 'Resources Console', href: '/resources', icon: Plug }
+	{ label: 'Resources Console', href: '/resources', icon: Plug },
+	{ label: 'Execution Controls', href: '/execute', icon: Play }
 ];

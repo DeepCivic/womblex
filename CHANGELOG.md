@@ -8,6 +8,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Console Execution Controls — screen (`docs/ui-plan.md` merge 11).**
+  The screen over the backend that landed just below: `ui/src/routes/execute`
+  replaces the sidebar's last stub with the console's one writable-to-a-run
+  surface. It loads `GET /api/execute/status` (a cheap, network-free read)
+  and, when the console cannot dispatch, shows a banner naming the *one*
+  missing piece — audit-only (no `--allow-execute`), no store, or no queue —
+  in the guard's own order, rather than a bare "disabled". The
+  configure-and-run form (input prefix, optional run id, batch size, max
+  attempts) posts to `POST /api/execute/enqueue`; a success reports the run
+  id, document/batch counts and `newly_enqueued` (which distinguishes a fresh
+  run from a resume), then points the run selector at the run just planned so
+  the operator can switch straight to the Dashboard or Corpus Inspector to
+  watch it drain.
+
+  Dispatch is the only action: "log streaming" is the Dashboard's own
+  queue-status + checkpoint feed (plan §4), so the screen links there rather
+  than duplicating it. The primary button is lime `--primary`, per
+  `DESIGN.md`'s role table — `--accent` is structural-only and never a fill.
+  A capability change since load (the switch flipped off, say) surfaces as the
+  enqueue's 403/409 and re-reads the status so the form disables and the
+  banner explains, matching what the server saw. The new `EnqueueRefused`
+  carries the HTTP status so the client tells the three failure shapes apart
+  (403 audit-only, 409 unwired, 400 bad input) without parsing a message.
+  With this, merge 11 is complete end to end and only the Dashboard screen (8)
+  and the `ReportIssue` control (7) remain.
 - **Console Execution Controls — backend (`docs/ui-plan.md` merge 11).**
   The console's first writable-to-a-run surface: `GET /api/execute/status`
   reports whether this deployment can dispatch work (and which piece is
