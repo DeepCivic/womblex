@@ -126,10 +126,19 @@ def get_preset(name: str) -> Preset | None:
 # ---------------------------------------------------------------------------
 #
 # Besides the built-ins above (code), an operator can *save* a composed config
-# as a named starting point of their own. Those land as one JSON file each under
-# a writable ``presets_dir`` (``UISettings.presets_dir``, ``None`` when the
-# deployment configured none) — one file per record, like
-# ``store.feedback_output``, so two saves can't lose each other.
+# as a named starting point of their own. Each lands as one JSON file — one file
+# per record, like ``store.feedback_output``, so two saves can't lose each
+# other. *Where* that file sits is ``womblex.ui.readers``' call, not this
+# module's: locally under a writable ``presets_dir``, remotely under the store's
+# own ``presets/`` prefix (a sibling of ``runs/`` and ``feedback/``), so a
+# store-backed console needs no writable mount. This module owns only the
+# *format* — the filename, the record bytes, and parsing one file back into a
+# :class:`Preset` — exactly the split ``feedback_output`` keeps.
+
+#: The store prefix operator-saved presets live under in remote mode — a
+#: sibling of ``runs/`` and ``feedback/`` in the same bucket, so the container
+#: stays ``read_only`` (docs/ui-plan.md merge 9).
+PRESETS_DIRNAME = "presets"
 
 _PRESET_SUFFIX = ".preset.json"
 
@@ -167,89 +176,88 @@ def _validate_overlay(config: dict[str, Any]) -> dict[str, Any]:
     return overlay
 
 
-def _load_saved_presets(presets_dir: Path) -> dict[str, Preset]:
-    """Read every ``*.preset.json`` under *presets_dir*, keyed by filename stem.
+# ---------------------------------------------------------------------------
+# Format: filename, record bytes, and parsing one file back into a Preset.
+# `readers.py` owns *where* these files sit (local dir vs. store prefix); this
+# module owns *what* one is, exactly the split `feedback_output` keeps.
+# ---------------------------------------------------------------------------
 
-    An unreadable or invalid file is skipped, not fatal — one corrupt preset
-    must not blank the dropdown (the same skip-and-continue the readers apply).
+
+def preset_filename(name: str) -> str:
+    """The single filename a preset called *name* is stored as.
+
+    Assumes *name* is already :func:`is_safe_preset_name`-checked by the caller
+    (it becomes this path segment); the saver validates before reaching here.
     """
-    saved: dict[str, Preset] = {}
-    if not presets_dir.is_dir():
-        return saved
-    for path in sorted(presets_dir.glob(f"*{_PRESET_SUFFIX}")):
-        name = path.name[: -len(_PRESET_SUFFIX)]
-        if not is_safe_preset_name(name):
-            continue
-        try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
-            _validate_overlay(raw.get("config", {}))
-        except Exception:
-            continue
-        saved[name] = Preset(
-            name=name,
-            description=str(raw.get("description", "")),
-            formats=tuple(raw.get("formats", ())),
-            config=raw.get("config", {}),
-            source="saved",
-        )
-    return saved
+    return f"{name}{_PRESET_SUFFIX}"
 
 
-def list_all_presets(presets_dir: Path | None) -> list[dict[str, Any]]:
-    """Built-in presets, then any saved under *presets_dir* (a saved name shadows)."""
-    merged: dict[str, Preset] = dict(PRESETS)
-    if presets_dir is not None:
-        merged.update(_load_saved_presets(presets_dir))
-    return [p.as_dict() for p in merged.values()]
+def preset_name_from_filename(filename: str) -> str | None:
+    """The preset name a ``*.preset.json`` file encodes, or ``None`` if it is not one.
+
+    ``None`` also for a name that is not :func:`is_safe_preset_name`-safe, so a
+    smuggled or hand-placed file never becomes a listable preset.
+    """
+    if not filename.endswith(_PRESET_SUFFIX):
+        return None
+    name = filename[: -len(_PRESET_SUFFIX)]
+    return name if is_safe_preset_name(name) else None
 
 
-def get_any_preset(presets_dir: Path | None, name: str) -> Preset | None:
-    """One preset by name — a saved one shadowing a built-in — or ``None``."""
-    if presets_dir is not None and is_safe_preset_name(name):
-        saved = _load_saved_presets(presets_dir)
-        if name in saved:
-            return saved[name]
-    return PRESETS.get(name)
-
-
-def save_preset(
-    presets_dir: Path,
-    *,
-    name: str,
-    description: str,
-    formats: tuple[str, ...],
-    config: dict[str, Any],
-) -> Preset:
-    """Write *config* as a named preset under *presets_dir*; return what was saved.
+def build_preset_record(
+    *, name: str, description: str, formats: tuple[str, ...], config: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Validate a save request into ``(record, overlay)`` — the on-disk shape and the overlay.
 
     ``dataset``/``paths`` are stripped and the overlay validated
-    (:func:`_validate_overlay`). Raises ``ValueError`` on an unsafe *name*;
-    ``pydantic.ValidationError`` on an overlay that does not load.
+    (:func:`_validate_overlay`) — the same ``WomblexConfig(**raw)`` construction
+    the built-ins are checked with, so a preset that would not load is refused
+    here rather than 500-ing whoever later picks it. Raises ``ValueError`` on an
+    unsafe *name*; ``pydantic.ValidationError`` on an overlay that does not load.
     """
     if not is_safe_preset_name(name):
         raise ValueError(f"unsafe preset name: {name!r}")
     overlay = _validate_overlay(config)
-    presets_dir.mkdir(parents=True, exist_ok=True)
     record = {"name": name, "description": description, "formats": list(formats), "config": overlay}
-    (presets_dir / f"{name}{_PRESET_SUFFIX}").write_text(
-        json.dumps(record, indent=2), encoding="utf-8"
-    )
-    return Preset(name=name, description=description, formats=formats, config=overlay, source="saved")
+    return record, overlay
 
 
-def delete_saved_preset(presets_dir: Path, name: str) -> bool:
-    """Delete a saved preset; True if removed, False if absent.
+def serialise_preset_record(record: dict[str, Any]) -> str:
+    """The bytes one preset file carries — one definition for local and store writes."""
+    return json.dumps(record, indent=2)
 
-    Only ever removes a file under *presets_dir* — a built-in is code, so a name
-    matching only a built-in (or an unsafe name) returns False untouched.
+
+def parse_saved_preset(name: str, raw_bytes: str) -> Preset | None:
+    """Parse one preset file's contents into a saved :class:`Preset`, or ``None``.
+
+    ``None`` (skipped, not fatal) when the file will not parse or its overlay
+    will not load — one corrupt preset must not blank the dropdown, the same
+    skip-and-continue the readers apply to a corrupt sidecar.
     """
-    if not is_safe_preset_name(name):
-        return False
-    path = presets_dir / f"{name}{_PRESET_SUFFIX}"
-    if not path.is_file():
-        return False
-    path.unlink()
-    return True
+    try:
+        raw = json.loads(raw_bytes)
+        _validate_overlay(raw.get("config", {}))
+    except Exception:
+        return None
+    return Preset(
+        name=name,
+        description=str(raw.get("description", "")),
+        formats=tuple(raw.get("formats", ())),
+        config=raw.get("config", {}),
+        source="saved",
+    )
+
+
+def merge_saved(saved: dict[str, Preset]) -> list[dict[str, Any]]:
+    """Built-in presets, then *saved* (a saved name shadows a built-in)."""
+    merged: dict[str, Preset] = dict(PRESETS)
+    merged.update(saved)
+    return [p.as_dict() for p in merged.values()]
+
+
+def resolve_one(saved: dict[str, Preset], name: str) -> Preset | None:
+    """One preset by name — a *saved* one shadowing a built-in — or ``None``."""
+    return saved.get(name) or PRESETS.get(name)
 
 
 def _validate_presets() -> None:

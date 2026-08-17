@@ -34,7 +34,9 @@ from womblex.store.quality_output import CHUNK_QUALITY_SCHEMA, CHUNK_QUALITY_SUF
 from womblex.store.retention import STAGE_SUFFIXES, RunDescription, describe_run, list_runs
 from womblex.store.run_manifest import RUN_MANIFEST_FILENAME
 from womblex.store.shard_audit import ARCHIVE_SUFFIX, audit_shard_directory
+from womblex.ui import presets as presets_mod
 from womblex.ui.deps import UISettings
+from womblex.ui.presets import Preset
 
 if TYPE_CHECKING:
     from womblex.store.remote import RemoteStore
@@ -187,6 +189,131 @@ def write_feedback(
     feedback_root = settings.feedback_dir or cast(Path, settings.output_root) / FEEDBACK_DIRNAME
     write_feedback_record(feedback_root, run_id, record)
     return record
+
+
+# ---------------------------------------------------------------------------
+# Operator-saved presets (docs/ui-plan.md merge 9)
+# ---------------------------------------------------------------------------
+#
+# Presets get the same local-vs-store treatment feedback does, for the same
+# reason: a store-backed (compose) console mounts its run source read-only, so
+# saving to a local ``presets_dir`` would 409 there. The store branch writes /
+# lists / deletes under the store's own ``presets/`` prefix (a sibling of
+# ``runs/`` and ``feedback/``), and the container needs no writable mount.
+# ``womblex.ui.presets`` owns the *format* (filename, bytes, parsing); these
+# functions own *where* it sits, exactly the split ``write_feedback`` keeps.
+
+
+def list_all_presets(settings: UISettings) -> list[dict]:
+    """Built-in presets, then any operator-saved ones (a saved name shadows).
+
+    Reads saved presets from the store's ``presets/`` prefix in remote mode,
+    or from ``presets_dir`` locally (empty when none is configured).
+    """
+    return presets_mod.merge_saved(_read_saved_presets(settings))
+
+
+def get_any_preset(settings: UISettings, name: str) -> Preset | None:
+    """One preset by name (a saved one shadowing a built-in), or ``None``."""
+    if not presets_mod.is_safe_preset_name(name):
+        return presets_mod.PRESETS.get(name)
+    return presets_mod.resolve_one(_read_saved_presets(settings), name)
+
+
+def save_preset(
+    settings: UISettings,
+    *,
+    name: str,
+    description: str,
+    formats: tuple[str, ...],
+    config: dict,
+) -> Preset:
+    """Save one preset; return the saved :class:`~womblex.ui.presets.Preset`.
+
+    The overlay is validated before either branch writes (a preset that would
+    not load is refused, not stored). Raises ``ValueError`` on an unsafe name,
+    ``pydantic.ValidationError`` on a non-loadable overlay — the route maps both
+    to 400. Callers gate on :attr:`UISettings.presets_writable` first (409).
+    """
+    record, overlay = presets_mod.build_preset_record(
+        name=name, description=description, formats=formats, config=config,
+    )
+    body = presets_mod.serialise_preset_record(record)
+    filename = presets_mod.preset_filename(name)
+    if settings.is_remote:
+        store = _open_store(cast(str, settings.store_uri))
+        with tempfile.TemporaryDirectory(prefix="womblex-ui-") as tmp:
+            local = Path(tmp) / filename
+            local.write_text(body, encoding="utf-8")
+            store.upload_file(local, f"{presets_mod.PRESETS_DIRNAME}/{filename}")
+    else:
+        presets_dir = cast(Path, settings.presets_dir)
+        presets_dir.mkdir(parents=True, exist_ok=True)
+        (presets_dir / filename).write_text(body, encoding="utf-8")
+    return presets_mod.Preset(
+        name=name, description=description, formats=formats, config=overlay, source="saved",
+    )
+
+
+def delete_saved_preset(settings: UISettings, name: str) -> bool:
+    """Delete a saved preset; True if removed, False if absent (or a built-in).
+
+    A built-in is code, so a name matching only a built-in — or an unsafe name
+    — returns False untouched; only a file/object under the presets location is
+    ever removed.
+    """
+    if not presets_mod.is_safe_preset_name(name):
+        return False
+    filename = presets_mod.preset_filename(name)
+    if settings.is_remote:
+        store = _open_store(cast(str, settings.store_uri))
+        key = f"{presets_mod.PRESETS_DIRNAME}/{filename}"
+        if not store.exists(key):
+            return False
+        store.delete(key)
+        return True
+    presets_dir = cast(Path, settings.presets_dir)
+    path = presets_dir / filename
+    if not path.is_file():
+        return False
+    path.unlink()
+    return True
+
+
+def _read_saved_presets(settings: UISettings) -> dict[str, Preset]:
+    """Every operator-saved preset, keyed by name — store prefix or local dir.
+
+    A file that will not parse or whose overlay will not load is skipped (not
+    fatal): one corrupt preset must not blank the dropdown, the same
+    skip-and-continue the sidecar readers apply.
+    """
+    saved: dict[str, Preset] = {}
+    if settings.is_remote:
+        store = _open_store(cast(str, settings.store_uri))
+        for key in store.list_files(presets_mod.PRESETS_DIRNAME, "*"):
+            filename = key.rsplit("/", 1)[-1]
+            name = presets_mod.preset_name_from_filename(filename)
+            if name is None:
+                continue
+            preset = presets_mod.parse_saved_preset(name, store.read_text(key))
+            if preset is not None:
+                saved[name] = preset
+        return saved
+    presets_dir = settings.presets_dir
+    if presets_dir is None or not presets_dir.is_dir():
+        return saved
+    for path in sorted(presets_dir.glob("*")):
+        name = presets_mod.preset_name_from_filename(path.name)
+        if name is None:
+            continue
+        try:
+            body = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        preset = presets_mod.parse_saved_preset(name, body)
+        if preset is not None:
+            saved[name] = preset
+    return saved
 
 
 # ---------------------------------------------------------------------------

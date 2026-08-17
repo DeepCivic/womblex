@@ -410,11 +410,14 @@ export async function getStageGraph(fetchImpl: typeof fetch = fetch): Promise<St
 // `config` is a *partial* `WomblexConfig` — it carries stage toggles/settings
 // but never `dataset`/`paths`, which name the run and stay the operator's to
 // fill — so applying it merges over the form's current config, leaving those.
+// `source` is `builtin` (code, undeletable) or `saved` (operator-authored) —
+// the screen offers delete only on the latter.
 export interface Preset {
 	name: string;
 	description: string;
 	formats: string[];
 	config: ConfigObject;
+	source: 'builtin' | 'saved';
 }
 
 export async function listPresets(fetchImpl: typeof fetch = fetch): Promise<Preset[]> {
@@ -422,6 +425,75 @@ export async function listPresets(fetchImpl: typeof fetch = fetch): Promise<Pres
 	if (!resp.ok) throw new Error(`GET /api/composer/presets: ${resp.status}`);
 	const body = (await resp.json()) as { presets: Preset[] };
 	return body.presets;
+}
+
+// The save-a-preset form. `config` is the whole composed config; the server
+// strips `dataset`/`paths` (a preset is an overlay) and validates the rest
+// through the same `WomblexConfig(**raw)` the composer's other endpoints use.
+export interface SavePresetRequest {
+	name: string;
+	description?: string;
+	formats?: string[];
+	config: ConfigObject;
+}
+
+/**
+ * Saving a preset the console refused. `status` is the HTTP code so the screen
+ * distinguishes the failure shapes without parsing the message: 409 (this
+ * console cannot write presets — local mode with no presets dir; remote mode
+ * always can), 400 (unsafe name, or a config that would not load as an
+ * overlay). Mirrors `ui/routes/composer.py`'s guard and error paths.
+ */
+export class SavePresetRefused extends Error {
+	status: number;
+	constructor(status: number, detail: string) {
+		super(detail);
+		this.name = 'SavePresetRefused';
+		this.status = status;
+	}
+}
+
+export async function savePreset(
+	req: SavePresetRequest,
+	fetchImpl: typeof fetch = fetch
+): Promise<Preset> {
+	const resp = await fetchImpl('/api/composer/presets', {
+		...JSON_POST,
+		body: JSON.stringify(req)
+	});
+	if (!resp.ok) {
+		const detail = ((await resp.json().catch(() => ({}))) as { detail?: unknown }).detail;
+		throw new SavePresetRefused(resp.status, detailToMessage(detail, resp.status));
+	}
+	return (await resp.json()) as Preset;
+}
+
+export async function deletePreset(
+	name: string,
+	fetchImpl: typeof fetch = fetch
+): Promise<void> {
+	const resp = await fetchImpl(`/api/composer/presets/${encodeURIComponent(name)}`, {
+		method: 'DELETE'
+	});
+	if (!resp.ok) {
+		const detail = ((await resp.json().catch(() => ({}))) as { detail?: unknown }).detail;
+		throw new SavePresetRefused(resp.status, detailToMessage(detail, resp.status));
+	}
+}
+
+// FastAPI's `detail` is a string for our raised HTTPExceptions but Pydantic's
+// own list-of-errors for a 400 from a bad overlay — flatten both to one line.
+function detailToMessage(detail: unknown, status: number): string {
+	if (typeof detail === 'string') return detail;
+	if (Array.isArray(detail)) {
+		return detail
+			.map((e) => {
+				const loc = Array.isArray(e?.loc) ? e.loc.join('.') : '';
+				return loc ? `${loc}: ${e?.msg ?? ''}` : String(e?.msg ?? e);
+			})
+			.join('; ');
+	}
+	return `request failed: ${status}`;
 }
 
 // The subset of JSON Schema Pydantic emits for `WomblexConfig`. Typed rather

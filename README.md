@@ -282,19 +282,22 @@ docker compose up --scale worker=4 worker     # raise or lower at any time
 
 ### Console (optional)
 
-`womblex ui` serves a read-only web console over artefacts a run has already
+`womblex ui` serves a web console over artefacts a run has already
 written — a run selector and documents table, a Dashboard (queue state and
 per-stage checkpoint progress), Corpus and Chunk inspectors (a document's
 chunks with their entity / PII / money overlays), a Pipeline Composer (build a
-`WomblexConfig` against the live JSON Schema, with named presets and the stage
-DAG rendered from the stage contracts), a Resources console (store / queue /
-Isaacus connection checks), and Execution Controls (configure-and-run into the
-job queue). It is a sidecar, never in-process with the pipeline, and reads
-either a local run root or the object store a distributed run published to:
+`WomblexConfig` against the live JSON Schema, with named presets — built-in and
+operator-saved — and the stage DAG rendered from the stage contracts; it can
+save the composed config as a preset and hand it off to the queue), a Resources
+console (store / queue / Isaacus connection checks), and Execution Controls
+(configure-and-run into the job queue). It is a sidecar, never in-process with
+the pipeline, and reads either a local run root or the object store a
+distributed run published to:
 
 ```bash
 pip install womblex[ui]                        # add [cloud] to read a store
 womblex ui --output-root output/               # local runs, at :8080
+womblex ui --output-root output/ --presets-dir presets/  # + save composer presets
 womblex ui --store <uri> --dsn <dsn>           # + dispatch (execution on by default)
 womblex ui --store <uri> --dsn <dsn> --audit-only  # read/inspect only, no dispatch
 docker compose up -d ui                        # or beside the stack above
@@ -303,12 +306,17 @@ docker compose up -d ui                        # or beside the stack above
 It adds no pipeline logic. Dispatch is on by default: wire both a `--store`
 and a `--dsn` and the Execution Controls screen can plan a run into the queue
 (workers do the work; the console runs no scheduler). Pass `--audit-only` for a
-pure read/inspect console that refuses to dispatch. Its one always-available write path is the report action
-(`POST /api/runs/{run_id}/feedback`), which files a reviewer's note about a
-record as a single JSON file under a `feedback/` location that is always a
-*sibling* of the runs, never inside one — so re-running a stage or purging a run
-neither disturbs accumulated feedback nor is disturbed by it. The compose
-service still runs `read_only`, writing feedback to the object store. There is
+pure read/inspect console that refuses to dispatch. Its writable surfaces are
+deliberately narrow. The report action (`POST /api/runs/{run_id}/feedback`)
+files a reviewer's note about a record as a single JSON file under a
+`feedback/` location that is always a *sibling* of the runs, never inside one
+— so re-running a stage or purging a run neither disturbs accumulated feedback
+nor is disturbed by it. The Pipeline Composer's saved presets work the same
+way: locally they need a writable `--presets-dir` (or `$WOMBLEX_UI_PRESETS_DIR`;
+without one the built-in presets still serve but saving is disabled), and in
+store-backed mode they land under the object store's own `presets/` prefix,
+alongside `feedback/` — so the compose service still runs `read_only`, writing
+both feedback and presets to the object store. There is
 no authentication, so it binds to loopback unless `--host` says otherwise; put
 your own control in front of anything wider. The screen designs and data
 sources are documented in [`docs/ui-plan.md`](docs/ui-plan.md).

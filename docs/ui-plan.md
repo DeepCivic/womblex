@@ -241,6 +241,25 @@ rather than referenced for the same reason. `reported_by` comes from an env var
 or trusted header and is **advisory, not verified** — there is no auth (§6) —
 but it costs one string now and a migration later.
 
+**Operator-saved presets take the same shape.** The Pipeline Composer can save
+a composed config as a named preset and delete one it saved (a built-in is
+code, so only saved presets are deletable). Each preset is one JSON file, and
+`ui/readers.py` owns the local-vs-store split exactly as it does for feedback:
+locally under a writable `--presets-dir` (`$WOMBLEX_UI_PRESETS_DIR`; absent
+disables saving, built-ins still serve), and in store-backed mode under the
+store's own `presets/` prefix — a sibling of `runs/` and `feedback/`. So a
+store-backed console saves presets without any writable mount, and the compose
+`ui` service stays `read_only` with no volume change. A preset is a *partial*
+config — `dataset`/`paths` are stripped on save (they name the run, not the
+shape) and the overlay is validated against the same `WomblexConfig(**raw)`
+the built-ins are, so a preset that would not load is refused at save (400)
+rather than 500-ing whoever later picks it. The composer also hands a composed
+run off to the queue: the queue carries no config (workers read their own
+`--config` at launch), so this is only `paths.input_root` → `input_prefix`
+(confirmed by the operator, since it may be absolute/local while the prefix is
+store-relative) and `dataset.run_id` → `run_id`, through the same enqueue the
+Execution Controls use.
+
 ## 5. Delivery sequence
 
 Sized to the 500-changed-line merge cap. Each merge stands alone and leaves the
@@ -256,7 +275,7 @@ tree green.
 | 6 | **Chunk Inspector** | Chunk reader endpoints, `ChunkCard`, entity/PII/money overlays | ✅ Done (endpoints + screen) |
 | 7 | **Report action** | One-file-per-report writer + `POST /api/runs/{id}/feedback`; `ReportIssue` control on the inspector screens | ⚠️ Write path only — endpoint + writer landed; `ReportIssue` control not yet on any screen |
 | 8 | **Dashboard** | Queue stats, job list, stale detection, fleet view from `locked_by`, KPI tiles and throughput | ✅ Done (endpoints + screen; run-scoped, self-refreshing, renders the checkpoint half with no queue configured) |
-| 9 | **Pipeline Composer** | `STAGE_CONTRACTS` graph endpoint, config form, validation, YAML download | ✅ Done (endpoints + screen; landed as two commits — graph, then form) |
+| 9 | **Pipeline Composer** | `STAGE_CONTRACTS` graph endpoint, config form, validation, YAML download, save/delete operator presets, enqueue hand-off | ✅ Done (endpoints + screen; landed across commits — graph, then form, then save/delete presets + enqueue hand-off) |
 | 10 | **Resources Console** | Connection cards, credential masking, test actions, fleet + queue-depth state | ✅ Done (endpoints + screen) |
 | 11 | **Execution controls** | `--audit-only`, configure-and-run, per-stage runs, log streaming | ✅ Done (endpoints + screen; configure-and-run enqueues, capability banner names the missing piece — "log streaming" is the Dashboard's queue/checkpoint feed, not duplicated here) |
 
@@ -284,7 +303,7 @@ exercised.
 | CI | A Node job lints and builds the SPA on changes under `ui/`, independent of the Python matrix, so a frontend break never masks a pipeline break |
 | SPA delivery | Built during the image build, not vendored into the wheel |
 | Remote reads | In scope from merge 2 — a cloud sidecar has no filesystem to read |
-| Feedback store | One file per report, sibling of `runs/`, same layout local and remote (§4) |
+| Feedback store | One file per report, sibling of `runs/`, same layout local and remote (§4). Operator-saved presets take the same shape: one file each, a store `presets/` prefix (sibling of `runs/`/`feedback/`) or a local `--presets-dir`, so a store-backed console needs no writable mount |
 | Settings | Editable via a shared writable config volume; secrets env-only; restart activates |
 | Auth | **None.** Not deployed discoverably at any layer. `reported_by` is advisory |
 | Execution | The console covers the full designed workflow, calling the same library functions the CLI calls — no subprocess, no shell-out. Dispatch is always the queue and **on by default**. `--audit-only` switches it off for read/inspect-only deployments |

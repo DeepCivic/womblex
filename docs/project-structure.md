@@ -110,11 +110,20 @@ womblex/
 │   │   └── stage_runner.py     # Execute a contract against an object store
 │   ├── ui/                     # Console sidecar (`womblex ui`) — FastAPI over pipeline artefacts; reads runs, never writes to one
 │   │   ├── app.py              # create_app() — binds one run source for the app's lifetime
-│   │   ├── deps.py             # UISettings — local output_root vs store-backed, resolved from args/env
-│   │   ├── readers.py          # Thin pyarrow readers, local and store-backed, over the same store/ modules
+│   │   ├── deps.py             # UISettings — local output_root vs store-backed (+ optional queue/feedback/presets dirs), resolved from args/env
+│   │   ├── readers.py          # Thin pyarrow readers + feedback/preset writers, local and store-backed, over the same store/ modules
+│   │   ├── dashboard.py        # Queue + per-stage checkpoint views for GET /api/dashboard
+│   │   ├── composer.py         # Stage-graph, config JSON Schema, validate + YAML render for the Pipeline Composer
+│   │   ├── presets.py          # Named pipeline presets — built-in (DEFAULT-Isaacus) + operator-saved (format: filename/bytes/parse)
+│   │   ├── execute.py          # Execution capability + enqueue-into-queue (the one writable-to-a-run surface)
+│   │   ├── resources.py        # Store / queue / Isaacus connection cards + live test actions
 │   │   └── routes/
 │   │       ├── runs.py         # /api/runs — manifest, stage-presence, audit, chunk detail
-│   │       └── feedback.py     # POST /api/runs/{run_id}/feedback — the report action (writes a feedback/ sibling)
+│   │       ├── feedback.py     # POST /api/runs/{run_id}/feedback — the report action (writes a feedback/ sibling)
+│   │       ├── dashboard.py    # GET /api/dashboard — queue state + per-stage progress
+│   │       ├── composer.py     # /api/composer — graph, schema, validate, yaml, GET/POST/DELETE presets (presets/ sibling)
+│   │       ├── resources.py    # /api/resources — connection cards + test/store, test/queue
+│   │       └── execute.py      # /api/execute — status + enqueue an extraction run into the queue
 │   ├── utils/
 │   │   ├── metrics.py       # WER/CER accuracy metrics
 │   │   ├── tabular_metrics.py # Tabular extraction accuracy (structural fidelity, data integrity)

@@ -134,6 +134,13 @@ class TestResolveSettings:
         monkeypatch.delenv("WOMBLEX_UI_PRESETS_DIR", raising=False)
         assert resolve_settings(tmp_path, None).presets_dir is None
 
+    def test_presets_writable_needs_a_dir_locally_but_not_remotely(self, tmp_path: Path) -> None:
+        """Local mode needs a writable presets dir; remote always writes to the store."""
+        assert resolve_settings(tmp_path, None).presets_writable is False
+        assert resolve_settings(tmp_path, None, presets_dir=tmp_path / "p").presets_writable is True
+        # Remote mode saves to the store's own presets/ prefix, so it needs no dir.
+        assert resolve_settings(None, "s3://bucket").presets_writable is True
+
 
 @pytest.fixture(params=["local", "remote"])
 def api_client(request: pytest.FixtureRequest, tmp_path: Path) -> tuple[TestClient, Path]:
@@ -937,17 +944,27 @@ class TestComposerApi:
 class TestComposerSavePresets:
     """Saving a composed config as a named preset (docs/ui-plan.md merge 9).
 
-    The one composer surface that writes: it needs a `presets_dir`, so a console
-    without one refuses with 409 (the same shape the Execution Controls refuse
-    with when a piece is missing) rather than half-working.
+    Parametrised over local (a writable `presets_dir`) and remote (the store's
+    own `presets/` prefix, a sibling of `runs/` and `feedback/`) — the same
+    local-vs-store split feedback keeps (§C). A store-backed console therefore
+    saves without any writable mount; a local console without a presets dir
+    refuses with 409, the same shape the Execution Controls use.
     """
+
+    def _saving_client(self, tmp_path: Path, mode: str) -> TestClient:
+        """A client that *can* save, in the given mode."""
+        if mode == "remote":
+            pytest.importorskip("fsspec")
+            return TestClient(create_app(store_uri=str(tmp_path / "store")))
+        return TestClient(create_app(output_root=tmp_path, presets_dir=tmp_path / "presets"))
 
     def _client(self, tmp_path: Path, *, with_presets_dir: bool = True) -> TestClient:
         presets_dir = (tmp_path / "presets") if with_presets_dir else None
         return TestClient(create_app(output_root=tmp_path, presets_dir=presets_dir))
 
-    def test_save_then_list_and_fetch_round_trips(self, tmp_path: Path) -> None:
-        client = self._client(tmp_path)
+    @pytest.mark.parametrize("mode", ["local", "remote"])
+    def test_save_then_list_and_fetch_round_trips(self, tmp_path: Path, mode: str) -> None:
+        client = self._saving_client(tmp_path, mode)
         resp = client.post("/api/composer/presets", json={
             "name": "My-Run", "description": "chunk only", "formats": [".pdf"],
             "config": {"chunking": {"enabled": True, "chunk_size": 320}},
@@ -962,6 +979,21 @@ class TestComposerSavePresets:
 
         one = client.get("/api/composer/presets/My-Run").json()
         assert one["config"]["chunking"]["chunk_size"] == 320
+
+    def test_remote_save_lands_under_the_store_presets_prefix(self, tmp_path: Path) -> None:
+        """A store-backed console writes presets to `presets/`, a sibling of
+        `runs/` — so the compose ui service needs no writable mount (§C)."""
+        pytest.importorskip("fsspec")
+        store_root = tmp_path / "store"
+        client = TestClient(create_app(store_uri=str(store_root)))
+        resp = client.post("/api/composer/presets", json={
+            "name": "Remote-One", "config": {"chunking": {"chunk_size": 128}},
+        })
+        assert resp.status_code == 201
+        # One object, under the store's presets/ prefix, and nowhere near runs/.
+        saved = list((store_root / "presets").glob("*.preset.json"))
+        assert [p.name for p in saved] == ["Remote-One.preset.json"]
+        assert not (store_root / "runs").exists()
 
     def test_save_strips_dataset_and_paths(self, tmp_path: Path) -> None:
         """A preset is an overlay — the run's identity is never baked into it."""
@@ -1008,8 +1040,9 @@ class TestComposerSavePresets:
         resp = client.post("/api/composer/presets", json={"name": "X", "config": {}})
         assert resp.status_code == 409
 
-    def test_delete_removes_a_saved_preset(self, tmp_path: Path) -> None:
-        client = self._client(tmp_path)
+    @pytest.mark.parametrize("mode", ["local", "remote"])
+    def test_delete_removes_a_saved_preset(self, tmp_path: Path, mode: str) -> None:
+        client = self._saving_client(tmp_path, mode)
         client.post("/api/composer/presets", json={"name": "Temp", "config": {}})
         assert client.delete("/api/composer/presets/Temp").status_code == 200
         assert client.get("/api/composer/presets/Temp").status_code == 404

@@ -61,6 +61,18 @@ def test_remote_store_file_roundtrip(tmp_path):
     assert out.read_bytes() == b"hello"
 
 
+def test_remote_store_read_text_and_delete(tmp_path):
+    """The small in-place read/delete the console's saved presets use (ui-plan merge 9)."""
+    store = RemoteStore.from_uri(str(tmp_path / "store"))
+    src = tmp_path / "one.preset.json"
+    src.write_text('{"name": "one"}', encoding="utf-8")
+    store.upload_file(src, "presets/one.preset.json")
+
+    assert store.read_text("presets/one.preset.json") == '{"name": "one"}'
+    store.delete("presets/one.preset.json")
+    assert not store.exists("presets/one.preset.json")
+
+
 def test_remote_store_download_to_dir_and_upload_glob(tmp_path):
     store = RemoteStore.from_uri(str(tmp_path / "store"))
 

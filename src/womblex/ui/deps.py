@@ -34,9 +34,13 @@ class UISettings:
     ``runs/`` in the same bucket.
 
     ``presets_dir`` is where the Pipeline Composer *saves* operator-authored
-    presets (docs/ui-plan.md merge 9) — one JSON file per preset. ``None``
-    disables saving: the built-in presets still serve, but
-    ``POST /api/composer/presets`` refuses with 409.
+    presets (docs/ui-plan.md merge 9) — one JSON file per preset. It applies
+    to *local* mode only, and mirrors ``feedback_dir``: remote mode has no
+    equivalent field because it always writes presets under the store's own
+    ``presets/`` prefix, a sibling of ``runs/`` and ``feedback/`` in the same
+    bucket — so a store-backed console needs no writable mount to save presets.
+    In local mode, ``None`` disables saving: the built-in presets still serve,
+    but ``POST /api/composer/presets`` refuses with 409.
     """
 
     output_root: Path | None
@@ -53,6 +57,16 @@ class UISettings:
     @property
     def is_remote(self) -> bool:
         return self.store_uri is not None
+
+    @property
+    def presets_writable(self) -> bool:
+        """Whether this deployment can save presets at all.
+
+        Remote mode always can (it writes to the store's ``presets/`` prefix,
+        like feedback); local mode can only when a writable ``presets_dir`` was
+        configured. The composer's save/delete routes 409 when this is false.
+        """
+        return self.is_remote or self.presets_dir is not None
 
 
 def resolve_settings(

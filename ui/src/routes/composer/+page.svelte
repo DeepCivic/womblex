@@ -12,15 +12,24 @@
 		getStageGraph,
 		getConfigSchema,
 		listPresets,
+		savePreset,
+		deletePreset,
+		SavePresetRefused,
 		validateConfig,
 		renderConfigYaml,
 		ConfigInvalid,
+		getExecutionStatus,
+		enqueueExtraction,
+		EnqueueRefused,
 		type ConfigObject,
+		type ExecutionStatus,
+		type EnqueueResult,
 		type JsonSchema,
 		type Preset,
 		type StageGraph as StageGraphData,
 		type ValidationResult
 	} from '$lib/api';
+	import { runSelection } from '$lib/stores/run.svelte';
 	import StageGraph from '$lib/components/StageGraph.svelte';
 	import SchemaForm, { defaultsFor } from '$lib/components/SchemaForm.svelte';
 	import StatusPill from '$lib/components/StatusPill.svelte';
@@ -43,16 +52,56 @@
 	let defs = $derived(schema?.$defs ?? {});
 	let selectedNode = $derived(graph?.nodes.find((n) => n.id === selected) ?? null);
 
+	// Saving the composed config as a named preset (docs/ui-plan.md merge 9).
+	// The server strips `dataset`/`paths` (a preset is an overlay) and validates
+	// the rest, so this form sends the whole current config and lets the server
+	// do the stripping — the browser re-implements no part of that.
+	let saveName = $state('');
+	let saveDescription = $state('');
+	let saveFormats = $state('');
+	let saving = $state(false);
+	let saveError = $state<string | null>(null);
+	// Whether saving is even offered. Set once the first save's 409 tells us this
+	// console has no writable presets location (local mode, no --presets-dir);
+	// remote mode always can, so this stays false there. Pre-emptive rather than
+	// probed: the list endpoint does not report writability, so the first attempt
+	// is what learns it, and the control then explains why it is disabled.
+	let savingDisabled = $state(false);
+
+	// Enqueue-from-composer (docs/ui-plan.md merge 11 hand-off). The queue carries
+	// no config — workers get theirs from their own `--config` at launch — so
+	// "enqueue this preset" is just handing the composed run's identity and input
+	// location to the existing `enqueueExtraction`. `paths.input_root` seeds the
+	// prefix but is only a suggestion: it may be an absolute/local path, whereas
+	// `input_prefix` is store-relative, so the operator confirms it in a field of
+	// its own rather than us assuming the two are the same.
+	let execStatus = $state<ExecutionStatus | null>(null);
+	let enqueuePrefix = $state('');
+	let enqueueRunId = $state('');
+	let enqueuing = $state(false);
+	let enqueueError = $state<string | null>(null);
+	let enqueueResult = $state<EnqueueResult | null>(null);
+
 	function message(err: unknown): string {
 		return err instanceof Error ? err.message : String(err);
 	}
 
+	// A run id or path segment the composed config already carries, as a plain
+	// string or empty — read defensively since `config` is a free-form object.
+	function configString(section: string, key: string): string {
+		const s = config[section];
+		if (s === null || typeof s !== 'object' || Array.isArray(s)) return '';
+		const v = (s as ConfigObject)[key];
+		return typeof v === 'string' ? v : '';
+	}
+
 	$effect(() => {
-		Promise.all([getStageGraph(), getConfigSchema(), listPresets()])
-			.then(([g, s, p]) => {
+		Promise.all([getStageGraph(), getConfigSchema(), listPresets(), getExecutionStatus()])
+			.then(([g, s, p, x]) => {
 				graph = g;
 				schema = s;
 				presets = p;
+				execStatus = x;
 				config = defaultsFor(s, s.$defs ?? {});
 			})
 			.catch((err) => (error = message(err)))
@@ -94,6 +143,92 @@
 		if (!preset) return;
 		config = deepMerge(config, preset.config);
 		clearVerdict();
+	}
+
+	// Save the whole composed config as a named preset. `formats` is a space-
+	// separated list of extensions; the server strips `dataset`/`paths` and
+	// validates the overlay, so a 400 here is a name/overlay problem and a 409
+	// means this console cannot write presets at all (then the control hides).
+	async function save(): Promise<void> {
+		if (saving || !saveName.trim()) return;
+		saving = true;
+		saveError = null;
+		try {
+			await savePreset({
+				name: saveName.trim(),
+				description: saveDescription.trim(),
+				formats: saveFormats.trim() ? saveFormats.trim().split(/\s+/) : [],
+				config
+			});
+			// Refresh the list so the new preset appears in the dropdown and, if
+			// saved, becomes selectable/deletable straight away.
+			presets = await listPresets();
+			selectedPreset = saveName.trim();
+			saveName = '';
+			saveDescription = '';
+			saveFormats = '';
+		} catch (err) {
+			if (err instanceof SavePresetRefused && err.status === 409) {
+				savingDisabled = true;
+			}
+			saveError = message(err);
+		} finally {
+			saving = false;
+		}
+	}
+
+	// Delete a saved preset (never a built-in — the control is only shown on
+	// `source === 'saved'`). Refresh the list and clear the picker if it named
+	// the one just removed.
+	async function remove(name: string): Promise<void> {
+		if (saving) return;
+		saving = true;
+		saveError = null;
+		try {
+			await deletePreset(name);
+			presets = await listPresets();
+			if (selectedPreset === name) selectedPreset = '';
+		} catch (err) {
+			saveError = message(err);
+		} finally {
+			saving = false;
+		}
+	}
+
+	// Hand the composed run's identity and input location to the queue. The queue
+	// carries no config; workers read their own `--config` at launch. So this is
+	// only `paths.input_root` → `input_prefix` (confirmed, since it may be an
+	// absolute/local path while the prefix is store-relative) and
+	// `dataset.run_id` → `run_id`, through the same `enqueueExtraction` the
+	// Execution Controls use.
+	async function enqueue(): Promise<void> {
+		if (enqueuing || !enqueuePrefix.trim()) return;
+		enqueuing = true;
+		enqueueError = null;
+		enqueueResult = null;
+		try {
+			const res = await enqueueExtraction({
+				input_prefix: enqueuePrefix.trim(),
+				run_id: enqueueRunId.trim() || undefined
+			});
+			enqueueResult = res;
+			// Point the rest of the console at the run just planned (as the
+			// Execution Controls do), so the Dashboard tracks it.
+			runSelection.select(res.run_id);
+			await runSelection.load();
+			runSelection.select(res.run_id);
+		} catch (err) {
+			// A capability change since load surfaces as 403/409; refresh status so
+			// the control disables and explains, matching what the server saw.
+			if (err instanceof EnqueueRefused && err.status !== 400) {
+				getExecutionStatus()
+					.then((body) => (execStatus = body))
+					.catch(() => {});
+			}
+			enqueueError = message(err);
+		} finally {
+			enqueuing = false;
+		}
 	}
 
 	// Any edit invalidates the last verdict: a stale green pill over a config
@@ -180,12 +315,88 @@
 							<option value={preset.name}>{preset.name}</option>
 						{/each}
 					</select>
+					{#if active && active.source === 'saved'}
+						<!-- Delete is offered only on operator-saved presets; a built-in is
+							 code and 404s if deleted, so the control is not shown for it. -->
+						<button
+							type="button"
+							class={BUTTON}
+							disabled={saving}
+							onclick={() => remove(active.name)}
+						>
+							Delete
+						</button>
+					{/if}
 				</label>
 				{#if active}
 					<p class="max-w-prose text-xs text-muted-foreground">{active.description}</p>
 					<p class="text-xs text-muted-foreground">
-						Formats: <span class="font-mono">{active.formats.join(' ')}</span> · sets stage toggles
-						and settings only; your <code>dataset</code> and <code>paths</code> are kept.
+						Formats: <span class="font-mono">{active.formats.join(' ')}</span> ·
+						<span class="font-mono">{active.source}</span> · sets stage toggles and settings only;
+						your <code>dataset</code> and <code>paths</code> are kept.
+					</p>
+				{/if}
+
+				<!-- Save the whole composed config as a named preset. The server strips
+					 dataset/paths and validates the overlay; a 409 means this console
+					 cannot write presets (local mode, no --presets-dir), and the control
+					 then explains rather than reappearing to fail again. -->
+				{#if !savingDisabled}
+					<div class="mt-1 flex flex-col gap-2 border-t border-border pt-3">
+						<span class="font-display text-sm">Save as preset</span>
+						<div class="flex flex-wrap items-end gap-2 text-xs">
+							<label class="flex flex-col gap-1">
+								<span class="text-muted-foreground">Name</span>
+								<input
+									type="text"
+									bind:value={saveName}
+									placeholder="My-Run"
+									class="rounded-md border border-border bg-background px-2 py-1 font-mono
+										focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+								/>
+							</label>
+							<label class="flex flex-col gap-1">
+								<span class="text-muted-foreground">Description <span class="opacity-60">(optional)</span></span>
+								<input
+									type="text"
+									bind:value={saveDescription}
+									placeholder="chunk only"
+									class="rounded-md border border-border bg-background px-2 py-1
+										focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+								/>
+							</label>
+							<label class="flex flex-col gap-1">
+								<span class="text-muted-foreground">Formats <span class="opacity-60">(optional)</span></span>
+								<input
+									type="text"
+									bind:value={saveFormats}
+									placeholder=".pdf .docx"
+									class="rounded-md border border-border bg-background px-2 py-1 font-mono
+										focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+								/>
+							</label>
+							<button
+								type="button"
+								class={BUTTON}
+								disabled={saving || !saveName.trim()}
+								onclick={save}
+							>
+								{saving ? 'Saving…' : 'Save'}
+							</button>
+						</div>
+						{#if saveError}
+							<p class="text-xs text-status-failed">{saveError}</p>
+						{/if}
+					</div>
+				{:else}
+					<!-- 409: no writable presets location on this console. -->
+					<p class="mt-1 border-t border-border pt-3 text-xs text-muted-foreground">
+						Saving presets is disabled on this console — it has no writable presets
+						location. Start it with <code>--presets-dir</code> (or
+						<code>$WOMBLEX_UI_PRESETS_DIR</code>), or point it at a
+						<code>--store</code> where presets go to the object store's own
+						<code>presets/</code> prefix.
+						{#if saveError}<span class="text-status-failed"> {saveError}</span>{/if}
 					</p>
 				{/if}
 			</section>
@@ -270,5 +481,113 @@
 				{/if}
 			</section>
 		</div>
+
+		<!-- Enqueue this composed run (docs/ui-plan.md merge 11 hand-off). The queue
+			 carries no config — workers read their own --config at launch — so this
+			 hands off only the run's identity (dataset.run_id) and input location
+			 (paths.input_root, as a *suggested* prefix: it may be absolute/local
+			 while input_prefix is store-relative, so the operator confirms it).
+			 Shown only where the console can dispatch (a store and a queue, not
+			 --audit-only); otherwise the Execution Controls' banner names the fix. -->
+		{#if execStatus?.can_execute}
+			{@const suggestedPrefix = configString('paths', 'input_root')}
+			{@const suggestedRunId = configString('dataset', 'run_id')}
+			<section class="flex flex-col gap-3 rounded-md border border-border bg-surface-raised p-4">
+				<div>
+					<h2 class="font-display text-sm">Enqueue this run</h2>
+					<p class="mt-1 max-w-prose text-xs text-muted-foreground">
+						Plans an extraction run into the job queue from the composed run's identity
+						and input location. Workers the platform brings up read their own
+						<code>--config</code> at launch — the queue carries no config, so this hands
+						off only the prefix and run id.
+					</p>
+				</div>
+				<div class="flex flex-wrap items-end gap-2 text-xs">
+					<label class="flex flex-col gap-1">
+						<span class="text-muted-foreground">Input prefix</span>
+						<input
+							type="text"
+							bind:value={enqueuePrefix}
+							placeholder={suggestedPrefix || 'inbox'}
+							disabled={enqueuing}
+							class="rounded-md border border-border bg-background px-2 py-1.5 font-mono
+								focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring
+								disabled:opacity-50"
+						/>
+					</label>
+					<label class="flex flex-col gap-1">
+						<span class="text-muted-foreground">Run id <span class="opacity-60">(optional)</span></span>
+						<input
+							type="text"
+							bind:value={enqueueRunId}
+							placeholder={suggestedRunId || 'mint a fresh timestamped id'}
+							disabled={enqueuing}
+							class="rounded-md border border-border bg-background px-2 py-1.5 font-mono
+								focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring
+								disabled:opacity-50"
+						/>
+					</label>
+					{#if suggestedPrefix && enqueuePrefix.trim() !== suggestedPrefix}
+						<button
+							type="button"
+							class={BUTTON}
+							disabled={enqueuing}
+							onclick={() => {
+								enqueuePrefix = suggestedPrefix;
+								enqueueRunId = suggestedRunId;
+							}}
+						>
+							Use composed paths
+						</button>
+					{/if}
+					<button
+						type="button"
+						class="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground
+							hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2
+							focus-visible:ring-ring disabled:opacity-50 disabled:hover:bg-primary"
+						disabled={enqueuing || !enqueuePrefix.trim()}
+						onclick={enqueue}
+					>
+						{enqueuing ? 'Enqueuing…' : 'Enqueue run'}
+					</button>
+				</div>
+				<p class="text-xs text-muted-foreground">
+					<code>input_prefix</code> is store-relative; <code>paths.input_root</code> may be an
+					absolute or local path, so confirm it rather than assuming they match.
+				</p>
+
+				{#if enqueueError}
+					<p class="text-xs text-status-failed">{enqueueError}</p>
+				{/if}
+
+				{#if enqueueResult}
+					<dl
+						class="grid grid-cols-2 gap-x-4 gap-y-1 rounded-md border border-status-done/40
+							bg-status-done/10 p-3 text-xs sm:grid-cols-4"
+					>
+						<div class="col-span-2 sm:col-span-4">
+							<dt class="text-muted-foreground">Run id</dt>
+							<dd class="font-mono">{enqueueResult.run_id}</dd>
+						</div>
+						<div>
+							<dt class="text-muted-foreground">Documents</dt>
+							<dd class="font-mono">{enqueueResult.document_count}</dd>
+						</div>
+						<div>
+							<dt class="text-muted-foreground">Batches</dt>
+							<dd class="font-mono">{enqueueResult.batch_count}</dd>
+						</div>
+						<div>
+							<dt class="text-muted-foreground">Newly enqueued</dt>
+							<dd class="font-mono">{enqueueResult.newly_enqueued}</dd>
+						</div>
+					</dl>
+					<p class="text-xs text-muted-foreground">
+						Selected this run — open the
+						<a href="/dashboard" class="underline">Dashboard</a> to watch the queue drain.
+					</p>
+				{/if}
+			</section>
+		{/if}
 	{/if}
 </div>

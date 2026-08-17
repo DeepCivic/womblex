@@ -19,6 +19,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,15 @@ class RemoteStore:
 
     def exists(self, rel: str) -> bool:
         return bool(self.fs.exists(self._full(rel)))  # type: ignore[attr-defined]
+
+    def read_text(self, rel: str, *, encoding: str = "utf-8") -> str:
+        """Read a small text object in place (no staging) — e.g. a saved preset."""
+        with self.fs.open(self._full(rel), "r", encoding=encoding) as handle:  # type: ignore[attr-defined]
+            return cast(str, handle.read())
+
+    def delete(self, rel: str) -> None:
+        """Remove one object. Assumes it exists; callers check first if that matters."""
+        self.fs.rm_file(self._full(rel))  # type: ignore[attr-defined]
 
     def list_files(self, rel: str, pattern: str = "*") -> list[str]:
         """List paths under *rel* matching *pattern*, returned store-relative."""
