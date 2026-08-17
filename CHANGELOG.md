@@ -8,6 +8,12 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 ## [Unreleased]
 
+### Changed
+- **Isaacus SDK, hosted-VLM (Bedrock) OCR and the AWS SDK are now core dependencies.** `isaacus`, `isaacus-sagemaker` and `boto3` move out of the `[isaacus]`/`[bedrock]`/`[cloud-ocr]` extras into the base install — every real deployment uses enrichment/embeddings and (often) hosted OCR or SageMaker, they are tiny next to the vision/ML stack already shipped, and gating them behind extras only produced misconfiguration (a missing SDK surfaced in the console as a bare "No API key"). They stay dormant until configured (no key / no `ISAACUS_SAGEMAKER_ENDPOINTS` / no `mistral-ocr` engine). The `[isaacus]`, `[bedrock]` and `[cloud-ocr]` extras are removed; remaining extras are `[local]` (empty), `[cloud]`, `[ui]`, `[dev]`. Dead `pip install womblex[…]` ImportError guards around first-party modules (enrich/persist/pii) simplified to direct imports; the stale `[pii]` extra reference is gone (presidio/sentence-transformers were already core).
+
+### Fixed
+- **Console Resources card: a misspelled SageMaker endpoints var now reads as a fixable cause, not "No API key".** Setting the singular `ISAACUS_SAGEMAKER_ENDPOINT` (or other near-misses) silently fell back to the hosted API, so the Isaacus card showed a bare "No API key" with no hint at the cause. `misconfigured_endpoints_var()` (network-free) detects the near-miss; the card gains an `endpoints_typo` field and the screen names the offending variable and the canonical `ISAACUS_SAGEMAKER_ENDPOINTS` (plural).
+
 ## [0.5.2] - 2026-08-18
 Minor, additive. Console-focused: the Pipeline Composer gains save/enqueue of operator presets (store-backed in cloud mode), the Dashboard screen lands, and execution is on by default (`--audit-only` is the new opt-out). Also fixes console stage-presence reporting `enrich` empty after enrich ran. No parquet schema changed.
 

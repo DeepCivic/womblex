@@ -38,7 +38,8 @@ COPY --from=frontend-builder /app/ui/build /app/ui/build
 
 # [ui] is fastapi + uvicorn only; [cloud] adds the object-storage reads a
 # distributed run needs (docs/ui-plan.md §2 — remote reads are in scope from
-# the first merge, not deferred behind a flag). Neither pulls boto3.
+# the first merge, not deferred behind a flag). boto3 is a base dependency
+# now, but the console never imports it (it reads artefacts, makes no AWS call).
 ARG EXTRAS=ui,cloud
 RUN pip install ".[${EXTRAS}]"
 

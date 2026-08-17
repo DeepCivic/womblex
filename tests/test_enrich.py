@@ -1,6 +1,6 @@
 """Tests for the Isaacus enrichment API wrapper and response conversion.
 
-Requires the isaacus extra: pip install womblex[isaacus]
+The isaacus SDK is a core dependency (always installed).
 """
 
 from __future__ import annotations
@@ -10,8 +10,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-# Skip all tests in this module if isaacus extra not installed
-pytest.importorskip("isaacus", reason="isaacus extra not installed")
+# Skip only on a broken install where the isaacus SDK cannot be imported
+pytest.importorskip("isaacus", reason="isaacus SDK not importable (broken install?)")
 
 from womblex.analyse.enrich import (
     _convert_document,

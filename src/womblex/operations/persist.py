@@ -29,17 +29,11 @@ def write_batch_parquet(batch: BatchResult, output_path: Path) -> Path | None:
 
 def write_batch_enrichment(batch: BatchResult, output_dir: Path) -> dict[str, Path | None]:
     """Write enrichment results and graph data to Parquet."""
-    try:
-        from womblex.store.enrichment_output import (
-            write_enrichment_metadata,
-            write_entity_mentions,
-            write_graph_edges,
-        )
-    except ImportError as e:
-        raise ImportError(
-            "Enrichment output requires the 'isaacus' extra. "
-            "Install with: pip install womblex[isaacus]"
-        ) from e
+    from womblex.store.enrichment_output import (
+        write_enrichment_metadata,
+        write_entity_mentions,
+        write_graph_edges,
+    )
 
     entity_rows: list[tuple[str, Any, list[object] | None]] = []
     graph_rows: list[tuple[str, Any]] = []

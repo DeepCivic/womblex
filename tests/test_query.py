@@ -1,7 +1,7 @@
 """Tests for analyse/query.py — loading enrichment data from Parquet.
 
 Uses the same enrichment fixtures as test_enrichment_output.py.
-Requires the isaacus extra: pip install womblex[isaacus]
+The isaacus SDK is a core dependency (always installed).
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("isaacus", reason="isaacus extra not installed")
+pytest.importorskip("isaacus", reason="isaacus SDK not importable (broken install?)")
 
 from womblex.analyse.graph import build_document_graph
 from womblex.analyse.models import (

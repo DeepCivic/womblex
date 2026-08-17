@@ -17,23 +17,16 @@ def run_enrichment(
 ) -> None:
     """Enrich completed documents via the Isaacus API.
 
-    Requires ``pip install womblex[isaacus]``. Failures are logged
-    per-document but do not halt the batch. Results are stored on
-    ``DocumentResult.enrichment`` and ``.graph``.
+    Failures are logged per-document but do not halt the batch. Results are
+    stored on ``DocumentResult.enrichment`` and ``.graph``.
 
     Args:
         results: DocumentResults with chunks populated.
         config: Pipeline configuration (uses ``config.enrichment``).
         client: An ``isaacus.Isaacus`` client instance.
     """
-    try:
-        from womblex.analyse.enrich import enrich_document
-        from womblex.analyse.graph import build_document_graph
-    except ImportError as e:
-        raise ImportError(
-            "Isaacus enrichment requires the 'isaacus' extra. "
-            "Install with: pip install womblex[isaacus]"
-        ) from e
+    from womblex.analyse.enrich import enrich_document
+    from womblex.analyse.graph import build_document_graph
 
     enrich_cfg = config.enrichment
     if not enrich_cfg.enabled:

@@ -104,11 +104,38 @@ class TestResourcesApi:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv("ISAACUS_SAGEMAKER_ENDPOINTS", raising=False)
+        monkeypatch.delenv("ISAACUS_SAGEMAKER_ENDPOINT", raising=False)
         monkeypatch.delenv("ISAACUS_API_KEY", raising=False)
         client = TestClient(create_app(output_root=tmp_path))
         card = client.get("/api/resources").json()["isaacus"]
         assert card["api_key_configured"] is False
         assert card["api_key_masked"] is None
+        assert card["endpoints_typo"] is None
+
+    def test_isaacus_card_flags_misspelled_endpoints_var(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The singular `…_ENDPOINT` silently falls back to the hosted API; the
+        card names it so the operator sees the cause, not a bare "No API key"."""
+        monkeypatch.delenv("ISAACUS_SAGEMAKER_ENDPOINTS", raising=False)
+        monkeypatch.delenv("ISAACUS_API_KEY", raising=False)
+        monkeypatch.setenv("ISAACUS_SAGEMAKER_ENDPOINT", "kanon-2-bundle-001")
+        client = TestClient(create_app(output_root=tmp_path))
+        card = client.get("/api/resources").json()["isaacus"]
+        assert card["deployment"] == "hosted"
+        assert card["endpoints_typo"] == "ISAACUS_SAGEMAKER_ENDPOINT"
+
+    def test_isaacus_card_no_typo_warning_when_canonical_var_set(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With the plural var set (even alongside the singular), there is
+        nothing to warn about — the deployment is on SageMaker."""
+        monkeypatch.setenv("ISAACUS_SAGEMAKER_ENDPOINTS", "kanon-2-universal-001")
+        monkeypatch.setenv("ISAACUS_SAGEMAKER_ENDPOINT", "kanon-2-bundle-001")
+        client = TestClient(create_app(output_root=tmp_path))
+        card = client.get("/api/resources").json()["isaacus"]
+        assert card["deployment"] == "sagemaker"
+        assert card["endpoints_typo"] is None
 
     def test_isaacus_card_reports_unserved_models_on_sagemaker(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

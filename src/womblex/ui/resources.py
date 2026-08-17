@@ -15,7 +15,10 @@ screen:
   card's fleet + queue-depth state needs.
 - **Isaacus** — `utils.isaacus_client.unserved_models()` reports whether the
   configured deployment (hosted API or SageMaker) covers the models Womblex
-  actually calls, with no network request of its own.
+  actually calls, with no network request of its own. `misconfigured_endpoints_var()`
+  names a near-miss of `ISAACUS_SAGEMAKER_ENDPOINTS` (e.g. the singular
+  `…_ENDPOINT`) so a silent hosted-API fallback reads as a fixable cause
+  rather than a bare "No API key".
 
 Credentials never appear in a response body: the store card reports whether
 AWS keys are configured, not their values, and the Isaacus card masks the
@@ -37,6 +40,7 @@ from womblex.ui.deps import UISettings
 from womblex.utils.isaacus_client import (
     API_KEY_ENV,
     endpoints_from_env,
+    misconfigured_endpoints_var,
     unserved_models,
 )
 
@@ -139,7 +143,13 @@ def get_queue_card(settings: UISettings) -> dict:
 
 
 def get_isaacus_card() -> dict:
-    """Deployment shape and model coverage — no network request of its own."""
+    """Deployment shape and model coverage — no network request of its own.
+
+    ``endpoints_typo`` names a near-miss of ``ISAACUS_SAGEMAKER_ENDPOINTS``
+    (e.g. the singular ``…_ENDPOINT``) when one is set but the canonical var
+    is not: the deployment silently falls back to the hosted API, so the card
+    would otherwise read as a bare "No API key" with no hint at the cause.
+    """
     endpoints = endpoints_from_env()
     api_key = os.environ.get(API_KEY_ENV)
     return {
@@ -152,6 +162,7 @@ def get_isaacus_card() -> dict:
         "api_key_masked": _mask_secret(api_key),
         "models_checked": list(ISAACUS_MODELS),
         "unserved_models": unserved_models(ISAACUS_MODELS) if endpoints else [],
+        "endpoints_typo": misconfigured_endpoints_var() if not endpoints else None,
     }
 
 

@@ -155,9 +155,6 @@ class PIIConfig(BaseModel):
       Requires enrichment to have run first (chunks and enrichment must
 
       exist on the DocumentResult).
-
-
-    Requires ``pip install womblex[pii]``.
     """
 
 

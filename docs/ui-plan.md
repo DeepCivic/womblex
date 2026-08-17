@@ -96,7 +96,10 @@ are **self-hosted in the bundle**, not fetched from Google Fonts, because the
 pipeline's no-network-at-runtime property should not be broken by its own UI.
 
 `[ui]` sits alongside the existing deployment-shaped extras (`[local]`,
-`[cloud]`, `[cloud-ocr]`) and, like `[cloud]`, must not pull boto3.
+`[cloud]`) and, like `[cloud]`, must not pull boto3 of its own. (boto3 is a
+core dependency now — for the Bedrock VLM OCR engine and the SageMaker SigV4
+client — but the console never imports it: it reads artefacts, makes no AWS
+call.)
 
 ## 3. Screen → data source
 

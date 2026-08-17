@@ -11,7 +11,8 @@ re-enriching the same narrative (the single-enrichment reuse design in
 The Document is a Stainless-generated pydantic model that round-trips
 losslessly through ``model_dump_json()`` ↔ ``model_validate_json()``; this
 module only stores/returns the JSON string and never imports the isaacus
-SDK, so it stays usable without the ``[isaacus]`` extra. The ``text_source``
+SDK (which is a core dependency in any case), so it loads even on a partial
+install where the SDK is missing. The ``text_source``
 column records which cleaning overlay the persisted ``document.text`` was
 reassembled under — audit metadata and a cheap reuse pre-filter; the
 authoritative reuse guard is byte-identity of ``document.text`` against the

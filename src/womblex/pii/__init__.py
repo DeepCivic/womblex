@@ -2,10 +2,8 @@
 
 Detects and replaces personally identifiable information using
 regex pattern recognisers (Presidio-style) with Sentence Transformers
-context validation.
-
-Install the required extras before use:
-    pip install womblex[pii]
+context validation. Both dependencies are part of the base install —
+no extra required.
 """
 
 from womblex.pii.cleaner import PIICleaner

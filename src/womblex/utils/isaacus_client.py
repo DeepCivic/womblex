@@ -97,6 +97,39 @@ def sagemaker_configured() -> bool:
     return bool(endpoints_from_env())
 
 
+#: Common misspellings of ``ISAACUS_SAGEMAKER_ENDPOINTS`` that silently fall
+#: back to the hosted API. The singular form is the one deployers reach for
+#: most (it reads naturally when a bundle is one endpoint), so a near-miss is
+#: worth surfacing rather than leaving as a bare "No API key".
+_ENDPOINTS_ALIASES: tuple[str, ...] = (
+    "ISAACUS_SAGEMAKER_ENDPOINT",
+    "ISAACUS_SAGEMAKER_ENDPT",
+    "ISAACUS_SAGEMAKER_ENDPOINT_URL",
+    "ISAACUS_ENDPOINT",
+    "ISAACUS_ENDPOINTS",
+    "ISAACUS_SAGE_MAKER_ENDPOINTS",
+)
+
+
+def misconfigured_endpoints_var() -> str | None:
+    """A set env var that *looks like* the endpoints var but is not it.
+
+    Returns the misspelled variable name (e.g. ``ISAACUS_SAGEMAKER_ENDPOINT``,
+    singular) when one is set and the canonical ``ISAACUS_SAGEMAKER_ENDPOINTS``
+    is not — the exact shape that reads as a bare "No API key" because the
+    deployment silently falls back to the hosted API. ``None`` when the
+    canonical var is set (nothing to warn about) or no near-miss is present.
+    Cheap and network-free; used by the UI to turn a dead-end status into an
+    actionable one.
+    """
+    if os.environ.get(ENDPOINTS_ENV, "").strip():
+        return None
+    for alias in _ENDPOINTS_ALIASES:
+        if os.environ.get(alias, "").strip():
+            return alias
+    return None
+
+
 def is_model_served(model: str, endpoints: Iterable[SageMakerEndpoint]) -> bool:
     """Whether some endpoint serves *model* (mirrors the integration's router)."""
     return any(e.models is None or model in e.models for e in endpoints)
@@ -159,10 +192,10 @@ def _sagemaker_client(endpoints: list[SageMakerEndpoint], models: Iterable[str])
             IsaacusSageMakerRuntimeEndpoint,
             IsaacusSageMakerRuntimeHTTPClient,
         )
-    except ImportError as e:  # pragma: no cover - exercised only without the extra
+    except ImportError as e:  # pragma: no cover - only on a broken/partial install
         raise ImportError(
-            f"{ENDPOINTS_ENV} is set but the isaacus-sagemaker package is missing. "
-            "Install with: uv sync --extra isaacus"
+            f"{ENDPOINTS_ENV} is set but the isaacus-sagemaker package could not be "
+            "imported. It is a core dependency; reinstall womblex."
         ) from e
 
     missing = unserved_models(models)
@@ -232,6 +265,7 @@ __all__ = [
     "is_model_served",
     "make_ai_chunking_client",
     "make_isaacus_client",
+    "misconfigured_endpoints_var",
     "parse_endpoints",
     "sagemaker_configured",
     "unserved_models",

@@ -2,8 +2,11 @@
 #
 # Bundles the extraction pipeline + the [cloud] extra (object-storage staging
 # and the Postgres job queue) so the same image serves `womblex run`, `worker`,
-# `enqueue`, and the per-stage commands. Override the installed extras at build
-# time, e.g. --build-arg EXTRAS="cloud,isaacus".
+# `enqueue`, and the per-stage commands. Isaacus enrichment/embeddings and the
+# Bedrock VLM OCR engine are in the base install (core deps), so no extra is
+# needed for them — just a key / `ISAACUS_SAGEMAKER_ENDPOINTS` / an OCR engine
+# choice at runtime. Override the installed extras at build time, e.g.
+# --build-arg EXTRAS="cloud,ui".
 FROM python:3.11-slim AS base
 
 ENV PYTHONUNBUFFERED=1 \

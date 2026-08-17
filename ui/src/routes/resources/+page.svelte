@@ -29,9 +29,14 @@
 	// a single call — but it has no unserved models either (that check only
 	// means anything once endpoints are declared), so keying the pill on
 	// coverage alone showed a green pill above an "API key: Not set" row.
+	// A near-miss of the SageMaker endpoints var (e.g. the singular `…_ENDPOINT`)
+	// is the usual cause of an unexpected "No API key", so it gets its own label.
 	let isaacusState = $derived.by((): { status: 'done' | 'warning'; label: string } => {
 		const card = cards?.isaacus;
 		if (!card) return { status: 'warning', label: 'Unknown' };
+		if (card.deployment === 'hosted' && card.endpoints_typo) {
+			return { status: 'warning', label: 'Endpoints var misspelled' };
+		}
 		if (card.deployment === 'hosted' && !card.api_key_configured) {
 			return { status: 'warning', label: 'No API key' };
 		}
@@ -229,6 +234,13 @@
 							</li>
 						{/each}
 					</ul>
+				{/if}
+				{#if cards.isaacus.deployment === 'hosted' && cards.isaacus.endpoints_typo}
+					<p class="text-xs text-status-failed">
+						<code class="font-mono">{cards.isaacus.endpoints_typo}</code> is set, but Womblex
+						reads <code class="font-mono">ISAACUS_SAGEMAKER_ENDPOINTS</code> (plural). Rename it,
+						or the deployment falls back to the hosted API and reports no key.
+					</p>
 				{/if}
 				{#if cards.isaacus.unserved_models.length > 0}
 					<p class="text-xs text-status-failed">

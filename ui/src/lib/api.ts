@@ -225,6 +225,11 @@ export interface IsaacusCard {
 	api_key_masked: string | null;
 	models_checked: string[];
 	unserved_models: string[];
+	// A set env var that looks like `ISAACUS_SAGEMAKER_ENDPOINTS` but is not it
+	// (e.g. the singular `…_ENDPOINT`), when the canonical var is unset. The
+	// deployment silently falls back to the hosted API, so this turns a bare
+	// "No API key" into a named, fixable cause. Null when there is nothing to warn.
+	endpoints_typo: string | null;
 }
 
 export interface ResourcesCards {

@@ -192,8 +192,8 @@ approval rather than quietly exceeding it.
 ### Dependencies
 - PyMuPDF (`fitz`) for PDF handling
 - rapidocr-onnxruntime for OCR (bundles PaddleOCR v4 ONNX det/rec/cls models, no PaddlePaddle framework)
-- boto3 (optional `[bedrock]` extra, aliased `[cloud-ocr]`) for the `mistral-ocr` engine — Mistral Pixtral Large via AWS Bedrock (Converse API). Imported lazily at exactly one site, `ingest/llm_ocr.py:_ensure_client` (`boto3.client("bedrock-runtime")`); nothing on the core extraction path touches it, which is why the whole suite runs without it and only the VLM benchmark skips
-- **`[cloud]` must never depend on boto3.** s3fs reaches S3 via aiobotocore → botocore, so object-storage staging needs no boto3; putting it in `[cloud]` would drag the hosted-VLM dependency into every distributed CPU deployment. Extras are deployment-shaped: `[local]` (empty — the base install), `[cloud]` (fsspec + s3fs + psycopg3), `[cloud-ocr]` (the one extra that changes OCR cost/behaviour)
+- boto3 (core dependency) for the `mistral-ocr` engine — Mistral Pixtral Large via AWS Bedrock (Converse API) — and for the `isaacus-sagemaker` HTTP client's SigV4 signing. Imported lazily at its use sites (`ingest/llm_ocr.py:_ensure_client` → `boto3.client("bedrock-runtime")`; `utils/isaacus_client.py` for the SageMaker session); nothing on the *default* extraction path touches it, which is why the whole suite runs without AWS credentials and only the VLM benchmark / live SageMaker paths skip
+- **Isaacus SDK (`isaacus`, `isaacus-sagemaker`) and boto3 are core, not extras.** Every real deployment uses enrichment/embeddings and (often) hosted OCR or SageMaker; they are tiny next to the vision/ML stack, and gating them behind extras only produced misconfiguration (a missing SDK surfaced as "no API key"). They stay dormant until configured — no key / no `ISAACUS_SAGEMAKER_ENDPOINTS` / no `mistral-ocr` engine means nothing calls out. Remaining extras are deployment-shaped: `[local]` (empty — the base install), `[cloud]` (fsspec + s3fs + psycopg3), `[ui]` (fastapi + uvicorn), `[dev]`
 - ultralytics for YOLOv8 layout analysis (bundled yolov8n.pt in `models/`)
 - opencv-python-headless for image processing (binarisation, deskew)
 - semchunk for chunking
@@ -297,20 +297,22 @@ uv run python -m pytest tests/test_fixture_accuracy.py tests/test_womblex_collec
 The skip count is environment-dependent (which optional deps, services, and
 fixtures are present) — none are on broken code. On a bare checkout (no Isaacus
 key, no AWS credentials, vendored fixtures only) a full `pytest tests/` reports
-~50 skips; on a dev box with the full fixtures, an Isaacus key, and AWS Bedrock
-access, far fewer skip.
+~35 skips (fewer than before — the isaacus SDK is core now, so its wrapper tests
+run instead of skipping); on a dev box with the full fixtures, an Isaacus key,
+and AWS Bedrock access, far fewer skip.
 Run with `-rs` to see live reasons. The recurring ones:
 
 - **~15 — Mistral OCR VLM benchmark** (`test_bench_ocr_accuracy.py`): the
   `mistral-ocr` engine invokes Mistral Pixtral Large via **AWS Bedrock**
-  (`bedrock-runtime`). Needs `boto3` installed (the `[bedrock]` extra) and
-  resolvable AWS credentials with Pixtral Large model access enabled. Skips
-  cleanly when absent.
+  (`bedrock-runtime`). boto3 is a core dependency (always installed), so the
+  skip is now purely about resolvable AWS credentials with Pixtral Large
+  model access enabled. Skips cleanly when absent.
 - **geospatial** (`test_geospatial.py`): needs the optional `geopandas` /
   `pyogrio` extras.
 - **isaacus SDK** (`test_enrich.py` / `test_graph.py` / `test_query.py` /
-  `test_enrichment_output.py`): module-level `importorskip("isaacus")` — skip
-  without the `[isaacus]` extra.
+  `test_enrichment_output.py`): module-level `importorskip("isaacus")` — the SDK
+  is a core dependency now, so these run (mocked clients); the guard only skips
+  on a broken install where `isaacus` cannot be imported.
 - **isaacus API key** (`test_embed_stage.py` / `test_enrich_stage.py`): the
   `isaacus_client` fixture skips without `ISAACUS_API_KEY` (these make real
   Kanon-2 calls when a key is present).
@@ -407,7 +409,7 @@ belongs on the orchestrator path, not here.
 - Log document IDs with all errors
 - Write checkpoint after each batch
 - Manage dependencies via `pyproject.toml` + `uv lock`; no separate requirements files
-- `uv.lock` carries **boto3 / s3transfer** for the optional `[bedrock]` extra (`boto3>=1.34`) — the AWS Bedrock client behind the `mistral-ocr` OCR engine, not the core pipeline. They are locked but not installed by a default `uv sync`; add `--extra bedrock` to get them. (The lock omitted this extra until 2026-07-28, so any sync rewrote it — hence boto3 turning up in unrelated diffs. Fixed; `uv lock --check` is clean.)
+- `uv.lock` carries **boto3 / s3transfer** as core dependencies (`boto3>=1.34`) — the AWS Bedrock client behind the `mistral-ocr` OCR engine and the SigV4 signing behind the `isaacus-sagemaker` SageMaker client. Installed by a default `uv sync`. (They were previously behind the `[bedrock]` extra; promoted to core so the SDK is present wherever a key/endpoint is configured.)
 - If `uv sync` rewrites `uv.lock`, that is a real dependency change, not noise — keep it out of unrelated commits (`git checkout -- uv.lock`) and land it as its own dependency-scoped change with human approval. `uv lock --check` tells you whether the lock and `pyproject.toml` agree
 - Never bypass the commit hook with `--no-verify`. If a scan fires, fix it or record why it is safe at the site — `# nosemgrep: <rule-id> -- <reason>` or `# pragma: allowlist secret`. Never widen an exclusion or drop a rule to get a green run. The local rulesets are in `.semgrep/rules/` and each documents its known false-positive classes in its header
 - Verify mechanism claims against code or measurement before writing docs — `grep`/`Read` the file or run a probe, attach the evidence. Inferred descriptions without grounding tend to be wrong and need correcting later.

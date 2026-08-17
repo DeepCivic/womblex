@@ -3,8 +3,8 @@ and ``graph-refresh`` (offline mention→chunk edge rebuild).
 
 All are per-stage (``--shards``) commands over an existing extraction shard
 directory, mirroring ``womblex chunk --shards``: each has an independent
-``CheckpointManager`` and writes sibling parquets in place. ``enrich``
-requires the ``isaacus`` extra + ``ISAACUS_API_KEY``; ``link`` and
+``CheckpointManager`` and writes sibling parquets in place. ``enrich`` uses
+the Isaacus SDK (a core dependency) + ``ISAACUS_API_KEY``; ``link`` and
 ``graph-refresh`` are offline. Run ``graph-refresh`` *after* ``chunk`` (the
 AI-chunking pipeline order is enrich → chunk → graph-refresh).
 """
@@ -84,7 +84,7 @@ def cmd_enrich(args: argparse.Namespace) -> int:
         # deployed endpoints up front.
         client = make_isaacus_client(models=[enrichment_config.model])
     except ImportError as e:
-        logger.error("Isaacus SDK not usable (uv sync --extra isaacus): %s", e)
+        logger.error("Isaacus SDK not usable (reinstall womblex): %s", e)
         return 1
     except Exception as e:
         # Logs the exception, not the key — the rule trips on "API_KEY" in the literal.

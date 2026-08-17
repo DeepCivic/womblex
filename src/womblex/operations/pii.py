@@ -17,7 +17,7 @@ def run_pii_cleaning(
 
     Uses regex pattern recognisers (Presidio-style) for candidate detection
     and a Sentence Transformers context model (all-MiniLM-L6-v2) for
-    low-confidence validation. Requires ``pip install womblex[pii]``.
+    low-confidence validation. Both are core dependencies — no extra required.
 
     The pipeline point is configurable via ``config.pii.pipeline_point``:
 
@@ -48,14 +48,8 @@ def run_pii_cleaning(
             "first, or use pipeline_point='post_chunk'/'post_extraction'."
         )
 
-    try:
-        from womblex.pii.cleaner import PIICleaner
-        from womblex.pii.stage import clean_chunks, clean_enriched_chunks, clean_extraction
-    except ImportError as exc:
-        raise ImportError(
-            "PII cleaning requires the 'pii' extra. "
-            "Install with: pip install womblex[pii]"
-        ) from exc
+    from womblex.pii.cleaner import PIICleaner
+    from womblex.pii.stage import clean_chunks, clean_enriched_chunks, clean_extraction
 
     cleaner = PIICleaner(
         entities=config.pii.entities,

@@ -177,13 +177,7 @@ class PIICleaner:
         network access.  Falls back to the HuggingFace hub identifier.
         """
         if self._model is None:
-            try:
-                from sentence_transformers import SentenceTransformer
-            except ImportError as exc:
-                raise ImportError(
-                    "PII context validation requires 'sentence-transformers'. "
-                    "Install with: pip install womblex[pii]"
-                ) from exc
+            from sentence_transformers import SentenceTransformer
 
             from womblex.utils.models import resolve_local_model_path
 
@@ -349,14 +343,8 @@ class PIICleaner:
         """Replace ``candidates`` in ``text`` with ``<ENTITY_TYPE>`` tags."""
         if not candidates:
             return text, 0
-        try:
-            from presidio_anonymizer import AnonymizerEngine
-            from presidio_anonymizer.entities import OperatorConfig, RecognizerResult
-        except ImportError as exc:
-            raise ImportError(
-                "PII replacement requires 'presidio-anonymizer'. "
-                "Install with: pip install womblex[pii]"
-            ) from exc
+        from presidio_anonymizer import AnonymizerEngine
+        from presidio_anonymizer.entities import OperatorConfig, RecognizerResult
 
         engine = AnonymizerEngine()
         analyzer_results = [

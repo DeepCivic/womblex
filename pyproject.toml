@@ -28,7 +28,13 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Information Analysis",
 ]
 
-# Core dependencies - extraction works without Isaacus
+# Core dependencies. Womblex is plug-and-play: Isaacus enrichment/embeddings,
+# hosted-VLM (Bedrock) OCR, and the AWS SDK are all part of the base install.
+# Every real deployment uses them, and they are comparatively tiny next to the
+# vision/ML stack already here (pymupdf, ultralytics, sentence-transformers) —
+# gating them behind extras only produced misconfiguration (a missing SDK read
+# as "no API key"). rapidocr-onnxruntime is the bundled CPU OCR engine; boto3
+# backs both the mistral-ocr engine and the isaacus-sagemaker HTTP client.
 dependencies = [
     "pymupdf>=1.24",
     "rapidocr-onnxruntime>=1.4",
@@ -47,6 +53,9 @@ dependencies = [
     "presidio-anonymizer>=2.2",
     "sentence-transformers>=3.0",
     "spylls>=0.1.7",
+    "isaacus>=0.19",
+    "isaacus-sagemaker>=0.1.4",
+    "boto3>=1.34",
 ]
 
 [project.optional-dependencies]
@@ -59,35 +68,11 @@ local = []
 
 # Cloud / distributed execution - pip install womblex[cloud]
 # Object-storage staging (fsspec + s3fs) and the Postgres job queue (psycopg3).
-# No boto3 here on purpose: s3fs reaches S3 via aiobotocore -> botocore, so
-# S3/MinIO staging needs no boto3, and boto3 is only ever imported by the
-# Bedrock OCR engine. Keeping it out means a scalable cloud deployment stays
-# on the cheap CPU OCR engine unless it opts into [cloud-ocr] explicitly.
 cloud = [
     "fsspec>=2024.0",
     "s3fs>=2024.0",
     "psycopg[binary]>=3.1",
 ]
-
-# Isaacus enrichment - pip install womblex[isaacus]
-# isaacus-sagemaker bootstraps the same SDK against a private, air-gapped
-# SageMaker deployment (ISAACUS_SAGEMAKER_ENDPOINTS); it is imported lazily and
-# only when that variable is set, so a hosted-API install never touches it. It
-# does pull boto3 in, which is why the boto3-free rule stays scoped to [cloud]:
-# a distributed CPU deployment that skips enrichment still skips boto3.
-isaacus = ["isaacus>=0.19", "isaacus-sagemaker>=0.1.4"]
-
-# Mistral OCR via AWS Bedrock - pip install womblex[bedrock]
-# The mistral-ocr OCR engine invokes Pixtral Large through bedrock-runtime.
-bedrock = ["boto3>=1.34"]
-
-# ADVANCED / OPTIONAL: hosted VLM OCR - pip install womblex[cloud-ocr]
-# Alias of [bedrock], named for what it buys you rather than for the vendor.
-# This is the one extra that changes OCR *cost and behaviour*: it routes pages
-# to a hosted vision model (per-token billing, network egress, AWS Pixtral
-# Large access) instead of the bundled CPU engine. [cloud] does not imply it,
-# and a distributed run does not need it.
-cloud-ocr = ["womblex[bedrock]"]
 
 # Console sidecar - pip install womblex[ui]
 # `womblex ui` serves a read-only API over artefacts the pipeline already
@@ -117,7 +102,7 @@ dev = [
 ]
 
 # Full install - pip install womblex[all]
-all = ["womblex[isaacus,bedrock,cloud,ui,dev]"]  # [local] is empty, [cloud-ocr] == [bedrock]
+all = ["womblex[cloud,ui,dev]"]  # [local] is empty; isaacus + Bedrock OCR + AWS SDK are core
 
 [project.urls]
 Homepage = "https://github.com/DeepCivic/womblex"

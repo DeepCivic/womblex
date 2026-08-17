@@ -17,7 +17,9 @@ operation. What does *not* change when you scale out:
 
 - the extraction logic (`womblex run` and the cloud worker call a byte-identical
   `process_batch` body)
-- the OCR engine (the bundled CPU one, unless you explicitly opt into `[cloud-ocr]`)
+- the OCR engine (the bundled CPU one by default; the hosted Bedrock VLM
+  engine ships in the base install too and is selected by config, not a
+  separate install)
 - the output layout (distributed runs land the ordinary shard layout, so every
   local `--shards` command consumes them unchanged)
 
@@ -51,24 +53,29 @@ queue, hosted APIs), never a different extraction path.
 
 | Deployment | Install | Adds |
 |---|---|---|
-| **Local CPU** (laptop, Chromebook, air-gapped box) | `pip install womblex` | — the base install is the local deployment |
+| **Local CPU** (laptop, Chromebook, air-gapped box) | `pip install womblex` | the whole pipeline — extraction, OCR, chunking, PII, **Isaacus enrichment/embeddings**, and **hosted Bedrock VLM OCR** — are all in the base install |
 | **Cloud CPU** (scalable, S3 + Postgres) | `pip install womblex[cloud]` | fsspec + s3fs staging, psycopg3 job queue |
-| Enrichment / embeddings | `pip install womblex[isaacus]` | Isaacus SDK — hosted API (`ISAACUS_API_KEY`) or a private SageMaker deployment (`ISAACUS_SAGEMAKER_ENDPOINTS`) |
-| Hosted VLM OCR *(advanced)* | `pip install womblex[cloud-ocr]` | boto3 → Mistral Pixtral Large via AWS Bedrock |
+
+Enrichment/embeddings (Isaacus SDK — hosted API via `ISAACUS_API_KEY` or a
+private SageMaker deployment via `ISAACUS_SAGEMAKER_ENDPOINTS`), hosted VLM OCR
+(Mistral Pixtral Large via AWS Bedrock), and the AWS SDK (`boto3`) are **core
+dependencies** — they need no extra. Every real deployment uses them, and they
+are tiny next to the vision/ML stack already in the base install, so gating
+them behind extras only produced misconfiguration (a missing SDK read as "no
+API key"). They stay dormant until you configure them: no key, no endpoints,
+and no `mistral-ocr` engine selected means nothing calls out.
 
 `pip install womblex[local]` is accepted and resolves to the plain base
 install — it exists so a deployment can state which mode it is, and so
 `[local]` and `[cloud]` read as a pair.
 
-Two things worth being explicit about, because they are the usual source of
-over-installing:
+Two things worth being explicit about:
 
-- **`[cloud]` does not pull in `[cloud-ocr]`.** S3 access goes through
-  s3fs → aiobotocore → botocore; boto3 is imported at exactly one site,
-  `ingest/llm_ocr.py`, for the Bedrock OCR engine. So a scalable AWS-native
-  deployment keeps the cheap, bundled CPU OCR engine unless you opt in.
-  `[cloud-ocr]` is the only extra that changes OCR cost and behaviour —
-  per-token billing, network egress, and a Pixtral Large model grant.
+- **Configured, not installed.** Isaacus enrichment, the Bedrock VLM OCR
+  engine, and `boto3` are always present but never active until you turn them
+  on — enrichment needs `ISAACUS_API_KEY` or `ISAACUS_SAGEMAKER_ENDPOINTS`, and
+  the hosted VLM OCR engine only fires when `extraction.ocr.engine:
+  mistral-ocr` is set. A default run stays fully local and CPU-only.
 - **Local vs cloud is a runtime choice, not a build-time one.** The same
   wheel does both; see [Environment-Agnostic Execution](#environment-agnostic-execution).
   Installing `[cloud]` does not commit you to running in the cloud.
@@ -98,7 +105,8 @@ Once you have extraction working, semantic analysis via Isaacus (embeddings, cla
 
 ### Isaacus API Key (optional)
 
-Required only for the enrichment stage (`pip install womblex[isaacus]`). Text extraction works without it.
+Required only for the enrichment/embedding stages. Text extraction works
+without it, and the Isaacus SDK is already installed (a core dependency).
 
 ```bash
 cp .env.example .env
@@ -498,7 +506,7 @@ See [docs/extraction.md](https://github.com/DeepCivic/womblex/blob/main/docs/ext
 reference, element kinds, the reassembly query, and the verbatim-text
 policy.
 
-With `womblex[isaacus]` enrichment enabled, the per-stage `womblex enrich --shards` writes sidecars alongside each batch:
+The per-stage `womblex enrich --shards` writes sidecars alongside each batch (enrichment is a core capability — no extra install, just a key or SageMaker endpoints):
 
 **`batch-NNNN.enrichment_entities.parquet`** — flat entity mentions for filtering / PII candidates
 

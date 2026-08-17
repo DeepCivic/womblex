@@ -1,8 +1,9 @@
 """CLI: `embed` — vectorise chunks via Isaacus (kanon-2-embedder).
 
 Per-stage (`--shards`) command over an existing shard directory that already
-has `*.chunks.parquet`, mirroring `womblex enrich --shards`. Requires the
-`isaacus` extra + `ISAACUS_API_KEY`.
+has `*.chunks.parquet`, mirroring `womblex enrich --shards`. The Isaacus SDK
+is a core dependency; the deployment is picked from the environment
+(`ISAACUS_API_KEY` or `ISAACUS_SAGEMAKER_ENDPOINTS`).
 """
 
 from __future__ import annotations
@@ -63,7 +64,7 @@ def cmd_embed(args: argparse.Namespace) -> int:
         # deployed endpoints up front.
         client = make_isaacus_client(models=[embedding_config.model])
     except ImportError as e:
-        logger.error("Isaacus SDK not usable (uv sync --extra isaacus): %s", e)
+        logger.error("Isaacus SDK not usable (reinstall womblex): %s", e)
         return 1
     except Exception as e:
         # Logs the exception, not the key — the rule trips on "API_KEY" in the literal.

@@ -370,7 +370,7 @@ def cmd_run_stage(args: argparse.Namespace) -> int:
         try:
             ctx.client = make_isaacus_client(models=contract.models(config))
         except ImportError as e:
-            logger.error("Isaacus SDK not usable (uv sync --extra isaacus): %s", e)
+            logger.error("Isaacus SDK not usable (reinstall womblex): %s", e)
             return 1
         except Exception as e:
             # Logs the exception, not the key — the rule trips on "API_KEY" in the literal.
