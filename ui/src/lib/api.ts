@@ -60,6 +60,110 @@ export async function getStagePresence(
 	return body.source_hashes;
 }
 
+// The Chunk Inspector's payload for one document (docs/ui-plan.md merge 6):
+// chunks plus the overlay sidecars, all joined on `source_hash` and
+// `chunk_index`. Field names mirror the store schemas the reader serialises
+// (`CHUNKS_SCHEMA`, `ENTITY_SCHEMA`, `PII_SPANS_SCHEMA`, `MONEY_SPANS_SCHEMA`,
+// `CHUNK_QUALITY_SCHEMA`) so a renamed column surfaces as a type error here.
+export interface Chunk {
+	source_hash: string;
+	chunk_index: number;
+	text: string;
+	start_char: number;
+	end_char: number;
+	content_type: string;
+	has_redaction: boolean;
+	page_start: number | null;
+	page_end: number | null;
+	elem_order: number | null;
+}
+
+// Entity mention. The reader re-keys the sharded layout's `document_id` onto
+// `source_hash` before serialising, so it joins like every other overlay.
+// `chunk_index` is -1 when the mention did not map to a chunk.
+export interface EntityMention {
+	source_hash: string;
+	entity_id: string;
+	entity_label: string;
+	name: string;
+	entity_type: string;
+	role: string;
+	mention_start: number;
+	mention_end: number;
+	chunk_index: number;
+}
+
+// One detected PII span, located within a chunk: slice `chunk.text[start:end]`.
+export interface PiiSpan {
+	source_hash: string;
+	chunk_index: number;
+	content_type: string;
+	start: number;
+	end: number;
+	text: string;
+	entity_type: string;
+	entity_id: string;
+	detector: string;
+	score: number;
+	replacement: string;
+}
+
+// A monetary amount anchored to narrative text. The reader keeps only
+// `locus === 'narrative'` spans (the others anchor to cells with no chunk
+// offset) and sends `value` as a string — `decimal128(38,4)` is exact by
+// contract and a float would lose that.
+export interface MoneySpan {
+	source_hash: string;
+	locus: string;
+	text_source: string;
+	start_char: number;
+	end_char: number;
+	page: number | null;
+	text: string;
+	value: string | null;
+	currency: string | null;
+	modifier: string | null;
+	multiplier: string | null;
+	negative: boolean;
+	confidence: number;
+	context: string;
+}
+
+// Per-chunk quality annotation (ML-readiness flags + duplicate-cluster ids).
+export interface ChunkQuality {
+	source_hash: string;
+	chunk_index: number;
+	content_type: string;
+	char_len: number;
+	alpha_frac: number;
+	is_short: boolean;
+	boilerplate_flag: boolean;
+	exact_dup_id: number | null;
+	near_dup_id: number | null;
+}
+
+export interface ChunkDetail {
+	run_id: string;
+	source_hash: string;
+	chunks: Chunk[];
+	entities: EntityMention[];
+	pii_spans: PiiSpan[];
+	money_spans: MoneySpan[];
+	quality: ChunkQuality[];
+}
+
+export async function getChunkDetail(
+	runId: string,
+	sourceHash: string,
+	fetchImpl: typeof fetch = fetch
+): Promise<ChunkDetail> {
+	const resp = await fetchImpl(
+		`/api/runs/${encodeURIComponent(runId)}/chunks/${encodeURIComponent(sourceHash)}`
+	);
+	if (!resp.ok) throw new Error(`GET /api/runs/${runId}/chunks/${sourceHash}: ${resp.status}`);
+	return (await resp.json()) as ChunkDetail;
+}
+
 // `ShardAuditReport.as_dict()` — the verify-shards action's result.
 export interface ShardAudit {
 	shard_dir: string;

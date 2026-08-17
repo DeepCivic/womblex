@@ -5,12 +5,21 @@ Screen requirements: the *Womblex Platform UX Requirements* brief (five domains 
 Dashboard, Pipeline Composer, Corpus Inspector, Semantic Chunk Inspector,
 Resources Console).
 
-Status: merges 1–5 and 10 landed (design system, read API skeleton, sidecar
-image, frontend shell, Corpus Inspector, Resources Console), plus the read
-APIs for merges 6, 8 and 9 and the write API for merge 7. The Chunk
-Inspector, Dashboard and Pipeline Composer screens themselves are still
-`ScreenStub` placeholders — each screen's endpoints landed ahead of it, so
-the `ReportIssue` control has nothing to attach to yet.
+Status (verified against the tree): merges 1–6 and 10 are complete end to end
+— design system, read API skeleton, sidecar image, frontend shell, Corpus
+Inspector, Chunk Inspector and Resources Console all have both their endpoints
+and their screens. Merges 8 and 9 are **backend-only**: the Dashboard
+(`/api/dashboard`) and Pipeline Composer (`/api/composer/*`) endpoints have
+landed, but their `ui/src/routes/{dashboard,composer}` screens are still
+`ScreenStub` placeholders — which is why those two screens render the "Ships
+in delivery merge N" message. Merge 7 is **partial**: the feedback write path
+(`POST /api/runs/{id}/feedback` + one-file-per-report writer) is in, but the
+`ReportIssue` control is not wired into any screen yet. Merge 11 (execution
+controls) has not started.
+
+In short: every planned *endpoint* through merge 10 exists; two *screens*
+(8, 9) and one *control* (7) remain to be built on top of endpoints that
+are already there. Per-merge state is tracked in the §5 table.
 
 ## 1. The governing principle
 
@@ -215,22 +224,24 @@ but it costs one string now and a migration later.
 Sized to the 500-changed-line merge cap. Each merge stands alone and leaves the
 tree green.
 
-| # | Merge | Contents |
-|---|---|---|
-| 1 | **Design system** | `DESIGN.md` + this plan *(this change)* |
-| 2 | **Read API skeleton** | `[ui]` extra, `src/womblex/ui/app.py`, `womblex ui` command, `describe_run()`, `/api/runs` + `/api/runs/{id}/manifest`, local and store-backed, tests against a fixture shard dir |
-| 3 | **Sidecar image** | `Dockerfile.ui`, the compose `ui` service, read-only container |
-| 4 | **Frontend shell** | `ui/` SvelteKit workspace + the SPA build stage, tokens from `DESIGN.md`, top bar + side nav, run selector, theme + density toggles |
-| 5 | **Corpus Inspector** | Documents grid, lifecycle-checkpoint switcher, failure filter, `verify-shards` action |
-| 6 | **Chunk Inspector** | Chunk reader endpoints, `ChunkCard`, entity/PII/money overlays |
-| 7 | **Report action** | One-file-per-report writer + `POST /api/runs/{id}/feedback`; `ReportIssue` control once the inspector screens exist |
-| 8 | **Dashboard** | Queue stats, job list, stale detection, fleet view from `locked_by`, KPI tiles and throughput |
-| 9 | **Pipeline Composer** | `STAGE_CONTRACTS` graph endpoint, config form, validation, YAML download |
-| 10 | **Resources Console** | Connection cards, credential masking, test actions, fleet + queue-depth state |
-| 11 | **Execution controls** | `--allow-execute`, configure-and-run, per-stage runs, log streaming |
+| # | Merge | Contents | Status |
+|---|---|---|---|
+| 1 | **Design system** | `DESIGN.md` + this plan *(this change)* | ✅ Done |
+| 2 | **Read API skeleton** | `[ui]` extra, `src/womblex/ui/app.py`, `womblex ui` command, `describe_run()`, `/api/runs` + `/api/runs/{id}/manifest`, local and store-backed, tests against a fixture shard dir | ✅ Done |
+| 3 | **Sidecar image** | `Dockerfile.ui`, the compose `ui` service, read-only container | ✅ Done |
+| 4 | **Frontend shell** | `ui/` SvelteKit workspace + the SPA build stage, tokens from `DESIGN.md`, top bar + side nav, run selector, theme + density toggles | ✅ Done |
+| 5 | **Corpus Inspector** | Documents grid, lifecycle-checkpoint switcher, failure filter, `verify-shards` action | ✅ Done (endpoints + screen) |
+| 6 | **Chunk Inspector** | Chunk reader endpoints, `ChunkCard`, entity/PII/money overlays | ✅ Done (endpoints + screen) |
+| 7 | **Report action** | One-file-per-report writer + `POST /api/runs/{id}/feedback`; `ReportIssue` control on the inspector screens | ⚠️ Write path only — endpoint + writer landed; `ReportIssue` control not yet on any screen |
+| 8 | **Dashboard** | Queue stats, job list, stale detection, fleet view from `locked_by`, KPI tiles and throughput | ⚠️ Endpoint only — `/api/dashboard` landed; screen is still `ScreenStub` |
+| 9 | **Pipeline Composer** | `STAGE_CONTRACTS` graph endpoint, config form, validation, YAML download | ⚠️ Endpoints only — `/api/composer/{graph,schema,validate,yaml}` landed; screen is still `ScreenStub` |
+| 10 | **Resources Console** | Connection cards, credential masking, test actions, fleet + queue-depth state | ✅ Done (endpoints + screen) |
+| 11 | **Execution controls** | `--allow-execute`, configure-and-run, per-stage runs, log streaming | ⬜ Not started |
 
-Merges 2–7 deliver a useful auditing console; everything from 8 on is additive,
-and the sequence can stop anywhere without leaving a half-built screen.
+**Remaining work is two screens (8, 9) plus one control (7)**, all over
+endpoints that already exist and are tested. The next merges are frontend-only:
+build `ui/src/routes/dashboard` and `.../composer` against their landed APIs,
+then attach `ReportIssue` to the inspector screens.
 
 The SPA build stage moved from merge 3 to merge 4 when 3 was built: a build
 stage for a directory that does not exist yet cannot build, and defining one
