@@ -286,3 +286,41 @@ export async function testQueueConnection(
 	if (!resp.ok) throw new Error(`POST /api/resources/test/queue: ${resp.status}`);
 	return (await resp.json()) as QueueTestResult;
 }
+
+// The Pipeline Composer (docs/ui-plan.md merge 9). Neither read is run-scoped:
+// the DAG comes from `STAGE_CONTRACTS` and the form's fields from
+// `WomblexConfig`'s JSON Schema, so the frontend hand-codes neither the stage
+// ordering nor the config field list — §3's "do not hand-code the DAG".
+export interface ConditionalInput {
+	suffix: string;
+	reason: string;
+	strict: boolean;
+}
+
+export interface StageNode {
+	id: string;
+	scope: string | null;
+	mutation: string | null;
+	needs_isaacus_api: boolean;
+	checkpoint_dirname: string | null;
+	required_inputs: string[];
+	conditional_inputs: ConditionalInput[];
+	outputs: string[];
+}
+
+export interface StageEdge {
+	from: string;
+	to: string;
+	suffixes: string[];
+}
+
+export interface StageGraph {
+	nodes: StageNode[];
+	edges: StageEdge[];
+}
+
+export async function getStageGraph(fetchImpl: typeof fetch = fetch): Promise<StageGraph> {
+	const resp = await fetchImpl('/api/composer/graph');
+	if (!resp.ok) throw new Error(`GET /api/composer/graph: ${resp.status}`);
+	return (await resp.json()) as StageGraph;
+}

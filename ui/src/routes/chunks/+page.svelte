@@ -24,7 +24,7 @@
 	let documentsError: string | null = $state(null);
 	let selectedHash: string | null = $state(null);
 
-	let detail: ChunkDetail | null = $state(null);
+	let detail = $state<ChunkDetail | null>(null); // `$state<T>` not a `let` annotation: TS narrows the latter to `null`
 	let loading = $state(false);
 	let error: string | null = $state(null);
 
@@ -47,6 +47,9 @@
 	);
 
 	function groupBy<T>(rows: T[], key: (row: T) => number): Map<number, T[]> {
+		// Built and returned inside a $derived, never mutated after — SvelteMap
+		// is for state edited in place, which this never is.
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity
 		const map = new Map<number, T[]>();
 		for (const row of rows) {
 			const k = key(row);
