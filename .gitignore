@@ -16,6 +16,10 @@ htmlcov/
 .venv/
 venv/
 
+# Local-only compose overrides (host-specific ports, etc.)
+docker-compose.local.yml
+docker-compose.override.yml
+
 # IDE
 .idea/
 .vscode/

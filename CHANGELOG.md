@@ -8,6 +8,9 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 ## [Unreleased]
 
+### Changed
+- **Console: execution is on by default; `--audit-only` is the opt-out.** Inverts the merge-11 switch — the console can dispatch runs into the queue without a flag, and `womblex ui --audit-only` gives a pure read/inspect console (the old `--allow-execute` is removed). Still queue-only, so dispatch needs both a `--store` and a `--dsn`; the `/api/execute/status` payload renames `allow_execute` → `audit_only` and `ExecutionCapability.can_execute` is now `not audit_only and has_store and has_queue`.
+
 ### Added
 - **Console Dashboard — screen (`docs/ui-plan.md` merge 8).** Run-scoped, self-refreshing screen over `/api/dashboard`; completes merge 8, leaving only the `ReportIssue` control (7).
   - Queue half (needs a DSN): KPI tiles over exact status counts, total and throughput; `locked_by` worker fleet; stale-job detection naming what `--stale-timeout` recovers; the `womblex_jobs` list with stale rows flagged inline.

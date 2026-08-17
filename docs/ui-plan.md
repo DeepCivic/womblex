@@ -69,7 +69,7 @@ src/womblex/ui/
 ├── routes/        # runs, corpus, chunks, stages, resources, jobs, execute
 └── readers.py     # Thin pyarrow readers over the shard sidecars
 ui/                     # SvelteKit SPA; built during the image build
-src/womblex/cli/ui.py   # `womblex ui [--port 8080] [--allow-execute]`
+src/womblex/cli/ui.py   # `womblex ui [--port 8080] [--audit-only]`
 ```
 
 State reaches the sidecar exactly the way it reaches a worker — no new
@@ -189,14 +189,14 @@ MinIO, already in `docker-compose.yml`) rather than a bare `womblex run`; a
 queue-less local console would need its own background runner and progress
 reporting. Deferred, and worth revisiting if that requirement bites.
 
-`--allow-execute` remains the switch: off gives a pure auditing console. It
-is enforced in one place — `ui/execute.py`'s guard, which every write action
-calls before it touches the store or the queue — and refuses with 403
-(audit-only) or 409 (no store / no queue configured), the two states
-`ExecutionCapability` distinguishes. Execution is queue-only, so it needs
-*both* a `--store` and a `--dsn`; a local `output_root`-only console can
-configure and audit but not dispatch, and `GET /api/execute/status` says so
-rather than half-working.
+`--audit-only` remains the switch: passing it gives a pure auditing console.
+Execution is on by default; the switch is enforced in one place —
+`ui/execute.py`'s guard, which every write action calls before it touches the
+store or the queue — and refuses with 403 (audit-only) or 409 (no store /
+no queue configured), the two states `ExecutionCapability` distinguishes.
+Execution is queue-only, so it needs *both* a `--store` and a `--dsn`; a
+local `output_root`-only console can configure and audit but not dispatch, and
+`GET /api/execute/status` says so rather than half-working.
 
 ### Scale-to-zero is in scope, and already supported
 
@@ -258,7 +258,7 @@ tree green.
 | 8 | **Dashboard** | Queue stats, job list, stale detection, fleet view from `locked_by`, KPI tiles and throughput | ✅ Done (endpoints + screen; run-scoped, self-refreshing, renders the checkpoint half with no queue configured) |
 | 9 | **Pipeline Composer** | `STAGE_CONTRACTS` graph endpoint, config form, validation, YAML download | ✅ Done (endpoints + screen; landed as two commits — graph, then form) |
 | 10 | **Resources Console** | Connection cards, credential masking, test actions, fleet + queue-depth state | ✅ Done (endpoints + screen) |
-| 11 | **Execution controls** | `--allow-execute`, configure-and-run, per-stage runs, log streaming | ✅ Done (endpoints + screen; configure-and-run enqueues, capability banner names the missing piece — "log streaming" is the Dashboard's queue/checkpoint feed, not duplicated here) |
+| 11 | **Execution controls** | `--audit-only`, configure-and-run, per-stage runs, log streaming | ✅ Done (endpoints + screen; configure-and-run enqueues, capability banner names the missing piece — "log streaming" is the Dashboard's queue/checkpoint feed, not duplicated here) |
 
 **Remaining work is one control (7)** — the `ReportIssue` action attached to
 the inspector screens, over an endpoint that already exists and is tested.
@@ -287,7 +287,7 @@ exercised.
 | Feedback store | One file per report, sibling of `runs/`, same layout local and remote (§4) |
 | Settings | Editable via a shared writable config volume; secrets env-only; restart activates |
 | Auth | **None.** Not deployed discoverably at any layer. `reported_by` is advisory |
-| Execution | The console covers the full designed workflow, calling the same library functions the CLI calls — no subprocess, no shell-out. Dispatch is always the queue. `--allow-execute` switches it off for audit-only deployments |
+| Execution | The console covers the full designed workflow, calling the same library functions the CLI calls — no subprocess, no shell-out. Dispatch is always the queue and **on by default**. `--audit-only` switches it off for read/inspect-only deployments |
 
 One deferred item: the plan assumes a small number of trusted operators.
 Multi-user means auth, per-user preferences and a real audit log — a larger

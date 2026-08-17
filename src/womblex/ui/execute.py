@@ -20,10 +20,11 @@ one — and the plan pins exactly how far that goes:
   through); a local ``output_root``-only deployment can configure and audit
   but not run, and :func:`execution_status` says so rather than half-working.
 
-- **`--allow-execute` is the switch** (§4, §6). Off gives a pure auditing
-  console: every write action here refuses with :class:`ExecutionDisabled`
-  before it touches the store or the queue, so an audit-only deployment
-  cannot be talked into dispatching work.
+- **`--audit-only` is the switch** (§4, §6). By default the console can
+  dispatch; pass ``--audit-only`` for a pure auditing console where every
+  write action here refuses with :class:`ExecutionDisabled` before it
+  touches the store or the queue, so an audit-only deployment cannot be
+  talked into dispatching work.
 
 "Log streaming" is the queue's own job-status transitions
 (:meth:`JobQueue.list_jobs`) plus the per-stage checkpoints
@@ -66,26 +67,26 @@ class ExecutionDisabled(Exception):
 class ExecutionCapability:
     """Whether this console can dispatch work, and if not, precisely why.
 
-    All three must hold: ``--allow-execute`` on, a remote store to enqueue
+    All three must hold: not ``--audit-only``, a remote store to enqueue
     from and publish to, and a job queue to dispatch through (see the module
     docstring). ``can_execute`` is their conjunction; the individual flags
     are surfaced so the screen can name the missing piece rather than a bare
     "disabled".
     """
 
-    allow_execute: bool
+    audit_only: bool
     has_store: bool
     has_queue: bool
     stages: tuple[str, ...]
 
     @property
     def can_execute(self) -> bool:
-        return self.allow_execute and self.has_store and self.has_queue
+        return (not self.audit_only) and self.has_store and self.has_queue
 
     def as_dict(self) -> dict:
         return {
             "can_execute": self.can_execute,
-            "allow_execute": self.allow_execute,
+            "audit_only": self.audit_only,
             "has_store": self.has_store,
             "has_queue": self.has_queue,
             "stages": list(self.stages),
@@ -101,7 +102,7 @@ def execution_status(settings: UISettings) -> ExecutionCapability:
     ``test`` actions.
     """
     return ExecutionCapability(
-        allow_execute=settings.allow_execute,
+        audit_only=settings.audit_only,
         has_store=settings.is_remote,
         has_queue=bool(settings.db_dsn),
         stages=STAGE_NAMES,
@@ -116,10 +117,10 @@ def _guard(settings: UISettings) -> ExecutionCapability:
     is a wiring gap (409). Every write path calls this before touching either.
     """
     cap = execution_status(settings)
-    if not cap.allow_execute:
+    if cap.audit_only:
         raise ExecutionDisabled(
             "execute_disabled",
-            "This console is audit-only. Start it with --allow-execute to dispatch work.",
+            "This console is audit-only. Restart it without --audit-only to dispatch work.",
         )
     if not cap.has_store:
         raise ExecutionDisabled(

@@ -42,10 +42,11 @@ def _register_ui(p: argparse.ArgumentParser) -> None:
              "dashboard falls back to the run's per-stage checkpoints.",
     )
     p.add_argument(
-        "--allow-execute", action="store_true",
-        help="Enable the Execution Controls (docs/ui-plan.md merge 11) — the console "
-             "can then enqueue extraction runs into the job queue. Off (default) is "
-             "an audit-only console. Also needs a --store and a --dsn to dispatch.",
+        "--audit-only", action="store_true",
+        help="Disable the Execution Controls (docs/ui-plan.md merge 11) — a pure "
+             "auditing console that can configure and inspect but not dispatch. "
+             "By default the console can enqueue extraction runs into the job queue "
+             "(this also needs a --store and a --dsn to actually dispatch).",
     )
 
 
@@ -63,7 +64,7 @@ def cmd_ui(args: argparse.Namespace) -> int:
     try:
         settings = resolve_settings(
             args.output_root, args.store,
-            allow_execute=args.allow_execute, feedback_dir=args.feedback_dir,
+            audit_only=args.audit_only, feedback_dir=args.feedback_dir,
             db_dsn=args.dsn,
         )
     except ValueError as e:
@@ -73,7 +74,7 @@ def cmd_ui(args: argparse.Namespace) -> int:
     app = create_app(
         output_root=settings.output_root,
         store_uri=settings.store_uri,
-        allow_execute=settings.allow_execute,
+        audit_only=settings.audit_only,
         feedback_dir=settings.feedback_dir,
         db_dsn=settings.db_dsn,
     )

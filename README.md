@@ -295,14 +295,15 @@ either a local run root or the object store a distributed run published to:
 ```bash
 pip install womblex[ui]                        # add [cloud] to read a store
 womblex ui --output-root output/               # local runs, at :8080
-womblex ui --output-root output/ --allow-execute --dsn <dsn> --store <uri>  # + dispatch
+womblex ui --store <uri> --dsn <dsn>           # + dispatch (execution on by default)
+womblex ui --store <uri> --dsn <dsn> --audit-only  # read/inspect only, no dispatch
 docker compose up -d ui                        # or beside the stack above
 ```
 
-It adds no pipeline logic. Reads are the whole surface unless `--allow-execute`
-is passed *and* both a `--store` and a `--dsn` are wired — then the Execution
-Controls screen can plan a run into the queue (workers do the work; the console
-runs no scheduler). Its one always-available write path is the report action
+It adds no pipeline logic. Dispatch is on by default: wire both a `--store`
+and a `--dsn` and the Execution Controls screen can plan a run into the queue
+(workers do the work; the console runs no scheduler). Pass `--audit-only` for a
+pure read/inspect console that refuses to dispatch. Its one always-available write path is the report action
 (`POST /api/runs/{run_id}/feedback`), which files a reviewer's note about a
 record as a single JSON file under a `feedback/` location that is always a
 *sibling* of the runs, never inside one — so re-running a stage or purging a run

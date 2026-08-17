@@ -27,7 +27,7 @@ def create_app(
     *,
     output_root: Path | None = None,
     store_uri: str | None = None,
-    allow_execute: bool = False,
+    audit_only: bool = False,
     feedback_dir: Path | None = None,
     db_dsn: str | None = None,
     spa_dir: Path | None = DEFAULT_SPA_DIR,
@@ -44,10 +44,11 @@ def create_app(
     (default ``<output_root>/feedback``); see ``UISettings``. Ignored in
     remote mode, which always uses the store's own ``feedback/`` prefix.
 
-    ``allow_execute`` switches on the Execution Controls (docs/ui-plan.md
-    merge 11): off (the default) the ``/api/execute`` write action refuses
-    with 403, giving a pure auditing console. It still requires a store and a
-    queue to actually dispatch — see :mod:`womblex.ui.execute`.
+    ``audit_only`` switches *off* the Execution Controls (docs/ui-plan.md
+    merge 11): by default the console can dispatch, and pass ``audit_only``
+    to get a pure auditing console whose ``/api/execute`` write action refuses
+    with 403. Dispatch also requires a store and a queue — see
+    :mod:`womblex.ui.execute`.
 
     ``db_dsn`` is the optional job queue the Dashboard reads. Omitted means
     no queue, which is a normal local deployment — the dashboard falls back
@@ -59,7 +60,7 @@ def create_app(
     """
     settings = UISettings(
         output_root=output_root, store_uri=store_uri,
-        allow_execute=allow_execute, feedback_dir=feedback_dir, db_dsn=db_dsn,
+        audit_only=audit_only, feedback_dir=feedback_dir, db_dsn=db_dsn,
     )
     app = FastAPI(title="Womblex Console")
     app.state.settings = settings

@@ -3,7 +3,7 @@
 	// writable-to-a-run surface. It reaches the whole designed workflow by
 	// enqueuing — never shelling out, never running a batch in-process (§4
 	// "Running the pipeline from the screen"). Dispatch is always the queue,
-	// so a store *and* a DSN are required; `--allow-execute` is the switch.
+	// so a store *and* a DSN are required; `--audit-only` turns dispatch off.
 	//
 	// Not run-scoped: like the Composer and Resources Console, this screen
 	// configures a *new* run rather than reading an existing one. A successful
@@ -48,12 +48,12 @@
 	// the store and queue (wiring gaps).
 	let blocker = $derived.by((): { label: string; detail: string } | null => {
 		if (!status || status.can_execute) return null;
-		if (!status.allow_execute) {
+		if (status.audit_only) {
 			return {
 				label: 'Audit-only',
 				detail:
-					'This console was started without --allow-execute, so it can configure and ' +
-					'audit but not dispatch. Restart it with --allow-execute to enable this screen.'
+					'This console was started with --audit-only, so it can configure and ' +
+					'audit but not dispatch. Restart it without --audit-only to enable this screen.'
 			};
 		}
 		if (!status.has_store) {

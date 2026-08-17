@@ -935,31 +935,34 @@ def _seed_store_inputs(store_root: Path, prefix: str, names: list[str]) -> None:
 
 class TestExecuteApi:
     """The Execution Controls (docs/ui-plan.md merge 11). Dispatch is always the
-    queue, gated by `--allow-execute` and requiring a store *and* a DSN.
+    queue, on by default and requiring a store *and* a DSN; `--audit-only` is
+    the opt-out switch.
     """
 
     def test_status_reflects_the_three_flags(self, tmp_path: Path) -> None:
-        """An audit-only local console can neither execute nor claim it can."""
+        """A local console can neither execute (no store/queue) nor claim it can."""
         client = TestClient(create_app(output_root=tmp_path))
         body = client.get("/api/execute/status").json()
         assert body["can_execute"] is False
         assert body == {
-            "can_execute": False, "allow_execute": False,
+            "can_execute": False, "audit_only": False,
             "has_store": False, "has_queue": False, "stages": body["stages"],
         }
         assert "chunk" in body["stages"]
 
-    def test_status_can_execute_needs_all_three(self, tmp_path: Path) -> None:
+    def test_status_can_execute_by_default_with_a_store_and_queue(self, tmp_path: Path) -> None:
+        """Execution is on by default (no --audit-only) once a store and DSN are wired."""
         client = TestClient(create_app(
-            store_uri=str(tmp_path / "store"), allow_execute=True,
+            store_uri=str(tmp_path / "store"),
             db_dsn="postgresql://x/y",
         ))
         assert client.get("/api/execute/status").json()["can_execute"] is True
 
     def test_enqueue_forbidden_when_audit_only(self, tmp_path: Path) -> None:
-        """Off gives a pure auditing console (plan §6) — 403 before touching anything."""
+        """--audit-only gives a pure auditing console (plan §6) — 403 before touching anything."""
         client = TestClient(create_app(
             store_uri=str(tmp_path / "store"), db_dsn="postgresql://x/y",
+            audit_only=True,
         ))
         resp = client.post("/api/execute/enqueue", json={"input_prefix": "inbox"})
         assert resp.status_code == 403
@@ -967,14 +970,14 @@ class TestExecuteApi:
     def test_enqueue_conflict_without_a_store(self, tmp_path: Path) -> None:
         """A local output_root can configure and audit but not dispatch (plan §4)."""
         client = TestClient(create_app(
-            output_root=tmp_path, allow_execute=True, db_dsn="postgresql://x/y",
+            output_root=tmp_path, db_dsn="postgresql://x/y",
         ))
         resp = client.post("/api/execute/enqueue", json={"input_prefix": "inbox"})
         assert resp.status_code == 409
 
     def test_enqueue_conflict_without_a_queue(self, tmp_path: Path) -> None:
         pytest.importorskip("fsspec")
-        client = TestClient(create_app(store_uri=str(tmp_path / "store"), allow_execute=True))
+        client = TestClient(create_app(store_uri=str(tmp_path / "store")))
         resp = client.post("/api/execute/enqueue", json={"input_prefix": "inbox"})
         assert resp.status_code == 409
 
@@ -987,7 +990,7 @@ class TestExecuteApi:
         store_root = tmp_path / "store"
         _seed_store_inputs(store_root, "inbox", ["notes.txt"])  # unsupported ext
         client = TestClient(create_app(
-            store_uri=str(store_root), allow_execute=True, db_dsn="postgresql://x/y",
+            store_uri=str(store_root), db_dsn="postgresql://x/y",
         ))
         resp = client.post("/api/execute/enqueue", json={"input_prefix": "inbox"})
         assert resp.status_code == 400
@@ -1001,7 +1004,7 @@ class TestExecuteApi:
         store_root = tmp_path / "store"
         _seed_store_inputs(store_root, "inbox", [f"doc-{i}.pdf" for i in range(5)])
         client = TestClient(create_app(
-            store_uri=str(store_root), allow_execute=True, db_dsn="postgresql://x/y",
+            store_uri=str(store_root), db_dsn="postgresql://x/y",
         ))
         resp = client.post(
             "/api/execute/enqueue",
@@ -1031,7 +1034,7 @@ class TestExecuteApi:
         store_root = tmp_path / "store"
         _seed_store_inputs(store_root, "inbox", ["doc-0.pdf"])
         client = TestClient(create_app(
-            store_uri=str(store_root), allow_execute=True, db_dsn="postgresql://x/y",
+            store_uri=str(store_root), db_dsn="postgresql://x/y",
         ))
         resp = client.post("/api/execute/enqueue", json={"input_prefix": "inbox"})
         assert resp.json()["run_id"].startswith("run-")
@@ -1039,7 +1042,7 @@ class TestExecuteApi:
     def test_enqueue_rejects_a_batch_size_below_one(self, tmp_path: Path) -> None:
         """Pydantic's `ge=1` refuses it at the boundary (422), before the guard runs."""
         client = TestClient(create_app(
-            store_uri=str(tmp_path / "store"), allow_execute=True, db_dsn="postgresql://x/y",
+            store_uri=str(tmp_path / "store"), db_dsn="postgresql://x/y",
         ))
         resp = client.post(
             "/api/execute/enqueue", json={"input_prefix": "inbox", "batch_size": 0},
@@ -1050,7 +1053,7 @@ class TestExecuteApi:
 class TestSpaMount:
     """The console serves the built SPA (docs/ui-plan.md merge 4) when one is
     present alongside it, and falls back to the API-only shape when not —
-    the same image serves cloud and audit-only deployments.
+    the same image serves cloud and local deployments.
     """
 
     @pytest.fixture

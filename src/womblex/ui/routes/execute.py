@@ -3,7 +3,7 @@
 The one writable-to-a-run surface in the console. ``GET /status`` is a
 cheap, network-free read of whether this deployment can dispatch work (and
 if not, why); ``POST /enqueue`` plans an extraction run into the queue. Both
-delegate to :mod:`womblex.ui.execute`, which enforces the ``--allow-execute``
+delegate to :mod:`womblex.ui.execute`, which enforces the ``--audit-only``
 switch and the store+queue requirement (plan §4) before touching anything —
 this router only maps its :class:`~womblex.ui.execute.ExecutionDisabled`
 reasons onto HTTP status codes.

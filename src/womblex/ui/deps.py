@@ -36,7 +36,7 @@ class UISettings:
 
     output_root: Path | None
     store_uri: str | None
-    allow_execute: bool = False
+    audit_only: bool = False
     feedback_dir: Path | None = None
     db_dsn: str | None = None
 
@@ -53,7 +53,7 @@ def resolve_settings(
     output_root: Path | None,
     store_uri: str | None,
     *,
-    allow_execute: bool = False,
+    audit_only: bool = False,
     feedback_dir: Path | None = None,
     db_dsn: str | None = None,
 ) -> UISettings:
@@ -87,7 +87,7 @@ def resolve_settings(
         )
     dsn = db_dsn or os.environ.get("WOMBLEX_DB_DSN") or os.environ.get("DATABASE_URL")
     return UISettings(
-        output_root=root, store_uri=store, allow_execute=allow_execute,
+        output_root=root, store_uri=store, audit_only=audit_only,
         feedback_dir=fb_dir, db_dsn=dsn,
     )
 

@@ -506,7 +506,7 @@ export async function renderConfigYaml(
 // re-types no stage list.
 export interface ExecutionStatus {
 	can_execute: boolean;
-	allow_execute: boolean;
+	audit_only: boolean;
 	has_store: boolean;
 	has_queue: boolean;
 	stages: string[];
