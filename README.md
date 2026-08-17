@@ -282,27 +282,35 @@ docker compose up --scale worker=4 worker     # raise or lower at any time
 
 ### Console (optional)
 
-`womblex ui` serves an HTTP API over artefacts a run has already written —
-the run index, a run's documents table, per-stage sidecar presence, the shard
-audit, and one document's chunks with their entity / PII / money overlays. It
-is a sidecar, never in-process with the pipeline, and reads either a local run
-root or the object store a distributed run published to:
+`womblex ui` serves a read-only web console over artefacts a run has already
+written — a run selector and documents table, a Dashboard (queue state and
+per-stage checkpoint progress), Corpus and Chunk inspectors (a document's
+chunks with their entity / PII / money overlays), a Pipeline Composer (build a
+`WomblexConfig` against the live JSON Schema, with named presets and the stage
+DAG rendered from the stage contracts), a Resources console (store / queue /
+Isaacus connection checks), and Execution Controls (configure-and-run into the
+job queue). It is a sidecar, never in-process with the pipeline, and reads
+either a local run root or the object store a distributed run published to:
 
 ```bash
 pip install womblex[ui]                        # add [cloud] to read a store
 womblex ui --output-root output/               # local runs, at :8080
+womblex ui --output-root output/ --allow-execute --dsn <dsn> --store <uri>  # + dispatch
 docker compose up -d ui                        # or beside the stack above
 ```
 
-It adds no pipeline logic and writes nothing to a run. Its one write path is
-the report action (`POST /api/runs/{run_id}/feedback`), which files a reviewer's
-note about a record as a single JSON file under a `feedback/` location that is
-always a *sibling* of the runs, never inside one — so re-running a stage or
-purging a run neither disturbs accumulated feedback nor is disturbed by it. The
-compose service still runs `read_only`, writing feedback to the object store.
-There is no authentication, so it binds to loopback unless `--host` says
-otherwise; put your own control in front of anything wider. The screens that
-consume this API are planned in [`docs/ui-plan.md`](docs/ui-plan.md).
+It adds no pipeline logic. Reads are the whole surface unless `--allow-execute`
+is passed *and* both a `--store` and a `--dsn` are wired — then the Execution
+Controls screen can plan a run into the queue (workers do the work; the console
+runs no scheduler). Its one always-available write path is the report action
+(`POST /api/runs/{run_id}/feedback`), which files a reviewer's note about a
+record as a single JSON file under a `feedback/` location that is always a
+*sibling* of the runs, never inside one — so re-running a stage or purging a run
+neither disturbs accumulated feedback nor is disturbed by it. The compose
+service still runs `read_only`, writing feedback to the object store. There is
+no authentication, so it binds to loopback unless `--host` says otherwise; put
+your own control in front of anything wider. The screen designs and data
+sources are documented in [`docs/ui-plan.md`](docs/ui-plan.md).
 
 ## How It Works
 

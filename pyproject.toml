@@ -1,6 +1,6 @@
 [project]
 name = "womblex"
-version = "0.5.0"
+version = "0.5.1"
 description = "Document extraction pipeline for Australian government documents"
 readme = "README.md"
 requires-python = ">=3.11"

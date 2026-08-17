@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-08-17
+
+Minor under 0.x: additive on the whole. The headline is the **optional console**
+(`womblex ui`) — a read-only sidecar over artefacts the pipeline already writes,
+now complete through its Pipeline Composer, Dashboard, Resources and Execution
+Controls screens (`docs/ui-plan.md`). Also lands **Isaacus on Amazon SageMaker**
+(private, air-gapped deployment via `ISAACUS_SAGEMAKER_ENDPOINTS`), a nullable
+`elem_order` column on `CHUNKS_SCHEMA` (document-order anchor for table chunks,
+back-filled on read for older shards), and deployment-shaped install extras
+(`[local]`, `[cloud-ocr]`).
+
+**No breaking changes and no schema break**: `CHUNKS_SCHEMA` gains a nullable
+column that `read_chunks` back-fills for shards written before it; every other
+parquet schema is byte-identical to `0.4.0`. The console adds no pipeline logic
+and its one write path (feedback) lands beside the runs, never inside one.
+
 ### Added
 - **Console Pipeline Composer — presets (`DEFAULT-Isaacus`).** The composer
   now offers named, selectable pre-configured pipelines from a dropdown above
