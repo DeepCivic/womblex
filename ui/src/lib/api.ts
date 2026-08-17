@@ -329,6 +329,25 @@ export async function getStageGraph(fetchImpl: typeof fetch = fetch): Promise<St
 	return (await resp.json()) as StageGraph;
 }
 
+// A named pre-configured pipeline the composer form loads as a starting point
+// (e.g. `DEFAULT-Isaacus`: extract → chunk → enrich → build_graph → money).
+// `config` is a *partial* `WomblexConfig` — it carries stage toggles/settings
+// but never `dataset`/`paths`, which name the run and stay the operator's to
+// fill — so applying it merges over the form's current config, leaving those.
+export interface Preset {
+	name: string;
+	description: string;
+	formats: string[];
+	config: ConfigObject;
+}
+
+export async function listPresets(fetchImpl: typeof fetch = fetch): Promise<Preset[]> {
+	const resp = await fetchImpl('/api/composer/presets');
+	if (!resp.ok) throw new Error(`GET /api/composer/presets: ${resp.status}`);
+	const body = (await resp.json()) as { presets: Preset[] };
+	return body.presets;
+}
+
 // The subset of JSON Schema Pydantic emits for `WomblexConfig`. Typed rather
 // than `any` so the form's field resolution is checked; unknown keywords are
 // simply not read.

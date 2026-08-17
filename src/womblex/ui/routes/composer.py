@@ -1,12 +1,13 @@
-"""``/api/composer`` — the Pipeline Composer's graph, form schema and config
-validation (docs/ui-plan.md merge 9).
+"""``/api/composer`` — the Pipeline Composer's graph, form schema, presets and
+config validation (docs/ui-plan.md merge 9).
 
-Reads no run state — `config.py` and `cloud/stage_contracts.py` are static,
-so unlike every other route here this one takes no `UISettings` dependency.
-`POST /validate` and `POST /yaml` are not a second writable surface (feedback
-stays the console's only one, plan §4): neither touches a run or the
-filesystem, they just build a `WomblexConfig` in memory and hand back what
-came of it.
+Reads no run state — `config.py`, `cloud/stage_contracts.py` and the preset
+registry are static, so unlike every other route here this one takes no
+`UISettings` dependency. `POST /validate` and `POST /yaml` are not a second
+writable surface (feedback stays the console's only one, plan §4): neither
+touches a run or the filesystem, they just build a `WomblexConfig` in memory
+and hand back what came of it. `GET /presets` serves named pre-configured
+pipelines (e.g. `DEFAULT-Isaacus`) the form loads as starting points.
 """
 from __future__ import annotations
 
@@ -15,7 +16,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import ValidationError
 
-from womblex.ui import composer
+from womblex.ui import composer, presets
 
 router = APIRouter(prefix="/api/composer", tags=["composer"])
 
@@ -24,6 +25,26 @@ router = APIRouter(prefix="/api/composer", tags=["composer"])
 def get_graph() -> dict:
     """The pipeline DAG `STAGE_CONTRACTS` implies — nodes, required-input edges."""
     return composer.get_stage_graph()
+
+
+@router.get("/presets")
+def get_presets() -> dict:
+    """Named pre-configured pipelines the form offers as starting points.
+
+    Each is a *partial* `WomblexConfig` (no `dataset` / `paths` — the operator
+    still supplies the run's identity and paths). `DEFAULT-Isaacus` is the
+    reference extract → chunk → enrich → build_graph → money shape.
+    """
+    return {"presets": presets.list_presets()}
+
+
+@router.get("/presets/{name}")
+def get_preset(name: str) -> dict:
+    """One preset by name; 404 if there is no such preset."""
+    preset = presets.get_preset(name)
+    if preset is None:
+        raise HTTPException(status_code=404, detail=f"no such preset: {name!r}")
+    return preset.as_dict()
 
 
 @router.get("/schema")

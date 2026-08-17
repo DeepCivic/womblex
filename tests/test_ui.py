@@ -730,6 +730,73 @@ class TestComposerApi:
         assert set(body["properties"]) >= {"dataset", "paths", "chunking", "pii"}
         assert "dataset" in body.get("required", [])
 
+    def test_presets_list_includes_default_isaacus(self, client: TestClient) -> None:
+        body = client.get("/api/composer/presets").json()
+        names = [p["name"] for p in body["presets"]]
+        assert "DEFAULT-Isaacus" in names
+        preset = next(p for p in body["presets"] if p["name"] == "DEFAULT-Isaacus")
+        assert preset["formats"] == [".pdf", ".docx"]
+
+    def test_default_isaacus_enables_the_extract_chunk_enrich_graph_money_shape(
+        self, client: TestClient
+    ) -> None:
+        """The preset is the reference extract → chunk → enrich → build_graph →
+        money pipeline: chunking, enrichment and money all on, graph produced by
+        enrich + the offline graph-refresh edge rebuild."""
+        preset = client.get("/api/composer/presets/DEFAULT-Isaacus").json()
+        cfg = preset["config"]
+        assert cfg["chunking"]["enabled"] is True
+        assert cfg["chunking"]["chunking_model"] == "kanon-2-enricher"
+        assert cfg["enrichment"]["enabled"] is True
+        assert cfg["money"]["enabled"] is True
+        # No dataset/paths: the operator supplies the run's identity and paths.
+        assert "dataset" not in cfg
+        assert "paths" not in cfg
+
+    def test_a_preset_overlaid_on_a_minimal_config_validates(
+        self, client: TestClient
+    ) -> None:
+        """A preset is a partial config; merged onto dataset+paths it must be a
+        config the CLI would load — that is the whole point of it being data
+        the same `WomblexConfig(**raw)` construction checks."""
+        preset = client.get("/api/composer/presets/DEFAULT-Isaacus").json()
+        merged = {**_MINIMAL_CONFIG, **preset["config"]}
+        resp = client.post("/api/composer/validate", json=merged)
+        body = resp.json()
+        assert body["valid"] is True
+        assert body["unknown_keys"] == []
+
+    def test_unknown_preset_404s(self, client: TestClient) -> None:
+        assert client.get("/api/composer/presets/nope").status_code == 404
+
+    def test_default_isaacus_config_file_ships_and_loads(self, client: TestClient) -> None:
+        """The preset is CLI-runnable: `configs/default-isaacus.yaml` exists and
+        `load_config` accepts it (a dev runs the per-stage sequence with it)."""
+        from womblex.config import load_config
+
+        cfg_path = REPO_ROOT / "configs" / "default-isaacus.yaml"
+        assert cfg_path.is_file(), "configs/default-isaacus.yaml is the CLI source of truth"
+        cfg = load_config(cfg_path)
+        # The four stages the shape names are on.
+        assert cfg.chunking.enabled and cfg.chunking.chunking_model == "kanon-2-enricher"
+        assert cfg.enrichment.enabled
+        assert cfg.money.enabled
+        # AI chunking + enrich both on => reuse auto-wired, so no double enrich.
+        assert cfg.enrichment.persist_document is True
+
+    def test_config_file_and_ui_preset_agree(self, client: TestClient) -> None:
+        """The console preset mirrors the shipped config file; they must not drift
+        on the stage toggles/settings the preset carries."""
+        from womblex.config import load_config
+
+        cfg = load_config(REPO_ROOT / "configs" / "default-isaacus.yaml")
+        overlay = client.get("/api/composer/presets/DEFAULT-Isaacus").json()["config"]
+        assert overlay["chunking"]["chunk_size"] == cfg.chunking.chunk_size
+        assert overlay["chunking"]["chunking_model"] == cfg.chunking.chunking_model
+        assert overlay["chunking"]["overlap"] == cfg.chunking.overlap
+        assert overlay["money"]["default_currency"] == cfg.money.default_currency
+        assert overlay["enrichment"]["enabled"] == cfg.enrichment.enabled
+
     def test_validate_accepts_a_minimal_config(self, client: TestClient) -> None:
         resp = client.post("/api/composer/validate", json=_MINIMAL_CONFIG)
         assert resp.json() == {"valid": True, "errors": [], "unknown_keys": []}

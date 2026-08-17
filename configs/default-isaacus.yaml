@@ -1,0 +1,140 @@
+# DEFAULT-Isaacus — the reference Isaacus pipeline.
+#
+#   extract → chunk → enrich → build_graph → money → done
+#
+# The entity graph (enrich + the offline graph-refresh mention→chunk edge
+# rebuild) and monetary amounts are produced over the one run. For PDF and
+# DOCX sources (narrative documents — spreadsheets are structured, not
+# narrative, so AI chunking and enrichment add nothing there).
+#
+# This file is the source of truth for the "DEFAULT-Isaacus" preset the console's
+# Pipeline Composer offers (src/womblex/ui/presets.py mirrors the stage toggles
+# and settings here). Edit both together.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# HOW TO RUN IT (important: `womblex run` does NOT execute this whole shape).
+#
+# `womblex run` only sequences extract → redact → chunk → pii in one process
+# (womblex/batch.py). enrich, build_graph (graph-refresh) and money are
+# per-stage commands. So the pipeline is a SEQUENCE of per-stage commands over
+# one shard directory. Enrich MUST run before chunk (AI chunking reuses the
+# enrichment Document — otherwise every document is enriched twice):
+#
+#   RUN=out/$(date -u +run-%Y%m%dT%H%M%SZ); SHARDS=$RUN/documents
+#
+#   # 1. extract (writes *.elements.parquet + sidecars per batch)
+#   womblex run          --config configs/default-isaacus.yaml --run-id "$(basename "$RUN")"
+#   #    ^ `run` extracts; its own chunk pass is skipped below by chunking in
+#   #      per-stage order. To extract only, set chunking.enabled:false for the
+#   #      `run` pass, or just run the per-stage chunk after enrich as shown.
+#
+#   # 2. enrich BEFORE chunk (persists *.enrichment_doc.parquet for reuse)
+#   womblex enrich       --shards "$SHARDS" --config configs/default-isaacus.yaml
+#
+#   # 3. chunk (AI chunking reuses the enrich Document — no double enrich)
+#   womblex chunk        --shards "$SHARDS" --config configs/default-isaacus.yaml
+#
+#   # 4. build_graph: rebuild mention→chunk edges now that chunks exist
+#   womblex graph-refresh --shards "$SHARDS"
+#
+#   # 5. money (offline, order-independent — reads the extraction Parquet)
+#   womblex money        --shards "$SHARDS" --config configs/default-isaacus.yaml
+#
+#   # 6. consolidate the run-level documents manifest
+#   womblex manifest     --shards "$SHARDS"
+#
+# On object storage, steps 2–5 are the same via `womblex run-stage --stage
+# <enrich|chunk|graph-refresh|money> --store <uri> --run-id <id> --config …`.
+# ─────────────────────────────────────────────────────────────────────────────
+
+dataset:
+  name: default-isaacus
+  # run_id: my-named-run   # Optional; else --run-id or an auto timestamp.
+
+paths:
+  input_root: ./data/raw
+  output_root: ./data/processed
+  checkpoint_dir: ./data/checkpoints
+
+# Detection defaults are fine for mixed PDF/DOCX narrative corpora.
+detection:
+  min_text_coverage: 0.3
+  form_signal_threshold: 0.5
+  table_signal_threshold: 0.4
+
+extraction:
+  native:
+    include_tables: true
+  ocr:
+    engine: paddleocr      # local, CPU-only, no network. mistral-ocr/ollama opt-in.
+    dpi: 300
+    lang: eng
+
+# Redaction stays on in flag mode (the default): it marks records/chunks that
+# overlap redacted regions without changing text — safe and cheap. Switch to
+# blackout/delete only when the corpus is actually redacted.
+redaction:
+  enabled: true
+  mode: flag
+
+# AI chunking: boundaries follow the Kanon-2 enricher's structure spans.
+# REQUIRES enrich to have run first (see the command sequence above) —
+# WomblexConfig auto-enables enrichment.persist_document so chunk reuses the
+# enrich Document instead of calling Kanon-2 a second time per document.
+chunking:
+  enabled: true
+  tokenizer: "isaacus/kanon-2-tokenizer"
+  chunk_size: 480          # The Kanon-2 512-token window minus 32-token headroom.
+  chunking_model: kanon-2-enricher
+  chunk_tables: true
+  overlap: 0.1             # 10% of chunk_size shared across boundaries, so an
+                           # entity mention straddling a boundary survives in a
+                           # chunk — the graph maps mentions onto chunks by offset.
+  processes: 1             # Single-threaded (Chromebook-friendly). Raise on servers.
+
+# Kanon-2 enrichment over the whole reassembled document. Kanon-2 chunks long
+# inputs internally (overflow_strategy) and stitches the graph back; returned
+# offsets still index the full source, so mention→chunk mapping is unaffected.
+enrichment:
+  enabled: true
+  model: kanon-2-enricher
+  overflow_strategy: auto  # chunk+stitch >16k-token docs (FOI bundles exceed it).
+  # Token-budgeted batching — defaults are reasonable starting points; probe
+  # against your rate limits and raise if you have headroom.
+  max_texts_per_request: 8 # Isaacus per-request document ceiling.
+  token_budget: 32768      # Pack requests up to this many combined tokens.
+  split_ceiling: 100000    # Split a solo doc above this client-side (429 margin).
+  # persist_document is auto-enabled here because chunking_model is set + enrich
+  # is on; it lets the chunk stage reuse this stage's Document (no double enrich).
+
+# Monetary amounts (offline, API-free, annotation only). Order-independent —
+# it reads the extraction Parquet, never the graph or chunks — but produced in
+# the same run so *.money_spans.parquet lands beside *.graph_edges.parquet,
+# keyed on source_hash, and narrative amounts join to chunks by offset.
+money:
+  enabled: true
+  narrative: true
+  default_currency: AUD    # `$` means AUD in Australian government publications.
+  columns:
+    enabled: true          # Classify table/sheet money columns from headers/formats.
+
+# Embedding, linking and PII are OFF: this preset produces the graph + money,
+# not a retrieval index or a masked corpus. Turn them on deliberately —
+#   embed:  vectorise chunks (needs the kanon-2-embedder; set dimensions only if
+#           you must reduce the model default — leaving it null keeps full width).
+#   pii:    graph-driven masking, run AFTER enrich (pipeline_point post_enrichment).
+#   link:   resolve entities to a reference register (needs linking.reference).
+embedding:
+  enabled: false
+linking:
+  enabled: false
+pii:
+  enabled: false
+
+processing:
+  batch_size: 25
+  checkpoint_every: 25
+  text_source: elements    # Verbatim. 'normalised'/'spellfix' overlay opt-in.
+  retention:
+    policy: rolling
+    keep: 2

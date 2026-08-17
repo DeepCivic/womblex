@@ -11,11 +11,13 @@
 	import {
 		getStageGraph,
 		getConfigSchema,
+		listPresets,
 		validateConfig,
 		renderConfigYaml,
 		ConfigInvalid,
 		type ConfigObject,
 		type JsonSchema,
+		type Preset,
 		type StageGraph as StageGraphData,
 		type ValidationResult
 	} from '$lib/api';
@@ -29,6 +31,8 @@
 	let graph = $state<StageGraphData | null>(null);
 	let schema = $state<JsonSchema | null>(null);
 	let config: ConfigObject = $state({});
+	let presets = $state<Preset[]>([]);
+	let selectedPreset = $state('');
 	let selected = $state<string | null>(null);
 	let result = $state<ValidationResult | null>(null);
 	let yamlText = $state<string | null>(null);
@@ -44,15 +48,53 @@
 	}
 
 	$effect(() => {
-		Promise.all([getStageGraph(), getConfigSchema()])
-			.then(([g, s]) => {
+		Promise.all([getStageGraph(), getConfigSchema(), listPresets()])
+			.then(([g, s, p]) => {
 				graph = g;
 				schema = s;
+				presets = p;
 				config = defaultsFor(s, s.$defs ?? {});
 			})
 			.catch((err) => (error = message(err)))
 			.finally(() => (loading = false));
 	});
+
+	// Deep-merge a plain object overlay onto `base`, recursing into nested
+	// objects (a stage section) and replacing scalars/arrays. Presets are
+	// partial — they carry only the sections their shape sets — so a plain
+	// spread would drop `base`'s other sections; and they never carry
+	// `dataset`/`paths`, so those the operator already typed survive untouched.
+	function deepMerge(base: ConfigObject, overlay: ConfigObject): ConfigObject {
+		const out: ConfigObject = { ...base };
+		for (const [key, value] of Object.entries(overlay)) {
+			const existing = out[key];
+			if (
+				value !== null &&
+				typeof value === 'object' &&
+				!Array.isArray(value) &&
+				existing !== null &&
+				typeof existing === 'object' &&
+				!Array.isArray(existing)
+			) {
+				out[key] = deepMerge(existing as ConfigObject, value as ConfigObject);
+			} else {
+				out[key] = structuredClone(value);
+			}
+		}
+		return out;
+	}
+
+	// Loading a preset overlays its partial config onto the current form state
+	// (schema defaults plus whatever the operator has set), so the run's
+	// `dataset`/`paths` — which no preset carries — are preserved. Reassigning
+	// `config` reruns the form; the reactive verdict clears via the same path an
+	// edit takes.
+	function applyPreset(name: string): void {
+		const preset = presets.find((p) => p.name === name);
+		if (!preset) return;
+		config = deepMerge(config, preset.config);
+		clearVerdict();
+	}
 
 	// Any edit invalidates the last verdict: a stale green pill over a config
 	// that has since changed is worse than no pill.
@@ -117,6 +159,38 @@
 	{:else if error && !graph}
 		<p class="text-sm text-status-failed">{error}</p>
 	{:else if graph && schema}
+		<!-- Preset picker: a named partial config the operator loads as a starting
+			 point. It merges over the current form (preserving dataset/paths, which
+			 no preset carries), so it seeds the four-stage shape without hand-
+			 assembling it — e.g. DEFAULT-Isaacus's extract→chunk→enrich→build_graph
+			 →money over PDF/DOCX. -->
+		{#if presets.length > 0}
+			{@const active = presets.find((p) => p.name === selectedPreset) ?? null}
+			<section class="flex flex-col gap-2 rounded-md border border-border bg-surface-raised p-4">
+				<label class="flex flex-wrap items-center gap-2 text-xs">
+					<span class="font-display text-sm">Start from a preset</span>
+					<select
+						bind:value={selectedPreset}
+						onchange={() => selectedPreset && applyPreset(selectedPreset)}
+						class="rounded-md border border-border bg-background px-2 py-1 text-xs
+							focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+					>
+						<option value="">Custom (schema defaults)</option>
+						{#each presets as preset (preset.name)}
+							<option value={preset.name}>{preset.name}</option>
+						{/each}
+					</select>
+				</label>
+				{#if active}
+					<p class="max-w-prose text-xs text-muted-foreground">{active.description}</p>
+					<p class="text-xs text-muted-foreground">
+						Formats: <span class="font-mono">{active.formats.join(' ')}</span> · sets stage toggles
+						and settings only; your <code>dataset</code> and <code>paths</code> are kept.
+					</p>
+				{/if}
+			</section>
+		{/if}
+
 		<!-- The DAG. Ordering is `required_inputs`, so "extraction precedes
 			 chunking" is drawn from the contracts rather than asserted here. -->
 		<StageGraph {graph} {config} bind:selected />

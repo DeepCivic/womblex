@@ -428,6 +428,36 @@ processing:
 
 See `configs/example.yaml` for a complete example.
 
+### Preset pipelines
+
+Ready-to-run configs for common end-to-end shapes live in `configs/`. The
+console's Pipeline Composer offers the same ones by name (e.g.
+`DEFAULT-Isaacus`); the config file is the CLI source of truth.
+
+**`configs/default-isaacus.yaml` — the reference Isaacus pipeline**
+(`extract → chunk → enrich → build_graph → money → done`, for PDF/DOCX). The
+entity graph and monetary amounts are produced over the one run. Note that
+`womblex run` alone runs only `extract → redact → chunk → pii`; `enrich`,
+`build_graph` (graph-refresh) and `money` are per-stage commands, and `enrich`
+must precede `chunk` so AI chunking reuses the enrichment (no double cost):
+
+```bash
+RUN=out/$(date -u +run-%Y%m%dT%H%M%SZ); SHARDS=$RUN/documents
+CFG=configs/default-isaacus.yaml
+
+womblex run           --config $CFG --run-id "$(basename "$RUN")"  # 1. extract
+womblex enrich        --shards "$SHARDS" --config $CFG             # 2. enrich BEFORE chunk
+womblex chunk         --shards "$SHARDS" --config $CFG             # 3. AI chunk (reuses enrich)
+womblex graph-refresh --shards "$SHARDS"                           # 4. build_graph edges
+womblex money         --shards "$SHARDS" --config $CFG             # 5. amounts (offline)
+womblex manifest      --shards "$SHARDS"                           # 6. consolidate manifest
+```
+
+On object storage, steps 2–5 are the same via `womblex run-stage --stage
+<enrich|chunk|graph-refresh|money> --store <uri> --run-id <id> --config $CFG`.
+The full command sequence and per-setting rationale are commented inside the
+config file itself.
+
 ## Output
 
 Each batch writes four sibling Parquet shards. The shard base name is the

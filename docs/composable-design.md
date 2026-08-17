@@ -49,8 +49,23 @@ embed(chunks)           list[TextChunk]          list[Embedding]          chunks
 link(enrich entities)   entity mentions          entity_links             enrichment exists (impl: link/stage.py, I7)
 build_graph(enrichment) EnrichmentResult         DocumentGraph            enrichment exists
 pii_clean(chunks, graph) list[TextChunk] + graph list[TextChunk]          graph exists
+money(elements+cells)   *.elements.parquet +     *.money_spans.parquet +   extraction Parquet exists
+                        *.table_cells.parquet    *.money_columns.parquet  (impl: process/money_stage.py)
 load_graph(parquet_dir) Parquet files            EntityMention + Edge     enrichment Parquet exists (impl: analyse/query.py's load_entity_mentions / load_graph_edges)
 ```
+
+`money` is an **offline annotation op** in the mould of `quality`: API-free, no
+ordering dependency on enrich, and it **never rewrites element or chunk text**.
+It reads the extraction Parquet (`*.elements.parquet` + its `*.table_cells.parquet`
+sibling) rather than a `list[DocumentResult]` — it operates over a shard directory,
+annotating three loci (narrative offsets into the `processing.text_source` layer,
+`table_cell`, `sheet_cell`) and writing two joinable sidecars per batch, gated by
+`config.money.enabled`. The narrative locus scans the text *reassembled from the
+element stream* (`reassemble_narrative`, the same reconstruction chunking uses),
+not the `*.chunks.parquet` — chunks are **not** a money precondition. Because its
+narrative offsets index the same `processing.text_source` space enrichment
+mentions and chunks use, the spans *join* to them downstream; cell spans anchor
+to their own coordinates. See [money-extraction.md](money-extraction.md).
 
 ### Valid Compositions (examples, not exhaustive)
 
@@ -68,9 +83,12 @@ ingest_abn(dir) → done                                       ABN XML to Parque
 ingest_geo(dir) → done                                       SHP to GeoParquet, nothing else
 load_graph(parquet_dir) → pii_clean(chunks, graph) → done    re-run PII from saved graph
 extract(pdf) → enrich → chunk(chunking_model) → done         AI chunking reuses enrich's Document
+extract(pdf) → money → done                                  annotate amounts, no rewrite
+extract(xlsx) → .parquet → money → done                      column-evidenced amounts from a register
+extract(pdf) → chunk → enrich → build_graph → money → done  graph + money over the one run
 ```
 
-The last row is the AI-chunking single-enrichment reuse seam — the same
+The `chunk(chunking_model)` row is the AI-chunking single-enrichment reuse seam — the same
 persisted-output-reuse shape as `load_graph → pii` (a later stage consumes an
 earlier stage's sidecar rather than recomputing). `enrich` writes the raw ILGS
 Document to `*.enrichment_doc.parquet`; `chunk` reuses it when `chunking_model`
@@ -78,6 +96,22 @@ is set, guarded by byte-identity of `Document.text` against the reassembled
 narrative. It is an *ordering* requirement, not a hard dependency: run out of
 order or without the sidecar and `chunk` self-enriches (composable fallback,
 the same "missing overlay falls back to verbatim" idiom as `text_source`).
+
+The `build_graph → money` row is not a data dependency — it is two independent
+sidecars over one run. `money` reads the extraction Parquet (`*.elements.parquet`
++ `*.table_cells.parquet`), never the graph, so it produces byte-identical output
+whether run before or after `enrich`/`build_graph`; the arrow only records that
+both land in the same shard directory. Everything joins on `source_hash`, so the
+run ends up with `*.graph_edges.parquet` **and** `*.money_spans.parquet` keyed to
+the same documents, and — because `money`'s narrative offsets index the same
+`processing.text_source` space enrichment mentions and chunks use — amounts can
+be *joined* to the chunk a mention falls in at query time. That join is an
+offset overlap performed downstream, not something the money stage does: it reads
+the element stream, never `*.chunks.parquet`, so `chunk` is not a precondition.
+In practice this is `womblex money --shards
+<run>/documents/` (or `run-stage --stage money` in the object store) run over a
+directory the earlier stages already wrote to — its own resumable checkpoint
+means re-running only annotates batches without a money sidecar yet.
 
 ### Invalid Compositions (precondition violations)
 
@@ -89,6 +123,7 @@ pii_clean(advanced) without build_graph — advanced PII needs graph
 ingest_gnaf → chunk — G-NAF output is Parquet, not ExtractionResult
 ingest_abn → enrich — register Parquet is not ExtractionResult
 ingest_geo → pii_clean — GeoParquet is geometry, not text
+ingest_gnaf → money — register Parquet has no *.elements.parquet / *.table_cells.parquet to scan
 extract(csv, 10k rows) → .txt — multi-unit, must use .parquet
 ```
 
@@ -110,3 +145,4 @@ docs fall back per-document. The remaining rows are structural impossibilities
 - `womblex ingest-geo` calls `ingest_geospatial_directory()` directly
 - `womblex ingest-abn` calls `ingest_abn_xml()` / `ingest_abn_directory()` directly
 - `womblex chunk`, `womblex redact` call individual operations directly
+- `womblex money --shards <dir>` calls `money_shards()` directly — the offline annotation op that reads the extraction Parquet and writes `*.money_spans.parquet` + `*.money_columns.parquet`
