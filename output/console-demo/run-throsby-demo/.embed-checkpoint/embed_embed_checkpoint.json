@@ -1,0 +1,11 @@
+{
+  "processed_ids": [
+    "throsby-oosc"
+  ],
+  "total_processed": 1,
+  "total_succeeded": 4,
+  "total_failed": 0,
+  "last_batch": 1,
+  "started_at": "2026-08-17T15:05:49.853898+00:00",
+  "updated_at": "2026-08-17T15:05:50.811049+00:00"
+}
