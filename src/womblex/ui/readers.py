@@ -71,15 +71,16 @@ def get_stage_presence(settings: UISettings, run_id: str, stage: str) -> list[st
     enrichment sidecars.
     """
     suffix = STAGE_SUFFIXES[stage]
+    column = _PRESENCE_HASH_COLUMN.get(suffix, "source_hash")
     if settings.is_remote:
-        return _remote_stage_presence(cast(str, settings.store_uri), run_id, suffix)
+        return _remote_stage_presence(cast(str, settings.store_uri), run_id, suffix, column)
     run_dir = cast(Path, settings.output_root) / run_id
     if not run_dir.is_dir():
         return None
     shard_dir = run_dir / "documents"
     if not shard_dir.is_dir():
         return []
-    return _scan_stage_presence(shard_dir, suffix)
+    return _scan_stage_presence(shard_dir, suffix, column)
 
 
 def get_shard_audit(settings: UISettings, run_id: str) -> dict | None:
@@ -105,6 +106,18 @@ _CHUNK_DETAIL_SIDECARS: tuple[tuple[str, str, pa.Schema, str], ...] = (
     ("money_spans", MONEY_SPANS_SUFFIX, MONEY_SPANS_SCHEMA, "source_hash"),
     ("quality", CHUNK_QUALITY_SUFFIX, CHUNK_QUALITY_SCHEMA, "source_hash"),
 )
+
+#: Sidecar suffix -> the column that carries the source_hash, for the stage
+#: presence scan (:func:`_scan_stage_presence`). Every sidecar joins on
+#: ``source_hash`` *except* the sharded enrichment layout, which writes the
+#: source_hash into ``document_id`` (see ``enrichment_output.py``'s note and
+#: the ``entities`` join column above). Derived from `_CHUNK_DETAIL_SIDECARS`
+#: so the two cannot drift; a suffix absent here defaults to ``source_hash``.
+#: This is why ``GET /stage-presence/enrich`` returned ``[]`` even after enrich
+#: ran — it scanned a ``source_hash`` column the enrich sidecar does not have.
+_PRESENCE_HASH_COLUMN: dict[str, str] = {
+    suffix: column for _key, suffix, _schema, column in _CHUNK_DETAIL_SIDECARS
+}
 
 
 def get_chunk_detail(settings: UISettings, run_id: str, source_hash: str) -> dict | None:
@@ -263,8 +276,15 @@ def _chunk_detail(
     return detail
 
 
-def _scan_stage_presence(shard_dir: Path, suffix: str) -> list[str]:
-    """``source_hash`` values across every ``*<suffix>`` sidecar in *shard_dir*.
+def _scan_stage_presence(shard_dir: Path, suffix: str, column: str = "source_hash") -> list[str]:
+    """source_hash values across every ``*<suffix>`` sidecar in *shard_dir*.
+
+    *column* names the field carrying the source_hash — ``source_hash`` for
+    every sidecar bar the sharded enrichment one, which stores it in
+    ``document_id`` (see :data:`_PRESENCE_HASH_COLUMN`). Reading the wrong
+    column is why ``enrich`` presence came back empty; the values are always
+    returned under the ``source_hash`` name the documents grid joins on,
+    whichever column they were read from.
 
     An unreadable sidecar is warned about and skipped rather than failing the
     whole screen: presence is an annotation on the documents grid, and one
@@ -276,7 +296,7 @@ def _scan_stage_presence(shard_dir: Path, suffix: str) -> list[str]:
         if p.name.endswith(ARCHIVE_SUFFIX):
             continue
         try:
-            col = pq.read_table(str(p), columns=["source_hash"]).column("source_hash")
+            col = pq.read_table(str(p), columns=[column]).column(column)
         except Exception as e:
             logger.warning("stage-presence: skipping unreadable sidecar %s: %s", p.name, e)
             continue
@@ -351,7 +371,9 @@ def _remote_stages_present(store: RemoteStore, prefix: str) -> tuple[str, ...]:
     )
 
 
-def _remote_stage_presence(store_uri: str, run_id: str, suffix: str) -> list[str] | None:
+def _remote_stage_presence(
+    store_uri: str, run_id: str, suffix: str, column: str = "source_hash"
+) -> list[str] | None:
     store = _open_store(store_uri)
     if run_id not in store.list_dirs("runs"):
         return None
@@ -361,7 +383,7 @@ def _remote_stage_presence(store_uri: str, run_id: str, suffix: str) -> list[str
     with tempfile.TemporaryDirectory(prefix="womblex-ui-") as tmp:
         tmp_dir = Path(tmp)
         store.download_to_dir(keys, tmp_dir)
-        return _scan_stage_presence(tmp_dir, suffix)
+        return _scan_stage_presence(tmp_dir, suffix, column)
 
 
 def _remote_chunk_detail(store_uri: str, run_id: str, source_hash: str) -> dict | None:

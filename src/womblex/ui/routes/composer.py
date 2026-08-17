@@ -1,22 +1,21 @@
 """``/api/composer`` — the Pipeline Composer's graph, form schema, presets and
 config validation (docs/ui-plan.md merge 9).
 
-Reads no run state — `config.py`, `cloud/stage_contracts.py` and the preset
-registry are static, so unlike every other route here this one takes no
-`UISettings` dependency. `POST /validate` and `POST /yaml` are not a second
-writable surface (feedback stays the console's only one, plan §4): neither
-touches a run or the filesystem, they just build a `WomblexConfig` in memory
-and hand back what came of it. `GET /presets` serves named pre-configured
-pipelines (e.g. `DEFAULT-Isaacus`) the form loads as starting points.
+The read surface (`graph`, `schema`, `validate`, `yaml`, `GET /presets`) touches
+no run and no filesystem — it builds a `WomblexConfig` in memory. Saving a
+preset is the one write: `POST`/`DELETE /presets` file one JSON per preset under
+the deployment's `presets_dir`, and refuse with 409 when none is configured
+(read-only where it cannot write, like the Execution Controls without a queue).
 """
 from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Response
-from pydantic import ValidationError
+from fastapi import APIRouter, Depends, HTTPException, Response
+from pydantic import BaseModel, Field, ValidationError
 
 from womblex.ui import composer, presets
+from womblex.ui.deps import UISettings, get_settings
 
 router = APIRouter(prefix="/api/composer", tags=["composer"])
 
@@ -28,23 +27,88 @@ def get_graph() -> dict:
 
 
 @router.get("/presets")
-def get_presets() -> dict:
+def get_presets(settings: UISettings = Depends(get_settings)) -> dict:  # noqa: B008
     """Named pre-configured pipelines the form offers as starting points.
 
-    Each is a *partial* `WomblexConfig` (no `dataset` / `paths` — the operator
-    still supplies the run's identity and paths). `DEFAULT-Isaacus` is the
-    reference extract → chunk → enrich → build_graph → money shape.
+    Built-in presets first, then any the operator has saved under the
+    deployment's presets dir. Each is a *partial* `WomblexConfig` (no
+    `dataset` / `paths` — the operator still supplies the run's identity and
+    paths). `DEFAULT-Isaacus` is the reference extract → chunk → enrich →
+    build_graph → money shape. Each carries `source` (`builtin` | `saved`) so
+    the form can offer delete only on the ones it can delete.
     """
-    return {"presets": presets.list_presets()}
+    return {"presets": presets.list_all_presets(settings.presets_dir)}
 
 
 @router.get("/presets/{name}")
-def get_preset(name: str) -> dict:
-    """One preset by name; 404 if there is no such preset."""
-    preset = presets.get_preset(name)
+def get_preset(name: str, settings: UISettings = Depends(get_settings)) -> dict:  # noqa: B008
+    """One preset by name (a saved one shadowing a built-in); 404 if none."""
+    preset = presets.get_any_preset(settings.presets_dir, name)
     if preset is None:
         raise HTTPException(status_code=404, detail=f"no such preset: {name!r}")
     return preset.as_dict()
+
+
+class SavePresetRequest(BaseModel):
+    """Save-a-preset form. `config` is a whole composed config; `dataset`/`paths`
+    are stripped on save (a preset is an overlay). `description`/`formats` optional."""
+
+    name: str = Field(..., min_length=1)
+    description: str = ""
+    formats: list[str] = Field(default_factory=list)
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post("/presets", status_code=201)
+def post_preset(
+    body: SavePresetRequest, settings: UISettings = Depends(get_settings),  # noqa: B008
+) -> dict:
+    """Save *body* as a named preset under the deployment's presets dir.
+
+    409 when no presets dir is configured (the composer cannot write — wire up
+    `--presets-dir` / `$WOMBLEX_UI_PRESETS_DIR`), 400 on an unsafe name or a
+    config that would not load as an overlay (the same `WomblexConfig(**raw)`
+    construction the built-ins are validated with). Overwriting a saved preset
+    of the same name is allowed — it is the operator's own to replace.
+    """
+    if settings.presets_dir is None:
+        raise HTTPException(
+            status_code=409,
+            detail="This console has no presets dir configured; saving is disabled. "
+                   "Set --presets-dir (or $WOMBLEX_UI_PRESETS_DIR) to save presets.",
+        )
+    try:
+        preset = presets.save_preset(
+            settings.presets_dir,
+            name=body.name, description=body.description,
+            formats=tuple(body.formats), config=body.config,
+        )
+    except ValidationError as e:
+        detail = e.errors(include_url=False, include_context=False, include_input=False)
+        raise HTTPException(status_code=400, detail=detail) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return preset.as_dict()
+
+
+@router.delete("/presets/{name}")
+def delete_preset(
+    name: str, settings: UISettings = Depends(get_settings),  # noqa: B008
+) -> dict:
+    """Delete a saved preset by name.
+
+    409 when no presets dir is configured, 404 when no *saved* preset by that
+    name exists — a built-in is code and cannot be deleted, so a name that
+    matches only a built-in is a 404 here, not a silent success.
+    """
+    if settings.presets_dir is None:
+        raise HTTPException(
+            status_code=409,
+            detail="This console has no presets dir configured; nothing to delete.",
+        )
+    if not presets.delete_saved_preset(settings.presets_dir, name):
+        raise HTTPException(status_code=404, detail=f"no such saved preset: {name!r}")
+    return {"deleted": name}
 
 
 @router.get("/schema")

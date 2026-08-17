@@ -117,6 +117,23 @@ class TestResolveSettings:
     def test_feedback_dir_defaults_to_none(self, tmp_path: Path) -> None:
         assert resolve_settings(tmp_path, None).feedback_dir is None
 
+    def test_presets_dir_explicit_arg_wins(self, tmp_path: Path) -> None:
+        presets_dir = tmp_path / "presets"
+        assert resolve_settings(tmp_path, None, presets_dir=presets_dir).presets_dir == presets_dir
+
+    def test_presets_dir_env_fallback(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        presets_dir = tmp_path / "presets"
+        monkeypatch.setenv("WOMBLEX_UI_PRESETS_DIR", str(presets_dir))
+        assert resolve_settings(tmp_path, None).presets_dir == presets_dir
+
+    def test_presets_dir_defaults_to_none(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("WOMBLEX_UI_PRESETS_DIR", raising=False)
+        assert resolve_settings(tmp_path, None).presets_dir is None
+
 
 @pytest.fixture(params=["local", "remote"])
 def api_client(request: pytest.FixtureRequest, tmp_path: Path) -> tuple[TestClient, Path]:
@@ -197,6 +214,21 @@ class TestRunsApi:
         # A stage with no sidecar in this run reports present, not missing.
         empty = client.get("/api/runs/run-a/stage-presence/embed").json()
         assert empty["source_hashes"] == []
+
+    def test_stage_presence_reads_the_enrich_sidecar_hash_column(
+        self, api_client: tuple[TestClient, Path]
+    ) -> None:
+        """The sharded enrichment sidecar stores the source_hash in `document_id`,
+        not `source_hash` (see `enrichment_output.py`). Presence must read the
+        column the file actually carries, or `enrich` reports empty even though
+        the stage ran.
+        """
+        client, run_root = api_client
+        shard_dir = run_root / "run-a" / "documents"
+        _write_manifest_shard(shard_dir, _ROWS)
+        _write_shard(shard_dir, ENRICHMENT_ENTITIES_SUFFIX, ENTITY_SCHEMA, [_ENTITY_ROW])
+        body = client.get("/api/runs/run-a/stage-presence/enrich").json()
+        assert body == {"run_id": "run-a", "stage": "enrich", "source_hashes": ["hash-a"]}
 
     def test_stage_presence_skips_an_unreadable_sidecar(
         self, api_client: tuple[TestClient, Path]
@@ -893,6 +925,115 @@ class TestComposerApi:
         resp = client.post("/api/composer/yaml", json=_NO_DATASET)
         assert resp.status_code == 422
         assert any(err["loc"] == ["dataset"] for err in resp.json()["detail"])
+
+    def test_built_in_presets_are_marked_as_such(self, client: TestClient) -> None:
+        """`source` lets the screen offer delete only on saved presets; a built-in
+        is code and cannot be removed."""
+        body = client.get("/api/composer/presets").json()
+        builtin = next(p for p in body["presets"] if p["name"] == "DEFAULT-Isaacus")
+        assert builtin["source"] == "builtin"
+
+
+class TestComposerSavePresets:
+    """Saving a composed config as a named preset (docs/ui-plan.md merge 9).
+
+    The one composer surface that writes: it needs a `presets_dir`, so a console
+    without one refuses with 409 (the same shape the Execution Controls refuse
+    with when a piece is missing) rather than half-working.
+    """
+
+    def _client(self, tmp_path: Path, *, with_presets_dir: bool = True) -> TestClient:
+        presets_dir = (tmp_path / "presets") if with_presets_dir else None
+        return TestClient(create_app(output_root=tmp_path, presets_dir=presets_dir))
+
+    def test_save_then_list_and_fetch_round_trips(self, tmp_path: Path) -> None:
+        client = self._client(tmp_path)
+        resp = client.post("/api/composer/presets", json={
+            "name": "My-Run", "description": "chunk only", "formats": [".pdf"],
+            "config": {"chunking": {"enabled": True, "chunk_size": 320}},
+        })
+        assert resp.status_code == 201
+        assert resp.json()["source"] == "saved"
+
+        names = {p["name"]: p for p in client.get("/api/composer/presets").json()["presets"]}
+        assert "My-Run" in names and names["My-Run"]["source"] == "saved"
+        # Built-ins still serve alongside the saved one.
+        assert "DEFAULT-Isaacus" in names
+
+        one = client.get("/api/composer/presets/My-Run").json()
+        assert one["config"]["chunking"]["chunk_size"] == 320
+
+    def test_save_strips_dataset_and_paths(self, tmp_path: Path) -> None:
+        """A preset is an overlay — the run's identity is never baked into it."""
+        client = self._client(tmp_path)
+        resp = client.post("/api/composer/presets", json={
+            "name": "Overlay",
+            "config": {**_MINIMAL_CONFIG, "money": {"enabled": True}},
+        })
+        cfg = resp.json()["config"]
+        assert "dataset" not in cfg and "paths" not in cfg
+        assert cfg["money"]["enabled"] is True
+
+    def test_saved_preset_overlaid_on_a_minimal_config_still_validates(
+        self, tmp_path: Path
+    ) -> None:
+        """The whole point of validating at save time: what is saved must load."""
+        client = self._client(tmp_path)
+        client.post("/api/composer/presets", json={
+            "name": "Round", "config": {"chunking": {"chunk_size": 200}},
+        })
+        overlay = client.get("/api/composer/presets/Round").json()["config"]
+        resp = client.post("/api/composer/validate", json={**_MINIMAL_CONFIG, **overlay})
+        assert resp.json()["valid"] is True
+
+    def test_save_rejects_a_config_that_would_not_load(self, tmp_path: Path) -> None:
+        """A preset that fails to build a `WomblexConfig` is refused at save (400),
+        not left to 500 whoever later picks it."""
+        client = self._client(tmp_path)
+        resp = client.post("/api/composer/presets", json={
+            "name": "Bad", "config": {"chunking": {"chunk_size": "not-an-int"}},
+        })
+        assert resp.status_code == 400
+
+    def test_save_rejects_an_unsafe_name(self, tmp_path: Path) -> None:
+        client = self._client(tmp_path)
+        for name in ["../escape", "a/b", "..", ".hidden"]:
+            resp = client.post("/api/composer/presets", json={"name": name, "config": {}})
+            assert resp.status_code == 400, name
+        # Nothing was written anywhere — no file escaped the presets dir.
+        assert list(tmp_path.rglob("*.preset.json")) == []
+
+    def test_save_conflicts_without_a_presets_dir(self, tmp_path: Path) -> None:
+        client = self._client(tmp_path, with_presets_dir=False)
+        resp = client.post("/api/composer/presets", json={"name": "X", "config": {}})
+        assert resp.status_code == 409
+
+    def test_delete_removes_a_saved_preset(self, tmp_path: Path) -> None:
+        client = self._client(tmp_path)
+        client.post("/api/composer/presets", json={"name": "Temp", "config": {}})
+        assert client.delete("/api/composer/presets/Temp").status_code == 200
+        assert client.get("/api/composer/presets/Temp").status_code == 404
+
+    def test_delete_refuses_to_remove_a_built_in(self, tmp_path: Path) -> None:
+        """A built-in is code; deleting it is a 404 here, not a silent success."""
+        client = self._client(tmp_path)
+        assert client.delete("/api/composer/presets/DEFAULT-Isaacus").status_code == 404
+        # And it is still there.
+        assert client.get("/api/composer/presets/DEFAULT-Isaacus").status_code == 200
+
+    def test_delete_conflicts_without_a_presets_dir(self, tmp_path: Path) -> None:
+        client = self._client(tmp_path, with_presets_dir=False)
+        assert client.delete("/api/composer/presets/anything").status_code == 409
+
+    def test_a_saved_preset_shadows_a_built_in_of_the_same_name(self, tmp_path: Path) -> None:
+        """The operator asked for that name; their save wins, still marked saved."""
+        client = self._client(tmp_path)
+        client.post("/api/composer/presets", json={
+            "name": "DEFAULT-Isaacus", "config": {"chunking": {"chunk_size": 999}},
+        })
+        one = client.get("/api/composer/presets/DEFAULT-Isaacus").json()
+        assert one["source"] == "saved"
+        assert one["config"]["chunking"]["chunk_size"] == 999
 
 
 class _FakeQueue:

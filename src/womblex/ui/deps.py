@@ -32,6 +32,11 @@ class UISettings:
     land somewhere else entirely. Remote mode has no equivalent field: it
     always writes under the store's own ``feedback/`` prefix, a sibling of
     ``runs/`` in the same bucket.
+
+    ``presets_dir`` is where the Pipeline Composer *saves* operator-authored
+    presets (docs/ui-plan.md merge 9) — one JSON file per preset. ``None``
+    disables saving: the built-in presets still serve, but
+    ``POST /api/composer/presets`` refuses with 409.
     """
 
     output_root: Path | None
@@ -39,6 +44,7 @@ class UISettings:
     audit_only: bool = False
     feedback_dir: Path | None = None
     db_dsn: str | None = None
+    presets_dir: Path | None = None
 
     def __post_init__(self) -> None:
         if bool(self.output_root) == bool(self.store_uri):
@@ -56,6 +62,7 @@ def resolve_settings(
     audit_only: bool = False,
     feedback_dir: Path | None = None,
     db_dsn: str | None = None,
+    presets_dir: Path | None = None,
 ) -> UISettings:
     """Resolve settings from explicit arguments, falling back to env vars.
 
@@ -66,6 +73,10 @@ def resolve_settings(
     deployment behind an empty run list. ``$WOMBLEX_UI_FEEDBACK_DIR`` is the
     env fallback for ``feedback_dir``, read only when the explicit argument
     is absent.
+
+    ``$WOMBLEX_UI_PRESETS_DIR`` is the env fallback for ``presets_dir`` — the
+    directory the composer saves operator-authored presets into. Absent means
+    saving is disabled (built-in presets still serve).
 
     ``$WOMBLEX_DB_DSN`` / ``$DATABASE_URL`` name the job queue, the same
     pair ``womblex worker`` reads. Absent is not an error: the dashboard
@@ -86,9 +97,12 @@ def resolve_settings(
             "(or set $WOMBLEX_UI_OUTPUT_ROOT / $WOMBLEX_STORE_URI)"
         )
     dsn = db_dsn or os.environ.get("WOMBLEX_DB_DSN") or os.environ.get("DATABASE_URL")
+    presets = presets_dir
+    if presets is None and "WOMBLEX_UI_PRESETS_DIR" in os.environ:
+        presets = Path(os.environ["WOMBLEX_UI_PRESETS_DIR"])
     return UISettings(
         output_root=root, store_uri=store, audit_only=audit_only,
-        feedback_dir=fb_dir, db_dsn=dsn,
+        feedback_dir=fb_dir, db_dsn=dsn, presets_dir=presets,
     )
 
 

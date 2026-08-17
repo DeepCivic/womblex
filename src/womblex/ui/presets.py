@@ -29,7 +29,10 @@ here mirrors that file's stage toggles and settings; keep the two in step.
 """
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from womblex.config import DatasetConfig, PathsConfig, WomblexConfig
@@ -40,15 +43,16 @@ class Preset:
     """A named partial config the composer loads into its form.
 
     ``config`` is the partial ``WomblexConfig`` overlay (no ``dataset`` /
-    ``paths``); ``formats`` is the file extensions the pipeline is intended for,
-    surfaced so the screen can label the preset and warn if pointed at other
-    inputs. Neither is enforced here — a preset is a starting point, not a lock.
+    ``paths``); ``formats`` is the file extensions the pipeline is intended for.
+    ``source`` is ``"builtin"`` (code) or ``"saved"`` (operator-authored) — the
+    screen offers delete only on the latter.
     """
 
     name: str
     description: str
     formats: tuple[str, ...]
     config: dict[str, Any]
+    source: str = "builtin"
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -56,6 +60,7 @@ class Preset:
             "description": self.description,
             "formats": list(self.formats),
             "config": self.config,
+            "source": self.source,
         }
 
 
@@ -107,33 +112,150 @@ PRESETS: dict[str, Preset] = {p.name: p for p in (_DEFAULT_ISAACUS,)}
 
 
 def list_presets() -> list[dict[str, Any]]:
-    """Every preset, in registration order — the composer's preset dropdown."""
+    """Every built-in preset, in registration order — the composer's preset dropdown."""
     return [p.as_dict() for p in PRESETS.values()]
 
 
 def get_preset(name: str) -> Preset | None:
-    """The preset called *name*, or ``None`` if there is no such preset."""
+    """The built-in preset called *name*, or ``None`` if there is no such preset."""
     return PRESETS.get(name)
 
 
-def _validate_presets() -> None:
-    """Assert every preset overlays onto a loadable ``WomblexConfig``.
+# ---------------------------------------------------------------------------
+# Operator-saved presets (docs/ui-plan.md merge 9)
+# ---------------------------------------------------------------------------
+#
+# Besides the built-ins above (code), an operator can *save* a composed config
+# as a named starting point of their own. Those land as one JSON file each under
+# a writable ``presets_dir`` (``UISettings.presets_dir``, ``None`` when the
+# deployment configured none) — one file per record, like
+# ``store.feedback_output``, so two saves can't lose each other.
 
-    Called once at import so a preset that would not load fails fast (and is
-    covered by ``tests/test_ui.py``) rather than 500-ing when an operator picks
-    it. Uses placeholder ``dataset`` / ``paths`` — the two sections a preset
-    never carries — exactly as the composer's structural-graph default does.
+_PRESET_SUFFIX = ".preset.json"
+
+#: A preset name becomes a filename, so it is constrained like a run id
+#: (``feedback_output.is_safe_run_id``): letters, digits, dot, dash, underscore,
+#: no leading dot — enough for ``My-Run_v2`` without admitting ``..`` or a
+#: separator.
+_SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def is_safe_preset_name(name: str) -> bool:
+    """True if *name* is a single, filesystem-safe token (it becomes a filename).
+
+    Refused rather than sanitised, like ``feedback_output.is_safe_run_id``: a
+    ``..``, separator or leading dot could climb out of the ``presets_dir``
+    join or hide the file.
     """
-    from pathlib import Path
+    return bool(name) and name not in {".", ".."} and _SAFE_NAME.match(name) is not None
 
-    for preset in PRESETS.values():
-        WomblexConfig(
-            dataset=DatasetConfig(name="preset-check"),
-            paths=PathsConfig(
-                input_root=Path("."), output_root=Path("."), checkpoint_dir=Path(".")
-            ),
-            **preset.config,
+
+def _validate_overlay(config: dict[str, Any]) -> dict[str, Any]:
+    """Return *config* minus ``dataset``/``paths``, having asserted it loads.
+
+    A preset is an overlay, so the run-identity sections are dropped and the
+    rest is checked against ``WomblexConfig`` (placeholder ``dataset``/``paths``)
+    — the same construction ``load_config`` uses, so a preset that would not
+    load is refused here rather than 500-ing whoever later picks it.
+    """
+    overlay = {k: v for k, v in config.items() if k not in {"dataset", "paths"}}
+    WomblexConfig(
+        dataset=DatasetConfig(name="preset-check"),
+        paths=PathsConfig(input_root=Path("."), output_root=Path("."), checkpoint_dir=Path(".")),
+        **overlay,
+    )
+    return overlay
+
+
+def _load_saved_presets(presets_dir: Path) -> dict[str, Preset]:
+    """Read every ``*.preset.json`` under *presets_dir*, keyed by filename stem.
+
+    An unreadable or invalid file is skipped, not fatal — one corrupt preset
+    must not blank the dropdown (the same skip-and-continue the readers apply).
+    """
+    saved: dict[str, Preset] = {}
+    if not presets_dir.is_dir():
+        return saved
+    for path in sorted(presets_dir.glob(f"*{_PRESET_SUFFIX}")):
+        name = path.name[: -len(_PRESET_SUFFIX)]
+        if not is_safe_preset_name(name):
+            continue
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            _validate_overlay(raw.get("config", {}))
+        except Exception:
+            continue
+        saved[name] = Preset(
+            name=name,
+            description=str(raw.get("description", "")),
+            formats=tuple(raw.get("formats", ())),
+            config=raw.get("config", {}),
+            source="saved",
         )
+    return saved
+
+
+def list_all_presets(presets_dir: Path | None) -> list[dict[str, Any]]:
+    """Built-in presets, then any saved under *presets_dir* (a saved name shadows)."""
+    merged: dict[str, Preset] = dict(PRESETS)
+    if presets_dir is not None:
+        merged.update(_load_saved_presets(presets_dir))
+    return [p.as_dict() for p in merged.values()]
+
+
+def get_any_preset(presets_dir: Path | None, name: str) -> Preset | None:
+    """One preset by name — a saved one shadowing a built-in — or ``None``."""
+    if presets_dir is not None and is_safe_preset_name(name):
+        saved = _load_saved_presets(presets_dir)
+        if name in saved:
+            return saved[name]
+    return PRESETS.get(name)
+
+
+def save_preset(
+    presets_dir: Path,
+    *,
+    name: str,
+    description: str,
+    formats: tuple[str, ...],
+    config: dict[str, Any],
+) -> Preset:
+    """Write *config* as a named preset under *presets_dir*; return what was saved.
+
+    ``dataset``/``paths`` are stripped and the overlay validated
+    (:func:`_validate_overlay`). Raises ``ValueError`` on an unsafe *name*;
+    ``pydantic.ValidationError`` on an overlay that does not load.
+    """
+    if not is_safe_preset_name(name):
+        raise ValueError(f"unsafe preset name: {name!r}")
+    overlay = _validate_overlay(config)
+    presets_dir.mkdir(parents=True, exist_ok=True)
+    record = {"name": name, "description": description, "formats": list(formats), "config": overlay}
+    (presets_dir / f"{name}{_PRESET_SUFFIX}").write_text(
+        json.dumps(record, indent=2), encoding="utf-8"
+    )
+    return Preset(name=name, description=description, formats=formats, config=overlay, source="saved")
+
+
+def delete_saved_preset(presets_dir: Path, name: str) -> bool:
+    """Delete a saved preset; True if removed, False if absent.
+
+    Only ever removes a file under *presets_dir* — a built-in is code, so a name
+    matching only a built-in (or an unsafe name) returns False untouched.
+    """
+    if not is_safe_preset_name(name):
+        return False
+    path = presets_dir / f"{name}{_PRESET_SUFFIX}"
+    if not path.is_file():
+        return False
+    path.unlink()
+    return True
+
+
+def _validate_presets() -> None:
+    """Assert every built-in preset loads — called once at import so it fails fast."""
+    for preset in PRESETS.values():
+        _validate_overlay(preset.config)
 
 
 _validate_presets()

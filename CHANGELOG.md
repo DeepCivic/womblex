@@ -8,6 +8,12 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 ## [Unreleased]
 
+### Fixed
+- **Console stage-presence read `enrich` empty even after enrich ran.** `_scan_stage_presence` (`ui/readers.py`) scanned a `source_hash` column, but the sharded enrichment sidecar carries the source_hash in `document_id` (as the Chunk Inspector's own path already handles). Presence now reads the column each sidecar actually carries, derived from the same `_CHUNK_DETAIL_SIDECARS` table so the two cannot drift; values still returned under `source_hash`. `GET /stage-presence/enrich` (and the Corpus Inspector's checkpoint overlay) now reflect enrich.
+
+### Added
+- **Console Pipeline Composer — save/delete operator presets (backend; merge 9).** `POST`/`DELETE /api/composer/presets` file one JSON per preset under a writable `presets_dir` (`--presets-dir` / `$WOMBLEX_UI_PRESETS_DIR`); `GET /presets` merges built-ins with saved (`source: builtin|saved`, a saved name shadows). `dataset`/`paths` stripped on save (a preset is an overlay), overlay validated via the same `WomblexConfig(**raw)` the built-ins use; 409 without a presets dir, 400 on an unsafe name / non-loadable overlay. Frontend (save/enqueue UI) follows in the next merge.
+
 ### Changed
 - **Console: execution is on by default; `--audit-only` is the opt-out.** Inverts the merge-11 switch — the console can dispatch runs into the queue without a flag, and `womblex ui --audit-only` gives a pure read/inspect console (the old `--allow-execute` is removed). Still queue-only, so dispatch needs both a `--store` and a `--dsn`; the `/api/execute/status` payload renames `allow_execute` → `audit_only` and `ExecutionCapability.can_execute` is now `not audit_only and has_store and has_queue`.
 
