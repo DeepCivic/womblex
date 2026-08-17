@@ -13,6 +13,7 @@ import json
 import re
 from decimal import Decimal
 from pathlib import Path
+from typing import Self
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -825,6 +826,158 @@ class TestComposerApi:
         resp = client.post("/api/composer/yaml", json=_NO_DATASET)
         assert resp.status_code == 422
         assert any(err["loc"] == ["dataset"] for err in resp.json()["detail"])
+
+
+class _FakeQueue:
+    """A `JobQueue` stand-in — the execute happy path must not need Postgres.
+
+    Records what `enqueue_extraction` hands it (schema call, run_id, specs) so
+    a test can assert the batching without a live database, and returns a
+    fixed `newly` count for `enqueue`.
+    """
+
+    last: _FakeQueue | None = None
+
+    def __init__(self, dsn: str, **_kw: object) -> None:
+        self.dsn = dsn
+        self.schema_ensured = False
+        self.enqueued: tuple[str, list] | None = None
+        _FakeQueue.last = self
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        pass
+
+    def ensure_schema(self) -> None:
+        self.schema_ensured = True
+
+    def enqueue(self, run_id: str, specs: list) -> int:
+        self.enqueued = (run_id, specs)
+        return len(specs)
+
+
+def _seed_store_inputs(store_root: Path, prefix: str, names: list[str]) -> None:
+    """Write source documents under `<store_root>/<prefix>` for enqueue to list."""
+    in_dir = store_root / prefix
+    in_dir.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        (in_dir / name).write_bytes(b"%PDF-1.4 stub")
+
+
+class TestExecuteApi:
+    """The Execution Controls (docs/ui-plan.md merge 11). Dispatch is always the
+    queue, gated by `--allow-execute` and requiring a store *and* a DSN.
+    """
+
+    def test_status_reflects_the_three_flags(self, tmp_path: Path) -> None:
+        """An audit-only local console can neither execute nor claim it can."""
+        client = TestClient(create_app(output_root=tmp_path))
+        body = client.get("/api/execute/status").json()
+        assert body["can_execute"] is False
+        assert body == {
+            "can_execute": False, "allow_execute": False,
+            "has_store": False, "has_queue": False, "stages": body["stages"],
+        }
+        assert "chunk" in body["stages"]
+
+    def test_status_can_execute_needs_all_three(self, tmp_path: Path) -> None:
+        client = TestClient(create_app(
+            store_uri=str(tmp_path / "store"), allow_execute=True,
+            db_dsn="postgresql://x/y",
+        ))
+        assert client.get("/api/execute/status").json()["can_execute"] is True
+
+    def test_enqueue_forbidden_when_audit_only(self, tmp_path: Path) -> None:
+        """Off gives a pure auditing console (plan §6) — 403 before touching anything."""
+        client = TestClient(create_app(
+            store_uri=str(tmp_path / "store"), db_dsn="postgresql://x/y",
+        ))
+        resp = client.post("/api/execute/enqueue", json={"input_prefix": "inbox"})
+        assert resp.status_code == 403
+
+    def test_enqueue_conflict_without_a_store(self, tmp_path: Path) -> None:
+        """A local output_root can configure and audit but not dispatch (plan §4)."""
+        client = TestClient(create_app(
+            output_root=tmp_path, allow_execute=True, db_dsn="postgresql://x/y",
+        ))
+        resp = client.post("/api/execute/enqueue", json={"input_prefix": "inbox"})
+        assert resp.status_code == 409
+
+    def test_enqueue_conflict_without_a_queue(self, tmp_path: Path) -> None:
+        pytest.importorskip("fsspec")
+        client = TestClient(create_app(store_uri=str(tmp_path / "store"), allow_execute=True))
+        resp = client.post("/api/execute/enqueue", json={"input_prefix": "inbox"})
+        assert resp.status_code == 409
+
+    def test_enqueue_400_when_no_documents_match(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An empty prefix is bad input (400), not a disabled console (403/409)."""
+        pytest.importorskip("fsspec")
+        monkeypatch.setattr("womblex.cloud.queue.JobQueue", _FakeQueue)
+        store_root = tmp_path / "store"
+        _seed_store_inputs(store_root, "inbox", ["notes.txt"])  # unsupported ext
+        client = TestClient(create_app(
+            store_uri=str(store_root), allow_execute=True, db_dsn="postgresql://x/y",
+        ))
+        resp = client.post("/api/execute/enqueue", json={"input_prefix": "inbox"})
+        assert resp.status_code == 400
+
+    def test_enqueue_plans_batches_into_the_queue(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The configure-and-run happy path: list, batch, one idempotent row each."""
+        pytest.importorskip("fsspec")
+        monkeypatch.setattr("womblex.cloud.queue.JobQueue", _FakeQueue)
+        store_root = tmp_path / "store"
+        _seed_store_inputs(store_root, "inbox", [f"doc-{i}.pdf" for i in range(5)])
+        client = TestClient(create_app(
+            store_uri=str(store_root), allow_execute=True, db_dsn="postgresql://x/y",
+        ))
+        resp = client.post(
+            "/api/execute/enqueue",
+            json={"input_prefix": "inbox", "run_id": "run-exec", "batch_size": 2},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["run_id"] == "run-exec"
+        assert body["document_count"] == 5
+        assert body["batch_count"] == 3  # 2 + 2 + 1
+        assert body["newly_enqueued"] == 3
+        assert body["shard_prefix"] == "runs/run-exec/documents"
+
+        queue = _FakeQueue.last
+        assert queue is not None and queue.schema_ensured
+        run_id, specs = queue.enqueued  # type: ignore[misc]
+        assert run_id == "run-exec"
+        assert [s.batch_num for s in specs] == [1, 2, 3]
+        assert [len(s.input_keys) for s in specs] == [2, 2, 1]
+        assert all(s.shard_prefix == "runs/run-exec/documents" for s in specs)
+
+    def test_enqueue_mints_a_run_id_when_omitted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pytest.importorskip("fsspec")
+        monkeypatch.setattr("womblex.cloud.queue.JobQueue", _FakeQueue)
+        store_root = tmp_path / "store"
+        _seed_store_inputs(store_root, "inbox", ["doc-0.pdf"])
+        client = TestClient(create_app(
+            store_uri=str(store_root), allow_execute=True, db_dsn="postgresql://x/y",
+        ))
+        resp = client.post("/api/execute/enqueue", json={"input_prefix": "inbox"})
+        assert resp.json()["run_id"].startswith("run-")
+
+    def test_enqueue_rejects_a_batch_size_below_one(self, tmp_path: Path) -> None:
+        """Pydantic's `ge=1` refuses it at the boundary (422), before the guard runs."""
+        client = TestClient(create_app(
+            store_uri=str(tmp_path / "store"), allow_execute=True, db_dsn="postgresql://x/y",
+        ))
+        resp = client.post(
+            "/api/execute/enqueue", json={"input_prefix": "inbox", "batch_size": 0},
+        )
+        assert resp.status_code == 422
 
 
 class TestSpaMount:

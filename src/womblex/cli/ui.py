@@ -43,8 +43,9 @@ def _register_ui(p: argparse.ArgumentParser) -> None:
     )
     p.add_argument(
         "--allow-execute", action="store_true",
-        help="Reserved for the execution endpoints (docs/ui-plan.md merge 11). "
-             "None exist yet, so today every deployment is audit-only either way.",
+        help="Enable the Execution Controls (docs/ui-plan.md merge 11) — the console "
+             "can then enqueue extraction runs into the job queue. Off (default) is "
+             "an audit-only console. Also needs a --store and a --dsn to dispatch.",
     )
 
 

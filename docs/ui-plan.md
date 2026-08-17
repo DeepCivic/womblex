@@ -14,11 +14,14 @@ still a `ScreenStub` placeholder — which is why that screen renders the
 "Ships in delivery merge N" message. Merge 7 is **partial**: the feedback
 write path (`POST /api/runs/{id}/feedback` + one-file-per-report writer) is
 in, but the `ReportIssue` control is not wired into any screen yet. Merge 11
-(execution controls) has not started.
+(execution controls) is **backend-only**: `GET /api/execute/status` and
+`POST /api/execute/enqueue` have landed (gated by `--allow-execute`,
+dispatch is always the queue), but no execution *screen* exists yet.
 
-In short: every planned *endpoint* through merge 10 exists; one *screen* (8)
-and one *control* (7) remain to be built on top of endpoints that are already
-there. Per-merge state is tracked in the §5 table.
+In short: every planned *endpoint* now exists; one *screen* each for the
+Dashboard (8) and Execution Controls (11), plus one *control* (7), remain to
+be built on top of endpoints that are already there. Per-merge state is
+tracked in the §5 table.
 
 ## 1. The governing principle
 
@@ -56,7 +59,7 @@ womblex[ui]  →  fastapi + uvicorn        (no new core dependencies)
 src/womblex/ui/
 ├── app.py         # FastAPI app factory; serves the built SPA as static files
 ├── deps.py        # Resolve store / output_root / optional JobQueue per request
-├── routes/        # runs, corpus, chunks, stages, resources, jobs
+├── routes/        # runs, corpus, chunks, stages, resources, jobs, execute
 └── readers.py     # Thin pyarrow readers over the shard sidecars
 ui/                     # SvelteKit SPA; built during the image build
 src/womblex/cli/ui.py   # `womblex ui [--port 8080] [--allow-execute]`
@@ -179,7 +182,14 @@ MinIO, already in `docker-compose.yml`) rather than a bare `womblex run`; a
 queue-less local console would need its own background runner and progress
 reporting. Deferred, and worth revisiting if that requirement bites.
 
-`--allow-execute` remains the switch: off gives a pure auditing console.
+`--allow-execute` remains the switch: off gives a pure auditing console. It
+is enforced in one place — `ui/execute.py`'s guard, which every write action
+calls before it touches the store or the queue — and refuses with 403
+(audit-only) or 409 (no store / no queue configured), the two states
+`ExecutionCapability` distinguishes. Execution is queue-only, so it needs
+*both* a `--store` and a `--dsn`; a local `output_root`-only console can
+configure and audit but not dispatch, and `GET /api/execute/status` says so
+rather than half-working.
 
 ### Scale-to-zero is in scope, and already supported
 
@@ -241,12 +251,12 @@ tree green.
 | 8 | **Dashboard** | Queue stats, job list, stale detection, fleet view from `locked_by`, KPI tiles and throughput | ⚠️ Endpoint only — `/api/dashboard` landed; screen is still `ScreenStub` |
 | 9 | **Pipeline Composer** | `STAGE_CONTRACTS` graph endpoint, config form, validation, YAML download | ✅ Done (endpoints + screen; landed as two commits — graph, then form) |
 | 10 | **Resources Console** | Connection cards, credential masking, test actions, fleet + queue-depth state | ✅ Done (endpoints + screen) |
-| 11 | **Execution controls** | `--allow-execute`, configure-and-run, per-stage runs, log streaming | ⬜ Not started |
+| 11 | **Execution controls** | `--allow-execute`, configure-and-run, per-stage runs, log streaming | ⚠️ Backend only — `GET /api/execute/status` + `POST /api/execute/enqueue` landed (queue dispatch, `--allow-execute` guard); no execution screen yet |
 
-**Remaining work is one screen (8) plus one control (7)**, both over
-endpoints that already exist and are tested. The next merges are frontend-only:
-build `ui/src/routes/dashboard` against its landed API, then attach
-`ReportIssue` to the inspector screens.
+**Remaining work is two screens (8, 11) plus one control (7)**, all over
+endpoints that already exist and are tested. The next merges are
+frontend-only: build `ui/src/routes/dashboard` and the execution controls
+against their landed APIs, then attach `ReportIssue` to the inspector screens.
 
 Merge 9 came in two commits — the DAG, then the config form over it — because
 a screen carrying both a graph renderer and a recursive JSON-Schema form does

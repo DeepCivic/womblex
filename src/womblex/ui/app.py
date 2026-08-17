@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from womblex.ui.deps import UISettings
-from womblex.ui.routes import composer, dashboard, feedback, resources, runs
+from womblex.ui.routes import composer, dashboard, execute, feedback, resources, runs
 
 # `ui/` is not vendored into the wheel (docs/ui-plan.md §6 "SPA delivery") —
 # only Dockerfile.ui's builder stage produces this directory, at the
@@ -44,6 +44,11 @@ def create_app(
     (default ``<output_root>/feedback``); see ``UISettings``. Ignored in
     remote mode, which always uses the store's own ``feedback/`` prefix.
 
+    ``allow_execute`` switches on the Execution Controls (docs/ui-plan.md
+    merge 11): off (the default) the ``/api/execute`` write action refuses
+    with 403, giving a pure auditing console. It still requires a store and a
+    queue to actually dispatch — see :mod:`womblex.ui.execute`.
+
     ``db_dsn`` is the optional job queue the Dashboard reads. Omitted means
     no queue, which is a normal local deployment — the dashboard falls back
     to the run's own per-stage checkpoints.
@@ -63,6 +68,7 @@ def create_app(
     app.include_router(dashboard.router)
     app.include_router(composer.router)
     app.include_router(resources.router)
+    app.include_router(execute.router)
 
     @app.get("/api/health")
     def health() -> dict:

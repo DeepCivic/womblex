@@ -8,6 +8,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Console Execution Controls — backend (`docs/ui-plan.md` merge 11).**
+  The console's first writable-to-a-run surface: `GET /api/execute/status`
+  reports whether this deployment can dispatch work (and which piece is
+  missing if not), and `POST /api/execute/enqueue` plans an extraction run
+  into the job queue — the "configure-and-run" action. Both live in a new
+  `ui/execute.py` + `ui/routes/execute.py`.
+
+  Dispatch is always the queue (plan §4): `enqueue_extraction` is a thin
+  wrapper over the same key-listing / batching `cli/cloud.cmd_enqueue` does,
+  reached through the sidecar's own store, so no web request can become an
+  arbitrary command — there is no command, only an idempotent queue row per
+  batch. Workers a platform brings up do the work; the console runs no
+  scheduler.
+
+  `--allow-execute` is the switch, enforced in one place (`_guard`) that
+  every write action calls before touching the store or the queue: off gives
+  a pure auditing console (403). Execution is queue-only, so it also needs
+  *both* a `--store` and a `--dsn` — a local `output_root`-only console can
+  configure and audit but not dispatch, and refuses with 409 rather than
+  half-working. `ExecutionCapability` carries the three flags so the screen
+  can name the missing piece; the route maps its `ExecutionDisabled.reason`
+  onto 403 (audit-only) vs 409 (unwired). "Log streaming" is the queue's own
+  job-status transitions plus the per-stage checkpoints the Dashboard
+  already serves — batch-granular, not a fabricated line-by-line log. The
+  `womblex ui --allow-execute` flag, previously reserved, now does this.
 - **Console Pipeline Composer — config form (`docs/ui-plan.md` merge 9).**
   The composer's second half: a form over `/api/composer/schema`, a Validate
   action, a YAML preview and a download, and stage toggles on the graph's
