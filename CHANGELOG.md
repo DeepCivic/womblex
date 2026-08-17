@@ -8,6 +8,12 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-08-18
+Dependency-only. `isaacus`, `isaacus-sagemaker` and the AWS SDK (`boto3`) move
+into the base install; the `[isaacus]`, `[bedrock]` and `[cloud-ocr]` extras are
+removed. Also fixes the console Resources card misreading a misspelled SageMaker
+endpoints var as a bare "No API key". No parquet schema changed.
+
 ### Changed
 - **Isaacus SDK, hosted-VLM (Bedrock) OCR and the AWS SDK are now core dependencies.** `isaacus`, `isaacus-sagemaker` and `boto3` move out of the `[isaacus]`/`[bedrock]`/`[cloud-ocr]` extras into the base install — every real deployment uses enrichment/embeddings and (often) hosted OCR or SageMaker, they are tiny next to the vision/ML stack already shipped, and gating them behind extras only produced misconfiguration (a missing SDK surfaced in the console as a bare "No API key"). They stay dormant until configured (no key / no `ISAACUS_SAGEMAKER_ENDPOINTS` / no `mistral-ocr` engine). The `[isaacus]`, `[bedrock]` and `[cloud-ocr]` extras are removed; remaining extras are `[local]` (empty), `[cloud]`, `[ui]`, `[dev]`. Dead `pip install womblex[…]` ImportError guards around first-party modules (enrich/persist/pii) simplified to direct imports; the stale `[pii]` extra reference is gone (presidio/sentence-transformers were already core).
 
