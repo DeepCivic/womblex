@@ -45,19 +45,21 @@ Raw files (PDF / DOCX / CSV / XLSX)
         ▼
 ┌───────────────────┐
 │  run_redaction    │  → RedactionReport on ExtractionResult
-│  (redact/stage)   │    (flag / blackout / delete mode)
+│ (operations/      │    (flag / blackout / delete mode; delegates to
+│  redact)          │     redact/stage helpers)
 └───────────────────┘
         │
         ▼
 ┌───────────────────┐
-│ chunk_document    │  → list[TextChunk]
-│ (process/chunker) │    (text, offsets, content_type, has_redaction)
+│  run_chunking     │  → list[TextChunk]
+│ (operations/chunk)│    (text, offsets, content_type, has_redaction;
+│                   │     engine is process/chunker.chunk_batch)
 └───────────────────┘
         │
         ▼
 ┌───────────────────┐
 │ run_pii_cleaning  │  → PII spans replaced with <ENTITY_TYPE> tags
-│ (pii/stage)       │    (PERSON, ADDRESS)
+│ (operations/pii)  │    (PERSON, ADDRESS; delegates to pii/stage)
 └───────────────────┘
         │
   ── extraction complete, caller decides what to do next ──
@@ -65,7 +67,8 @@ Raw files (PDF / DOCX / CSV / XLSX)
         ▼  (caller composes operations as needed)
 ┌───────────────────┐
 │  run_enrichment   │  → EnrichmentResult per document
-│  (analyse/enrich) │    (segments, entities, relationships)
+│ (operations/      │    (segments, entities, relationships;
+│  enrich)          │     API call in analyse/enrich)
 └───────────────────┘
         │
         ▼
@@ -77,11 +80,15 @@ Raw files (PDF / DOCX / CSV / XLSX)
         │
         ▼
 ┌───────────────────┐
-│  write_results    │  → batch-NNNN.{elements, table_cells,
-│  (store/output)   │     form_fields, _manifest}.parquet
-│  write_enrichment │  → entities.parquet, graph_edges.parquet,
-│  (store/enrichment│     enrichment_meta.parquet
-│  _output)         │
+│  write_batch_     │  → batch-NNNN.{elements, table_cells,
+│  parquet          │     form_fields, _manifest}.parquet
+│ (operations/      │     (via store/output.write_results)
+│  persist)         │
+│  write_batch_     │  → entities.parquet, graph_edges.parquet,
+│  enrichment       │     enrichment_meta.parquet (via
+│ (operations/      │     store/enrichment_output.write_enrichment_
+│  persist)         │     metadata / write_entity_mentions /
+│                   │     write_graph_edges)
 └───────────────────┘
         │
         ▼

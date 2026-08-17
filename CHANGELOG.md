@@ -8,6 +8,9 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-08-18
+Minor, additive. Console-focused: the Pipeline Composer gains save/enqueue of operator presets (store-backed in cloud mode), the Dashboard screen lands, and execution is on by default (`--audit-only` is the new opt-out). Also fixes console stage-presence reporting `enrich` empty after enrich ran. No parquet schema changed.
+
 ### Fixed
 - **Console stage-presence read `enrich` empty even after enrich ran.** `_scan_stage_presence` (`ui/readers.py`) scanned a `source_hash` column, but the sharded enrichment sidecar carries the source_hash in `document_id` (as the Chunk Inspector's own path already handles). Presence now reads the column each sidecar actually carries, derived from the same `_CHUNK_DETAIL_SIDECARS` table so the two cannot drift; values still returned under `source_hash`. `GET /stage-presence/enrich` (and the Corpus Inspector's checkpoint overlay) now reflect enrich.
 
