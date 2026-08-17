@@ -306,6 +306,10 @@ export interface StageNode {
 	required_inputs: string[];
 	conditional_inputs: ConditionalInput[];
 	outputs: string[];
+	// The `WomblexConfig` section that configures this stage, or null where no
+	// single section does (`extract`, `graph-refresh`). Served rather than
+	// mapped here so a renamed config section breaks a Python test.
+	config_section: string | null;
 }
 
 export interface StageEdge {
@@ -323,4 +327,79 @@ export async function getStageGraph(fetchImpl: typeof fetch = fetch): Promise<St
 	const resp = await fetchImpl('/api/composer/graph');
 	if (!resp.ok) throw new Error(`GET /api/composer/graph: ${resp.status}`);
 	return (await resp.json()) as StageGraph;
+}
+
+// The subset of JSON Schema Pydantic emits for `WomblexConfig`. Typed rather
+// than `any` so the form's field resolution is checked; unknown keywords are
+// simply not read.
+export interface JsonSchema {
+	type?: string;
+	title?: string;
+	description?: string;
+	default?: unknown;
+	properties?: Record<string, JsonSchema>;
+	required?: string[];
+	items?: JsonSchema;
+	anyOf?: JsonSchema[];
+	enum?: unknown[];
+	additionalProperties?: boolean | JsonSchema;
+	$ref?: string;
+	$defs?: Record<string, JsonSchema>;
+}
+
+export type ConfigObject = Record<string, unknown>;
+
+export async function getConfigSchema(fetchImpl: typeof fetch = fetch): Promise<JsonSchema> {
+	const resp = await fetchImpl('/api/composer/schema');
+	if (!resp.ok) throw new Error(`GET /api/composer/schema: ${resp.status}`);
+	return (await resp.json()) as JsonSchema;
+}
+
+// Pydantic's own error shape (`include_url`/`context`/`input` off server-side).
+export interface ConfigError {
+	loc: (string | number)[];
+	msg: string;
+	type: string;
+}
+
+export interface ValidationResult {
+	valid: boolean;
+	errors: ConfigError[];
+	// Keys the schema does not claim. Always empty for a config this form
+	// built — its fields *are* the schema — so no screen renders them; the
+	// field is here because the endpoint reports it.
+	unknown_keys: string[];
+}
+
+const JSON_POST = { method: 'POST', headers: { 'content-type': 'application/json' } };
+
+export async function validateConfig(
+	raw: ConfigObject,
+	fetchImpl: typeof fetch = fetch
+): Promise<ValidationResult> {
+	const resp = await fetchImpl('/api/composer/validate', { ...JSON_POST, body: JSON.stringify(raw) });
+	if (!resp.ok) throw new Error(`POST /api/composer/validate: ${resp.status}`);
+	return (await resp.json()) as ValidationResult;
+}
+
+/** A config `/yaml` refused to render — carries the same errors `/validate` reports. */
+export class ConfigInvalid extends Error {
+	errors: ConfigError[];
+	constructor(errors: ConfigError[]) {
+		super('Config is invalid');
+		this.name = 'ConfigInvalid';
+		this.errors = errors;
+	}
+}
+
+export async function renderConfigYaml(
+	raw: ConfigObject,
+	fetchImpl: typeof fetch = fetch
+): Promise<string> {
+	const resp = await fetchImpl('/api/composer/yaml', { ...JSON_POST, body: JSON.stringify(raw) });
+	if (resp.status === 422) {
+		throw new ConfigInvalid(((await resp.json()) as { detail: ConfigError[] }).detail);
+	}
+	if (!resp.ok) throw new Error(`POST /api/composer/yaml: ${resp.status}`);
+	return await resp.text();
 }

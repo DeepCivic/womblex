@@ -708,6 +708,22 @@ class TestComposerApi:
         # order — the plan's guardrail is precisely this reachability.
         assert reached == set(STAGE_NAMES)
 
+    def test_graph_node_config_sections_are_real_config_fields(
+        self, client: TestClient
+    ) -> None:
+        """The composer's node → config-section map is hand-declared (nothing in
+        `StageContract` names a config field), so a renamed section must fail
+        here rather than silently leave a stage's toggle wired to nothing."""
+        from womblex.config import WomblexConfig
+
+        body = client.get("/api/composer/graph").json()
+        sections = {n["config_section"] for n in body["nodes"]} - {None}
+        assert sections and sections <= set(WomblexConfig.model_fields)
+        assert {n["id"] for n in body["nodes"] if n["config_section"] is None} == {
+            "extract",
+            "graph-refresh",
+        }
+
     def test_schema_is_the_womblex_config_schema(self, client: TestClient) -> None:
         body = client.get("/api/composer/schema").json()
         assert set(body["properties"]) >= {"dataset", "paths", "chunking", "pii"}

@@ -8,6 +8,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Console Pipeline Composer — config form (`docs/ui-plan.md` merge 9).**
+  The composer's second half: a form over `/api/composer/schema`, a Validate
+  action, a YAML preview and a download, and stage toggles on the graph's
+  nodes wired to the same config the form edits.
+
+  `SchemaForm.svelte` renders `WomblexConfig`'s JSON Schema recursively — a
+  `$ref` property becomes a collapsible subsection — so every field of every
+  nested model is reachable without a hand-typed mirror of `config.py`, and a
+  new config field appears in the console the moment Pydantic reports it.
+  `X | None` is read through as Pydantic's optionality marker rather than
+  rendered as a variant picker, and an optional subsection that defaults to
+  null (`linking.reference`) stays null until an operator asks for it, so the
+  composer never posts a section the library never had.
+
+  Nothing about validity is decided in the browser: Validate and the YAML
+  download both go to the endpoints, which build a `WomblexConfig` the way
+  `load_config` does, and the downloaded file is the server's rendering — so
+  it is byte-identical to what `womblex run --config` would read.
+
+  Each node's `enabled` checkbox writes its config section's `enabled`, so
+  the graph and the form are one state rather than two views that can
+  disagree; disabled stages drop to 40% and keep their edges, per DESIGN.md's
+  `StageNode`. Which section a stage belongs to is served as `config_section`
+  from a new `CONFIG_SECTION` map in `ui/composer.py`: not derivable from
+  `StageContract` (contracts name suffixes, not config fields), so declared
+  beside the config models under a test that every name is a real
+  `WomblexConfig` field, rather than typed into the frontend where a rename
+  would drift in silence.
 - **Console Pipeline Composer — stage graph (`docs/ui-plan.md` merge 9).**
   The composer screen replaces its `ScreenStub` with the pipeline DAG that
   `/api/composer/graph` already served, plus a detail panel for the selected

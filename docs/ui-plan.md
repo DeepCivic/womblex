@@ -5,21 +5,20 @@ Screen requirements: the *Womblex Platform UX Requirements* brief (five domains 
 Dashboard, Pipeline Composer, Corpus Inspector, Semantic Chunk Inspector,
 Resources Console).
 
-Status (verified against the tree): merges 1–6 and 10 are complete end to end
-— design system, read API skeleton, sidecar image, frontend shell, Corpus
-Inspector, Chunk Inspector and Resources Console all have both their endpoints
-and their screens. Merges 8 and 9 are **backend-only**: the Dashboard
-(`/api/dashboard`) and Pipeline Composer (`/api/composer/*`) endpoints have
-landed, but their `ui/src/routes/{dashboard,composer}` screens are still
-`ScreenStub` placeholders — which is why those two screens render the "Ships
-in delivery merge N" message. Merge 7 is **partial**: the feedback write path
-(`POST /api/runs/{id}/feedback` + one-file-per-report writer) is in, but the
-`ReportIssue` control is not wired into any screen yet. Merge 11 (execution
-controls) has not started.
+Status (verified against the tree): merges 1–6 and 9–10 are complete end to
+end — design system, read API skeleton, sidecar image, frontend shell, Corpus
+Inspector, Chunk Inspector, Pipeline Composer and Resources Console all have
+both their endpoints and their screens. Merge 8 is **backend-only**: the
+Dashboard's `/api/dashboard` has landed, but `ui/src/routes/dashboard` is
+still a `ScreenStub` placeholder — which is why that screen renders the
+"Ships in delivery merge N" message. Merge 7 is **partial**: the feedback
+write path (`POST /api/runs/{id}/feedback` + one-file-per-report writer) is
+in, but the `ReportIssue` control is not wired into any screen yet. Merge 11
+(execution controls) has not started.
 
-In short: every planned *endpoint* through merge 10 exists; two *screens*
-(8, 9) and one *control* (7) remain to be built on top of endpoints that
-are already there. Per-merge state is tracked in the §5 table.
+In short: every planned *endpoint* through merge 10 exists; one *screen* (8)
+and one *control* (7) remain to be built on top of endpoints that are already
+there. Per-merge state is tracked in the §5 table.
 
 ## 1. The governing principle
 
@@ -110,6 +109,12 @@ requirement that the composer be "the only place logical guardrails are enforced
 existing structure — the guardrail is `chunk.required_inputs` naming the
 elements sidecar, not a rule re-typed in TypeScript. **Do not hand-code the DAG
 in the frontend**; serve it from `STAGE_CONTRACTS` so it cannot drift.
+
+Which config section carries a stage's `enabled` toggle is *not* derivable
+from `StageContract` — contracts name parquet suffixes, not config fields — so
+`ui/composer.py` declares that map (`CONFIG_SECTION`) beside the config models
+and serves it per node, under a test that every name is a real `WomblexConfig`
+field. Same rule one step out: the frontend re-types nothing the library knows.
 
 **Stage checkpoints live inside the run.** Every shard stage writes its
 `CheckpointState` to a dot-directory under the run root
@@ -234,14 +239,19 @@ tree green.
 | 6 | **Chunk Inspector** | Chunk reader endpoints, `ChunkCard`, entity/PII/money overlays | ✅ Done (endpoints + screen) |
 | 7 | **Report action** | One-file-per-report writer + `POST /api/runs/{id}/feedback`; `ReportIssue` control on the inspector screens | ⚠️ Write path only — endpoint + writer landed; `ReportIssue` control not yet on any screen |
 | 8 | **Dashboard** | Queue stats, job list, stale detection, fleet view from `locked_by`, KPI tiles and throughput | ⚠️ Endpoint only — `/api/dashboard` landed; screen is still `ScreenStub` |
-| 9 | **Pipeline Composer** | `STAGE_CONTRACTS` graph endpoint, config form, validation, YAML download | ⚠️ Endpoints only — `/api/composer/{graph,schema,validate,yaml}` landed; screen is still `ScreenStub` |
+| 9 | **Pipeline Composer** | `STAGE_CONTRACTS` graph endpoint, config form, validation, YAML download | ✅ Done (endpoints + screen; landed as two commits — graph, then form) |
 | 10 | **Resources Console** | Connection cards, credential masking, test actions, fleet + queue-depth state | ✅ Done (endpoints + screen) |
 | 11 | **Execution controls** | `--allow-execute`, configure-and-run, per-stage runs, log streaming | ⬜ Not started |
 
-**Remaining work is two screens (8, 9) plus one control (7)**, all over
+**Remaining work is one screen (8) plus one control (7)**, both over
 endpoints that already exist and are tested. The next merges are frontend-only:
-build `ui/src/routes/dashboard` and `.../composer` against their landed APIs,
-then attach `ReportIssue` to the inspector screens.
+build `ui/src/routes/dashboard` against its landed API, then attach
+`ReportIssue` to the inspector screens.
+
+Merge 9 came in two commits — the DAG, then the config form over it — because
+a screen carrying both a graph renderer and a recursive JSON-Schema form does
+not fit the 500-line cap. Each stands alone: the first leaves a composer that
+shows the pipeline, the second makes it edit one.
 
 The SPA build stage moved from merge 3 to merge 4 when 3 was built: a build
 stage for a directory that does not exist yet cannot build, and defining one

@@ -3,16 +3,20 @@
 	// `/api/composer/graph` — nodes and their ordering come from
 	// `STAGE_CONTRACTS`, never from a hand-written list here.
 	//
-	// Nodes are HTML cards laid out at fixed pixel positions, with an SVG
-	// behind them for the edges. Both read the same constants, so edge
-	// geometry needs no DOM measurement.
-	import type { StageGraph } from '$lib/api';
+	// Nodes are HTML cards (so the enabled toggle is a real checkbox) laid out
+	// at fixed pixel positions, with an SVG behind them for the edges. Both
+	// read the same constants, so edge geometry needs no DOM measurement.
+	import type { ConfigObject, StageGraph } from '$lib/api';
 
 	let {
 		graph,
+		config,
 		selected = $bindable(null)
 	}: {
 		graph: StageGraph;
+		/** The config being edited — a stage's toggle writes its section's
+		 * `enabled`, so the graph and the form are one state, not two. */
+		config: ConfigObject;
 		selected: string | null;
 	} = $props();
 
@@ -51,6 +55,22 @@
 		};
 	});
 
+	function sectionOf(key: string | null): ConfigObject | null {
+		return key ? ((config[key] as ConfigObject | undefined) ?? null) : null;
+	}
+
+	// A stage with no `enabled` field (normalise) or no config section of its
+	// own (extract, graph-refresh) is always on — it has no switch to draw.
+	function isEnabled(key: string | null): boolean {
+		const section = sectionOf(key);
+		return typeof section?.enabled === 'boolean' ? section.enabled : true;
+	}
+
+	function setEnabled(key: string | null, on: boolean): void {
+		const section = sectionOf(key);
+		if (section) section.enabled = on;
+	}
+
 	function edgePath(from: string, to: string): string {
 		const a = layout.at[from];
 		const b = layout.at[to];
@@ -87,11 +107,23 @@
 				<div
 					class={[
 						'absolute flex flex-col justify-center gap-0.5 rounded-md border bg-surface-raised px-2.5',
-						selected === node.id ? 'border-accent ring-1 ring-accent' : 'border-border'
+						selected === node.id ? 'border-accent ring-1 ring-accent' : 'border-border',
+						// Disabled stages drop to 40% and keep their edges, so a broken
+						// chain reads as a gap (DESIGN.md "StageNode").
+						isEnabled(node.config_section) || 'opacity-40'
 					]}
 					style="left:{pos.x}px;top:{pos.y}px;width:{NODE_W}px;height:{NODE_H}px"
 				>
 					<div class="flex items-center gap-2">
+						{#if typeof sectionOf(node.config_section)?.enabled === 'boolean'}
+							<input
+								type="checkbox"
+								class="h-3.5 w-3.5 shrink-0 accent-accent"
+								aria-label="{node.id} enabled"
+								checked={isEnabled(node.config_section)}
+								onchange={(e) => setEnabled(node.config_section, e.currentTarget.checked)}
+							/>
+						{/if}
 						<button
 							type="button"
 							class="truncate text-left font-display text-sm focus-visible:outline-none
