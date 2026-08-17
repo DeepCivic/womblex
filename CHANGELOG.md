@@ -8,6 +8,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Console Pipeline Composer — config form (`docs/ui-plan.md` merge 9).**
+  The composer's second half: a form over `/api/composer/schema`, a Validate
+  action, a YAML preview and a download, and stage toggles on the graph's
+  nodes wired to the same config the form edits.
+
+  `SchemaForm.svelte` renders `WomblexConfig`'s JSON Schema recursively — a
+  `$ref` property becomes a collapsible subsection — so every field of every
+  nested model is reachable without a hand-typed mirror of `config.py`, and a
+  new config field appears in the console the moment Pydantic reports it.
+  `X | None` is read through as Pydantic's optionality marker rather than
+  rendered as a variant picker, and an optional subsection that defaults to
+  null (`linking.reference`) stays null until an operator asks for it, so the
+  composer never posts a section the library never had.
+
+  Nothing about validity is decided in the browser: Validate and the YAML
+  download both go to the endpoints, which build a `WomblexConfig` the way
+  `load_config` does, and the downloaded file is the server's rendering — so
+  it is byte-identical to what `womblex run --config` would read.
+
+  Each node's `enabled` checkbox writes its config section's `enabled`, so
+  the graph and the form are one state rather than two views that can
+  disagree; disabled stages drop to 40% and keep their edges, per DESIGN.md's
+  `StageNode`. Which section a stage belongs to is served as `config_section`
+  from a new `CONFIG_SECTION` map in `ui/composer.py`: not derivable from
+  `StageContract` (contracts name suffixes, not config fields), so declared
+  beside the config models under a test that every name is a real
+  `WomblexConfig` field, rather than typed into the frontend where a rename
+  would drift in silence.
+- **Console Pipeline Composer — stage graph (`docs/ui-plan.md` merge 9).**
+  The composer screen replaces its `ScreenStub` with the pipeline DAG that
+  `/api/composer/graph` already served, plus a detail panel for the selected
+  stage (scope, mutation mode, Isaacus need, declared inputs and outputs).
+
+  `StageGraph.svelte` lays nodes out by longest path from `extract`, so a
+  stage sits one column right of its latest dependency and every edge points
+  forward. Nothing about the ordering is typed in the frontend: the columns
+  fall out of the `required_inputs` edges the endpoint serves, which is the
+  plan's §3 rule ("do not hand-code the DAG in the frontend") holding in the
+  one place it could have been broken.
+
+  Nodes are HTML cards positioned from the same constants the edge SVG reads,
+  rather than a measured layout — no `ResizeObserver`, and the geometry is
+  deterministic in the first frame. Selecting a node emphasises the edges
+  that touch it and fades the rest, which is how a stage's actual
+  dependencies read at a glance in a graph with fifteen of them.
+
+  Also fixes the frontend CI job, red on `main` before this: `svelte-check`
+  rejected `let x: ChunkDetail | null = $state(null)` in the Chunk Inspector
+  (TypeScript narrows the annotated `let` to `null`, so every `$derived` over
+  it errored on `never`), and `eslint` flagged a plain `Map` built and
+  returned inside a `$derived` — pinned with a scoped disable and its reason,
+  since `SvelteMap` is for state edited in place.
 - **Console Resources Console (`docs/ui-plan.md` merge 10).** `GET
   /api/resources` returns three connection cards — run store, job queue,
   Isaacus — plus `POST /api/resources/test/store` and `/test/queue` as the

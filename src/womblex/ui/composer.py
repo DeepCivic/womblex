@@ -35,6 +35,28 @@ from womblex.config import DatasetConfig, PathsConfig, WomblexConfig
 #: point at.
 EXTRACT_NODE = "extract"
 
+#: Which `WomblexConfig` section configures each stage. Not derivable from
+#: `StageContract` — contracts name parquet suffixes, not config fields — so it
+#: is declared here, beside the config models, rather than in the frontend
+#: where it would drift silently (`tests/test_ui.py` asserts every name is a
+#: real field). It is what lets a node in the composer's graph carry its own
+#: enabled toggle instead of the operator hunting for the matching section.
+#: `graph-refresh` is absent because it has none: it re-derives edges from what
+#: `enrich` and `chunk` already wrote. `extract` is absent because it is
+#: configured by `detection` + `extraction` + `redaction` together, so no one
+#: section is *the* one.
+CONFIG_SECTION: dict[str, str] = {
+    "normalise": "normalise",
+    "spellfix": "spellfix",
+    "chunk": "chunking",
+    "money": "money",
+    "enrich": "enrichment",
+    "embed": "embedding",
+    "link": "linking",
+    "pii": "pii",
+    "quality": "quality",
+}
+
 #: A config at schema defaults, used only to resolve `StageContract`'s
 #: config-derived `conditional_inputs` / `outputs` for the structural graph.
 #: `dataset` / `paths` have no defaults of their own (they name a real run)
@@ -77,6 +99,7 @@ def get_stage_graph() -> dict[str, Any]:
             "required_inputs": [],
             "conditional_inputs": [],
             "outputs": list(DISCOVERY_SUFFIXES),
+            "config_section": None,
         }
     ]
     # (producer, consumer) -> the suffixes justifying it, insertion-ordered.
@@ -97,6 +120,7 @@ def get_stage_graph() -> dict[str, Any]:
                 "required_inputs": list(contract.required_inputs),
                 "conditional_inputs": conditional,
                 "outputs": list(contract.outputs(_DEFAULT_CONFIG)),
+                "config_section": CONFIG_SECTION.get(name),
             }
         )
         for suffix in contract.required_inputs:
