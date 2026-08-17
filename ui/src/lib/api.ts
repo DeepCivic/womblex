@@ -287,6 +287,82 @@ export async function testQueueConnection(
 	return (await resp.json()) as QueueTestResult;
 }
 
+// The Dashboard (docs/ui-plan.md merge 8). Two sources, both already written
+// by the pipeline: the job queue (when a DSN is configured) and the per-stage
+// checkpoints inside the selected run. `queue` is null whenever there is no
+// queue to read — no DSN, or the connection failed — and `queue_error` says
+// which; that is a normal local deployment, not a fault, so the `stages` half
+// still renders. Field names mirror `cloud/queue.py`'s dataclasses and
+// `store/checkpoint.py`'s `CheckpointProgress` (`asdict()` is what the API
+// serialises), so a renamed column surfaces as a type error here.
+
+// One `womblex_jobs` row (`JobRow`): the job list's grain. Timestamps are
+// ISO-8601 strings, converted once server-side.
+export interface JobRow {
+	id: number;
+	run_id: string;
+	batch_num: number;
+	status: string;
+	attempts: number;
+	max_attempts: number;
+	locked_by: string | null;
+	locked_at: string | null;
+	error: string | null;
+	created_at: string | null;
+	updated_at: string | null;
+}
+
+// The whole queue section, or null when there is no queue to read. `stale` is
+// the running rows past `stale_after_seconds` — the same predicate a worker's
+// `--stale-timeout` recovers, reported not acted on (§4 "Stalled-job
+// identification").
+export interface QueueSection {
+	stats: Record<string, number>;
+	total: number;
+	jobs: JobRow[];
+	workers: QueueWorker[];
+	stale: JobRow[];
+	throughput: QueueThroughput;
+}
+
+// One stage's checkpoint progress for the selected run, in pipeline order.
+// `documents_per_minute` is the run's lifetime average, null when the
+// timestamps are too close to divide by — a smoother rate would be fiction
+// (§4 "Live local-run progress").
+export interface StageProgress {
+	stage: string;
+	name: string;
+	processed: number;
+	succeeded: number;
+	failed: number;
+	last_batch: number;
+	started_at: string;
+	updated_at: string;
+	documents_per_minute: number | null;
+}
+
+export interface DashboardData {
+	run_id: string | null;
+	stale_after_seconds: number;
+	queue: QueueSection | null;
+	queue_error: string | null;
+	stages: StageProgress[];
+}
+
+// `run_id` scopes the queue views and selects which run's checkpoints to read;
+// omit it for the whole-queue view (then `stages` is empty — checkpoints are
+// per-run). A missing run is not a 404: an enqueued run whose first batch has
+// not landed has no directory yet, and the empty `stages` is the honest answer.
+export async function getDashboard(
+	runId: string | null,
+	fetchImpl: typeof fetch = fetch
+): Promise<DashboardData> {
+	const query = runId ? `?run_id=${encodeURIComponent(runId)}` : '';
+	const resp = await fetchImpl(`/api/dashboard${query}`);
+	if (!resp.ok) throw new Error(`GET /api/dashboard: ${resp.status}`);
+	return (await resp.json()) as DashboardData;
+}
+
 // The Pipeline Composer (docs/ui-plan.md merge 9). Neither read is run-scoped:
 // the DAG comes from `STAGE_CONTRACTS` and the form's fields from
 // `WomblexConfig`'s JSON Schema, so the frontend hand-codes neither the stage

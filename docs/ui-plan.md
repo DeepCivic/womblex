@@ -5,24 +5,30 @@ Screen requirements: the *Womblex Platform UX Requirements* brief (five domains 
 Dashboard, Pipeline Composer, Corpus Inspector, Semantic Chunk Inspector,
 Resources Console).
 
-Status (verified against the tree): merges 1–6 and 9–10 are complete end to
+Status (verified against the tree): merges 1–6 and 8–11 are complete end to
 end — design system, read API skeleton, sidecar image, frontend shell, Corpus
-Inspector, Chunk Inspector, Pipeline Composer and Resources Console all have
-both their endpoints and their screens. Merge 8 is **backend-only**: the
-Dashboard's `/api/dashboard` has landed, but `ui/src/routes/dashboard` is
-still a `ScreenStub` placeholder — which is why that screen renders the
-"Ships in delivery merge N" message. Merge 7 is **partial**: the feedback
-write path (`POST /api/runs/{id}/feedback` + one-file-per-report writer) is
-in, but the `ReportIssue` control is not wired into any screen yet. Merge 11
-(execution controls) is now complete end to end: `GET /api/execute/status`
-and `POST /api/execute/enqueue` are joined by `ui/src/routes/execute` — a
-capability banner that names the missing piece when the console cannot
-dispatch, and a configure-and-run form that enqueues an extraction run and
-points the run selector at it.
+Inspector, Chunk Inspector, Dashboard, Pipeline Composer, Resources Console and
+Execution Controls all have both their endpoints and their screens. Merge 8
+(dashboard) is now complete: `GET /api/dashboard` is joined by
+`ui/src/routes/dashboard` — a run-scoped, self-refreshing screen with KPI
+tiles over the exact queue counts, a `locked_by` worker fleet, stale-job
+detection that names what a worker's `--stale-timeout` would recover, the
+`womblex_jobs` list itself, and per-stage checkpoint progress read from inside
+the selected run. It renders in both deployments: with no queue configured the
+checkpoint half still shows, so a local operator sees stage progress without a
+DSN. Merge 11 (execution controls) is likewise complete: `GET
+/api/execute/status` and `POST /api/execute/enqueue` are joined by
+`ui/src/routes/execute` — a capability banner that names the missing piece
+when the console cannot dispatch, and a configure-and-run form that enqueues
+an extraction run and points the run selector at it.
 
-In short: every planned *endpoint* now exists; one *screen* (the Dashboard,
-8) plus one *control* (7) remain to be built on top of endpoints that are
-already there. Per-merge state is tracked in the §5 table.
+Merge 7 is the one remaining **partial**: the feedback write path (`POST
+/api/runs/{id}/feedback` + one-file-per-report writer) is in, but the
+`ReportIssue` control is not wired into any screen yet.
+
+In short: every planned *endpoint* exists and every *screen* but one is built.
+One *control* (7) — the report action on the inspector screens — remains, over
+an endpoint that is already there. Per-merge state is tracked in the §5 table.
 
 ## 1. The governing principle
 
@@ -249,15 +255,15 @@ tree green.
 | 5 | **Corpus Inspector** | Documents grid, lifecycle-checkpoint switcher, failure filter, `verify-shards` action | ✅ Done (endpoints + screen) |
 | 6 | **Chunk Inspector** | Chunk reader endpoints, `ChunkCard`, entity/PII/money overlays | ✅ Done (endpoints + screen) |
 | 7 | **Report action** | One-file-per-report writer + `POST /api/runs/{id}/feedback`; `ReportIssue` control on the inspector screens | ⚠️ Write path only — endpoint + writer landed; `ReportIssue` control not yet on any screen |
-| 8 | **Dashboard** | Queue stats, job list, stale detection, fleet view from `locked_by`, KPI tiles and throughput | ⚠️ Endpoint only — `/api/dashboard` landed; screen is still `ScreenStub` |
+| 8 | **Dashboard** | Queue stats, job list, stale detection, fleet view from `locked_by`, KPI tiles and throughput | ✅ Done (endpoints + screen; run-scoped, self-refreshing, renders the checkpoint half with no queue configured) |
 | 9 | **Pipeline Composer** | `STAGE_CONTRACTS` graph endpoint, config form, validation, YAML download | ✅ Done (endpoints + screen; landed as two commits — graph, then form) |
 | 10 | **Resources Console** | Connection cards, credential masking, test actions, fleet + queue-depth state | ✅ Done (endpoints + screen) |
 | 11 | **Execution controls** | `--allow-execute`, configure-and-run, per-stage runs, log streaming | ✅ Done (endpoints + screen; configure-and-run enqueues, capability banner names the missing piece — "log streaming" is the Dashboard's queue/checkpoint feed, not duplicated here) |
 
-**Remaining work is one screen (8) plus one control (7)**, both over
-endpoints that already exist and are tested. The next merges are
-frontend-only: build `ui/src/routes/dashboard` against its landed API, then
-attach `ReportIssue` to the inspector screens.
+**Remaining work is one control (7)** — the `ReportIssue` action attached to
+the inspector screens, over an endpoint that already exists and is tested.
+The next merge is frontend-only: wire that control onto the Corpus and Chunk
+Inspectors.
 
 Merge 9 came in two commits — the DAG, then the config form over it — because
 a screen carrying both a graph renderer and a recursive JSON-Schema form does
