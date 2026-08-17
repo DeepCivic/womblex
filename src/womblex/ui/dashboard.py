@@ -72,7 +72,7 @@ def get_dashboard(
     That is a normal local deployment, not a fault, so the checkpoint half
     of the payload is unaffected by it.
     """
-    queue, queue_error = _queue_section(
+    queue, queue_error = queue_section(
         settings, run_id, stale_after=stale_after, window_seconds=window_seconds,
         job_limit=job_limit,
     )
@@ -85,7 +85,7 @@ def get_dashboard(
     }
 
 
-def _queue_section(
+def queue_section(
     settings: UISettings,
     run_id: str | None,
     *,
@@ -99,6 +99,10 @@ def _queue_section(
     dashboard's other half still renders, and an operator seeing "queue
     unreachable" next to live checkpoint progress has more to go on than a
     500.
+
+    Not prefixed private: the Resources Console reuses this as its queue
+    connectivity test and fleet/queue-depth read (docs/ui-plan.md merge 10)
+    rather than reimplementing the same connect-and-read.
     """
     if not settings.db_dsn:
         return None, None
