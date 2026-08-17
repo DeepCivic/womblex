@@ -3862,9 +3862,12 @@ wheels = [
 
 [[package]]
 name = "womblex"
-version = "0.5.1"
+version = "0.5.3"
 source = { editable = "." }
 dependencies = [
+    { name = "boto3" },
+    { name = "isaacus" },
+    { name = "isaacus-sagemaker" },
     { name = "numpy" },
     { name = "opencv-python-headless" },
     { name = "openpyxl" },
@@ -3886,12 +3889,9 @@ dependencies = [
 
 [package.optional-dependencies]
 all = [
-    { name = "boto3" },
     { name = "fastapi" },
     { name = "fsspec" },
     { name = "httpx" },
-    { name = "isaacus" },
-    { name = "isaacus-sagemaker" },
     { name = "mypy" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pytest" },
@@ -3900,16 +3900,10 @@ all = [
     { name = "s3fs" },
     { name = "uvicorn" },
 ]
-bedrock = [
-    { name = "boto3" },
-]
 cloud = [
     { name = "fsspec" },
     { name = "psycopg", extra = ["binary"] },
     { name = "s3fs" },
-]
-cloud-ocr = [
-    { name = "boto3" },
 ]
 dev = [
     { name = "httpx" },
@@ -3918,10 +3912,6 @@ dev = [
     { name = "pytest-cov" },
     { name = "ruff" },
 ]
-isaacus = [
-    { name = "isaacus" },
-    { name = "isaacus-sagemaker" },
-]
 ui = [
     { name = "fastapi" },
     { name = "uvicorn" },
@@ -3929,12 +3919,12 @@ ui = [
 
 [package.metadata]
 requires-dist = [
-    { name = "boto3", marker = "extra == 'bedrock'", specifier = ">=1.34" },
+    { name = "boto3", specifier = ">=1.34" },
     { name = "fastapi", marker = "extra == 'ui'", specifier = ">=0.115" },
     { name = "fsspec", marker = "extra == 'cloud'", specifier = ">=2024.0" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
-    { name = "isaacus", marker = "extra == 'isaacus'", specifier = ">=0.19" },
-    { name = "isaacus-sagemaker", marker = "extra == 'isaacus'", specifier = ">=0.1.4" },
+    { name = "isaacus", specifier = ">=0.19" },
+    { name = "isaacus-sagemaker", specifier = ">=0.1.4" },
     { name = "mypy", marker = "extra == 'dev'" },
     { name = "numpy" },
     { name = "opencv-python-headless" },
@@ -3959,10 +3949,9 @@ requires-dist = [
     { name = "tqdm" },
     { name = "ultralytics", specifier = ">=8.0" },
     { name = "uvicorn", marker = "extra == 'ui'", specifier = ">=0.30" },
-    { name = "womblex", extras = ["bedrock"], marker = "extra == 'cloud-ocr'" },
-    { name = "womblex", extras = ["isaacus", "bedrock", "cloud", "ui", "dev"], marker = "extra == 'all'" },
+    { name = "womblex", extras = ["cloud", "ui", "dev"], marker = "extra == 'all'" },
 ]
-provides-extras = ["local", "cloud", "isaacus", "bedrock", "cloud-ocr", "ui", "dev", "all"]
+provides-extras = ["local", "cloud", "ui", "dev", "all"]
 
 [[package]]
 name = "wrapt"
