@@ -54,7 +54,7 @@ queue, hosted APIs), never a different extraction path.
 | Deployment | Install | Adds |
 |---|---|---|
 | **Local CPU** (laptop, Chromebook, air-gapped box) | `pip install womblex` | the whole pipeline — extraction, OCR, chunking, PII, **Isaacus enrichment/embeddings**, and **hosted Bedrock VLM OCR** — are all in the base install |
-| **Cloud CPU** (scalable, S3 + Postgres) | `pip install womblex[cloud]` | fsspec + s3fs staging, psycopg3 job queue |
+| **Cloud CPU** (scalable, S3 + Postgres) | `pip install womblex` (or `womblex[cloud]`) | nothing extra — fsspec + s3fs staging and the psycopg3 job queue are in the base install; `[cloud]` is an empty marker |
 
 Enrichment/embeddings (Isaacus SDK — hosted API via `ISAACUS_API_KEY` or a
 private SageMaker deployment via `ISAACUS_SAGEMAKER_ENDPOINTS`), hosted VLM OCR
@@ -195,7 +195,8 @@ scale-out path for when a single machine is the bottleneck; `womblex run` on a
 local directory remains fully supported and produces the same shards.
 
 ```bash
-pip install womblex[cloud]   # fsspec + s3fs + psycopg3
+pip install womblex           # fsspec + s3fs + psycopg3 are already in the base install
+pip install womblex[cloud]    # accepted, but empty — a marker that says "cloud deployment"
 ```
 
 ### Selecting the backend
@@ -303,7 +304,7 @@ the pipeline, and reads either a local run root or the object store a
 distributed run published to:
 
 ```bash
-pip install womblex[ui]                        # add [cloud] to read a store
+pip install womblex[ui]                        # reads a local root or an s3:// store out of the box
 womblex ui --output-root output/               # local runs, at :8080
 womblex ui --output-root output/ --presets-dir presets/  # + save composer presets
 womblex ui --store <uri> --dsn <dsn>           # + dispatch (execution on by default)

@@ -10,11 +10,10 @@
 	<a
 		href="/"
 		aria-label="Womblex console home"
-		class="flex h-10 w-10 shrink-0 flex-col items-center justify-center rounded-md bg-foreground
+		class="flex h-10 shrink-0 items-center justify-center rounded-md bg-foreground px-2.5
 			text-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 	>
-		<span class="font-display text-[9px] leading-none tracking-wide">WOMB</span>
-		<span class="font-display text-[9px] leading-none tracking-wide">LEX</span>
+		<span class="font-display text-sm font-black leading-none tracking-tight">WOMBLEX</span>
 	</a>
 
 	<input

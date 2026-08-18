@@ -1224,6 +1224,63 @@ class TestExecuteApi:
         assert resp.status_code == 422
 
 
+class TestStoreUnreachable:
+    """A store that cannot be opened degrades to a legible 503, not an opaque 500.
+
+    The canonical cause in a cloud deployment is ``womblex[cloud]`` (and so
+    ``s3fs``) not being installed: ``RemoteStore.from_uri('s3://…')`` raises
+    ``ImportError: Install s3fs to access S3``. That is a deployment fault, not
+    a bug in the request, so the read routes surface it as 503 carrying the
+    underlying message — the same cause the Resources card's *Test connection*
+    reports — rather than letting the raw exception become a 500 top-banner.
+    """
+
+    def _client(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> TestClient:
+        def _boom(_uri: str) -> object:
+            raise readers.StoreUnreachable("Install s3fs to access S3")
+
+        monkeypatch.setattr(readers, "_open_store", _boom)
+        return TestClient(create_app(store_uri=str(tmp_path / "store")))
+
+    def test_list_runs_returns_503_with_the_cause(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        client = self._client(monkeypatch, tmp_path)
+        resp = client.get("/api/runs")
+        assert resp.status_code == 503
+        assert "s3fs" in resp.json()["detail"]
+
+    def test_presets_returns_503_with_the_cause(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        client = self._client(monkeypatch, tmp_path)
+        resp = client.get("/api/composer/presets")
+        assert resp.status_code == 503
+        assert "s3fs" in resp.json()["detail"]
+
+    def test_manifest_and_audit_also_degrade_to_503(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        client = self._client(monkeypatch, tmp_path)
+        assert client.get("/api/runs/run-a/manifest").status_code == 503
+        assert client.get("/api/runs/run-a/audit").status_code == 503
+        assert client.get("/api/runs/run-a/stage-presence/chunk").status_code == 503
+        assert client.get("/api/runs/run-a/chunks/hash-a").status_code == 503
+
+    def test_open_store_wraps_a_backend_import_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The wrap happens in `_open_store`, so every reader shares one mapping."""
+        import womblex.store.remote as remote_mod
+
+        def _raise(_uri: str, **_kw: object) -> object:
+            raise ImportError("Install s3fs to access S3")
+
+        monkeypatch.setattr(remote_mod.RemoteStore, "from_uri", staticmethod(_raise))
+        with pytest.raises(readers.StoreUnreachable, match="s3fs"):
+            readers._open_store("s3://redline")
+
+
 class TestSpaMount:
     """The console serves the built SPA (docs/ui-plan.md merge 4) when one is
     present alongside it, and falls back to the API-only shape when not —

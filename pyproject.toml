@@ -29,12 +29,18 @@ classifiers = [
 ]
 
 # Core dependencies. Womblex is plug-and-play: Isaacus enrichment/embeddings,
-# hosted-VLM (Bedrock) OCR, and the AWS SDK are all part of the base install.
+# hosted-VLM (Bedrock) OCR, the AWS SDK, object-storage staging (fsspec + s3fs)
+# and the Postgres job queue (psycopg) are all part of the base install.
 # Every real deployment uses them, and they are comparatively tiny next to the
 # vision/ML stack already here (pymupdf, ultralytics, sentence-transformers) —
 # gating them behind extras only produced misconfiguration (a missing SDK read
-# as "no API key"). rapidocr-onnxruntime is the bundled CPU OCR engine; boto3
-# backs both the mistral-ocr engine and the isaacus-sagemaker HTTP client.
+# as "no API key", and a cloud deployment 500ing on `s3://` because the image
+# was built without `[cloud]`). rapidocr-onnxruntime is the bundled CPU OCR
+# engine; boto3 backs both the mistral-ocr engine and the isaacus-sagemaker
+# HTTP client. A local / air-gapped run touches none of s3fs/psycopg — they
+# stay dormant until a `s3://` store or a `--dsn` names them — so shipping them
+# costs a CPU-only box nothing but keeps `s3://` working the moment it is asked
+# for, on any install.
 dependencies = [
     "pymupdf>=1.24",
     "rapidocr-onnxruntime>=1.4",
@@ -56,6 +62,9 @@ dependencies = [
     "isaacus>=0.19",
     "isaacus-sagemaker>=0.1.4",
     "boto3>=1.34",
+    "fsspec>=2024.0",
+    "s3fs>=2024.0",
+    "psycopg[binary]>=3.1",
 ]
 
 [project.optional-dependencies]
@@ -67,19 +76,21 @@ dependencies = [
 local = []
 
 # Cloud / distributed execution - pip install womblex[cloud]
-# Object-storage staging (fsspec + s3fs) and the Postgres job queue (psycopg3).
-cloud = [
-    "fsspec>=2024.0",
-    "s3fs>=2024.0",
-    "psycopg[binary]>=3.1",
-]
+# Now empty, like [local]: object-storage staging (fsspec + s3fs) and the
+# Postgres job queue (psycopg) are core dependencies, so `s3://` and `--dsn`
+# work on any install (a cloud image built without the extra used to 500 on
+# `s3://` — "Install s3fs to access S3"). The extra is retained so an install
+# can still *state* it is a cloud deployment and `[local]`/`[cloud]` read as a
+# pair, and so existing `pip install womblex[cloud]` invocations keep resolving.
+cloud = []
 
 # Console sidecar - pip install womblex[ui]
 # `womblex ui` serves a read-only API over artefacts the pipeline already
 # writes (docs/ui-plan.md). fastapi + uvicorn and nothing else: the console
 # adds no pipeline logic, so it stays as CPU-light as the worker it sits
-# beside. Reading a *distributed* run's object storage additionally needs
-# [cloud]; this extra pulls no boto3 of its own, matching [cloud]'s rule.
+# beside. Reading a *distributed* run's object storage needs fsspec + s3fs,
+# which are now core — so a bare `womblex[ui]` console reads an `s3://` store
+# out of the box, no `[cloud]` required.
 ui = [
     "fastapi>=0.115",
     "uvicorn>=0.30",

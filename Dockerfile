@@ -1,12 +1,13 @@
 # Womblex container image.
 #
-# Bundles the extraction pipeline + the [cloud] extra (object-storage staging
-# and the Postgres job queue) so the same image serves `womblex run`, `worker`,
-# `enqueue`, and the per-stage commands. Isaacus enrichment/embeddings and the
-# Bedrock VLM OCR engine are in the base install (core deps), so no extra is
-# needed for them — just a key / `ISAACUS_SAGEMAKER_ENDPOINTS` / an OCR engine
-# choice at runtime. Override the installed extras at build time, e.g.
-# --build-arg EXTRAS="cloud,ui".
+# Bundles the whole pipeline. Object-storage staging (fsspec + s3fs) and the
+# Postgres job queue (psycopg) are now *core* dependencies, so the same image
+# serves `womblex run`, `worker`, `enqueue`, and the per-stage commands against
+# either a local dir or an `s3://` store with no extra install. Isaacus
+# enrichment/embeddings and the Bedrock VLM OCR engine are core too — just a
+# key / `ISAACUS_SAGEMAKER_ENDPOINTS` / an OCR engine choice at runtime. The
+# only remaining extras are `[ui]` (the console) and `[dev]` (test/lint);
+# override at build time, e.g. --build-arg EXTRAS="ui".
 FROM python:3.11-slim AS base
 
 ENV PYTHONUNBUFFERED=1 \
@@ -24,8 +25,10 @@ RUN apt-get update \
 WORKDIR /app
 COPY . /app
 
-ARG EXTRAS=cloud
-RUN pip install ".[${EXTRAS}]"
+# `.` installs the core deps (S3 + queue included); no extra needed for a
+# worker. Override to add the console/dev tools, e.g. --build-arg EXTRAS="ui".
+ARG EXTRAS=""
+RUN if [ -n "${EXTRAS}" ]; then pip install ".[${EXTRAS}]"; else pip install "."; fi
 
 # Default to the CLI; compose / `docker run` override the subcommand.
 ENTRYPOINT ["womblex"]

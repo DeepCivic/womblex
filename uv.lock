@@ -3866,6 +3866,7 @@ version = "0.5.3"
 source = { editable = "." }
 dependencies = [
     { name = "boto3" },
+    { name = "fsspec" },
     { name = "isaacus" },
     { name = "isaacus-sagemaker" },
     { name = "numpy" },
@@ -3873,6 +3874,7 @@ dependencies = [
     { name = "openpyxl" },
     { name = "pandas" },
     { name = "presidio-anonymizer" },
+    { name = "psycopg", extra = ["binary"] },
     { name = "pyarrow" },
     { name = "pydantic" },
     { name = "pymupdf" },
@@ -3880,6 +3882,7 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "pyyaml" },
     { name = "rapidocr-onnxruntime" },
+    { name = "s3fs" },
     { name = "semchunk" },
     { name = "sentence-transformers" },
     { name = "spylls" },
@@ -3890,20 +3893,12 @@ dependencies = [
 [package.optional-dependencies]
 all = [
     { name = "fastapi" },
-    { name = "fsspec" },
     { name = "httpx" },
     { name = "mypy" },
-    { name = "psycopg", extra = ["binary"] },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "ruff" },
-    { name = "s3fs" },
     { name = "uvicorn" },
-]
-cloud = [
-    { name = "fsspec" },
-    { name = "psycopg", extra = ["binary"] },
-    { name = "s3fs" },
 ]
 dev = [
     { name = "httpx" },
@@ -3921,7 +3916,7 @@ ui = [
 requires-dist = [
     { name = "boto3", specifier = ">=1.34" },
     { name = "fastapi", marker = "extra == 'ui'", specifier = ">=0.115" },
-    { name = "fsspec", marker = "extra == 'cloud'", specifier = ">=2024.0" },
+    { name = "fsspec", specifier = ">=2024.0" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
     { name = "isaacus", specifier = ">=0.19" },
     { name = "isaacus-sagemaker", specifier = ">=0.1.4" },
@@ -3931,7 +3926,7 @@ requires-dist = [
     { name = "openpyxl" },
     { name = "pandas", specifier = ">=2.0" },
     { name = "presidio-anonymizer", specifier = ">=2.2" },
-    { name = "psycopg", extras = ["binary"], marker = "extra == 'cloud'", specifier = ">=3.1" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.1" },
     { name = "pyarrow" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pymupdf", specifier = ">=1.24" },
@@ -3942,7 +3937,7 @@ requires-dist = [
     { name = "pyyaml" },
     { name = "rapidocr-onnxruntime", specifier = ">=1.4" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.16,<0.17" },
-    { name = "s3fs", marker = "extra == 'cloud'", specifier = ">=2024.0" },
+    { name = "s3fs", specifier = ">=2024.0" },
     { name = "semchunk", specifier = ">=4.0" },
     { name = "sentence-transformers", specifier = ">=3.0" },
     { name = "spylls", specifier = ">=0.1.7" },

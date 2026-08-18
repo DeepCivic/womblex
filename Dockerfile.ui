@@ -36,11 +36,15 @@ WORKDIR /app
 COPY . /app
 COPY --from=frontend-builder /app/ui/build /app/ui/build
 
-# [ui] is fastapi + uvicorn only; [cloud] adds the object-storage reads a
-# distributed run needs (docs/ui-plan.md §2 — remote reads are in scope from
-# the first merge, not deferred behind a flag). boto3 is a base dependency
-# now, but the console never imports it (it reads artefacts, makes no AWS call).
-ARG EXTRAS=ui,cloud
+# `[ui]` is fastapi + uvicorn only. The object-storage reads a distributed run
+# needs (docs/ui-plan.md §2 — remote reads are in scope from the first merge)
+# ride on fsspec + s3fs, which are now *core* dependencies, so a bare
+# `womblex[ui]` console reads an `s3://` store out of the box — no `[cloud]`
+# required. boto3 is core too, but the console never imports it (it reads
+# artefacts, makes no AWS call). This was the cloud-deployment break: the image
+# used to depend on `[cloud]` carrying s3fs, so any build that dropped the
+# extra 500'd on `s3://` with "Install s3fs to access S3".
+ARG EXTRAS=ui
 RUN pip install ".[${EXTRAS}]"
 
 # Bind beyond loopback: the CLI defaults to 127.0.0.1, which inside a

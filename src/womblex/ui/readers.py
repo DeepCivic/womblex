@@ -44,6 +44,23 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class StoreUnreachable(Exception):
+    """The configured object store could not be opened or reached.
+
+    Raised by :func:`_open_store` when ``RemoteStore.from_uri`` fails — a
+    missing backend package (``ImportError: Install s3fs to access S3`` when
+    ``womblex[cloud]`` is not installed), bad credentials, or an unreachable
+    endpoint. It carries the underlying message so the operator sees the same
+    actionable cause the Resources card's *Test connection* reports.
+
+    A store fault is not a bug in a request — it is a deployment that cannot
+    reach its own run source — so the read routes map this to **503** rather
+    than letting the raw exception surface as an opaque **500**. This mirrors
+    the dashboard's queue handling, where an unreachable queue is a reported
+    ``queue_error``, not a crash.
+    """
+
+
 def list_run_summaries(settings: UISettings) -> list[RunDescription]:
     """All runs the settings can see, newest run_id first."""
     if settings.is_remote:
@@ -437,9 +454,21 @@ def _scan_stage_presence(shard_dir: Path, suffix: str, column: str = "source_has
 
 
 def _open_store(store_uri: str) -> RemoteStore:
+    """Open the store at *store_uri*, or raise :class:`StoreUnreachable`.
+
+    ``RemoteStore.from_uri`` raises ``ImportError`` when the fsspec backend for
+    the URI's scheme is not installed (the ``s3fs`` case), and various
+    connection errors when the endpoint is set but unreachable. All become one
+    catchable, message-preserving :class:`StoreUnreachable` so a store fault
+    reads as a legible 503, not an opaque 500.
+    """
     from womblex.store.remote import RemoteStore
 
-    return RemoteStore.from_uri(store_uri)
+    try:
+        return RemoteStore.from_uri(store_uri)
+    except Exception as e:
+        logger.warning("store unreachable (%s): %s", store_uri, e)
+        raise StoreUnreachable(str(e)) from e
 
 
 def _list_remote_runs(store_uri: str) -> list[RunDescription]:

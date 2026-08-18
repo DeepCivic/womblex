@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from womblex.ui import composer, readers
 from womblex.ui.deps import UISettings, get_settings
+from womblex.ui.readers import StoreUnreachable
 
 router = APIRouter(prefix="/api/composer", tags=["composer"])
 
@@ -41,13 +42,20 @@ def get_presets(settings: UISettings = Depends(get_settings)) -> dict:  # noqa: 
     (`builtin` | `saved`) so the form can offer delete only on the ones it can
     delete.
     """
-    return {"presets": readers.list_all_presets(settings)}
+    try:
+        presets = readers.list_all_presets(settings)
+    except StoreUnreachable as e:
+        raise HTTPException(status_code=503, detail=f"preset store unreachable: {e}") from e
+    return {"presets": presets}
 
 
 @router.get("/presets/{name}")
 def get_preset(name: str, settings: UISettings = Depends(get_settings)) -> dict:  # noqa: B008
     """One preset by name (a saved one shadowing a built-in); 404 if none."""
-    preset = readers.get_any_preset(settings, name)
+    try:
+        preset = readers.get_any_preset(settings, name)
+    except StoreUnreachable as e:
+        raise HTTPException(status_code=503, detail=f"preset store unreachable: {e}") from e
     if preset is None:
         raise HTTPException(status_code=404, detail=f"no such preset: {name!r}")
     return preset.as_dict()

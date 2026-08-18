@@ -12,6 +12,12 @@
 #   # optional read-only console over the same bucket, at :8080:
 #   docker compose up -d ui
 #
+#   # Just want to see the console with a sample corpus (no workers/queue)?
+#   # Seed the vendored demo run into the bucket, then bring up the console:
+#   docker compose up -d minio createbuckets
+#   docker compose --profile seed up seed-demo
+#   docker compose up -d ui           # run-throsby-demo now shows at :8080
+#
 # Inputs and outputs share the s3://womblex bucket; shards land at
 # runs/<run_id>/documents/.
 
@@ -103,6 +109,20 @@ services:
       - ./configs:/app/configs
     command: ["worker", "--config", "configs/example.yaml",
               "--poll-interval", "5", "--stale-timeout", "900"]
+
+  # One-shot, opt-in: publish the vendored sample corpus (run-throsby-demo)
+  # into the bucket so a fresh console shows a browsable run instead of
+  # "Sample corpus not present". Behind a profile so a real deployment does
+  # not seed a sample into its own store unasked; run it explicitly with
+  # `docker compose --profile seed up seed-demo`.
+  seed-demo:
+    build: .
+    depends_on:
+      createbuckets:
+        condition: service_completed_successfully
+    environment: *cloud-env
+    command: ["seed-demo"]   # resolves WOMBLEX_STORE_URI -> s3://womblex
+    profiles: ["seed"]
 
   # Optional read-only console (`womblex ui`, docs/ui-plan.md), at :8080.
   # Reads the same s3://womblex bucket the workers publish to — the shared

@@ -10,7 +10,9 @@ adapter, exactly the way ``store/`` sidecar modules are self-contained.
 fsspec gives one API across ``s3://`` (MinIO is S3-compatible), ``gs://``,
 ``az://`` and the local filesystem, so the air-gapped / CPU-first default is
 free: a ``file://`` or bare local path uses the same code path with no S3
-dependency exercised.
+endpoint touched. fsspec + s3fs are core dependencies (see ``pyproject.toml``),
+so ``s3://`` works on any install — they stay dormant until a remote URI names
+them.
 """
 
 from __future__ import annotations
@@ -61,13 +63,9 @@ def storage_options_from_env(uri: str) -> dict:
 
 
 def _require_fsspec():  # type: ignore[no-untyped-def]
-    try:
-        import fsspec
-    except ImportError as e:  # pragma: no cover - exercised only without the extra
-        raise ImportError(
-            "Object-storage staging requires the 'cloud' extra. "
-            "Install with: pip install womblex[cloud]"
-        ) from e
+    # fsspec is a core dependency, so this is a plain import now. Kept as a
+    # named helper (rather than inlined) so `from_uri` reads unchanged and any
+    # future backend-availability check has one place to live.
     import fsspec
 
     return fsspec

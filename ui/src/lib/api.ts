@@ -11,9 +11,18 @@ export interface RunSummary {
 	updated_at: string | null;
 }
 
+// Prefer the server's own `detail` (e.g. "run store unreachable: Install s3fs
+// to access S3") over a bare status code, so a 503 from a misconfigured store
+// reads as a fixable cause in the top banner rather than "GET /api/runs: 503".
+async function errorDetail(resp: Response, label: string): Promise<string> {
+	const detail = ((await resp.json().catch(() => ({}))) as { detail?: unknown }).detail;
+	if (typeof detail === 'string' && detail) return detail;
+	return `${label}: ${resp.status}`;
+}
+
 export async function listRuns(fetchImpl: typeof fetch = fetch): Promise<RunSummary[]> {
 	const resp = await fetchImpl('/api/runs');
-	if (!resp.ok) throw new Error(`GET /api/runs: ${resp.status}`);
+	if (!resp.ok) throw new Error(await errorDetail(resp, 'GET /api/runs'));
 	const body = (await resp.json()) as { runs: RunSummary[] };
 	return body.runs;
 }
@@ -427,7 +436,7 @@ export interface Preset {
 
 export async function listPresets(fetchImpl: typeof fetch = fetch): Promise<Preset[]> {
 	const resp = await fetchImpl('/api/composer/presets');
-	if (!resp.ok) throw new Error(`GET /api/composer/presets: ${resp.status}`);
+	if (!resp.ok) throw new Error(await errorDetail(resp, 'GET /api/composer/presets'));
 	const body = (await resp.json()) as { presets: Preset[] };
 	return body.presets;
 }
