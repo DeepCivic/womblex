@@ -322,17 +322,38 @@ the batch. Persist it next to the shards and serve it.
 - **`ui/routes/runs.py`** — `GET /api/runs/{run_id}/logs` (list: name, size, modified) and
   `GET /api/runs/{run_id}/logs/{name}` (`text/plain`, with `?download=1` setting
   `Content-Disposition`). Store faults reuse the existing `StoreUnreachable` → 503 path.
+
+  **A `{name}` the console will not serve still gets a useful answer.** A name that fails
+  the pattern and a name that passes but is not present both return the *same* **404**,
+  carrying the same `{available: [...]}` payload `GET …/logs` would return. Two reasons to
+  collapse them: the operator gets "that log is not here — these are" in one round trip
+  instead of a dead end, and a rejected name is not distinguishable from an absent one, so
+  the endpoint cannot be used to probe for what exists outside the run's `logs/` prefix.
+  Containment still happens first — the pattern check runs before any path join, so a
+  malformed name never reaches the filesystem or the store on the way to its 404.
 - **`ui/src/routes/dashboard/+page.svelte`** — a **Logs** panel beside the job table:
   per-batch view-and-download, and an inline `<pre>` viewer for the selected one. The
   existing `job.error` cell is left exactly as it is.
+
+  Three states, none of them a blank pane or a raw error string:
+  - **Log missing** — the 404's `available` list re-renders the picker inline with "that
+    log is no longer available", so a stale link (a batch requeued under a new number, a
+    run whose logs were pruned) self-corrects instead of stranding the operator.
+  - **Run has no logs at all** — an explicit empty state saying logs are published by
+    workers from this version onward. Every run already in a store predates the change and
+    would otherwise show an unexplained empty panel.
+  - **Job failed before its log was published** — the panel says so and points at the
+    `job.error` cell, which is the only reason that exists in that case.
 - **`ui/src/lib/api.ts`** — `listRunLogs()` / `getRunLog()`, plus routing every fetch
   through the existing `errorDetail()` helper. It is already written and already prefers
   the server's `detail` over a bare status, but only `listRuns` and `listPresets` use it;
   the other ten helpers throw `` `GET …: ${resp.status}` `` and discard the reason the
   server sent.
 - **Tests** — the handler attaches and detaches cleanly (no leak across batches), a failing
-  document's message reaches the file, the log is published on a failed job, and the
-  filename guard rejects `../` and absolute paths.
+  document's message reaches the file, and the log is published on a failed job. On the
+  endpoint: `../`, an absolute path, a URL-encoded traversal and a plausible-but-absent
+  `batch-9999.log` all return 404 with the `available` list and never touch the filesystem;
+  a run with no `logs/` prefix lists empty rather than 404-ing.
 
 **Honest cost of protecting existing behaviour:** a log file is unstructured, so the Corpus
 Inspector's failed-only filter still shows nothing for a document that failed extraction —
@@ -406,5 +427,9 @@ Then on screen:
    document, and downloads as a `.log` file. Then confirm a job that fails outright also
    published its log. Check the `docker logs` output is unchanged — the file handler is
    additive, not a replacement.
+   Then the not-found paths: request `logs/batch-9999.log` and `logs/../../etc/passwd` and
+   confirm both render the picker with "that log is no longer available" rather than an
+   error string or a blank pane; and open a **run created before this change**, confirming
+   the panel explains why it has no logs instead of showing an empty list.
 7. **Mismatch guard** — start a worker with a different `--ingest` and confirm it refuses
    the job immediately with both roots named, rather than failing per file.
