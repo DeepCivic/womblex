@@ -287,6 +287,13 @@ the inspector screens, over an endpoint that already exists and is tested.
 The next merge is frontend-only: wire that control onto the Corpus and Chunk
 Inspectors.
 
+**Follow-on work is planned separately.** Ingest and output becoming distinct,
+operator-editable locations; the Execution Controls folding into the Pipeline
+Composer; and run failure reasons reaching the screen are specified in
+[`ui-ingest-plan.md`](ui-ingest-plan.md), which supersedes this document's
+single-`store_uri` assumption and its "§4 settings are activated by restart"
+line for those two fields. Everything else here still holds.
+
 Merge 9 came in two commits — the DAG, then the config form over it — because
 a screen carrying both a graph renderer and a recursive JSON-Schema form does
 not fit the 500-line cap. Each stands alone: the first leaves a composer that
