@@ -8,6 +8,19 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-08-18
+Build-only. Bakes the known-good `pip install --upgrade pip` step into both
+Dockerfiles so images build reproducibly from the tag, ending the practice of
+patching the Dockerfile on the instance (which produced a v0.5.4 image that
+corresponded to no committed source). No behaviour, dependency or schema
+change.
+
+### Fixed
+- **Docker builds no longer need an instance-local pip patch.** The stock pip on `python:3.11-slim` is old enough that its resolver stalls/fails on the boto stack — `s3fs` -> `aiobotocore` pins a narrow `botocore` range that must co-resolve with `boto3`'s own `botocore` pin. Both `Dockerfile` and `Dockerfile.ui` now run `pip install --upgrade pip` before the main install, so the newer resolver finds the compatible set. Previously an engineer added this line by hand on the instance, so the built image bypassed the clean Dockerfile from the tag.
+
+### Changed
+- **`docker-compose.yml` names both images explicitly.** The pipeline/worker services (`init`, `womblex`, `worker`, `seed-demo`) now spell out `build: {context: ., dockerfile: Dockerfile}` instead of the bare `build: .`, so the two-image split (plain `Dockerfile` for workers, `Dockerfile.ui` for the console) reads at a glance. No build behaviour change.
+
 ## [0.5.4] - 2026-08-18
 Tooling-only: clears pre-existing lint/type noise on the base tree (files this
 change never touched otherwise). One `chmod`, a few mypy per-module overrides,

@@ -28,7 +28,13 @@ COPY . /app
 # `.` installs the core deps (S3 + queue included); no extra needed for a
 # worker. Override to add the console/dev tools, e.g. --build-arg EXTRAS="ui".
 ARG EXTRAS=""
-RUN if [ -n "${EXTRAS}" ]; then pip install ".[${EXTRAS}]"; else pip install "."; fi
+# Upgrade pip first: the stock pip on python:3.11-slim is old enough that its
+# resolver stalls/fails on the boto stack (s3fs -> aiobotocore pins a narrow
+# botocore range that must co-resolve with boto3's own botocore pin). The
+# newer resolver finds the compatible set. Baked in here rather than patched
+# on the instance so every build is reproducible from the tag.
+RUN pip install --upgrade pip \
+    && if [ -n "${EXTRAS}" ]; then pip install ".[${EXTRAS}]"; else pip install "."; fi
 
 # Default to the CLI; compose / `docker run` override the subcommand.
 ENTRYPOINT ["womblex"]

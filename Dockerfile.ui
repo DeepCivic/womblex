@@ -45,7 +45,13 @@ COPY --from=frontend-builder /app/ui/build /app/ui/build
 # used to depend on `[cloud]` carrying s3fs, so any build that dropped the
 # extra 500'd on `s3://` with "Install s3fs to access S3".
 ARG EXTRAS=ui
-RUN pip install ".[${EXTRAS}]"
+# Upgrade pip first: the stock pip on python:3.11-slim is old enough that its
+# resolver stalls/fails on the boto stack (s3fs -> aiobotocore pins a narrow
+# botocore range that must co-resolve with boto3's own botocore pin). The
+# newer resolver finds the compatible set. Baked in here rather than patched
+# on the instance so every build is reproducible from the tag.
+RUN pip install --upgrade pip \
+    && pip install ".[${EXTRAS}]"
 
 # Bind beyond loopback: the CLI defaults to 127.0.0.1, which inside a
 # container would refuse every request from the published port. The console

@@ -20,6 +20,10 @@
 #
 # Inputs and outputs share the s3://womblex bucket; shards land at
 # runs/<run_id>/documents/.
+#
+# Two images, one stack: the pipeline/worker services build the plain
+# `Dockerfile`; the `ui` console builds `Dockerfile.ui` (adds a Node stage
+# for the SPA). Both are named explicitly below so the split is legible.
 
 x-cloud-env: &cloud-env
   WOMBLEX_DB_DSN: postgresql://womblex:womblex@postgres:5432/womblex
@@ -76,7 +80,9 @@ services:
 
   # One-shot: create the womblex_jobs table.
   init:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     depends_on:
       postgres:
         condition: service_healthy
@@ -85,7 +91,9 @@ services:
 
   # General-purpose CLI entry (enqueue, run, manifest, ...). Use with `run`.
   womblex:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     depends_on:
       postgres:
         condition: service_healthy
@@ -98,7 +106,9 @@ services:
 
   # Scale horizontally: docker compose up --scale worker=4 worker
   worker:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     depends_on:
       init:
         condition: service_completed_successfully
@@ -116,7 +126,9 @@ services:
   # not seed a sample into its own store unasked; run it explicitly with
   # `docker compose --profile seed up seed-demo`.
   seed-demo:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     depends_on:
       createbuckets:
         condition: service_completed_successfully
