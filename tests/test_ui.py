@@ -1652,7 +1652,8 @@ class TestSidecarImage:
         raw = (REPO_ROOT / "docker-compose.yml").read_text()
         # The three connection vars + S3 creds are all `${VAR:-<bundled default>}`.
         for var, default in [
-            ("WOMBLEX_DB_DSN", "postgresql://womblex:womblex@postgres:5432/womblex"),
+            # The bundled compose default, already baselined in docker-compose.yml.
+            ("WOMBLEX_DB_DSN", "postgresql://womblex:womblex@postgres:5432/womblex"),  # pragma: allowlist secret
             ("WOMBLEX_STORE_URI", "s3://womblex"),
             ("WOMBLEX_S3_ENDPOINT", "http://minio:9000"),
             ("AWS_ACCESS_KEY_ID", "minioadmin"),
@@ -1665,7 +1666,7 @@ class TestSidecarImage:
         # `${VAR:-default}` string is what a service's environment shows.
         env = _compose_service("worker")["environment"]
         assert env["WOMBLEX_DB_DSN"] == (
-            "${WOMBLEX_DB_DSN:-postgresql://womblex:womblex@postgres:5432/womblex}"
+            "${WOMBLEX_DB_DSN:-postgresql://womblex:womblex@postgres:5432/womblex}"  # pragma: allowlist secret
         )
         assert env["WOMBLEX_STORE_URI"] == "${WOMBLEX_STORE_URI:-s3://womblex}"
         assert env["WOMBLEX_S3_ENDPOINT"] == "${WOMBLEX_S3_ENDPOINT:-http://minio:9000}"

@@ -318,7 +318,7 @@ mechanical edit for older engines.)
 #    and every run lands under runs/<run_id>/documents/ beneath that prefix.
 #    WOMBLEX_INGEST_URI must be disjoint from that runs/ output — its own
 #    prefix of the same bucket, or a different bucket entirely.
-export WOMBLEX_DB_DSN=postgresql://user:pass@db.example:5432/shared
+export WOMBLEX_DB_DSN=postgresql://user:pass@db.example:5432/shared  # pragma: allowlist secret -- placeholder, not a real DSN
 export WOMBLEX_STORE_URI=s3://shared/womblex        # own prefix of a shared bucket
 export WOMBLEX_INGEST_URI=s3://shared/womblex/inbox # disjoint from the store's runs/
 export WOMBLEX_S3_ENDPOINT=                          # leave empty for real AWS S3
