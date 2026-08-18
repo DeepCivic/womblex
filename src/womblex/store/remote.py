@@ -62,6 +62,58 @@ def storage_options_from_env(uri: str) -> dict:
     return opts
 
 
+def store_root(uri: str) -> tuple[str, str]:
+    """Normalise *uri* to ``(bucket_or_mount, prefix)`` for containment checks.
+
+    Parsed via ``fsspec.core.url_to_fs`` — the same call :meth:`RemoteStore.from_uri`
+    makes — so this agrees with what actually gets opened. Object-store URIs
+    (``s3://bucket/prefix``) split the bucket out from the key prefix so two
+    different buckets never compare as overlapping; local paths have no bucket
+    concept, so the first element is always ``""`` and the second is the full
+    path.
+    """
+    fsspec = _require_fsspec()
+    fs, path = fsspec.core.url_to_fs(uri)
+    path = path.strip("/")
+    protocol = fs.protocol[0] if isinstance(fs.protocol, (list, tuple)) else fs.protocol
+    if protocol in ("s3", "s3a", "gs", "gcs", "az", "abfs"):
+        bucket, _, prefix = path.partition("/")
+        return bucket, prefix
+    return "", path
+
+
+def _path_contains(parent: str, child: str) -> bool:
+    """True when path-segment sequence *parent* is *child* or an ancestor of it."""
+    parent_parts = [p for p in parent.split("/") if p]
+    child_parts = [p for p in child.split("/") if p]
+    return child_parts[: len(parent_parts)] == parent_parts
+
+
+def assert_disjoint_locations(
+    ingest_uri: str, store_uri: str, *, runs_prefix: str = "runs",
+) -> None:
+    """Raise ``ValueError`` unless *ingest_uri* and the store's effective run
+    output (``<store_uri>/<runs_prefix>``) live on disjoint paths.
+
+    Same bucket, different folders is the normal case and is left alone —
+    the rule is path disjointness, not bucket separation. Either location
+    containing the other means raw documents and processed shards would
+    accumulate in one folder, so this is a start-up/save-time guard, not a
+    per-key filter.
+    """
+    output_uri = f"{store_uri.rstrip('/')}/{runs_prefix.strip('/')}"
+    ingest_bucket, ingest_path = store_root(ingest_uri)
+    output_bucket, output_path = store_root(output_uri)
+    if ingest_bucket != output_bucket:
+        return
+    if _path_contains(ingest_path, output_path) or _path_contains(output_path, ingest_path):
+        raise ValueError(
+            f"Ingest location {ingest_uri!r} and output location {output_uri!r} "
+            "are not disjoint (one contains the other) — documents and shards "
+            "must live under separate prefixes."
+        )
+
+
 def _require_fsspec():  # type: ignore[no-untyped-def]
     # fsspec is a core dependency, so this is a plain import now. Kept as a
     # named helper (rather than inlined) so `from_uri` reads unchanged and any
@@ -165,6 +217,8 @@ class RemoteStore:
 
 __all__ = [
     "RemoteStore",
+    "assert_disjoint_locations",
     "is_remote_uri",
     "storage_options_from_env",
+    "store_root",
 ]

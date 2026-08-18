@@ -13,7 +13,13 @@ from pathlib import Path
 
 import pytest
 
-from womblex.store.remote import RemoteStore, is_remote_uri, storage_options_from_env
+from womblex.store.remote import (
+    RemoteStore,
+    assert_disjoint_locations,
+    is_remote_uri,
+    storage_options_from_env,
+    store_root,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -71,6 +77,34 @@ def test_storage_options_from_env(monkeypatch):
     # them even with AWS env vars set.
     assert storage_options_from_env("gs://bucket/x") == {}
     assert storage_options_from_env("/tmp/x") == {}
+
+
+def test_store_root_splits_bucket_from_prefix():
+    assert store_root("s3://womblex/inbox") == ("womblex", "inbox")
+    assert store_root("s3://womblex") == ("womblex", "")
+    assert store_root("s3://womblex/runs/x") == ("womblex", "runs/x")
+    # Local paths have no bucket concept.
+    assert store_root("/data/inbox") == ("", "data/inbox")
+
+
+def test_assert_disjoint_locations():
+    """The table from docs/ui-ingest-plan.md §4 — same bucket, different
+    folders is fine; either location containing the other is a hard fail.
+    """
+    # Disjoint: no error.
+    assert_disjoint_locations("s3://womblex/inbox", "s3://womblex")
+    assert_disjoint_locations("/data/inbox", "/data/out")
+
+    # Ingest contains the output.
+    with pytest.raises(ValueError, match="s3://womblex.*s3://womblex/runs"):
+        assert_disjoint_locations("s3://womblex", "s3://womblex")
+
+    # Ingest nested inside the output.
+    with pytest.raises(ValueError):
+        assert_disjoint_locations("s3://womblex/runs/x", "s3://womblex")
+
+    # Different buckets never overlap, no matter the prefix.
+    assert_disjoint_locations("s3://other-bucket/runs", "s3://womblex")
 
 
 def test_remote_store_file_roundtrip(tmp_path):
@@ -139,6 +173,53 @@ def test_remote_store_list_dirs(tmp_path):
     assert "stray.txt" not in store.list_dirs("runs")
     # A prefix that doesn't exist yet returns empty, not an error.
     assert store.list_dirs("missing") == []
+
+
+# --- worker: ingest as a distinct store (local, no Postgres) ----------------
+
+
+def _minimal_config(tmp_path: Path):
+    from womblex.config import (
+        ChunkingConfig,
+        DatasetConfig,
+        ExtractionConfig,
+        PathsConfig,
+        RedactionConfig,
+        WomblexConfig,
+    )
+
+    return WomblexConfig(
+        dataset=DatasetConfig(name="w"),
+        paths=PathsConfig(
+            input_root=tmp_path, output_root=tmp_path / "out", checkpoint_dir=tmp_path / ".ckpt"
+        ),
+        extraction=ExtractionConfig(),
+        chunking=ChunkingConfig(enabled=False),
+        redaction=RedactionConfig(enabled=False),
+    )
+
+
+def test_process_job_downloads_from_a_second_ingest_store(tmp_path):
+    """The gap merge 1 closes: inputs and outputs can be different stores."""
+    from womblex.cloud.queue import Job
+    from womblex.cloud.worker import _process_job
+
+    ingest_store = RemoteStore.from_uri(str(tmp_path / "ingest"))
+    csv = tmp_path / "people.csv"
+    csv.write_text("name,role\nAlice,Director\n")
+    ingest_store.upload_file(csv, "people.csv")
+
+    output_store = RemoteStore.from_uri(str(tmp_path / "store"))
+    job = Job(
+        id=1, run_id="r1", batch_num=1, input_keys=["people.csv"],
+        shard_prefix="runs/r1/documents", attempts=1,
+    )
+
+    _process_job(job, _minimal_config(tmp_path), output_store, ingest_store)
+
+    assert output_store.list_files("runs/r1/documents", "*._manifest.parquet")
+    assert not output_store.exists("people.csv")  # never lands in the output tree
+    assert ingest_store.exists("people.csv")       # the source document is untouched
 
 
 # --- finalize (local store, no Postgres) -------------------------------------
@@ -253,6 +334,64 @@ def test_claim_complete_and_fail(queue):
     assert job2b is not None and job2b.batch_num == 2
     q.fail(job2b.id, "boom again")  # attempts now 2 == max -> failed
     assert q.stats(run_id).get("failed") == 1
+
+
+def test_worker_refuses_a_job_whose_ingest_root_mismatches(queue, tmp_path):
+    """A job enqueued against one ingest root and claimed by a worker reading
+    from another is refused immediately, not failed per file (docs/ui-ingest-plan.md
+    §4, merge 1 verification step 7).
+    """
+    from womblex.cloud.queue import JobSpec
+    from womblex.cloud.worker import run_worker
+
+    q, run_id = queue
+    q.enqueue(run_id, [
+        JobSpec(
+            batch_num=1, input_keys=["a.pdf"], shard_prefix="runs/x/documents",
+            ingest_root="s3://right-bucket/inbox",
+        ),
+    ])
+
+    store = tmp_path / "store"
+    store.mkdir()
+    completed = run_worker(
+        _dsn(), str(store), _minimal_config(tmp_path),
+        ingest_uri="s3://wrong-bucket/inbox", run_id=run_id, once=True,
+    )
+    assert completed == 0
+
+    stats = q.stats(run_id)
+    assert stats.get("failed") == 1 or stats.get("pending") == 1  # returned to the queue
+    rows = q.list_jobs(run_id)
+    assert "s3://right-bucket/inbox" in rows[0].error
+    assert "s3://wrong-bucket/inbox" in rows[0].error
+
+
+def test_worker_ingest_root_none_falls_back_to_the_store(queue, tmp_path):
+    """A legacy job (ingest_root NULL) is accepted by any worker — no
+    mismatch, since NULL means 'use the worker's own root'. Also today's
+    single-store behaviour: no --ingest means inputs and outputs share the
+    one --store.
+    """
+    from womblex.cloud.queue import JobSpec
+    from womblex.cloud.worker import run_worker
+
+    q, run_id = queue
+    store = RemoteStore.from_uri(str(tmp_path / "store"))
+    csv = tmp_path / "people.csv"
+    csv.write_text("name,role\nAlice,Director\n")
+    store.upload_file(csv, "people.csv")
+
+    q.enqueue(run_id, [
+        JobSpec(batch_num=1, input_keys=["people.csv"], shard_prefix=f"runs/{run_id}/documents"),
+    ])
+
+    completed = run_worker(
+        _dsn(), str(tmp_path / "store"), _minimal_config(tmp_path),
+        run_id=run_id, once=True,
+    )
+    assert completed == 1
+    assert q.stats(run_id) == {"done": 1}
 
 
 # --- the dashboard's read-only views (docs/ui-plan.md merge 8) ----------------

@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS womblex_jobs (
     status        TEXT        NOT NULL DEFAULT 'pending',
     input_keys    JSONB       NOT NULL,
     shard_prefix  TEXT        NOT NULL,
+    ingest_root   TEXT,
     attempts      INTEGER     NOT NULL DEFAULT 0,
     max_attempts  INTEGER     NOT NULL DEFAULT 3,
     locked_by     TEXT,
@@ -43,13 +44,14 @@ CREATE TABLE IF NOT EXISTS womblex_jobs (
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (run_id, batch_num)
 );
+ALTER TABLE womblex_jobs ADD COLUMN IF NOT EXISTS ingest_root TEXT;
 CREATE INDEX IF NOT EXISTS womblex_jobs_claim_idx
     ON womblex_jobs (status, batch_num);
 """
 
 # Literal queries (no f-string interpolation) — the only varying part is the
 # optional run filter, so each variant is spelled out in full.
-_CLAIM_COLS = "id, run_id, batch_num, input_keys, shard_prefix, attempts"
+_CLAIM_COLS = "id, run_id, batch_num, input_keys, shard_prefix, attempts, ingest_root"
 _CLAIM_TAIL = "ORDER BY batch_num FOR UPDATE SKIP LOCKED LIMIT 1"
 _CLAIM_ANY = (
     f"SELECT {_CLAIM_COLS} FROM womblex_jobs "
@@ -104,6 +106,7 @@ class JobSpec:
     input_keys: list[str]
     shard_prefix: str
     max_attempts: int = 3
+    ingest_root: str | None = None
 
 
 @dataclass
@@ -116,6 +119,7 @@ class Job:
     input_keys: list[str]
     shard_prefix: str
     attempts: int
+    ingest_root: str | None = None
 
 
 @dataclass(frozen=True)
@@ -231,12 +235,12 @@ class JobQueue:
                 cur = self.conn.execute(
                     """
                     INSERT INTO womblex_jobs
-                        (run_id, batch_num, input_keys, shard_prefix, max_attempts)
-                    VALUES (%s, %s, %s, %s, %s)
+                        (run_id, batch_num, input_keys, shard_prefix, ingest_root, max_attempts)
+                    VALUES (%s, %s, %s, %s, %s, %s)
                     ON CONFLICT (run_id, batch_num) DO NOTHING
                     """,
                     (run_id, spec.batch_num, Json(spec.input_keys),
-                     spec.shard_prefix, spec.max_attempts),
+                     spec.shard_prefix, spec.ingest_root, spec.max_attempts),
                 )
                 inserted += cur.rowcount
         logger.info("Enqueued %d new job(s) for run %s (of %d submitted)",
@@ -264,6 +268,7 @@ class JobQueue:
         return Job(
             id=row[0], run_id=row[1], batch_num=row[2],
             input_keys=list(row[3]), shard_prefix=row[4], attempts=row[5] + 1,
+            ingest_root=row[6],
         )
 
     def complete(self, job_id: int) -> None:

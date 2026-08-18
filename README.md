@@ -225,13 +225,17 @@ why a distributed run's output is the ordinary shard layout.
 
 ```bash
 # 1. Plan: list source docs in object storage, split into batches, enqueue.
-#    Idempotent on (run_id, batch_num) — re-run to resume.
-womblex enqueue --store s3://womblex --input-prefix inputs/demo \
+#    Idempotent on (run_id, batch_num) — re-run to resume. --ingest names a
+#    location distinct from --store's runs/ output (assert_disjoint_locations
+#    enforces this); the whole ingest root is the run's input, no prefix
+#    needed. --input-prefix still works for a sub-folder of --ingest.
+womblex enqueue --store s3://womblex --ingest s3://womblex/inbox \
     --config configs/example.yaml --create-schema
 
 # 2. Process: run as many workers as you like (separate hosts/containers).
 #    Each claims batches via FOR UPDATE SKIP LOCKED — no double-processing.
-womblex worker --store s3://womblex --config configs/example.yaml \
+womblex worker --store s3://womblex --ingest s3://womblex/inbox \
+    --config configs/example.yaml \
     --stale-timeout 900            # requeue batches orphaned by crashed workers
 
 # 3. Watch progress.
@@ -261,7 +265,8 @@ is **run-scoped**, staging every batch's chunks in one pass because its
 duplicate-cluster ids are corpus-wide. Pass `--shards <dir>` instead of
 `--store`/`--run-id` to run the same contract locally.
 
-Connection details come from `--store`/`WOMBLEX_STORE_URI`, `--dsn`/`WOMBLEX_DB_DSN`
+Connection details come from `--store`/`WOMBLEX_STORE_URI`, `--ingest`/`WOMBLEX_INGEST_URI`
+(defaults to `--store` when unset, for back-compatibility), `--dsn`/`WOMBLEX_DB_DSN`
 (or `DATABASE_URL`), and the standard `AWS_*` / `WOMBLEX_S3_ENDPOINT` env vars
 (MinIO works as an S3 endpoint). Shards land at `<store>/runs/<run_id>/documents/`
 in the **ordinary layout**, so once synced down, `womblex manifest` /
@@ -287,8 +292,8 @@ local stack up explicitly:
 
 ```bash
 docker compose --profile local up -d postgres minio createbuckets init
-docker compose run --rm womblex enqueue --input-prefix inputs/demo \
-    --config configs/example.yaml --create-schema
+# upload source docs to the 'womblex' bucket under inbox/, then:
+docker compose run --rm womblex enqueue --config configs/example.yaml --create-schema
 docker compose up --scale worker=4 worker     # raise or lower at any time
 ```
 
@@ -311,8 +316,11 @@ mechanical edit for older engines.)
 #    Womblex keeps its output in its own folder of a shared bucket — verified:
 #    fsspec splits s3://shared/womblex into bucket `shared` + root `womblex/`,
 #    and every run lands under runs/<run_id>/documents/ beneath that prefix.
+#    WOMBLEX_INGEST_URI must be disjoint from that runs/ output — its own
+#    prefix of the same bucket, or a different bucket entirely.
 export WOMBLEX_DB_DSN=postgresql://user:pass@db.example:5432/shared
 export WOMBLEX_STORE_URI=s3://shared/womblex        # own prefix of a shared bucket
+export WOMBLEX_INGEST_URI=s3://shared/womblex/inbox # disjoint from the store's runs/
 export WOMBLEX_S3_ENDPOINT=                          # leave empty for real AWS S3
 export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_REGION=ap-southeast-2
 export ISAACUS_API_KEY=...                           # if enrichment/embeddings run
@@ -324,8 +332,7 @@ docker compose run --rm init
 #    psql "$WOMBLEX_DB_DSN" -f sql/womblex_jobs.sql
 
 # 3. Enqueue and scale workers exactly as local — no bundled backend started.
-docker compose run --rm womblex enqueue --input-prefix inputs/demo \
-    --config configs/example.yaml
+docker compose run --rm womblex enqueue --config configs/example.yaml
 docker compose up --scale worker=4 worker
 docker compose up -d ui                              # optional console, :8080
 ```

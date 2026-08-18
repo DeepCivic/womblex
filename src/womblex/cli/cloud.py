@@ -44,12 +44,27 @@ def _resolve_store(args: argparse.Namespace) -> str | None:
     return args.store or os.environ.get("WOMBLEX_STORE_URI")
 
 
+def _resolve_ingest(args: argparse.Namespace) -> str | None:
+    """The configured source-document location, or ``None`` to fall back to ``--store``."""
+    return args.ingest or os.environ.get("WOMBLEX_INGEST_URI")
+
+
 # --- enqueue -----------------------------------------------------------------
 
 
 def _register_enqueue(p: argparse.ArgumentParser) -> None:
     p.add_argument("--store", help="Object-store base URI (or $WOMBLEX_STORE_URI), e.g. s3://womblex")
-    p.add_argument("--input-prefix", required=True, help="Store-relative dir holding source documents")
+    p.add_argument(
+        "--ingest", default=None,
+        help="Object-store base URI for source documents (or $WOMBLEX_INGEST_URI). "
+             "Must be disjoint from --store's runs/ output. Defaults to --store, "
+             "matching --input-prefix under it, for back-compatibility.",
+    )
+    p.add_argument(
+        "--input-prefix", default=None,
+        help="Store-relative dir holding source documents. Optional with --ingest "
+             "(default: the whole ingest root); required without it.",
+    )
     p.add_argument("--config", type=Path, help="Config YAML (sources processing.batch_size)")
     p.add_argument("--run-id", default=None, help="Run identifier (default: auto timestamp)")
     p.add_argument(
@@ -65,16 +80,28 @@ def _register_enqueue(p: argparse.ArgumentParser) -> None:
 
 def cmd_enqueue(args: argparse.Namespace) -> int:
     from womblex.cloud.queue import JobQueue, JobSpec
-    from womblex.store.remote import RemoteStore
+    from womblex.store.remote import RemoteStore, assert_disjoint_locations
     from womblex.store.retention import generate_run_id
 
     dsn = _resolve_dsn(args)
     store_uri = _resolve_store(args)
+    ingest_uri = _resolve_ingest(args)
     if not dsn:
         logger.error("No Postgres DSN (pass --dsn or set WOMBLEX_DB_DSN / DATABASE_URL)")
         return 1
     if not store_uri:
         logger.error("No store URI (pass --store or set WOMBLEX_STORE_URI)")
+        return 1
+    if ingest_uri:
+        try:
+            assert_disjoint_locations(ingest_uri, store_uri)
+        except ValueError as e:
+            logger.error(str(e))
+            return 1
+    elif not args.input_prefix:
+        logger.error(
+            "No source documents location (pass --ingest, or --input-prefix under --store)"
+        )
         return 1
 
     batch_size = args.batch_size
@@ -95,11 +122,12 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
     output_prefix = (args.output_prefix or f"runs/{run_id}").strip("/")
     shard_prefix = f"{output_prefix}/documents"
 
-    store = RemoteStore.from_uri(store_uri)
-    all_keys = store.list_files(args.input_prefix, "*")
+    ingest_store = RemoteStore.from_uri(ingest_uri) if ingest_uri else RemoteStore.from_uri(store_uri)
+    input_prefix = args.input_prefix or ""
+    all_keys = ingest_store.list_files(input_prefix, "*")
     keys = sorted(k for k in all_keys if Path(k).suffix.lower() in SUPPORTED_EXTENSIONS)
     if not keys:
-        logger.error("No supported documents under %s/%s", store_uri, args.input_prefix)
+        logger.error("No supported documents under %s/%s", ingest_uri or store_uri, input_prefix)
         return 1
 
     specs = [
@@ -108,6 +136,7 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
             input_keys=keys[i : i + batch_size],
             shard_prefix=shard_prefix,
             max_attempts=args.max_attempts,
+            ingest_root=ingest_uri,
         )
         for batch_idx, i in enumerate(range(0, len(keys), batch_size), start=1)
     ]
@@ -132,6 +161,11 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
 def _register_worker(p: argparse.ArgumentParser) -> None:
     p.add_argument("--config", type=Path, required=True, help="Config YAML (pipeline settings)")
     p.add_argument("--store", help="Object-store base URI (or $WOMBLEX_STORE_URI)")
+    p.add_argument(
+        "--ingest", default=None,
+        help="Object-store base URI to read source documents from (or "
+             "$WOMBLEX_INGEST_URI). Defaults to --store.",
+    )
     p.add_argument("--dsn", default=None, help="Postgres DSN (or $WOMBLEX_DB_DSN / $DATABASE_URL)")
     p.add_argument("--run-id", default=None, help="Only claim jobs for this run (default: any)")
     p.add_argument("--worker-id", default=None, help="Worker identity in locks (default: host:pid)")
@@ -148,6 +182,7 @@ def cmd_worker(args: argparse.Namespace) -> int:
 
     dsn = _resolve_dsn(args)
     store_uri = _resolve_store(args)
+    ingest_uri = _resolve_ingest(args)
     if not dsn:
         logger.error("No Postgres DSN (pass --dsn or set WOMBLEX_DB_DSN / DATABASE_URL)")
         return 1
@@ -158,6 +193,7 @@ def cmd_worker(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     completed = run_worker(
         dsn, store_uri, config,
+        ingest_uri=ingest_uri,
         worker_id=args.worker_id,
         run_id=args.run_id,
         poll_interval=args.poll_interval,
