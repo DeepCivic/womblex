@@ -134,19 +134,25 @@ def get_schema() -> dict:
 
 
 @router.post("/validate")
-def post_validate(raw: dict[str, Any]) -> dict:
+def post_validate(
+    raw: dict[str, Any], settings: UISettings = Depends(get_settings),  # noqa: B008
+) -> dict:
     """Whether *raw* builds a valid `WomblexConfig`, plus Pydantic's own errors.
 
     `unknown_keys` lists submitted keys the schema does not claim. These do
     not make a config invalid — the CLI ignores them too — but they are the
     one mistake a config editor must never swallow silently, since a typo'd
-    key validates clean and then vanishes from the rendered YAML.
+    key validates clean and then vanishes from the rendered YAML. `paths` is
+    filled in from this deployment's ingest/output locations — the schema
+    does not offer it (`get_config_schema`), so *raw* never carries one.
     """
-    return composer.validate_config(raw)
+    return composer.validate_config(raw, settings)
 
 
 @router.post("/yaml")
-def post_yaml(raw: dict[str, Any]) -> Response:
+def post_yaml(
+    raw: dict[str, Any], settings: UISettings = Depends(get_settings),  # noqa: B008
+) -> Response:
     """Validate *raw* and return it as a downloadable YAML file.
 
     422 with Pydantic's own errors on an invalid config — the same shape
@@ -156,7 +162,7 @@ def post_yaml(raw: dict[str, Any]) -> Response:
     file itself records what it lost.
     """
     try:
-        text = composer.render_yaml(raw)
+        text = composer.render_yaml(raw, settings)
     except ValidationError as e:
         detail = e.errors(include_url=False, include_context=False, include_input=False)
         raise HTTPException(status_code=422, detail=detail) from e

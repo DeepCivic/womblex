@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS womblex_jobs (
     status        TEXT        NOT NULL DEFAULT 'pending',
     input_keys    JSONB       NOT NULL,
     shard_prefix  TEXT        NOT NULL,
+    ingest_root   TEXT,
     attempts      INTEGER     NOT NULL DEFAULT 0,
     max_attempts  INTEGER     NOT NULL DEFAULT 3,
     locked_by     TEXT,
@@ -38,5 +39,6 @@ CREATE TABLE IF NOT EXISTS womblex_jobs (
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (run_id, batch_num)
 );
+ALTER TABLE womblex_jobs ADD COLUMN IF NOT EXISTS ingest_root TEXT;
 CREATE INDEX IF NOT EXISTS womblex_jobs_claim_idx
     ON womblex_jobs (status, batch_num);

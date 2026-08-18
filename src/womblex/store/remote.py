@@ -62,6 +62,107 @@ def storage_options_from_env(uri: str) -> dict:
     return opts
 
 
+#: Protocols :class:`RemoteStore` can open. A URI with any other scheme is
+#: rejected before fsspec sees it — ``url_to_fs`` would otherwise try to
+#: resolve the host of e.g. ``ftp://`` during what is meant to be validation.
+SUPPORTED_PROTOCOLS = ("file", "s3", "s3a", "gs", "gcs", "az", "abfs")
+
+
+def validate_location_uri(uri: str) -> None:
+    """Raise ``ValueError`` unless *uri* names a location a store can open.
+
+    Catches the typos a hand-typed location actually produces — ``s3:/bucket``
+    (one slash), ``S3://bucket``, a bare ``s3://`` with no bucket, an
+    unsupported scheme. Without this, ``s3:/bucket`` parses as a *relative
+    local path* and documents land in a folder literally named ``s3:``.
+    """
+    if not uri or not uri.strip():
+        raise ValueError("location is empty")
+    scheme, sep, rest = uri.partition("://")
+    if not sep:
+        head = uri.split("/", 1)[0]
+        if ":" in head:
+            raise ValueError(
+                f"{uri!r} is not a usable location — a URI needs '://' "
+                f"(did you mean {head.rstrip(':')}://…?)"
+            )
+        return  # a plain local path
+    if scheme != scheme.lower():
+        raise ValueError(f"{uri!r} is not a usable location — the scheme must be lowercase")
+    if scheme not in SUPPORTED_PROTOCOLS:
+        raise ValueError(
+            f"{uri!r} is not a usable location — scheme {scheme!r} is not one of "
+            f"{', '.join(SUPPORTED_PROTOCOLS)}"
+        )
+    if scheme != "file" and not rest.strip("/"):
+        raise ValueError(f"{uri!r} names no bucket")
+
+
+def store_root(uri: str) -> tuple[str, str]:
+    """Normalise *uri* to ``(bucket_or_mount, prefix)`` for containment checks.
+
+    Parsed with the same ``url_to_fs`` call and storage options
+    :meth:`RemoteStore.from_uri` uses, so it agrees with what actually gets
+    opened. Object-store URIs split the bucket out so two different buckets
+    never compare as overlapping; local paths have no bucket, so the first
+    element is ``""``.
+    """
+    validate_location_uri(uri)
+    fsspec = _require_fsspec()
+    fs, path = fsspec.core.url_to_fs(uri, **storage_options_from_env(uri))
+    # Collapse empty segments so a doubled slash compares as the typo it is,
+    # and so this agrees with `_path_contains`, which drops them too.
+    path = "/".join(part for part in path.split("/") if part)
+    protocol = fs.protocol[0] if isinstance(fs.protocol, (list, tuple)) else fs.protocol
+    if protocol in ("s3", "s3a", "gs", "gcs", "az", "abfs"):
+        bucket, _, prefix = path.partition("/")
+        return bucket, prefix
+    return "", path
+
+
+def _path_contains(parent: str, child: str) -> bool:
+    """True when path-segment sequence *parent* is *child* or an ancestor of it."""
+    parent_parts = [p for p in parent.split("/") if p]
+    child_parts = [p for p in child.split("/") if p]
+    return child_parts[: len(parent_parts)] == parent_parts
+
+
+def same_location(a: str, b: str) -> bool:
+    """True when two URIs name the same bucket and prefix.
+
+    Spelling differences that do not change what gets opened — a trailing
+    slash, a redundant ``//`` — compare equal, which a raw string comparison
+    of two independently-configured values would not.
+    """
+    return store_root(a) == store_root(b)
+
+
+def assert_disjoint_locations(
+    ingest_uri: str, store_uri: str, *, runs_prefix: str = "runs",
+) -> None:
+    """Raise ``ValueError`` unless *ingest_uri* and the store's effective output
+    (``<store_uri>/<runs_prefix>``) live on disjoint paths.
+
+    Same bucket, different folders is the normal case. Either location
+    containing the other means raw documents and processed shards would
+    accumulate in one folder. Comparison is by path *segment*, so
+    ``s3://b/run`` and ``s3://b/runs`` are disjoint — matching how the
+    delimiter-based listing in :meth:`RemoteStore.list_files` actually walks
+    an object store, not how a raw ``ListObjectsV2`` prefix would.
+    """
+    output_uri = f"{store_uri.rstrip('/')}/{runs_prefix.strip('/')}"
+    ingest_bucket, ingest_path = store_root(ingest_uri)
+    output_bucket, output_path = store_root(output_uri)
+    if ingest_bucket != output_bucket:
+        return
+    if _path_contains(ingest_path, output_path) or _path_contains(output_path, ingest_path):
+        raise ValueError(
+            f"Ingest location {ingest_uri!r} and output location {output_uri!r} "
+            "are not disjoint (one contains the other) — documents and shards "
+            "must live under separate prefixes."
+        )
+
+
 def _require_fsspec():  # type: ignore[no-untyped-def]
     # fsspec is a core dependency, so this is a plain import now. Kept as a
     # named helper (rather than inlined) so `from_uri` reads unchanged and any
@@ -106,12 +207,20 @@ class RemoteStore:
         """Remove one object. Assumes it exists; callers check first if that matters."""
         self.fs.rm_file(self._full(rel))  # type: ignore[attr-defined]
 
-    def list_files(self, rel: str, pattern: str = "*") -> list[str]:
-        """List paths under *rel* matching *pattern*, returned store-relative."""
+    def list_files(self, rel: str, pattern: str = "*", *, recursive: bool = False) -> list[str]:
+        """List paths under *rel* matching *pattern*, returned store-relative.
+
+        ``recursive`` walks nested prefixes as well as the immediate level.
+        Object stores have a flat keyspace — a document uploaded as
+        ``inbox/2026-08/foo.pdf`` is one key, not a folder — so any caller
+        enumerating *documents* (rather than a known sibling set, like a
+        batch's parquet shards) needs it.
+        """
         full = self._full(rel)
-        matches: list[str] = self.fs.glob(f"{full}/{pattern}")  # type: ignore[attr-defined]
+        glob = f"{full}/**/{pattern}" if recursive else f"{full}/{pattern}"
+        matches: list[str] = self.fs.glob(glob)  # type: ignore[attr-defined]
         prefix = self.root + "/"
-        return [m.removeprefix(prefix) for m in matches]
+        return [m.removeprefix(prefix) for m in matches if m != self.root]
 
     def list_dirs(self, rel: str) -> list[str]:
         """List immediate child directory names under *rel* (name only, not full path).
@@ -164,7 +273,12 @@ class RemoteStore:
 
 
 __all__ = [
+    "SUPPORTED_PROTOCOLS",
     "RemoteStore",
+    "assert_disjoint_locations",
     "is_remote_uri",
+    "same_location",
     "storage_options_from_env",
+    "store_root",
+    "validate_location_uri",
 ]

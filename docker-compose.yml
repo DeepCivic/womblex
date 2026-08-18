@@ -15,9 +15,8 @@
 #   LOCAL (default) — bring the bundled backends up under the `local` profile:
 #
 #     docker compose --profile local up -d postgres minio createbuckets init
-#     # upload source docs to the 'womblex' bucket under inputs/<dataset>/, then:
-#     docker compose run --rm womblex enqueue --input-prefix inputs/demo \
-#         --config configs/example.yaml --create-schema
+#     # upload source docs to the 'womblex' bucket under inbox/, then:
+#     docker compose run --rm womblex enqueue --config configs/example.yaml --create-schema
 #     docker compose up --scale worker=4 worker
 #     # once drained, consolidate the run manifest:
 #     docker compose run --rm womblex finalize --run-id <run_id>
@@ -31,6 +30,7 @@
 #
 #     export WOMBLEX_DB_DSN=postgresql://user:pass@db.example:5432/shared
 #     export WOMBLEX_STORE_URI=s3://shared/womblex     # own prefix of a shared bucket
+#     export WOMBLEX_INGEST_URI=s3://shared/womblex/inbox  # disjoint from the store's runs/
 #     export WOMBLEX_S3_ENDPOINT=                       # empty => real AWS S3
 #     export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_REGION=...
 #     docker compose run --rm init                     # create womblex_jobs in the external DSN
@@ -45,8 +45,8 @@
 #   docker compose --profile seed up seed-demo
 #   docker compose up -d ui           # run-throsby-demo now shows at :8080
 #
-# Inputs and outputs share the s3://womblex bucket; shards land at
-# runs/<run_id>/documents/.
+# Inputs and outputs share the s3://womblex bucket, on disjoint prefixes:
+# source documents live under inbox/, shards land at runs/<run_id>/documents/.
 #
 # Two images, one stack: the pipeline/worker services build the plain
 # `Dockerfile`; the `ui` console builds `Dockerfile.ui` (adds a Node stage
@@ -71,6 +71,9 @@
 x-cloud-env: &cloud-env
   WOMBLEX_DB_DSN: ${WOMBLEX_DB_DSN:-postgresql://womblex:womblex@postgres:5432/womblex}
   WOMBLEX_STORE_URI: ${WOMBLEX_STORE_URI:-s3://womblex}
+  # Source documents live on their own prefix of the same bucket, disjoint
+  # from the store's runs/ output — see assert_disjoint_locations.
+  WOMBLEX_INGEST_URI: ${WOMBLEX_INGEST_URI:-s3://womblex/inbox}
   # Empty WOMBLEX_S3_ENDPOINT (the cloud case) => s3fs talks to real AWS S3;
   # the bundled default points at MinIO.
   WOMBLEX_S3_ENDPOINT: ${WOMBLEX_S3_ENDPOINT:-http://minio:9000}
@@ -242,13 +245,21 @@ services:
       createbuckets:
         condition: service_completed_successfully
         required: false
-    environment: *cloud-env
+    environment:
+      <<: *cloud-env
+      # Where an operator-saved ingest/output override lives (docs/ui-ingest-plan.md
+      # merge 3a) — its own writable mount, since the override file is what
+      # *names* the store and so cannot live inside it.
+      WOMBLEX_UI_SETTINGS_DIR: /settings
     ports:
       - "8080:8080"
     read_only: true
     tmpfs:
       - /tmp
+    volumes:
+      - ui-settings:/settings
 
 volumes:
   pgdata:
   miniodata:
+  ui-settings:

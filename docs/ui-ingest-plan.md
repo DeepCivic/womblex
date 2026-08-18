@@ -50,6 +50,32 @@ operator can read the log from the screen.
 | Scope of editing | **Buckets and folders only.** The DSN, AWS credentials and Isaacus keys stay read-only and env-provided ([`ui-plan.md`](ui-plan.md) §4: "accepting a credential means storing one") |
 | Batching controls | Stay on the composer. Batch size becomes a 10 / 50 / 100 select; the server stays permissive (`ge=1`) so the CLI keeps full range |
 
+## 2.1 What S3 forces
+
+The plan reads as if the ingest location were a folder. On
+[S3](https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html) it is a *key
+prefix*, and the difference changes four things.
+
+| S3 fact | Consequence for this plan |
+|---|---|
+| The keyspace is **flat** — `inbox/2026-08/foo.pdf` is one key, not a file in a folder. `ListObjectsV2` only groups by folder when asked to, via `Delimiter` (`CommonPrefixes`) | "The whole configured ingest root is the run's input" has to mean a **recursive** listing. fsspec's `glob("<root>/*")` is the delimited form and stops at the first level, so a dated or per-agency upload layout reports **0 documents ready** — and with no prefix field on any screen, nothing reaches them. Document enumeration uses `list_files(..., recursive=True)`; the fixed-name sibling listings (a batch's parquet shards) stay delimited |
+| A prefix is a **string**, not a path — `ListObjectsV2(Prefix="run")` returns `runs/…` too | Disjointness is compared by path *segment*, so `s3://b/run` and `s3://b/runs` are disjoint. That is right for Womblex because every listing goes through the delimited glob, but it is not what a raw `ListObjectsV2` would do. Stated in `assert_disjoint_locations` so nobody "fixes" it into a string-prefix test later |
+| One set of credentials and one endpoint. `storage_options_from_env` keys off `AWS_*` / `WOMBLEX_S3_ENDPOINT` globally, and the plan keeps credentials read-only and env-provided | **Ingest and output must sit in the same S3 account and endpoint.** A saved `s3://partner-bucket/inbox` is accepted and then fails its reachability test with an opaque `AccessDenied`. Cross-account ingest needs per-location credentials, which §2 rules out — out of scope, and named here so it is not rediscovered |
+| `ListObjectsV2` pages at 1000 keys and is billed per request | `ingest_preflight`'s exact `document_count` is one full walk of the ingest root per call. Fine at demo and normal-run scale; if a bucket ever holds six figures of objects, the count becomes a bounded "1000+" rather than a slow page load. Not built now — recorded so the first slow console has a diagnosis |
+
+Two smaller ones, both fixed rather than deferred:
+
+- **`s3:/bucket` (one slash) is not an error.** `url_to_fs` reads it as a
+  *relative local path*, so the console saves it and then writes documents into
+  a folder literally named `s3:`. Since merge 3a lets an operator type a
+  location, `validate_location_uri` refuses it — along with `S3://`, an
+  unsupported scheme, and a bucket-less `s3://` — before fsspec sees it. That
+  also stops validation of an operator-supplied URI resolving a hostname.
+- **Two configured locations get spelled differently.** An enqueue flag and a
+  worker's compose env var routinely differ by a trailing slash. The worker's
+  `ingest_root` refusal compares normalised `store_root()` tuples, not raw
+  strings, or a correctly-wired fleet refuses every job.
+
 ## 3. Approach
 
 Ingest becomes a **location setting alongside the output store**, resolved the way
@@ -144,14 +170,24 @@ per-key filter.
 **`cloud/queue.py` + `sql/womblex_jobs.sql`** — one additive, idempotent column so a
 mismatch fails fast rather than per-batch: `ALTER TABLE womblex_jobs ADD COLUMN IF NOT
 EXISTS ingest_root TEXT` inside `ensure_schema()`; `JobSpec`/`Job` carry it; the worker
-refuses a job whose `ingest_root` is set and differs from its own, with both roots in the
-error. `NULL` means legacy — use the worker's own root. No data migration, and
+refuses a job whose `ingest_root` is set and does not normalise equal to its own, with both
+roots in the error. `NULL` means legacy — use the worker's own root. No data migration, and
 `ensure_schema()` already runs before every console enqueue.
+
+The refusal calls `queue.release()`, not `queue.fail()`: the batch is fine and this worker
+is the wrong one for it, so it returns to `pending` with the reason recorded and **without**
+consuming an attempt. `fail()` would burn the retry budget on work a correctly-wired worker
+could still claim — and, because a failed job under `max_attempts` also returns to
+`pending`, would re-claim it in a tight loop until it died. The worker backs off by
+`poll_interval` after a refusal, exactly as it does on an empty claim.
 
 **`cli/cloud.py`** — `_resolve_ingest(args)` mirroring `_resolve_store` / `_resolve_dsn`;
 `--ingest` on `enqueue` and `worker`; `--input-prefix` on `enqueue` becomes **optional**,
-defaulting to the ingest root; `cmd_enqueue` lists from the ingest store and calls
-`assert_disjoint_locations` before touching the queue.
+defaulting to the ingest root; `cmd_enqueue` lists from the ingest store
+(recursively) and calls `assert_disjoint_locations` before touching the queue, passing the
+run's **actual** `--output-prefix` rather than the default `runs` — otherwise
+`--output-prefix inbox/out` alongside `--ingest .../inbox` passes the guard and then writes
+shards into the ingest.
 
 **`docker-compose.yml` + README** — `WOMBLEX_INGEST_URI: ${WOMBLEX_INGEST_URI:-s3://womblex/inbox}`
 in the `x-cloud-env` anchor. **No second bucket**: the bundled stack keeps its single
@@ -228,16 +264,24 @@ the two known keys, tolerate a missing file.
 - `get_settings` re-resolves per request instead of returning a value frozen at start-up,
   mtime-gated so the common case is a `stat()`. This is what makes an edit take effect
   without a restart; `app.state` keeps the base settings, so "reset to default" is just
-  deleting the override.
+  deleting the override. A saved override that *stops* validating — hand-edited, or the
+  `--store` it was saved against changed on redeploy — degrades to the flag/env defaults
+  with a warning, the same skip-and-continue an unparseable file gets; 500ing every request
+  would take the console down exactly where the operator would go to fix it. Start-up keeps
+  the hard failure (a misconfiguration should be loud), but the message names the file to
+  delete.
 
 **`ui/resources.py`**
 
 - Each location card reports `value`, `source` (`flag` | `env` | `saved`), and `editable`.
-- `save_locations(settings, *, ingest_uri, store_uri)` — validates shape, calls
-  `assert_disjoint_locations` (overlap enforcement now lives on the save path as well as at
-  start-up), writes the file, and returns the refreshed cards plus the reachability
-  verdicts from the existing `test_store` / `test_ingest`. Reachability is **reported, not
-  required**: a bucket that does not exist yet is a normal state to save.
+- `save_locations(settings, *, ingest_uri, store_uri)` — runs `validate_location_uri` on
+  each supplied value, then `assert_disjoint_locations` (overlap enforcement now lives on
+  the save path as well as at start-up), writes the file, and returns the refreshed cards
+  plus the reachability verdicts from the existing `test_store` / `test_ingest`.
+  Reachability is **reported, not required**: a bucket that does not exist yet is a normal
+  state to save. *Parseability* is required — see §2.1: `s3:/bucket` would otherwise save
+  cleanly and silently become a local folder. In `output_root` mode there is no `runs/`
+  prefix to compare against, so the tree itself is the output side of the check.
 - Guarded by the same reasons an enqueue is: `--audit-only` refuses (403), no settings dir
   refuses (409). The DSN, AWS credentials and Isaacus key are not accepted by this endpoint
   at all — they stay masked and env-provided.

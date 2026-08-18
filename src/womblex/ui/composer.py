@@ -28,6 +28,8 @@ from womblex.cloud.stage_contracts import (
     STAGE_NAMES,
 )
 from womblex.config import DatasetConfig, PathsConfig, WomblexConfig
+from womblex.store.remote import is_remote_uri
+from womblex.ui.deps import UISettings
 
 #: Extraction is not itself a `StageContract` — it runs inside
 #: `process_batch`, not `run-stage` — but every stage's element-stream
@@ -176,16 +178,62 @@ def unknown_keys(
 
 def get_config_schema() -> dict[str, Any]:
     """`WomblexConfig`'s JSON Schema — the composer form's field list, straight
-    from Pydantic. No hand-typed mirror of `config.py` to fall out of sync."""
-    return WomblexConfig.model_json_schema()
+    from Pydantic. No hand-typed mirror of `config.py` to fall out of sync.
+
+    `paths` is stripped: it names the deployment's ingest/output locations,
+    not something the operator retypes per run (docs/ui-ingest-plan.md §3).
+    `validate_config`/`render_yaml` inject it back before construction.
+    """
+    schema = WomblexConfig.model_json_schema()
+    schema.get("properties", {}).pop("paths", None)
+    required = schema.get("required")
+    if isinstance(required, list) and "paths" in required:
+        required.remove("paths")
+    return schema
 
 
-def validate_config(raw: dict[str, Any]) -> dict[str, Any]:
+#: `pathlib.Path` mangles an object-store URI (`Path("s3://foo")` collapses
+#: to `s3:/foo`), so an object-store field is filled with this placeholder
+#: instead and named in a YAML header comment (`render_yaml`) rather than
+#: written where it would lie.
+_PATHS_PLACEHOLDER = "."
+
+
+def _deployment_paths(settings: UISettings) -> tuple[dict[str, str], list[str]]:
+    """This deployment's `paths` section, plus env vars to note instead of a
+    mangled object-store URI. A local folder is written verbatim."""
+    env_vars: list[str] = []
+
+    if settings.ingest_uri and is_remote_uri(settings.ingest_uri):
+        input_root = _PATHS_PLACEHOLDER
+        env_vars.append("$WOMBLEX_INGEST_URI")
+    elif settings.ingest_uri:
+        input_root = settings.ingest_uri
+    else:
+        input_root = str(settings.output_root) if settings.output_root else _PATHS_PLACEHOLDER
+
+    if settings.store_uri and is_remote_uri(settings.store_uri):
+        output_root = _PATHS_PLACEHOLDER
+        env_vars.append("$WOMBLEX_STORE_URI")
+    elif settings.store_uri:
+        output_root = settings.store_uri
+    else:
+        output_root = str(settings.output_root) if settings.output_root else _PATHS_PLACEHOLDER
+
+    paths = {
+        "input_root": input_root,
+        "output_root": output_root,
+        "checkpoint_dir": _PATHS_PLACEHOLDER,
+    }
+    return paths, env_vars
+
+
+def validate_config(raw: dict[str, Any], settings: UISettings) -> dict[str, Any]:
     """Try to build a `WomblexConfig` from *raw*; report Pydantic's own errors.
 
-    Uses `WomblexConfig(**raw)` — the same construction `load_config` uses —
-    so a config the composer accepts is one the CLI accepts too, and there is
-    no separate composer-side notion of validity.
+    *raw* carries no `paths` (the schema does not offer it); this deployment's
+    locations are injected before constructing the model, the same
+    `WomblexConfig(**raw)` construction `load_config` uses.
 
     `unknown_keys` is reported *beside* `valid` rather than folded into it,
     for exactly that reason: the CLI loads a config with a stray key without
@@ -194,45 +242,55 @@ def validate_config(raw: dict[str, Any]) -> dict[str, Any]:
     not a verdict on the config.
     """
     unknown = unknown_keys(raw)
+    paths, _ = _deployment_paths(settings)
     try:
-        WomblexConfig(**raw)
+        WomblexConfig(**{**raw, "paths": paths})
     except ValidationError as e:
         errors = e.errors(include_url=False, include_context=False, include_input=False)
         return {"valid": False, "errors": errors, "unknown_keys": unknown}
     return {"valid": True, "errors": [], "unknown_keys": unknown}
 
 
-def render_yaml(raw: dict[str, Any]) -> str:
+def render_yaml(raw: dict[str, Any], settings: UISettings) -> str:
     """Validate *raw* and render it back as YAML, in the shape `load_config` reads.
 
     Round-trips through the validated model (`model_dump(mode="json")`)
     rather than dumping the posted dict verbatim, so the download always
     reflects Pydantic-applied defaults and coercions — what a fresh
     `womblex run --config <this file>` would actually see, not whatever the
-    browser happened to send.
+    browser happened to send. `paths` comes from this deployment's ingest/
+    output locations, injected the same way `validate_config` does.
 
-    Dropped keys are recorded as a YAML comment at the top of the file. The
-    warning belongs on the artefact, not only in the `/validate` response:
-    the downloaded file is what gets committed and mailed around, and a
-    config that quietly lost a mistyped section should say so wherever it
-    ends up. Comments are inert to `yaml.safe_load`, so `load_config` reads
-    the file exactly as it would without them.
+    Dropped keys are recorded as a YAML comment at the top of the file, since
+    the downloaded file is what gets committed and mailed around. Comments
+    are inert to `yaml.safe_load`, so `load_config` reads it unchanged.
+
+    When ingest/output are object-store URIs, `paths.input_root`/
+    `output_root` in the body are a placeholder rather than a mangled
+    `s3:/…` path — a second header comment names the env vars actually
+    driving storage instead ("storage is env, not YAML").
 
     Raises `pydantic.ValidationError` on an invalid config; the route
     translates that to a 422 with the same error shape `validate_config`
     returns.
     """
-    config = WomblexConfig(**raw)
+    paths, env_vars = _deployment_paths(settings)
+    config = WomblexConfig(**{**raw, "paths": paths})
     body = str(yaml.safe_dump(config.model_dump(mode="json"), sort_keys=False))
     unknown = unknown_keys(raw)
-    if not unknown:
-        return body
-    header = "\n".join(
-        [
+
+    header_lines: list[str] = []
+    if unknown:
+        header_lines += [
             f"# WARNING: {len(unknown)} submitted key(s) are not in the Womblex config",
             "# schema and were dropped from this file (likely typos):",
             *(f"#   {key}" for key in unknown),
-            "",
         ]
-    )
-    return f"{header}{body}"
+    if env_vars:
+        header_lines += [
+            "# paths.input_root/output_root above are placeholders — this deployment's "
+            "storage is configured via " + " / ".join(env_vars) + ", not written here.",
+        ]
+    if not header_lines:
+        return body
+    return "\n".join([*header_lines, "", body])
