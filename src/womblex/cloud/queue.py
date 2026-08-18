@@ -19,6 +19,13 @@ from typing import Self
 
 logger = logging.getLogger(__name__)
 
+# The one table Womblex owns in its database (plus its claim index). Pinned
+# byte-for-byte to ``sql/womblex_jobs.sql`` by ``tests/test_cloud.py`` — that
+# file is the DBA-reviewable artefact for provisioning the table in a shared or
+# externally-managed DB, and is what ``psql -f`` applies; edit both together.
+# Every statement is IF NOT EXISTS and scoped to this table (no DROP/TRUNCATE,
+# no CREATE DATABASE/SCHEMA, no search_path), so Womblex coexists with another
+# system's tables in the same database.
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS womblex_jobs (
     id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

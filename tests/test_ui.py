@@ -536,6 +536,71 @@ def _write_checkpoint(run_dir: Path, stage: str, **counters: int) -> None:
     )
 
 
+def _missing_jobs_table_error() -> Exception:
+    """The error Postgres raises when ``womblex_jobs`` does not exist.
+
+    A real ``psycopg.errors.UndefinedTable`` when psycopg is importable (the
+    normal case with a DSN configured), else a plain exception carrying the
+    same message the string-match fallback in ``dashboard._is_missing_jobs_table``
+    recognises.
+    """
+    try:
+        import psycopg
+
+        return psycopg.errors.UndefinedTable('relation "womblex_jobs" does not exist')
+    except Exception:  # pragma: no cover - psycopg is present wherever a DSN is
+        return Exception('relation "womblex_jobs" does not exist')
+
+
+class _MissingTableQueue:
+    """A reachable ``JobQueue`` whose ``womblex_jobs`` table has not been created.
+
+    Connecting succeeds (a fresh Postgres before ``init``/enqueue); the first
+    read raises ``UndefinedTable``. The dashboard must read this as an empty
+    queue, not a fault, and must never create the table.
+    """
+
+    schema_ensured_count = 0
+
+    def __init__(self, dsn: str, **_kw: object) -> None:
+        self.dsn = dsn
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        pass
+
+    def ensure_schema(self) -> None:
+        type(self).schema_ensured_count += 1
+
+    def stats(self, _run_id: str | None = None) -> dict:
+        raise _missing_jobs_table_error()
+
+    def list_jobs(self, *a: object, **k: object) -> list:
+        raise _missing_jobs_table_error()
+
+    def workers(self, *a: object, **k: object) -> list:
+        raise _missing_jobs_table_error()
+
+    def stale_jobs(self, *a: object, **k: object) -> list:
+        raise _missing_jobs_table_error()
+
+    def throughput(self, *a: object, **k: object) -> object:
+        raise _missing_jobs_table_error()
+
+
+class _BrokenQueue(_MissingTableQueue):
+    """A reachable queue whose reads fail for a reason that is *not* a missing table.
+
+    Proves the missing-table swallow is narrow: a real failure (here a
+    permissions error) still surfaces as ``queue_error``, not a silent empty.
+    """
+
+    def stats(self, _run_id: str | None = None) -> dict:
+        raise Exception("permission denied for table womblex_jobs")
+
+
 class TestDashboardApi:
     """The Dashboard reads the queue when there is one and the run's own
     per-stage checkpoints always (docs/ui-plan.md merge 8). These exercise
@@ -567,6 +632,49 @@ class TestDashboardApi:
         assert body["queue"] is None
         assert body["queue_error"]
         assert [s["stage"] for s in body["stages"]] == ["chunk"]
+
+    def test_a_reachable_queue_with_no_jobs_table_reads_as_empty_not_a_fault(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A fresh Postgres before `init`/first-enqueue has no `womblex_jobs`.
+
+        Reading that as "queue unreachable" was a reported symptom: the console
+        gates its whole dashboard/execution surface on the queue, so a fresh
+        cluster read as a fault (and the enqueue form vanished) until the table
+        happened to appear. A reachable-but-schemaless queue is an *empty* queue
+        — `queue_error` stays None and the tiles render as zero. The console must
+        not create the table (it is read-only; `init`/enqueue own creation).
+        """
+        monkeypatch.setattr("womblex.cloud.queue.JobQueue", _MissingTableQueue)
+        client = TestClient(create_app(output_root=tmp_path, db_dsn="postgresql://x/y"))
+        body = client.get("/api/dashboard").json()
+        assert body["queue_error"] is None
+        assert body["queue"] == {
+            "stats": {}, "total": 0, "jobs": [], "workers": [], "stale": [],
+            "throughput": {
+                "window_seconds": dashboard.DEFAULT_THROUGHPUT_WINDOW,
+                "completed": 0, "per_minute": 0.0, "last_completed_at": None,
+            },
+        }
+
+    def test_a_missing_table_never_creates_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The read path must not call ensure_schema — the console never mutates."""
+        monkeypatch.setattr("womblex.cloud.queue.JobQueue", _MissingTableQueue)
+        client = TestClient(create_app(output_root=tmp_path, db_dsn="postgresql://x/y"))
+        client.get("/api/dashboard")
+        assert _MissingTableQueue.schema_ensured_count == 0
+
+    def test_a_real_query_error_still_reports_as_unreachable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Only a missing table is swallowed; a genuine failure is not hidden."""
+        monkeypatch.setattr("womblex.cloud.queue.JobQueue", _BrokenQueue)
+        client = TestClient(create_app(output_root=tmp_path, db_dsn="postgresql://x/y"))
+        body = client.get("/api/dashboard").json()
+        assert body["queue"] is None
+        assert "permission denied" in body["queue_error"]
 
     def test_stage_progress_from_checkpoints(
         self, api_client: tuple[TestClient, Path]
@@ -776,17 +884,20 @@ class TestComposerApi:
         preset = next(p for p in body["presets"] if p["name"] == "DEFAULT-Isaacus")
         assert preset["formats"] == [".pdf", ".docx"]
 
-    def test_default_isaacus_enables_the_extract_chunk_enrich_graph_money_shape(
+    def test_default_isaacus_enables_the_extract_chunk_enrich_graph_embed_money_shape(
         self, client: TestClient
     ) -> None:
         """The preset is the reference extract → chunk → enrich → build_graph →
-        money pipeline: chunking, enrichment and money all on, graph produced by
-        enrich + the offline graph-refresh edge rebuild."""
+        embed → money pipeline: chunking, enrichment, embedding and money all on,
+        graph produced by enrich + the offline graph-refresh edge rebuild. Embed
+        is part of the shape (the demo run carries it); a preset that omitted it
+        disagreed with the sample corpus, which is the bug this pins."""
         preset = client.get("/api/composer/presets/DEFAULT-Isaacus").json()
         cfg = preset["config"]
         assert cfg["chunking"]["enabled"] is True
         assert cfg["chunking"]["chunking_model"] == "kanon-2-enricher"
         assert cfg["enrichment"]["enabled"] is True
+        assert cfg["embedding"]["enabled"] is True
         assert cfg["money"]["enabled"] is True
         # No dataset/paths: the operator supplies the run's identity and paths.
         assert "dataset" not in cfg
@@ -816,9 +927,10 @@ class TestComposerApi:
         cfg_path = REPO_ROOT / "configs" / "default-isaacus.yaml"
         assert cfg_path.is_file(), "configs/default-isaacus.yaml is the CLI source of truth"
         cfg = load_config(cfg_path)
-        # The four stages the shape names are on.
+        # The five stages the shape names are on.
         assert cfg.chunking.enabled and cfg.chunking.chunking_model == "kanon-2-enricher"
         assert cfg.enrichment.enabled
+        assert cfg.embedding.enabled
         assert cfg.money.enabled
         # AI chunking + enrich both on => reuse auto-wired, so no double enrich.
         assert cfg.enrichment.persist_document is True
@@ -833,6 +945,10 @@ class TestComposerApi:
         assert overlay["chunking"]["chunk_size"] == cfg.chunking.chunk_size
         assert overlay["chunking"]["chunking_model"] == cfg.chunking.chunking_model
         assert overlay["chunking"]["overlap"] == cfg.chunking.overlap
+        # The stage toggles the preset carries agree with the config file.
+        assert overlay["enrichment"]["enabled"] == cfg.enrichment.enabled
+        assert overlay["embedding"]["enabled"] == cfg.embedding.enabled
+        assert overlay["money"]["enabled"] == cfg.money.enabled
         assert overlay["money"]["default_currency"] == cfg.money.default_currency
         assert overlay["enrichment"]["enabled"] == cfg.enrichment.enabled
 
@@ -1395,6 +1511,22 @@ class TestSidecarImage:
         env = _compose_service("ui")["environment"]
         assert "WOMBLEX_STORE_URI" in env
         assert "WOMBLEX_UI_OUTPUT_ROOT" not in env
+
+    def test_compose_ui_service_waits_for_the_queue_and_store_it_advertises(self) -> None:
+        """The ui service advertises WOMBLEX_DB_DSN and WOMBLEX_STORE_URI, so it must
+        wait for postgres AND minio to be *healthy* — not just for the bucket to
+        exist. Coming up before either is ready was the cause of the reported
+        "queue unreachable" and the intermittent Composer 500s/failed-to-fetch:
+        every screen's first reads raced the backends' startup.
+        """
+        deps = _compose_service("ui")["depends_on"]
+        env = _compose_service("ui")["environment"]
+        # It advertises both, so a consumer expects both to answer on boot.
+        assert "WOMBLEX_DB_DSN" in env and "WOMBLEX_STORE_URI" in env
+        assert deps["postgres"]["condition"] == "service_healthy"
+        assert deps["minio"]["condition"] == "service_healthy"
+        # The bucket must also exist before the store reads land.
+        assert deps["createbuckets"]["condition"] == "service_completed_successfully"
 
     def test_frontend_builder_stage_runs_a_real_package_script(self) -> None:
         """The builder stage's `npm run build` must name a script `ui/package.json` declares."""

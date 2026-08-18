@@ -15,8 +15,36 @@ import pytest
 
 from womblex.store.remote import RemoteStore, is_remote_uri, storage_options_from_env
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
 # RemoteStore reaches fsspec lazily; skip the whole module without the cloud extra.
 pytest.importorskip("fsspec")
+
+
+# --- schema artefact ---------------------------------------------------------
+
+
+def test_sql_schema_file_matches_the_queue_ddl():
+    """``sql/womblex_jobs.sql`` is the DBA-reviewable way to provision the one
+    table Womblex owns (e.g. into a shared/externally-managed DB via ``psql
+    -f``). It must be byte-for-byte the DDL ``ensure_schema`` runs, or an
+    operator who applies the file gets a table that differs from what
+    ``--create-schema`` would make. Compared on the executable statements only
+    — the file's leading ``--`` comment header is documentation.
+    """
+    from womblex.cloud.queue import _SCHEMA
+
+    def _ddl_only(text: str) -> str:
+        # Drop full-line SQL comments and blank lines; the file carries a
+        # documentation header the embedded ``_SCHEMA`` string does not.
+        lines = [
+            ln for ln in text.splitlines()
+            if ln.strip() and not ln.lstrip().startswith("--")
+        ]
+        return "\n".join(lines).strip()
+
+    sql_file = (REPO_ROOT / "sql" / "womblex_jobs.sql").read_text()
+    assert _ddl_only(sql_file) == _ddl_only(_SCHEMA)
 
 
 # --- RemoteStore (local backend) ---------------------------------------------

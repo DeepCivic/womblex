@@ -8,6 +8,24 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 ## [Unreleased]
 
+## [0.5.6] - 2026-08-18
+Minor, additive. Console reliability on a fresh/shared cluster: a reachable
+queue whose `womblex_jobs` table does not exist yet reads as *empty*, not
+"unreachable", and the compose `ui` service waits for Postgres/MinIO to be
+healthy before it comes up. `DEFAULT-Isaacus` now enables embeddings so the
+preset, config file and vendored demo run are the one shape. Ships
+`sql/womblex_jobs.sql`, the DBA-reviewable schema artefact for provisioning the
+one table Womblex owns into a shared or externally-managed database. No parquet
+schema changed.
+
+### Added
+- **`sql/womblex_jobs.sql` — the DBA-reviewable schema artefact.** The one table Womblex owns (`womblex_jobs` + its claim index) now has a checked-in `.sql` file, so an operator provisioning a shared or externally-managed database can `psql "$WOMBLEX_DB_DSN" -f sql/womblex_jobs.sql` (and review the DDL / apply grants) instead of reading it out of Python or running `womblex jobs --create-schema`. It is byte-for-byte the DDL `ensure_schema` runs, pinned by `tests/test_cloud.py`. Every statement is `IF NOT EXISTS` and scoped to this one table (no DROP/TRUNCATE, no CREATE DATABASE/SCHEMA, no `search_path`), so Womblex coexists with another system's tables in the same database — it does not need a database of its own.
+
+### Fixed
+- **Console Dashboard/Execution: a reachable-but-schemaless queue now reads as empty, not "unreachable".** A fresh Postgres in which `init` (or the first enqueue) has not yet created the `womblex_jobs` table now shows as an *empty* queue instead of a fault. Previously every dashboard read (`stats`/`list_jobs`/`workers`/…) raised `UndefinedTable`, which `queue_section` reported as `queue_error` — and because the whole dashboard/execution surface is gated on the queue, a fresh cluster read as broken (with the intermittent Composer 500s / failed-to-fetch that came from the same racing-startup window) until the table happened to appear. `dashboard.queue_section` now maps `psycopg.errors.UndefinedTable` (SQLSTATE 42P01) to the empty-queue payload and never creates the table (the console is read-only; `init`/enqueue own creation); a genuine failure (connection, permissions) still surfaces as `queue_error`.
+- **`docker compose up ui` no longer races Postgres/MinIO startup.** The `ui` service advertises `WOMBLEX_DB_DSN` and `WOMBLEX_STORE_URI` but depended only on `createbuckets`, so it came up before Postgres/MinIO were answering — the reported "queue unreachable" and intermittent Composer 500s. It now `depends_on` both `postgres` and `minio` being `service_healthy`. The sample-corpus quickstart comment now brings up `postgres`/`init` too, so the console sees a reachable (empty) queue rather than an unreachable one.
+- **`DEFAULT-Isaacus` preset and `configs/default-isaacus.yaml` now enable embeddings.** The reference shape is `extract → chunk → enrich → build_graph → embed → money`, and the vendored demo run (`run-throsby-demo`) already carries `*.embeddings.parquet` — but the preset/config left `embedding.enabled: false`, so the composer's DEFAULT-Isaacus disagreed with the sample corpus it is meant to mirror. `embedding.enabled: true` in both, with `task`/`dimensions` left at the model defaults. Preset, config file and demo run are now the one shape (pinned by `test_config_file_and_ui_preset_agree` and a new demo-shape test).
+
 ## [0.5.5] - 2026-08-18
 Build-only. Bakes the known-good `pip install --upgrade pip` step into both
 Dockerfiles so images build reproducibly from the tag, ending the practice of

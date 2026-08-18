@@ -57,6 +57,47 @@ CHECKPOINT_DIRNAMES: dict[str, str] = {
 }
 
 
+def _EMPTY_QUEUE_SECTION(window_seconds: float) -> dict:
+    """The queue payload a reachable-but-empty queue produces.
+
+    Same shape a live read returns with zero rows, so the frontend renders the
+    tiles/lists as empty rather than special-casing it. Used when the
+    ``womblex_jobs`` table does not exist yet (a fresh Postgres before ``init``
+    or the first enqueue) — an empty queue, not a fault.
+    """
+    return {
+        "stats": {},
+        "total": 0,
+        "jobs": [],
+        "workers": [],
+        "stale": [],
+        "throughput": {
+            "window_seconds": window_seconds,
+            "completed": 0,
+            "per_minute": 0.0,
+            "last_completed_at": None,
+        },
+    }
+
+
+def _is_missing_jobs_table(exc: Exception) -> bool:
+    """Whether *exc* is Postgres saying ``womblex_jobs`` does not exist.
+
+    Matched on psycopg's ``UndefinedTable`` (SQLSTATE 42P01) when psycopg is
+    importable, else on the message — a reachable connection whose schema the
+    console does not create. Anything else (a real connection failure, a
+    permissions error) is not swallowed; it propagates to the ``queue_error``.
+    """
+    try:
+        import psycopg
+
+        if isinstance(exc, psycopg.errors.UndefinedTable):
+            return True
+    except Exception:  # pragma: no cover - psycopg always present with a DSN configured
+        pass
+    return "womblex_jobs" in str(exc) and "exist" in str(exc).lower()
+
+
 def get_dashboard(
     settings: UISettings,
     *,
@@ -100,6 +141,15 @@ def queue_section(
     unreachable" next to live checkpoint progress has more to go on than a
     500.
 
+    A *reachable* queue whose ``womblex_jobs`` table does not exist yet is not
+    an error: it is a fresh Postgres that ``init`` (or the first enqueue) has
+    not created the schema in, and its honest state is an empty queue. Reading
+    it as "unreachable" was a reported symptom — the console gates the whole
+    dashboard/execution surface on the queue, so a fresh cluster read as a
+    fault until the table happened to appear. We report the empty queue and
+    never create the table (the console is read-only; ``init``/enqueue own
+    creation).
+
     Not prefixed private: the Resources Console reuses this as its queue
     connectivity test and fleet/queue-depth read (docs/ui-plan.md merge 10)
     rather than reimplementing the same connect-and-read.
@@ -110,11 +160,16 @@ def queue_section(
         from womblex.cloud.queue import JobQueue
 
         with JobQueue(settings.db_dsn, connect_timeout=QUEUE_CONNECT_TIMEOUT) as queue:
-            stats = queue.stats(run_id)
-            jobs = queue.list_jobs(run_id, limit=job_limit)
-            workers = queue.workers(run_id)
-            stale = queue.stale_jobs(stale_after, run_id)
-            throughput = queue.throughput(run_id, window_seconds=window_seconds)
+            try:
+                stats = queue.stats(run_id)
+                jobs = queue.list_jobs(run_id, limit=job_limit)
+                workers = queue.workers(run_id)
+                stale = queue.stale_jobs(stale_after, run_id)
+                throughput = queue.throughput(run_id, window_seconds=window_seconds)
+            except Exception as e:
+                if _is_missing_jobs_table(e):
+                    return _EMPTY_QUEUE_SECTION(window_seconds), None
+                raise
     except Exception as e:
         logger.warning("dashboard: queue unavailable: %s", e)
         return None, str(e)

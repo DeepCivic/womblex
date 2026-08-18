@@ -69,6 +69,17 @@ class TestSeedDemoCommand:
         rows = readers.get_manifest_rows(settings, demo_corpus.DEMO_RUN_ID)
         assert rows is not None and len(rows) == 1
 
+    def test_seeded_run_carries_the_default_isaacus_shape(self, tmp_path: Path) -> None:
+        """The sample corpus is a completed DEFAULT-Isaacus run, so the console's
+        sample and the composer preset agree. Embed is part of it — the demo run
+        that omitted it would have disagreed with the (now embed-enabled) preset.
+        """
+        assert cmd_seed_demo(_Args(output_root=tmp_path)) == 0
+        settings = UISettings(output_root=tmp_path, store_uri=None)
+        stages = set(readers.list_run_summaries(settings)[0].stages)
+        # The stages the DEFAULT-Isaacus shape names, evidenced by their sidecars.
+        assert {"extract", "chunk", "enrich", "embed", "money"} <= stages
+
     def test_seeds_a_store_the_console_then_reads(self, tmp_path: Path) -> None:
         """Store mode: the run lands under runs/<run_id>/ (RemoteStore's local backend)."""
         store_root = tmp_path / "store"

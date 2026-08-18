@@ -1,15 +1,17 @@
 # DEFAULT-Isaacus — the reference Isaacus pipeline.
 #
-#   extract → chunk → enrich → build_graph → money → done
+#   extract → chunk → enrich → build_graph → embed → money → done
 #
 # The entity graph (enrich + the offline graph-refresh mention→chunk edge
-# rebuild) and monetary amounts are produced over the one run. For PDF and
-# DOCX sources (narrative documents — spreadsheets are structured, not
-# narrative, so AI chunking and enrichment add nothing there).
+# rebuild), chunk embeddings (the kanon-2-embedder retrieval index) and
+# monetary amounts are produced over the one run. For PDF and DOCX sources
+# (narrative documents — spreadsheets are structured, not narrative, so AI
+# chunking and enrichment add nothing there).
 #
 # This file is the source of truth for the "DEFAULT-Isaacus" preset the console's
 # Pipeline Composer offers (src/womblex/ui/presets.py mirrors the stage toggles
-# and settings here). Edit both together.
+# and settings here) and the vendored demo run (output/console-demo, a completed
+# run of this exact shape). Edit all three together.
 #
 # ─────────────────────────────────────────────────────────────────────────────
 # HOW TO RUN IT (important: `womblex run` does NOT execute this whole shape).
@@ -37,14 +39,17 @@
 #   # 4. build_graph: rebuild mention→chunk edges now that chunks exist
 #   womblex graph-refresh --shards "$SHARDS"
 #
-#   # 5. money (offline, order-independent — reads the extraction Parquet)
+#   # 5. embed (vectorise chunks with the kanon-2-embedder — the retrieval index)
+#   womblex embed        --shards "$SHARDS" --config configs/default-isaacus.yaml
+#
+#   # 6. money (offline, order-independent — reads the extraction Parquet)
 #   womblex money        --shards "$SHARDS" --config configs/default-isaacus.yaml
 #
-#   # 6. consolidate the run-level documents manifest
+#   # 7. consolidate the run-level documents manifest
 #   womblex manifest     --shards "$SHARDS"
 #
-# On object storage, steps 2–5 are the same via `womblex run-stage --stage
-# <enrich|chunk|graph-refresh|money> --store <uri> --run-id <id> --config …`.
+# On object storage, steps 2–6 are the same via `womblex run-stage --stage
+# <enrich|chunk|graph-refresh|embed|money> --store <uri> --run-id <id> --config …`.
 # ─────────────────────────────────────────────────────────────────────────────
 
 dataset:
@@ -118,14 +123,15 @@ money:
   columns:
     enabled: true          # Classify table/sheet money columns from headers/formats.
 
-# Embedding, linking and PII are OFF: this preset produces the graph + money,
-# not a retrieval index or a masked corpus. Turn them on deliberately —
-#   embed:  vectorise chunks (needs the kanon-2-embedder; set dimensions only if
-#           you must reduce the model default — leaving it null keeps full width).
-#   pii:    graph-driven masking, run AFTER enrich (pipeline_point post_enrichment).
-#   link:   resolve entities to a reference register (needs linking.reference).
+# Chunk embeddings (the kanon-2-embedder retrieval index) over the same run, so
+# *.embeddings.parquet lands beside the chunks and graph. task/dimensions stay
+# at the model defaults (retrieval/document, full width) — set dimensions only
+# to reduce below the model default. Run AFTER chunk (it embeds *.chunks.parquet).
 embedding:
-  enabled: false
+  enabled: true
+  # model: kanon-2-embedder   # default
+  # task: retrieval/document  # default; retrieval/query | null for other uses
+  # dimensions: null          # model default width unless you must reduce it
 linking:
   enabled: false
 pii:

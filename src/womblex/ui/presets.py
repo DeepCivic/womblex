@@ -15,11 +15,14 @@ construction ``load_config`` uses, so a preset that would not load is a test
 failure, not a runtime surprise (``tests/test_ui.py`` builds each one).
 
 `DEFAULT-Isaacus` is the reference Isaacus pipeline:
-``extract → chunk → enrich → build_graph → money → done``, with the entity
-graph (enrich + the ``graph-refresh`` mention→chunk edge rebuild) and monetary
-amounts produced over the one run. It targets PDF and DOCX sources — the two
-narrative formats among ``SUPPORTED_EXTENSIONS`` — which is what makes AI
-chunking and enrichment meaningful (spreadsheets are structured, not narrative).
+``extract → chunk → enrich → build_graph → embed → money → done``, with the
+entity graph (enrich + the ``graph-refresh`` mention→chunk edge rebuild), chunk
+embeddings (the kanon-2-embedder retrieval index) and monetary amounts produced
+over the one run. It targets PDF and DOCX sources — the two narrative formats
+among ``SUPPORTED_EXTENSIONS`` — which is what makes AI chunking and enrichment
+meaningful (spreadsheets are structured, not narrative). The vendored demo run
+(``run-throsby-demo``, ``womblex seed-demo``) is a completed run of exactly this
+shape, so the console's sample corpus and the preset stay in step.
 
 The runnable, CLI-first source of truth for that shape is
 ``configs/default-isaacus.yaml`` — a complete config plus the per-stage command
@@ -64,11 +67,13 @@ class Preset:
         }
 
 
-#: `DEFAULT-Isaacus` — extract → chunk → enrich → build_graph → money → done.
+#: `DEFAULT-Isaacus` — extract → chunk → enrich → build_graph → embed → money.
 #:
 #: Mirrors ``configs/default-isaacus.yaml`` (the runnable, CLI-first source of
-#: truth) — edit both together. Settings beyond the bare `enabled` flags are
-#: carried so the composer form seeds sensible values, not just toggles:
+#: truth) and the vendored demo run (``run-throsby-demo``, which is a completed
+#: run of this exact shape) — edit all three together. Settings beyond the bare
+#: `enabled` flags are carried so the composer form seeds sensible values, not
+#: just toggles:
 #:
 #: - `chunking.chunking_model = kanon-2-enricher` selects semchunk-4 AI
 #:   chunking (boundaries follow the enricher's structure). With `enrich` also
@@ -78,6 +83,10 @@ class Preset:
 #:   edges from the offline `graph-refresh` stage (the "build_graph" step).
 #:   `chunk_size = 480` is the Kanon-2 window; `overlap = 0.1` shares 10% across
 #:   boundaries so a mention straddling one still lands in a chunk.
+#: - `embedding.enabled` vectorises the chunks with the kanon-2-embedder (the
+#:   retrieval index), leaving `task`/`dimensions` at the model defaults. This
+#:   is the stage the demo run carries (`*.embeddings.parquet`) and was the one
+#:   the earlier preset omitted, so the sample corpus and the preset disagreed.
 #: - `money.enabled` runs the offline amount annotator over the same run, so the
 #:   graph and money sidecars land side by side (`graph + money over the one run`);
 #:   `default_currency = AUD` matches Australian-government `$` convention.
@@ -85,10 +94,11 @@ _DEFAULT_ISAACUS = Preset(
     name="DEFAULT-Isaacus",
     description=(
         "Reference Isaacus pipeline: extract, semantic chunking, Kanon-2 "
-        "enrichment, entity-graph edge rebuild (build_graph) and monetary-amount "
-        "annotation — graph and money produced over the one run. For PDF and "
-        "DOCX sources. Runnable from the CLI as configs/default-isaacus.yaml "
-        "(a per-stage sequence: enrich before chunk, then graph-refresh, then money)."
+        "enrichment, entity-graph edge rebuild (build_graph), chunk embeddings "
+        "and monetary-amount annotation — graph, embeddings and money produced "
+        "over the one run. For PDF and DOCX sources. Runnable from the CLI as "
+        "configs/default-isaacus.yaml (a per-stage sequence: enrich before chunk, "
+        "then graph-refresh, then embed, then money)."
     ),
     formats=(".pdf", ".docx"),
     config={
@@ -99,9 +109,10 @@ _DEFAULT_ISAACUS = Preset(
             "overlap": 0.1,
         },
         "enrichment": {"enabled": True},
+        "embedding": {"enabled": True},
         "money": {"enabled": True, "default_currency": "AUD"},
-        # Redaction/PII/embed/link stay at their defaults (off, except redaction
-        # flagging) — the preset names the four stages the shape calls for and
+        # Redaction/PII/link stay at their defaults (off, except redaction
+        # flagging) — the preset names the five stages the shape calls for and
         # leaves everything else to the config schema's own defaults.
     },
 )

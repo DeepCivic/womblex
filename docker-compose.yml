@@ -12,9 +12,11 @@
 #   # optional read-only console over the same bucket, at :8080:
 #   docker compose up -d ui
 #
-#   # Just want to see the console with a sample corpus (no workers/queue)?
-#   # Seed the vendored demo run into the bucket, then bring up the console:
-#   docker compose up -d minio createbuckets
+#   # Just want to see the console with a sample corpus (no workers)?
+#   # Bring up the infra, seed the vendored demo run into the bucket, then the
+#   # console. Postgres is included so the Dashboard/Execution panels see a
+#   # reachable queue (an empty one) rather than "queue unreachable":
+#   docker compose up -d postgres minio createbuckets init
 #   docker compose --profile seed up seed-demo
 #   docker compose up -d ui           # run-throsby-demo now shows at :8080
 #
@@ -141,6 +143,14 @@ services:
   # cloud-env anchor supplies WOMBLEX_STORE_URI, which is the run source the
   # CLI resolves when neither --output-root nor --store is passed.
   #
+  # Depends on postgres AND minio being *healthy*, not just createbuckets: the
+  # console advertises WOMBLEX_DB_DSN (the queue the Dashboard and Execution
+  # panels read) and WOMBLEX_STORE_URI, so bringing it up before either is
+  # ready is what produced the reported "queue unreachable" / intermittent
+  # Composer 500s + failed-to-fetch — every screen's first reads raced the
+  # backends' startup. Gating on health makes the console come up only once
+  # both are answering.
+  #
   # read_only: true is the container-level statement of the plan's rule that
   # no screen writes to a stage output; /tmp is tmpfs because a store-backed
   # read stages the manifest through a temp dir (ui/readers.py). Verified the
@@ -150,6 +160,10 @@ services:
       context: .
       dockerfile: Dockerfile.ui
     depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
       createbuckets:
         condition: service_completed_successfully
     environment: *cloud-env

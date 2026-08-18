@@ -7,12 +7,13 @@ cloud-deployment "Sample corpus not present": the store (`s3://redline`) was
 simply empty.
 
 `output/console-demo/run-throsby-demo/` is a complete, pre-built pipeline run
-(extract → chunk → enrich → embed → money, checkpoints included) vendored into
-the repo/image. This module copies it into whatever store the console reads —
-a local `output_root` or an `s3://` bucket — under `runs/<run_id>/`, so a
-fresh deployment has a browsable sample corpus with one command
-(`womblex seed-demo`). It is store-layout knowledge, so it lives beside the
-other `store/` publishers rather than in the CLI.
+of the reference DEFAULT-Isaacus shape (extract → chunk → enrich → build_graph
+→ embed → money, checkpoints included) vendored into the repo/image. This
+module copies it into whatever store the console reads — a local `output_root`
+or an `s3://` bucket — under `runs/<run_id>/`, so a fresh deployment has a
+browsable sample corpus with one command (`womblex seed-demo`). It is
+store-layout knowledge, so it lives beside the other `store/` publishers rather
+than in the CLI.
 
 The publish is one code path for both deployments: `RemoteStore.from_uri`
 returns a local `LocalFileSystem` for a bare path / `file://` and an
