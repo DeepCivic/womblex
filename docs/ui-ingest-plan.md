@@ -29,15 +29,15 @@ Three consequences:
   redundant.
 - **Failures are hard to read on screen.** The one durable failure reason is
   `womblex_jobs.error`, written as a bare `repr(e)` and shown truncated in a Dashboard
-  cell. Worse, `operations/persist.py:write_batch_parquet` only writes manifest rows for
-  `status == "completed"` documents — so a document that failed extraction has **no
-  manifest row at all**, its error survives only in a log line, and the Corpus Inspector's
-  already-built failed-only filter can never show it.
+  cell. The detail an operator actually needs is already logged — `operations/extract.py`
+  emits `Detection failed: doc=… error=…` and `Extraction failed: doc=… error=…` per
+  document — but it goes to stderr, so it lives in `docker logs` on whichever worker
+  happened to claim the batch and is unreachable from the console.
 
 Intended outcome: ingest and output locations are named once per deployment (local folder
-or object-store URI, enforced to be different buckets) and editable from the Resources
-Console; the composer is the only dispatch surface and re-inputs nothing; and when a run
-fails, the screen says why.
+or object-store URI, kept on disjoint paths) and editable from the Resources Console; the
+composer is the only dispatch surface and re-inputs nothing; and when a run fails, the
+operator can read the log from the screen.
 
 ## 2. Decisions
 
@@ -45,7 +45,7 @@ fails, the screen says why.
 |---|---|
 | Local-folder ingest dispatch | Stays queue-backed. `RemoteStore.from_uri` is fsspec-based and already opens local paths, so `--ingest /data/inbox --store /data/outbox` works with no new runner. The queue-less in-process runner stays deferred ([`ui-plan.md`](ui-plan.md) §4) |
 | Ingest scope per run | The whole configured ingest root is the run's input. No prefix field on any screen. The API keeps an *optional* `input_prefix` so `womblex enqueue --input-prefix` retains sub-folder parity |
-| Ingest vs output overlap | Hard fail at start-up, on save, and at enqueue. Compose gains a second bucket |
+| Ingest vs output overlap | **Same bucket is fine; the paths must be disjoint.** The thing to prevent is raw documents and processed parquet accumulating in one bloated folder, not co-tenancy of a bucket. So `s3://womblex/inbox` + `s3://womblex` (whose runs land under `runs/`) is valid, and either location containing the other is a hard fail at start-up, on save, and at enqueue. Compose needs no second bucket — just an `inbox/` prefix |
 | Editing locations | Env / compose values are **defaults**, not the only source. The Resources Console can *add* a location where none is set and *update* one that is, persisted to a small writable settings file and applied without a restart. Provenance (`from environment` vs `set here`) is shown, with a reset-to-default action |
 | Scope of editing | **Buckets and folders only.** The DSN, AWS credentials and Isaacus keys stay read-only and env-provided ([`ui-plan.md`](ui-plan.md) §4: "accepting a credential means storing one") |
 | Batching controls | Stay on the composer. Batch size becomes a 10 / 50 / 100 select; the server stays permissive (`ge=1`) so the CLI keeps full range |
@@ -98,7 +98,7 @@ Sized to the 500-changed-line merge cap. Each merge stands alone and leaves the 
 | 3a | Editable ingest / output locations (backend) | Endpoint the screen does not yet call |
 | 3b | Editable location cards (frontend) | Frontend |
 | 4 | Composer owns dispatch; Execution Controls removed | Frontend, net negative |
-| 5 | Run failure reasons on screen | Independent |
+| 5 | Run logs readable and downloadable from the console | Independent; no existing behaviour changed |
 
 3a/3b are split at that seam specifically because the combined diff would run over the cap.
 
@@ -108,9 +108,27 @@ Sized to the 500-changed-line merge cap. Each merge stands alone and leaves the 
 
 - `store_root(uri) -> tuple[str, str]` — normalised `(bucket_or_mount, prefix)`, parsed
   consistently with `fsspec.core.url_to_fs`.
-- `assert_distinct_stores(ingest, output)` — raises `ValueError` naming both URIs when they
-  resolve to the same bucket, or when either prefix contains the other. The single
+- `assert_disjoint_locations(ingest_uri, store_uri, *, runs_prefix="runs")` — the single
   enforcement point; the CLI and `UISettings` both call it, neither re-implements it.
+
+The rule is **path disjointness, not bucket separation**. It compares the ingest location
+against the *effective* run-output location — `<store_uri>/<runs_prefix>`, which is where
+shards actually land — and raises `ValueError` naming both when either contains the other.
+Same bucket, different folders is the normal case:
+
+| Ingest | Store | Effective output | Verdict |
+|---|---|---|---|
+| `s3://womblex/inbox` | `s3://womblex` | `s3://womblex/runs` | ✅ disjoint |
+| `/data/inbox` | `/data/out` | `/data/out/runs` | ✅ disjoint |
+| `s3://womblex` | `s3://womblex` | `s3://womblex/runs` | ❌ ingest contains the output |
+| `s3://womblex/runs/x` | `s3://womblex` | `s3://womblex/runs` | ❌ ingest nested in the output |
+
+The two rejected rows are the same failure in both directions: raw documents and processed
+parquet sharing a folder, with each new run's listing picking up the last run's artefacts.
+`SUPPORTED_EXTENSIONS` (no `.parquet`) means an overlap would not actually *enqueue* a
+shard, so this check is about keeping the folders clean rather than about correctness of a
+single run — which is why it is a start-up/save-time guard with a clear message, not a
+per-key filter.
 
 **`cloud/worker.py`**
 
@@ -133,12 +151,15 @@ error. `NULL` means legacy — use the worker's own root. No data migration, and
 **`cli/cloud.py`** — `_resolve_ingest(args)` mirroring `_resolve_store` / `_resolve_dsn`;
 `--ingest` on `enqueue` and `worker`; `--input-prefix` on `enqueue` becomes **optional**,
 defaulting to the ingest root; `cmd_enqueue` lists from the ingest store and calls
-`assert_distinct_stores` before touching the queue.
+`assert_disjoint_locations` before touching the queue.
 
-**`docker-compose.yml` + README** — `WOMBLEX_INGEST_URI: ${WOMBLEX_INGEST_URI:-s3://womblex-inbox}`
-in the `x-cloud-env` anchor; `createbuckets` makes `womblex-inbox` as well as `womblex`;
-the header comment stops saying inputs and outputs share a bucket. `seed-demo` is
-unaffected — it seeds `runs/` in the output bucket.
+**`docker-compose.yml` + README** — `WOMBLEX_INGEST_URI: ${WOMBLEX_INGEST_URI:-s3://womblex/inbox}`
+in the `x-cloud-env` anchor. **No second bucket**: the bundled stack keeps its single
+`womblex` bucket, with documents under `inbox/` and shards under `runs/`, so an existing
+local stack needs no re-provisioning. The compose header's "inputs and outputs share the
+s3://womblex bucket" line becomes an explicit statement of the two prefixes, and the
+quickstart's `inputs/demo` example folds into `inbox/`. `seed-demo` is unaffected — it
+seeds `runs/`.
 
 **Tests** (`tests/test_cloud.py`) — overlap rejection, worker downloading from a second
 store, the `ingest_root` mismatch refusal.
@@ -146,7 +167,7 @@ store, the `ingest_root` mismatch refusal.
 ### Merge 2 — Console reads the configured ingest (backend, additive)
 
 **`ui/deps.py`** — `UISettings.ingest_uri: str | None`; `resolve_settings` reads
-`--ingest` then `$WOMBLEX_INGEST_URI`, and calls `assert_distinct_stores` when both are
+`--ingest` then `$WOMBLEX_INGEST_URI`, and calls `assert_disjoint_locations` when both are
 present. Threaded through `ui/app.py:create_app` and `cli/ui.py`.
 
 **`ui/execute.py`**
@@ -213,7 +234,7 @@ the two known keys, tolerate a missing file.
 
 - Each location card reports `value`, `source` (`flag` | `env` | `saved`), and `editable`.
 - `save_locations(settings, *, ingest_uri, store_uri)` — validates shape, calls
-  `assert_distinct_stores` (overlap enforcement now lives on the save path as well as at
+  `assert_disjoint_locations` (overlap enforcement now lives on the save path as well as at
   start-up), writes the file, and returns the refreshed cards plus the reachability
   verdicts from the existing `test_store` / `test_ingest`. Reachability is **reported, not
   required**: a bucket that does not exist yet is a normal state to save.
@@ -270,26 +291,58 @@ and a `LocationsRefused` error class alongside `SavePresetRefused`.
 
 Mostly deletion; net line count should fall.
 
-### Merge 5 — Run failure reasons on screen
+### Merge 5 — Run logs readable and downloadable from the console
 
-- **`store/output.py` + `operations/persist.py`** — the one library fix behind this.
-  `write_results` takes `failures: list[tuple[str, str, str]]` (doc_id, source_path, error)
-  and appends manifest-only rows with `status="error"`; `write_batch_parquet` passes the
-  `status == "error"` results it currently discards, and writes the shard when there are
-  failures even if no document completed. The Corpus Inspector's failed-only filter and
-  `DocumentGrid`'s `doc.error` cell then work as built, with no UI change.
-- **`ui/src/lib/api.ts`** — route every fetch through the existing `errorDetail()` helper.
-  It is already written and already prefers the server's `detail` over a bare status, but
-  only `listRuns` and `listPresets` use it; the other ten helpers throw
-  `` `GET …: ${resp.status}` `` and discard the reason the server sent.
-- **`ui/src/routes/composer/+page.svelte`** — after a successful enqueue, poll the existing
-  `GET /api/dashboard?run_id=…` and render a compact run-health strip: failed/total
-  batches, the first `job.error` in full, failed-document count, and links to the Dashboard
-  and Corpus Inspector. No new endpoint.
-- **`ui/src/routes/dashboard/+page.svelte`** — make the truncated error cell expandable so
-  the full stored text (up to the queue's 2000-char cap) is readable without a tooltip.
-- **Tests** — a failed document produces a manifest row with `status="error"` and its
-  message.
+**Existing behaviour is protected.** No change to `write_results`, `write_batch_parquet`,
+`MANIFEST_SCHEMA` or what any stage writes. A document that fails extraction still produces
+no manifest row, exactly as today. The fix is to stop throwing away the log that already
+explains why, and put it on the screen.
+
+The information is already produced — `operations/extract.py` logs
+`Detection failed: doc=… error=…` and `Extraction failed: doc=… error=…` for every failure,
+with the doc id. It goes to stderr, so it dies in `docker logs` on whichever worker claimed
+the batch. Persist it next to the shards and serve it.
+
+- **`utils/run_log.py`** (new, ~50 lines) — `capture_batch_log(path)`, a context manager
+  that attaches a `logging.FileHandler` to the `womblex` logger for its duration and
+  detaches it after. Additive: the existing stderr handler stays, so console/`docker logs`
+  output is unchanged.
+- **`cloud/worker.py`** — `_process_job` wraps its body in `capture_batch_log(tmp/batch.log)`
+  and uploads the file alongside the shards in the publish step it already performs
+  (`store.upload_file(log, f"{output_prefix}/logs/batch-NNNN.log")`). The log is written on
+  failure as well as success, which is the case that matters — so the upload sits outside
+  the try, and a failed upload never masks the original error.
+- **`cli/pipeline.py`** — `cmd_run` does the same per batch into `<run_root>/logs/`, so a
+  local run gets the same artefact by the same mechanism.
+- **`ui/readers.py`** — `list_run_logs(settings, run_id)` and `read_run_log(settings,
+  run_id, name)`, following the local/remote fork every other reader uses. Filenames are
+  validated against a strict `batch-\d{4}\.log` pattern before any join — the console has
+  no auth, so this is the same containment discipline `resolve_spa_path` and
+  `is_safe_run_id` already apply.
+- **`ui/routes/runs.py`** — `GET /api/runs/{run_id}/logs` (list: name, size, modified) and
+  `GET /api/runs/{run_id}/logs/{name}` (`text/plain`, with `?download=1` setting
+  `Content-Disposition`). Store faults reuse the existing `StoreUnreachable` → 503 path.
+- **`ui/src/routes/dashboard/+page.svelte`** — a **Logs** panel beside the job table:
+  per-batch view-and-download, and an inline `<pre>` viewer for the selected one. The
+  existing `job.error` cell is left exactly as it is.
+- **`ui/src/lib/api.ts`** — `listRunLogs()` / `getRunLog()`, plus routing every fetch
+  through the existing `errorDetail()` helper. It is already written and already prefers
+  the server's `detail` over a bare status, but only `listRuns` and `listPresets` use it;
+  the other ten helpers throw `` `GET …: ${resp.status}` `` and discard the reason the
+  server sent.
+- **Tests** — the handler attaches and detaches cleanly (no leak across batches), a failing
+  document's message reaches the file, the log is published on a failed job, and the
+  filename guard rejects `../` and absolute paths.
+
+**Honest cost of protecting existing behaviour:** a log file is unstructured, so the Corpus
+Inspector's failed-only filter still shows nothing for a document that failed extraction —
+that document has no manifest row to filter on. The operator finds the reason in the log
+instead of in the grid. Making failed documents first-class in the manifest remains
+available as a later, separately-argued change; it is deliberately not bundled here.
+
+If the diff runs over the cap, the seam is backend (`run_log.py`, worker, `cmd_run`,
+readers, routes, tests) then frontend (panel + `api.ts`) — the backend half stands alone
+with the endpoint tested and no caller.
 
 ## 5. Reuse
 
@@ -299,7 +352,8 @@ gap was only ever a *second* store handle — pulling from S3 is already impleme
 `is_safe_run_id`, `generate_run_id`, `resources.test_store`'s try/except shape, the
 `presets_dir` / `presets_writable` / 409-explains-the-flag pattern (copied wholesale for
 settings), `ui/presets.py`'s save-parse-validate file shape, `dashboard.queue_section`,
-`api.ts:errorDetail`, `DocumentGrid`'s failed-only filter.
+`api.ts:errorDetail`, the `StoreUnreachable` → 503 path, and the per-document
+`Detection failed` / `Extraction failed` log lines `operations/extract.py` already emits.
 
 ## 6. Verification
 
@@ -316,19 +370,20 @@ End to end, against the compose stack:
 
 ```bash
 docker compose --profile local up -d postgres minio createbuckets init
-mc cp sample.pdf local/womblex-inbox/     # the NEW inbox bucket
+mc cp sample.pdf local/womblex/inbox/     # same bucket, its own prefix
 docker compose up -d ui                   # console at :8080
 ```
 
 Then on screen:
 
-1. **Resources Console, read** — ingest card shows `s3://womblex-inbox` tagged *from
-   environment*, Test reports reachable; store card shows `s3://womblex`. Start the console
-   with both pointed at the same bucket and confirm it refuses at start-up, naming both
-   URIs.
+1. **Resources Console, read** — ingest card shows `s3://womblex/inbox` tagged *from
+   environment*, Test reports reachable; store card shows `s3://womblex`. Confirm this
+   same-bucket pairing starts cleanly, then start the console with ingest set to
+   `s3://womblex` (containing the output `runs/`) and confirm it refuses at start-up,
+   naming both locations.
 2. **Resources Console, edit** — the core of this change:
-   - Change the ingest value to a second bucket, Save. The card re-tags *set here*; the
-     next enqueue reads the new bucket with no restart.
+   - Change the ingest value to another prefix, Save. The card re-tags *set here*; the
+     next enqueue reads the new prefix with no restart.
    - Reset to default; the card returns to the env value.
    - Try to save an ingest equal to (or nested under) the output location — rejected with
      both URIs named, nothing written.
@@ -344,9 +399,12 @@ Then on screen:
    Dashboard shows the expected batch count for the document count.
 4. **Nav** — no Execution Controls entry; `/execute` falls through to the SPA index.
 5. **Dashboard** — `docker compose up --scale worker=2 worker`; batches drain.
-6. **Failure path** — put a corrupt/zero-byte `.pdf` in the inbox and re-run. Confirm the
-   composer's run-health strip names the failure, the Dashboard's error cell expands to the
-   full message, and the Corpus Inspector lists the document with `status=error` and its
-   error text (the last of these is what merge 5's manifest change unlocks).
+6. **Failure path** — put a corrupt/zero-byte `.pdf` in the inbox alongside a good one and
+   re-run. Confirm the batch still succeeds for the good document (unchanged behaviour),
+   that `runs/<run_id>/logs/batch-0001.log` exists in the store, and that the Dashboard's
+   Logs panel shows it, renders the `Extraction failed: doc=… error=…` line naming the bad
+   document, and downloads as a `.log` file. Then confirm a job that fails outright also
+   published its log. Check the `docker logs` output is unchanged — the file handler is
+   additive, not a replacement.
 7. **Mismatch guard** — start a worker with a different `--ingest` and confirm it refuses
    the job immediately with both roots named, rather than failing per file.
