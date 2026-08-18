@@ -166,10 +166,28 @@ def get_isaacus_card() -> dict:
     }
 
 
+def get_ingest_card(settings: UISettings) -> dict:
+    """Where source documents are read from, if configured.
+
+    Unlike the store card, ingest is optional, so ``configured`` is the
+    first thing the card reports rather than assuming one of two shapes.
+    """
+    if not settings.ingest_uri:
+        return {"configured": False, "uri": None, "is_object_store": False, "options": {}}
+    uri = settings.ingest_uri
+    return {
+        "configured": True,
+        "uri": uri,
+        "is_object_store": is_remote_uri(uri),
+        "options": _store_options_summary(uri),
+    }
+
+
 def get_resources(settings: UISettings) -> dict:
-    """The three connection cards, cheap enough to read on every page load."""
+    """The four connection cards, cheap enough to read on every page load."""
     return {
         "store": get_store_card(settings),
+        "ingest": get_ingest_card(settings),
         "queue": get_queue_card(settings),
         "isaacus": get_isaacus_card(),
     }
@@ -200,6 +218,25 @@ def test_store(settings: UISettings) -> dict:
         RemoteStore.from_uri(uri).list_dirs("runs")
     except Exception as e:
         logger.warning("resources: store unreachable: %s", e)
+        return {"reachable": False, "error": str(e)}
+    return {"reachable": True, "error": None}
+
+
+def test_ingest(settings: UISettings) -> dict:
+    """Live reachability check behind the ingest card's "Test" action.
+
+    Same shape as :func:`test_store`: a listing call that completes — even
+    against an empty prefix — counts as reachable.
+    """
+    if not settings.ingest_uri:
+        return {"reachable": False, "error": "no ingest location configured"}
+    uri = settings.ingest_uri
+    try:
+        from womblex.store.remote import RemoteStore
+
+        RemoteStore.from_uri(uri).list_files("", "*")
+    except Exception as e:
+        logger.warning("resources: ingest unreachable: %s", e)
         return {"reachable": False, "error": str(e)}
     return {"reachable": True, "error": None}
 

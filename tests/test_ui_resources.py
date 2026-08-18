@@ -70,6 +70,39 @@ class TestResourcesApi:
         assert options["endpoint_url"] == "http://minio:9000"
         assert options["region"] == "ap-southeast-2"
 
+    def test_ingest_card_unconfigured(self, tmp_path: Path) -> None:
+        client = TestClient(create_app(output_root=tmp_path))
+        card = client.get("/api/resources").json()["ingest"]
+        assert card == {"configured": False, "uri": None, "is_object_store": False, "options": {}}
+
+    def test_ingest_card_configured_local(self, tmp_path: Path) -> None:
+        pytest.importorskip("fsspec")
+        ingest_root = tmp_path / "inbox"
+        client = TestClient(create_app(
+            store_uri=str(tmp_path / "store"), ingest_uri=str(ingest_root),
+        ))
+        card = client.get("/api/resources").json()["ingest"]
+        assert card["configured"] is True
+        assert card["uri"] == str(ingest_root)
+        assert card["is_object_store"] is False
+        assert card["options"]["credentials_configured"] is False
+
+    def test_test_ingest_not_configured(self, tmp_path: Path) -> None:
+        client = TestClient(create_app(output_root=tmp_path))
+        assert client.post("/api/resources/test/ingest").json() == {
+            "reachable": False, "error": "no ingest location configured",
+        }
+
+    def test_test_ingest_unreachable_reports_rather_than_raises(self, tmp_path: Path) -> None:
+        """No store configured, so the disjointness check never runs."""
+        pytest.importorskip("fsspec")
+        client = TestClient(create_app(
+            output_root=tmp_path, ingest_uri="not-a-real-protocol://nope",
+        ))
+        body = client.post("/api/resources/test/ingest").json()
+        assert body["reachable"] is False
+        assert body["error"]
+
     def test_queue_card_unconfigured(self, tmp_path: Path) -> None:
         client = TestClient(create_app(output_root=tmp_path))
         assert client.get("/api/resources").json()["queue"] == {

@@ -85,6 +85,11 @@ class TestUISettings:
         assert UISettings(output_root=tmp_path, store_uri=None).is_remote is False
         assert UISettings(output_root=None, store_uri="s3://bucket").is_remote is True
 
+    def test_ingest_and_store_must_be_disjoint(self) -> None:
+        UISettings(output_root=None, store_uri="s3://womblex", ingest_uri="s3://womblex/inbox")
+        with pytest.raises(ValueError, match="not disjoint"):
+            UISettings(output_root=None, store_uri="s3://womblex", ingest_uri="s3://womblex")
+
 
 class TestResolveSettings:
     def test_explicit_args_win(self, tmp_path: Path) -> None:
@@ -143,6 +148,10 @@ class TestResolveSettings:
         assert resolve_settings(tmp_path, None, presets_dir=tmp_path / "p").presets_writable is True
         # Remote mode saves to the store's own presets/ prefix, so it needs no dir.
         assert resolve_settings(None, "s3://bucket").presets_writable is True
+
+    def test_ingest_uri_env_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("WOMBLEX_INGEST_URI", "s3://womblex/inbox")
+        assert resolve_settings(None, "s3://womblex").ingest_uri == "s3://womblex/inbox"
 
 
 @pytest.fixture(params=["local", "remote"])
@@ -800,11 +809,8 @@ class TestDashboardApi:
         assert read_checkpoints(ckpt_dir)[0].documents_per_minute is None
 
 
-_MINIMAL_CONFIG = {
-    "dataset": {"name": "t"},
-    "paths": {"input_root": ".", "output_root": ".", "checkpoint_dir": "."},
-}
-_NO_DATASET = {"paths": _MINIMAL_CONFIG["paths"]}
+_MINIMAL_CONFIG = {"dataset": {"name": "t"}}
+_NO_DATASET: dict = {}
 
 
 class TestComposerApi:
@@ -877,9 +883,12 @@ class TestComposerApi:
             "graph-refresh",
         }
 
-    def test_schema_is_the_womblex_config_schema(self, client: TestClient) -> None:
+    def test_schema_is_the_womblex_config_schema_minus_paths(self, client: TestClient) -> None:
+        """`paths` is the deployment's locations, not operator-retyped per run."""
         body = client.get("/api/composer/schema").json()
-        assert set(body["properties"]) >= {"dataset", "paths", "chunking", "pii"}
+        assert set(body["properties"]) >= {"dataset", "chunking", "pii"}
+        assert "paths" not in body["properties"]
+        assert "paths" not in body.get("required", [])
         assert "dataset" in body.get("required", [])
 
     def test_presets_list_includes_default_isaacus(self, client: TestClient) -> None:
@@ -1012,15 +1021,20 @@ class TestComposerApi:
         assert body["valid"] is False
         assert any(err["loc"] == ["dataset"] for err in body["errors"])
 
-    def test_validate_touches_no_filesystem(self, client: TestClient) -> None:
-        """Paths are validated as strings, never resolved — otherwise an unauthenticated
-        endpoint (plan §6) would answer "does this file exist?" for any path."""
+    def test_deployment_paths_override_any_submitted_paths(
+        self, client: TestClient, tmp_path: Path
+    ) -> None:
+        """A posted `paths` is replaced wholesale, never touched otherwise."""
         resp = client.post("/api/composer/validate", json={
             "dataset": {"name": "t"},
             "paths": {"input_root": "/nonexistent/xyz", "output_root": "/root/.ssh",
                       "checkpoint_dir": "/etc/shadow"},
         })
         assert resp.json()["valid"] is True
+        yaml_resp = client.post("/api/composer/yaml", json={"dataset": {"name": "t"}})
+        parsed = yaml.safe_load(yaml_resp.text)
+        assert parsed["paths"]["output_root"] == str(tmp_path)
+        assert parsed["paths"]["input_root"] != "/nonexistent/xyz"
 
     def test_yaml_download_roundtrips_a_valid_config(self, client: TestClient) -> None:
         resp = client.post("/api/composer/yaml", json=_MINIMAL_CONFIG)
@@ -1229,81 +1243,93 @@ def _seed_store_inputs(store_root: Path, prefix: str, names: list[str]) -> None:
 
 
 class TestExecuteApi:
-    """The Execution Controls (docs/ui-plan.md merge 11). Dispatch is always the
-    queue, on by default and requiring a store *and* a DSN; `--audit-only` is
-    the opt-out switch.
-    """
+    """Dispatch requires a store, an ingest location, and a DSN; `--audit-only`
+    is the opt-out switch (docs/ui-plan.md merge 11, docs/ui-ingest-plan.md §2)."""
 
-    def test_status_reflects_the_three_flags(self, tmp_path: Path) -> None:
-        """A local console can neither execute (no store/queue) nor claim it can."""
+    def test_status_reflects_the_four_flags(self, tmp_path: Path) -> None:
         client = TestClient(create_app(output_root=tmp_path))
         body = client.get("/api/execute/status").json()
         assert body["can_execute"] is False
         assert body == {
             "can_execute": False, "audit_only": False,
-            "has_store": False, "has_queue": False, "stages": body["stages"],
+            "has_store": False, "has_ingest": False, "has_queue": False,
+            "stages": body["stages"], "ingest_uri": None, "output_uri": str(tmp_path),
         }
         assert "chunk" in body["stages"]
 
-    def test_status_can_execute_by_default_with_a_store_and_queue(self, tmp_path: Path) -> None:
-        """Execution is on by default (no --audit-only) once a store and DSN are wired."""
+    def test_status_can_execute_with_a_store_ingest_and_queue(self, tmp_path: Path) -> None:
         client = TestClient(create_app(
-            store_uri=str(tmp_path / "store"),
+            store_uri=str(tmp_path / "store"), ingest_uri=str(tmp_path / "inbox"),
             db_dsn="postgresql://x/y",
         ))
-        assert client.get("/api/execute/status").json()["can_execute"] is True
+        body = client.get("/api/execute/status").json()
+        assert body["can_execute"] is True
+        assert body["ingest_uri"] == str(tmp_path / "inbox")
+        assert body["output_uri"] == str(tmp_path / "store")
 
     def test_enqueue_forbidden_when_audit_only(self, tmp_path: Path) -> None:
         """--audit-only gives a pure auditing console (plan §6) — 403 before touching anything."""
         client = TestClient(create_app(
-            store_uri=str(tmp_path / "store"), db_dsn="postgresql://x/y",
-            audit_only=True,
+            store_uri=str(tmp_path / "store"), ingest_uri=str(tmp_path / "inbox"),
+            db_dsn="postgresql://x/y", audit_only=True,
         ))
-        resp = client.post("/api/execute/enqueue", json={"input_prefix": "inbox"})
+        resp = client.post("/api/execute/enqueue", json={})
         assert resp.status_code == 403
 
     def test_enqueue_conflict_without_a_store(self, tmp_path: Path) -> None:
         """A local output_root can configure and audit but not dispatch (plan §4)."""
         client = TestClient(create_app(
-            output_root=tmp_path, db_dsn="postgresql://x/y",
+            output_root=tmp_path, ingest_uri=str(tmp_path / "inbox"), db_dsn="postgresql://x/y",
         ))
-        resp = client.post("/api/execute/enqueue", json={"input_prefix": "inbox"})
+        resp = client.post("/api/execute/enqueue", json={})
+        assert resp.status_code == 409
+
+    def test_enqueue_conflict_without_an_ingest_location(self, tmp_path: Path) -> None:
+        pytest.importorskip("fsspec")
+        client = TestClient(create_app(
+            store_uri=str(tmp_path / "store"), db_dsn="postgresql://x/y",
+        ))
+        resp = client.post("/api/execute/enqueue", json={})
         assert resp.status_code == 409
 
     def test_enqueue_conflict_without_a_queue(self, tmp_path: Path) -> None:
         pytest.importorskip("fsspec")
-        client = TestClient(create_app(store_uri=str(tmp_path / "store")))
-        resp = client.post("/api/execute/enqueue", json={"input_prefix": "inbox"})
+        client = TestClient(create_app(
+            store_uri=str(tmp_path / "store"), ingest_uri=str(tmp_path / "inbox"),
+        ))
+        resp = client.post("/api/execute/enqueue", json={})
         assert resp.status_code == 409
 
     def test_enqueue_400_when_no_documents_match(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """An empty prefix is bad input (400), not a disabled console (403/409)."""
+        """An empty ingest root is bad input (400), not a disabled console (403/409)."""
         pytest.importorskip("fsspec")
         monkeypatch.setattr("womblex.cloud.queue.JobQueue", _FakeQueue)
-        store_root = tmp_path / "store"
-        _seed_store_inputs(store_root, "inbox", ["notes.txt"])  # unsupported ext
+        ingest_root = tmp_path / "inbox"
+        _seed_store_inputs(ingest_root, "", ["notes.txt"])  # unsupported ext
         client = TestClient(create_app(
-            store_uri=str(store_root), db_dsn="postgresql://x/y",
+            store_uri=str(tmp_path / "store"), ingest_uri=str(ingest_root),
+            db_dsn="postgresql://x/y",
         ))
-        resp = client.post("/api/execute/enqueue", json={"input_prefix": "inbox"})
+        resp = client.post("/api/execute/enqueue", json={})
         assert resp.status_code == 400
 
     def test_enqueue_plans_batches_into_the_queue(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The configure-and-run happy path: list, batch, one idempotent row each."""
+        """List the whole ingest root (no prefix field), batch, one idempotent
+        row each, stamped with the ingest root."""
         pytest.importorskip("fsspec")
         monkeypatch.setattr("womblex.cloud.queue.JobQueue", _FakeQueue)
-        store_root = tmp_path / "store"
-        _seed_store_inputs(store_root, "inbox", [f"doc-{i}.pdf" for i in range(5)])
+        ingest_root = tmp_path / "inbox"
+        _seed_store_inputs(ingest_root, "", [f"doc-{i}.pdf" for i in range(5)])
         client = TestClient(create_app(
-            store_uri=str(store_root), db_dsn="postgresql://x/y",
+            store_uri=str(tmp_path / "store"), ingest_uri=str(ingest_root),
+            db_dsn="postgresql://x/y",
         ))
         resp = client.post(
-            "/api/execute/enqueue",
-            json={"input_prefix": "inbox", "run_id": "run-exec", "batch_size": 2},
+            "/api/execute/enqueue", json={"run_id": "run-exec", "batch_size": 2},
         )
         assert resp.status_code == 200
         body = resp.json()
@@ -1320,29 +1346,55 @@ class TestExecuteApi:
         assert [s.batch_num for s in specs] == [1, 2, 3]
         assert [len(s.input_keys) for s in specs] == [2, 2, 1]
         assert all(s.shard_prefix == "runs/run-exec/documents" for s in specs)
+        assert all(s.ingest_root == str(ingest_root) for s in specs)
 
     def test_enqueue_mints_a_run_id_when_omitted(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         pytest.importorskip("fsspec")
         monkeypatch.setattr("womblex.cloud.queue.JobQueue", _FakeQueue)
-        store_root = tmp_path / "store"
-        _seed_store_inputs(store_root, "inbox", ["doc-0.pdf"])
+        ingest_root = tmp_path / "inbox"
+        _seed_store_inputs(ingest_root, "", ["doc-0.pdf"])
         client = TestClient(create_app(
-            store_uri=str(store_root), db_dsn="postgresql://x/y",
+            store_uri=str(tmp_path / "store"), ingest_uri=str(ingest_root),
+            db_dsn="postgresql://x/y",
         ))
-        resp = client.post("/api/execute/enqueue", json={"input_prefix": "inbox"})
+        resp = client.post("/api/execute/enqueue", json={})
         assert resp.json()["run_id"].startswith("run-")
 
     def test_enqueue_rejects_a_batch_size_below_one(self, tmp_path: Path) -> None:
         """Pydantic's `ge=1` refuses it at the boundary (422), before the guard runs."""
         client = TestClient(create_app(
-            store_uri=str(tmp_path / "store"), db_dsn="postgresql://x/y",
+            store_uri=str(tmp_path / "store"), ingest_uri=str(tmp_path / "inbox"),
+            db_dsn="postgresql://x/y",
         ))
-        resp = client.post(
-            "/api/execute/enqueue", json={"input_prefix": "inbox", "batch_size": 0},
-        )
+        resp = client.post("/api/execute/enqueue", json={"batch_size": 0})
         assert resp.status_code == 422
+
+
+class TestIngestPreflight:
+    """`GET /api/execute/ingest` — reachability + document count."""
+
+    def test_no_ingest_configured(self, tmp_path: Path) -> None:
+        client = TestClient(create_app(output_root=tmp_path))
+        body = client.get("/api/execute/ingest").json()
+        assert body == {
+            "uri": None, "kind": None, "reachable": False,
+            "document_count": 0, "sample": [], "error": "no ingest location configured",
+        }
+
+    def test_reachable_ingest_reports_count_and_sample(self, tmp_path: Path) -> None:
+        pytest.importorskip("fsspec")
+        ingest_root = tmp_path / "inbox"
+        _seed_store_inputs(ingest_root, "", [f"doc-{i}.pdf" for i in range(3)])
+        client = TestClient(create_app(
+            store_uri=str(tmp_path / "store"), ingest_uri=str(ingest_root),
+        ))
+        body = client.get("/api/execute/ingest").json()
+        assert body["kind"] == "local"
+        assert body["reachable"] is True
+        assert body["document_count"] == 3
+        assert sorted(body["sample"]) == ["doc-0.pdf", "doc-1.pdf", "doc-2.pdf"]
 
 
 class TestStoreUnreachable:
@@ -1654,3 +1706,4 @@ class TestCliUi:
         monkeypatch.delenv("WOMBLEX_UI_OUTPUT_ROOT", raising=False)
         monkeypatch.delenv("WOMBLEX_STORE_URI", raising=False)
         assert cli_main(["ui"]) == 1
+

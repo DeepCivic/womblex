@@ -19,7 +19,7 @@ router = APIRouter(prefix="/api/resources", tags=["resources"])
 
 @router.get("")
 def get_resources(settings: UISettings = Depends(get_settings)) -> dict:  # noqa: B008
-    """The store, queue and Isaacus cards, cheap enough to load with the screen."""
+    """The store, ingest, queue and Isaacus cards, cheap enough to load with the screen."""
     return resources.get_resources(settings)
 
 
@@ -27,6 +27,12 @@ def get_resources(settings: UISettings = Depends(get_settings)) -> dict:  # noqa
 def post_test_store(settings: UISettings = Depends(get_settings)) -> dict:  # noqa: B008
     """Live reachability: a local dir check, or `RemoteStore.list_dirs("runs")`."""
     return resources.test_store(settings)
+
+
+@router.post("/test/ingest")
+def post_test_ingest(settings: UISettings = Depends(get_settings)) -> dict:  # noqa: B008
+    """Live reachability of the configured ingest location, if any."""
+    return resources.test_ingest(settings)
 
 
 @router.post("/test/queue")

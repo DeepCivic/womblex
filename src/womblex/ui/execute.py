@@ -67,8 +67,9 @@ class ExecutionDisabled(Exception):
 class ExecutionCapability:
     """Whether this console can dispatch work, and if not, precisely why.
 
-    All three must hold: not ``--audit-only``, a remote store to enqueue
-    from and publish to, and a job queue to dispatch through (see the module
+    All four must hold: not ``--audit-only``, an output location a
+    ``RemoteStore`` can publish shards to, an ingest location to enqueue
+    documents from, and a job queue to dispatch through (see the module
     docstring). ``can_execute`` is their conjunction; the individual flags
     are surfaced so the screen can name the missing piece rather than a bare
     "disabled".
@@ -76,20 +77,26 @@ class ExecutionCapability:
 
     audit_only: bool
     has_store: bool
+    has_ingest: bool
     has_queue: bool
     stages: tuple[str, ...]
+    ingest_uri: str | None
+    output_uri: str | None
 
     @property
     def can_execute(self) -> bool:
-        return (not self.audit_only) and self.has_store and self.has_queue
+        return (not self.audit_only) and self.has_store and self.has_ingest and self.has_queue
 
     def as_dict(self) -> dict:
         return {
             "can_execute": self.can_execute,
             "audit_only": self.audit_only,
             "has_store": self.has_store,
+            "has_ingest": self.has_ingest,
             "has_queue": self.has_queue,
             "stages": list(self.stages),
+            "ingest_uri": self.ingest_uri,
+            "output_uri": self.output_uri,
         }
 
 
@@ -104,8 +111,11 @@ def execution_status(settings: UISettings) -> ExecutionCapability:
     return ExecutionCapability(
         audit_only=settings.audit_only,
         has_store=settings.is_remote,
+        has_ingest=bool(settings.ingest_uri),
         has_queue=bool(settings.db_dsn),
         stages=STAGE_NAMES,
+        ingest_uri=settings.ingest_uri,
+        output_uri=settings.store_uri or (str(settings.output_root) if settings.output_root else None),
     )
 
 
@@ -113,8 +123,9 @@ def _guard(settings: UISettings) -> ExecutionCapability:
     """Refuse any write action the console is not configured to perform.
 
     Ordered so the operator sees the most actionable failure first: an
-    audit-only deployment is a deliberate choice (403), a missing store/queue
-    is a wiring gap (409). Every write path calls this before touching either.
+    audit-only deployment is a deliberate choice (403); a missing store,
+    ingest location or queue is a wiring gap (409), checked in that order.
+    Every write path calls this before touching either.
     """
     cap = execution_status(settings)
     if cap.audit_only:
@@ -127,6 +138,12 @@ def _guard(settings: UISettings) -> ExecutionCapability:
             "no_store",
             "Execution dispatches through a shared object store; this console reads a "
             "local output_root. Point it at a --store to enqueue work.",
+        )
+    if not cap.has_ingest:
+        raise ExecutionDisabled(
+            "no_ingest",
+            "Execution enqueues documents from a configured ingest location; none is "
+            "set. Set one (--ingest / $WOMBLEX_INGEST_URI) to enqueue work.",
         )
     if not cap.has_queue:
         raise ExecutionDisabled(
@@ -167,7 +184,7 @@ class EnqueueResult:
 def enqueue_extraction(
     settings: UISettings,
     *,
-    input_prefix: str,
+    input_prefix: str | None = None,
     run_id: str | None = None,
     batch_size: int = 50,
     max_attempts: int = 3,
@@ -175,16 +192,17 @@ def enqueue_extraction(
     """Plan an extraction run into the queue — the "configure-and-run" action.
 
     The same three steps ``womblex enqueue`` does (``cli/cloud.cmd_enqueue``),
-    reached through the sidecar's own store: list supported documents under
-    *input_prefix*, split them into ``batch_size`` batches, and write one
-    idempotent queue row each. Workers (brought up by the platform, not by
-    this call — the console runs no scheduler, plan §4) then claim and process
-    them; the Dashboard watches the queue drain.
+    reached through the sidecar's own configured ingest location: list
+    supported documents under *input_prefix* (the whole ingest root when
+    omitted — docs/ui-ingest-plan.md §2 "no prefix field on any screen"),
+    split them into ``batch_size`` batches, and write one idempotent queue
+    row each, stamped with the ingest root so a worker reading from a
+    different location refuses the job instead of failing per file.
 
     Raises :class:`ExecutionDisabled` when the console cannot dispatch, and
-    ``ValueError`` on bad input (no run source of documents, a batch size below
-    one, an unsafe run_id) — the route maps the former to 403/409 and the
-    latter to 400.
+    ``ValueError`` on bad input (no documents under the prefix, a batch size
+    below one, an unsafe run_id) — the route maps the former to 403/409 and
+    the latter to 400.
     """
     _guard(settings)
     if batch_size < 1:
@@ -196,11 +214,13 @@ def enqueue_extraction(
     from womblex.cloud.queue import JobQueue, JobSpec
     from womblex.store.remote import RemoteStore
 
-    store = RemoteStore.from_uri(cast(str, settings.store_uri))
-    all_keys = store.list_files(input_prefix, "*")
+    ingest_uri = cast(str, settings.ingest_uri)
+    ingest_store = RemoteStore.from_uri(ingest_uri)
+    prefix = input_prefix or ""
+    all_keys = ingest_store.list_files(prefix, "*")
     keys = sorted(k for k in all_keys if Path(k).suffix.lower() in SUPPORTED_EXTENSIONS)
     if not keys:
-        raise ValueError(f"no supported documents under {input_prefix}")
+        raise ValueError(f"no supported documents under {ingest_uri}/{prefix}".rstrip("/"))
 
     output_prefix = f"runs/{resolved_run_id}"
     shard_prefix = f"{output_prefix}/documents"
@@ -210,6 +230,7 @@ def enqueue_extraction(
             input_keys=keys[i : i + batch_size],
             shard_prefix=shard_prefix,
             max_attempts=max_attempts,
+            ingest_root=ingest_uri,
         )
         for batch_idx, i in enumerate(range(0, len(keys), batch_size), start=1)
     ]
@@ -229,3 +250,34 @@ def enqueue_extraction(
         newly_enqueued=newly,
         shard_prefix=shard_prefix,
     )
+
+
+def ingest_preflight(settings: UISettings) -> dict:
+    """Reachability + document count of the configured ingest location.
+
+    Feeds the composer's "N documents ready" line — the same ``list_files`` +
+    ``SUPPORTED_EXTENSIONS`` filter :func:`enqueue_extraction` uses.
+    """
+    if not settings.ingest_uri:
+        return {
+            "uri": None, "kind": None, "reachable": False,
+            "document_count": 0, "sample": [],
+            "error": "no ingest location configured",
+        }
+    from womblex.store.remote import RemoteStore, is_remote_uri
+
+    uri = settings.ingest_uri
+    kind = "remote" if is_remote_uri(uri) else "local"
+    try:
+        all_keys = RemoteStore.from_uri(uri).list_files("", "*")
+    except Exception as e:
+        logger.warning("execute: ingest unreachable: %s", e)
+        return {
+            "uri": uri, "kind": kind, "reachable": False,
+            "document_count": 0, "sample": [], "error": str(e),
+        }
+    keys = sorted(k for k in all_keys if Path(k).suffix.lower() in SUPPORTED_EXTENSIONS)
+    return {
+        "uri": uri, "kind": kind, "reachable": True,
+        "document_count": len(keys), "sample": keys[:5], "error": None,
+    }

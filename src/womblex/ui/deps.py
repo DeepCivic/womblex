@@ -14,6 +14,8 @@ from pathlib import Path
 
 from fastapi import Request
 
+from womblex.store.remote import assert_disjoint_locations
+
 
 @dataclass(frozen=True)
 class UISettings:
@@ -41,6 +43,13 @@ class UISettings:
     bucket — so a store-backed console needs no writable mount to save presets.
     In local mode, ``None`` disables saving: the built-in presets still serve,
     but ``POST /api/composer/presets`` refuses with 409.
+
+    ``ingest_uri`` names where source documents arrive from, distinct from
+    ``store_uri``/``output_root`` (docs/ui-ingest-plan.md). ``None`` means no
+    ingest is configured: the Execution Controls cannot dispatch, but
+    everything read-only still serves. When both are set they must be
+    disjoint of the output store's effective ``runs/`` prefix — enforced at
+    construction so a misconfigured deployment fails at start-up.
     """
 
     output_root: Path | None
@@ -49,10 +58,13 @@ class UISettings:
     feedback_dir: Path | None = None
     db_dsn: str | None = None
     presets_dir: Path | None = None
+    ingest_uri: str | None = None
 
     def __post_init__(self) -> None:
         if bool(self.output_root) == bool(self.store_uri):
             raise ValueError("UISettings needs exactly one of output_root or store_uri")
+        if self.ingest_uri and self.store_uri:
+            assert_disjoint_locations(self.ingest_uri, self.store_uri)
 
     @property
     def is_remote(self) -> bool:
@@ -77,6 +89,7 @@ def resolve_settings(
     feedback_dir: Path | None = None,
     db_dsn: str | None = None,
     presets_dir: Path | None = None,
+    ingest_uri: str | None = None,
 ) -> UISettings:
     """Resolve settings from explicit arguments, falling back to env vars.
 
@@ -95,6 +108,11 @@ def resolve_settings(
     ``$WOMBLEX_DB_DSN`` / ``$DATABASE_URL`` name the job queue, the same
     pair ``womblex worker`` reads. Absent is not an error: the dashboard
     falls back to checkpoints.
+
+    ``$WOMBLEX_INGEST_URI`` is the env fallback for ``ingest_uri`` — the same
+    variable ``womblex enqueue``/``worker`` read. Absent means no ingest is
+    configured. When resolved alongside a store, ``UISettings`` itself checks
+    the two are disjoint and raises ``ValueError`` naming both.
     """
     root = output_root
     if root is None and "WOMBLEX_UI_OUTPUT_ROOT" in os.environ:
@@ -114,9 +132,10 @@ def resolve_settings(
     presets = presets_dir
     if presets is None and "WOMBLEX_UI_PRESETS_DIR" in os.environ:
         presets = Path(os.environ["WOMBLEX_UI_PRESETS_DIR"])
+    ingest = ingest_uri or os.environ.get("WOMBLEX_INGEST_URI")
     return UISettings(
         output_root=root, store_uri=store, audit_only=audit_only,
-        feedback_dir=fb_dir, db_dsn=dsn, presets_dir=presets,
+        feedback_dir=fb_dir, db_dsn=dsn, presets_dir=presets, ingest_uri=ingest,
     )
 
 
