@@ -8,6 +8,17 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-08-18
+Tooling-only: clears pre-existing lint/type noise on the base tree (files this
+change never touched otherwise). One `chmod`, a few mypy per-module overrides,
+one stale `type: ignore` code corrected. No behaviour, dependency or schema
+change; `ruff check src/` and `mypy src/` both clean.
+
+### Fixed
+- **Ruff EXE002 on `src/womblex/utils/__init__.py`.** The package `__init__.py` carried the executable bit with no shebang — it is an importable module, not a script, so the bit is dropped (`chmod -x`) rather than the rule ignored.
+- **Mypy `import-not-found` for third-party libraries without stubs.** `psycopg` (+ `psycopg.types.json`), `torch` and `ultralytics` ship no type stubs, so mypy errored on their imports (`cloud/queue.py`, `ingest/paddle_ocr.py`). Added `ignore_missing_imports = true` per-module overrides for `psycopg.*`, `torch.*` and `ultralytics.*` in `pyproject.toml`, matching the existing `boto3.*`/`fitz.*` pattern.
+- **Stale `type: ignore` code on `ingest/paddle_ocr.py`.** The `from ultralytics import YOLO` line carried `# type: ignore[import-untyped]`; mypy reports the import as `import-not-found`, so the code is corrected to match.
+
 ## [0.5.3] - 2026-08-18
 Dependency-only. `isaacus`, `isaacus-sagemaker` and the AWS SDK (`boto3`) move
 into the base install; the `[isaacus]`, `[bedrock]` and `[cloud-ocr]` extras are

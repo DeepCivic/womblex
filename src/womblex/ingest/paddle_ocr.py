@@ -323,7 +323,7 @@ class YOLOLayoutAnalyzer:
             # Cap torch's intra-op pool (defaults to cpu_count). interop must be
             # set before any parallel work — best-effort, ignore if already used.
             import torch
-            from ultralytics import YOLO  # type: ignore[import-untyped]
+            from ultralytics import YOLO  # type: ignore[import-not-found]
 
             torch.set_num_threads(n)
             try:

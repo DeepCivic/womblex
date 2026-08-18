@@ -1,6 +1,6 @@
 [project]
 name = "womblex"
-version = "0.5.3"
+version = "0.5.4"
 description = "Document extraction pipeline for Australian government documents"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -216,5 +216,11 @@ module = [
     "boto3.*",
     "botocore",
     "botocore.*",
+    "psycopg",
+    "psycopg.*",
+    "torch",
+    "torch.*",
+    "ultralytics",
+    "ultralytics.*",
 ]
 ignore_missing_imports = true
