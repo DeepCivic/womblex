@@ -8,8 +8,14 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 ## [Unreleased]
 
+## [0.5.8] - 2026-08-18
+Library + CLI, back-compatible. `docs/ui-ingest-plan.md` merge 1: source
+documents can now live at their own object-store/local location, separate
+from the output store. No parquet schema changed; `womblex_jobs` gains one
+nullable column.
+
 ### Added
-- **Ingest as a distinct store (library + CLI).** `docs/ui-ingest-plan.md` merge 1: source documents can now live at their own object-store/local location, separate from the output store — `--ingest` / `$WOMBLEX_INGEST_URI` on `womblex enqueue` and `womblex worker`, back-compatible (omitted ⇒ today's single-store behaviour). `store/remote.py` gains `store_root()` and `assert_disjoint_locations()` — the single enforcement point requiring the ingest location and the store's effective `runs/` output to be on disjoint paths (same bucket, different folders is fine; either containing the other is a hard fail, checked at enqueue). `womblex_jobs` gains a nullable `ingest_root` column (`JobSpec`/`Job` carry it); a worker refuses a claimed job whose `ingest_root` differs from its own, naming both roots, rather than failing per file. Job failures now record the exception type, message, and the worker's ingest root instead of a bare `repr(e)`. `enqueue --input-prefix` is now optional — the whole ingest root is the default scope. `docker-compose.yml` and the README document the bundled stack's `inbox/` (ingest) vs `runs/` (output) prefixes of the one `womblex` bucket.
+- **Ingest as a distinct store (library + CLI).** `--ingest` / `$WOMBLEX_INGEST_URI` on `womblex enqueue` and `womblex worker`, back-compatible (omitted ⇒ today's single-store behaviour). `store/remote.py` gains `store_root()` and `assert_disjoint_locations()` — the single enforcement point requiring the ingest location and the store's effective `runs/` output to be on disjoint paths (same bucket, different folders is fine; either containing the other is a hard fail, checked at enqueue). `womblex_jobs` gains a nullable `ingest_root` column (`JobSpec`/`Job` carry it); a worker refuses a claimed job whose `ingest_root` differs from its own, naming both roots, rather than failing per file. Job failures now record the exception type, message, and the worker's ingest root instead of a bare `repr(e)`. `enqueue --input-prefix` is now optional — the whole ingest root is the default scope. `docker-compose.yml` and the README document the bundled stack's `inbox/` (ingest) vs `runs/` (output) prefixes of the one `womblex` bucket.
 
 ## [0.5.7] - 2026-08-18
 Compose-only, additive. `docker-compose.yml` now serves two deployments from
