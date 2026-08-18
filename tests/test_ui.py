@@ -1323,7 +1323,8 @@ class TestExecuteApi:
         pytest.importorskip("fsspec")
         monkeypatch.setattr("womblex.cloud.queue.JobQueue", _FakeQueue)
         ingest_root = tmp_path / "inbox"
-        _seed_store_inputs(ingest_root, "", [f"doc-{i}.pdf" for i in range(5)])
+        _seed_store_inputs(ingest_root, "", [f"doc-{i}.pdf" for i in range(4)])
+        _seed_store_inputs(ingest_root, "2026-08", ["doc-4.pdf"])  # a nested key counts too
         client = TestClient(create_app(
             store_uri=str(tmp_path / "store"), ingest_uri=str(ingest_root),
             db_dsn="postgresql://x/y",
@@ -1382,6 +1383,22 @@ class TestIngestPreflight:
             "uri": None, "kind": None, "reachable": False,
             "document_count": 0, "sample": [], "error": "no ingest location configured",
         }
+
+    def test_nested_prefixes_are_counted(self, tmp_path: Path) -> None:
+        """Object stores have no folders: `inbox/2026-08/foo.pdf` is one key.
+        A listing that stops at the first level reports 0 documents ready for
+        an entirely normal upload layout — and, with no prefix field on any
+        screen, leaves the operator no way to reach them."""
+        pytest.importorskip("fsspec")
+        ingest_root = tmp_path / "inbox"
+        _seed_store_inputs(ingest_root, "", ["top.pdf"])
+        _seed_store_inputs(ingest_root, "2026-08/health", ["nested.pdf"])
+        client = TestClient(create_app(
+            store_uri=str(tmp_path / "store"), ingest_uri=str(ingest_root),
+        ))
+        body = client.get("/api/execute/ingest").json()
+        assert body["document_count"] == 2
+        assert sorted(body["sample"]) == ["2026-08/health/nested.pdf", "top.pdf"]
 
     def test_reachable_ingest_reports_count_and_sample(self, tmp_path: Path) -> None:
         pytest.importorskip("fsspec")

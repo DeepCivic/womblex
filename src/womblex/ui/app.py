@@ -62,18 +62,14 @@ def create_app(
     presets still serve, but ``POST /api/composer/presets`` refuses with 409.
 
     ``ingest_uri`` names where source documents arrive from (docs/ui-ingest-plan.md).
-    Omitted means no ingest is configured: the Execution Controls cannot
-    dispatch until one is set. Raises ``ValueError`` (via ``UISettings``) when
-    it is not disjoint from ``store_uri``'s effective ``runs/`` output.
+    Omitted, the Execution Controls cannot dispatch. Raises ``ValueError``
+    when it is not disjoint from ``store_uri``'s effective ``runs/`` output.
 
-    ``settings_dir`` is where an operator-saved ingest/output location
-    override lives (docs/ui-ingest-plan.md merge 3a). Stored on ``app.state``
-    exactly as given — the *pre-overlay* base — so
-    :func:`~womblex.ui.deps.get_settings` can apply the live saved override on
-    every request and pick up an edit with no restart. Omitted (no
-    ``--settings-dir`` / ``$WOMBLEX_UI_SETTINGS_DIR``) means locations are
-    read-only: the Resources Console's location cards disable editing and
-    explain the flag, exactly like preset saving without ``--presets-dir``.
+    ``settings_dir`` holds an operator-saved location override. Stored on
+    ``app.state`` as given — the *pre-overlay* base — so
+    :func:`~womblex.ui.deps.get_settings` can apply the live override per
+    request. Omitted, the location cards are read-only, exactly like preset
+    saving without ``--presets-dir``.
 
     ``spa_dir`` is mounted only if it exists — a bare ``womblex[ui]`` install
     with no SvelteKit build alongside it still serves the read API, just

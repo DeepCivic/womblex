@@ -17,8 +17,10 @@ from womblex.store.remote import (
     RemoteStore,
     assert_disjoint_locations,
     is_remote_uri,
+    same_location,
     storage_options_from_env,
     store_root,
+    validate_location_uri,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -105,6 +107,84 @@ def test_assert_disjoint_locations():
 
     # Different buckets never overlap, no matter the prefix.
     assert_disjoint_locations("s3://other-bucket/runs", "s3://womblex")
+
+
+def test_assert_disjoint_locations_honours_a_custom_output_prefix():
+    """`--output-prefix` moves where shards land, so the guard has to check
+    that prefix, not a hardcoded `runs/`."""
+    # Default prefix: inbox and runs/ are disjoint.
+    assert_disjoint_locations("s3://womblex/inbox", "s3://womblex")
+    # ...but shards directed *into* the inbox are exactly what the rule forbids.
+    with pytest.raises(ValueError):
+        assert_disjoint_locations(
+            "s3://womblex/inbox", "s3://womblex", runs_prefix="inbox/out",
+        )
+
+
+def test_validate_location_uri_rejects_the_typos_operators_actually_make():
+    """A hand-typed location that fsspec would silently read as a *relative
+    local path* is the failure the Resources Console has to catch on save."""
+    validate_location_uri("s3://womblex/inbox")
+    validate_location_uri("/data/inbox")
+    validate_location_uri("gs://bucket/inbox")
+
+    with pytest.raises(ValueError, match="s3://"):
+        validate_location_uri("s3:/womblex/inbox")  # one slash
+    with pytest.raises(ValueError, match="lowercase"):
+        validate_location_uri("S3://womblex/inbox")
+    with pytest.raises(ValueError, match="not one of"):
+        validate_location_uri("ftp://host/inbox")
+    with pytest.raises(ValueError, match="no bucket"):
+        validate_location_uri("s3://")
+    with pytest.raises(ValueError, match="empty"):
+        validate_location_uri("   ")
+
+
+def test_validate_location_uri_runs_before_any_network_lookup():
+    """An unsupported scheme is refused on the string, so validating an
+    operator-supplied URI never resolves a hostname."""
+    with pytest.raises(ValueError):
+        store_root("ftp://never-resolved.invalid/inbox")
+
+
+def test_same_location_ignores_spelling_that_opens_the_same_place():
+    assert same_location("s3://womblex/inbox", "s3://womblex/inbox/")
+    assert same_location("s3://womblex/inbox", "s3://womblex//inbox")
+    assert not same_location("s3://womblex/inbox", "s3://womblex/outbox")
+    assert not same_location("s3://womblex/inbox", "s3://other/inbox")
+
+
+def test_worker_ingest_root_comparison_is_normalised():
+    """An enqueue and a worker configured from different places (a flag here,
+    a compose env var there) differ by a trailing slash routinely — that must
+    not refuse every job."""
+    from womblex.cloud.worker import _same_ingest
+
+    assert _same_ingest("s3://womblex/inbox", "s3://womblex/inbox/")
+    assert not _same_ingest("s3://womblex/inbox", "s3://wrong/inbox")
+    # An unparseable root falls back to an exact match; the refusal path
+    # itself must never raise.
+    assert not _same_ingest("s3:/broken", "s3://womblex/inbox")
+    assert _same_ingest("s3:/broken", "s3:/broken")
+
+
+def test_list_files_recursive_reaches_nested_prefixes(tmp_path):
+    """Object stores have a flat keyspace: `inbox/2026-08/foo.pdf` is one key,
+    not a folder. A non-recursive listing of the ingest root reports zero
+    documents for a perfectly normal upload layout."""
+    store = RemoteStore.from_uri(str(tmp_path / "inbox"))
+    store.upload_file(_touch(tmp_path / "top.pdf"), "top.pdf")
+    store.upload_file(_touch(tmp_path / "nested.pdf"), "2026-08/agency/nested.pdf")
+
+    assert store.list_files("", "*") == ["2026-08", "top.pdf"]
+    assert sorted(store.list_files("", "*", recursive=True)) == [
+        "2026-08", "2026-08/agency", "2026-08/agency/nested.pdf", "top.pdf",
+    ]
+
+
+def _touch(path: Path) -> Path:
+    path.write_text("x")
+    return path
 
 
 def test_remote_store_file_roundtrip(tmp_path):
@@ -360,11 +440,34 @@ def test_worker_refuses_a_job_whose_ingest_root_mismatches(queue, tmp_path):
     )
     assert completed == 0
 
-    stats = q.stats(run_id)
-    assert stats.get("failed") == 1 or stats.get("pending") == 1  # returned to the queue
+    # Released, not failed: the batch is fine, this worker is the wrong one
+    # for it, so it waits for a correctly-wired one with its retries intact.
+    assert q.stats(run_id) == {"pending": 1}
     rows = q.list_jobs(run_id)
+    assert rows[0].attempts == 0
     assert "s3://right-bucket/inbox" in rows[0].error
     assert "s3://wrong-bucket/inbox" in rows[0].error
+
+
+def test_release_returns_a_job_without_consuming_an_attempt(queue):
+    """`fail` burns the retry budget; `release` is for a refusal that says
+    nothing about the job itself."""
+    from womblex.cloud.queue import JobSpec
+
+    q, run_id = queue
+    q.enqueue(run_id, [
+        JobSpec(batch_num=1, input_keys=["a.pdf"], shard_prefix=f"runs/{run_id}/documents"),
+    ])
+    job = q.claim("w1", run_id)
+    assert job is not None and job.attempts == 1
+
+    q.release(job.id, "wrong worker")
+    assert q.stats(run_id) == {"pending": 1}
+    assert q.list_jobs(run_id)[0].attempts == 0
+
+    # Still claimable, with the full budget.
+    again = q.claim("w2", run_id)
+    assert again is not None and again.attempts == 1
 
 
 def test_worker_ingest_root_none_falls_back_to_the_store(queue, tmp_path):

@@ -292,6 +292,26 @@ class JobQueue:
                 (error[:2000], job_id),
             )
 
+    def release(self, job_id: int, error: str) -> None:
+        """Return a claimed job to ``pending`` without consuming an attempt.
+
+        For a refusal that says nothing about the job — a worker wired to the
+        wrong ingest root — where :meth:`fail` would burn the retry budget on
+        a batch a correctly-wired worker could still run. The reason is still
+        recorded, so the row reads as pending-with-a-reason on the dashboard
+        rather than silently stalled.
+        """
+        with self.conn.transaction():
+            self.conn.execute(
+                """
+                UPDATE womblex_jobs
+                SET status='pending', attempts = GREATEST(attempts - 1, 0),
+                    locked_by=NULL, locked_at=NULL, error=%s, updated_at=now()
+                WHERE id=%s
+                """,
+                (error[:2000], job_id),
+            )
+
     def requeue_stale(self, older_than_seconds: float) -> int:
         """Return ``running`` jobs locked longer than the threshold to ``pending``.
 

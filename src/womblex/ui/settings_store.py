@@ -1,18 +1,14 @@
 """Operator-saved ingest/output location override (docs/ui-ingest-plan.md merge 3a).
 
-Env and compose values are *defaults*, not the only source: the Resources
-Console can save a location the deployment did not set, or update one it did,
-without a restart. The override lives in one small JSON file —
-``locations.json`` — in a writable settings dir the operator names
-(``--settings-dir`` / ``$WOMBLEX_UI_SETTINGS_DIR``). It cannot live in the
-output store, because it is the file that *names* the output store.
+Env and compose values are *defaults*: the Resources Console can add or
+update a location without a restart, persisted to one ``locations.json`` in a
+writable settings dir (``--settings-dir`` / ``$WOMBLEX_UI_SETTINGS_DIR``). It
+cannot live in the output store, because it is the file that *names* the
+output store.
 
-Same self-contained shape as ``ui/presets.py``'s save-parse-validate file
-helpers: validate on write, tolerate a missing or corrupt file on read (a
-hand-edited or partially-written file must not take the console down — it
-degrades to "no override", not a crash), refuse anything but the two known
-keys. ``ui/deps.py`` owns applying the parsed override onto ``UISettings``;
-this module owns only the file's shape.
+Same self-contained shape as ``ui/presets.py``'s file helpers: validate on
+write, tolerate a missing or corrupt file on read. ``ui/deps.py`` owns
+applying the parsed override; this module owns only the file's shape.
 """
 from __future__ import annotations
 
@@ -55,11 +51,9 @@ def locations_path(settings_dir: Path) -> Path:
 def read_saved_locations(settings_dir: Path) -> SavedLocations:
     """The saved override, or an empty one if the file is absent or will not parse.
 
-    Skip-and-continue, not fatal (like ``presets.parse_saved_preset``): a
-    corrupt or hand-edited file must not take the console's settings
-    resolution down. Only the two known keys are read; anything else in the
-    file is ignored rather than rejected, so a forward-compatible extra key
-    does not itself become a fault here.
+    Skip-and-continue, not fatal: a corrupt or hand-edited file must not take
+    the console's settings resolution down. Only the two known keys are read;
+    anything else is ignored, so a forward-compatible extra key is not a fault.
     """
     path = locations_path(settings_dir)
     try:

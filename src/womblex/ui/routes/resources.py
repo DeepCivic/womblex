@@ -7,12 +7,10 @@ separate ``POST /test/*`` action, matching the plan's "test actions" and
 letting a slow or dead connection block only the card the operator clicked,
 not the page load.
 
-``PUT /locations`` is the one write here (docs/ui-ingest-plan.md merge 3a):
-save, update or clear the operator override for the ingest/output cards.
-Guarded the same way the Execution Controls' dispatch is — ``--audit-only``
-refuses with 403, no ``--settings-dir`` refuses with 409 — since editing
-where documents come from and shards land is dispatch-adjacent, not a pure
-read.
+``PUT /locations`` is the one write here: save, update or clear the operator
+override for the ingest/output cards. Guarded like dispatch is — 403 when
+``--audit-only``, 409 with no ``--settings-dir`` — since editing where
+documents come from and shards land is dispatch-adjacent, not a pure read.
 """
 from __future__ import annotations
 
@@ -59,11 +57,9 @@ def post_test_queue(
 class SaveLocationsRequest(BaseModel):
     """The location-edit form — a full replace of the saved override.
 
-    Each field is either a new location or ``null``, meaning "reset this one
-    to its flag/env default". Submitting one field as ``null`` while the
-    other carries a value still replaces the *whole* saved override, matching
-    ``PUT`` — a caller wanting to keep a field's current override must
-    resubmit it.
+    Each field is either a new location or ``null`` ("reset to the flag/env
+    default"). A ``PUT`` replaces the *whole* override, so a caller keeping a
+    field must resubmit it.
     """
 
     ingest_uri: str | None = None
@@ -77,11 +73,9 @@ def put_locations(
 ) -> dict:
     """Save / update / clear the ingest and output location override.
 
-    403 when this console is audit-only — editing locations is
-    dispatch-adjacent, guarded the same as the Execution Controls' own write
-    action. 409 when no ``--settings-dir`` (or ``$WOMBLEX_UI_SETTINGS_DIR``)
-    is configured — there is nowhere to write the override. 400 on an
-    overlapping ingest/output pair or a location `RemoteStore` cannot parse.
+    403 when the console is audit-only, 409 when no ``--settings-dir`` (or
+    ``$WOMBLEX_UI_SETTINGS_DIR``) is configured, 400 on an overlapping
+    ingest/output pair or a location ``RemoteStore`` cannot open.
     """
     if base.audit_only:
         raise HTTPException(

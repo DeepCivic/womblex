@@ -511,3 +511,48 @@ class TestEditableLocations:
         assert body["ingest"]["uri"] == str(tmp_path / "inbox")
         assert body["ingest_test"]["reachable"] is True
         assert body["store_test"]["reachable"] is True
+
+    def test_put_locations_400_on_a_uri_no_store_can_open(self, tmp_path: Path) -> None:
+        """`s3:/bucket` (one slash) parses as a *relative local path*, so
+        without an explicit check it saves cleanly and then quietly writes
+        documents into a folder named `s3:`."""
+        pytest.importorskip("fsspec")
+        settings_dir = tmp_path / "settings"
+        client = TestClient(create_app(
+            store_uri=str(tmp_path / "store"), settings_dir=settings_dir,
+        ))
+        for bad in ("s3:/womblex/inbox", "S3://womblex/inbox", "ftp://host/inbox", "s3://"):
+            resp = client.put("/api/resources/locations", json={"ingest_uri": bad})
+            assert resp.status_code == 400, bad
+        assert read_saved_locations(settings_dir).ingest_uri is None
+
+    def test_ingest_inside_a_local_output_root_is_refused(self, tmp_path: Path) -> None:
+        """`output_root` mode has no `runs/` prefix of its own — the tree *is*
+        the output — so an ingest nested in it overlaps just the same."""
+        pytest.importorskip("fsspec")
+        root = tmp_path / "root"
+        settings_dir = tmp_path / "settings"
+        client = TestClient(create_app(output_root=root, settings_dir=settings_dir))
+        resp = client.put("/api/resources/locations", json={"ingest_uri": str(root / "inbox")})
+        assert resp.status_code == 400
+        assert read_saved_locations(settings_dir).ingest_uri is None
+
+    def test_a_saved_override_that_stops_validating_degrades_to_defaults(
+        self, tmp_path: Path,
+    ) -> None:
+        """The override file is operator-editable and outlives the flags it was
+        saved against. One that no longer validates must fall back to the
+        flag/env defaults, not 500 every request until someone reaches the
+        volume — the same skip-and-continue an unparseable file already gets.
+        """
+        pytest.importorskip("fsspec")
+        store = tmp_path / "store"
+        settings_dir = tmp_path / "settings"
+        client = TestClient(create_app(
+            store_uri=str(store), settings_dir=settings_dir, ingest_uri=str(tmp_path / "inbox"),
+        ))
+        # Written behind the API, as a hand-edit or a changed --store would be.
+        write_saved_locations(settings_dir, SavedLocations(ingest_uri=str(store / "runs")))
+        resp = client.get("/api/resources")
+        assert resp.status_code == 200
+        assert resp.json()["ingest"]["uri"] == str(tmp_path / "inbox")

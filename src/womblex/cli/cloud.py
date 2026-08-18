@@ -92,13 +92,7 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
     if not store_uri:
         logger.error("No store URI (pass --store or set WOMBLEX_STORE_URI)")
         return 1
-    if ingest_uri:
-        try:
-            assert_disjoint_locations(ingest_uri, store_uri)
-        except ValueError as e:
-            logger.error(str(e))
-            return 1
-    elif not args.input_prefix:
+    if not ingest_uri and not args.input_prefix:
         logger.error(
             "No source documents location (pass --ingest, or --input-prefix under --store)"
         )
@@ -122,9 +116,19 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
     output_prefix = (args.output_prefix or f"runs/{run_id}").strip("/")
     shard_prefix = f"{output_prefix}/documents"
 
+    # Checked against the prefix shards actually land under, not a hardcoded
+    # `runs/` — `--output-prefix inbox/out` alongside `--ingest .../inbox`
+    # would otherwise pass the guard and then write shards into the ingest.
+    if ingest_uri:
+        try:
+            assert_disjoint_locations(ingest_uri, store_uri, runs_prefix=output_prefix)
+        except ValueError as e:
+            logger.error(str(e))
+            return 1
+
     ingest_store = RemoteStore.from_uri(ingest_uri) if ingest_uri else RemoteStore.from_uri(store_uri)
     input_prefix = args.input_prefix or ""
-    all_keys = ingest_store.list_files(input_prefix, "*")
+    all_keys = ingest_store.list_files(input_prefix, "*", recursive=True)
     keys = sorted(k for k in all_keys if Path(k).suffix.lower() in SUPPORTED_EXTENSIONS)
     if not keys:
         logger.error("No supported documents under %s/%s", ingest_uri or store_uri, input_prefix)

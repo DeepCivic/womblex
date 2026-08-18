@@ -34,7 +34,12 @@ from typing import cast
 from urllib.parse import urlsplit, urlunsplit
 
 from womblex.config import EmbeddingConfig, EnrichmentConfig
-from womblex.store.remote import assert_disjoint_locations, is_remote_uri, storage_options_from_env
+from womblex.store.remote import (
+    assert_disjoint_locations,
+    is_remote_uri,
+    storage_options_from_env,
+    validate_location_uri,
+)
 from womblex.ui import dashboard
 from womblex.ui.deps import UISettings, apply_saved_locations
 from womblex.ui.settings_store import SavedLocations, read_saved_locations, write_saved_locations
@@ -121,12 +126,11 @@ def _store_options_summary(uri: str) -> dict:
 
 
 def _location_source(configured_uri: str | None, saved_uri: str | None, env_uri: str | None) -> str:
-    """Where an effective location value came from: saved override, env, or flag.
+    """Where an effective location came from: saved override, env, or flag.
 
-    Checked in resolution order (docs/ui-ingest-plan.md §3: flag < env <
-    saved) so a saved value that happens to match the env default still
-    reports as ``"saved"`` — it is the highest-precedence source that could
-    have produced this value, and the one an edit would actually update.
+    Checked highest-precedence first (flag < env < saved), so a saved value
+    matching the env default still reports ``"saved"`` — that is the source
+    an edit would update.
     """
     if configured_uri is None:
         return "flag"
@@ -158,10 +162,9 @@ def _store_source(settings: UISettings) -> str:
 def get_store_card(settings: UISettings) -> dict:
     """Where runs are read from, and how (docs/ui-plan.md §3).
 
-    ``editable`` reflects whether this deployment has a writable settings
-    dir at all (docs/ui-ingest-plan.md merge 3a) — true in both branches,
-    since saving a location is what switches a local deployment into
-    ``store_uri`` mode in the first place.
+    ``editable`` is just "this deployment has a writable settings dir" — true
+    in both branches, since saving a location is what switches a local
+    deployment into ``store_uri`` mode.
     """
     editable = settings.settings_writable
     if settings.is_remote:
@@ -312,28 +315,29 @@ def test_queue(
 
 
 def save_locations(base: UISettings, *, ingest_uri: str | None, store_uri: str | None) -> dict:
-    """Persist an ingest/output override and return the refreshed cards (docs/ui-ingest-plan.md merge 3a).
+    """Persist an ingest/output override and return the refreshed cards.
 
     *base* is the pre-overlay settings (:func:`~womblex.ui.deps.get_base_settings`),
-    not the request's resolved ones — a cleared field (``None``) falls back to
-    *this*, the flag/env default, never to whatever was previously saved. This
-    is a full replace (``PUT``), not a merge: *ingest_uri*/*store_uri* become
-    exactly the new saved override, so a caller wanting to keep one field
-    unchanged must resubmit its current value.
+    so a cleared field (``None``) falls back to the flag/env default rather
+    than to whatever was previously saved. A full replace (``PUT``), not a
+    merge — a caller keeping one field must resubmit its current value.
 
-    Disjointness is validated against the pair that will actually be
-    effective after this save — the same
-    :func:`~womblex.store.remote.assert_disjoint_locations` check
-    ``UISettings`` runs at construction — so an overlapping pair is refused
-    before anything is written, naming both locations. Reachability is
-    reported alongside the saved cards, not required: an object-store bucket
-    that does not exist yet, or a local folder not yet created, is a normal
-    thing to save — the operator may be naming it ahead of provisioning it.
+    Raises ``ValueError`` (→ 400) on a location a store cannot open or on a
+    pair that would overlap once effective. Reachability is *reported*, not
+    required: naming a bucket ahead of provisioning it is normal.
     """
+    for value in (ingest_uri, store_uri):
+        if value is not None:
+            validate_location_uri(value)
+
     effective_ingest = ingest_uri or base.ingest_uri
     effective_store = store_uri or base.store_uri
     if effective_ingest and effective_store:
         assert_disjoint_locations(effective_ingest, effective_store)
+    elif effective_ingest and base.output_root is not None:
+        # Legacy output_root mode has no `runs/` prefix of its own, so the
+        # tree itself is the output — an ingest inside it still overlaps.
+        assert_disjoint_locations(effective_ingest, str(base.output_root), runs_prefix="")
 
     settings_dir = cast(Path, base.settings_dir)
     saved = SavedLocations(ingest_uri=ingest_uri, store_uri=store_uri)

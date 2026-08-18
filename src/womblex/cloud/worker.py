@@ -20,13 +20,30 @@ from pathlib import Path
 from womblex.batch import process_batch
 from womblex.cloud.queue import Job, JobQueue
 from womblex.config import WomblexConfig
-from womblex.store.remote import RemoteStore
+from womblex.store.remote import RemoteStore, same_location
 
 logger = logging.getLogger(__name__)
 
 
 def default_worker_id() -> str:
     return f"{socket.gethostname()}:{os.getpid()}"
+
+
+def _same_ingest(a: str, b: str) -> bool:
+    """Whether two ingest roots name the same location.
+
+    Normalised, not compared as strings: an enqueue and a worker configured
+    from different places (a flag here, a compose env var there) routinely
+    differ by a trailing slash while naming the same bucket and prefix. An
+    unparseable root on either side falls back to an exact match rather than
+    raising — the refusal path must not itself throw.
+    """
+    if a == b:
+        return True
+    try:
+        return same_location(a, b)
+    except (ValueError, ImportError):
+        return False
 
 
 def _process_job(job: Job, config: WomblexConfig, store: RemoteStore, ingest: RemoteStore) -> None:
@@ -101,20 +118,29 @@ def run_worker(
                 time.sleep(poll_interval)
                 continue
 
-            idle_since = None
             logger.info("worker %s claimed job %d (batch %d, attempt %d)",
                         worker_id, job.id, job.batch_num, job.attempts)
-            if job.ingest_root and job.ingest_root != worker_ingest_root:
+            if job.ingest_root and not _same_ingest(job.ingest_root, worker_ingest_root):
                 error = (
                     f"ingest root mismatch: job enqueued against "
                     f"{job.ingest_root!r}, this worker reads from "
                     f"{worker_ingest_root!r}"
                 )
                 logger.error("job %d (batch %d) refused: %s", job.id, job.batch_num, error)
-                queue.fail(job.id, error)
+                # Released, not failed: the batch is fine, this worker is the
+                # wrong one for it. Failing here would burn the retry budget —
+                # and, since the row returns to pending, re-claim it in a tight
+                # loop until the job died. A refusal is "no work for me", so
+                # it backs off and ages towards idle_timeout like an empty
+                # claim rather than holding a mis-wired worker up forever.
+                queue.release(job.id, error)
                 if once:
                     break
+                idle_since = idle_since or time.monotonic()
+                time.sleep(poll_interval)
                 continue
+
+            idle_since = None
             try:
                 _process_job(job, config, store, ingest)
                 queue.complete(job.id)

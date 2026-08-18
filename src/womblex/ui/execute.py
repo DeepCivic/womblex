@@ -191,18 +191,13 @@ def enqueue_extraction(
 ) -> EnqueueResult:
     """Plan an extraction run into the queue — the "configure-and-run" action.
 
-    The same three steps ``womblex enqueue`` does (``cli/cloud.cmd_enqueue``),
-    reached through the sidecar's own configured ingest location: list
-    supported documents under *input_prefix* (the whole ingest root when
-    omitted — docs/ui-ingest-plan.md §2 "no prefix field on any screen"),
-    split them into ``batch_size`` batches, and write one idempotent queue
-    row each, stamped with the ingest root so a worker reading from a
-    different location refuses the job instead of failing per file.
+    The same three steps ``womblex enqueue`` does, against the configured
+    ingest location: list supported documents under *input_prefix* (the whole
+    ingest root when omitted), split them into ``batch_size`` batches, and
+    write one idempotent queue row each, stamped with the ingest root.
 
-    Raises :class:`ExecutionDisabled` when the console cannot dispatch, and
-    ``ValueError`` on bad input (no documents under the prefix, a batch size
-    below one, an unsafe run_id) — the route maps the former to 403/409 and
-    the latter to 400.
+    Raises :class:`ExecutionDisabled` when the console cannot dispatch (the
+    route maps it to 403/409) and ``ValueError`` on bad input (→ 400).
     """
     _guard(settings)
     if batch_size < 1:
@@ -217,7 +212,7 @@ def enqueue_extraction(
     ingest_uri = cast(str, settings.ingest_uri)
     ingest_store = RemoteStore.from_uri(ingest_uri)
     prefix = input_prefix or ""
-    all_keys = ingest_store.list_files(prefix, "*")
+    all_keys = ingest_store.list_files(prefix, "*", recursive=True)
     keys = sorted(k for k in all_keys if Path(k).suffix.lower() in SUPPORTED_EXTENSIONS)
     if not keys:
         raise ValueError(f"no supported documents under {ingest_uri}/{prefix}".rstrip("/"))
@@ -255,8 +250,9 @@ def enqueue_extraction(
 def ingest_preflight(settings: UISettings) -> dict:
     """Reachability + document count of the configured ingest location.
 
-    Feeds the composer's "N documents ready" line — the same ``list_files`` +
-    ``SUPPORTED_EXTENSIONS`` filter :func:`enqueue_extraction` uses.
+    Feeds the composer's "N documents ready" line, using the same recursive
+    listing and ``SUPPORTED_EXTENSIONS`` filter the enqueue does — so the
+    count shown is the count that would be enqueued.
     """
     if not settings.ingest_uri:
         return {
@@ -269,7 +265,7 @@ def ingest_preflight(settings: UISettings) -> dict:
     uri = settings.ingest_uri
     kind = "remote" if is_remote_uri(uri) else "local"
     try:
-        all_keys = RemoteStore.from_uri(uri).list_files("", "*")
+        all_keys = RemoteStore.from_uri(uri).list_files("", "*", recursive=True)
     except Exception as e:
         logger.warning("execute: ingest unreachable: %s", e)
         return {
