@@ -9,12 +9,18 @@ variable ``womblex-cloud`` already reads.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import cast
 
 from fastapi import Request
 
 from womblex.store.remote import assert_disjoint_locations
+from womblex.ui.settings_store import SavedLocations, locations_path, read_saved_locations
+
+#: Sentinel for "no mtime checked yet" — distinct from ``None`` (the file is
+#: absent) so the very first request always rebuilds the overlay once.
+_UNSET = object()
 
 
 @dataclass(frozen=True)
@@ -50,6 +56,14 @@ class UISettings:
     everything read-only still serves. When both are set they must be
     disjoint of the output store's effective ``runs/`` prefix — enforced at
     construction so a misconfigured deployment fails at start-up.
+
+    ``settings_dir`` is where an operator-saved ingest/output location
+    override lives (docs/ui-ingest-plan.md merge 3a) — one ``locations.json``,
+    following the ``presets_dir`` pattern exactly. ``None`` disables saving:
+    the Resources Console's location cards stay read-only and explain the
+    flag, the same degradation preset saving already has. Unlike
+    ``presets_dir``, there is no remote-mode fallback — the override file is
+    what *names* the store, so it cannot live inside it, in either mode.
     """
 
     output_root: Path | None
@@ -59,6 +73,7 @@ class UISettings:
     db_dsn: str | None = None
     presets_dir: Path | None = None
     ingest_uri: str | None = None
+    settings_dir: Path | None = None
 
     def __post_init__(self) -> None:
         if bool(self.output_root) == bool(self.store_uri):
@@ -80,6 +95,36 @@ class UISettings:
         """
         return self.is_remote or self.presets_dir is not None
 
+    @property
+    def settings_writable(self) -> bool:
+        """Whether this deployment can save an ingest/output location override.
+
+        Needs a configured ``settings_dir`` in *either* mode — remote or
+        local — since the override is what names the store itself.
+        """
+        return self.settings_dir is not None
+
+
+def apply_saved_locations(base: UISettings, saved: SavedLocations) -> UISettings:
+    """*base* with a saved ingest/output override layered on top.
+
+    A saved ``store_uri`` switches the deployment out of legacy
+    ``output_root`` mode entirely — the two stay mutually exclusive, so
+    setting one clears the other, exactly as building a fresh ``UISettings``
+    with ``--store`` instead of ``--output-root`` would. Going through
+    ``dataclasses.replace`` re-runs ``__post_init__``, which is what
+    revalidates disjointness against the *effective* pair, not just the
+    flag/env values — an overlapping saved override raises here, the same
+    ``ValueError`` a bad flag/env pair would.
+    """
+    output_root = base.output_root
+    store_uri = base.store_uri
+    if saved.store_uri:
+        store_uri = saved.store_uri
+        output_root = None
+    ingest_uri = saved.ingest_uri or base.ingest_uri
+    return replace(base, output_root=output_root, store_uri=store_uri, ingest_uri=ingest_uri)
+
 
 def resolve_settings(
     output_root: Path | None,
@@ -90,6 +135,7 @@ def resolve_settings(
     db_dsn: str | None = None,
     presets_dir: Path | None = None,
     ingest_uri: str | None = None,
+    settings_dir: Path | None = None,
 ) -> UISettings:
     """Resolve settings from explicit arguments, falling back to env vars.
 
@@ -113,6 +159,18 @@ def resolve_settings(
     variable ``womblex enqueue``/``worker`` read. Absent means no ingest is
     configured. When resolved alongside a store, ``UISettings`` itself checks
     the two are disjoint and raises ``ValueError`` naming both.
+
+    ``$WOMBLEX_UI_SETTINGS_DIR`` is the env fallback for ``settings_dir`` —
+    the writable directory an operator-saved ingest/output override lives in
+    (docs/ui-ingest-plan.md merge 3a). When one resolves, the saved override
+    is applied and validated here too, so a bad saved override fails at
+    start-up exactly like a bad flag/env pair — but the object this function
+    returns is still the *pre-overlay* base. The live override is applied
+    fresh on every request instead (:func:`get_settings`), which is what
+    lets an edit through the Resources Console take effect with no restart
+    and makes "reset to default" exactly deleting the override file: baking
+    the overlay into this return value would freeze it for the process's
+    lifetime instead.
     """
     root = output_root
     if root is None and "WOMBLEX_UI_OUTPUT_ROOT" in os.environ:
@@ -133,13 +191,54 @@ def resolve_settings(
     if presets is None and "WOMBLEX_UI_PRESETS_DIR" in os.environ:
         presets = Path(os.environ["WOMBLEX_UI_PRESETS_DIR"])
     ingest = ingest_uri or os.environ.get("WOMBLEX_INGEST_URI")
-    return UISettings(
+    settings = settings_dir
+    if settings is None and "WOMBLEX_UI_SETTINGS_DIR" in os.environ:
+        settings = Path(os.environ["WOMBLEX_UI_SETTINGS_DIR"])
+    base = UISettings(
         output_root=root, store_uri=store, audit_only=audit_only,
         feedback_dir=fb_dir, db_dsn=dsn, presets_dir=presets, ingest_uri=ingest,
+        settings_dir=settings,
     )
+    if settings is not None:
+        apply_saved_locations(base, read_saved_locations(settings))  # validate; result discarded
+    return base
 
 
 def get_settings(request: Request) -> UISettings:
-    """FastAPI dependency: the app-wide settings resolved at startup."""
+    """FastAPI dependency: this deployment's settings, re-resolved per request.
+
+    ``app.state.settings`` holds the *base* — flags + env, no saved override
+    — fixed for the process's lifetime (see :func:`get_base_settings`). When
+    a settings dir is configured, the override file's mtime is checked (one
+    cheap ``stat()``) and the overlay only rebuilt when it has changed, so an
+    edit made through the Resources Console takes effect on the very next
+    request with no restart, at the cost of one syscall on every other
+    request. Absent a settings dir there is nothing to overlay, so the base
+    settings serve untouched.
+    """
+    base: UISettings = request.app.state.settings
+    if base.settings_dir is None:
+        return base
+    state = request.app.state
+    path = locations_path(base.settings_dir)
+    try:
+        mtime: float | None = path.stat().st_mtime
+    except OSError:
+        mtime = None
+    if getattr(state, "_locations_mtime", _UNSET) != mtime:
+        state._resolved_settings = apply_saved_locations(base, read_saved_locations(base.settings_dir))
+        state._locations_mtime = mtime
+    return cast(UISettings, state._resolved_settings)
+
+
+def get_base_settings(request: Request) -> UISettings:
+    """FastAPI dependency: the flags/env settings this process started with.
+
+    No saved override applied, unlike :func:`get_settings` — this is the
+    fallback a cleared location resets *to*, and the object
+    ``resources.save_locations`` validates a new override against. Every
+    other route wants the effective settings (:func:`get_settings`); only the
+    location-save route wants the pre-overlay base.
+    """
     settings: UISettings = request.app.state.settings
     return settings

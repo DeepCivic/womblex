@@ -55,6 +55,13 @@ def _register_ui(p: argparse.ArgumentParser) -> None:
              "audit but not dispatch.",
     )
     p.add_argument(
+        "--settings-dir", type=Path, default=None,
+        help="Writable dir an operator-saved ingest/output location override "
+             "lives in (or $WOMBLEX_UI_SETTINGS_DIR). Without one, the "
+             "Resources Console's location cards are read-only and explain "
+             "the flag.",
+    )
+    p.add_argument(
         "--audit-only", action="store_true",
         help="Disable the Execution Controls (docs/ui-plan.md merge 11) — a pure "
              "auditing console that can configure and inspect but not dispatch. "
@@ -79,7 +86,7 @@ def cmd_ui(args: argparse.Namespace) -> int:
             args.output_root, args.store,
             audit_only=args.audit_only, feedback_dir=args.feedback_dir,
             db_dsn=args.dsn, presets_dir=args.presets_dir,
-            ingest_uri=args.ingest,
+            ingest_uri=args.ingest, settings_dir=args.settings_dir,
         )
     except ValueError as e:
         logger.error("%s", e)
@@ -93,6 +100,7 @@ def cmd_ui(args: argparse.Namespace) -> int:
         db_dsn=settings.db_dsn,
         presets_dir=settings.presets_dir,
         ingest_uri=settings.ingest_uri,
+        settings_dir=settings.settings_dir,
     )
     source = settings.store_uri or settings.output_root
     logger.info("womblex ui: serving %s on %s:%d", source, args.host, args.port)

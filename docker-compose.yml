@@ -245,13 +245,21 @@ services:
       createbuckets:
         condition: service_completed_successfully
         required: false
-    environment: *cloud-env
+    environment:
+      <<: *cloud-env
+      # Where an operator-saved ingest/output override lives (docs/ui-ingest-plan.md
+      # merge 3a) — its own writable mount, since the override file is what
+      # *names* the store and so cannot live inside it.
+      WOMBLEX_UI_SETTINGS_DIR: /settings
     ports:
       - "8080:8080"
     read_only: true
     tmpfs:
       - /tmp
+    volumes:
+      - ui-settings:/settings
 
 volumes:
   pgdata:
   miniodata:
+  ui-settings:

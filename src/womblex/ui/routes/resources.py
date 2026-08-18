@@ -6,13 +6,21 @@ credentials only, no network call. Each card's live reachability check is a
 separate ``POST /test/*`` action, matching the plan's "test actions" and
 letting a slow or dead connection block only the card the operator clicked,
 not the page load.
+
+``PUT /locations`` is the one write here (docs/ui-ingest-plan.md merge 3a):
+save, update or clear the operator override for the ingest/output cards.
+Guarded the same way the Execution Controls' dispatch is — ``--audit-only``
+refuses with 403, no ``--settings-dir`` refuses with 409 — since editing
+where documents come from and shards land is dispatch-adjacent, not a pure
+read.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 from womblex.ui import dashboard, resources
-from womblex.ui.deps import UISettings, get_settings
+from womblex.ui.deps import UISettings, get_base_settings, get_settings
 
 router = APIRouter(prefix="/api/resources", tags=["resources"])
 
@@ -46,3 +54,47 @@ def post_test_queue(
     return resources.test_queue(
         settings, stale_after=stale_after, window_seconds=window_seconds, job_limit=job_limit,
     )
+
+
+class SaveLocationsRequest(BaseModel):
+    """The location-edit form — a full replace of the saved override.
+
+    Each field is either a new location or ``null``, meaning "reset this one
+    to its flag/env default". Submitting one field as ``null`` while the
+    other carries a value still replaces the *whole* saved override, matching
+    ``PUT`` — a caller wanting to keep a field's current override must
+    resubmit it.
+    """
+
+    ingest_uri: str | None = None
+    store_uri: str | None = None
+
+
+@router.put("/locations")
+def put_locations(
+    body: SaveLocationsRequest,
+    base: UISettings = Depends(get_base_settings),  # noqa: B008
+) -> dict:
+    """Save / update / clear the ingest and output location override.
+
+    403 when this console is audit-only — editing locations is
+    dispatch-adjacent, guarded the same as the Execution Controls' own write
+    action. 409 when no ``--settings-dir`` (or ``$WOMBLEX_UI_SETTINGS_DIR``)
+    is configured — there is nowhere to write the override. 400 on an
+    overlapping ingest/output pair or a location `RemoteStore` cannot parse.
+    """
+    if base.audit_only:
+        raise HTTPException(
+            status_code=403,
+            detail="This console is audit-only. Restart it without --audit-only to edit locations.",
+        )
+    if not base.settings_writable:
+        raise HTTPException(
+            status_code=409,
+            detail="This console has no settings dir configured; location edits are "
+                   "disabled. Set --settings-dir (or $WOMBLEX_UI_SETTINGS_DIR) to edit them.",
+        )
+    try:
+        return resources.save_locations(base, ingest_uri=body.ingest_uri, store_uri=body.store_uri)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e

@@ -34,9 +34,10 @@ from typing import cast
 from urllib.parse import urlsplit, urlunsplit
 
 from womblex.config import EmbeddingConfig, EnrichmentConfig
-from womblex.store.remote import is_remote_uri, storage_options_from_env
+from womblex.store.remote import assert_disjoint_locations, is_remote_uri, storage_options_from_env
 from womblex.ui import dashboard
-from womblex.ui.deps import UISettings
+from womblex.ui.deps import UISettings, apply_saved_locations
+from womblex.ui.settings_store import SavedLocations, read_saved_locations, write_saved_locations
 from womblex.utils.isaacus_client import (
     API_KEY_ENV,
     endpoints_from_env,
@@ -119,8 +120,50 @@ def _store_options_summary(uri: str) -> dict:
     }
 
 
+def _location_source(configured_uri: str | None, saved_uri: str | None, env_uri: str | None) -> str:
+    """Where an effective location value came from: saved override, env, or flag.
+
+    Checked in resolution order (docs/ui-ingest-plan.md §3: flag < env <
+    saved) so a saved value that happens to match the env default still
+    reports as ``"saved"`` — it is the highest-precedence source that could
+    have produced this value, and the one an edit would actually update.
+    """
+    if configured_uri is None:
+        return "flag"
+    if saved_uri is not None and saved_uri == configured_uri:
+        return "saved"
+    if env_uri is not None and env_uri == configured_uri:
+        return "env"
+    return "flag"
+
+
+def _ingest_source(settings: UISettings) -> str:
+    saved = read_saved_locations(settings.settings_dir).ingest_uri if settings.settings_dir else None
+    return _location_source(settings.ingest_uri, saved, os.environ.get("WOMBLEX_INGEST_URI"))
+
+
+def _store_source(settings: UISettings) -> str:
+    """Where the effective output location came from.
+
+    ``output_root`` mode (the legacy local read-only tree) has no override
+    path at all — it can only come from ``--output-root`` /
+    ``$WOMBLEX_UI_OUTPUT_ROOT`` — so it is always reported as ``"flag"``.
+    """
+    if not settings.is_remote:
+        return "flag"
+    saved = read_saved_locations(settings.settings_dir).store_uri if settings.settings_dir else None
+    return _location_source(settings.store_uri, saved, os.environ.get("WOMBLEX_STORE_URI"))
+
+
 def get_store_card(settings: UISettings) -> dict:
-    """Where runs are read from, and how (docs/ui-plan.md §3)."""
+    """Where runs are read from, and how (docs/ui-plan.md §3).
+
+    ``editable`` reflects whether this deployment has a writable settings
+    dir at all (docs/ui-ingest-plan.md merge 3a) — true in both branches,
+    since saving a location is what switches a local deployment into
+    ``store_uri`` mode in the first place.
+    """
+    editable = settings.settings_writable
     if settings.is_remote:
         uri = cast(str, settings.store_uri)
         return {
@@ -128,12 +171,16 @@ def get_store_card(settings: UISettings) -> dict:
             "uri": uri,
             "is_object_store": is_remote_uri(uri),
             "options": _store_options_summary(uri),
+            "source": _store_source(settings),
+            "editable": editable,
         }
     return {
         "kind": "local",
         "uri": str(cast(Path, settings.output_root)),
         "is_object_store": False,
         "options": {},
+        "source": "flag",
+        "editable": editable,
     }
 
 
@@ -172,14 +219,20 @@ def get_ingest_card(settings: UISettings) -> dict:
     Unlike the store card, ingest is optional, so ``configured`` is the
     first thing the card reports rather than assuming one of two shapes.
     """
+    editable = settings.settings_writable
     if not settings.ingest_uri:
-        return {"configured": False, "uri": None, "is_object_store": False, "options": {}}
+        return {
+            "configured": False, "uri": None, "is_object_store": False, "options": {},
+            "source": "flag", "editable": editable,
+        }
     uri = settings.ingest_uri
     return {
         "configured": True,
         "uri": uri,
         "is_object_store": is_remote_uri(uri),
         "options": _store_options_summary(uri),
+        "source": _ingest_source(settings),
+        "editable": editable,
     }
 
 
@@ -256,3 +309,40 @@ def test_queue(
         job_limit=job_limit,
     )
     return {"reachable": queue is not None, "error": error, "queue": queue}
+
+
+def save_locations(base: UISettings, *, ingest_uri: str | None, store_uri: str | None) -> dict:
+    """Persist an ingest/output override and return the refreshed cards (docs/ui-ingest-plan.md merge 3a).
+
+    *base* is the pre-overlay settings (:func:`~womblex.ui.deps.get_base_settings`),
+    not the request's resolved ones — a cleared field (``None``) falls back to
+    *this*, the flag/env default, never to whatever was previously saved. This
+    is a full replace (``PUT``), not a merge: *ingest_uri*/*store_uri* become
+    exactly the new saved override, so a caller wanting to keep one field
+    unchanged must resubmit its current value.
+
+    Disjointness is validated against the pair that will actually be
+    effective after this save — the same
+    :func:`~womblex.store.remote.assert_disjoint_locations` check
+    ``UISettings`` runs at construction — so an overlapping pair is refused
+    before anything is written, naming both locations. Reachability is
+    reported alongside the saved cards, not required: an object-store bucket
+    that does not exist yet, or a local folder not yet created, is a normal
+    thing to save — the operator may be naming it ahead of provisioning it.
+    """
+    effective_ingest = ingest_uri or base.ingest_uri
+    effective_store = store_uri or base.store_uri
+    if effective_ingest and effective_store:
+        assert_disjoint_locations(effective_ingest, effective_store)
+
+    settings_dir = cast(Path, base.settings_dir)
+    saved = SavedLocations(ingest_uri=ingest_uri, store_uri=store_uri)
+    write_saved_locations(settings_dir, saved)
+
+    refreshed = apply_saved_locations(base, saved)
+    return {
+        "ingest": get_ingest_card(refreshed),
+        "store": get_store_card(refreshed),
+        "ingest_test": test_ingest(refreshed),
+        "store_test": test_store(refreshed),
+    }
