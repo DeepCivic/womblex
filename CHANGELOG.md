@@ -8,6 +8,16 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 ## [Unreleased]
 
+## [0.5.7] - 2026-08-18
+Compose-only, additive. `docker-compose.yml` now serves two deployments from
+one file: the self-contained local stack (unchanged when no env is set) and a
+cloud deployment pointed at externally-provided Postgres + externally-provided
+S3, with no code change. No application code or parquet schema changed (only
+the version bump in `pyproject.toml`).
+
+### Added
+- **`docker-compose.yml` cloud profile — external Postgres + external S3 with no code change.** Every connection value in the compose file is now `${VAR:-<bundled default>}` (`WOMBLEX_DB_DSN`, `WOMBLEX_STORE_URI`, `WOMBLEX_S3_ENDPOINT`, `AWS_*`): unset env resolves to today's self-contained local stack byte-for-byte; set env points every service at external services. The bundled `postgres`/`minio`/`createbuckets` moved behind a `local` compose profile, so a plain `docker compose up worker` does not start them, and `init`/`worker`/`womblex`/`seed-demo`/`ui` declare their dependency on those bundled backends as `required: false` — so a cloud deployment (external services, bundled backends never started) is not blocked by a missing dependency, while the local stack still health-gates as before. The compose header documents both invocations and the one mechanical edit for engines older than Compose 2.20.0. `WOMBLEX_STORE_URI` accepts a path prefix (`s3://<bucket>/<prefix>`), so Womblex keeps its output in its own folder of a shared bucket; embeddings are published as `*.embeddings.parquet` in the object store and never written to Postgres, so `pgvector` is a property of the shared database for other consumers, not a Womblex requirement. New README "Cloud deployment" section walks the three-env-var invocation and the `init` / `psql -f sql/womblex_jobs.sql` table creation; `TestSidecarImage` gains coverage that the bundled backends sit behind the `local` profile, that cloud services do not hard-depend on them, and that the connection env is overridable.
+
 ## [0.5.6] - 2026-08-18
 Minor, additive. Console reliability on a fresh/shared cluster: a reachable
 queue whose `womblex_jobs` table does not exist yet reads as *empty*, not

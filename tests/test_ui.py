@@ -37,9 +37,12 @@ from womblex.ui.deps import UISettings, resolve_settings
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
+def _compose() -> dict:
+    return yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())
+
+
 def _compose_service(name: str) -> dict:
-    compose = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())
-    return compose["services"][name]
+    return _compose()["services"][name]
 
 _OK_ROW = {
     "source_hash": "hash-a", "collection_id": "test", "doc_id": "doc-a",
@@ -598,7 +601,9 @@ class _BrokenQueue(_MissingTableQueue):
     """
 
     def stats(self, _run_id: str | None = None) -> dict:
-        raise Exception("permission denied for table womblex_jobs")
+        # A deliberately generic exception: the point is an *arbitrary* failure
+        # that is not a missing table, so a custom type would defeat the test.
+        raise Exception("permission denied for table womblex_jobs")  # noqa: TRY002
 
 
 class TestDashboardApi:
@@ -1527,6 +1532,74 @@ class TestSidecarImage:
         assert deps["minio"]["condition"] == "service_healthy"
         # The bucket must also exist before the store reads land.
         assert deps["createbuckets"]["condition"] == "service_completed_successfully"
+
+    def test_bundled_backends_sit_behind_the_local_profile(self) -> None:
+        """The self-contained stack (bundled Postgres/MinIO/bucket) is opt-in via the
+        `local` profile, so a cloud deployment against external Postgres + S3 does
+        not start them: `docker compose up worker` brings up only the profile-less
+        services. Without this, cloud mode would spin up a Postgres/MinIO nobody
+        uses (and, worse, `worker`'s deps would wait on them).
+        """
+        svcs = _compose()["services"]
+        for name in ["postgres", "minio", "createbuckets"]:
+            assert svcs[name]["profiles"] == ["local"], name
+        # The consumers carry no profile — they are the default `up` target.
+        for name in ["init", "worker", "ui"]:
+            assert "profiles" not in svcs[name], name
+
+    def test_cloud_services_do_not_hard_depend_on_the_bundled_backends(self) -> None:
+        """Every dependency a cloud service declares on a `local`-profile backend is
+        `required: false`, so an absent bundled Postgres/MinIO/bucket (the cloud
+        case, external services instead) is a warning, not a missing-dependency
+        error. This is the one thing that lets `docker compose up worker` run at
+        all when the bundled backends were never started.
+        """
+        svcs = _compose()["services"]
+        local_backends = {"postgres", "minio", "createbuckets", "init"}
+        for name in ["init", "worker", "womblex", "seed-demo", "ui"]:
+            for dep, spec in svcs[name].get("depends_on", {}).items():
+                if dep in local_backends:
+                    assert spec["required"] is False, f"{name} hard-depends on {dep}"
+
+    def test_ui_health_gate_survives_into_cloud_mode(self) -> None:
+        """The startup-race fix (ui waits for postgres/minio *healthy*) must still
+        hold as `required: false` — the condition is unchanged, so a local stack
+        still gates on health, and a cloud stack simply has no bundled backend to
+        wait on (it reads the external DSN/S3 the same env names).
+        """
+        deps = _compose_service("ui")["depends_on"]
+        assert deps["postgres"]["condition"] == "service_healthy"
+        assert deps["postgres"]["required"] is False
+        assert deps["minio"]["condition"] == "service_healthy"
+        assert deps["minio"]["required"] is False
+
+    def test_connection_env_is_overridable_with_bundled_local_defaults(self) -> None:
+        """The whole local/cloud switch: each connection var reads from the
+        environment with the bundled local stack as the `${VAR:-default}`
+        fallback. Unset env == today's local stack (the defaults point at the
+        bundled services); set env == external Postgres + S3. A hard-coded value
+        here would silently ignore an operator's external endpoint.
+        """
+        raw = (REPO_ROOT / "docker-compose.yml").read_text()
+        # The three connection vars + S3 creds are all `${VAR:-<bundled default>}`.
+        for var, default in [
+            ("WOMBLEX_DB_DSN", "postgresql://womblex:womblex@postgres:5432/womblex"),
+            ("WOMBLEX_STORE_URI", "s3://womblex"),
+            ("WOMBLEX_S3_ENDPOINT", "http://minio:9000"),
+            ("AWS_ACCESS_KEY_ID", "minioadmin"),
+            ("AWS_SECRET_ACCESS_KEY", "minioadmin"),
+            ("AWS_REGION", "us-east-1"),
+        ]:
+            assert f"${{{var}:-{default}}}" in raw, var
+        # The anchor the services inherit carries the same overridable form —
+        # `yaml.safe_load` does not run compose's substitution, so the literal
+        # `${VAR:-default}` string is what a service's environment shows.
+        env = _compose_service("worker")["environment"]
+        assert env["WOMBLEX_DB_DSN"] == (
+            "${WOMBLEX_DB_DSN:-postgresql://womblex:womblex@postgres:5432/womblex}"
+        )
+        assert env["WOMBLEX_STORE_URI"] == "${WOMBLEX_STORE_URI:-s3://womblex}"
+        assert env["WOMBLEX_S3_ENDPOINT"] == "${WOMBLEX_S3_ENDPOINT:-http://minio:9000}"
 
     def test_frontend_builder_stage_runs_a_real_package_script(self) -> None:
         """The builder stage's `npm run build` must name a script `ui/package.json` declares."""

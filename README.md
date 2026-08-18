@@ -280,14 +280,65 @@ picks it up. `--idle-timeout` exits a worker that finds no work, so a fleet can
 scale to zero on its own once the run drains.
 
 A ready-to-run stack (Postgres + MinIO + scalable workers) lives in
-`docker-compose.yml`:
+`docker-compose.yml`. It is self-contained by default and points at external
+Postgres + S3 the moment you set the connection env vars — one file, no code
+change. The bundled Postgres/MinIO sit behind a `local` profile, so bring the
+local stack up explicitly:
 
 ```bash
-docker compose up -d postgres minio createbuckets init
+docker compose --profile local up -d postgres minio createbuckets init
 docker compose run --rm womblex enqueue --input-prefix inputs/demo \
     --config configs/example.yaml --create-schema
 docker compose up --scale worker=4 worker     # raise or lower at any time
 ```
+
+### Cloud deployment (external Postgres + external S3)
+
+The same compose file runs against externally-provided Postgres and an
+externally-provided S3 bucket with **no code change** — you set three
+connection env vars (plus S3 credentials) and skip the bundled backends. What
+makes this work: every connection value in the file is `${VAR:-<local
+default>}`, so unset env is the local stack byte-for-byte and set env is the
+external service; the bundled `postgres`/`minio` sit behind the `local`
+profile (so a plain `up` never starts them); and `init`/`worker`/`ui` declare
+their dependency on those backends as `required: false`, so an absent bundled
+backend is a warning, not a missing-dependency error. (Requires Docker Compose
+≥ 2.20.0 for `required: false`; the compose header documents the one
+mechanical edit for older engines.)
+
+```bash
+# 1. Point at the external services. WOMBLEX_STORE_URI takes a path prefix, so
+#    Womblex keeps its output in its own folder of a shared bucket — verified:
+#    fsspec splits s3://shared/womblex into bucket `shared` + root `womblex/`,
+#    and every run lands under runs/<run_id>/documents/ beneath that prefix.
+export WOMBLEX_DB_DSN=postgresql://user:pass@db.example:5432/shared
+export WOMBLEX_STORE_URI=s3://shared/womblex        # own prefix of a shared bucket
+export WOMBLEX_S3_ENDPOINT=                          # leave empty for real AWS S3
+export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_REGION=ap-southeast-2
+export ISAACUS_API_KEY=...                           # if enrichment/embeddings run
+
+# 2. Create the one table Womblex owns (womblex_jobs) in the external DSN.
+#    Either run the init one-shot (it resolves WOMBLEX_DB_DSN)...
+docker compose run --rm init
+#    ...or apply the checked-in schema directly, for DBA review / grants:
+#    psql "$WOMBLEX_DB_DSN" -f sql/womblex_jobs.sql
+
+# 3. Enqueue and scale workers exactly as local — no bundled backend started.
+docker compose run --rm womblex enqueue --input-prefix inputs/demo \
+    --config configs/example.yaml
+docker compose up --scale worker=4 worker
+docker compose up -d ui                              # optional console, :8080
+```
+
+**Womblex owns exactly one table (`womblex_jobs`) and writes no vectors.** It
+is a well-behaved tenant of a shared database: every statement is scoped to
+that one table (no `DROP`/`TRUNCATE`, no `CREATE DATABASE`/`SCHEMA`, no
+`search_path`), so it coexists with another system's tables in the same
+database provided the name does not collide. Embeddings are published as
+`*.embeddings.parquet` in the object store (under your `WOMBLEX_STORE_URI`
+prefix), **not** written to Postgres — so `pgvector` is a property of the
+shared database for *other* consumers of those embeddings, never a Womblex
+requirement. Womblex does not read or write a vector column.
 
 ### Console (optional)
 
