@@ -86,7 +86,7 @@ def _mask_dsn(dsn: str | None) -> str | None:
 
     Covers both DSN forms psycopg accepts, because ``JobQueue`` passes
     whatever the operator set straight through: the URI form
-    (``postgresql://user:pw@host/db``), whose password ``urlsplit`` finds,
+    (``postgresql://user:pw@host/db``), whose password ``urlsplit`` finds,  # pragma: allowlist secret -- docstring example, not a real credential
     and libpq's keyword/value form (``host=… password=…``), which has no
     netloc at all and so would otherwise be returned verbatim — a full
     credential leak from an endpoint with no auth in front of it (plan §6).

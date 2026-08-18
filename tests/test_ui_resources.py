@@ -92,7 +92,7 @@ class TestResourcesApi:
         monkeypatch.setenv("ISAACUS_API_KEY", "sk-abcdef123456")
         client = TestClient(create_app(output_root=tmp_path))
         resp = client.get("/api/resources")
-        assert "abcdef123456" not in resp.text  # only the masked tail may appear
+        assert "abcdef123456" not in resp.text  # only the masked tail may appear -- pragma: allowlist secret
         card = resp.json()["isaacus"]
         assert card["deployment"] == "hosted"
         assert card["endpoints"] == []
