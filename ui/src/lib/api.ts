@@ -206,6 +206,12 @@ export interface StoreOptions {
 	region: string | null;
 }
 
+// Where an effective location came from (docs/ui-ingest-plan.md §2): a CLI
+// `flag`, an `env` var, or a `saved` operator override. The screen collapses
+// `flag`/`env` to one "from environment" chip and shows `saved` as "set here",
+// but the three are carried distinctly because that is what a reset restores to.
+export type LocationSource = 'flag' | 'env' | 'saved';
+
 export interface StoreCard {
 	kind: 'local' | 'remote';
 	uri: string;
@@ -214,6 +220,23 @@ export interface StoreCard {
 	// directory. Partial rather than required, so reading a field outside the
 	// `kind === 'remote'` guard is a type error rather than a runtime undefined.
 	options: Partial<StoreOptions>;
+	source: LocationSource;
+	// Whether this console has a writable settings dir — the one thing that
+	// makes the location editable at all (docs/ui-ingest-plan.md merge 3a).
+	// False in both modes when no `--settings-dir` was configured.
+	editable: boolean;
+}
+
+// The ingest card. Unlike the store, ingest is optional, so `configured` is
+// the first thing it reports rather than assuming one of two shapes; `uri` is
+// null when unconfigured (docs/ui-ingest-plan.md merge 2/3a).
+export interface IngestCard {
+	configured: boolean;
+	uri: string | null;
+	is_object_store: boolean;
+	options: Partial<StoreOptions>;
+	source: LocationSource;
+	editable: boolean;
 }
 
 export interface QueueCard {
@@ -243,6 +266,7 @@ export interface IsaacusCard {
 
 export interface ResourcesCards {
 	store: StoreCard;
+	ingest: IngestCard;
 	queue: QueueCard;
 	isaacus: IsaacusCard;
 }
@@ -264,6 +288,64 @@ export async function testStoreConnection(
 	const resp = await fetchImpl('/api/resources/test/store', { method: 'POST' });
 	if (!resp.ok) throw new Error(`POST /api/resources/test/store: ${resp.status}`);
 	return (await resp.json()) as ReachabilityResult;
+}
+
+export async function testIngest(fetchImpl: typeof fetch = fetch): Promise<ReachabilityResult> {
+	const resp = await fetchImpl('/api/resources/test/ingest', { method: 'POST' });
+	if (!resp.ok) throw new Error(`POST /api/resources/test/ingest: ${resp.status}`);
+	return (await resp.json()) as ReachabilityResult;
+}
+
+// Save / update / clear the operator's ingest and output location override
+// (docs/ui-ingest-plan.md merge 3a). A full replace (PUT): each field is a new
+// location or `null` ("reset to the flag/env default"), so a caller keeping a
+// field must resubmit its current value.
+export interface SaveLocationsRequest {
+	ingest_uri?: string | null;
+	store_uri?: string | null;
+}
+
+// The refreshed cards plus the reachability verdicts the save re-ran — so the
+// screen re-renders the provenance chips and the "reachable?" state in one
+// round trip. Reachability is *reported, not required*: naming a bucket ahead
+// of provisioning it is a normal save.
+export interface SaveLocationsResult {
+	ingest: IngestCard;
+	store: StoreCard;
+	ingest_test: ReachabilityResult;
+	store_test: ReachabilityResult;
+}
+
+/**
+ * A location edit the console refused. `status` is the HTTP code so the screen
+ * tells the failure shapes apart without parsing the message: 409 (no writable
+ * settings dir — editing is disabled on this console), 403 (audit-only, a
+ * deliberate choice), 400 (a malformed URI, or an ingest/output pair that would
+ * overlap). Mirrors `ui/routes/resources.py`'s guard and `ValueError` paths.
+ */
+export class LocationsRefused extends Error {
+	status: number;
+	constructor(status: number, detail: string) {
+		super(detail);
+		this.name = 'LocationsRefused';
+		this.status = status;
+	}
+}
+
+export async function saveLocations(
+	req: SaveLocationsRequest,
+	fetchImpl: typeof fetch = fetch
+): Promise<SaveLocationsResult> {
+	const resp = await fetchImpl('/api/resources/locations', {
+		method: 'PUT',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify(req)
+	});
+	if (!resp.ok) {
+		const detail = ((await resp.json().catch(() => ({}))) as { detail?: unknown }).detail;
+		throw new LocationsRefused(resp.status, detailToMessage(detail, resp.status));
+	}
+	return (await resp.json()) as SaveLocationsResult;
 }
 
 // Fleet + queue-depth state, from the same `JobQueue` views the Dashboard
@@ -604,6 +686,28 @@ export async function getExecutionStatus(
 	const resp = await fetchImpl('/api/execute/status');
 	if (!resp.ok) throw new Error(`GET /api/execute/status: ${resp.status}`);
 	return (await resp.json()) as ExecutionStatus;
+}
+
+// Reachability + document count of the configured ingest location
+// (docs/ui-ingest-plan.md merge 2). Serves both the composer's "N documents
+// ready" line and the Resources Console's ingest card, using the same recursive
+// listing + `SUPPORTED_EXTENSIONS` filter the enqueue does — so the count shown
+// is the count that would be enqueued. `uri`/`kind` are null when unconfigured.
+export interface IngestPreflight {
+	uri: string | null;
+	kind: 'remote' | 'local' | null;
+	reachable: boolean;
+	document_count: number;
+	sample: string[];
+	error: string | null;
+}
+
+export async function getIngestPreflight(
+	fetchImpl: typeof fetch = fetch
+): Promise<IngestPreflight> {
+	const resp = await fetchImpl('/api/execute/ingest');
+	if (!resp.ok) throw new Error(await errorDetail(resp, 'GET /api/execute/ingest'));
+	return (await resp.json()) as IngestPreflight;
 }
 
 // The configure-and-run form. `input_prefix` is store-relative; `run_id`

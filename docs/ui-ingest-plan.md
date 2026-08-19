@@ -119,14 +119,26 @@ Sized to the 500-changed-line merge cap. Each merge stands alone and leaves the 
 
 | # | Merge | Nature |
 |---|---|---|
-| 1 | Ingest as a distinct store (library + CLI) | Back-compatible |
-| 2 | Console reads the configured ingest (backend) | Additive |
-| 3a | Editable ingest / output locations (backend) | Endpoint the screen does not yet call |
-| 3b | Editable location cards (frontend) | Frontend |
+| 1 | Ingest as a distinct store (library + CLI) | Back-compatible | DONE
+| 2 | Console reads the configured ingest (backend) | Additive | DONE
+| 3a | Editable ingest / output locations (backend) | Endpoint the screen does not yet call | DONE
+| 3b | Editable location cards (frontend) | Frontend | DONE
 | 4 | Composer owns dispatch; Execution Controls removed | Frontend, net negative |
 | 5 | Run logs readable and downloadable from the console | Independent; no existing behaviour changed |
 
 3a/3b are split at that seam specifically because the combined diff would run over the cap.
+
+**Note — `docs/ui-plan.md` is gone.** That plan (merges 1–11, all landed) was
+deliberately deleted; its history is no longer carried in the tree. References
+to it still linger in ~28 files (source docstrings, README, `Dockerfile.ui`,
+`pyproject.toml`, `docker-compose.yml`, `.github/workflows/ci.yml`, CHANGELOG,
+tests, and this document). They are all documentation cross-links, not code
+imports, so nothing breaks — but they are now dangling. Clean them up
+**opportunistically as we go**: each of the remaining merges (4, 5) touches
+several of those files, so drop or repoint the `docs/ui-plan.md` citation
+whenever a merge already has a file open, rather than as a separate sweep. This
+document's own `ui-plan.md` links (§2, §3) go in the merge that next edits this
+file.
 
 ### Merge 1 — Ingest as a distinct store (library + CLI)
 
