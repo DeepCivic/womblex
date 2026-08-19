@@ -81,6 +81,80 @@ def test_storage_options_from_env(monkeypatch):
     assert storage_options_from_env("/tmp/x") == {}
 
 
+def test_storage_options_prefers_store_specific_credentials(monkeypatch):
+    """The store creds come from WOMBLEX_S3_* first, so a cloud deployment can
+    give s3fs a MinIO/S3 key WITHOUT setting the process-global AWS_ACCESS_KEY_ID
+    — which would otherwise clobber boto3's instance-role resolution for the
+    isaacus-sagemaker SigV4 signer and 403 (the cloud credential-conflict bug).
+    """
+    monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
+    monkeypatch.delenv("AWS_SECRET_ACCESS_KEY", raising=False)
+    monkeypatch.setenv("WOMBLEX_S3_ACCESS_KEY_ID", "store-key")
+    monkeypatch.setenv("WOMBLEX_S3_SECRET_ACCESS_KEY", "store-secret")
+    opts = storage_options_from_env("s3://bucket/x")
+    assert opts["key"] == "store-key"
+    assert opts["secret"] == "store-secret"
+
+    # Store-specific wins over the AWS fallback when both are set.
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "aws-key")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "aws-secret")
+    opts = storage_options_from_env("s3://bucket/x")
+    assert opts["key"] == "store-key"
+    assert opts["secret"] == "store-secret"
+
+
+def test_storage_options_omits_credentials_when_none_are_set(monkeypatch):
+    """No store-specific and no AWS keys => s3fs gets no explicit credentials
+    and falls back to its own chain (the EC2 instance role for real AWS S3).
+    An endpoint override alone must not synthesise a half-set credential.
+    """
+    for var in (
+        "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+        "WOMBLEX_S3_ACCESS_KEY_ID", "WOMBLEX_S3_SECRET_ACCESS_KEY",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    opts = storage_options_from_env("s3://bucket/x")
+    assert "key" not in opts
+    assert "secret" not in opts
+
+
+def test_storage_options_explicit_credentials_win_over_env(monkeypatch):
+    """An operator-saved (Resources Console) credential override beats the env
+    keys the Dockerfile baked in — so a rotated key is used moving forward
+    without a container rebuild (issue 3).
+    """
+    monkeypatch.setenv("WOMBLEX_S3_ACCESS_KEY_ID", "baked-key")
+    monkeypatch.setenv("WOMBLEX_S3_SECRET_ACCESS_KEY", "baked-secret")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "aws-key")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "aws-secret")
+    opts = storage_options_from_env("s3://bucket/x", credentials=("saved-key", "saved-secret"))
+    assert opts["key"] == "saved-key"
+    assert opts["secret"] == "saved-secret"
+
+
+def test_from_uri_threads_the_credential_override(tmp_path, monkeypatch):
+    """`RemoteStore.from_uri(..., credentials=...)` passes the override through
+    to the storage options for an s3 URI (a local URI ignores them, as it has
+    no s3fs options at all).
+    """
+    monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
+    monkeypatch.delenv("WOMBLEX_S3_ACCESS_KEY_ID", raising=False)
+    from womblex.store import remote as remote_mod
+
+    captured: dict = {}
+
+    def _fake_url_to_fs(uri, **opts):
+        captured.update(opts)
+        # Return something url_to_fs-shaped without touching a network.
+        import fsspec
+        return fsspec.filesystem("memory"), "bucket/x"
+
+    monkeypatch.setattr(remote_mod._require_fsspec().core, "url_to_fs", _fake_url_to_fs)
+    remote_mod.RemoteStore.from_uri("s3://bucket/x", credentials=("ov-key", "ov-secret"))
+    assert captured.get("key") == "ov-key"
+    assert captured.get("secret") == "ov-secret"
+
+
 def test_store_root_splits_bucket_from_prefix():
     assert store_root("s3://womblex/inbox") == ("womblex", "inbox")
     assert store_root("s3://womblex") == ("womblex", "")
@@ -364,8 +438,8 @@ def test_process_job_publishes_the_log_even_when_the_batch_fails(tmp_path, monke
     """The failing case is the one that matters: the log is uploaded outside the
     try, so a job that raises still leaves its `batch-NNNN.log` in the store, and
     the original error is what propagates."""
-    from womblex.cloud.queue import Job
     from womblex.cloud import worker as worker_mod
+    from womblex.cloud.queue import Job
 
     ingest_store = RemoteStore.from_uri(str(tmp_path / "ingest"))
     csv = tmp_path / "people.csv"

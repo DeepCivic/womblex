@@ -1,0 +1,100 @@
+# Local-only override for the bundled Docker Compose stack.
+#
+# Purpose: make `docker-compose.yml`'s LOCAL deployment (bundled Postgres +
+# MinIO, `local` profile) reliably self-contained, without touching anything
+# the CLOUD deployment relies on. Use it explicitly alongside the base file:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.local.override.yml \
+#       --profile local up -d postgres minio createbuckets init
+#   # upload source docs to s3://womblex/inbox, then:
+#   docker compose -f docker-compose.yml -f docker-compose.local.override.yml \
+#       run --rm womblex enqueue --config configs/example.yaml --create-schema
+#   docker compose -f docker-compose.yml -f docker-compose.local.override.yml \
+#       up --scale worker=4 worker
+#   # console over the same bucket at :8080 (seed a demo run first if you like):
+#   docker compose -f docker-compose.yml -f docker-compose.local.override.yml \
+#       --profile seed up seed-demo
+#   docker compose -f docker-compose.yml -f docker-compose.local.override.yml \
+#       --profile local up -d ui
+#
+# WHY THIS FILE EXISTS
+# --------------------
+# The base file is a single-file local/cloud switch: every connection value is
+# `${VAR:-<bundled default>}`, so SETTING those vars flips it to a cloud
+# deployment. That is exactly what makes an *unqualified* local `up` fragile —
+# if the operator's shell (or a sourced `.env`) has `WOMBLEX_DB_DSN`,
+# `WOMBLEX_STORE_URI`, `WOMBLEX_S3_ENDPOINT` or `AWS_*` set for some other
+# purpose, the "local" containers silently inherit them and dial out to
+# external infrastructure instead of the bundled Postgres/MinIO. This override
+# PINS every consumer's connection surface back to the bundled services, so the
+# local stack stays local no matter what is in the ambient environment.
+#
+# It changes nothing about the cloud path: the base file is used on its own for
+# cloud, this override is never passed there.
+#
+# MERGE SAFETY
+# ------------
+# `environment:` is map-form on purpose. Compose merges maps key-by-key, so the
+# keys pinned here override just those keys and every other inherited variable
+# (AWS_REGION, ISAACUS_API_KEY, WOMBLEX_UI_SETTINGS_DIR, ...) is preserved.
+# `depends_on:` re-states the bundled backends the base already declares, but
+# as hard local dependencies (`required: true`, the default) with the same
+# health/completion conditions — locally the backends are always started, so a
+# consumer should wait for them, not treat them as optional the way the cloud
+# path must.
+
+# The bundled-local connection surface, pinned to the Compose service names so
+# the local stack cannot inherit a cloud endpoint from the host environment.
+# Mirrors the base file's bundled defaults exactly.
+x-local-env: &local-env
+  WOMBLEX_DB_DSN: postgresql://womblex:womblex@postgres:5432/womblex
+  WOMBLEX_STORE_URI: s3://womblex
+  WOMBLEX_INGEST_URI: s3://womblex/inbox
+  WOMBLEX_S3_ENDPOINT: http://minio:9000
+  AWS_ACCESS_KEY_ID: minioadmin
+  AWS_SECRET_ACCESS_KEY: minioadmin
+  AWS_REGION: us-east-1
+
+services:
+  init:
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *local-env
+
+  womblex:
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      <<: *local-env
+
+  worker:
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      createbuckets:
+        condition: service_completed_successfully
+    environment:
+      <<: *local-env
+
+  seed-demo:
+    depends_on:
+      createbuckets:
+        condition: service_completed_successfully
+    environment:
+      <<: *local-env
+
+  ui:
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      createbuckets:
+        condition: service_completed_successfully
+    environment:
+      <<: *local-env

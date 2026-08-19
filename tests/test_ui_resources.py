@@ -74,6 +74,32 @@ class TestResourcesApi:
         assert options["endpoint_url"] == "http://minio:9000"
         assert options["region"] == "ap-southeast-2"
 
+    def test_store_card_reports_credential_source_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Env-supplied keys report ``credentials_source == 'env'`` and a masked
+        tail, never the raw value."""
+        monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIAEXAMPLE1234")
+        monkeypatch.setenv(
+            "AWS_SECRET_ACCESS_KEY", "super-secret-value"  # pragma: allowlist secret
+        )
+        client = TestClient(create_app(store_uri=f"s3://{tmp_path}/bucket"))
+        options = client.get("/api/resources").json()["store"]["options"]
+        assert options["credentials_configured"] is True
+        assert options["credentials_source"] == "env"
+        assert options["credentials_masked"].endswith("1234")
+
+    def test_store_card_reports_no_credential_source_when_unset(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
+        monkeypatch.delenv("WOMBLEX_S3_ACCESS_KEY_ID", raising=False)
+        client = TestClient(create_app(store_uri=f"s3://{tmp_path}/bucket"))
+        options = client.get("/api/resources").json()["store"]["options"]
+        assert options["credentials_configured"] is False
+        assert options["credentials_source"] is None
+        assert options["credentials_masked"] is None
+
     def test_ingest_card_unconfigured(self, tmp_path: Path) -> None:
         client = TestClient(create_app(output_root=tmp_path))
         card = client.get("/api/resources").json()["ingest"]
@@ -93,6 +119,7 @@ class TestResourcesApi:
         assert card["uri"] == str(ingest_root)
         assert card["is_object_store"] is False
         assert card["options"]["credentials_configured"] is False
+        assert card["options"]["credentials_source"] is None
 
     def test_test_ingest_not_configured(self, tmp_path: Path) -> None:
         client = TestClient(create_app(output_root=tmp_path))
@@ -344,6 +371,21 @@ class TestSettingsStore:
         )
         assert read_saved_locations(tmp_path) == SavedLocations(ingest_uri="s3://a/inbox")
 
+    def test_credentials_round_trip(self, tmp_path: Path) -> None:
+        saved = SavedLocations(
+            store_uri="s3://a",
+            s3_access_key_id="AKIA1",
+            s3_secret_access_key="shh",  # pragma: allowlist secret
+        )
+        write_saved_locations(tmp_path, saved)
+        assert read_saved_locations(tmp_path) == saved
+        assert read_saved_locations(tmp_path).s3_credentials() == ("AKIA1", "shh")
+
+    def test_s3_credentials_needs_both_halves(self) -> None:
+        assert SavedLocations(s3_access_key_id="AKIA1").s3_credentials() is None
+        assert SavedLocations(s3_secret_access_key="shh").s3_credentials() is None  # pragma: allowlist secret
+        assert SavedLocations().s3_credentials() is None
+
 
 class TestLocationOverlayPrecedence:
     """flag < env < saved (docs/ui-ingest-plan.md §3) — ``resolve_settings``
@@ -439,7 +481,10 @@ class TestEditableLocations:
         card = client.get("/api/resources").json()["store"]
         assert card == {
             "kind": "remote", "uri": str(new_store), "is_object_store": False,
-            "options": {"credentials_configured": False, "endpoint_url": None, "region": None},
+            "options": {
+                "credentials_configured": False, "credentials_source": None,
+                "credentials_masked": None, "endpoint_url": None, "region": None,
+            },
             "source": "saved", "editable": True,
         }
 
@@ -556,3 +601,104 @@ class TestEditableLocations:
         resp = client.get("/api/resources")
         assert resp.status_code == 200
         assert resp.json()["ingest"]["uri"] == str(tmp_path / "inbox")
+
+
+class TestCredentialOverride:
+    """Operator-saved S3 credentials override the baked-in env keys (issue 3).
+
+    The console is a connection *manager*, not read-only: an engineer adds a
+    rotated key through the Resources Console and the system uses it moving
+    forward, without a container rebuild. The pair is persisted to the
+    settings volume, masked in every response, and folded into the console's
+    own store opens by :func:`apply_saved_locations`.
+    """
+
+    def test_apply_saved_locations_layers_credentials(self, tmp_path: Path) -> None:
+        from womblex.ui.deps import UISettings, apply_saved_locations
+
+        base = UISettings(output_root=None, store_uri="s3://bucket")
+        assert base.s3_credentials is None
+        layered = apply_saved_locations(
+            base,
+            SavedLocations(
+                s3_access_key_id="AKIA1",
+                s3_secret_access_key="shh",  # pragma: allowlist secret
+            ),
+        )
+        assert layered.s3_credentials == ("AKIA1", "shh")
+
+    def test_apply_saved_locations_keeps_base_credentials_when_none_saved(
+        self, tmp_path: Path,
+    ) -> None:
+        from womblex.ui.deps import UISettings, apply_saved_locations
+
+        base = UISettings(
+            output_root=None, store_uri="s3://bucket", s3_credentials=("base-k", "base-s"),
+        )
+        layered = apply_saved_locations(base, SavedLocations(ingest_uri="s3://bucket/inbox"))
+        assert layered.s3_credentials == ("base-k", "base-s")
+
+    def test_save_credentials_persists_and_masks(self, tmp_path: Path) -> None:
+        """A saved pair is written to the volume, but the response only ever
+        carries the masked tail and its source — never the raw secret."""
+        pytest.importorskip("fsspec")
+        settings_dir = tmp_path / "settings"
+        client = TestClient(create_app(
+            store_uri=str(tmp_path / "store"), settings_dir=settings_dir,
+        ))
+        resp = client.put("/api/resources/locations", json={
+            "s3_access_key_id": "AKIAROTATED9999",
+            "s3_secret_access_key": "top-secret-rotated",  # pragma: allowlist secret
+        })
+        assert resp.status_code == 200
+        assert "top-secret-rotated" not in resp.text
+        assert "AKIAROTATED9999" not in resp.text
+        options = resp.json()["store"]["options"]
+        assert options["credentials_configured"] is True
+        assert options["credentials_source"] == "saved"
+        assert options["credentials_masked"].endswith("9999")
+        # Persisted for the next process / request.
+        saved = read_saved_locations(settings_dir)
+        assert saved.s3_credentials() == ("AKIAROTATED9999", "top-secret-rotated")
+
+    def test_save_credentials_preserves_them_when_a_later_save_omits_them(
+        self, tmp_path: Path,
+    ) -> None:
+        """The masked response cannot carry the secret back, so a save that
+        edits only a location must not silently wipe the saved credentials."""
+        pytest.importorskip("fsspec")
+        settings_dir = tmp_path / "settings"
+        client = TestClient(create_app(
+            store_uri=str(tmp_path / "store"), settings_dir=settings_dir,
+        ))
+        client.put("/api/resources/locations", json={
+            "s3_access_key_id": "AKIA1",
+            "s3_secret_access_key": "shh",  # pragma: allowlist secret
+        })
+        # A later save that only touches the ingest location omits the creds.
+        client.put("/api/resources/locations", json={"ingest_uri": str(tmp_path / "inbox")})
+        assert read_saved_locations(settings_dir).s3_credentials() == ("AKIA1", "shh")
+
+    def test_clear_credentials_reverts_to_env(self, tmp_path: Path) -> None:
+        pytest.importorskip("fsspec")
+        settings_dir = tmp_path / "settings"
+        client = TestClient(create_app(
+            store_uri=str(tmp_path / "store"), settings_dir=settings_dir,
+        ))
+        client.put("/api/resources/locations", json={
+            "s3_access_key_id": "AKIA1",
+            "s3_secret_access_key": "shh",  # pragma: allowlist secret
+        })
+        resp = client.put("/api/resources/locations", json={"clear_credentials": True})
+        assert resp.status_code == 200
+        assert read_saved_locations(settings_dir).s3_credentials() is None
+
+    def test_half_set_credential_pair_is_refused(self, tmp_path: Path) -> None:
+        pytest.importorskip("fsspec")
+        settings_dir = tmp_path / "settings"
+        client = TestClient(create_app(
+            store_uri=str(tmp_path / "store"), settings_dir=settings_dir,
+        ))
+        resp = client.put("/api/resources/locations", json={"s3_access_key_id": "AKIA1"})
+        assert resp.status_code == 400
+        assert read_saved_locations(settings_dir).s3_credentials() is None

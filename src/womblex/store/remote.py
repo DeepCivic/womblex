@@ -33,24 +33,46 @@ def is_remote_uri(uri: str) -> bool:
     return uri.startswith(_REMOTE_PROTOCOLS)
 
 
-def storage_options_from_env(uri: str) -> dict:
-    """Build fsspec storage options for *uri* from standard env vars.
+def storage_options_from_env(uri: str, *, credentials: tuple[str, str] | None = None) -> dict:
+    """Build fsspec storage options for *uri* from env vars.
 
-    Only ``s3://`` gets explicit options: the AWS conventions s3fs already
-    reads (``AWS_ACCESS_KEY_ID``, ``AWS_SECRET_ACCESS_KEY``, ``AWS_REGION``)
-    plus an endpoint override (``WOMBLEX_S3_ENDPOINT`` or
-    ``AWS_ENDPOINT_URL``) so MinIO and other S3-compatible stores work
-    without code changes. Every other backend — ``gs://``, ``az://``, local —
-    returns an empty dict and authenticates via its own native mechanism
-    (gcsfs/adlfs ambient credentials); these kwargs are s3fs-shaped and
-    would misconfigure them.
+    Only ``s3://`` gets explicit options: an S3 access key/secret plus an
+    endpoint override (``WOMBLEX_S3_ENDPOINT`` or ``AWS_ENDPOINT_URL``) so
+    MinIO and other S3-compatible stores work without code changes. Every
+    other backend — ``gs://``, ``az://``, local — returns an empty dict and
+    authenticates via its own native mechanism (gcsfs/adlfs ambient
+    credentials); these kwargs are s3fs-shaped and would misconfigure them.
+
+    *credentials*, when given as ``(key, secret)``, is an explicit override
+    that wins over the environment — the path an operator-saved credential
+    (Resources Console) takes so a rotated key is used *moving forward*
+    without a container rebuild, even though the Dockerfile baked an older one
+    into the env. When ``None``, the store's credentials are read from the
+    **store-specific** ``WOMBLEX_S3_ACCESS_KEY_ID`` /
+    ``WOMBLEX_S3_SECRET_ACCESS_KEY`` first, falling back to the AWS standard
+    ``AWS_ACCESS_KEY_ID`` / ``AWS_SECRET_ACCESS_KEY`` for back-compatibility.
+    The store-specific pair exists so a deployment can point s3fs at MinIO (a
+    static key) **without** setting the ambient ``AWS_ACCESS_KEY_ID`` — which
+    is process-global and, when set, disables boto3's instance-role resolution
+    for *every* client in the process, including the ``isaacus-sagemaker``
+    SigV4 signer (it would then sign MinIO's key against real SageMaker and
+    403). Leaving ``AWS_ACCESS_KEY_ID`` unset lets that signer reach the EC2
+    instance role, while s3fs still gets MinIO's key explicitly here.
     """
     if not uri.startswith("s3://"):
         return {}
     endpoint = os.environ.get("WOMBLEX_S3_ENDPOINT") or os.environ.get("AWS_ENDPOINT_URL")
     opts: dict = {}
-    key = os.environ.get("AWS_ACCESS_KEY_ID")
-    secret = os.environ.get("AWS_SECRET_ACCESS_KEY")
+    key: str | None
+    secret: str | None
+    if credentials is not None:
+        key, secret = credentials
+    else:
+        key = os.environ.get("WOMBLEX_S3_ACCESS_KEY_ID") or os.environ.get("AWS_ACCESS_KEY_ID")
+        secret = (
+            os.environ.get("WOMBLEX_S3_SECRET_ACCESS_KEY")
+            or os.environ.get("AWS_SECRET_ACCESS_KEY")
+        )
     if key and secret:
         opts["key"] = key
         opts["secret"] = secret
@@ -184,10 +206,26 @@ class RemoteStore:
     root: str
 
     @classmethod
-    def from_uri(cls, uri: str, *, storage_options: dict | None = None) -> RemoteStore:
-        """Open a store at *uri* (e.g. ``s3://bucket/runs`` or ``/data/runs``)."""
+    def from_uri(
+        cls,
+        uri: str,
+        *,
+        storage_options: dict | None = None,
+        credentials: tuple[str, str] | None = None,
+    ) -> RemoteStore:
+        """Open a store at *uri* (e.g. ``s3://bucket/runs`` or ``/data/runs``).
+
+        *credentials* is an explicit ``(key, secret)`` S3 override that wins
+        over the environment (see :func:`storage_options_from_env`) — the path
+        an operator-saved credential takes. Ignored when *storage_options* is
+        passed (the caller has already built the full options dict).
+        """
         fsspec = _require_fsspec()
-        opts = storage_options if storage_options is not None else storage_options_from_env(uri)
+        opts = (
+            storage_options
+            if storage_options is not None
+            else storage_options_from_env(uri, credentials=credentials)
+        )
         fs, root = fsspec.core.url_to_fs(uri, **opts)
         return cls(fs=fs, root=root.rstrip("/"))
 

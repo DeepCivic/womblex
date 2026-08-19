@@ -263,6 +263,13 @@ export async function getAudit(
 // network-free reads — each card's live check is a separate `test*` call.
 export interface StoreOptions {
 	credentials_configured: boolean;
+	// Where the S3 credentials came from: `saved` (the operator override this
+	// console persisted), `env` (the baked-in AWS_*/WOMBLEX_S3_* keys), or null
+	// when none are configured. Never the values themselves.
+	credentials_source: 'saved' | 'env' | null;
+	// The access-key id masked to its last four characters, for recognition
+	// only. Null when no credentials are configured; never the secret.
+	credentials_masked: string | null;
 	endpoint_url: string | null;
 	region: string | null;
 }
@@ -358,12 +365,21 @@ export async function testIngest(fetchImpl: typeof fetch = fetch): Promise<Reach
 }
 
 // Save / update / clear the operator's ingest and output location override
-// (docs/ui-ingest-plan.md merge 3a). A full replace (PUT): each field is a new
-// location or `null` ("reset to the flag/env default"), so a caller keeping a
-// field must resubmit its current value.
+// (docs/ui-ingest-plan.md merge 3a). A full replace (PUT): each location field
+// is a new value or `null` ("reset to the flag/env default"), so a caller
+// keeping a field must resubmit its current value.
+//
+// The S3 credential pair is the exception — the console masks the saved secret
+// in every response, so the frontend cannot resubmit one it can no longer read.
+// Omit both fields to *keep* the saved override; pass both to set a new pair;
+// set `clear_credentials` to remove it and revert to the env keys. A half-set
+// pair is refused (400).
 export interface SaveLocationsRequest {
 	ingest_uri?: string | null;
 	store_uri?: string | null;
+	s3_access_key_id?: string | null;
+	s3_secret_access_key?: string | null;
+	clear_credentials?: boolean;
 }
 
 // The refreshed cards plus the reachability verdicts the save re-ran — so the

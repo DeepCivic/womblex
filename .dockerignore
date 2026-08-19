@@ -13,6 +13,12 @@ output/
 !output/console-demo/
 .venv/
 venv/
+# Local development virtualenvs (e.g. `.venv-312`, `.venv-test`). Never belong
+# in the image and, unignored, dominate the build context (multi-GB) — the
+# same reason `.venv/` above is excluded. Kept broad so any `.venv*` variant a
+# contributor creates stays out.
+.venv*/
+**/.venv*/
 # Benchmark fixtures are large and not needed in the runtime image.
 fixtures/fixtures/
 docs/accuracy/

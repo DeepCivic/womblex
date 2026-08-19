@@ -210,7 +210,7 @@ def enqueue_extraction(
     from womblex.store.remote import RemoteStore
 
     ingest_uri = cast(str, settings.ingest_uri)
-    ingest_store = RemoteStore.from_uri(ingest_uri)
+    ingest_store = RemoteStore.from_uri(ingest_uri, credentials=settings.s3_credentials)
     prefix = input_prefix or ""
     all_keys = ingest_store.list_files(prefix, "*", recursive=True)
     keys = sorted(k for k in all_keys if Path(k).suffix.lower() in SUPPORTED_EXTENSIONS)
@@ -265,7 +265,9 @@ def ingest_preflight(settings: UISettings) -> dict:
     uri = settings.ingest_uri
     kind = "remote" if is_remote_uri(uri) else "local"
     try:
-        all_keys = RemoteStore.from_uri(uri).list_files("", "*", recursive=True)
+        all_keys = RemoteStore.from_uri(
+            uri, credentials=settings.s3_credentials
+        ).list_files("", "*", recursive=True)
     except Exception as e:
         logger.warning("execute: ingest unreachable: %s", e)
         return {

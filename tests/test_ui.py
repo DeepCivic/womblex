@@ -1752,19 +1752,30 @@ class TestSidecarImage:
         fallback. Unset env == today's local stack (the defaults point at the
         bundled services); set env == external Postgres + S3. A hard-coded value
         here would silently ignore an operator's external endpoint.
+
+        Store credentials live on the store-specific `WOMBLEX_S3_ACCESS_KEY_ID` /
+        `WOMBLEX_S3_SECRET_ACCESS_KEY` (defaulting to MinIO's key locally), while
+        the ambient `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` default to
+        **empty** on purpose: setting them is process-global and would clobber
+        the EC2 instance role the isaacus-sagemaker SigV4 signer resolves in a
+        cloud deployment (the credential-conflict bug).
         """
         raw = (REPO_ROOT / "docker-compose.yml").read_text()
-        # The three connection vars + S3 creds are all `${VAR:-<bundled default>}`.
+        # The connection vars + store creds are all `${VAR:-<bundled default>}`.
         for var, default in [
             # The bundled compose default, already baselined in docker-compose.yml.
             ("WOMBLEX_DB_DSN", "postgresql://womblex:womblex@postgres:5432/womblex"),  # pragma: allowlist secret
             ("WOMBLEX_STORE_URI", "s3://womblex"),
             ("WOMBLEX_S3_ENDPOINT", "http://minio:9000"),
-            ("AWS_ACCESS_KEY_ID", "minioadmin"),
-            ("AWS_SECRET_ACCESS_KEY", "minioadmin"),
+            ("WOMBLEX_S3_ACCESS_KEY_ID", "minioadmin"),
+            ("WOMBLEX_S3_SECRET_ACCESS_KEY", "minioadmin"),
             ("AWS_REGION", "us-east-1"),
         ]:
             assert f"${{{var}:-{default}}}" in raw, var
+        # The AWS credential vars pass through only when the operator sets them,
+        # defaulting to empty so the SageMaker signer can reach the instance role.
+        for var in ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]:
+            assert f"${{{var}:-}}" in raw, var
         # The anchor the services inherit carries the same overridable form —
         # `yaml.safe_load` does not run compose's substitution, so the literal
         # `${VAR:-default}` string is what a service's environment shows.
@@ -1774,6 +1785,8 @@ class TestSidecarImage:
         )
         assert env["WOMBLEX_STORE_URI"] == "${WOMBLEX_STORE_URI:-s3://womblex}"
         assert env["WOMBLEX_S3_ENDPOINT"] == "${WOMBLEX_S3_ENDPOINT:-http://minio:9000}"
+        assert env["WOMBLEX_S3_ACCESS_KEY_ID"] == "${WOMBLEX_S3_ACCESS_KEY_ID:-minioadmin}"
+        assert env["AWS_ACCESS_KEY_ID"] == "${AWS_ACCESS_KEY_ID:-}"
 
     def test_frontend_builder_stage_runs_a_real_package_script(self) -> None:
         """The builder stage's `npm run build` must name a script `ui/package.json` declares."""

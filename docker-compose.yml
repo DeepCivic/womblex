@@ -32,7 +32,16 @@
 #     export WOMBLEX_STORE_URI=s3://shared/womblex     # own prefix of a shared bucket
 #     export WOMBLEX_INGEST_URI=s3://shared/womblex/inbox  # disjoint from the store's runs/
 #     export WOMBLEX_S3_ENDPOINT=                       # empty => real AWS S3
-#     export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_REGION=...
+#     export AWS_REGION=...
+#     # S3 store credentials go on the STORE-SPECIFIC vars, NOT AWS_ACCESS_KEY_ID:
+#     export WOMBLEX_S3_ACCESS_KEY_ID=...  WOMBLEX_S3_SECRET_ACCESS_KEY=...
+#     # Leave AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY UNSET. Setting them is
+#     # process-global and disables boto3's instance-role resolution for the
+#     # isaacus-sagemaker SigV4 signer, which then signs the store key against
+#     # SageMaker and 403s. Unset, SageMaker uses the EC2 instance role while
+#     # s3fs gets the store creds above. If the S3 store is reachable by the
+#     # SAME instance role (real AWS S3, not MinIO), leave the store vars unset
+#     # too and s3fs uses the role as well.
 #     docker compose run --rm init                     # create womblex_jobs in the external DSN
 #     docker compose up --scale worker=4 worker
 #   See the README "Cloud deployment" section for the full walk-through.
@@ -77,8 +86,21 @@ x-cloud-env: &cloud-env
   # Empty WOMBLEX_S3_ENDPOINT (the cloud case) => s3fs talks to real AWS S3;
   # the bundled default points at MinIO.
   WOMBLEX_S3_ENDPOINT: ${WOMBLEX_S3_ENDPOINT:-http://minio:9000}
-  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-minioadmin}
-  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-minioadmin}
+  # Store credentials for s3fs, read store-specifically so the ambient
+  # AWS_ACCESS_KEY_ID can stay UNSET. That matters in cloud: setting
+  # AWS_ACCESS_KEY_ID is process-global and disables boto3's instance-role
+  # resolution for the isaacus-sagemaker SigV4 signer too (it would sign the
+  # store key against SageMaker and 403). Leaving it unset lets SageMaker use
+  # the EC2 instance role while s3fs still gets these explicitly. The bundled
+  # default is MinIO's static key; a cloud deployment on an instance role can
+  # leave BOTH unset (s3fs then uses the instance role for S3 as well).
+  WOMBLEX_S3_ACCESS_KEY_ID: ${WOMBLEX_S3_ACCESS_KEY_ID:-minioadmin}
+  WOMBLEX_S3_SECRET_ACCESS_KEY: ${WOMBLEX_S3_SECRET_ACCESS_KEY:-minioadmin}
+  # Passed through only if the operator sets them; unset by default so the
+  # SageMaker signer resolves the instance role. AWS_REGION is safe to set
+  # (it is not a credential) and both the store and SageMaker read it.
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
   AWS_REGION: ${AWS_REGION:-us-east-1}
   ISAACUS_API_KEY: ${ISAACUS_API_KEY:-}
 

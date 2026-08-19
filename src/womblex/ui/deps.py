@@ -74,6 +74,7 @@ class UISettings:
     presets_dir: Path | None = None
     ingest_uri: str | None = None
     settings_dir: Path | None = None
+    s3_credentials: tuple[str, str] | None = None
 
     def __post_init__(self) -> None:
         if bool(self.output_root) == bool(self.store_uri):
@@ -111,7 +112,8 @@ def apply_saved_locations(base: UISettings, saved: SavedLocations) -> UISettings
     A saved ``store_uri`` clears ``output_root``, keeping the XOR invariant.
     Going through ``dataclasses.replace`` re-runs ``__post_init__``, so
     disjointness is revalidated against the *effective* pair rather than the
-    flag/env values alone.
+    flag/env values alone. A saved S3 credential pair (both key and secret)
+    layers on too, so the console's own store reads use it over the env.
     """
     output_root = base.output_root
     store_uri = base.store_uri
@@ -119,7 +121,11 @@ def apply_saved_locations(base: UISettings, saved: SavedLocations) -> UISettings
         store_uri = saved.store_uri
         output_root = None
     ingest_uri = saved.ingest_uri or base.ingest_uri
-    return replace(base, output_root=output_root, store_uri=store_uri, ingest_uri=ingest_uri)
+    s3_credentials = saved.s3_credentials() or base.s3_credentials
+    return replace(
+        base, output_root=output_root, store_uri=store_uri, ingest_uri=ingest_uri,
+        s3_credentials=s3_credentials,
+    )
 
 
 def resolve_settings(

@@ -142,9 +142,38 @@ export ISAACUS_SAGEMAKER_PROFILE="my-aws-profile"  # optional; else the AWS SDK 
 ```
 
 A stage whose model no endpoint serves fails before its first request, naming
-the model and listing what the endpoints do serve. AWS credentials are resolved
-by boto3 as usual (SigV4-signed `/invocations` calls). Chunk-size token
-counting is unaffected: the Kanon-2 tokeniser is vendored and stays local.
+the model and listing what the endpoints do serve. Chunk-size token counting is
+unaffected: the Kanon-2 tokeniser is vendored and stays local.
+
+**SageMaker credentials and the MinIO conflict.** The `/invocations` calls are
+SigV4-signed by boto3's standard credential chain — on EC2 that resolves the
+instance role (e.g. one with a `SageMakerInvokeEndpoint` policy scoped to your
+endpoint), which is what you want. The trap: if the object store is MinIO, you
+may have set `AWS_ACCESS_KEY_ID=minioadmin` for s3fs. That env var is
+**process-global**, and boto3 checks env vars *before* the instance role — so
+it disables the role for the SageMaker signer too, which then signs `minioadmin`
+against real SageMaker and 403s (`security token … is invalid`). Symmetrically,
+setting the real AWS keys makes s3fs fail against MinIO (`InvalidAccessKeyId`).
+Give the object store its **own** credentials via `WOMBLEX_S3_ACCESS_KEY_ID` /
+`WOMBLEX_S3_SECRET_ACCESS_KEY` and leave `AWS_ACCESS_KEY_ID` **unset** — then
+s3fs authenticates to MinIO explicitly while SageMaker keeps the instance role.
+(`ISAACUS_SAGEMAKER_PROFILE` selects a non-default AWS profile if you need one
+for SageMaker specifically.)
+
+**Rotating the object-store key from the console.** The `WOMBLEX_S3_*` keys
+above are *defaults* — often baked into the image. When one is rotated, an
+operator can save the new pair through the Resources Console (Run store card →
+S3 credentials) rather than rebuilding the container: the console persists it to
+its settings volume (`--settings-dir` / `$WOMBLEX_UI_SETTINGS_DIR`) and uses it
+over the env from the next request, and *Test connection* confirms it reaches
+the store. The pair overrides only the console's own store reads (and its
+enqueue/preflight against the ingest store); pipeline **workers** still read
+their keys from the env at their own start-up, so a rotated key that must reach
+the fleet is still an env/redeploy change there. The saved secret never appears
+in a response body or log — the card shows only its masked last-four and
+whether it came from `saved` or `env`. Because that settings volume now holds a
+credential, treat it as sensitive (mount it as you would any secret store);
+saving nothing keeps the env defaults, and *Clear* reverts to them.
 
 ## Quick Start
 
@@ -213,9 +242,14 @@ branch for one to select. Both choices fall out of what you already pass:
 a `LocalFileSystem` for a bare path or `file://` and an `S3FileSystem` for
 `s3://` (likewise `gs://`, `az://`). The staging code above it is one code
 path — a local `--store` runs the whole stage-in → `process_batch` → stage-out
-cycle with s3fs never imported. Credentials follow the same rule: the standard
-`AWS_*` vars and `WOMBLEX_S3_ENDPOINT` (for MinIO) are read only for `s3://`,
-so a local store needs no configuration at all.
+cycle with s3fs never imported. Credentials follow the same rule: the S3 store
+creds (`WOMBLEX_S3_ACCESS_KEY_ID` / `WOMBLEX_S3_SECRET_ACCESS_KEY`, falling back
+to `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`) and `WOMBLEX_S3_ENDPOINT`
+(for MinIO, falling back to `AWS_ENDPOINT_URL`) are read only for `s3://`, so a
+local store needs no configuration at all. Prefer the store-specific `WOMBLEX_S3_*` vars in the cloud: setting the
+ambient `AWS_ACCESS_KEY_ID` is process-global and would clobber the instance
+role boto3 uses to sign Isaacus-on-SageMaker `/invocations` calls (see the
+SageMaker section above).
 
 Execution mode is the command, not a setting. `womblex run` processes batches
 in-process and checkpoints to `CheckpointManager`; `enqueue`/`worker` put the
@@ -267,8 +301,10 @@ duplicate-cluster ids are corpus-wide. Pass `--shards <dir>` instead of
 
 Connection details come from `--store`/`WOMBLEX_STORE_URI`, `--ingest`/`WOMBLEX_INGEST_URI`
 (defaults to `--store` when unset, for back-compatibility), `--dsn`/`WOMBLEX_DB_DSN`
-(or `DATABASE_URL`), and the standard `AWS_*` / `WOMBLEX_S3_ENDPOINT` env vars
-(MinIO works as an S3 endpoint). Shards land at `<store>/runs/<run_id>/documents/`
+(or `DATABASE_URL`), and the S3 store env vars (`WOMBLEX_S3_ACCESS_KEY_ID` /
+`WOMBLEX_S3_SECRET_ACCESS_KEY`, or the `AWS_*` fallback, plus
+`WOMBLEX_S3_ENDPOINT` / `AWS_ENDPOINT_URL` — MinIO works as an S3 endpoint).
+Shards land at `<store>/runs/<run_id>/documents/`
 in the **ordinary layout**, so once synced down, `womblex manifest` /
 `chunk --shards` / every per-stage command consume a distributed run exactly
 like a local one — or run them in place with `run-stage`, above.
@@ -322,8 +358,13 @@ export WOMBLEX_DB_DSN=postgresql://user:pass@db.example:5432/shared  # pragma: a
 export WOMBLEX_STORE_URI=s3://shared/womblex        # own prefix of a shared bucket
 export WOMBLEX_INGEST_URI=s3://shared/womblex/inbox # disjoint from the store's runs/
 export WOMBLEX_S3_ENDPOINT=                          # leave empty for real AWS S3
-export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_REGION=ap-southeast-2
-export ISAACUS_API_KEY=...                           # if enrichment/embeddings run
+export AWS_REGION=ap-southeast-2
+# Store credentials go on the store-specific vars, NOT AWS_ACCESS_KEY_ID —
+# see the SageMaker section: an ambient AWS_ACCESS_KEY_ID is process-global
+# and clobbers the instance role the isaacus-sagemaker signer needs. For real
+# AWS S3 reachable by the same instance role, leave these unset too.
+export WOMBLEX_S3_ACCESS_KEY_ID=... WOMBLEX_S3_SECRET_ACCESS_KEY=...  # pragma: allowlist secret -- placeholders
+export ISAACUS_API_KEY=...                           # if enrichment/embeddings run (omit on SageMaker)
 
 # 2. Create the one table Womblex owns (womblex_jobs) in the external DSN.
 #    Either run the init one-shot (it resolves WOMBLEX_DB_DSN)...

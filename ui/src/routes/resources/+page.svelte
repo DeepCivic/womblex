@@ -44,6 +44,15 @@
 	let storeSaving = $state(false);
 	let ingestSaveError: string | null = $state(null);
 	let storeSaveError: string | null = $state(null);
+	// S3 credential override for the run store. The console masks the saved
+	// secret in every response, so these open blank: an empty pair is "keep what
+	// is saved" (preserve-on-omit), a filled pair sets a new override, and the
+	// Clear button reverts to the env keys. The card's `credentials_source` /
+	// `credentials_masked` show what is currently in force.
+	let accessKeyDraft = $state('');
+	let secretKeyDraft = $state('');
+	let credsSaving = $state(false);
+	let credsSaveError: string | null = $state(null);
 	// A 409 (no writable settings dir) or 403 (audit-only) is a fixed property of
 	// this deployment, not a per-click failure: once seen, editing is disabled
 	// permanently and the card explains the flag — the same pattern the composer
@@ -195,6 +204,40 @@
 			storeSaveError = handleRefusal(err);
 		} finally {
 			storeSaving = false;
+		}
+	}
+
+	// Save or clear the S3 credential override. `clear` reverts to the env keys;
+	// otherwise both fields must be filled (the backend refuses a half-set pair).
+	// Locations are resubmitted at their current saved values so this save does
+	// not disturb them (a PUT is a full replace of the location override).
+	async function saveCredentials(clear: boolean = false): Promise<void> {
+		if (credsSaving || !cards) return;
+		if (!clear && (!accessKeyDraft.trim() || !secretKeyDraft.trim())) {
+			credsSaveError = 'Enter both an access key id and a secret access key.';
+			return;
+		}
+		credsSaving = true;
+		credsSaveError = null;
+		try {
+			const result = await saveLocations({
+				store_uri: cards.store.source === 'saved' ? cards.store.uri : null,
+				ingest_uri: cards.ingest.source === 'saved' ? cards.ingest.uri : null,
+				s3_access_key_id: clear ? null : accessKeyDraft.trim(),
+				s3_secret_access_key: clear ? null : secretKeyDraft.trim(),
+				clear_credentials: clear
+			});
+			cards = { ...cards, ingest: result.ingest, store: result.store };
+			ingestResult = result.ingest_test;
+			storeResult = result.store_test;
+			// Never keep the secret in memory once it is saved — the card now shows
+			// the masked tail and its source.
+			accessKeyDraft = '';
+			secretKeyDraft = '';
+		} catch (err) {
+			credsSaveError = handleRefusal(err);
+		} finally {
+			credsSaving = false;
 		}
 	}
 </script>
@@ -369,7 +412,18 @@
 						<dt class="text-muted-foreground">Object store</dt>
 						<dd>{cards.store.is_object_store ? 'Yes' : 'No (local fsspec backend)'}</dd>
 						<dt class="text-muted-foreground">Credentials</dt>
-						<dd>{cards.store.options.credentials_configured ? 'Configured' : 'Not set'}</dd>
+						<dd>
+							{#if cards.store.options.credentials_configured}
+								<span class="font-mono">{cards.store.options.credentials_masked}</span>
+								<span class="text-muted-foreground"
+									>({cards.store.options.credentials_source === 'saved'
+										? 'set here'
+										: 'from environment'})</span
+								>
+							{:else}
+								Not set
+							{/if}
+						</dd>
 						{#if cards.store.options.endpoint_url}
 							<dt class="text-muted-foreground">Endpoint</dt>
 							<dd class="font-mono">{cards.store.options.endpoint_url}</dd>
@@ -395,6 +449,62 @@
 					runStoreTest,
 					storeTesting
 				)}
+				<!-- S3 credential override, only for a remote store this console can edit.
+					 The fields open blank (the saved secret is never sent back); an empty
+					 save keeps what is saved, a filled pair sets a new override, and Clear
+					 reverts to the baked-in env keys. -->
+				{#if cards.store.kind === 'remote' && cards.store.editable && !locationsDisabled}
+					<div class="flex flex-col gap-2 border-t border-border pt-3">
+						<p class="text-xs text-muted-foreground">
+							S3 credentials — set here to override the deployment's baked-in keys (used
+							from the next request, no restart). Leave blank to keep what is saved.
+						</p>
+						<label class="flex flex-col gap-1 text-xs">
+							<span class="text-muted-foreground">Access key id</span>
+							<input
+								type="text"
+								value={accessKeyDraft}
+								oninput={(e) => (accessKeyDraft = e.currentTarget.value)}
+								autocomplete="off"
+								placeholder="AKIA…"
+								disabled={credsSaving}
+								class="rounded-md border border-border bg-background px-2 py-1.5 font-mono
+									focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+							/>
+						</label>
+						<label class="flex flex-col gap-1 text-xs">
+							<span class="text-muted-foreground">Secret access key</span>
+							<input
+								type="password"
+								value={secretKeyDraft}
+								oninput={(e) => (secretKeyDraft = e.currentTarget.value)}
+								autocomplete="off"
+								placeholder="••••••••"
+								disabled={credsSaving}
+								class="rounded-md border border-border bg-background px-2 py-1.5 font-mono
+									focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+							/>
+						</label>
+						<div class="flex flex-wrap items-center gap-2">
+							<button
+								type="button"
+								class="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground
+									hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring
+									disabled:opacity-50 disabled:hover:bg-primary"
+								disabled={credsSaving}
+								onclick={() => saveCredentials()}
+							>
+								{credsSaving ? 'Saving…' : 'Save credentials'}
+							</button>
+							{#if cards.store.options.credentials_source === 'saved'}
+								{@render testButton('Clear credentials', credsSaving, () => saveCredentials(true))}
+							{/if}
+						</div>
+						{#if credsSaveError}
+							<p class="text-xs text-status-failed">{credsSaveError}</p>
+						{/if}
+					</div>
+				{/if}
 			</section>
 		</div>
 

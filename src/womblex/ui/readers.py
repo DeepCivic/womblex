@@ -78,7 +78,7 @@ class StoreUnreachable(Exception):
 def list_run_summaries(settings: UISettings) -> list[RunDescription]:
     """All runs the settings can see, newest run_id first."""
     if settings.is_remote:
-        runs = _list_remote_runs(cast(str, settings.store_uri))
+        runs = _list_remote_runs(cast(str, settings.store_uri), settings.s3_credentials)
     else:
         runs = [describe_run(p) for p in list_runs(cast(Path, settings.output_root))]
     return sorted(runs, key=lambda d: d.run_id, reverse=True)
@@ -87,7 +87,9 @@ def list_run_summaries(settings: UISettings) -> list[RunDescription]:
 def get_manifest_rows(settings: UISettings, run_id: str) -> list[dict] | None:
     """Manifest rows (one per document) for run_id, or None if it doesn't exist."""
     if settings.is_remote:
-        return _remote_manifest_rows(cast(str, settings.store_uri), run_id)
+        return _remote_manifest_rows(
+            cast(str, settings.store_uri), run_id, settings.s3_credentials
+        )
     run_dir = cast(Path, settings.output_root) / run_id
     if not run_dir.is_dir():
         return None
@@ -106,7 +108,10 @@ def get_stage_presence(settings: UISettings, run_id: str, stage: str) -> list[st
     suffix = STAGE_SUFFIXES[stage]
     column = _PRESENCE_HASH_COLUMN.get(suffix, "source_hash")
     if settings.is_remote:
-        return _remote_stage_presence(cast(str, settings.store_uri), run_id, suffix, column)
+        return _remote_stage_presence(
+            cast(str, settings.store_uri), run_id, suffix, column,
+            credentials=settings.s3_credentials,
+        )
     run_dir = cast(Path, settings.output_root) / run_id
     if not run_dir.is_dir():
         return None
@@ -119,7 +124,7 @@ def get_stage_presence(settings: UISettings, run_id: str, stage: str) -> list[st
 def get_shard_audit(settings: UISettings, run_id: str) -> dict | None:
     """Cross-batch structural audit for run_id — the verify-shards action's data."""
     if settings.is_remote:
-        return _remote_shard_audit(cast(str, settings.store_uri), run_id)
+        return _remote_shard_audit(cast(str, settings.store_uri), run_id, settings.s3_credentials)
     run_dir = cast(Path, settings.output_root) / run_id
     if not run_dir.is_dir():
         return None
@@ -161,7 +166,9 @@ def get_chunk_detail(settings: UISettings, run_id: str, source_hash: str) -> dic
     the same "present, not missing" shape as :func:`get_stage_presence`.
     """
     if settings.is_remote:
-        return _remote_chunk_detail(cast(str, settings.store_uri), run_id, source_hash)
+        return _remote_chunk_detail(
+            cast(str, settings.store_uri), run_id, source_hash, settings.s3_credentials
+        )
     run_dir = cast(Path, settings.output_root) / run_id
     if not run_dir.is_dir():
         return None
@@ -193,7 +200,7 @@ def list_run_logs(settings: UISettings, run_id: str) -> list[dict] | None:
     empty rather than 404-ing.
     """
     if settings.is_remote:
-        return _remote_run_logs(cast(str, settings.store_uri), run_id)
+        return _remote_run_logs(cast(str, settings.store_uri), run_id, settings.s3_credentials)
     run_dir = cast(Path, settings.output_root) / run_id
     if not run_dir.is_dir():
         return None
@@ -219,7 +226,9 @@ def read_run_log(settings: UISettings, run_id: str, name: str) -> str | None:
     if not is_safe_log_name(name):
         return None
     if settings.is_remote:
-        return _remote_run_log(cast(str, settings.store_uri), run_id, name)
+        return _remote_run_log(
+            cast(str, settings.store_uri), run_id, name, settings.s3_credentials
+        )
     run_dir = cast(Path, settings.output_root) / run_id
     if not run_dir.is_dir():
         return None
@@ -271,7 +280,7 @@ def write_feedback(
         chunk_index=chunk_index, row=row, note=note, reported_by=reported_by,
     )
     if settings.is_remote:
-        store = _open_store(cast(str, settings.store_uri))
+        store = _open_store(cast(str, settings.store_uri), settings.s3_credentials)
         if run_id not in store.list_dirs("runs"):
             return None
         # Serialise via the same writer the local branch uses, then publish —
@@ -338,7 +347,7 @@ def save_preset(
     body = presets_mod.serialise_preset_record(record)
     filename = presets_mod.preset_filename(name)
     if settings.is_remote:
-        store = _open_store(cast(str, settings.store_uri))
+        store = _open_store(cast(str, settings.store_uri), settings.s3_credentials)
         with tempfile.TemporaryDirectory(prefix="womblex-ui-") as tmp:
             local = Path(tmp) / filename
             local.write_text(body, encoding="utf-8")
@@ -363,7 +372,7 @@ def delete_saved_preset(settings: UISettings, name: str) -> bool:
         return False
     filename = presets_mod.preset_filename(name)
     if settings.is_remote:
-        store = _open_store(cast(str, settings.store_uri))
+        store = _open_store(cast(str, settings.store_uri), settings.s3_credentials)
         key = f"{presets_mod.PRESETS_DIRNAME}/{filename}"
         if not store.exists(key):
             return False
@@ -386,7 +395,7 @@ def _read_saved_presets(settings: UISettings) -> dict[str, Preset]:
     """
     saved: dict[str, Preset] = {}
     if settings.is_remote:
-        store = _open_store(cast(str, settings.store_uri))
+        store = _open_store(cast(str, settings.store_uri), settings.s3_credentials)
         for key in store.list_files(presets_mod.PRESETS_DIRNAME, "*"):
             filename = key.rsplit("/", 1)[-1]
             name = presets_mod.preset_name_from_filename(filename)
@@ -533,8 +542,17 @@ def _scan_stage_presence(shard_dir: Path, suffix: str, column: str = "source_has
 # ---------------------------------------------------------------------------
 
 
-def _open_store(store_uri: str) -> RemoteStore:
+def _open_store(
+    store_uri: str, credentials: tuple[str, str] | None = None
+) -> RemoteStore:
     """Open the store at *store_uri*, or raise :class:`StoreUnreachable`.
+
+    *credentials*, when given, is the operator-saved ``(key, secret)`` S3
+    override the Resources Console persisted; it wins over the env vars the
+    Dockerfile baked in (see
+    :func:`womblex.store.remote.storage_options_from_env`), so a key rotated
+    through the console is used by the console's own store reads moving
+    forward, with no container rebuild.
 
     ``RemoteStore.from_uri`` raises ``ImportError`` when the fsspec backend for
     the URI's scheme is not installed (the ``s3fs`` case), and various
@@ -545,19 +563,23 @@ def _open_store(store_uri: str) -> RemoteStore:
     from womblex.store.remote import RemoteStore
 
     try:
-        return RemoteStore.from_uri(store_uri)
+        return RemoteStore.from_uri(store_uri, credentials=credentials)
     except Exception as e:
         logger.warning("store unreachable (%s): %s", store_uri, e)
         raise StoreUnreachable(str(e)) from e
 
 
-def _list_remote_runs(store_uri: str) -> list[RunDescription]:
-    store = _open_store(store_uri)
+def _list_remote_runs(
+    store_uri: str, credentials: tuple[str, str] | None = None
+) -> list[RunDescription]:
+    store = _open_store(store_uri, credentials)
     return [_describe_remote_run(store, run_id) for run_id in store.list_dirs("runs")]
 
 
-def _remote_manifest_rows(store_uri: str, run_id: str) -> list[dict] | None:
-    store = _open_store(store_uri)
+def _remote_manifest_rows(
+    store_uri: str, run_id: str, credentials: tuple[str, str] | None = None
+) -> list[dict] | None:
+    store = _open_store(store_uri, credentials)
     if run_id not in store.list_dirs("runs"):
         return None
     return list(_remote_manifest_table(store, f"runs/{run_id}").to_pylist())
@@ -608,9 +630,10 @@ def _remote_stages_present(store: RemoteStore, prefix: str) -> tuple[str, ...]:
 
 
 def _remote_stage_presence(
-    store_uri: str, run_id: str, suffix: str, column: str = "source_hash"
+    store_uri: str, run_id: str, suffix: str, column: str = "source_hash",
+    *, credentials: tuple[str, str] | None = None,
 ) -> list[str] | None:
-    store = _open_store(store_uri)
+    store = _open_store(store_uri, credentials)
     if run_id not in store.list_dirs("runs"):
         return None
     keys = store.list_files(f"runs/{run_id}/documents", f"*{suffix}")
@@ -622,7 +645,10 @@ def _remote_stage_presence(
         return _scan_stage_presence(tmp_dir, suffix, column)
 
 
-def _remote_chunk_detail(store_uri: str, run_id: str, source_hash: str) -> dict | None:
+def _remote_chunk_detail(
+    store_uri: str, run_id: str, source_hash: str,
+    credentials: tuple[str, str] | None = None,
+) -> dict | None:
     """Read the overlay sidecars in place, filtered to one document.
 
     The only reader here that does **not** stage into a temp dir first. The
@@ -633,7 +659,7 @@ def _remote_chunk_detail(store_uri: str, run_id: str, source_hash: str) -> dict 
     store's own fsspec filesystem pushes the ``source_hash`` predicate into
     the parquet reader instead.
     """
-    store = _open_store(store_uri)
+    store = _open_store(store_uri, credentials)
     if run_id not in store.list_dirs("runs"):
         return None
     prefix = f"runs/{run_id}/documents"
@@ -646,7 +672,9 @@ def _remote_chunk_detail(store_uri: str, run_id: str, source_hash: str) -> dict 
     return _chunk_detail(paths, source_hash, filesystem=store.fs)
 
 
-def _remote_shard_audit(store_uri: str, run_id: str) -> dict | None:
+def _remote_shard_audit(
+    store_uri: str, run_id: str, credentials: tuple[str, str] | None = None
+) -> dict | None:
     """Stage the four extraction-role shards and audit them locally.
 
     Restricted to ``_SHARD_SUFFIX`` rather than ``*.parquet`` on purpose:
@@ -654,7 +682,7 @@ def _remote_shard_audit(store_uri: str, run_id: str) -> dict | None:
     sidecars are the largest files in it — globbing everything would pull
     the whole corpus over the network to count element kinds.
     """
-    store = _open_store(store_uri)
+    store = _open_store(store_uri, credentials)
     if run_id not in store.list_dirs("runs"):
         return None
     prefix = f"runs/{run_id}/documents"
@@ -667,7 +695,9 @@ def _remote_shard_audit(store_uri: str, run_id: str) -> dict | None:
         return audit_shard_directory(tmp_dir).as_dict()
 
 
-def _remote_run_logs(store_uri: str, run_id: str) -> list[dict] | None:
+def _remote_run_logs(
+    store_uri: str, run_id: str, credentials: tuple[str, str] | None = None
+) -> list[dict] | None:
     """List a remote run's batch logs from its ``logs/`` prefix.
 
     ``None`` when the run does not exist; an empty list when it does but has no
@@ -675,7 +705,7 @@ def _remote_run_logs(store_uri: str, run_id: str) -> list[dict] | None:
     an object's size uniformly per-listing, so a per-key ``info`` fetches size
     and mtime for the (small) set of batch logs.
     """
-    store = _open_store(store_uri)
+    store = _open_store(store_uri, credentials)
     if run_id not in store.list_dirs("runs"):
         return None
     keys = store.list_files(f"runs/{run_id}/logs", "*")
@@ -696,20 +726,22 @@ def _remote_log_entry(store: RemoteStore, key: str, name: str) -> dict:
         info: dict = store.fs.info(f"{store.root}/{key}")  # type: ignore[attr-defined]
         size = int(info.get("size") or info.get("Size") or 0)
         mtime = info.get("LastModified") or info.get("mtime")
-        if hasattr(mtime, "strftime"):
+        if mtime is not None and hasattr(mtime, "strftime"):
             modified = mtime.strftime("%Y-%m-%dT%H:%M:%SZ")
     except Exception as e:  # a listing that cannot be `info`'d is still nameable
         logger.warning("run-logs: could not stat %s: %s", key, e)
     return {"name": name, "size": size, "modified": modified}
 
 
-def _remote_run_log(store_uri: str, run_id: str, name: str) -> str | None:
+def _remote_run_log(
+    store_uri: str, run_id: str, name: str, credentials: tuple[str, str] | None = None
+) -> str | None:
     """Read one remote batch log in place; None if the run or the log is absent.
 
     *name* is already validated by :func:`read_run_log`; the run existence
     check gives a hand-typed run id the same 404 the local branch produces.
     """
-    store = _open_store(store_uri)
+    store = _open_store(store_uri, credentials)
     if run_id not in store.list_dirs("runs"):
         return None
     key = f"runs/{run_id}/logs/{name}"

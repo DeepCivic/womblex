@@ -114,12 +114,26 @@ def _mask_dsn(dsn: str | None) -> str | None:
     return _KEYWORD_PASSWORD_RE.sub(r"\1***", dsn)
 
 
-def _store_options_summary(uri: str) -> dict:
-    """AWS options `storage_options_from_env` would pass — presence, not values."""
-    opts = storage_options_from_env(uri)
+def _store_options_summary(uri: str, credentials: tuple[str, str] | None = None) -> dict:
+    """AWS options `storage_options_from_env` would pass — presence, not values.
+
+    *credentials*, when given, is the operator-saved S3 override; it is folded
+    in the same way :func:`storage_options_from_env` folds it, so the card
+    reports ``credentials_configured`` true for a console whose keys come from
+    the saved override rather than the env. The values themselves never leave
+    this function — only whether a key/secret pair is present, where it came
+    from (``"saved"`` when the override supplied it, else ``"env"``), and the
+    access-key id masked to its last four characters for recognition.
+    """
+    opts = storage_options_from_env(uri, credentials=credentials)
     client_kwargs = opts.get("client_kwargs", {})
+    configured = bool(opts.get("key") and opts.get("secret"))
     return {
-        "credentials_configured": bool(opts.get("key") and opts.get("secret")),
+        "credentials_configured": configured,
+        "credentials_source": (
+            "saved" if (credentials is not None and configured) else ("env" if configured else None)
+        ),
+        "credentials_masked": _mask_secret(opts.get("key")) if configured else None,
         "endpoint_url": client_kwargs.get("endpoint_url"),
         "region": client_kwargs.get("region_name"),
     }
@@ -173,7 +187,7 @@ def get_store_card(settings: UISettings) -> dict:
             "kind": "remote",
             "uri": uri,
             "is_object_store": is_remote_uri(uri),
-            "options": _store_options_summary(uri),
+            "options": _store_options_summary(uri, settings.s3_credentials),
             "source": _store_source(settings),
             "editable": editable,
         }
@@ -233,7 +247,7 @@ def get_ingest_card(settings: UISettings) -> dict:
         "configured": True,
         "uri": uri,
         "is_object_store": is_remote_uri(uri),
-        "options": _store_options_summary(uri),
+        "options": _store_options_summary(uri, settings.s3_credentials),
         "source": _ingest_source(settings),
         "editable": editable,
     }
@@ -271,7 +285,7 @@ def test_store(settings: UISettings) -> dict:
     try:
         from womblex.store.remote import RemoteStore
 
-        RemoteStore.from_uri(uri).list_dirs("runs")
+        RemoteStore.from_uri(uri, credentials=settings.s3_credentials).list_dirs("runs")
     except Exception as e:
         logger.warning("resources: store unreachable: %s", e)
         return {"reachable": False, "error": str(e)}
@@ -290,7 +304,7 @@ def test_ingest(settings: UISettings) -> dict:
     try:
         from womblex.store.remote import RemoteStore
 
-        RemoteStore.from_uri(uri).list_files("", "*")
+        RemoteStore.from_uri(uri, credentials=settings.s3_credentials).list_files("", "*")
     except Exception as e:
         logger.warning("resources: ingest unreachable: %s", e)
         return {"reachable": False, "error": str(e)}
@@ -314,7 +328,15 @@ def test_queue(
     return {"reachable": queue is not None, "error": error, "queue": queue}
 
 
-def save_locations(base: UISettings, *, ingest_uri: str | None, store_uri: str | None) -> dict:
+def save_locations(
+    base: UISettings,
+    *,
+    ingest_uri: str | None,
+    store_uri: str | None,
+    s3_access_key_id: str | None = None,
+    s3_secret_access_key: str | None = None,
+    clear_credentials: bool = False,
+) -> dict:
     """Persist an ingest/output override and return the refreshed cards.
 
     *base* is the pre-overlay settings (:func:`~womblex.ui.deps.get_base_settings`),
@@ -322,9 +344,17 @@ def save_locations(base: UISettings, *, ingest_uri: str | None, store_uri: str |
     than to whatever was previously saved. A full replace (``PUT``), not a
     merge — a caller keeping one field must resubmit its current value.
 
-    Raises ``ValueError`` (→ 400) on a location a store cannot open or on a
-    pair that would overlap once effective. Reachability is *reported*, not
-    required: naming a bucket ahead of provisioning it is normal.
+    The S3 credential pair is the one exception to "full replace": the console
+    masks the saved secret in every response, so the frontend cannot resubmit
+    a secret it can no longer read. A save that omits both credential fields
+    therefore *keeps* whatever was saved (preserve-on-omit); passing both sets
+    a new pair; ``clear_credentials`` removes it and reverts to the env keys.
+    A half-set pair (one field only) is refused rather than half-stored.
+
+    Raises ``ValueError`` (→ 400) on a location a store cannot open, on a
+    pair that would overlap once effective, or on a half-set credential pair.
+    Reachability is *reported*, not required: naming a bucket ahead of
+    provisioning it is normal.
     """
     for value in (ingest_uri, store_uri):
         if value is not None:
@@ -340,7 +370,16 @@ def save_locations(base: UISettings, *, ingest_uri: str | None, store_uri: str |
         assert_disjoint_locations(effective_ingest, str(base.output_root), runs_prefix="")
 
     settings_dir = cast(Path, base.settings_dir)
-    saved = SavedLocations(ingest_uri=ingest_uri, store_uri=store_uri)
+    key, secret = _resolve_saved_credentials(
+        settings_dir,
+        s3_access_key_id=s3_access_key_id,
+        s3_secret_access_key=s3_secret_access_key,
+        clear_credentials=clear_credentials,
+    )
+    saved = SavedLocations(
+        ingest_uri=ingest_uri, store_uri=store_uri,
+        s3_access_key_id=key, s3_secret_access_key=secret,
+    )
     write_saved_locations(settings_dir, saved)
 
     refreshed = apply_saved_locations(base, saved)
@@ -350,3 +389,32 @@ def save_locations(base: UISettings, *, ingest_uri: str | None, store_uri: str |
         "ingest_test": test_ingest(refreshed),
         "store_test": test_store(refreshed),
     }
+
+
+def _resolve_saved_credentials(
+    settings_dir: Path,
+    *,
+    s3_access_key_id: str | None,
+    s3_secret_access_key: str | None,
+    clear_credentials: bool,
+) -> tuple[str | None, str | None]:
+    """The ``(key, secret)`` to persist, given the request and what was saved.
+
+    ``clear_credentials`` wins — both fields drop to ``None`` and the store
+    reverts to the env keys. A submitted pair (both fields) replaces the saved
+    one. Neither given keeps the saved pair intact (preserve-on-omit), because
+    the masked response the operator edited never carried the real secret back.
+    A half-set pair is a caller error, not a silent half-store.
+    """
+    if clear_credentials:
+        return None, None
+    if s3_access_key_id and s3_secret_access_key:
+        return s3_access_key_id, s3_secret_access_key
+    if s3_access_key_id or s3_secret_access_key:
+        raise ValueError(
+            "both s3_access_key_id and s3_secret_access_key are required to set a "
+            "credential override (pass neither to keep the saved pair, or "
+            "clear_credentials to remove it)"
+        )
+    previous = read_saved_locations(settings_dir)
+    return previous.s3_access_key_id, previous.s3_secret_access_key
