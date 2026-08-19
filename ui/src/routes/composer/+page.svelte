@@ -1,7 +1,8 @@
 <script lang="ts">
-	// The Pipeline Composer (docs/ui-plan.md merge 9). Like the Resources
-	// Console it is not run-scoped: it edits configuration and shows the
-	// pipeline's shape, so it never touches a run's artefacts.
+	// The Pipeline Composer (docs/ui-plan.md merge 9; dispatch moved here in
+	// docs/ui-ingest-plan.md merge 4). It edits configuration and shows the
+	// pipeline's shape, and — as the console's one dispatch surface — enqueues a
+	// run over the deployment's configured ingest location.
 	//
 	// Both halves are served, not typed here: the graph is `STAGE_CONTRACTS`
 	// and the form is `WomblexConfig`'s JSON Schema. Validation and the YAML
@@ -19,10 +20,12 @@
 		renderConfigYaml,
 		ConfigInvalid,
 		getExecutionStatus,
+		getIngestPreflight,
 		enqueueExtraction,
 		EnqueueRefused,
 		type ConfigObject,
 		type ExecutionStatus,
+		type IngestPreflight,
 		type EnqueueResult,
 		type JsonSchema,
 		type Preset,
@@ -68,16 +71,23 @@
 	// is what learns it, and the control then explains why it is disabled.
 	let savingDisabled = $state(false);
 
-	// Enqueue-from-composer (docs/ui-plan.md merge 11 hand-off). The queue carries
-	// no config — workers get theirs from their own `--config` at launch — so
-	// "enqueue this preset" is just handing the composed run's identity and input
-	// location to the existing `enqueueExtraction`. `paths.input_root` seeds the
-	// prefix but is only a suggestion: it may be an absolute/local path, whereas
-	// `input_prefix` is store-relative, so the operator confirms it in a field of
-	// its own rather than us assuming the two are the same.
+	// Enqueue-from-composer (docs/ui-ingest-plan.md merge 4). The composer is now
+	// the only dispatch surface. The queue carries no config — workers get theirs
+	// from their own `--config` at launch — and ingest/output locations are
+	// deployment settings owned by the Resources Console, not re-input here. So an
+	// enqueue is just the composed run's identity (`run_id`) plus batching
+	// controls; the whole configured ingest root is the input, so there is no
+	// prefix field. The read-only deployment strip shows where documents come from
+	// and how many are ready, fed by the ingest preflight.
 	let execStatus = $state<ExecutionStatus | null>(null);
-	let enqueuePrefix = $state('');
+	let preflight = $state<IngestPreflight | null>(null);
 	let enqueueRunId = $state('');
+	// Batching controls moved here from the deleted Execution Controls. Batch size
+	// is a 10/50/100 select (a free integer invited a 1 or a 5000 with no
+	// feedback); the server stays permissive (`ge=1`) so `womblex enqueue` keeps
+	// full range. Max attempts carries over as the small number input it was.
+	let batchSize = $state(50);
+	let maxAttempts = $state(3);
 	let enqueuing = $state(false);
 	let enqueueError = $state<string | null>(null);
 	let enqueueResult = $state<EnqueueResult | null>(null);
@@ -86,22 +96,58 @@
 		return err instanceof Error ? err.message : String(err);
 	}
 
-	// A run id or path segment the composed config already carries, as a plain
-	// string or empty — read defensively since `config` is a free-form object.
-	function configString(section: string, key: string): string {
-		const s = config[section];
-		if (s === null || typeof s !== 'object' || Array.isArray(s)) return '';
-		const v = (s as ConfigObject)[key];
-		return typeof v === 'string' ? v : '';
-	}
+	// Which of the four dispatch requirements is missing, named so the operator
+	// sees the actionable fix rather than a bare disabled control. Order matches
+	// the server guard (`ui/execute.py`): the audit-only switch first (a
+	// deliberate choice), then the store, ingest and queue wiring gaps.
+	let blocker = $derived.by((): { label: string; detail: string } | null => {
+		if (!execStatus || execStatus.can_execute) return null;
+		if (execStatus.audit_only) {
+			return {
+				label: 'Audit-only',
+				detail:
+					'This console was started with --audit-only, so it can configure and ' +
+					'audit but not dispatch. Restart it without --audit-only to enqueue runs.'
+			};
+		}
+		if (!execStatus.has_store) {
+			return {
+				label: 'No store',
+				detail:
+					'Execution dispatches through a shared object store; this console reads a local ' +
+					'output_root. Point it at a --store (or $WOMBLEX_STORE_URI) to enqueue work.'
+			};
+		}
+		if (!execStatus.has_ingest) {
+			return {
+				label: 'No ingest location',
+				detail:
+					'Execution enqueues documents from a configured ingest location; none is set. ' +
+					'Set one on the Resources Console (or --ingest / $WOMBLEX_INGEST_URI) to enqueue work.'
+			};
+		}
+		return {
+			label: 'No queue',
+			detail:
+				'Execution dispatches through the job queue; no DSN is configured. Set one ' +
+				'(--dsn / $WOMBLEX_DB_DSN) to enqueue work.'
+		};
+	});
 
 	$effect(() => {
-		Promise.all([getStageGraph(), getConfigSchema(), listPresets(), getExecutionStatus()])
-			.then(([g, s, p, x]) => {
+		Promise.all([
+			getStageGraph(),
+			getConfigSchema(),
+			listPresets(),
+			getExecutionStatus(),
+			getIngestPreflight()
+		])
+			.then(([g, s, p, x, pre]) => {
 				graph = g;
 				schema = s;
 				presets = p;
 				execStatus = x;
+				preflight = pre;
 				config = defaultsFor(s, s.$defs ?? {});
 			})
 			.catch((err) => (error = message(err)))
@@ -195,31 +241,35 @@
 		}
 	}
 
-	// Hand the composed run's identity and input location to the queue. The queue
-	// carries no config; workers read their own `--config` at launch. So this is
-	// only `paths.input_root` → `input_prefix` (confirmed, since it may be an
-	// absolute/local path while the prefix is store-relative) and
-	// `dataset.run_id` → `run_id`, through the same `enqueueExtraction` the
-	// Execution Controls use.
+	// Hand the composed run into the queue — the composer is the only dispatch
+	// surface (docs/ui-ingest-plan.md merge 4). The queue carries no config;
+	// workers read their own `--config` at launch. Ingest and output are
+	// deployment settings owned by the Resources Console, so this sends no
+	// prefix — the whole configured ingest root is the input — only the optional
+	// run id and the batching controls, through the same `enqueueExtraction` the
+	// deleted Execution Controls used.
 	async function enqueue(): Promise<void> {
-		if (enqueuing || !enqueuePrefix.trim()) return;
+		if (enqueuing) return;
 		enqueuing = true;
 		enqueueError = null;
 		enqueueResult = null;
 		try {
 			const res = await enqueueExtraction({
-				input_prefix: enqueuePrefix.trim(),
-				run_id: enqueueRunId.trim() || undefined
+				run_id: enqueueRunId.trim() || undefined,
+				batch_size: batchSize,
+				max_attempts: maxAttempts
 			});
 			enqueueResult = res;
-			// Point the rest of the console at the run just planned (as the
-			// Execution Controls do), so the Dashboard tracks it.
+			// Point the rest of the console at the run just planned, so the Dashboard
+			// tracks it. `load()` reconciles the stored selection, so `select()`
+			// first makes the new id survive it.
 			runSelection.select(res.run_id);
 			await runSelection.load();
 			runSelection.select(res.run_id);
 		} catch (err) {
 			// A capability change since load surfaces as 403/409; refresh status so
-			// the control disables and explains, matching what the server saw.
+			// the control disables and the blocker banner explains, matching what the
+			// server saw.
 			if (err instanceof EnqueueRefused && err.status !== 400) {
 				getExecutionStatus()
 					.then((body) => (execStatus = body))
@@ -482,112 +532,151 @@
 			</section>
 		</div>
 
-		<!-- Enqueue this composed run (docs/ui-plan.md merge 11 hand-off). The queue
-			 carries no config — workers read their own --config at launch — so this
-			 hands off only the run's identity (dataset.run_id) and input location
-			 (paths.input_root, as a *suggested* prefix: it may be absolute/local
-			 while input_prefix is store-relative, so the operator confirms it).
-			 Shown only where the console can dispatch (a store and a queue, not
-			 --audit-only); otherwise the Execution Controls' banner names the fix. -->
-		{#if execStatus?.can_execute}
-			{@const suggestedPrefix = configString('paths', 'input_root')}
-			{@const suggestedRunId = configString('dataset', 'run_id')}
-			<section class="flex flex-col gap-3 rounded-md border border-border bg-surface-raised p-4">
-				<div>
-					<h2 class="font-display text-sm">Enqueue this run</h2>
-					<p class="mt-1 max-w-prose text-xs text-muted-foreground">
-						Plans an extraction run into the job queue from the composed run's identity
-						and input location. Workers the platform brings up read their own
-						<code>--config</code> at launch — the queue carries no config, so this hands
-						off only the prefix and run id.
-					</p>
-				</div>
-				<div class="flex flex-wrap items-end gap-2 text-xs">
-					<label class="flex flex-col gap-1">
-						<span class="text-muted-foreground">Input prefix</span>
-						<input
-							type="text"
-							bind:value={enqueuePrefix}
-							placeholder={suggestedPrefix || 'inbox'}
-							disabled={enqueuing}
-							class="rounded-md border border-border bg-background px-2 py-1.5 font-mono
-								focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring
-								disabled:opacity-50"
-						/>
-					</label>
-					<label class="flex flex-col gap-1">
-						<span class="text-muted-foreground">Run id <span class="opacity-60">(optional)</span></span>
-						<input
-							type="text"
-							bind:value={enqueueRunId}
-							placeholder={suggestedRunId || 'mint a fresh timestamped id'}
-							disabled={enqueuing}
-							class="rounded-md border border-border bg-background px-2 py-1.5 font-mono
-								focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring
-								disabled:opacity-50"
-						/>
-					</label>
-					{#if suggestedPrefix && enqueuePrefix.trim() !== suggestedPrefix}
-						<button
-							type="button"
-							class={BUTTON}
-							disabled={enqueuing}
-							onclick={() => {
-								enqueuePrefix = suggestedPrefix;
-								enqueueRunId = suggestedRunId;
-							}}
-						>
-							Use composed paths
-						</button>
-					{/if}
-					<button
-						type="button"
-						class="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground
-							hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2
-							focus-visible:ring-ring disabled:opacity-50 disabled:hover:bg-primary"
-						disabled={enqueuing || !enqueuePrefix.trim()}
-						onclick={enqueue}
-					>
-						{enqueuing ? 'Enqueuing…' : 'Enqueue run'}
-					</button>
-				</div>
-				<p class="text-xs text-muted-foreground">
-					<code>input_prefix</code> is store-relative; <code>paths.input_root</code> may be an
-					absolute or local path, so confirm it rather than assuming they match.
+		<!-- Enqueue this composed run (docs/ui-ingest-plan.md merge 4). The composer
+			 is the only dispatch surface now. Ingest and output are deployment
+			 settings owned by the Resources Console, so this re-inputs nothing: the
+			 whole configured ingest root is the input. The strip below shows where
+			 documents come from and how many are ready (from the ingest preflight);
+			 when the console cannot dispatch, the blocker banner names the fix
+			 instead of hiding the section. -->
+		<section class="flex flex-col gap-3 rounded-md border border-border bg-surface-raised p-4">
+			<div>
+				<h2 class="font-display text-sm">Enqueue this run</h2>
+				<p class="mt-1 max-w-prose text-xs text-muted-foreground">
+					Plans an extraction run into the job queue over the whole configured ingest
+					location. Workers the platform brings up read their own <code>--config</code>
+					at launch — the queue carries no config, so this hands off only the run id
+					and batching. Change the ingest and output locations on the
+					<a href="/resources" class="underline">Resources Console</a>.
 				</p>
+			</div>
 
-				{#if enqueueError}
-					<p class="text-xs text-status-failed">{enqueueError}</p>
-				{/if}
+			<!-- Read-only deployment locations. The composer displays them; it never
+				 edits them. "N documents ready" is the same recursive listing +
+				 SUPPORTED_EXTENSIONS filter the enqueue performs, so the count shown is
+				 the count that would be enqueued. -->
+			<dl class="grid gap-x-4 gap-y-1 rounded-md border border-border bg-surface-sunken p-3 text-xs sm:grid-cols-3">
+				<div>
+					<dt class="text-muted-foreground">Ingest</dt>
+					<dd class="truncate font-mono" title={execStatus?.ingest_uri ?? ''}>
+						{execStatus?.ingest_uri ?? 'not configured'}
+					</dd>
+				</div>
+				<div>
+					<dt class="text-muted-foreground">Output</dt>
+					<dd class="truncate font-mono" title={execStatus?.output_uri ?? ''}>
+						{execStatus?.output_uri ?? 'not configured'}
+					</dd>
+				</div>
+				<div>
+					<dt class="text-muted-foreground">Queue</dt>
+					<dd class="font-mono">{execStatus?.has_queue ? 'configured' : 'not configured'}</dd>
+				</div>
+				<div class="sm:col-span-3">
+					<dt class="text-muted-foreground">Documents ready</dt>
+					<dd class="font-mono">
+						{#if preflight?.error}
+							<span class="text-status-failed">{preflight.error}</span>
+						{:else if preflight}
+							{preflight.document_count} document{preflight.document_count === 1 ? '' : 's'} ready
+						{:else}
+							—
+						{/if}
+					</dd>
+				</div>
+			</dl>
 
-				{#if enqueueResult}
-					<dl
-						class="grid grid-cols-2 gap-x-4 gap-y-1 rounded-md border border-status-done/40
-							bg-status-done/10 p-3 text-xs sm:grid-cols-4"
+			{#if blocker}
+				<!-- Dispatch is off or unwired. Name the fix; the controls below stay
+					 visible but disabled so the operator sees what they would do. -->
+				<div class="rounded-md border border-status-warning/40 bg-status-warning/10 p-3">
+					<p class="font-display text-xs">{blocker.label}</p>
+					<p class="mt-1 max-w-prose text-xs text-muted-foreground">{blocker.detail}</p>
+				</div>
+			{/if}
+
+			<div class="flex flex-wrap items-end gap-2 text-xs">
+				<label class="flex flex-col gap-1">
+					<span class="text-muted-foreground">Run id <span class="opacity-60">(optional)</span></span>
+					<input
+						type="text"
+						bind:value={enqueueRunId}
+						placeholder="mint a fresh timestamped id"
+						disabled={!execStatus?.can_execute || enqueuing}
+						class="rounded-md border border-border bg-background px-2 py-1.5 font-mono
+							focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring
+							disabled:opacity-50"
+					/>
+				</label>
+				<label class="flex flex-col gap-1">
+					<span class="text-muted-foreground">Batch size</span>
+					<select
+						bind:value={batchSize}
+						disabled={!execStatus?.can_execute || enqueuing}
+						class="rounded-md border border-border bg-background px-2 py-1.5 font-mono
+							focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring
+							disabled:opacity-50"
 					>
-						<div class="col-span-2 sm:col-span-4">
-							<dt class="text-muted-foreground">Run id</dt>
-							<dd class="font-mono">{enqueueResult.run_id}</dd>
-						</div>
-						<div>
-							<dt class="text-muted-foreground">Documents</dt>
-							<dd class="font-mono">{enqueueResult.document_count}</dd>
-						</div>
-						<div>
-							<dt class="text-muted-foreground">Batches</dt>
-							<dd class="font-mono">{enqueueResult.batch_count}</dd>
-						</div>
-						<div>
-							<dt class="text-muted-foreground">Newly enqueued</dt>
-							<dd class="font-mono">{enqueueResult.newly_enqueued}</dd>
-						</div>
-					</dl>
-					<p class="text-xs text-muted-foreground">
-						Selected this run — open the
-						<a href="/dashboard" class="underline">Dashboard</a> to watch the queue drain.
-					</p>
-				{/if}
-			</section>
-		{/if}
+						<option value={10}>10</option>
+						<option value={50}>50</option>
+						<option value={100}>100</option>
+					</select>
+				</label>
+				<label class="flex flex-col gap-1">
+					<span class="text-muted-foreground">Max attempts</span>
+					<input
+						type="number"
+						min="1"
+						bind:value={maxAttempts}
+						disabled={!execStatus?.can_execute || enqueuing}
+						class="w-20 rounded-md border border-border bg-background px-2 py-1.5 font-mono
+							focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring
+							disabled:opacity-50"
+					/>
+				</label>
+				<button
+					type="button"
+					class="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground
+						hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2
+						focus-visible:ring-ring disabled:opacity-50 disabled:hover:bg-primary"
+					disabled={!execStatus?.can_execute || enqueuing}
+					onclick={enqueue}
+				>
+					{enqueuing ? 'Enqueuing…' : 'Enqueue run'}
+				</button>
+			</div>
+
+			{#if enqueueError}
+				<p class="text-xs text-status-failed">{enqueueError}</p>
+			{/if}
+
+			{#if enqueueResult}
+				<dl
+					class="grid grid-cols-2 gap-x-4 gap-y-1 rounded-md border border-status-done/40
+						bg-status-done/10 p-3 text-xs sm:grid-cols-4"
+				>
+					<div class="col-span-2 sm:col-span-4">
+						<dt class="text-muted-foreground">Run id</dt>
+						<dd class="font-mono">{enqueueResult.run_id}</dd>
+					</div>
+					<div>
+						<dt class="text-muted-foreground">Documents</dt>
+						<dd class="font-mono">{enqueueResult.document_count}</dd>
+					</div>
+					<div>
+						<dt class="text-muted-foreground">Batches</dt>
+						<dd class="font-mono">{enqueueResult.batch_count}</dd>
+					</div>
+					<div>
+						<dt class="text-muted-foreground">Newly enqueued</dt>
+						<dd class="font-mono">{enqueueResult.newly_enqueued}</dd>
+					</div>
+				</dl>
+				<p class="text-xs text-muted-foreground">
+					Selected this run — open the
+					<a href="/dashboard" class="underline">Dashboard</a> to watch the queue drain.
+				</p>
+			{/if}
+		</section>
 	{/if}
 </div>

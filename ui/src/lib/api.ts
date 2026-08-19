@@ -667,17 +667,22 @@ export async function renderConfigYaml(
 	return await resp.text();
 }
 
-// The Execution Controls (docs/ui-plan.md merge 11) — the one writable-to-a-run
-// surface. `ExecutionCapability.as_dict()`: whether this deployment can dispatch
-// work, and which of the three requirements is missing if not (§4 "Running the
-// pipeline from the screen"). `stages` is `STAGE_NAMES`, served so the frontend
-// re-types no stage list.
+// The console's dispatch capability (docs/ui-ingest-plan.md). `ExecutionCapability
+// .as_dict()`: whether this deployment can dispatch work, and which of the four
+// requirements is missing if not. `can_execute` is the conjunction of
+// `!audit_only && has_store && has_ingest && has_queue`; the individual flags
+// let the composer name the missing piece. `ingest_uri`/`output_uri` feed the
+// composer's read-only deployment-locations strip. `stages` is `STAGE_NAMES`,
+// served so the frontend re-types no stage list.
 export interface ExecutionStatus {
 	can_execute: boolean;
 	audit_only: boolean;
 	has_store: boolean;
+	has_ingest: boolean;
 	has_queue: boolean;
 	stages: string[];
+	ingest_uri: string | null;
+	output_uri: string | null;
 }
 
 export async function getExecutionStatus(
@@ -710,11 +715,13 @@ export async function getIngestPreflight(
 	return (await resp.json()) as IngestPreflight;
 }
 
-// The configure-and-run form. `input_prefix` is store-relative; `run_id`
-// omitted mints a fresh timestamped id, and supplying an existing one resumes
-// it (enqueue is idempotent on `(run_id, batch_num)`).
+// The configure-and-run form. `input_prefix` is ingest-relative and optional —
+// omitted means the whole configured ingest root, which is the normal case
+// (docs/ui-ingest-plan.md §2). `run_id` omitted mints a fresh timestamped id,
+// and supplying an existing one resumes it (enqueue is idempotent on
+// `(run_id, batch_num)`).
 export interface EnqueueRequest {
-	input_prefix: string;
+	input_prefix?: string | null;
 	run_id?: string | null;
 	batch_size?: number;
 	max_attempts?: number;

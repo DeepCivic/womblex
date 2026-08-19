@@ -355,11 +355,12 @@ per-stage checkpoint progress), Corpus and Chunk inspectors (a document's
 chunks with their entity / PII / money overlays), a Pipeline Composer (build a
 `WomblexConfig` against the live JSON Schema, with named presets — built-in and
 operator-saved — and the stage DAG rendered from the stage contracts; it can
-save the composed config as a preset and hand it off to the queue), a Resources
-console (store / queue / Isaacus connection checks), and Execution Controls
-(configure-and-run into the job queue). It is a sidecar, never in-process with
-the pipeline, and reads either a local run root or the object store a
-distributed run published to:
+save the composed config as a preset and enqueue a run over the deployment's
+configured ingest location — the composer is the console's one dispatch
+surface), and a Resources console (store / ingest / queue / Isaacus connection
+checks, with editable ingest and output locations). It is a sidecar, never
+in-process with the pipeline, and reads either a local run root or the object
+store a distributed run published to:
 
 ```bash
 pip install womblex[ui]                        # reads a local root or an s3:// store out of the box
@@ -370,9 +371,10 @@ womblex ui --store <uri> --dsn <dsn> --audit-only  # read/inspect only, no dispa
 docker compose up -d ui                        # or beside the stack above
 ```
 
-It adds no pipeline logic. Dispatch is on by default: wire both a `--store`
-and a `--dsn` and the Execution Controls screen can plan a run into the queue
-(workers do the work; the console runs no scheduler). Pass `--audit-only` for a
+It adds no pipeline logic. Dispatch is on by default: wire a `--store`, a
+`--dsn` and an `--ingest` location and the Pipeline Composer can plan a run into
+the queue (workers do the work; the console runs no scheduler). Pass
+`--audit-only` for a
 pure read/inspect console that refuses to dispatch. Its writable surfaces are
 deliberately narrow. The report action (`POST /api/runs/{run_id}/feedback`)
 files a reviewer's note about a record as a single JSON file under a
@@ -386,7 +388,7 @@ alongside `feedback/` — so the compose service still runs `read_only`, writing
 both feedback and presets to the object store. There is
 no authentication, so it binds to loopback unless `--host` says otherwise; put
 your own control in front of anything wider. The screen designs and data
-sources are documented in [`docs/ui-plan.md`](docs/ui-plan.md).
+sources are documented in [`docs/ui-ingest-plan.md`](docs/ui-ingest-plan.md).
 
 ## How It Works
 
