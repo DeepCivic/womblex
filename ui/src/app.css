@@ -27,7 +27,7 @@
 	--ring: #7b6ff0; /* console: --accent doubles as focus ring (role table) */
 
 	--surface-raised: #ffffff; /* console */
-	--surface-sunken: #b0d820; /* console */
+	--surface-sunken: #c0ff00; /* console */
 	--muted-foreground: #5a5a4e; /* base */
 
 	--primary: #c8ef35; /* console: lime, buttons/active-nav/logo, never page surface */

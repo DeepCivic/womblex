@@ -67,7 +67,7 @@ Six new tokens. Each exists because the console has a concern DeepCivic does not
 | Token | Dark | Light | Why |
 |---|---|---|---|
 | `--surface-raised` | `#22222e` | `#ffffff` | Console layers panels inside panels (side nav → grid → detail drawer). Page + card is not enough depth |
-| `--surface-sunken` | `#141420` | `#b0d820` | Wells: log output, code blocks, empty grid states |
+| `--surface-sunken` | `#141420` | `#c0ff00` | Wells: log output, code blocks, empty grid states |
 | `--status-pending` | `#a0a090` | `#38382a` | Queue/checkpoint state |
 | `--status-running` | `#c8ef35` | `#c8ef35` | Queue/checkpoint state |
 | `--status-done` | `#4ade80` | `#15803d` | Queue/checkpoint state |
