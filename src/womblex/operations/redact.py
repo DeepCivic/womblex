@@ -69,9 +69,18 @@ def run_redaction(
         if mode != "flag":
             apply_text_redaction(dr.extraction.pages, report, mode)
 
-        logger.info(
-            "Redaction [%s]: doc=%s pages_affected=%d regions=%d",
-            mode, dr.doc_id, len(report.affected_pages), report.total,
-        )
+        # In `flag` mode nothing about the text changes — we are only
+        # recording where the source itself redacted content, so log it as a
+        # detection. The mutating modes (blackout/delete) log the action.
+        if mode == "flag":
+            logger.info(
+                "RedactionDetected: doc=%s pages_affected=%d regions=%d",
+                dr.doc_id, len(report.affected_pages), report.total,
+            )
+        else:
+            logger.info(
+                "RedactionApplied [%s]: doc=%s pages_affected=%d regions=%d",
+                mode, dr.doc_id, len(report.affected_pages), report.total,
+            )
 
     return results

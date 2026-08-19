@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from womblex.cloud.stage_contracts import STAGE_CONTRACTS
+from womblex.pipeline_order import sort_by_pipeline
 from womblex.store.checkpoint import CHECKPOINT_GLOB, CheckpointProgress, read_checkpoints
 from womblex.store.feedback_output import is_safe_run_id
 from womblex.ui.deps import UISettings
@@ -50,11 +51,16 @@ QUEUE_CONNECT_TIMEOUT = 5.0
 #: contracts rather than re-typed here so a renamed directory cannot drift.
 #: Stages with no checkpoint of their own (``quality``, whose scope is the
 #: whole run) are absent by construction.
-CHECKPOINT_DIRNAMES: dict[str, str] = {
+#:
+#: Ordered by `sort_by_pipeline`, because `_stage_progress` reports "per-stage
+#: progress, in pipeline order" and `STAGE_CONTRACTS`'s own dict order is an
+#: inventory, not a sequence — it lists `chunk` before `enrich`, the reverse
+#: of the order a run executes them in.
+CHECKPOINT_DIRNAMES: dict[str, str] = sort_by_pipeline({
     name: contract.checkpoint_dirname
     for name, contract in STAGE_CONTRACTS.items()
     if contract.checkpoint_dirname is not None
-}
+})
 
 
 def _EMPTY_QUEUE_SECTION(window_seconds: float) -> dict:

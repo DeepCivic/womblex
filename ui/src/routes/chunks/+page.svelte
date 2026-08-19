@@ -21,6 +21,7 @@
 	import ChunkCard from '$lib/components/ChunkCard.svelte';
 
 	let documents: ManifestDocument[] = $state([]);
+	let documentsLoading = $state(false);
 	let documentsError: string | null = $state(null);
 	let selectedHash: string | null = $state(null);
 
@@ -89,6 +90,7 @@
 			return;
 		}
 		let cancelled = false;
+		documentsLoading = true;
 		documentsError = null;
 		getManifest(runId)
 			.then((docs) => {
@@ -98,6 +100,9 @@
 			})
 			.catch((err) => {
 				if (!cancelled) documentsError = message(err);
+			})
+			.finally(() => {
+				if (!cancelled) documentsLoading = false;
 			});
 		return () => {
 			cancelled = true;
@@ -136,6 +141,14 @@
 
 	{#if !runSelection.selectedRunId}
 		<p class="text-sm text-muted-foreground">Select a run to inspect its chunks.</p>
+	{:else if documentsLoading}
+		<!-- Gated before the empty state: a run's manifest is a store read of
+			 every batch's shard manifest, so on a large run it is in flight for
+			 seconds. Without this, "no documents" rendered over the whole wait
+			 and read as a verdict on a run that had plenty (issue 4). Same
+			 loading → error → content order as the Corpus Inspector, which
+			 reads the same manifest. -->
+		<p class="text-sm text-muted-foreground">Loading documents…</p>
 	{:else if documentsError}
 		<p class="text-sm text-status-failed">{documentsError}</p>
 	{:else if documents.length === 0}

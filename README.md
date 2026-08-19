@@ -288,6 +288,15 @@ womblex run-stage --stage normalise --store s3://womblex --run-id <run_id>
 womblex run-stage --stage chunk --store s3://womblex --run-id <run_id> \
     --config configs/example.yaml
 womblex run-stage --stage embed --store s3://womblex --run-id <run_id>
+
+# 5b. …or hand the whole sequence to the workers instead of typing it.
+#     Same stages, same contracts, ordering supplied from PIPELINE_ORDER and
+#     gated by the config (a run that does not embed enqueues no embed job).
+#     Deliberately a separate press from step 1: a worker will not start a
+#     stage until the run's batches have settled, but a *bad* extraction
+#     should not spend Isaacus budget on enrich and embed either.
+womblex enqueue-stages --run-id <run_id> --config configs/example.yaml
+womblex enqueue-stages --run-id <run_id> --config configs/example.yaml --dry-run
 ```
 
 `run-stage` covers `normalise`, `spellfix`, `chunk`, `money`, `enrich`, `embed`,
@@ -298,6 +307,17 @@ never skipped by output existence and relies on its own idempotency; `quality`
 is **run-scoped**, staging every batch's chunks in one pass because its
 duplicate-cluster ids are corpus-wide. Pass `--shards <dir>` instead of
 `--store`/`--run-id` to run the same contract locally.
+
+`enqueue-stages` writes one queue row per stage instead of running it here, so
+execution stays on the fleet with its retry and crash recovery, and a dispatcher
+(the CLI, or the console) only ever writes rows. Rows are idempotent per
+`(run_id, stage)`, so pressing it twice does not re-run what finished. A stage
+row is claimable only once nothing earlier in its run is pending or running —
+all of extraction, then each stage ahead of it — so the fleet self-sequences.
+It covers `normalise`, `spellfix`, `enrich`, `chunk`, `graph-refresh`, `embed`,
+`money` and `link`; **`pii` and `quality` are never dispatched** (PII masking is
+irreversible and must not run because a flag was left on in a copied config;
+`quality` is run-scoped), and both stay reachable through `run-stage`.
 
 Connection details come from `--store`/`WOMBLEX_STORE_URI`, `--ingest`/`WOMBLEX_INGEST_URI`
 (defaults to `--store` when unset, for back-compatibility), `--dsn`/`WOMBLEX_DB_DSN`
@@ -486,8 +506,8 @@ Extracted text is split into semantically meaningful chunks using [semchunk](htt
 
 Chunking has two invocation modes that share one engine (`chunk_batch`):
 
-- **Per-stage:** `womblex chunk --shards <run_dir>/documents/` consumes the extraction-stage shards directly and writes `*.chunks.parquet` siblings. Independent `CheckpointManager` so the chunk stage resumes without re-extracting. This is the primary workflow for staged corpus runs.
-- **E2E composition:** `womblex run --config <yaml>` extracts and chunks in one process (kept for users with simpler corpora).
+- **Per-stage:** `womblex chunk --shards <run_dir>/documents/` consumes the extraction-stage shards directly and writes `*.chunks.parquet` siblings. Independent `CheckpointManager` so the chunk stage resumes without re-extracting. This is the workflow — `womblex run` is extraction only, so chunking is always dispatched as its own stage over the extraction shards.
+- **E2E composition:** `womblex chunk --config <yaml>` (no `--shards`) extracts and chunks in one process (a back-compat convenience for simple corpora; `womblex run` itself no longer chunks).
 
 Both modes reassemble narrative + tables from each source's element stream, then feed every doc's narratives into a single semchunk call (with overlap) and every doc's table markdowns into another (no overlap), so `processes` parallelises across the whole batch. Chunks carry `(start_char, end_char, page_start, page_end, has_redaction, content_type)`; they join back to `elements` via `source_hash` plus offset-range overlap.
 
@@ -564,8 +584,9 @@ console's Pipeline Composer offers the same ones by name (e.g.
 **`configs/default-isaacus.yaml` — the reference Isaacus pipeline**
 (`extract → chunk → enrich → build_graph → money → done`, for PDF/DOCX). The
 entity graph and monetary amounts are produced over the one run. Note that
-`womblex run` alone runs only `extract → redact → chunk → pii`; `enrich`,
-`build_graph` (graph-refresh) and `money` are per-stage commands, and `enrich`
+`womblex run` alone runs only `extract → redaction detection` (extraction only);
+`chunk`, `enrich`, `build_graph` (graph-refresh), `embed`, `money` and `pii`
+are per-stage commands, and `enrich`
 must precede `chunk` so AI chunking reuses the enrichment (no double cost):
 
 ```bash

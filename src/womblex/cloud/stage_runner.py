@@ -395,11 +395,64 @@ def run_stage_local(
     return summary
 
 
+class StagePreconditionError(Exception):
+    """A stage cannot start: preflight failed, or Isaacus is not resolvable.
+
+    Distinct from a base failing mid-run — nothing has been attempted yet, so
+    the message is the whole story and needs no traceback. Both dispatchers
+    (the CLI and the worker) refuse on it rather than running a stage that
+    would write nothing and read as success.
+    """
+
+
+def prepare_stage_context(contract: StageContract, config: WomblexConfig) -> RunContext:
+    """Check *contract*'s preconditions and build the runtime it needs.
+
+    Raises :class:`StagePreconditionError` when the stage must not run. Shared
+    by every dispatcher so a stage run from the queue applies exactly the
+    checks `womblex run-stage` does — the Isaacus one especially: without it
+    `chunk_shards` warns, writes nothing and returns cleanly, which a queue
+    would record as a completed job.
+    """
+    if contract.preflight is not None:
+        try:
+            contract.preflight(config)
+        except Exception as e:
+            raise StagePreconditionError(f"{contract.name} preflight failed: {e}") from e
+
+    if contract.needs_isaacus_api:
+        from womblex.utils.availability import isaacus_available
+
+        if not isaacus_available():
+            raise StagePreconditionError(
+                f"{contract.name} needs Isaacus (isaacus SDK + ISAACUS_API_KEY, or "
+                "ISAACUS_SAGEMAKER_ENDPOINTS for a private deployment); none is "
+                "resolvable. Refusing to run rather than publishing nothing."
+            )
+
+    ctx = RunContext()
+    if contract.needs_client:
+        from womblex.utils.isaacus_client import make_isaacus_client
+
+        try:
+            ctx.client = make_isaacus_client(models=contract.models(config))
+        except ImportError as e:
+            raise StagePreconditionError(f"Isaacus SDK not usable (reinstall womblex): {e}") from e
+        except Exception as e:
+            raise StagePreconditionError(
+                "Could not construct Isaacus client (check ISAACUS_API_KEY, or "
+                f"ISAACUS_SAGEMAKER_ENDPOINTS for a private deployment): {e}"
+            ) from e
+    return ctx
+
+
 __all__ = [
     "InputContractError",
     "NotReady",
+    "StagePreconditionError",
     "StageRunSummary",
     "checkpoint_prefix_for",
+    "prepare_stage_context",
     "remote_bases",
     "run_stage_local",
     "run_stage_remote",

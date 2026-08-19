@@ -1,5 +1,11 @@
 -- Womblex job queue schema — the one table Womblex owns in its database.
 --
+-- One row per unit of work: an extraction batch (`kind='batch'`, carrying
+-- `input_keys`) or one downstream stage over a whole run (`kind='stage'`,
+-- carrying `stage`). Stage rows reuse `batch_num` as their queue position,
+-- offset past every real batch, so `UNIQUE (run_id, batch_num)` gives one row
+-- per (run, stage) and `ORDER BY batch_num` drains extraction first.
+--
 -- Womblex is a well-behaved tenant: it creates and only ever touches
 -- `womblex_jobs` (and its one index). There are no DROP/TRUNCATE, no
 -- CREATE DATABASE/SCHEMA, and no search_path changes anywhere in the code —
@@ -26,6 +32,8 @@ CREATE TABLE IF NOT EXISTS womblex_jobs (
     id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     run_id        TEXT        NOT NULL,
     batch_num     INTEGER     NOT NULL,
+    kind          TEXT        NOT NULL DEFAULT 'batch',
+    stage         TEXT,
     status        TEXT        NOT NULL DEFAULT 'pending',
     input_keys    JSONB       NOT NULL,
     shard_prefix  TEXT        NOT NULL,
@@ -40,5 +48,7 @@ CREATE TABLE IF NOT EXISTS womblex_jobs (
     UNIQUE (run_id, batch_num)
 );
 ALTER TABLE womblex_jobs ADD COLUMN IF NOT EXISTS ingest_root TEXT;
+ALTER TABLE womblex_jobs ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'batch';
+ALTER TABLE womblex_jobs ADD COLUMN IF NOT EXISTS stage TEXT;
 CREATE INDEX IF NOT EXISTS womblex_jobs_claim_idx
     ON womblex_jobs (status, batch_num);

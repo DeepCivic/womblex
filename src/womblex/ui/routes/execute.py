@@ -2,19 +2,22 @@
 
 The one writable-to-a-run surface in the console. ``GET /status`` is a
 cheap, network-free read of whether this deployment can dispatch work (and
-if not, why); ``POST /enqueue`` plans an extraction run into the queue. Both
-delegate to :mod:`womblex.ui.execute`, which enforces the ``--audit-only``
-switch and the store+queue requirement (plan §4) before touching anything —
-this router only maps its :class:`~womblex.ui.execute.ExecutionDisabled`
-reasons onto HTTP status codes.
+if not, why); ``POST /enqueue`` plans an extraction run into the queue and
+``POST /stages`` dispatches that run's downstream stages. All delegate to
+:mod:`womblex.ui.execute`, which enforces the ``--audit-only`` switch and the
+store+queue requirement (plan §4) before touching anything — this router only
+maps its :class:`~womblex.ui.execute.ExecutionDisabled` reasons onto HTTP
+status codes.
 
-Per-stage dispatch and the run/log feed are the queue's own views the
-Dashboard already serves (``/api/dashboard``); nothing is duplicated here.
+The run/log feed is the queue's own view the Dashboard already serves
+(``/api/dashboard``); nothing is duplicated here.
 """
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from womblex.ui import execute
 from womblex.ui.deps import UISettings, get_settings
@@ -87,6 +90,53 @@ def post_enqueue(
         )
     except execute.ExecutionDisabled as e:
         raise HTTPException(status_code=_REASON_STATUS[e.reason], detail=e.detail) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return result.as_dict()
+
+
+class StageDispatchRequest(BaseModel):
+    """The "run downstream stages" press: which run, and the composed config.
+
+    ``config`` is the composer's current form state — the same whole config
+    ``POST /api/composer/validate`` takes — because *it* is what decides which
+    stages a run wants. The queue still carries no config: the rows name only
+    the stage, and the workers read their own ``--config`` at launch, exactly
+    as ``womblex enqueue-stages --config`` behaves.
+
+    ``run_id`` is required and never minted here. Stages run over shards that
+    already exist, so there is no such thing as dispatching them for a run
+    nobody extracted.
+    """
+
+    run_id: str = Field(..., min_length=1)
+    config: dict[str, Any] = Field(default_factory=dict)
+    max_attempts: int = Field(3, ge=1)
+
+
+@router.post("/stages")
+def post_stages(
+    body: StageDispatchRequest, settings: UISettings = Depends(get_settings),  # noqa: B008
+) -> dict:
+    """Dispatch this run's downstream stages; workers claim them once it drains.
+
+    Same status shapes as ``POST /enqueue`` — 403 audit-only, 409 store/queue
+    unwired, 400 bad input — plus 400 carrying Pydantic's own error list when
+    the posted config would not load, matching what the composer's preset save
+    returns for the same fault.
+    """
+    try:
+        result = execute.enqueue_downstream_stages(
+            settings,
+            run_id=body.run_id,
+            config=body.config,
+            max_attempts=body.max_attempts,
+        )
+    except execute.ExecutionDisabled as e:
+        raise HTTPException(status_code=_REASON_STATUS[e.reason], detail=e.detail) from e
+    except ValidationError as e:
+        detail = e.errors(include_url=False, include_context=False, include_input=False)
+        raise HTTPException(status_code=400, detail=detail) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return result.as_dict()

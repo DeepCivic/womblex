@@ -1,10 +1,17 @@
-"""Postgres-backed batch job queue using ``FOR UPDATE SKIP LOCKED``.
+"""Postgres-backed job queue using ``FOR UPDATE SKIP LOCKED``.
 
-One table, ``womblex_jobs``, holds one row per batch. Workers claim a pending
-row atomically — ``SKIP LOCKED`` lets N workers cooperate without double-firing
+One table, ``womblex_jobs``, holds one row per unit of work — an extraction
+batch (``kind='batch'``) or a downstream stage over a whole run
+(``kind='stage'``). Workers claim a pending row atomically — ``SKIP LOCKED`` lets N workers cooperate without double-firing
 and without an external broker. The row's ``status`` is the distributed
 checkpoint: a re-enqueue is idempotent on ``(run_id, batch_num)``, so resuming a
 crashed run is just "enqueue again, start workers".
+
+Stage rows reuse ``batch_num`` as their queue position, offset past every real
+batch by :data:`STAGE_SEQ_BASE` (see :meth:`JobQueue.enqueue_stages`). That is
+what makes ``ORDER BY batch_num`` claim all extraction before any stage, and
+the stages among themselves in pipeline order, with no second ordering column
+and no change to the existing unique constraint.
 
 psycopg3 (synchronous) matches Womblex's synchronous batch model; the queue
 holds one long-lived connection and wraps each claim in a transaction.
@@ -31,6 +38,8 @@ CREATE TABLE IF NOT EXISTS womblex_jobs (
     id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     run_id        TEXT        NOT NULL,
     batch_num     INTEGER     NOT NULL,
+    kind          TEXT        NOT NULL DEFAULT 'batch',
+    stage         TEXT,
     status        TEXT        NOT NULL DEFAULT 'pending',
     input_keys    JSONB       NOT NULL,
     shard_prefix  TEXT        NOT NULL,
@@ -45,21 +54,41 @@ CREATE TABLE IF NOT EXISTS womblex_jobs (
     UNIQUE (run_id, batch_num)
 );
 ALTER TABLE womblex_jobs ADD COLUMN IF NOT EXISTS ingest_root TEXT;
+ALTER TABLE womblex_jobs ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'batch';
+ALTER TABLE womblex_jobs ADD COLUMN IF NOT EXISTS stage TEXT;
 CREATE INDEX IF NOT EXISTS womblex_jobs_claim_idx
     ON womblex_jobs (status, batch_num);
 """
 
 # Literal queries (no f-string interpolation) — the only varying part is the
 # optional run filter, so each variant is spelled out in full.
-_CLAIM_COLS = "id, run_id, batch_num, input_keys, shard_prefix, attempts, ingest_root"
-_CLAIM_TAIL = "ORDER BY batch_num FOR UPDATE SKIP LOCKED LIMIT 1"
-_CLAIM_ANY = (
-    f"SELECT {_CLAIM_COLS} FROM womblex_jobs "
-    f"WHERE status = 'pending' AND attempts < max_attempts {_CLAIM_TAIL}"
+_CLAIM_COLS = (
+    "id, run_id, batch_num, input_keys, shard_prefix, attempts, ingest_root, kind, stage"
 )
+# A stage row runs over what everything ahead of it published, so it is only
+# claimable once nothing earlier in its run is still pending or running: all of
+# extraction (`batch_num` 1..N) and every stage below it in `PIPELINE_ORDER`.
+# Batch rows carry no such gate — they are independent of one another and must
+# stay claimable in parallel, which is the whole point of the fleet.
+#
+# A *failed* predecessor does not hold the queue. Its row already records the
+# failure, and a dependent stage surfaces the gap as `not-ready` bases rather
+# than the operator finding a run wedged on rows that will never settle.
+_UNSETTLED_EARLIER = (
+    "NOT EXISTS (SELECT 1 FROM womblex_jobs AS earlier "
+    "WHERE earlier.run_id = womblex_jobs.run_id "
+    "AND earlier.batch_num < womblex_jobs.batch_num "
+    "AND earlier.status IN ('pending', 'running'))"
+)
+_CLAIMABLE = (
+    f"status = 'pending' AND attempts < max_attempts "
+    f"AND (kind <> 'stage' OR {_UNSETTLED_EARLIER})"
+)
+_CLAIM_TAIL = "ORDER BY batch_num FOR UPDATE SKIP LOCKED LIMIT 1"
+_CLAIM_ANY = f"SELECT {_CLAIM_COLS} FROM womblex_jobs WHERE {_CLAIMABLE} {_CLAIM_TAIL}"
 _CLAIM_RUN = (
     f"SELECT {_CLAIM_COLS} FROM womblex_jobs "
-    f"WHERE status = 'pending' AND attempts < max_attempts AND run_id = %s {_CLAIM_TAIL}"
+    f"WHERE {_CLAIMABLE} AND run_id = %s {_CLAIM_TAIL}"
 )
 _STATS_ALL = "SELECT status, count(*) FROM womblex_jobs GROUP BY status"
 _STATS_RUN = "SELECT status, count(*) FROM womblex_jobs WHERE run_id = %s GROUP BY status"
@@ -72,7 +101,7 @@ _STATS_RUN = "SELECT status, count(*) FROM womblex_jobs WHERE run_id = %s GROUP 
 _RUN_FILTER = "(%s::text IS NULL OR run_id = %s::text)"
 _JOB_COLS = (
     "id, run_id, batch_num, status, attempts, max_attempts, "
-    "locked_by, locked_at, error, created_at, updated_at"
+    "locked_by, locked_at, error, created_at, updated_at, kind, stage"
 )
 _LIST_JOBS = (
     f"SELECT {_JOB_COLS} FROM womblex_jobs WHERE {_RUN_FILTER} "
@@ -98,6 +127,15 @@ _THROUGHPUT = (
 )
 
 
+#: Queue position of the first stage row, past any plausible batch count.
+#: Stage rows sit at ``STAGE_SEQ_BASE + stage_rank(stage)``, so the existing
+#: ``UNIQUE (run_id, batch_num)`` gives one row per ``(run_id, stage)`` for
+#: free, ``ORDER BY batch_num`` drains extraction before dispatching any stage,
+#: and the stages claim in pipeline order. ``batch_num`` is ``INTEGER``, so a
+#: billion leaves ample headroom above and below.
+STAGE_SEQ_BASE = 1_000_000_000
+
+
 @dataclass
 class JobSpec:
     """A batch to enqueue: which input keys, and where its shards go."""
@@ -111,7 +149,13 @@ class JobSpec:
 
 @dataclass
 class Job:
-    """A claimed batch."""
+    """A claimed unit of work — an extraction batch, or one downstream stage.
+
+    ``kind`` discriminates: ``'batch'`` rows carry ``input_keys`` (the source
+    documents to extract) and ``'stage'`` rows carry ``stage`` (the contract to
+    run over ``shard_prefix``, whose inputs are already in the store). The two
+    never mix — a stage row's ``input_keys`` is empty.
+    """
 
     id: int
     run_id: str
@@ -120,6 +164,13 @@ class Job:
     shard_prefix: str
     attempts: int
     ingest_root: str | None = None
+    kind: str = "batch"
+    stage: str | None = None
+
+    @property
+    def label(self) -> str:
+        """How this job names itself in a log line."""
+        return f"stage {self.stage}" if self.kind == "stage" else f"batch {self.batch_num}"
 
 
 @dataclass(frozen=True)
@@ -142,6 +193,8 @@ class JobRow:
     error: str | None
     created_at: str | None
     updated_at: str | None
+    kind: str = "batch"
+    stage: str | None = None
 
 
 @dataclass(frozen=True)
@@ -247,8 +300,52 @@ class JobQueue:
                     inserted, run_id, len(jobs))
         return inserted
 
+    def enqueue_stages(
+        self, run_id: str, stages: list[str], shard_prefix: str, *, max_attempts: int = 3,
+    ) -> int:
+        """Insert one stage row per name in *stages*; idempotent per stage.
+
+        *stages* is whatever the caller wants run — dispatchers pass
+        ``pipeline_order.enabled_downstream_stages(config)``, which is already
+        ordered and config-gated. Order is not taken from the list: each row's
+        queue position comes from `stage_rank`, so an out-of-order list still
+        runs in pipeline order and a duplicated name collapses to one row.
+
+        Returns the number of rows actually inserted. A stage already enqueued
+        for this run is skipped, so pressing "run downstream stages" twice does
+        not re-run what finished — the same resume-by-re-enqueue property batch
+        rows have, and the stage runner is itself idempotent underneath it.
+        """
+        from psycopg.types.json import Json
+
+        from womblex.pipeline_order import stage_rank
+
+        inserted = 0
+        with self.conn.transaction():
+            for stage in stages:
+                cur = self.conn.execute(
+                    """
+                    INSERT INTO womblex_jobs
+                        (run_id, batch_num, kind, stage, input_keys, shard_prefix, max_attempts)
+                    VALUES (%s, %s, 'stage', %s, %s, %s, %s)
+                    ON CONFLICT (run_id, batch_num) DO NOTHING
+                    """,
+                    (run_id, STAGE_SEQ_BASE + stage_rank(stage), stage, Json([]),
+                     shard_prefix, max_attempts),
+                )
+                inserted += cur.rowcount
+        logger.info("Enqueued %d new stage job(s) for run %s (of %d submitted)",
+                    inserted, run_id, len(stages))
+        return inserted
+
     def claim(self, worker_id: str, run_id: str | None = None) -> Job | None:
-        """Atomically claim the next pending batch, or ``None`` if none free."""
+        """Atomically claim the next claimable job, or ``None`` if none free.
+
+        Batch rows are claimable as soon as they are pending. A stage row also
+        waits on everything earlier in its run settling, so ``None`` here can
+        mean "work exists but is not yet due" — the caller polls, it does not
+        treat it as drained.
+        """
         sql = _CLAIM_RUN if run_id else _CLAIM_ANY
         params: tuple = (run_id,) if run_id else ()
         with self.conn.transaction():
@@ -268,7 +365,7 @@ class JobQueue:
         return Job(
             id=row[0], run_id=row[1], batch_num=row[2],
             input_keys=list(row[3]), shard_prefix=row[4], attempts=row[5] + 1,
-            ingest_root=row[6],
+            ingest_root=row[6], kind=row[7], stage=row[8],
         )
 
     def complete(self, job_id: int) -> None:
@@ -402,6 +499,7 @@ def _job_row(row: tuple) -> JobRow:
         attempts=row[4], max_attempts=row[5], locked_by=row[6],
         locked_at=_iso(row[7]), error=row[8],
         created_at=_iso(row[9]), updated_at=_iso(row[10]),
+        kind=row[11], stage=row[12],
     )
 
 
@@ -409,4 +507,13 @@ def utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-__all__ = ["Job", "JobQueue", "JobRow", "JobSpec", "Throughput", "WorkerState", "utcnow"]
+__all__ = [
+    "STAGE_SEQ_BASE",
+    "Job",
+    "JobQueue",
+    "JobRow",
+    "JobSpec",
+    "Throughput",
+    "WorkerState",
+    "utcnow",
+]
