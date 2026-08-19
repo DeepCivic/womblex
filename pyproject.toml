@@ -85,12 +85,13 @@ local = []
 cloud = []
 
 # Console sidecar - pip install womblex[ui]
-# `womblex ui` serves a read-only API over artefacts the pipeline already
-# writes (docs/ui-plan.md). fastapi + uvicorn and nothing else: the console
-# adds no pipeline logic, so it stays as CPU-light as the worker it sits
-# beside. Reading a *distributed* run's object storage needs fsspec + s3fs,
-# which are now core — so a bare `womblex[ui]` console reads an `s3://` store
-# out of the box, no `[cloud]` required.
+# `womblex ui` serves an API over the artefacts the pipeline writes and lets an
+# operator act on the deployment (the Pipeline Composer dispatches runs into
+# the queue; feedback/presets are filed into the store). fastapi + uvicorn and
+# nothing else: the console adds no pipeline logic, so it stays as CPU-light as
+# the worker it sits beside. Reading a *distributed* run's object storage needs
+# fsspec + s3fs, which are now core — so a bare `womblex[ui]` console reads an
+# `s3://` store out of the box, no `[cloud]` required.
 ui = [
     "fastapi>=0.115",
     "uvicorn>=0.30",

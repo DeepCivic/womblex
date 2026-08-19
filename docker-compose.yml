@@ -20,7 +20,7 @@
 #     docker compose up --scale worker=4 worker
 #     # once drained, consolidate the run manifest:
 #     docker compose run --rm womblex finalize --run-id <run_id>
-#     # optional read-only console over the same bucket, at :8080:
+#     # optional console over the same bucket, at :8080:
 #     docker compose up -d ui
 #
 #   CLOUD — set the three connection vars (+ S3 creds) to external services and
@@ -233,10 +233,12 @@ services:
     command: ["seed-demo"]   # resolves WOMBLEX_STORE_URI -> s3://womblex
     profiles: ["seed"]
 
-  # Optional read-only console (`womblex ui`, docs/ui-plan.md), at :8080.
-  # Reads the same s3://womblex bucket the workers publish to — the shared
-  # cloud-env anchor supplies WOMBLEX_STORE_URI, which is the run source the
-  # CLI resolves when neither --output-root nor --store is passed.
+  # Optional console (`womblex ui`), at :8080. An interactive operator
+  # surface, not a passive viewer: it reads the same s3://womblex bucket the
+  # workers publish to (the shared cloud-env anchor supplies WOMBLEX_STORE_URI,
+  # the run source the CLI resolves when neither --output-root nor --store is
+  # passed) AND acts on the deployment — the Pipeline Composer dispatches runs
+  # into the queue, and it files feedback/presets into the store.
   #
   # Depends on postgres AND minio being *healthy*, not just createbuckets: the
   # console advertises WOMBLEX_DB_DSN (the queue the Dashboard and Execution
@@ -248,11 +250,6 @@ services:
   # bundled backends are absent, and the console reads the external DSN/S3 the
   # same env vars name — a reachable-but-schemaless external queue reads as an
   # empty queue, not a fault (v0.5.6), so it comes up cleanly there too.
-  #
-  # read_only: true is the container-level statement of the plan's rule that
-  # no screen writes to a stage output; /tmp is tmpfs because a store-backed
-  # read stages the manifest through a temp dir (ui/readers.py). Verified the
-  # console needs no other writable path, HOME included.
   ui:
     build:
       context: .
@@ -275,9 +272,6 @@ services:
       WOMBLEX_UI_SETTINGS_DIR: /settings
     ports:
       - "8080:8080"
-    read_only: true
-    tmpfs:
-      - /tmp
     volumes:
       - ui-settings:/settings
 

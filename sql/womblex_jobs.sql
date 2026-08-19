@@ -16,8 +16,8 @@
 -- It is equivalent to what `womblex jobs --create-schema` (or the first
 -- `womblex enqueue --create-schema`) runs, and to what the console's Execution
 -- enqueue path calls on first use. All statements are IF NOT EXISTS, so it is
--- idempotent and safe to re-apply. The console/dashboard never runs it (it is
--- read-only); creation is owned by init/enqueue or by applying this file.
+-- idempotent and safe to re-apply. The console/dashboard never runs it;
+-- creation is owned by init/enqueue or by applying this file.
 --
 -- This file is pinned byte-for-byte to `_SCHEMA` in
 -- `src/womblex/cloud/queue.py` by `tests/test_cloud.py` — edit both together.

@@ -425,8 +425,8 @@ nor is disturbed by it. The Pipeline Composer's saved presets work the same
 way: locally they need a writable `--presets-dir` (or `$WOMBLEX_UI_PRESETS_DIR`;
 without one the built-in presets still serve but saving is disabled), and in
 store-backed mode they land under the object store's own `presets/` prefix,
-alongside `feedback/` — so the compose service still runs `read_only`, writing
-both feedback and presets to the object store. There is
+alongside `feedback/` — so the compose service writes both feedback and presets
+to the object store, needing no writable mount for them. There is
 no authentication, so it binds to loopback unless `--host` says otherwise; put
 your own control in front of anything wider. The screen designs and data
 sources are documented in [`docs/ui-ingest-plan.md`](docs/ui-ingest-plan.md).

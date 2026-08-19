@@ -38,10 +38,19 @@
 # keys pinned here override just those keys and every other inherited variable
 # (AWS_REGION, ISAACUS_API_KEY, WOMBLEX_UI_SETTINGS_DIR, ...) is preserved.
 # `depends_on:` re-states the bundled backends the base already declares, but
-# as hard local dependencies (`required: true`, the default) with the same
-# health/completion conditions — locally the backends are always started, so a
-# consumer should wait for them, not treat them as optional the way the cloud
-# path must.
+# as hard local dependencies with the same health/completion conditions —
+# locally the backends are always started, so a consumer should wait for them,
+# not treat them as optional the way the cloud path must.
+#
+# NOTE: `required: true` is set EXPLICITLY on every dependency below, and this
+# is load-bearing, not decorative. `depends_on:` long-form is a YAML mapping,
+# and Compose deep-merges mappings key-by-key: an override only overrides the
+# keys it names and INHERITS the rest. The base declares these backends
+# `required: false` (its cloud path needs that). If the override restated only
+# `condition:`, the base's `required: false` would survive the merge and the
+# local consumers would still treat the backends as optional — silently
+# defeating the whole point of this file. Spelling out `required: true` is what
+# actually flips them to hard local dependencies.
 
 # The bundled-local connection surface, pinned to the Compose service names so
 # the local stack cannot inherit a cloud endpoint from the host environment.
@@ -60,6 +69,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+        required: true
     environment:
       <<: *local-env
 
@@ -67,8 +77,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+        required: true
       minio:
         condition: service_healthy
+        required: true
     environment:
       <<: *local-env
 
@@ -76,8 +88,10 @@ services:
     depends_on:
       init:
         condition: service_completed_successfully
+        required: true
       createbuckets:
         condition: service_completed_successfully
+        required: true
     environment:
       <<: *local-env
 
@@ -85,6 +99,7 @@ services:
     depends_on:
       createbuckets:
         condition: service_completed_successfully
+        required: true
     environment:
       <<: *local-env
 
@@ -92,9 +107,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+        required: true
       minio:
         condition: service_healthy
+        required: true
       createbuckets:
         condition: service_completed_successfully
+        required: true
     environment:
       <<: *local-env
