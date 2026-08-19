@@ -22,7 +22,10 @@ checkpoint dirname) and wants that mapping ordered, not replaced.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from womblex.config import WomblexConfig
 
 #: Every pipeline stage, in the order a full run executes them. Extraction
 #: leads (it produces what all the rest read); the two non-obvious edges are:
@@ -83,4 +86,76 @@ def in_pipeline_order(stages: Iterable[str]) -> tuple[str, ...]:
     return tuple(sorted(stages, key=stage_rank))
 
 
-__all__ = ["PIPELINE_ORDER", "in_pipeline_order", "sort_by_pipeline", "stage_rank"]
+#: The stages a dispatcher may enqueue on the operator's behalf, in order.
+#:
+#: Three of `PIPELINE_ORDER`'s entries are deliberately absent:
+#:
+#: - `extract` is the batch queue itself — it is already dispatched, per batch,
+#:   and downstream stages run over what it published.
+#: - `pii` masks irreversibly and writes a terminal `*.clean_text.parquet`. It
+#:   must be a deliberate act, never a consequence of a flag left on in a config
+#:   copied from another run.
+#: - `quality` is run-scoped and undercooked; its cluster ids are meaningful
+#:   only over a fully drained run.
+#:
+#: Both remain reachable through `womblex run-stage --stage …`, which is
+#: unchanged: this tuple bounds *automatic* dispatch, not the stage runner.
+DOWNSTREAM_STAGES: tuple[str, ...] = (
+    "normalise",
+    "spellfix",
+    "enrich",
+    "chunk",
+    "graph-refresh",
+    "embed",
+    "money",
+    "link",
+)
+
+
+def _normalise_wanted(config: WomblexConfig) -> bool:
+    """Whether anything downstream reads the normalised overlay.
+
+    `NormaliseConfig` has no `enabled` flag — its toggles are transforms, all
+    on by default — so the real gate is whether a consumer selects the layer it
+    writes. `processing.text_source` is that selector for chunk and enrich;
+    `money.text_source` overrides it for the money stage alone. Dispatching
+    normalise with no reader writes an overlay nothing opens; skipping it with
+    one silently falls back to verbatim text, which is the failure that reads
+    as a broken config setting.
+    """
+    overlays = ("normalised", "spellfix")
+    return config.processing.text_source in overlays or config.money.text_source in overlays
+
+
+def enabled_downstream_stages(config: WomblexConfig) -> tuple[str, ...]:
+    """The `DOWNSTREAM_STAGES` *config* actually asks for, in pipeline order.
+
+    Each stage answers to its own config section, so a run that enriches but
+    does not embed dispatches enrich and not embed. `graph-refresh` is the one
+    stage with no section of its own: it re-links mentions onto chunks that AI
+    chunking rewrote, so it is meaningful only when chunk consumed the
+    enrichment (`chunking.chunking_model`) — after plain semchunk the offsets
+    enrich recorded still hold and the refresh is a no-op.
+    """
+    ai_chunking = bool(config.chunking.enabled and config.chunking.chunking_model)
+    wanted = {
+        "normalise": _normalise_wanted(config),
+        "spellfix": config.spellfix.enabled,
+        "enrich": config.enrichment.enabled,
+        "chunk": config.chunking.enabled,
+        "graph-refresh": ai_chunking and config.enrichment.enabled,
+        "embed": config.embedding.enabled,
+        "money": config.money.enabled,
+        "link": config.linking.enabled,
+    }
+    return tuple(s for s in DOWNSTREAM_STAGES if wanted[s])
+
+
+__all__ = [
+    "DOWNSTREAM_STAGES",
+    "PIPELINE_ORDER",
+    "enabled_downstream_stages",
+    "in_pipeline_order",
+    "sort_by_pipeline",
+    "stage_rank",
+]

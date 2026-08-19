@@ -6,7 +6,9 @@ import pytest
 
 from womblex.cloud.stage_contracts import STAGE_CONTRACTS
 from womblex.pipeline_order import (
+    DOWNSTREAM_STAGES,
     PIPELINE_ORDER,
+    enabled_downstream_stages,
     in_pipeline_order,
     sort_by_pipeline,
     stage_rank,
@@ -90,3 +92,94 @@ class TestConsumersFollowIt:
         for mapping in (STAGE_SUFFIXES, _checkpoint_dirnames()):
             names = list(mapping)
             assert names.index("enrich") < names.index("chunk")
+
+
+def _config(**sections):
+    """A minimal `WomblexConfig` with the named sections overridden."""
+    from womblex.config import WomblexConfig
+
+    return WomblexConfig.model_validate({
+        "dataset": {"name": "t"},
+        "paths": {"input_root": ".", "output_root": ".", "checkpoint_dir": "."},
+        **sections,
+    })
+
+
+class TestDispatchableStages:
+    """What a dispatcher may enqueue, and what it must never enqueue."""
+
+    def test_dispatchable_is_a_subset_of_the_pipeline(self) -> None:
+        assert set(DOWNSTREAM_STAGES) <= set(PIPELINE_ORDER)
+
+    def test_it_is_declared_in_pipeline_order(self) -> None:
+        assert DOWNSTREAM_STAGES == in_pipeline_order(DOWNSTREAM_STAGES)
+
+    def test_pii_and_quality_are_never_dispatched(self) -> None:
+        """PII masking is irreversible and quality is run-scoped: neither may
+        run because a flag was left on in a copied config. Both stay reachable
+        through `womblex run-stage --stage …`."""
+        assert "pii" not in DOWNSTREAM_STAGES
+        assert "quality" not in DOWNSTREAM_STAGES
+        assert {"pii", "quality"} <= set(STAGE_CONTRACTS)
+
+    def test_extraction_is_not_a_downstream_stage(self) -> None:
+        """It is the batch queue itself, dispatched per batch by `enqueue`."""
+        assert "extract" not in DOWNSTREAM_STAGES
+
+
+class TestEnabledDownstreamStages:
+    def test_defaults_dispatch_only_the_stages_defaulted_on(self) -> None:
+        """chunk and money default on; enrich/embed/link/spellfix default off."""
+        assert enabled_downstream_stages(_config()) == ("chunk", "money")
+
+    def test_each_stage_answers_to_its_own_section(self) -> None:
+        stages = enabled_downstream_stages(_config(
+            enrichment={"enabled": True},
+            embedding={"enabled": True},
+            spellfix={"enabled": True},
+            money={"enabled": False},
+        ))
+        assert stages == ("spellfix", "enrich", "chunk", "embed")
+
+    def test_nothing_enabled_dispatches_nothing(self) -> None:
+        assert enabled_downstream_stages(_config(
+            chunking={"enabled": False}, money={"enabled": False},
+        )) == ()
+
+    def test_normalise_follows_the_text_source_that_reads_it(self) -> None:
+        """It has no `enabled` flag — the gate is whether anything opens the
+        overlay it writes."""
+        assert "normalise" not in enabled_downstream_stages(_config())
+        assert "normalise" in enabled_downstream_stages(
+            _config(processing={"text_source": "normalised"})
+        )
+        assert "normalise" in enabled_downstream_stages(
+            _config(processing={"text_source": "spellfix"})
+        )
+        # money's own override is a reader too.
+        assert "normalise" in enabled_downstream_stages(
+            _config(money={"text_source": "normalised"})
+        )
+
+    def test_graph_refresh_only_after_ai_chunking(self) -> None:
+        """It re-links mentions onto chunks AI chunking rewrote; after plain
+        semchunk the offsets enrich recorded still hold."""
+        enriching = {"enrichment": {"enabled": True}}
+        assert "graph-refresh" not in enabled_downstream_stages(_config(**enriching))
+        assert "graph-refresh" in enabled_downstream_stages(_config(
+            chunking={"chunking_model": "kanon-2-enricher"}, **enriching,
+        ))
+        # No enrichment to re-link.
+        assert "graph-refresh" not in enabled_downstream_stages(_config(
+            chunking={"chunking_model": "kanon-2-enricher"},
+        ))
+
+    def test_the_result_is_always_ordered(self) -> None:
+        stages = enabled_downstream_stages(_config(
+            enrichment={"enabled": True}, embedding={"enabled": True},
+            linking={"enabled": True}, spellfix={"enabled": True},
+            processing={"text_source": "spellfix"},
+        ))
+        assert stages == in_pipeline_order(stages)
+        assert stages.index("normalise") < stages.index("spellfix")
+        assert stages.index("enrich") < stages.index("chunk")

@@ -720,3 +720,105 @@ def test_throughput_counts_completions_in_the_window(queue):
     assert recent.last_completed_at is not None
     # Scoped: another run's completions are not this run's throughput.
     assert q.throughput("no-such-run").completed == 0
+
+
+# --- stage jobs (issue 5 part 2) --------------------------------------------
+
+
+def test_stage_jobs_wait_for_extraction_then_claim_in_pipeline_order(queue):
+    """The gate this merge adds: a stage row is claimable only once nothing
+    earlier in its run is still pending or running — all of extraction, then
+    each stage below it in `PIPELINE_ORDER`."""
+    from womblex.cloud.queue import JobSpec
+
+    q, run_id = queue
+    q.enqueue(run_id, [JobSpec(batch_num=1, input_keys=["a.pdf"], shard_prefix="runs/x/documents")])
+    assert q.enqueue_stages(run_id, ["embed", "enrich", "chunk"], "runs/x/documents") == 3
+    assert q.enqueue_stages(run_id, ["enrich"], "runs/x/documents") == 0  # idempotent per stage
+
+    batch = q.claim("w1", run_id)
+    assert batch is not None and batch.kind == "batch" and batch.batch_num == 1
+    # Extraction is running: no stage is due, even with three of them pending.
+    assert q.claim("w2", run_id) is None
+    q.complete(batch.id)
+
+    first = q.claim("w1", run_id)
+    assert first is not None and first.kind == "stage" and first.stage == "enrich"
+    assert first.input_keys == []
+    # enrich is running, so chunk waits on it — one stage of a run at a time.
+    assert q.claim("w2", run_id) is None
+    q.complete(first.id)
+
+    rest = []
+    while (job := q.claim("w1", run_id)) is not None:
+        rest.append(job.stage)
+        q.complete(job.id)
+    assert rest == ["chunk", "embed"]
+
+
+def test_a_failed_stage_does_not_wedge_the_ones_behind_it(queue):
+    """A settled-as-failed row records the failure; the stages behind it still
+    run and surface the gap as not-ready bases, rather than the operator finding
+    a run stuck on rows that will never resolve."""
+    q, run_id = queue
+    q.enqueue_stages(run_id, ["enrich", "chunk"], "runs/x/documents", max_attempts=1)
+
+    enrich = q.claim("w1", run_id)
+    assert enrich is not None and enrich.stage == "enrich"
+    q.fail(enrich.id, "boom")
+    assert q.stats(run_id).get("failed") == 1
+
+    chunk = q.claim("w1", run_id)
+    assert chunk is not None and chunk.stage == "chunk"
+
+
+def test_stage_rows_are_ordered_past_every_batch(queue):
+    """`batch_num` doubles as the queue position, which is what makes
+    `ORDER BY batch_num` drain extraction first with no second sort column."""
+    from womblex.cloud.queue import STAGE_SEQ_BASE
+
+    q, run_id = queue
+    q.enqueue_stages(run_id, ["money"], "runs/x/documents")
+    row = q.list_jobs(run_id)[0]
+    assert row.kind == "stage"
+    assert row.stage == "money"
+    assert row.batch_num > STAGE_SEQ_BASE
+
+
+def test_stage_jobs_of_other_runs_are_not_gated_by_this_one(queue):
+    """The gate is per-run: another run's undrained extraction must not hold
+    back this run's stages."""
+    from womblex.cloud.queue import JobSpec
+
+    q, run_id = queue
+    other = f"{run_id}-other"
+    try:
+        q.enqueue(other, [JobSpec(batch_num=1, input_keys=["a.pdf"], shard_prefix="p")])
+        q.enqueue_stages(run_id, ["money"], "runs/x/documents")
+
+        stage = q.claim("w1", run_id)
+        assert stage is not None and stage.kind == "stage" and stage.stage == "money"
+    finally:
+        with q.conn.transaction():
+            q.conn.execute("DELETE FROM womblex_jobs WHERE run_id = %s", (other,))
+
+
+def test_the_stage_columns_are_added_to_an_existing_table_in_place(queue):
+    """A live deployment's `womblex_jobs` predates `kind`/`stage`. The additive
+    ALTERs upgrade it with its rows intact, and those rows read as batches —
+    there is no migration step for the operator to run."""
+    q, run_id = queue
+    with q.conn.transaction():
+        q.conn.execute("ALTER TABLE womblex_jobs DROP COLUMN IF EXISTS kind")
+        q.conn.execute("ALTER TABLE womblex_jobs DROP COLUMN IF EXISTS stage")
+        q.conn.execute(
+            "INSERT INTO womblex_jobs (run_id, batch_num, input_keys, shard_prefix) "
+            "VALUES (%s, 1, %s, 'p')",
+            (run_id, '["a.pdf"]'),
+        )
+
+    q.ensure_schema()  # idempotent, and the ALTERs land here
+
+    row = q.list_jobs(run_id)[0]
+    assert (row.kind, row.stage) == ("batch", None)
+    assert q.enqueue_stages(run_id, ["money"], "runs/x/documents") == 1
