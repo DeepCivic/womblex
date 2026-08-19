@@ -30,6 +30,7 @@ from pathlib import Path
 
 import pyarrow.parquet as pq
 
+from womblex.pipeline_order import sort_by_pipeline
 from womblex.store.enrichment_output import ENRICHMENT_ENTITIES_SUFFIX
 from womblex.store.money_output import MONEY_SPANS_SUFFIX
 from womblex.store.normalise_output import NORMALISED_TEXT_SUFFIX
@@ -50,8 +51,16 @@ logger = logging.getLogger(__name__)
 #: Stage name -> the sidecar suffix that stage writes, in pipeline order.
 #: Presence of a matching file in a shard dir is what "this stage has run"
 #: means on disk. Redaction is deliberately absent: it rewrites element text
-#: in memory and leaves no sidecar of its own to detect.
-STAGE_SUFFIXES: dict[str, str] = {
+#: in memory and leaves no sidecar of its own to detect, and so is
+#: `graph-refresh`, which rewrites enrich's two sidecars in place rather than
+#: writing one of its own.
+#:
+#: Ordered by `sort_by_pipeline`, not by how it is spelled here: every reader
+#: of this dict presents its keys as the run's stage list (the console's
+#: lifecycle-checkpoint switcher renders them directly), and hand-keeping a
+#: literal in order is exactly what drifted — this ran `chunk` before
+#: `enrich`, backwards from the sequence the README prescribes.
+STAGE_SUFFIXES: dict[str, str] = sort_by_pipeline({
     "extract": ELEMENTS_SUFFIX,
     "normalise": NORMALISED_TEXT_SUFFIX,
     "spellfix": SPELLFIX_TEXT_SUFFIX,
@@ -62,7 +71,7 @@ STAGE_SUFFIXES: dict[str, str] = {
     "link": ENTITY_LINKS_SUFFIX,
     "enrich": ENRICHMENT_ENTITIES_SUFFIX,
     "embed": EMBEDDINGS_SUFFIX,
-}
+})
 
 
 def generate_run_id() -> str:

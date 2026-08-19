@@ -749,15 +749,15 @@ export async function renderConfigYaml(
 // requirements is missing if not. `can_execute` is the conjunction of
 // `!audit_only && has_store && has_ingest && has_queue`; the individual flags
 // let the composer name the missing piece. `ingest_uri`/`output_uri` feed the
-// composer's read-only deployment-locations strip. `stages` is `STAGE_NAMES`,
-// served so the frontend re-types no stage list.
+// composer's read-only deployment-locations strip. There is no stage list: the
+// pipeline's shape comes from `getStageGraph()`, which serves it from the
+// contracts, and the field this once carried was read by nothing.
 export interface ExecutionStatus {
 	can_execute: boolean;
 	audit_only: boolean;
 	has_store: boolean;
 	has_ingest: boolean;
 	has_queue: boolean;
-	stages: string[];
 	ingest_uri: string | null;
 	output_uri: string | null;
 }

@@ -1357,9 +1357,18 @@ class TestExecuteApi:
         assert body == {
             "can_execute": False, "audit_only": False,
             "has_store": False, "has_ingest": False, "has_queue": False,
-            "stages": body["stages"], "ingest_uri": None, "output_uri": str(tmp_path),
+            "ingest_uri": None, "output_uri": str(tmp_path),
         }
-        assert "chunk" in body["stages"]
+
+    def test_status_advertises_no_stage_list(self, tmp_path: Path) -> None:
+        """The pipeline's shape is the composer's graph, not a dispatch flag.
+
+        `stages` here used to be `STAGE_NAMES` — read as "what this console
+        dispatches" beside `can_execute`, while no dispatch path for a stage
+        existed and no caller read the field.
+        """
+        client = TestClient(create_app(output_root=tmp_path))
+        assert "stages" not in client.get("/api/execute/status").json()
 
     def test_status_can_execute_with_a_store_ingest_and_queue(self, tmp_path: Path) -> None:
         client = TestClient(create_app(

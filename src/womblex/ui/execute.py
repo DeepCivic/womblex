@@ -5,13 +5,17 @@ one — and the plan pins exactly how far that goes:
 
 - **Dispatch is always the queue** (§4 "Running the pipeline from the
   screen"). The console never shells out and never runs a batch in-process:
-  it enqueues, and the workers a platform brings up do the work. So the two
-  write actions here — enqueue an extraction run, dispatch a downstream
-  stage — are thin wrappers over :mod:`womblex.cli.cloud`'s own building
-  blocks (``JobQueue.enqueue`` + the same key-listing / batching
-  ``cmd_enqueue`` does), reached through the store the sidecar already
-  reads. No web request can become an arbitrary command because there is no
-  command, only a queue row.
+  it enqueues, and the workers a platform brings up do the work. The one
+  write action here — enqueue an extraction run — is a thin wrapper over
+  :mod:`womblex.cli.cloud`'s own building blocks (``JobQueue.enqueue`` + the
+  same key-listing / batching ``cmd_enqueue`` does), reached through the
+  store the sidecar already reads. No web request can become an arbitrary
+  command because there is no command, only a queue row.
+
+  Dispatching the *downstream* stages (``run-stage``) is not wired up: the
+  queue carries extraction batches only, so a console-composed pipeline
+  currently runs its extraction and stops. Until that lands, the stages are
+  the CLI sequence in README §"the full pipeline".
 
 - **Queue-only, so a store *and* a DSN are required.** A queue-less local
   console would need its own background runner and progress reporting, which
@@ -40,7 +44,6 @@ from pathlib import Path
 from typing import cast
 
 from womblex.cli._shared import SUPPORTED_EXTENSIONS
-from womblex.cloud.stage_contracts import STAGE_NAMES
 from womblex.store.feedback_output import is_safe_run_id
 from womblex.store.retention import generate_run_id
 from womblex.ui.deps import UISettings
@@ -73,13 +76,17 @@ class ExecutionCapability:
     docstring). ``can_execute`` is their conjunction; the individual flags
     are surfaced so the screen can name the missing piece rather than a bare
     "disabled".
+
+    It reports no stage list. It used to carry ``STAGE_NAMES``, which read as
+    "the stages this console dispatches" while nothing here could dispatch
+    one — and no caller ever read it. The pipeline's shape is the composer's
+    ``get_stage_graph()``, which serves it from the contracts.
     """
 
     audit_only: bool
     has_store: bool
     has_ingest: bool
     has_queue: bool
-    stages: tuple[str, ...]
     ingest_uri: str | None
     output_uri: str | None
 
@@ -94,7 +101,6 @@ class ExecutionCapability:
             "has_store": self.has_store,
             "has_ingest": self.has_ingest,
             "has_queue": self.has_queue,
-            "stages": list(self.stages),
             "ingest_uri": self.ingest_uri,
             "output_uri": self.output_uri,
         }
@@ -113,7 +119,6 @@ def execution_status(settings: UISettings) -> ExecutionCapability:
         has_store=settings.is_remote,
         has_ingest=bool(settings.ingest_uri),
         has_queue=bool(settings.db_dsn),
-        stages=STAGE_NAMES,
         ingest_uri=settings.ingest_uri,
         output_uri=settings.store_uri or (str(settings.output_root) if settings.output_root else None),
     )

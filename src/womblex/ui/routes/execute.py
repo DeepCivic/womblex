@@ -8,8 +8,10 @@ switch and the store+queue requirement (plan §4) before touching anything —
 this router only maps its :class:`~womblex.ui.execute.ExecutionDisabled`
 reasons onto HTTP status codes.
 
-Per-stage dispatch and the run/log feed are the queue's own views the
-Dashboard already serves (``/api/dashboard``); nothing is duplicated here.
+The run/log feed is the queue's own view the Dashboard already serves
+(``/api/dashboard``); nothing is duplicated here. Per-stage dispatch is not
+served anywhere — the queue carries extraction batches only, so the
+downstream stages remain the CLI's ``womblex run-stage``.
 """
 from __future__ import annotations
 
