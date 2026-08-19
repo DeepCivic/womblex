@@ -822,3 +822,76 @@ def test_the_stage_columns_are_added_to_an_existing_table_in_place(queue):
     row = q.list_jobs(run_id)[0]
     assert (row.kind, row.stage) == ("batch", None)
     assert q.enqueue_stages(run_id, ["money"], "runs/x/documents") == 1
+
+
+def test_process_job_runs_the_stage_contract_and_publishes_its_log(tmp_path, monkeypatch):
+    """A stage row hands the run's shard prefix to the same `run_stage_remote`
+    `womblex run-stage` calls — the queue is a second dispatcher for it, not a
+    second implementation."""
+    from womblex.cloud import stage_runner as sr
+    from womblex.cloud.queue import STAGE_SEQ_BASE, Job
+    from womblex.cloud.worker import _process_job
+
+    seen = {}
+
+    def _fake_run(contract, store, shard_prefix, config, **kwargs):
+        seen.update(stage=contract.name, prefix=shard_prefix,
+                    checkpoint_prefix=kwargs.get("checkpoint_prefix"))
+        return sr.StageRunSummary(stage=contract.name, processed=1, bases=1)
+
+    monkeypatch.setattr(sr, "prepare_stage_context", lambda contract, config: sr.RunContext())
+    monkeypatch.setattr(sr, "run_stage_remote", _fake_run)
+
+    store = RemoteStore.from_uri(str(tmp_path / "store"))
+    job = Job(
+        id=1, run_id="r1", batch_num=STAGE_SEQ_BASE + 7, input_keys=[],
+        shard_prefix="runs/r1/documents", attempts=1, kind="stage", stage="money",
+    )
+    _process_job(job, _minimal_config(tmp_path), store, store)
+
+    assert seen == {
+        "stage": "money",
+        "prefix": "runs/r1/documents",
+        # Staged, so a crashed stage resumes: the claim gate means no
+        # concurrent runner of the same run can clobber it.
+        "checkpoint_prefix": "runs/r1/.money-checkpoint",
+    }
+    assert store.exists("runs/r1/logs/stage-money.log")
+
+
+def test_a_stage_that_publishes_nothing_fails_its_row(tmp_path, monkeypatch):
+    """A non-zero summary must not read as done — the row records it and retries."""
+    from womblex.cloud import stage_runner as sr
+    from womblex.cloud.queue import Job
+    from womblex.cloud.worker import StageJobFailed, _process_job
+
+    def _fake_run(contract, store, shard_prefix, config, **kwargs):
+        return sr.StageRunSummary(stage=contract.name, bases=2, not_ready=2)
+
+    monkeypatch.setattr(sr, "prepare_stage_context", lambda contract, config: sr.RunContext())
+    monkeypatch.setattr(sr, "run_stage_remote", _fake_run)
+
+    store = RemoteStore.from_uri(str(tmp_path / "store"))
+    job = Job(
+        id=1, run_id="r1", batch_num=1, input_keys=[], shard_prefix="runs/r1/documents",
+        attempts=1, kind="stage", stage="chunk",
+    )
+    with pytest.raises(StageJobFailed):
+        _process_job(job, _minimal_config(tmp_path), store, store)
+    # The log is still published — that is the case the operator most needs it.
+    assert store.exists("runs/r1/logs/stage-chunk.log")
+
+
+def test_prepare_stage_context_refuses_a_stage_isaacus_cannot_serve(monkeypatch, tmp_path):
+    """Without it `chunk_shards` warns, writes nothing and returns cleanly —
+    a remote no-op a queue would record as a completed job."""
+    from womblex.cloud.stage_contracts import STAGE_CONTRACTS
+    from womblex.cloud.stage_runner import StagePreconditionError, prepare_stage_context
+    from womblex.utils import availability
+
+    monkeypatch.setattr(availability, "isaacus_available", lambda: False)
+    with pytest.raises(StagePreconditionError, match="needs Isaacus"):
+        prepare_stage_context(STAGE_CONTRACTS["chunk"], _minimal_config(tmp_path))
+
+    # A stage with no Isaacus need is unaffected.
+    assert prepare_stage_context(STAGE_CONTRACTS["money"], _minimal_config(tmp_path)) is not None

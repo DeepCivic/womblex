@@ -1,10 +1,16 @@
-"""Worker loop: claim a batch, stage it, run the pipeline, publish shards.
+"""Worker loop: claim a job, run it, publish what it produced.
 
-Each iteration claims one batch from the queue, pulls its input documents from
-object storage into a throwaway scratch dir, runs the shared
-``womblex.batch.process_batch`` body (identical to ``womblex run``), then pushes
-the resulting ``batch-NNNN.*.parquet`` shards back. A per-job failure marks the
-row (with retry) and moves on — one bad document never stops the fleet, the same
+Each iteration claims one row from the queue. An **extraction batch** pulls its
+input documents from object storage into a throwaway scratch dir, runs the
+shared ``womblex.batch.process_batch`` body (identical to ``womblex run``), then
+pushes the resulting ``batch-NNNN.*.parquet`` shards back. A **stage** job needs
+no staging of its own — its inputs are already in the store — so it hands the
+run's shard prefix to ``stage_runner.run_stage_remote``, which stages one base
+at a time and publishes each stage's sidecars.
+
+The same worker serves both: execution stays on the fleet, and a dispatcher
+(the CLI, or the console) only ever writes rows. A per-job failure marks the row
+(with retry) and moves on — one bad document never stops the fleet, the same
 contract the local runner honours.
 """
 
@@ -47,53 +53,105 @@ def _same_ingest(a: str, b: str) -> bool:
         return False
 
 
+def _output_prefix(job: Job) -> str:
+    """The run's output dir — ``shard_prefix`` (``…/documents``) less its leaf."""
+    return job.shard_prefix.rsplit("/", 1)[0]
+
+
+def _log_name(job: Job) -> str:
+    return f"stage-{job.stage}" if job.kind == "stage" else f"batch-{job.batch_num:04d}"
+
+
 def _log_key(job: Job) -> str:
-    """Where this batch's log lands, a ``logs/`` sibling of its shards.
+    """Where this job's log lands, a ``logs/`` sibling of the run's shards.
 
     ``shard_prefix`` is ``runs/<run_id>/documents``; the log goes to
-    ``runs/<run_id>/logs/batch-NNNN.log``, so the reader can list a run's
-    logs without knowing the batch numbering ahead of time.
+    ``runs/<run_id>/logs/batch-NNNN.log`` (or ``logs/stage-<name>.log``), so the
+    reader can list a run's logs without knowing the batch numbering ahead of
+    time.
     """
-    run_prefix = job.shard_prefix.rsplit("/", 1)[0]
-    return f"{run_prefix}/logs/batch-{job.batch_num:04d}.log"
+    return f"{_output_prefix(job)}/logs/{_log_name(job)}.log"
+
+
+class StageJobFailed(Exception):
+    """A stage job ran but its summary reported a non-zero exit."""
 
 
 def _process_job(job: Job, config: WomblexConfig, store: RemoteStore, ingest: RemoteStore) -> None:
-    """Stage inputs, run the batch, publish shards **and the batch log**.
+    """Run one claimed job, capturing and publishing its log either way.
 
     The log is captured for the whole run and published in a ``finally``, so a
-    failed batch still leaves its ``batch-NNNN.log`` in the store — that is the
-    case the operator most needs it. A failed *upload* of the log never masks
-    the original error: it is logged and swallowed.
+    failed job still leaves its ``batch-NNNN.log`` / ``stage-<name>.log`` in the
+    store — that is the case the operator most needs it. A failed *upload* of
+    the log never masks the original error: it is logged and swallowed.
     """
     with tempfile.TemporaryDirectory(prefix="womblex-job-") as tmp:
         root = Path(tmp)
-        inputs_dir = root / "inputs"
-        shards_dir = root / "shards"
-        shards_dir.mkdir(parents=True, exist_ok=True)
-        log_path = root / f"batch-{job.batch_num:04d}.log"
-
+        log_path = root / f"{_log_name(job)}.log"
         try:
             with capture_batch_log(log_path):
-                files = ingest.download_to_dir(job.input_keys, inputs_dir)
-                outcome = process_batch(
-                    files, config, batch_num=job.batch_num, shard_dir=shards_dir,
-                )
-                # Glob off the shard path the batch reported, so the naming
-                # scheme lives only in womblex.batch.
-                store.upload_glob(shards_dir, f"{outcome.shard_path.stem}.*", job.shard_prefix)
-                logger.info(
-                    "[batch %d] %d ok, %d failed -> %s",
-                    job.batch_num, outcome.batch.succeeded, outcome.batch.failed,
-                    job.shard_prefix,
-                )
+                if job.kind == "stage":
+                    _run_stage(job, config, store)
+                else:
+                    _run_batch(job, config, store, ingest, root)
         finally:
             # Outside the capture (the file is now closed and complete) but
             # inside the temp dir; publish on success and failure alike.
             try:
                 store.upload_file(log_path, _log_key(job))
-            except Exception:  # publishing the log must never mask the batch's own error
-                logger.exception("[batch %d] failed to publish batch log", job.batch_num)
+            except Exception:  # publishing the log must never mask the job's own error
+                logger.exception("[%s] failed to publish job log", job.label)
+
+
+def _run_batch(
+    job: Job, config: WomblexConfig, store: RemoteStore, ingest: RemoteStore, root: Path,
+) -> None:
+    """Stage this batch's inputs, extract them, publish the shards."""
+    inputs_dir = root / "inputs"
+    shards_dir = root / "shards"
+    shards_dir.mkdir(parents=True, exist_ok=True)
+    files = ingest.download_to_dir(job.input_keys, inputs_dir)
+    outcome = process_batch(files, config, batch_num=job.batch_num, shard_dir=shards_dir)
+    # Glob off the shard path the batch reported, so the naming scheme lives
+    # only in womblex.batch.
+    store.upload_glob(shards_dir, f"{outcome.shard_path.stem}.*", job.shard_prefix)
+    logger.info(
+        "[batch %d] %d ok, %d failed -> %s",
+        job.batch_num, outcome.batch.succeeded, outcome.batch.failed, job.shard_prefix,
+    )
+
+
+def _run_stage(job: Job, config: WomblexConfig, store: RemoteStore) -> None:
+    """Run one downstream stage over the run's shard prefix.
+
+    The same call ``womblex run-stage --store`` makes, with the same
+    preconditions — the queue is a second dispatcher for it, not a second
+    implementation. Checkpoints are staged: the claim gate lets only one stage
+    of a run run at a time, so there is no concurrent runner to clobber them,
+    and a crashed stage resumes where it stopped instead of re-doing the run.
+
+    A non-zero summary is raised rather than returned, so the row records the
+    failure and retries — a stage that published nothing must not read as done.
+    """
+    from womblex.cloud.stage_contracts import STAGE_CONTRACTS
+    from womblex.cloud.stage_runner import (
+        checkpoint_prefix_for,
+        prepare_stage_context,
+        run_stage_remote,
+    )
+
+    contract = STAGE_CONTRACTS[job.stage or ""]
+    ctx = prepare_stage_context(contract, config)
+    summary = run_stage_remote(
+        contract, store, job.shard_prefix, config, ctx=ctx,
+        checkpoint_prefix=checkpoint_prefix_for(contract, _output_prefix(job)),
+    )
+    summary.log()
+    if summary.exit_code != 0:
+        raise StageJobFailed(
+            f"stage {contract.name}: {summary.failed} failed, "
+            f"{summary.not_ready} not-ready of {summary.bases} base(s)"
+        )
 
 
 def run_worker(
@@ -111,7 +169,9 @@ def run_worker(
 ) -> int:
     """Run the claim→process→publish loop until drained or interrupted.
 
-    Returns the number of jobs completed by this worker.
+    Serves both row kinds: extraction batches and, once a run's batches have
+    settled, the downstream stage jobs a dispatcher enqueued for it. Returns the
+    number of jobs completed by this worker.
 
     ``ingest_uri`` names a second store to download source documents from;
     ``None`` keeps today's single-store behaviour (inputs and outputs share
@@ -149,15 +209,17 @@ def run_worker(
                 time.sleep(poll_interval)
                 continue
 
-            logger.info("worker %s claimed job %d (batch %d, attempt %d)",
-                        worker_id, job.id, job.batch_num, job.attempts)
+            logger.info("worker %s claimed job %d (%s, attempt %d)",
+                        worker_id, job.id, job.label, job.attempts)
+            # Stage jobs read the store, never the ingest, so the guard is
+            # batch-only — `ingest_root` is NULL on a stage row regardless.
             if job.ingest_root and not _same_ingest(job.ingest_root, worker_ingest_root):
                 error = (
                     f"ingest root mismatch: job enqueued against "
                     f"{job.ingest_root!r}, this worker reads from "
                     f"{worker_ingest_root!r}"
                 )
-                logger.error("job %d (batch %d) refused: %s", job.id, job.batch_num, error)
+                logger.error("job %d (%s) refused: %s", job.id, job.label, error)
                 # Released, not failed: the batch is fine, this worker is the
                 # wrong one for it. Failing here would burn the retry budget —
                 # and, since the row returns to pending, re-claim it in a tight
@@ -176,8 +238,8 @@ def run_worker(
                 _process_job(job, config, store, ingest)
                 queue.complete(job.id)
                 completed += 1
-            except Exception as e:  # one bad batch must not kill the worker
-                logger.exception("job %d (batch %d) failed", job.id, job.batch_num)
+            except Exception as e:  # one bad job must not kill the worker
+                logger.exception("job %d (%s) failed", job.id, job.label)
                 queue.fail(
                     job.id,
                     f"{type(e).__name__}: {e} — worker ingest root {worker_ingest_root}",
@@ -192,4 +254,4 @@ def run_worker(
     return completed
 
 
-__all__ = ["default_worker_id", "run_worker"]
+__all__ = ["StageJobFailed", "default_worker_id", "run_worker"]

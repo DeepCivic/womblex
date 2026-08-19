@@ -1,5 +1,5 @@
-"""Cloud CLI subcommands: ``enqueue`` (plan batches), ``worker`` (process),
-``jobs`` (status).
+"""Cloud CLI subcommands: ``enqueue`` (plan batches), ``enqueue-stages`` (queue
+the downstream stages), ``worker`` (process), ``jobs`` (status).
 
 Distributed counterpart to ``womblex run``. ``enqueue`` lists source documents
 in an object store, splits them into batches, and writes one queue row each;
@@ -22,7 +22,6 @@ import tempfile
 from pathlib import Path
 
 from womblex.cli._shared import SUPPORTED_EXTENSIONS, Command
-from womblex.utils.isaacus_client import make_isaacus_client
 
 logger = logging.getLogger("womblex")
 
@@ -33,6 +32,13 @@ logger = logging.getLogger("womblex")
 RUN_STAGE_CHOICES = (
     "normalise", "spellfix", "chunk", "money", "enrich",
     "embed", "link", "pii", "graph-refresh", "quality",
+)
+
+#: What `enqueue-stages` may dispatch — `pipeline_order.DOWNSTREAM_STAGES`,
+#: spelled here for the same reason as above (`--help` must not import the
+#: contract table). `test_pipeline_order.py` pins the two together.
+DISPATCHABLE_STAGES = (
+    "normalise", "spellfix", "enrich", "chunk", "graph-refresh", "embed", "money", "link",
 )
 
 
@@ -312,6 +318,86 @@ def cmd_finalize(args: argparse.Namespace) -> int:
     return 0
 
 
+# --- enqueue-stages ----------------------------------------------------------
+
+
+def _register_enqueue_stages(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--config", type=Path, required=True,
+                   help="Config YAML — decides which stages this run wants")
+    p.add_argument("--run-id", required=True, help="Run whose shards the stages read")
+    p.add_argument(
+        "--output-prefix", default=None,
+        help="Store-relative outputs dir (default: runs/<run_id>). "
+             "Stages read and write <output-prefix>/documents/.",
+    )
+    p.add_argument("--stages", default=None,
+                   help="Comma-separated override of the config-derived stage list. "
+                        f"Choose from: {', '.join(DISPATCHABLE_STAGES)}.")
+    p.add_argument("--max-attempts", type=int, default=3, help="Retries per stage before 'failed'")
+    p.add_argument("--dsn", default=None, help="Postgres DSN (or $WOMBLEX_DB_DSN / $DATABASE_URL)")
+    p.add_argument("--dry-run", action="store_true", help="Print the stage list and exit")
+
+
+def cmd_enqueue_stages(args: argparse.Namespace) -> int:
+    """Enqueue this run's downstream stages for the workers to claim.
+
+    The distributed counterpart to running the README's `run-stage` sequence by
+    hand: same stages, same order (`pipeline_order.PIPELINE_ORDER`), same
+    contracts — dispatched as queue rows so execution stays on the fleet, with
+    its retry and crash recovery, rather than in whoever typed the command.
+
+    Deliberately a separate press from `enqueue`. A worker will not start a
+    stage until the run's batches have settled, but a *bad* extraction should
+    not silently spend Isaacus budget on enrich and embed either: the operator
+    enqueues extraction, watches it drain, looks at it, then runs this.
+
+    `pii` and `quality` are never dispatched (`DOWNSTREAM_STAGES`); both stay
+    available through `womblex run-stage --stage …`.
+    """
+    from womblex.cloud.queue import JobQueue
+    from womblex.config import load_config
+    from womblex.pipeline_order import enabled_downstream_stages, in_pipeline_order
+
+    dsn = _resolve_dsn(args)
+    if not dsn and not args.dry_run:
+        logger.error("No Postgres DSN (pass --dsn or set WOMBLEX_DB_DSN / DATABASE_URL)")
+        return 1
+
+    config = load_config(args.config)
+    if args.stages:
+        requested = [s.strip() for s in args.stages.split(",") if s.strip()]
+        unknown = [s for s in requested if s not in DISPATCHABLE_STAGES]
+        if unknown:
+            logger.error("Not dispatchable: %s. Choose from: %s (pii and quality are "
+                         "run-stage only)", ", ".join(unknown), ", ".join(DISPATCHABLE_STAGES))
+            return 1
+        stages = in_pipeline_order(requested)
+    else:
+        stages = enabled_downstream_stages(config)
+
+    if not stages:
+        logger.error("Config enables no downstream stages — nothing to enqueue")
+        return 1
+
+    output_prefix = (args.output_prefix or f"runs/{args.run_id}").strip("/")
+    shard_prefix = f"{output_prefix}/documents"
+    logger.info("run_id=%s: stages %s -> %s", args.run_id, " -> ".join(stages), shard_prefix)
+    if args.dry_run:
+        return 0
+
+    assert dsn is not None  # guarded above; narrows for mypy
+    with JobQueue(dsn) as queue:
+        inserted = queue.enqueue_stages(
+            args.run_id, list(stages), shard_prefix, max_attempts=args.max_attempts,
+        )
+    logger.info(
+        "%d of %d stage job(s) newly enqueued (the rest were already queued or done). "
+        "Workers claim them once run %s's batches settle.",
+        inserted, len(stages), args.run_id,
+    )
+    return 0
+
+
 # --- run-stage ---------------------------------------------------------------
 
 
@@ -375,9 +461,11 @@ def cmd_run_stage(args: argparse.Namespace) -> int:
     caller's: ``embed`` needs ``chunk`` to have run, ``pii`` is terminal after
     ``enrich`` and ``embed``.
     """
-    from womblex.cloud.stage_contracts import STAGE_CONTRACTS, RunContext
+    from womblex.cloud.stage_contracts import STAGE_CONTRACTS
     from womblex.cloud.stage_runner import (
+        StagePreconditionError,
         checkpoint_prefix_for,
+        prepare_stage_context,
         run_stage_local,
         run_stage_remote,
     )
@@ -385,41 +473,16 @@ def cmd_run_stage(args: argparse.Namespace) -> int:
     contract = STAGE_CONTRACTS[args.stage]
     config = _runner_config(args.config)
 
-    if contract.preflight is not None:
-        try:
-            contract.preflight(config)
-        except Exception as e:
-            logger.error("%s preflight failed: %s", args.stage, e)
-            return 1
-
-    ctx = RunContext()
-    if contract.needs_isaacus_api:
-        from womblex.utils.availability import isaacus_available
-
-        if not isaacus_available():
-            # `chunk_shards` would otherwise warn, write nothing and return
-            # cleanly — a remote no-op that looks like success.
-            logger.error(
-                "%s needs Isaacus (isaacus SDK + ISAACUS_API_KEY, or "
-                "ISAACUS_SAGEMAKER_ENDPOINTS for a private deployment); none is "
-                "resolvable. Refusing to run rather than publishing nothing.",
-                args.stage,
-            )
-            return 1
-    if contract.needs_client:
-        try:
-            ctx.client = make_isaacus_client(models=contract.models(config))
-        except ImportError as e:
-            logger.error("Isaacus SDK not usable (reinstall womblex): %s", e)
-            return 1
-        except Exception as e:
-            # Logs the exception, not the key — the rule trips on "API_KEY" in the literal.
-            # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
-            logger.error(
-                "Could not construct Isaacus client (check ISAACUS_API_KEY, or "
-                "ISAACUS_SAGEMAKER_ENDPOINTS for a private deployment): %s", e,
-            )
-            return 1
+    try:
+        # Preflight, Isaacus availability and the client — shared with the
+        # worker's stage path so a queue-dispatched stage refuses on exactly
+        # what this command refuses on.
+        # Logs the exception, not the key — the rule trips on "API_KEY" in the literal.
+        # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
+        ctx = prepare_stage_context(contract, config)
+    except StagePreconditionError as e:
+        logger.error("%s", e)
+        return 1
 
     if args.shards is not None:
         if not args.shards.is_dir():
@@ -486,6 +549,8 @@ COMMANDS = [
     Command("jobs", "Show cloud job-queue status", _register_jobs, cmd_jobs),
     Command("finalize", "Consolidate a distributed run's manifest in object storage",
             _register_finalize, cmd_finalize),
+    Command("enqueue-stages", "Queue a run's downstream stages for the workers",
+            _register_enqueue_stages, cmd_enqueue_stages),
     Command("run-stage", "Run a downstream shard stage against object storage",
             _register_run_stage, cmd_run_stage),
 ]

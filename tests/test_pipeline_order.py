@@ -126,6 +126,11 @@ class TestDispatchableStages:
         """It is the batch queue itself, dispatched per batch by `enqueue`."""
         assert "extract" not in DOWNSTREAM_STAGES
 
+    def test_cli_choices_do_not_drift(self) -> None:
+        from womblex.cli.cloud import DISPATCHABLE_STAGES
+
+        assert DISPATCHABLE_STAGES == DOWNSTREAM_STAGES
+
 
 class TestEnabledDownstreamStages:
     def test_defaults_dispatch_only_the_stages_defaulted_on(self) -> None:
