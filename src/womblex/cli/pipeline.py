@@ -1,5 +1,5 @@
-"""Pipeline CLI subcommands: ``run`` (full pipeline), ``extract`` (single file),
-``chunk`` (extract + chunk a directory)."""
+"""Pipeline CLI subcommands: ``run`` (extraction + optional redaction detection),
+``extract`` (single file), ``chunk`` (extract + chunk a directory)."""
 from __future__ import annotations
 
 import argparse
@@ -37,30 +37,24 @@ def _register_run(p: argparse.ArgumentParser) -> None:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
-    """Run all pipeline stages using a config file."""
+    """Run the extraction pipeline from a config file.
+
+    ``run`` is extraction only (extract → optional redaction detection). The
+    downstream stages (chunk, enrich, embed, money, pii, …) are their own
+    ``run-stage`` contracts and are dispatched separately — their
+    ``config.<stage>.enabled`` flags declare pipeline membership, they do not
+    make the stage run here.
+    """
     from womblex.batch import process_batch
     from womblex.config import load_config
     from womblex.store.checkpoint import CheckpointManager
     from womblex.store.output import ShardVerificationError, verify_shard_persistence
     from womblex.store.retention import apply_retention, generate_run_id, most_recent_run
     from womblex.store.shard_audit import reconcile_checkpoint_with_shards
-    from womblex.utils.availability import isaacus_available
     from womblex.utils.run_log import capture_batch_log
 
     config = load_config(args.config)
     logger.info("Loaded config: %s", config.dataset.name)
-
-    # Pre-flight composition check: `run` has no enrichment stage, so graph-driven
-    # (post_enrichment) PII can never satisfy its precondition here and would raise
-    # PreconditionError mid-run. Fail fast with guidance instead of crashing later.
-    if config.pii.enabled and config.pii.pipeline_point == "post_enrichment":
-        logger.error(
-            "pii.pipeline_point='post_enrichment' is unsupported in `womblex run` "
-            "(this path has no enrichment stage). Use the per-stage flow "
-            "(`womblex enrich --shards` then `womblex pii --shards`), or set "
-            "pii.pipeline_point to 'post_chunk' / 'post_extraction'."
-        )
-        return 1
 
     input_root = config.paths.input_root
     if not input_root.exists():
@@ -154,24 +148,30 @@ def cmd_run(args: argparse.Namespace) -> int:
     total_failed = 0
     start_time = time.time()
 
-    chunk_will_skip = config.chunking.enabled and not isaacus_available()
+    # `run` is extraction only; redaction detection is the one true-to-source
+    # annotation it also does. Chunk / PII / enrich / embed / money are
+    # downstream `run-stage` contracts, dispatched separately — the config
+    # flags declare pipeline membership, they don't run those stages here.
     stages = ["extraction"]
     if config.redaction.enabled:
         stages.append(f"redaction({config.redaction.mode})")
-    if config.pii.enabled:
-        stages.append("pii")
-    if config.chunking.enabled:
-        stages.append("chunking(skipped: no Isaacus)" if chunk_will_skip else "chunking")
     logger.info(
-        "Starting pipeline: %d documents, batch_size=%d, stages=[%s]",
+        "Starting extraction: %d documents, batch_size=%d, stages=[%s]",
         total_files, batch_size, ", ".join(stages),
     )
-    if chunk_will_skip:
-        logger.warning(
-            "chunking.enabled but Isaacus is unavailable (needs the isaacus SDK + "
-            "ISAACUS_API_KEY, or ISAACUS_SAGEMAKER_ENDPOINTS for a private "
-            "deployment) — the chunk stage will be skipped for every batch; no "
-            "chunks will be written."
+    downstream = [
+        name for name, enabled in (
+            ("chunk", config.chunking.enabled),
+            ("pii", config.pii.enabled),
+        ) if enabled
+    ]
+    if downstream:
+        logger.info(
+            "Config also enables downstream stage(s) [%s] — `run` does not execute "
+            "them; dispatch them via `womblex <stage> --shards` (or `run-stage`) "
+            "after extraction, in order (enrich → chunk → graph-refresh → embed → "
+            "money → pii).",
+            ", ".join(downstream),
         )
 
     for batch_idx, i in enumerate(range(0, total_files, batch_size), start=1):

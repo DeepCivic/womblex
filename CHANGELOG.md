@@ -8,6 +8,10 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 ## [Unreleased]
 
+### Fixed
+- **Extraction does only extraction — `process_batch` no longer runs chunk/PII in-batch (issues 1 & 6).** `womblex.batch.process_batch` sequenced `extract → redact → chunk → pii`, gating chunk on `chunking.enabled` and PII on `pii.enabled`. But those flags now mean "this stage is in the pipeline", not "run it inside extraction"; the in-batch output was discarded (`write_results` has no chunk/clean_text path), it ran chunk *before* enrich (wrong order), and with `chunking_model: kanon-2-enricher` the in-batch chunk built a SageMaker client and raised `ValueError: No AWS region for SageMaker endpoint(s) …` mid-batch, killing every attempt. `process_batch` is now **extract → optional redaction detection** only — chunk, PII, enrich, embed, money are downstream `run-stage` contracts, dispatched separately. Redaction *detection* stays (it represents the source true-to-form, not a transform). No PII ever ran in-batch (both live runs had `pii.enabled: false`), so no masking or data loss occurred. `cmd_run`'s stage reporting and the now-moot `post_enrichment`-PII pre-flight guard are reconciled to match; a config that enables downstream stages logs a one-line "dispatch these per-stage after extraction" note instead. Cloud deployments must still set `ISAACUS_SAGEMAKER_REGION` (or `AWS_REGION`, or `…ENDPOINTS=…@region`) — the real enrich/chunk/embed stages call SageMaker; the software already surfaces the missing region correctly.
+- **Redaction logs read as detection, not PII cleaning.** `run_redaction` logged `Redaction [flag]: …` for every mode; in `flag` mode nothing is transformed, so it now logs `RedactionDetected: …` (detection) and `RedactionApplied [blackout|delete]: …` (the mutating modes), so an operator reading a batch log no longer mistakes a true-to-source redaction annotation for a text-changing PII pass.
+
 ## [0.5.9] - 2026-08-18
 Minor, additive. Headline fix: the SageMaker/MinIO credential conflict that
 403'd Isaacus-on-SageMaker `/invocations` on an EC2 instance role — the object

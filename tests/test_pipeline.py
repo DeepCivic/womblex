@@ -256,12 +256,16 @@ processing:
     return cfg
 
 
-def test_run_rejects_post_enrichment_pii(tmp_path: Path) -> None:
-    """`womblex run` has no enrichment stage, so post_enrichment PII can never
-    satisfy its precondition — cmd_run rejects it up front (returns 1) instead
-    of raising PreconditionError mid-run."""
+def test_run_ignores_downstream_stage_flags(tmp_path: Path) -> None:
+    """`womblex run` is extraction only. Downstream flags (even a
+    post_enrichment PII config that `run` could never satisfy) no longer make
+    it run or reject — they declare pipeline membership, dispatched separately.
+    The run extracts and succeeds regardless."""
+    if not _CSV_FILE.exists():
+        pytest.skip("CSV fixture not available")
     input_root = tmp_path / "in"
     input_root.mkdir()
+    shutil.copy(_CSV_FILE, input_root / _CSV_FILE.name)
     cfg = tmp_path / "cfg.yaml"
     cfg.write_text(
         f"""\
@@ -274,12 +278,16 @@ paths:
 pii:
   enabled: true
   pipeline_point: post_enrichment
+chunking:
+  enabled: true
 """
     )
     args = argparse.Namespace(
         config=cfg, resume=False, limit=None, skip=0, batch_size=None, run_id="t",
     )
-    assert cmd_run(args) == 1
+    # Extraction only — succeeds; no PII/chunk runs in-batch, so no crash.
+    assert cmd_run(args) == 0
+    assert (tmp_path / "out" / "t" / "documents").is_dir()
 
 
 class TestCmdRunRunIdLayout:

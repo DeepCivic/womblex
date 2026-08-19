@@ -16,19 +16,20 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # HOW TO RUN IT (important: `womblex run` does NOT execute this whole shape).
 #
-# `womblex run` only sequences extract → redact → chunk → pii in one process
-# (womblex/batch.py). enrich, build_graph (graph-refresh) and money are
-# per-stage commands. So the pipeline is a SEQUENCE of per-stage commands over
-# one shard directory. Enrich MUST run before chunk (AI chunking reuses the
-# enrichment Document — otherwise every document is enriched twice):
+# `womblex run` only extracts (extract → optional redaction detection) in one
+# process (womblex/batch.py). chunk, enrich, build_graph (graph-refresh), embed,
+# money and pii are per-stage commands. So the pipeline is a SEQUENCE of
+# per-stage commands over one shard directory. Enrich MUST run before chunk (AI
+# chunking reuses the enrichment Document — otherwise every document is enriched
+# twice):
 #
 #   RUN=out/$(date -u +run-%Y%m%dT%H%M%SZ); SHARDS=$RUN/documents
 #
 #   # 1. extract (writes *.elements.parquet + sidecars per batch)
 #   womblex run          --config configs/default-isaacus.yaml --run-id "$(basename "$RUN")"
-#   #    ^ `run` extracts; its own chunk pass is skipped below by chunking in
-#   #      per-stage order. To extract only, set chunking.enabled:false for the
-#   #      `run` pass, or just run the per-stage chunk after enrich as shown.
+#   #    ^ `run` extracts only; the chunk/enrich/… toggles below declare the
+#   #      pipeline shape but are NOT run in-batch — dispatch them per-stage
+#   #      (steps 2–6) over $SHARDS.
 #
 #   # 2. enrich BEFORE chunk (persists *.enrichment_doc.parquet for reuse)
 #   womblex enrich       --shards "$SHARDS" --config configs/default-isaacus.yaml
