@@ -302,6 +302,92 @@ def test_process_job_downloads_from_a_second_ingest_store(tmp_path):
     assert ingest_store.exists("people.csv")       # the source document is untouched
 
 
+# --- run logs (docs/ui-ingest-plan.md merge 5) ------------------------------
+
+
+def test_capture_batch_log_attaches_and_detaches_cleanly(tmp_path):
+    """The handler is added for the block and removed after — no leak that would
+    tee the next batch's records into this file."""
+    import logging
+
+    from womblex.utils.run_log import capture_batch_log
+
+    womblex_logger = logging.getLogger("womblex")
+    before = list(womblex_logger.handlers)
+    log_path = tmp_path / "batch.log"
+    with capture_batch_log(log_path):
+        assert len(womblex_logger.handlers) == len(before) + 1
+        logging.getLogger("womblex.some.module").error("a captured line")
+    assert womblex_logger.handlers == before  # detached
+    assert "a captured line" in log_path.read_text()
+
+
+def test_capture_batch_log_detaches_even_when_the_block_raises(tmp_path):
+    import logging
+
+    from womblex.utils.run_log import capture_batch_log
+
+    womblex_logger = logging.getLogger("womblex")
+    before = list(womblex_logger.handlers)
+    log_path = tmp_path / "batch.log"
+    with pytest.raises(RuntimeError), capture_batch_log(log_path):
+        logging.getLogger("womblex").error("before the raise")
+        raise RuntimeError("boom")
+    assert womblex_logger.handlers == before
+    # The file is complete and readable even though the block raised — the
+    # failing case is the one the operator needs.
+    assert "before the raise" in log_path.read_text()
+
+
+def test_process_job_publishes_the_batch_log_beside_the_shards(tmp_path):
+    """A successful batch leaves `runs/<run_id>/logs/batch-NNNN.log` in the store."""
+    from womblex.cloud.queue import Job
+    from womblex.cloud.worker import _process_job
+
+    ingest_store = RemoteStore.from_uri(str(tmp_path / "ingest"))
+    csv = tmp_path / "people.csv"
+    csv.write_text("name,role\nAlice,Director\n")
+    ingest_store.upload_file(csv, "people.csv")
+
+    output_store = RemoteStore.from_uri(str(tmp_path / "store"))
+    job = Job(
+        id=1, run_id="r1", batch_num=3, input_keys=["people.csv"],
+        shard_prefix="runs/r1/documents", attempts=1,
+    )
+
+    _process_job(job, _minimal_config(tmp_path), output_store, ingest_store)
+
+    assert output_store.exists("runs/r1/logs/batch-0003.log")
+
+
+def test_process_job_publishes_the_log_even_when_the_batch_fails(tmp_path, monkeypatch):
+    """The failing case is the one that matters: the log is uploaded outside the
+    try, so a job that raises still leaves its `batch-NNNN.log` in the store, and
+    the original error is what propagates."""
+    from womblex.cloud.queue import Job
+    from womblex.cloud import worker as worker_mod
+
+    ingest_store = RemoteStore.from_uri(str(tmp_path / "ingest"))
+    csv = tmp_path / "people.csv"
+    csv.write_text("name,role\nAlice,Director\n")
+    ingest_store.upload_file(csv, "people.csv")
+    output_store = RemoteStore.from_uri(str(tmp_path / "store"))
+
+    def _boom(*_a, **_kw):
+        raise RuntimeError("processing exploded")
+
+    monkeypatch.setattr(worker_mod, "process_batch", _boom)
+    job = Job(
+        id=1, run_id="r1", batch_num=1, input_keys=["people.csv"],
+        shard_prefix="runs/r1/documents", attempts=1,
+    )
+
+    with pytest.raises(RuntimeError, match="processing exploded"):
+        worker_mod._process_job(job, _minimal_config(tmp_path), output_store, ingest_store)
+
+    assert output_store.exists("runs/r1/logs/batch-0001.log")
+
+
 # --- finalize (local store, no Postgres) -------------------------------------
 
 

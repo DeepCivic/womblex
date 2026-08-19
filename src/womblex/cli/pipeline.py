@@ -45,6 +45,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     from womblex.store.retention import apply_retention, generate_run_id, most_recent_run
     from womblex.store.shard_audit import reconcile_checkpoint_with_shards
     from womblex.utils.availability import isaacus_available
+    from womblex.utils.run_log import capture_batch_log
 
     config = load_config(args.config)
     logger.info("Loaded config: %s", config.dataset.name)
@@ -93,6 +94,10 @@ def cmd_run(args: argparse.Namespace) -> int:
     run_root = output_root / run_id
     shard_dir = run_root / "documents"
     shard_dir.mkdir(parents=True, exist_ok=True)
+    # Batch logs land in a `logs/` sibling of `documents/`, the same layout the
+    # cloud worker publishes to the store, so `ui/readers.py` reads both by one
+    # `runs/<run_id>/logs/batch-NNNN.log` convention.
+    logs_dir = run_root / "logs"
     cumulative_shard_size = sum(s.stat().st_size for s in shard_dir.glob("*.parquet"))
 
     # Apply retention before processing (only on fresh runs — never on resume,
@@ -178,7 +183,8 @@ def cmd_run(args: argparse.Namespace) -> int:
             batch_num, len(batch_files), i + 1, min(i + batch_size, total_files), total_files,
         )
 
-        outcome = process_batch(batch_files, config, batch_num=batch_num, shard_dir=shard_dir)
+        with capture_batch_log(logs_dir / f"batch-{batch_num:04d}.log"):
+            outcome = process_batch(batch_files, config, batch_num=batch_num, shard_dir=shard_dir)
         batch = outcome.batch
         total_succeeded += batch.succeeded
         total_failed += batch.failed

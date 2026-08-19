@@ -123,8 +123,8 @@ Sized to the 500-changed-line merge cap. Each merge stands alone and leaves the 
 | 2 | Console reads the configured ingest (backend) | Additive | DONE
 | 3a | Editable ingest / output locations (backend) | Endpoint the screen does not yet call | DONE
 | 3b | Editable location cards (frontend) | Frontend | DONE
-| 4 | Composer owns dispatch; Execution Controls removed | Frontend, net negative |
-| 5 | Run logs readable and downloadable from the console | Independent; no existing behaviour changed |
+| 4 | Composer owns dispatch; Execution Controls removed | Frontend, net negative | DONE
+| 5 | Run logs readable and downloadable from the console | Independent; no existing behaviour changed | DONE
 
 3a/3b are split at that seam specifically because the combined diff would run over the cap.
 

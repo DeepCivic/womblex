@@ -8,6 +8,7 @@ uses, so there is one code path for the parquet logic.
 from __future__ import annotations
 
 import logging
+import re
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -42,6 +43,19 @@ if TYPE_CHECKING:
     from womblex.store.remote import RemoteStore
 
 logger = logging.getLogger(__name__)
+
+#: A run log's filename, validated before any path join. Batch logs are named
+#: ``batch-NNNN.log`` by :func:`womblex.utils.run_log.capture_batch_log`'s
+#: callers (the worker and ``cmd_run``); anything else is refused rather than
+#: joined, the same containment discipline :func:`is_safe_run_id` applies to a
+#: run id. The console has no auth, so a name that reaches a store/filesystem
+#: join could otherwise probe outside the run's ``logs/`` prefix.
+_LOG_NAME_RE = re.compile(r"batch-\d{4}\.log\Z")
+
+
+def is_safe_log_name(name: str) -> bool:
+    """True if *name* is a batch log filename safe to join onto a ``logs/`` prefix."""
+    return bool(_LOG_NAME_RE.fullmatch(name))
 
 
 class StoreUnreachable(Exception):
@@ -157,6 +171,72 @@ def get_chunk_detail(settings: UISettings, run_id: str, source_hash: str) -> dic
         for _key, suffix, _schema, _column in _CHUNK_DETAIL_SIDECARS
     }
     return _chunk_detail(paths, source_hash)
+
+
+# ---------------------------------------------------------------------------
+# Run logs (docs/ui-ingest-plan.md merge 5)
+# ---------------------------------------------------------------------------
+#
+# Batch logs are the per-document failure lines `operations/extract.py` already
+# emits, teed to `runs/<run_id>/logs/batch-NNNN.log` by the worker and
+# `cmd_run` (via `utils/run_log.capture_batch_log`). They read with the same
+# local/remote fork every other reader uses. `None` means the run does not
+# exist (→ 404); an empty list means the run exists but predates this change
+# (→ an explained empty state, not a 404).
+
+
+def list_run_logs(settings: UISettings, run_id: str) -> list[dict] | None:
+    """Batch logs for run_id (``name``, ``size``, ``modified``), or None if absent.
+
+    Newest batch first — the batch an operator is most likely watching. A run
+    with no ``logs/`` prefix (every run written before this change) lists
+    empty rather than 404-ing.
+    """
+    if settings.is_remote:
+        return _remote_run_logs(cast(str, settings.store_uri), run_id)
+    run_dir = cast(Path, settings.output_root) / run_id
+    if not run_dir.is_dir():
+        return None
+    logs_dir = run_dir / "logs"
+    if not logs_dir.is_dir():
+        return []
+    entries = [
+        _log_entry(p.name, p.stat().st_size, p.stat().st_mtime)
+        for p in logs_dir.iterdir()
+        if p.is_file() and is_safe_log_name(p.name)
+    ]
+    return sorted(entries, key=lambda e: e["name"], reverse=True)
+
+
+def read_run_log(settings: UISettings, run_id: str, name: str) -> str | None:
+    """The text of one batch log, or None if the run, or that log, is absent.
+
+    *name* is validated by :func:`is_safe_log_name` before any join — an unsafe
+    or absent name both return None, which the route renders as one 404 carrying
+    the available list (the caller cannot distinguish rejected from absent, so
+    the endpoint cannot be used to probe outside the ``logs/`` prefix).
+    """
+    if not is_safe_log_name(name):
+        return None
+    if settings.is_remote:
+        return _remote_run_log(cast(str, settings.store_uri), run_id, name)
+    run_dir = cast(Path, settings.output_root) / run_id
+    if not run_dir.is_dir():
+        return None
+    log_path = run_dir / "logs" / name
+    if not log_path.is_file():
+        return None
+    return log_path.read_text(encoding="utf-8", errors="replace")
+
+
+def _log_entry(name: str, size: int, mtime: float) -> dict:
+    from datetime import UTC, datetime
+
+    return {
+        "name": name,
+        "size": size,
+        "modified": datetime.fromtimestamp(mtime, UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
 
 
 def write_feedback(
@@ -585,3 +665,54 @@ def _remote_shard_audit(store_uri: str, run_id: str) -> dict | None:
             if keys:
                 store.download_to_dir(keys, tmp_dir)
         return audit_shard_directory(tmp_dir).as_dict()
+
+
+def _remote_run_logs(store_uri: str, run_id: str) -> list[dict] | None:
+    """List a remote run's batch logs from its ``logs/`` prefix.
+
+    ``None`` when the run does not exist; an empty list when it does but has no
+    ``logs/`` prefix (a run written before this change). fsspec does not expose
+    an object's size uniformly per-listing, so a per-key ``info`` fetches size
+    and mtime for the (small) set of batch logs.
+    """
+    store = _open_store(store_uri)
+    if run_id not in store.list_dirs("runs"):
+        return None
+    keys = store.list_files(f"runs/{run_id}/logs", "*")
+    entries: list[dict] = []
+    for key in keys:
+        name = key.rsplit("/", 1)[-1]
+        if not is_safe_log_name(name):
+            continue
+        entries.append(_remote_log_entry(store, key, name))
+    return sorted(entries, key=lambda e: e["name"], reverse=True)
+
+
+def _remote_log_entry(store: RemoteStore, key: str, name: str) -> dict:
+    """Size + modified for one remote log, tolerating a backend that omits either."""
+    size = 0
+    modified: str | None = None
+    try:
+        info: dict = store.fs.info(f"{store.root}/{key}")  # type: ignore[attr-defined]
+        size = int(info.get("size") or info.get("Size") or 0)
+        mtime = info.get("LastModified") or info.get("mtime")
+        if hasattr(mtime, "strftime"):
+            modified = mtime.strftime("%Y-%m-%dT%H:%M:%SZ")
+    except Exception as e:  # a listing that cannot be `info`'d is still nameable
+        logger.warning("run-logs: could not stat %s: %s", key, e)
+    return {"name": name, "size": size, "modified": modified}
+
+
+def _remote_run_log(store_uri: str, run_id: str, name: str) -> str | None:
+    """Read one remote batch log in place; None if the run or the log is absent.
+
+    *name* is already validated by :func:`read_run_log`; the run existence
+    check gives a hand-typed run id the same 404 the local branch produces.
+    """
+    store = _open_store(store_uri)
+    if run_id not in store.list_dirs("runs"):
+        return None
+    key = f"runs/{run_id}/logs/{name}"
+    if not store.exists(key):
+        return None
+    return store.read_text(key)

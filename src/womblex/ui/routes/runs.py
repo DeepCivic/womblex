@@ -7,7 +7,8 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import PlainTextResponse
 
 from womblex.store.retention import STAGE_SUFFIXES
 from womblex.ui import readers
@@ -90,3 +91,62 @@ def get_chunk_detail(
     if detail is None:
         raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
     return {"run_id": run_id, "source_hash": source_hash, **detail}
+
+
+@router.get("/{run_id}/logs")
+def list_logs(run_id: str, settings: UISettings = Depends(get_settings)) -> dict:  # noqa: B008
+    """Batch logs published for this run (name, size, modified), newest first.
+
+    An existing run with no logs (one written before workers published them)
+    lists empty rather than 404-ing — the frontend renders that as an explained
+    empty state, not an error.
+    """
+    try:
+        logs = readers.list_run_logs(settings, run_id)
+    except StoreUnreachable as e:
+        raise _unreachable(e) from e
+    if logs is None:
+        raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
+    return {"run_id": run_id, "logs": logs}
+
+
+@router.get("/{run_id}/logs/{name}")
+def get_log(
+    run_id: str,
+    name: str,
+    download: int = Query(0),
+    settings: UISettings = Depends(get_settings),  # noqa: B008
+) -> PlainTextResponse:
+    """One batch log as ``text/plain`` (``?download=1`` forces a file download).
+
+    A *name* that fails the ``batch-NNNN.log`` pattern and a *name* that passes
+    but is not present return the **same 404**, both carrying the ``available``
+    list. That is deliberate (docs/ui-ingest-plan.md merge 5): the operator gets
+    "that log is not here — these are" in one round trip, and a rejected name is
+    indistinguishable from an absent one, so the endpoint cannot be used to probe
+    for what exists outside the run's ``logs/`` prefix. Containment happens first
+    — the pattern check runs before any path join, so a malformed name never
+    reaches the filesystem or store.
+    """
+    try:
+        text = readers.read_run_log(settings, run_id, name)
+    except StoreUnreachable as e:
+        raise _unreachable(e) from e
+    if text is None:
+        # A run that does not exist at all is a plain 404; a run that exists but
+        # lacks this log gets the available-list payload so the picker can
+        # self-correct. `list_run_logs` distinguishes the two by returning None.
+        try:
+            available = readers.list_run_logs(settings, run_id)
+        except StoreUnreachable as e:
+            raise _unreachable(e) from e
+        if available is None:
+            raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
+        raise HTTPException(
+            status_code=404,
+            detail={"message": f"log not found: {name}", "available": available},
+        )
+    headers = (
+        {"Content-Disposition": f'attachment; filename="{name}"'} if download else None
+    )
+    return PlainTextResponse(text, headers=headers)

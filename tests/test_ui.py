@@ -284,6 +284,110 @@ class TestRunsApi:
         assert client.get("/api/runs/nope/audit").status_code == 404
 
 
+def _write_log(run_root: Path, run_id: str, name: str, body: str) -> None:
+    logs_dir = run_root / run_id / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / name).write_text(body, encoding="utf-8")
+
+
+class TestRunLogsApi:
+    """Batch logs readable and downloadable from the console
+    (docs/ui-ingest-plan.md merge 5)."""
+
+    def test_lists_logs_newest_first(self, api_client: tuple[TestClient, Path]) -> None:
+        client, run_root = api_client
+        _write_manifest_shard(run_root / "run-a" / "documents", _ROWS)
+        _write_log(run_root, "run-a", "batch-0001.log", "first")
+        _write_log(run_root, "run-a", "batch-0002.log", "second")
+        body = client.get("/api/runs/run-a/logs").json()
+        assert body["run_id"] == "run-a"
+        assert [entry["name"] for entry in body["logs"]] == [
+            "batch-0002.log", "batch-0001.log",
+        ]
+
+    def test_list_404_when_run_missing(self, api_client: tuple[TestClient, Path]) -> None:
+        client, _ = api_client
+        assert client.get("/api/runs/nope/logs").status_code == 404
+
+    def test_run_with_no_logs_lists_empty_not_404(
+        self, api_client: tuple[TestClient, Path]
+    ) -> None:
+        """A run created before this change exists but has no `logs/` prefix; it
+        lists empty (an explained empty state) rather than 404-ing."""
+        client, run_root = api_client
+        _write_manifest_shard(run_root / "run-old" / "documents", _ROWS)
+        resp = client.get("/api/runs/run-old/logs")
+        assert resp.status_code == 200
+        assert resp.json()["logs"] == []
+
+    def test_reads_one_log_as_plain_text(self, api_client: tuple[TestClient, Path]) -> None:
+        client, run_root = api_client
+        _write_manifest_shard(run_root / "run-a" / "documents", _ROWS)
+        _write_log(run_root, "run-a", "batch-0001.log", "Extraction failed: doc=bad error=boom")
+        resp = client.get("/api/runs/run-a/logs/batch-0001.log")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("text/plain")
+        assert "Extraction failed: doc=bad" in resp.text
+        assert "content-disposition" not in resp.headers
+
+    def test_download_sets_content_disposition(
+        self, api_client: tuple[TestClient, Path]
+    ) -> None:
+        client, run_root = api_client
+        _write_manifest_shard(run_root / "run-a" / "documents", _ROWS)
+        _write_log(run_root, "run-a", "batch-0001.log", "log body")
+        resp = client.get("/api/runs/run-a/logs/batch-0001.log?download=1")
+        assert resp.status_code == 200
+        assert 'attachment; filename="batch-0001.log"' in resp.headers["content-disposition"]
+
+    def test_absent_log_404s_with_the_available_list(
+        self, api_client: tuple[TestClient, Path]
+    ) -> None:
+        client, run_root = api_client
+        _write_manifest_shard(run_root / "run-a" / "documents", _ROWS)
+        _write_log(run_root, "run-a", "batch-0001.log", "present")
+        resp = client.get("/api/runs/run-a/logs/batch-9999.log")
+        assert resp.status_code == 404
+        detail = resp.json()["detail"]
+        assert [entry["name"] for entry in detail["available"]] == ["batch-0001.log"]
+
+    @pytest.mark.parametrize(
+        "bad_name",
+        ["batch-1.log", "batch-0001.txt", "passwd", "batch-0001.log.bak"],
+    )
+    def test_a_malformed_name_404s_the_same_way_never_touching_the_store(
+        self, api_client: tuple[TestClient, Path], bad_name: str
+    ) -> None:
+        """A rejected name and an absent name return the identical 404 + available
+        list, so the endpoint cannot be used to probe outside `logs/`."""
+        client, run_root = api_client
+        _write_manifest_shard(run_root / "run-a" / "documents", _ROWS)
+        _write_log(run_root, "run-a", "batch-0001.log", "present")
+        resp = client.get(f"/api/runs/run-a/logs/{bad_name}")
+        assert resp.status_code == 404
+        assert [e["name"] for e in resp.json()["detail"]["available"]] == ["batch-0001.log"]
+
+    def test_a_traversal_never_reaches_the_filesystem(
+        self, api_client: tuple[TestClient, Path]
+    ) -> None:
+        client, run_root = api_client
+        _write_manifest_shard(run_root / "run-a" / "documents", _ROWS)
+        # Encoded so the router passes it through as one path segment rather
+        # than resolving `..` itself.
+        resp = client.get("/api/runs/run-a/logs/..%2F..%2Fetc%2Fpasswd")
+        assert resp.status_code == 404
+
+    def test_read_404_when_run_missing(self, api_client: tuple[TestClient, Path]) -> None:
+        client, _ = api_client
+        assert client.get("/api/runs/nope/logs/batch-0001.log").status_code == 404
+
+    def test_is_safe_log_name(self) -> None:
+        assert readers.is_safe_log_name("batch-0001.log")
+        assert not readers.is_safe_log_name("batch-1.log")
+        assert not readers.is_safe_log_name("../batch-0001.log")
+        assert not readers.is_safe_log_name("batch-0001.log.bak")
+
+
 class TestFeedbackApi:
     """The report action (docs/ui-plan.md §4, merge 7): one file per report."""
 

@@ -10,7 +10,15 @@
 	// job (§4 "Stalled-job identification"), a worker recovers it. Adding an
 	// action would make this a second producer of queue state, which the whole
 	// console is built to avoid.
-	import { getDashboard, type DashboardData, type JobRow } from '$lib/api';
+	import {
+		getDashboard,
+		listRunLogs,
+		getRunLog,
+		RunLogNotFound,
+		type DashboardData,
+		type JobRow,
+		type RunLog
+	} from '$lib/api';
 	import { runSelection } from '$lib/stores/run.svelte';
 	import StatusPill from '$lib/components/StatusPill.svelte';
 	import type { Status } from '$lib/status';
@@ -117,6 +125,72 @@
 			clearInterval(timer);
 		};
 	});
+
+	// --- Logs panel (docs/ui-ingest-plan.md merge 5) ------------------------
+	//
+	// Reads once per run selection (logs are static once published, unlike the
+	// draining queue), and again when the operator picks a batch. Kept separate
+	// from the polling effect so a poll failure never blanks a log the operator
+	// is reading, and vice versa. `logsState` distinguishes the three states the
+	// plan calls out: no such run's logs yet, an unreadable list, and a selected
+	// log that has since gone (self-corrected from the 404's `available` list).
+	let logs = $state<RunLog[] | null>(null);
+	let logsError: string | null = $state(null);
+	let selectedLog: string | null = $state(null);
+	let logText: string | null = $state(null);
+	let logTextError: string | null = $state(null);
+	let logLoading = $state(false);
+
+	$effect(() => {
+		const runId = runSelection.selectedRunId;
+		let cancelled = false;
+		logs = null;
+		logsError = null;
+		selectedLog = null;
+		logText = null;
+		logTextError = null;
+		if (!runId) return;
+		(async () => {
+			try {
+				const rows = await listRunLogs(runId);
+				if (!cancelled) logs = rows;
+			} catch (err) {
+				if (!cancelled) logsError = message(err);
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	});
+
+	async function openLog(name: string): Promise<void> {
+		const runId = runSelection.selectedRunId;
+		if (!runId) return;
+		selectedLog = name;
+		logText = null;
+		logTextError = null;
+		logLoading = true;
+		try {
+			logText = await getRunLog(runId, name);
+		} catch (err) {
+			if (err instanceof RunLogNotFound) {
+				// Stale link (a batch requeued under a new number, or logs pruned):
+				// re-render the picker from the fresh `available` list and say so.
+				logs = err.available;
+				selectedLog = null;
+				logTextError = 'That log is no longer available.';
+			} else {
+				logTextError = message(err);
+			}
+		} finally {
+			logLoading = false;
+		}
+	}
+
+	function downloadUrl(name: string): string {
+		const runId = runSelection.selectedRunId ?? '';
+		return `/api/runs/${encodeURIComponent(runId)}/logs/${encodeURIComponent(name)}?download=1`;
+	}
 </script>
 
 {#snippet jobRow(job: JobRow)}
@@ -342,6 +416,71 @@
 					Progress is batch-granular: each stage writes a checkpoint once per batch, so this is its
 					lifetime average, not an instantaneous rate.
 				</p>
+			{/if}
+		</section>
+
+		<!-- Run logs (docs/ui-ingest-plan.md merge 5): the per-document failure
+		     lines a worker/`cmd_run` published next to the shards. The `job.error`
+		     cell above is left as-is; this is the detail behind it. -->
+		<section class="flex flex-col gap-3">
+			<h2 class="font-display text-sm">Run logs</h2>
+			{#if !runSelection.selectedRunId}
+				<p class="text-xs text-muted-foreground">Select a run to read its batch logs.</p>
+			{:else if logsError}
+				<p class="text-xs text-status-failed">{logsError}</p>
+			{:else if logs === null}
+				<p class="text-xs text-muted-foreground">Loading logs…</p>
+			{:else if logs.length === 0}
+				<!-- Run exists but has no logs: it predates this change. Explain rather
+				     than showing an unexplained empty panel. -->
+				<p class="max-w-prose text-xs text-muted-foreground">
+					No batch logs for this run. Logs are published by workers (and
+					<code class="font-mono">womblex run</code>) from this version onward — a run created
+					before that has none, and its failure reasons are in the
+					<span class="font-medium">Error</span> column above.
+				</p>
+			{:else}
+				<div class="flex flex-col gap-3 lg:flex-row">
+					<!-- Picker -->
+					<ul class="flex shrink-0 flex-col gap-1 lg:w-56">
+						{#each logs as log (log.name)}
+							<li class="flex items-center justify-between gap-2">
+								<button
+									type="button"
+									class="flex-1 truncate rounded px-2 py-1 text-left font-mono text-xs hover:bg-surface-raised {selectedLog ===
+									log.name
+										? 'bg-surface-raised font-medium'
+										: 'text-muted-foreground'}"
+									onclick={() => openLog(log.name)}
+								>
+									{log.name}
+								</button>
+								<a
+									href={downloadUrl(log.name)}
+									class="shrink-0 text-xs text-muted-foreground underline hover:text-foreground"
+									title="Download {log.name}">download</a
+								>
+							</li>
+						{/each}
+					</ul>
+
+					<!-- Viewer -->
+					<div class="min-w-0 flex-1 rounded-md border border-border bg-surface-raised">
+						{#if logTextError}
+							<p class="px-3 py-2 text-xs text-status-warning">{logTextError}</p>
+						{:else if logLoading}
+							<p class="px-3 py-2 text-xs text-muted-foreground">Loading {selectedLog}…</p>
+						{:else if logText !== null}
+							<pre
+								class="max-h-96 overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-xs">{logText}</pre>
+						{:else}
+							<p class="px-3 py-2 text-xs text-muted-foreground">
+								Select a batch to read its log. A job that failed before its log was published
+								shows its only reason in the <span class="font-medium">Error</span> column above.
+							</p>
+						{/if}
+					</div>
+				</div>
 			{/if}
 		</section>
 	{/if}

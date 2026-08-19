@@ -21,6 +21,7 @@ from womblex.batch import process_batch
 from womblex.cloud.queue import Job, JobQueue
 from womblex.config import WomblexConfig
 from womblex.store.remote import RemoteStore, same_location
+from womblex.utils.run_log import capture_batch_log
 
 logger = logging.getLogger(__name__)
 
@@ -46,23 +47,53 @@ def _same_ingest(a: str, b: str) -> bool:
         return False
 
 
+def _log_key(job: Job) -> str:
+    """Where this batch's log lands, a ``logs/`` sibling of its shards.
+
+    ``shard_prefix`` is ``runs/<run_id>/documents``; the log goes to
+    ``runs/<run_id>/logs/batch-NNNN.log``, so the reader can list a run's
+    logs without knowing the batch numbering ahead of time.
+    """
+    run_prefix = job.shard_prefix.rsplit("/", 1)[0]
+    return f"{run_prefix}/logs/batch-{job.batch_num:04d}.log"
+
+
 def _process_job(job: Job, config: WomblexConfig, store: RemoteStore, ingest: RemoteStore) -> None:
-    """Stage inputs, run the batch, publish shards. Raises on failure."""
+    """Stage inputs, run the batch, publish shards **and the batch log**.
+
+    The log is captured for the whole run and published in a ``finally``, so a
+    failed batch still leaves its ``batch-NNNN.log`` in the store — that is the
+    case the operator most needs it. A failed *upload* of the log never masks
+    the original error: it is logged and swallowed.
+    """
     with tempfile.TemporaryDirectory(prefix="womblex-job-") as tmp:
         root = Path(tmp)
         inputs_dir = root / "inputs"
         shards_dir = root / "shards"
         shards_dir.mkdir(parents=True, exist_ok=True)
+        log_path = root / f"batch-{job.batch_num:04d}.log"
 
-        files = ingest.download_to_dir(job.input_keys, inputs_dir)
-        outcome = process_batch(files, config, batch_num=job.batch_num, shard_dir=shards_dir)
-        # Glob off the shard path the batch reported, so the naming scheme
-        # lives only in womblex.batch.
-        store.upload_glob(shards_dir, f"{outcome.shard_path.stem}.*", job.shard_prefix)
-        logger.info(
-            "[batch %d] %d ok, %d failed -> %s",
-            job.batch_num, outcome.batch.succeeded, outcome.batch.failed, job.shard_prefix,
-        )
+        try:
+            with capture_batch_log(log_path):
+                files = ingest.download_to_dir(job.input_keys, inputs_dir)
+                outcome = process_batch(
+                    files, config, batch_num=job.batch_num, shard_dir=shards_dir,
+                )
+                # Glob off the shard path the batch reported, so the naming
+                # scheme lives only in womblex.batch.
+                store.upload_glob(shards_dir, f"{outcome.shard_path.stem}.*", job.shard_prefix)
+                logger.info(
+                    "[batch %d] %d ok, %d failed -> %s",
+                    job.batch_num, outcome.batch.succeeded, outcome.batch.failed,
+                    job.shard_prefix,
+                )
+        finally:
+            # Outside the capture (the file is now closed and complete) but
+            # inside the temp dir; publish on success and failure alike.
+            try:
+                store.upload_file(log_path, _log_key(job))
+            except Exception:  # publishing the log must never mask the batch's own error
+                logger.exception("[batch %d] failed to publish batch log", job.batch_num)
 
 
 def run_worker(

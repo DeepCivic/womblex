@@ -49,7 +49,7 @@ export async function getManifest(
 	fetchImpl: typeof fetch = fetch
 ): Promise<ManifestDocument[]> {
 	const resp = await fetchImpl(`/api/runs/${encodeURIComponent(runId)}/manifest`);
-	if (!resp.ok) throw new Error(`GET /api/runs/${runId}/manifest: ${resp.status}`);
+	if (!resp.ok) throw new Error(await errorDetail(resp, `GET /api/runs/${runId}/manifest`));
 	const body = (await resp.json()) as { documents: ManifestDocument[] };
 	return body.documents;
 }
@@ -64,7 +64,7 @@ export async function getStagePresence(
 	const resp = await fetchImpl(
 		`/api/runs/${encodeURIComponent(runId)}/stage-presence/${encodeURIComponent(stage)}`
 	);
-	if (!resp.ok) throw new Error(`GET .../stage-presence/${stage}: ${resp.status}`);
+	if (!resp.ok) throw new Error(await errorDetail(resp, `GET .../stage-presence/${stage}`));
 	const body = (await resp.json()) as { source_hashes: string[] };
 	return body.source_hashes;
 }
@@ -169,8 +169,69 @@ export async function getChunkDetail(
 	const resp = await fetchImpl(
 		`/api/runs/${encodeURIComponent(runId)}/chunks/${encodeURIComponent(sourceHash)}`
 	);
-	if (!resp.ok) throw new Error(`GET /api/runs/${runId}/chunks/${sourceHash}: ${resp.status}`);
+	if (!resp.ok) throw new Error(await errorDetail(resp, `GET /api/runs/${runId}/chunks/${sourceHash}`));
 	return (await resp.json()) as ChunkDetail;
+}
+
+// One published batch log (docs/ui-ingest-plan.md merge 5). `modified` is null
+// when the backend cannot report it (some object stores omit it per-listing).
+export interface RunLog {
+	name: string;
+	size: number;
+	modified: string | null;
+}
+
+// The list of a run's batch logs. A run that exists but has no logs (written
+// before workers published them) lists empty rather than 404-ing, so the screen
+// tells "no logs yet" apart from "no such run".
+export async function listRunLogs(
+	runId: string,
+	fetchImpl: typeof fetch = fetch
+): Promise<RunLog[]> {
+	const resp = await fetchImpl(`/api/runs/${encodeURIComponent(runId)}/logs`);
+	if (!resp.ok) throw new Error(await errorDetail(resp, `GET /api/runs/${runId}/logs`));
+	const body = (await resp.json()) as { logs: RunLog[] };
+	return body.logs;
+}
+
+/**
+ * A requested log the console would not serve. Both a name that fails the
+ * `batch-NNNN.log` pattern and a valid-but-absent name land here with a 404
+ * carrying `available` — the live list of logs — so the picker re-renders
+ * inline with "that log is no longer available" and self-corrects a stale link
+ * rather than stranding the operator (docs/ui-ingest-plan.md merge 5).
+ */
+export class RunLogNotFound extends Error {
+	available: RunLog[];
+	constructor(message: string, available: RunLog[]) {
+		super(message);
+		this.name = 'RunLogNotFound';
+		this.available = available;
+	}
+}
+
+// The text of one batch log. `download` sets the `?download=1` flag so the same
+// endpoint serves both the inline `<pre>` viewer and a file download.
+export async function getRunLog(
+	runId: string,
+	name: string,
+	{ download = false, fetchImpl = fetch }: { download?: boolean; fetchImpl?: typeof fetch } = {}
+): Promise<string> {
+	const query = download ? '?download=1' : '';
+	const resp = await fetchImpl(
+		`/api/runs/${encodeURIComponent(runId)}/logs/${encodeURIComponent(name)}${query}`
+	);
+	if (!resp.ok) {
+		if (resp.status === 404) {
+			const detail = ((await resp.json().catch(() => ({}))) as { detail?: unknown }).detail;
+			if (detail && typeof detail === 'object' && 'available' in detail) {
+				const d = detail as { message?: string; available?: RunLog[] };
+				throw new RunLogNotFound(d.message ?? 'log not found', d.available ?? []);
+			}
+		}
+		throw new Error(await errorDetail(resp, `GET /api/runs/${runId}/logs/${name}`));
+	}
+	return await resp.text();
 }
 
 // `ShardAuditReport.as_dict()` — the verify-shards action's result.
@@ -194,7 +255,7 @@ export async function getAudit(
 	fetchImpl: typeof fetch = fetch
 ): Promise<ShardAudit> {
 	const resp = await fetchImpl(`/api/runs/${encodeURIComponent(runId)}/audit`);
-	if (!resp.ok) throw new Error(`GET /api/runs/${runId}/audit: ${resp.status}`);
+	if (!resp.ok) throw new Error(await errorDetail(resp, `GET /api/runs/${runId}/audit`));
 	return (await resp.json()) as ShardAudit;
 }
 
@@ -273,7 +334,7 @@ export interface ResourcesCards {
 
 export async function getResources(fetchImpl: typeof fetch = fetch): Promise<ResourcesCards> {
 	const resp = await fetchImpl('/api/resources');
-	if (!resp.ok) throw new Error(`GET /api/resources: ${resp.status}`);
+	if (!resp.ok) throw new Error(await errorDetail(resp, 'GET /api/resources'));
 	return (await resp.json()) as ResourcesCards;
 }
 
@@ -286,13 +347,13 @@ export async function testStoreConnection(
 	fetchImpl: typeof fetch = fetch
 ): Promise<ReachabilityResult> {
 	const resp = await fetchImpl('/api/resources/test/store', { method: 'POST' });
-	if (!resp.ok) throw new Error(`POST /api/resources/test/store: ${resp.status}`);
+	if (!resp.ok) throw new Error(await errorDetail(resp, 'POST /api/resources/test/store'));
 	return (await resp.json()) as ReachabilityResult;
 }
 
 export async function testIngest(fetchImpl: typeof fetch = fetch): Promise<ReachabilityResult> {
 	const resp = await fetchImpl('/api/resources/test/ingest', { method: 'POST' });
-	if (!resp.ok) throw new Error(`POST /api/resources/test/ingest: ${resp.status}`);
+	if (!resp.ok) throw new Error(await errorDetail(resp, 'POST /api/resources/test/ingest'));
 	return (await resp.json()) as ReachabilityResult;
 }
 
@@ -379,7 +440,7 @@ export async function testQueueConnection(
 	fetchImpl: typeof fetch = fetch
 ): Promise<QueueTestResult> {
 	const resp = await fetchImpl('/api/resources/test/queue', { method: 'POST' });
-	if (!resp.ok) throw new Error(`POST /api/resources/test/queue: ${resp.status}`);
+	if (!resp.ok) throw new Error(await errorDetail(resp, 'POST /api/resources/test/queue'));
 	return (await resp.json()) as QueueTestResult;
 }
 
@@ -455,7 +516,7 @@ export async function getDashboard(
 ): Promise<DashboardData> {
 	const query = runId ? `?run_id=${encodeURIComponent(runId)}` : '';
 	const resp = await fetchImpl(`/api/dashboard${query}`);
-	if (!resp.ok) throw new Error(`GET /api/dashboard: ${resp.status}`);
+	if (!resp.ok) throw new Error(await errorDetail(resp, 'GET /api/dashboard'));
 	return (await resp.json()) as DashboardData;
 }
 
@@ -497,7 +558,7 @@ export interface StageGraph {
 
 export async function getStageGraph(fetchImpl: typeof fetch = fetch): Promise<StageGraph> {
 	const resp = await fetchImpl('/api/composer/graph');
-	if (!resp.ok) throw new Error(`GET /api/composer/graph: ${resp.status}`);
+	if (!resp.ok) throw new Error(await errorDetail(resp, 'GET /api/composer/graph'));
 	return (await resp.json()) as StageGraph;
 }
 
@@ -614,7 +675,7 @@ export type ConfigObject = Record<string, unknown>;
 
 export async function getConfigSchema(fetchImpl: typeof fetch = fetch): Promise<JsonSchema> {
 	const resp = await fetchImpl('/api/composer/schema');
-	if (!resp.ok) throw new Error(`GET /api/composer/schema: ${resp.status}`);
+	if (!resp.ok) throw new Error(await errorDetail(resp, 'GET /api/composer/schema'));
 	return (await resp.json()) as JsonSchema;
 }
 
@@ -641,7 +702,7 @@ export async function validateConfig(
 	fetchImpl: typeof fetch = fetch
 ): Promise<ValidationResult> {
 	const resp = await fetchImpl('/api/composer/validate', { ...JSON_POST, body: JSON.stringify(raw) });
-	if (!resp.ok) throw new Error(`POST /api/composer/validate: ${resp.status}`);
+	if (!resp.ok) throw new Error(await errorDetail(resp, 'POST /api/composer/validate'));
 	return (await resp.json()) as ValidationResult;
 }
 
@@ -663,7 +724,7 @@ export async function renderConfigYaml(
 	if (resp.status === 422) {
 		throw new ConfigInvalid(((await resp.json()) as { detail: ConfigError[] }).detail);
 	}
-	if (!resp.ok) throw new Error(`POST /api/composer/yaml: ${resp.status}`);
+	if (!resp.ok) throw new Error(await errorDetail(resp, 'POST /api/composer/yaml'));
 	return await resp.text();
 }
 
@@ -689,7 +750,7 @@ export async function getExecutionStatus(
 	fetchImpl: typeof fetch = fetch
 ): Promise<ExecutionStatus> {
 	const resp = await fetchImpl('/api/execute/status');
-	if (!resp.ok) throw new Error(`GET /api/execute/status: ${resp.status}`);
+	if (!resp.ok) throw new Error(await errorDetail(resp, 'GET /api/execute/status'));
 	return (await resp.json()) as ExecutionStatus;
 }
 
