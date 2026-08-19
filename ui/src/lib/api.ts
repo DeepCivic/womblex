@@ -845,3 +845,49 @@ export async function enqueueExtraction(
 	}
 	return (await resp.json()) as EnqueueResult;
 }
+
+// The "run downstream stages" press. `config` is the composer's current form
+// state, because it is what decides which stages a run wants — the queue still
+// carries no config (rows name only the stage; workers read their own
+// `--config` at launch), exactly as `womblex enqueue-stages --config` behaves.
+// `run_id` is required: stages run over shards that already exist.
+export interface StageDispatchRequest {
+	run_id: string;
+	config: ConfigObject;
+	max_attempts?: number;
+}
+
+// `StageDispatchResult.as_dict()`. `stages` is what the config enabled, in
+// pipeline order — reported back because the list is derived rather than typed,
+// so a press that dispatched nothing (or more than expected) is visible.
+// `newly_enqueued` reads 0 on a repeat press: `enqueue_stages` is idempotent
+// per `(run_id, stage)`.
+export interface StageDispatchResult {
+	run_id: string;
+	stages: string[];
+	newly_enqueued: number;
+	shard_prefix: string;
+}
+
+export async function dispatchDownstreamStages(
+	req: StageDispatchRequest,
+	fetchImpl: typeof fetch = fetch
+): Promise<StageDispatchResult> {
+	const resp = await fetchImpl('/api/execute/stages', {
+		...JSON_POST,
+		body: JSON.stringify(req)
+	});
+	if (!resp.ok) {
+		// 400 carries Pydantic's error list rather than a string when the posted
+		// config would not load; stringify so the screen always has a message.
+		const detail = ((await resp.json().catch(() => ({}))) as { detail?: unknown }).detail;
+		const message =
+			typeof detail === 'string'
+				? detail
+				: detail
+					? JSON.stringify(detail)
+					: `POST /api/execute/stages: ${resp.status}`;
+		throw new EnqueueRefused(resp.status, message);
+	}
+	return (await resp.json()) as StageDispatchResult;
+}

@@ -36,6 +36,7 @@
 	import StageGraph from '$lib/components/StageGraph.svelte';
 	import SchemaForm, { defaultsFor } from '$lib/components/SchemaForm.svelte';
 	import StatusPill from '$lib/components/StatusPill.svelte';
+	import StageDispatch from '$lib/components/StageDispatch.svelte';
 
 	// `$state<T | null>` rather than an annotation on the `let`: TypeScript
 	// narrows the latter to `null` from its initialiser, which makes every
@@ -91,6 +92,21 @@
 	let enqueuing = $state(false);
 	let enqueueError = $state<string | null>(null);
 	let enqueueResult = $state<EnqueueResult | null>(null);
+
+	// The run the stage-dispatch card below acts on. Owned here, not in the
+	// component, because the enqueue above points it at the run it just planned —
+	// the two presses are one operator sequence over one run.
+	let stageRunId = $state(runSelection.selectedRunId ?? '');
+
+	// A capability change since load surfaces as 403/409 on either press; refresh
+	// status so the controls disable and the blocker banner explains, matching
+	// what the server saw. Shared with the stage-dispatch card.
+	function refreshExecStatus(): void {
+		getExecutionStatus()
+			.then((body) => (execStatus = body))
+			.catch(() => {});
+	}
+
 
 	function message(err: unknown): string {
 		return err instanceof Error ? err.message : String(err);
@@ -266,20 +282,17 @@
 			runSelection.select(res.run_id);
 			await runSelection.load();
 			runSelection.select(res.run_id);
+			// …and at the stage dispatch below, which is the next press on this
+			// same run once the Dashboard shows its batches drained.
+			stageRunId = res.run_id;
 		} catch (err) {
-			// A capability change since load surfaces as 403/409; refresh status so
-			// the control disables and the blocker banner explains, matching what the
-			// server saw.
-			if (err instanceof EnqueueRefused && err.status !== 400) {
-				getExecutionStatus()
-					.then((body) => (execStatus = body))
-					.catch(() => {});
-			}
+			if (err instanceof EnqueueRefused && err.status !== 400) refreshExecStatus();
 			enqueueError = message(err);
 		} finally {
 			enqueuing = false;
 		}
 	}
+
 
 	// Any edit invalidates the last verdict: a stale green pill over a config
 	// that has since changed is worse than no pill.
@@ -678,5 +691,18 @@
 				</p>
 			{/if}
 		</section>
+
+		<!-- The second press: this run's downstream stages, in its own component so
+			 this page stays under the file cap. Which stages run is derived
+			 server-side from the config above, through the same gate
+			 `womblex enqueue-stages` applies. -->
+		<StageDispatch
+			{config}
+			{blocker}
+			maxAttempts={maxAttempts}
+			canExecute={execStatus?.can_execute ?? false}
+			bind:runId={stageRunId}
+			onRefused={refreshExecStatus}
+		/>
 	{/if}
 </div>
