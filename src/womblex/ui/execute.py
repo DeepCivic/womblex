@@ -5,17 +5,19 @@ one — and the plan pins exactly how far that goes:
 
 - **Dispatch is always the queue** (§4 "Running the pipeline from the
   screen"). The console never shells out and never runs a batch in-process:
-  it enqueues, and the workers a platform brings up do the work. The one
-  write action here — enqueue an extraction run — is a thin wrapper over
-  :mod:`womblex.cli.cloud`'s own building blocks (``JobQueue.enqueue`` + the
-  same key-listing / batching ``cmd_enqueue`` does), reached through the
-  store the sidecar already reads. No web request can become an arbitrary
-  command because there is no command, only a queue row.
+  it enqueues, and the workers a platform brings up do the work. Both write
+  actions here are thin wrappers over :mod:`womblex.cli.cloud`'s own building
+  blocks — enqueue an extraction run (``JobQueue.enqueue`` + the same
+  key-listing / batching ``cmd_enqueue`` does), and dispatch that run's
+  downstream stages (``JobQueue.enqueue_stages`` + the same
+  ``enabled_downstream_stages`` gate ``cmd_enqueue_stages`` applies) — reached
+  through the store the sidecar already reads. No web request can become an
+  arbitrary command because there is no command, only a queue row.
 
-  Dispatching the *downstream* stages (``run-stage``) is not wired up: the
-  queue carries extraction batches only, so a console-composed pipeline
-  currently runs its extraction and stops. Until that lands, the stages are
-  the CLI sequence in README §"the full pipeline".
+  The console is therefore a skin over the CLI sequence in README §"the full
+  pipeline", not a second orchestration concept: it supplies the ordering
+  ``run-stage`` says is the caller's, from the one declaration in
+  :mod:`womblex.pipeline_order`.
 
 - **Queue-only, so a store *and* a DSN are required.** A queue-less local
   console would need its own background runner and progress reporting, which
@@ -124,13 +126,18 @@ def execution_status(settings: UISettings) -> ExecutionCapability:
     )
 
 
-def _guard(settings: UISettings) -> ExecutionCapability:
+def _guard(settings: UISettings, *, needs_ingest: bool = True) -> ExecutionCapability:
     """Refuse any write action the console is not configured to perform.
 
     Ordered so the operator sees the most actionable failure first: an
     audit-only deployment is a deliberate choice (403); a missing store,
     ingest location or queue is a wiring gap (409), checked in that order.
     Every write path calls this before touching either.
+
+    *needs_ingest* is false for dispatching the downstream stages: they read
+    the shards extraction already published to the store and never look at the
+    ingest location, so a deployment whose ingest has since been unset can
+    still finish a run it started.
     """
     cap = execution_status(settings)
     if cap.audit_only:
@@ -144,7 +151,7 @@ def _guard(settings: UISettings) -> ExecutionCapability:
             "Execution dispatches through a shared object store; this console reads a "
             "local output_root. Point it at a --store to enqueue work.",
         )
-    if not cap.has_ingest:
+    if needs_ingest and not cap.has_ingest:
         raise ExecutionDisabled(
             "no_ingest",
             "Execution enqueues documents from a configured ingest location; none is "
@@ -284,3 +291,106 @@ def ingest_preflight(settings: UISettings) -> dict:
         "uri": uri, "kind": kind, "reachable": True,
         "document_count": len(keys), "sample": keys[:5], "error": None,
     }
+
+
+@dataclass(frozen=True)
+class StageDispatchResult:
+    """The outcome of dispatching a run's downstream stages.
+
+    ``stages`` is what the composed config asked for, in `PIPELINE_ORDER` —
+    reported back because the list is *derived*, not typed by the operator, and
+    a press that quietly dispatched nothing (or dispatched embed when they
+    thought embedding was off) should be visible on the screen that pressed it.
+
+    ``newly_enqueued`` separates a first press from a repeat the same way
+    :class:`EnqueueResult` does: :meth:`JobQueue.enqueue_stages` is idempotent
+    per ``(run_id, stage)``, so pressing twice re-dispatches nothing and this
+    reads 0.
+    """
+
+    run_id: str
+    stages: tuple[str, ...]
+    newly_enqueued: int
+    shard_prefix: str
+
+    def as_dict(self) -> dict:
+        return {
+            "run_id": self.run_id,
+            "stages": list(self.stages),
+            "newly_enqueued": self.newly_enqueued,
+            "shard_prefix": self.shard_prefix,
+        }
+
+
+def enqueue_downstream_stages(
+    settings: UISettings,
+    *,
+    run_id: str,
+    config: dict,
+    max_attempts: int = 3,
+) -> StageDispatchResult:
+    """Dispatch *run_id*'s downstream stages — the console's second write action.
+
+    Exactly what ``womblex enqueue-stages --run-id … --config …`` does, reached
+    from the screen that composed the config: the stages *config* enables
+    (:func:`~womblex.pipeline_order.enabled_downstream_stages`), written as
+    queue rows for the workers to claim. The console still only writes rows —
+    execution stays on the fleet, with its retry and crash recovery, and no
+    request here can become a command because there is no command.
+
+    Deliberately a separate press from :func:`enqueue_extraction`, per the same
+    reasoning the CLI split them: a worker will not start a stage until the
+    run's batches settle, but a *bad* extraction should not spend Isaacus
+    budget on enrich and embed either. The operator enqueues, watches it drain,
+    looks at it, then presses this.
+
+    ``pii`` and ``quality`` are never dispatched — that bound lives in
+    ``DOWNSTREAM_STAGES``, not here, so the console cannot widen it. Both stay
+    reachable through ``womblex run-stage``.
+
+    Raises :class:`ExecutionDisabled` when the console cannot dispatch (→
+    403/409), ``pydantic.ValidationError`` on a config that would not load (→
+    400) and ``ValueError`` on an unsafe run id or a config that enables no
+    stage at all (→ 400).
+    """
+    _guard(settings, needs_ingest=False)
+    if not is_safe_run_id(run_id):
+        raise ValueError(f"unsafe run_id: {run_id!r}")
+
+    from womblex.cloud.queue import JobQueue
+    from womblex.config import WomblexConfig
+    from womblex.pipeline_order import enabled_downstream_stages
+    from womblex.ui.composer import deployment_paths
+
+    # Built through the same `WomblexConfig(**{**raw, "paths": …})` construction
+    # the composer validates and renders YAML with, so the stage list dispatched
+    # is the one the config *as the CLI would load it* asks for — defaults and
+    # coercions applied, not whatever the browser happened to send.
+    #
+    # `dataset` is filled in only when absent, the way `cli.cloud._runner_config`
+    # does: `WomblexConfig` requires it but no stage gate reads it (stages run
+    # over a shard prefix, not a dataset), so a config posted without one is a
+    # dispatchable config, not an invalid one.
+    paths, _ = deployment_paths(settings)
+    raw = {"dataset": {"name": "console"}, **config, "paths": paths}
+    stages = enabled_downstream_stages(WomblexConfig(**raw))
+    if not stages:
+        raise ValueError(
+            "This config enables no downstream stages — nothing to dispatch. Turn on "
+            "a stage (chunking, enrichment, embedding, money, linking) and press again."
+        )
+
+    shard_prefix = f"runs/{run_id}/documents"
+    with JobQueue(cast(str, settings.db_dsn)) as queue:
+        queue.ensure_schema()
+        newly = queue.enqueue_stages(
+            run_id, list(stages), shard_prefix, max_attempts=max_attempts,
+        )
+
+    logger.info(
+        "console stage dispatch: run_id=%s, stages %s, %d newly enqueued",
+        run_id, " -> ".join(stages), newly,
+    )
+    return StageDispatchResult(
+        run_id=run_id, stages=stages, newly_enqueued=newly, shard_prefix=shard_prefix,
+    )

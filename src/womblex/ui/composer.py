@@ -199,9 +199,15 @@ def get_config_schema() -> dict[str, Any]:
 _PATHS_PLACEHOLDER = "."
 
 
-def _deployment_paths(settings: UISettings) -> tuple[dict[str, str], list[str]]:
+def deployment_paths(settings: UISettings) -> tuple[dict[str, str], list[str]]:
     """This deployment's `paths` section, plus env vars to note instead of a
-    mangled object-store URI. A local folder is written verbatim."""
+    mangled object-store URI. A local folder is written verbatim.
+
+    Public because `ui.execute` builds the same `WomblexConfig` from the same
+    posted form state when it dispatches downstream stages — the stage list it
+    derives has to come from the config *as the CLI would load it*, which means
+    the same paths injection.
+    """
     env_vars: list[str] = []
 
     if settings.ingest_uri and is_remote_uri(settings.ingest_uri):
@@ -242,7 +248,7 @@ def validate_config(raw: dict[str, Any], settings: UISettings) -> dict[str, Any]
     not a verdict on the config.
     """
     unknown = unknown_keys(raw)
-    paths, _ = _deployment_paths(settings)
+    paths, _ = deployment_paths(settings)
     try:
         WomblexConfig(**{**raw, "paths": paths})
     except ValidationError as e:
@@ -274,7 +280,7 @@ def render_yaml(raw: dict[str, Any], settings: UISettings) -> str:
     translates that to a 422 with the same error shape `validate_config`
     returns.
     """
-    paths, env_vars = _deployment_paths(settings)
+    paths, env_vars = deployment_paths(settings)
     config = WomblexConfig(**{**raw, "paths": paths})
     body = str(yaml.safe_dump(config.model_dump(mode="json"), sort_keys=False))
     unknown = unknown_keys(raw)
