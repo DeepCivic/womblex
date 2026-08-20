@@ -28,7 +28,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 
 ## 1. Local Deployment Optimisation
 
-**As** a data analyst working on a laptop,
+**As** a user,
 **I want** to run the full pipeline locally without any cloud account, API key, or network access,
 **so that** I can process documents immediately and at low cost.
 
@@ -46,7 +46,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 
 ## 2. Scale-Out and Environment-Agnostic Execution
 
-**As** a platform engineer handling large volumes,
+**As** a user,
 **I want** to scale the pipeline to a cluster and move stages between local and cloud environments,
 **so that** I gain throughput without rewriting jobs or re-extracting documents.
 
@@ -70,7 +70,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 
 ## 3. Ingest-First Data Flow and Operation Composition
 
-**As** a pipeline architect,
+**As** a user,
 **I want** a clear two-phase execution model (ingest first, then optional composed operations),
 **so that** workflows are predictable and invalid stage configurations fail early.
 
@@ -82,15 +82,19 @@ the adjacent concerns and should be consulted rather than duplicated here:
 
 - Ingest is format-dependent and strictly precedes any transform operation.
 - Operations are independent functions that callers compose directly based on business need.
-- Stage ordering is a **partial order** (a dependency DAG), not a single fixed sequence: a stage is a valid next step whenever the sidecars it declares as required inputs are already present. Several orderings are therefore valid — e.g. after `enrich`, both `link` and `build_graph` are valid in either order; `chunk` → `enrich` is valid because `enrich` reads the extraction text, not the chunk output; independent sidecar ops (`money`, and `embed` once chunks exist) may be appended after any earlier stage that produced their required sidecars.
+- Stage ordering is a **partial order** (a dependency DAG), not a single fixed sequence: a stage is a valid next step whenever the sidecars it declares as required inputs are already present. Several orderings are therefore valid — e.g. after `enrich`, `link` (which needs only the enrichment entities) is immediately valid, while `graph-refresh` (the mention→chunk edge rebuild, `build_graph` in `configs/default-isaacus.yaml`) additionally requires that `chunk` has already run; `chunk` → `enrich` is valid because `enrich` reads the extraction text, not the chunk output; independent sidecar ops (`money`, and `embed` once chunks exist) may be appended after any earlier stage that produced their required sidecars.
 - Each operation enforces clear preconditions expressed as required-input edges (e.g., `chunk`/`money` require the extraction sidecars; `embed`/`pii` require chunks; `link` requires enrichment entities). The single linear `PIPELINE_ORDER` is a **presentation and default-dispatch order only** — it is one valid topological sort of the DAG, not the sole valid execution order.
 - A config-disabled stage acts as a passthrough without raising an error.
-- Invalid compositions (a stage run before the sidecars it requires exist) raise immediate errors, naming the producing stage, before processing begins.
-- Register ingests (`ingest_gnaf` / `ingest_abn` / `ingest_geo`) and text-only extraction (`extract` → `.txt`) are terminal — they have no valid downstream text stages (see Requirement 7).
+- Invalid compositions (a stage run before the sidecars it requires exist) are surfaced with a message naming the producing stage. The surface differs by failure class: a *strict* conditional input that config selected but is absent (e.g. a `processing.text_source` overlay) and a failed pre-flight both refuse **before any base is processed** (`InputContractError` / `StagePreconditionError`). A missing *required* input is handled **per base** by the runner as a `NotReady` state — logged with the producing stage and skipped — and only escalates to a non-zero exit when *every* discovered base is blocked (the still-draining-fleet case is otherwise a warning, not a failure).
+- Register ingests (`ingest_gnaf_directory` / `ingest_abn_xml` / `ingest_abn_directory` / the geo ingest) and text-only extraction (`extract` → `.txt`) are terminal — they have no valid downstream text stages (see Requirement 7).
+
+**TO-DO:**
+
+- **A missing required input is not a fail-fast, before-processing error (re: "Invalid compositions … naming the producing stage").** `stage_runner.run_stage_remote` (`cloud/stage_runner.py`) resolves required inputs *per base* and raises `NotReady`, which is caught and logged as a warning; the run still exits `0` unless the count of not-ready bases equals the total discovered bases (`StageRunSummary.exit_code`). This is deliberate — a still-draining fleet must not read as a stage-ordering error — but it means a genuinely mis-ordered composition over a *partially* processed run neither raises immediately nor fails the run, and the operator only sees a per-base warning. Decide whether to (a) add an explicit up-front composition check (verify the whole DAG's required-input edges against what the store already holds before processing any base, distinguishing "upstream still draining" from "upstream will never run" via the dispatched-stage set), or (b) document the per-base `NotReady`/warning behaviour as the intended contract and soften the acceptance criterion accordingly.
 
 ## 4. File Profiling, Detection, and Routing
 
-**As** a records manager receiving mixed-format document releases,
+**As** a user,
 **I want** the system to profile each file and route it to the correct extractor,
 **so that** inappropriate extraction methods (like OCR on native spreadsheets) are avoided.
 
@@ -108,7 +112,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 
 ## 5. PDF and Image Extraction with OCR Quality Controls
 
-**As** a researcher building a searchable corpus,
+**As** a user,
 **I want** reliable text extraction from native, scanned, hybrid, and redacted visual documents,
 **so that** the corpus accurately reflects content despite poor scan quality.
 
@@ -125,7 +129,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 
 ## 6. Native Office and Spreadsheet Extraction
 
-**As** a data analyst,
+**As** a user,
 **I want** native office documents and spreadsheets extracted with their structure and cell granularity preserved,
 **so that** logical paragraphs, embedded tables, and tabular records are usable for semantic analysis.
 
@@ -148,7 +152,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 
 ## 7. Standalone Reference Register Ingestion
 
-**As** a geospatial and identity-data consumer,
+**As** a user,
 **I want** standalone ingestion for reference registers,
 **so that** structured relational and spatial data bypasses NLP stages and is immediately queryable.
 
@@ -162,11 +166,11 @@ the adjacent concerns and should be consulted rather than duplicated here:
 - Large XML streams are parsed in constant memory to prevent out-of-memory errors on bulk extracts.
 - Spatial files preserve their original geometry, attributes, and coordinate reference systems.
 - File-level malformations isolate failures, logging the error and discarding partial output without halting the directory ingest.
-- Register ingestion explicitly bypasses the extraction/NLP pipeline and cannot be passed to text-based downstream operations.
+- Register ingestion explicitly bypasses the extraction/NLP pipeline. The bypass is **structural, not enforced**: register ingests write self-contained (Geo)Parquet with their own schemas and no `source_hash`/element layout, so the text-based downstream stages — which discover work by globbing the extraction sidecars (`*.elements.parquet` / `*.chunks.parquet`) — never see register output. Nothing actively rejects an operator who points a downstream stage at a register directory; it is incompatible by construction rather than blocked by a guard.
 
 ## 8. Output Data Contract & Persistence Integrity
 
-**As** a downstream data engineer,
+**As** a user,
 **I want** a consistent, immutable output contract with a universal join key and automated integrity checks,
 **so that** disparate outputs from any stage can be joined predictably and trusted.
 
@@ -190,25 +194,30 @@ the adjacent concerns and should be consulted rather than duplicated here:
 
 ## 9. Redaction Handling
 
-**As** a records officer preparing documents for release,
+**As** a user,
 **I want** redacted regions detected visually and handled according to a configurable policy,
 **so that** sensitive visual blocks are managed consistently.
 
 **Given** an extracted PDF document
 **When** the operator runs the redaction stage
-**Then** redactions are detected per page, applied based on the chosen mode, and written as an overlay sidecar.
+**Then** redactions are detected per page, applied based on the chosen mode, and (via the standalone shard CLI) written as an independent sidecar.
 
 **Acceptance criteria:**
 
-- Pages are rendered visually to detect solid redaction regions.
-- Multiple modes are supported: flag (annotation), blackout (prepended warning), and delete (text removal from output overlay).
-- A redaction report is attached to the extraction result with warning strings appropriately annotated.
-- Detected redactions are written as an independent Parquet sidecar.
-- Redaction timing is highly configurable (e.g., executing before or after chunking).
+- Pages are rendered visually to detect solid redaction regions (a vector `get_drawings()` fast path for native filled rectangles, falling back to CV2 contour detection on the rasterised page).
+- Multiple modes are supported: `flag` (annotation only, no text change), `blackout` (prepend a `<REDACTED>` marker to affected page text), and `delete` (clear affected page text). The `<REDACTED>` marker is a content marker, distinct from the human-readable warning strings described below.
+- A redaction report is attached to the extraction result, and per-page warning strings (e.g. `page N: K redacted region(s) detected`) are appended to the extraction's warnings.
+- Detected redactions are written as an independent Parquet sidecar (`*.redactions.parquet`) **only on the standalone `womblex redact --shards --pdfs` path** (`redact/batch.py`). The in-process E2E `run` path (`batch.py` → `run_redaction`) does **not** emit a redactions sidecar — it annotates the in-memory extraction result (element `meta['has_redaction']`, warning strings, and `has_redaction` folded onto chunks downstream) and, for `blackout`/`delete`, mutates page text in place.
+- Redaction runs at a single fixed point in the pipeline (extraction → redaction detection, per `batch.py`); there is **no** timing/pipeline-point configuration for it. `RedactionConfig` exposes only `enabled`, `mode`, `threshold`, `min_area_ratio`, `max_area_ratio`, `dpi`, and `use_layout_filter`.
+
+**TO-DO:**
+
+- **Redaction has no configurable pipeline point, contrary to earlier documentation.** `RedactionConfig` (`config.py`) carries no `pipeline_point`/timing field, and `batch.py` runs redaction detection at one fixed position (immediately after extraction, before any downstream stage). The claim that redaction runs "at configurable pipeline points (post_chunk, post_enrichment)" in `CLAUDE.md` and older docs appears to be conflated with `PIIConfig.pipeline_point` — that configurability exists for the **PII** stage, not redaction. Decide whether to (a) add a genuine `RedactionConfig.pipeline_point` (post_extraction / post_chunk / post_enrichment) mirroring the PII stage if before/after-chunking placement is actually wanted, or (b) treat the fixed post-extraction position as the intended contract and correct the stale `CLAUDE.md` wording accordingly.
+- **The independent redactions sidecar is only written on the standalone shard CLI, not the E2E `run` path.** `redact/batch.py::annotate_redactions_for_shards` writes `*.redactions.parquet`, but `operations/redact.py::run_redaction` (the path `batch.py` invokes during `womblex run`) persists nothing standalone — redaction survives only as in-memory annotations on the extraction result. Decide whether to (a) have the E2E path also emit `*.redactions.parquet` so the "independent sidecar" contract holds uniformly, or (b) document the two paths' divergence (E2E = in-line annotation; shard CLI = independent sidecar) as intended and keep the acceptance criterion qualified as above.
 
 ## 10. Chunking and AI Chunking Reuse
 
-**As** a search and retrieval builder,
+**As** a user,
 **I want** extracted text split into semantically meaningful, token-bounded chunks,
 **so that** downstream semantic analysis fits within model context limits.
 
@@ -226,7 +235,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 
 ## 11. PII Detection and Masking
 
-**As** a privacy and compliance officer,
+**As** a user,
 **I want** PII detected, masked, and retained reversibly for authorized audits,
 **so that** sensitive data is protected for publication without destroying internal provenance.
 
@@ -239,11 +248,11 @@ the adjacent concerns and should be consulted rather than duplicated here:
 - Candidates for entities like persons and addresses are generated contextually and validated via embedding similarities.
 - If run post-enrichment, external entity spans are merged into the PII candidates.
 - Identified PII spans in the clean-text layer are replaced with normalized typed tags (e.g., `<PERSON_1>`).
-- Reversible spans are written to an independent, Parquet sidecar containing the original text.
+- The spans are written to an independent Parquet sidecar (`*.pii_spans.parquet`) that retains each span's original text plus its chunk offsets and graph `entity_id` — the audit record from which an authorised reversal can be reconstructed against the clean-text layer. The sidecar is a reversal-enabling audit layer; no automatic un-masking operation is implemented.
 
 ## 12. Knowledge Graph and External Enrichment
 
-**As** a knowledge-graph analyst,
+**As** a user,
 **I want** entities and relationships extracted via external APIs and synchronized into a unified document graph,
 **so that** structured mentions accurately map back to their source chunks regardless of run order.
 
@@ -260,7 +269,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 
 ## 13. Money Annotation
 
-**As** a financial-data analyst,
+**As** a user,
 **I want** monetary amounts identified in narrative text and tabular cells,
 **so that** values can be queried and joined to specific document contexts downstream.
 
@@ -272,7 +281,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 
 - The annotation scans baseline element and table-cell streams (chunking is not a precondition).
 - Narrative spans index the same coordinate space as enrichment mentions, allowing seamless joins at query time.
-- Output is order-independent within a run: the money sidecars are byte-identical whether the stage runs before or after the knowledge-graph stages (money never touches the wall-clock manifest, so the cross-run caveat in Requirement 8 does not apply to it).
+- Output is order-independent within a run: the money sidecars carry identical rows (same `source_hash`, same logical order) whether the stage runs before or after the knowledge-graph stages, because money reads only the extraction sidecars and never stamps the wall-clock `extracted_at_iso`. The timestamp half of the Requirement 8 cross-run caveat therefore does not apply to it; the Parquet-writer-metadata half (`created_by`, encoding) is shared with every sidecar.
 - Cell annotations carry their sheet, parent element order, row, and column coordinates. They do **not** carry a merged-cell extent or a header-row coordinate — an amount inside a merged region cannot be tied back to the merge span, and the column's evidencing header is recorded only as joined text on the `money_columns` sidecar.
 
 **TO-DO:**
@@ -281,7 +290,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 
 ## 14. Batch Processing, Resiliency, and Operational Controls
 
-**As** an operator,
+**As** a user,
 **I want** reliable batching, checkpointing, and discrete execution controls (CLI/UI),
 **so that** I can manage large runs, recover from failures, and inspect outputs easily.
 
@@ -316,7 +325,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 
 ## 16. Dashboard — Queue and Stage Progress
 
-**As** an operator watching a run drain,
+**As** a user,
 **I want** a run-scoped dashboard of queue state and per-stage progress,
 **so that** I can monitor throughput and spot stalled jobs without touching the queue.
 
@@ -351,6 +360,10 @@ the adjacent concerns and should be consulted rather than duplicated here:
 - A verify-shards action runs the persistence audit, confirming required shard files exist, are readable, and match expected document counts.
 - The grid supports a failed-only filter and a user-selectable density (comfortable / default / compact) persisted locally.
 
+**TO-DO:**
+
+- **Row virtualisation and the announced total row count are not implemented (re: "row virtualisation, and an announced total row count").** `DocumentGrid.svelte` renders a real `<table>` with a `<caption>`, `<th scope="col">` header, and a sticky header, but puts *every* row in the DOM rather than virtualising a window over them — an explicit code comment records that `aria-rowcount`/`aria-rowindex` are omitted because "every row is in the DOM here, so the browser's own count is correct … They become necessary when virtualisation lands." As built, the grid will not stay dense over thousands of rows (the story's own motivation), and there is no `aria-rowcount` announcing a total beyond the rendered window. Decide whether to (a) add windowed row virtualisation and the `aria-rowcount`/`aria-rowindex` announcement it requires, or (b) drop "virtualised" from the story and "row virtualisation, and an announced total row count" from this criterion until it is implemented. Resolve alongside the matching Requirement 21 TO-DO, which restates the same gap as an accessibility rule.
+
 ## 18. Semantic Chunk Inspector — Chunk, Entity, PII, and Money Overlays
 
 **As** a user,
@@ -371,7 +384,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 
 ## 19. Pipeline Composer — Configuration, Validation, and Dispatch
 
-**As** a pipeline architect,
+**As** a user,
 **I want** to compose and validate a pipeline configuration visually and dispatch a run from it,
 **so that** I can author correct configs and enqueue work without hand-editing YAML or re-implementing guardrails.
 
@@ -389,7 +402,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 
 ## 20. Resources Console — Connections and Reporting
 
-**As** an operator configuring a deployment,
+**As** a user,
 **I want** connection cards for the store, ingest, queue, and enrichment service with reachability tests and a credential-safe reporting action,
 **so that** I can confirm the environment is wired correctly and flag bad records without exposing secrets.
 
@@ -407,7 +420,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 
 ## 21. Console Design System and Accessibility
 
-**As** an auditor working long sessions in varied environments,
+**As** a user,
 **I want** the console to default to a dense, dark, state-legible design that runs with no network access and meets accessibility standards,
 **so that** I can read large grids and chunk text reliably in both themes and at every density.
 
@@ -422,6 +435,10 @@ the adjacent concerns and should be consulted rather than duplicated here:
 - Fonts and icons are self-hosted in the UI bundle with no runtime network requests, consistent with the pipeline's local-first model.
 - Grids are real tables with `<th scope>` and `<caption>`, and virtualised rows announce total counts to assistive technology.
 - The keyboard reaches everything the mouse does (grid arrow-key navigation, `/` to focus search, `Esc` to close drawers) with a visible focus indicator, and interactive controls keep a ≥ 44×44px hit area even at 32px density.
+
+**TO-DO:**
+
+- **Virtualised rows do not announce total counts (re: "virtualised rows announce total counts to assistive technology").** The `<table>`/`<th scope>`/`<caption>` half of this criterion holds (`DocumentGrid.svelte`), but the grid is not virtualised and emits no `aria-rowcount`, so there is no announced total beyond the rendered rows. This is the same gap as the Requirement 17 TO-DO, stated here as its accessibility consequence: until windowed virtualisation lands with `aria-rowcount`/`aria-rowindex`, assistive technology hears only the DOM row count. Resolve together — either implement virtualisation with the row-count announcement, or drop the "virtualised rows announce total counts" clause from both requirements.
 
 ---
 

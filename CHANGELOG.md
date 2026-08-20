@@ -8,6 +8,9 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 ## [Unreleased]
 
+### Changed
+- **`DEFAULT-Isaacus` preset and `configs/default-isaacus.yaml`: fuller reference shape.** The reference pipeline is now `extract → normalise → spellfix → enrich → chunk → build_graph → embed → money → link → done`. Three additions: **text cleaning runs first** — `processing.text_source: spellfix` selects the OCR-repaired layer (chaining on the normalised layer) as the single string both enrich and AI chunking reassemble from, which also puts `normalise` and `spellfix` into `enabled_downstream_stages` **before** `enrich` in `PIPELINE_ORDER` (`normalise` has no `enabled` flag — it is gated by a consumer selecting its layer); **`spellfix.enabled: true`** (Tier A digit→letter, en_AU); and **`linking.enabled: true`** for entity-register matching (the register is corpus-specific, so `linking.reference` stays the operator's to supply at run time — the config loads without it and the stage warns/no-ops until set). **AI chunking is unchanged** (`chunking.chunking_model: kanon-2-enricher`, already on) and still auto-wires `enrichment.persist_document` so chunk reuses the enrich Document. Preset overlay (`src/womblex/ui/presets.py`) and the config file are edited together and pinned by `test_config_file_and_ui_preset_agree` (now covering `spellfix`/`linking`/`text_source`). The vendored demo run is a subset of this shape, so its `{extract, chunk, enrich, embed, money}` assertion still holds; README's per-stage command sequence updated to 10 steps.
+
 ## [0.5.10] - 2026-08-19
 Minor, additive. Headline fix: extraction now does only extraction —
 `process_batch` no longer runs chunk/PII in-batch, where the output was
