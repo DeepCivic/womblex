@@ -420,7 +420,7 @@ def prepare_stage_context(contract: StageContract, config: WomblexConfig) -> Run
         except Exception as e:
             raise StagePreconditionError(f"{contract.name} preflight failed: {e}") from e
 
-    if contract.needs_isaacus_api:
+    if contract.requires_isaacus_api(config):
         from womblex.utils.availability import isaacus_available
 
         if not isaacus_available():

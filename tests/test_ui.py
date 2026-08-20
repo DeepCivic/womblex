@@ -291,8 +291,7 @@ def _write_log(run_root: Path, run_id: str, name: str, body: str) -> None:
 
 
 class TestRunLogsApi:
-    """Batch logs readable and downloadable from the console
-    (docs/ui-ingest-plan.md merge 5)."""
+    """Batch logs readable and downloadable from the console."""
 
     def test_lists_logs_newest_first(self, api_client: tuple[TestClient, Path]) -> None:
         client, run_root = api_client
@@ -1002,14 +1001,16 @@ class TestComposerApi:
         preset = next(p for p in body["presets"] if p["name"] == "DEFAULT-Isaacus")
         assert preset["formats"] == [".pdf", ".docx"]
 
-    def test_default_isaacus_enables_the_extract_chunk_enrich_graph_embed_money_shape(
+    def test_default_isaacus_enables_the_full_reference_shape(
         self, client: TestClient
     ) -> None:
-        """The preset is the reference extract → chunk → enrich → build_graph →
-        embed → money pipeline: chunking, enrichment, embedding and money all on,
-        graph produced by enrich + the offline graph-refresh edge rebuild. Embed
-        is part of the shape (the demo run carries it); a preset that omitted it
-        disagreed with the sample corpus, which is the bug this pins."""
+        """The preset is the reference extract → normalise → spellfix → enrich →
+        chunk → build_graph → embed → money → link pipeline: text cleaning (via
+        processing.text_source=spellfix, which also gates normalise), AI chunking,
+        enrichment, embedding, money and linking all on; graph produced by enrich
+        + the offline graph-refresh edge rebuild. Embed is part of the shape (the
+        demo run carries it); a preset that omitted it disagreed with the sample
+        corpus, which is the bug this pins."""
         preset = client.get("/api/composer/presets/DEFAULT-Isaacus").json()
         cfg = preset["config"]
         assert cfg["chunking"]["enabled"] is True
@@ -1017,6 +1018,11 @@ class TestComposerApi:
         assert cfg["enrichment"]["enabled"] is True
         assert cfg["embedding"]["enabled"] is True
         assert cfg["money"]["enabled"] is True
+        assert cfg["linking"]["enabled"] is True
+        assert cfg["spellfix"]["enabled"] is True
+        # Text cleaning is selected once; this is also what gates normalise +
+        # spellfix into the downstream-stage dispatch and puts them before enrich.
+        assert cfg["processing"]["text_source"] == "spellfix"
         # No dataset/paths: the operator supplies the run's identity and paths.
         assert "dataset" not in cfg
         assert "paths" not in cfg
@@ -1045,11 +1051,15 @@ class TestComposerApi:
         cfg_path = REPO_ROOT / "configs" / "default-isaacus.yaml"
         assert cfg_path.is_file(), "configs/default-isaacus.yaml is the CLI source of truth"
         cfg = load_config(cfg_path)
-        # The five stages the shape names are on.
+        # The stages the shape names are on.
         assert cfg.chunking.enabled and cfg.chunking.chunking_model == "kanon-2-enricher"
         assert cfg.enrichment.enabled
         assert cfg.embedding.enabled
         assert cfg.money.enabled
+        assert cfg.linking.enabled
+        assert cfg.spellfix.enabled
+        # Text cleaning runs before enrich/chunk: the overlay both reassemble from.
+        assert cfg.processing.text_source == "spellfix"
         # AI chunking + enrich both on => reuse auto-wired, so no double enrich.
         assert cfg.enrichment.persist_document is True
 
@@ -1068,7 +1078,11 @@ class TestComposerApi:
         assert overlay["embedding"]["enabled"] == cfg.embedding.enabled
         assert overlay["money"]["enabled"] == cfg.money.enabled
         assert overlay["money"]["default_currency"] == cfg.money.default_currency
-        assert overlay["enrichment"]["enabled"] == cfg.enrichment.enabled
+        assert overlay["spellfix"]["enabled"] == cfg.spellfix.enabled
+        assert overlay["linking"]["enabled"] == cfg.linking.enabled
+        # The text-cleaning selector (which also gates normalise + spellfix into
+        # the downstream dispatch, before enrich) agrees.
+        assert overlay["processing"]["text_source"] == cfg.processing.text_source
 
     def test_validate_accepts_a_minimal_config(self, client: TestClient) -> None:
         resp = client.post("/api/composer/validate", json=_MINIMAL_CONFIG)
@@ -1347,15 +1361,15 @@ def _seed_store_inputs(store_root: Path, prefix: str, names: list[str]) -> None:
 
 
 class TestExecuteApi:
-    """Dispatch requires a store, an ingest location, and a DSN; `--audit-only`
-    is the opt-out switch (docs/ui-plan.md merge 11, docs/ui-ingest-plan.md §2)."""
+    """Dispatch requires a store, an ingest location, and a DSN
+    (docs/ui-plan.md merge 11)."""
 
-    def test_status_reflects_the_four_flags(self, tmp_path: Path) -> None:
+    def test_status_reflects_the_flags(self, tmp_path: Path) -> None:
         client = TestClient(create_app(output_root=tmp_path))
         body = client.get("/api/execute/status").json()
         assert body["can_execute"] is False
         assert body == {
-            "can_execute": False, "audit_only": False,
+            "can_execute": False,
             "has_store": False, "has_ingest": False, "has_queue": False,
             "ingest_uri": None, "output_uri": str(tmp_path),
         }
@@ -1379,15 +1393,6 @@ class TestExecuteApi:
         assert body["can_execute"] is True
         assert body["ingest_uri"] == str(tmp_path / "inbox")
         assert body["output_uri"] == str(tmp_path / "store")
-
-    def test_enqueue_forbidden_when_audit_only(self, tmp_path: Path) -> None:
-        """--audit-only gives a pure auditing console (plan §6) — 403 before touching anything."""
-        client = TestClient(create_app(
-            store_uri=str(tmp_path / "store"), ingest_uri=str(tmp_path / "inbox"),
-            db_dsn="postgresql://x/y", audit_only=True,
-        ))
-        resp = client.post("/api/execute/enqueue", json={})
-        assert resp.status_code == 403
 
     def test_enqueue_conflict_without_a_store(self, tmp_path: Path) -> None:
         """A local output_root can configure and audit but not dispatch (plan §4)."""

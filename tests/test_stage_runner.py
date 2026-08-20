@@ -491,17 +491,57 @@ def test_checkpoint_directory_is_staged_in_and_out(extraction_run, tmp_path):
 
 
 def test_isaacus_stage_refuses_to_run_without_the_api(monkeypatch, extraction_run):
-    """`chunk_shards` would warn, write nothing and return cleanly — a silent no-op."""
-    store, store_root, prefix, _local = extraction_run
+    """An API-needing stage refuses rather than warning, writing nothing and
+    returning cleanly — a silent no-op a queue would record as done.
+
+    ``enrich`` always calls Kanon-2, so it is the unconditional case. (``chunk``
+    needs the API only under AI chunking; plain token chunking runs offline —
+    see ``test_plain_chunk_does_not_need_the_api``.)
+    """
+    _store, store_root, _prefix, _local = extraction_run
     monkeypatch.setattr("womblex.utils.availability.isaacus_available", lambda: False)
 
     rc = cmd_run_stage(argparse.Namespace(
-        stage="chunk", store=str(store_root), shards=None, run_id="rs",
+        stage="enrich", store=str(store_root), shards=None, run_id="rs",
         output_prefix=None, config=None, dsn=None, force=False,
         stage_checkpoints=False, dataset="runner",
     ))
     assert rc == 1
+
+
+def test_ai_chunk_refuses_without_the_api(monkeypatch, extraction_run, tmp_path):
+    """With ``chunking_model`` set, chunk calls the enricher API, so it refuses
+    when Isaacus is unavailable rather than publishing nothing."""
+    store, store_root, prefix, _local = extraction_run
+    monkeypatch.setattr("womblex.utils.availability.isaacus_available", lambda: False)
+    cfg_path = tmp_path / "ai_chunk.yaml"
+    cfg_path.write_text(
+        "dataset:\n  name: t\n"
+        "paths:\n  input_root: .\n  output_root: .\n  checkpoint_dir: .\n"
+        "chunking:\n  chunking_model: kanon-2-enricher\n"
+    )
+
+    rc = cmd_run_stage(argparse.Namespace(
+        stage="chunk", store=str(store_root), shards=None, run_id="rs",
+        output_prefix=None, config=cfg_path, dsn=None, force=False,
+        stage_checkpoints=False, dataset="runner",
+    ))
+    assert rc == 1
     assert not store.exists(f"{prefix}/batch-0001.chunks.parquet")
+
+
+def test_plain_chunk_does_not_need_the_api(monkeypatch, extraction_run):
+    """Plain token chunking (no ``chunking_model``) sizes chunks with the
+    vendored kanon-2 tokeniser and runs fully offline — a keyless local run must
+    still chunk. Its precondition must not refuse when Isaacus is unavailable.
+    """
+    from womblex.cloud.stage_contracts import STAGE_CONTRACTS
+    from womblex.cloud.stage_runner import prepare_stage_context
+
+    monkeypatch.setattr("womblex.utils.availability.isaacus_available", lambda: False)
+    # No chunking_model => offline; the API precondition must pass regardless.
+    ctx = prepare_stage_context(STAGE_CONTRACTS["chunk"], _config())
+    assert ctx is not None
 
 
 def test_link_preflight_rejects_a_missing_reference_register(extraction_run, tmp_path):

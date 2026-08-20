@@ -111,6 +111,19 @@ def _no_models(_config: WomblexConfig) -> tuple[str, ...]:
     return ()
 
 
+def _chunk_needs_api(config: WomblexConfig) -> bool:
+    """``chunk`` needs the Isaacus API only when AI chunking is enabled.
+
+    Plain token chunking sizes chunks with the vendored kanon-2 tokeniser and
+    runs fully offline, so a keyless local run must still chunk. AI chunking
+    (``chunking.chunking_model`` set) calls the enricher API per document at
+    chunk time, so it needs a deployment. The static ``needs_isaacus_api=True``
+    on the contract is the *display* answer (chunk can use the API); this is
+    the *runtime-gate* answer, resolved from config.
+    """
+    return bool(config.chunking.chunking_model)
+
+
 @dataclass
 class RunContext:
     """Runtime dependencies the runner constructs once, before any base."""
@@ -138,6 +151,18 @@ class StageContract:
     models: Callable[[WomblexConfig], tuple[str, ...]] = _no_models
     checkpoint_dirname: str | None = None
     preflight: Callable[[WomblexConfig], None] | None = None
+    # Config-aware override of the runtime Isaacus gate. When set, the runner's
+    # pre-flight consults this instead of the static ``needs_isaacus_api`` flag
+    # — the flag stays the coarse "this stage can call the API" answer used for
+    # display (the composer graph), while this resolves whether *this config*
+    # actually will (e.g. ``chunk`` calls the API only under AI chunking).
+    needs_isaacus_api_for: Callable[[WomblexConfig], bool] | None = None
+
+    def requires_isaacus_api(self, config: WomblexConfig) -> bool:
+        """Whether *config* makes this stage call the Isaacus API at runtime."""
+        if self.needs_isaacus_api_for is not None:
+            return self.needs_isaacus_api_for(config)
+        return self.needs_isaacus_api
 
     def input_suffixes(self, config: WomblexConfig) -> tuple[str, ...]:
         """Required + conditional inputs for *config*, de-duplicated, in order."""
@@ -381,9 +406,12 @@ STAGE_CONTRACTS: dict[str, StageContract] = {
         conditional_inputs=_chunk_conditional,
         outputs=lambda _c: (CHUNKS_SUFFIX,),
         run=_run_chunk,
-        # No client argument, but the Kanon-2 tokeniser is API-only and
-        # `chunk_shards` merely warns and writes nothing when it is missing.
+        # `needs_isaacus_api=True` is the display answer (chunk *can* call the
+        # enricher API, under AI chunking). The runtime gate is config-aware:
+        # plain token chunking uses the vendored tokeniser and runs offline, so
+        # only AI chunking (`chunking_model`) actually needs a deployment.
         needs_isaacus_api=True,
+        needs_isaacus_api_for=_chunk_needs_api,
         checkpoint_dirname=".chunk-checkpoint",
     ),
     "money": StageContract(

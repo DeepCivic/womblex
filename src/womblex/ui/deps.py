@@ -54,10 +54,10 @@ class UISettings:
     but ``POST /api/composer/presets`` refuses with 409.
 
     ``ingest_uri`` names where source documents arrive from, distinct from
-    ``store_uri``/``output_root`` (docs/ui-ingest-plan.md). ``None`` means the
-    Execution Controls cannot dispatch; everything read-only still serves.
-    When both are set they must be disjoint of the output store's effective
-    ``runs/`` prefix, enforced here at construction.
+    ``store_uri``/``output_root``. ``None`` means the Execution Controls
+    cannot dispatch; everything read-only still serves. When both are set they
+    must be disjoint of the output store's effective ``runs/`` prefix,
+    enforced here at construction.
 
     ``settings_dir`` holds an operator-saved location override — one
     ``locations.json``, mirroring ``presets_dir``. ``None`` keeps the
@@ -68,7 +68,6 @@ class UISettings:
 
     output_root: Path | None
     store_uri: str | None
-    audit_only: bool = False
     feedback_dir: Path | None = None
     db_dsn: str | None = None
     presets_dir: Path | None = None
@@ -132,7 +131,6 @@ def resolve_settings(
     output_root: Path | None,
     store_uri: str | None,
     *,
-    audit_only: bool = False,
     feedback_dir: Path | None = None,
     db_dsn: str | None = None,
     presets_dir: Path | None = None,
@@ -191,7 +189,7 @@ def resolve_settings(
     if settings is None and "WOMBLEX_UI_SETTINGS_DIR" in os.environ:
         settings = Path(os.environ["WOMBLEX_UI_SETTINGS_DIR"])
     base = UISettings(
-        output_root=root, store_uri=store, audit_only=audit_only,
+        output_root=root, store_uri=store,
         feedback_dir=fb_dir, db_dsn=dsn, presets_dir=presets, ingest_uri=ingest,
         settings_dir=settings,
     )

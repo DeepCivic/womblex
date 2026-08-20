@@ -70,22 +70,40 @@ to their own coordinates. See [money-extraction.md](money-extraction.md).
 ### Valid Compositions (examples, not exhaustive)
 
 ```
-extract(pdf) → done                                          just get text out
-extract(pdf) → .txt                                          single file text output
-extract(pdf) → chunk → done                                  text + chunks
-extract(pdf) → redact_tag → chunk → pii_clean → done
-extract(pdf) → enrich → build_graph → done                   enrichment of full doc; chunk-level mention map omitted
-extract(pdf) → chunk → enrich → build_graph → pii_clean(advanced) → done
-extract(pdf) → chunk → embed → done
-extract(csv) → .parquet                                      tabular to Parquet
-ingest_gnaf(dir) → done                                      PSV to Parquet, nothing else
-ingest_abn(dir) → done                                       ABN XML to Parquet, nothing else
-ingest_geo(dir) → done                                       SHP to GeoParquet, nothing else
-load_graph(parquet_dir) → pii_clean(chunks, graph) → done    re-run PII from saved graph
-extract(pdf) → enrich → chunk(chunking_model) → done         AI chunking reuses enrich's Document
-extract(pdf) → money → done                                  annotate amounts, no rewrite
-extract(xlsx) → .parquet → money → done                      column-evidenced amounts from a register
-extract(pdf) → chunk → enrich → build_graph → money → done  graph + money over the one run
+Replace the `Valid Compositions` section with this:
+
+### Stage → Valid Next Stages
+
+For each stage, the listed stages are the only data-dependent stages that can immediately follow it in a valid composition. `done` is terminal.
+
+| Stage | Valid immediate next stages |
+|-------|-----------------------------|
+| `extract` (in-memory `ExtractionResult`) | `redact` (PDF only), `chunk`, `pii_clean(extraction)`, `enrich`, `money`*, `done` |
+| `extract` → `.txt` | `done` |
+| `extract` → `.parquet` | `money`*, `done` |
+| `redact` | `chunk`, `pii_clean(extraction)`, `enrich`, `money`*, `done` |
+| `chunk` | `pii_clean(chunks)`, `embed`, `enrich`, `money`*, `done` |
+| `pii_clean(extraction)` | `chunk`, `enrich`, `done` |
+| `pii_clean(chunks)` | `embed`, `done` |
+| `enrich` | `build_graph`, `link`, `chunk(chunking_model)`, `money`*, `done` |
+| `link` | `build_graph` (if not already run), `money`*, `done` |
+| `build_graph` | `pii_clean(chunks, graph)` (requires chunks), `link` (independent), `money`*, `done` |
+| `embed` | `done` |
+| `pii_clean(chunks, graph)` | `embed`, `done` |
+| `money` | `done` |
+| `load_graph` | `pii_clean(chunks, graph)` (requires existing chunks), `done` |
+| `ingest_gnaf` / `ingest_abn` / `ingest_geo` | `done` |
+
+`* money` requires the extraction Parquet sidecars (`*.elements.parquet` + `*.table_cells.parquet`). If those are not present, `money` is not a valid next stage.
+
+Notes:
+
+- `pii_clean(extraction)`, `pii_clean(chunks)`, and `pii_clean(chunks, graph)` are the three PII modes from the transform table.
+- `chunk(chunking_model)` is the AI-chunking reuse mode of `chunk`; it is valid after `enrich`.
+- `chunk → enrich` is valid because `enrich` operates on the same `DocumentResult` extraction text, not on the chunk output.
+- `link` and `build_graph` are independent after `enrich`; either order is valid.
+- Independent sidecar ops such as `money` — and `embed` once chunks exist — can be appended after any earlier stage that has already produced the required sidecar, even if not listed on every row.
+- CSV/XLSX extraction follows the `.parquet` row; the documented spreadsheet path is `extract → .parquet → money`.
 ```
 
 The `chunk(chunking_model)` row is the AI-chunking single-enrichment reuse seam — the same

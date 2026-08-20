@@ -1,6 +1,6 @@
 <script lang="ts">
-	// The Pipeline Composer (docs/ui-plan.md merge 9; dispatch moved here in
-	// docs/ui-ingest-plan.md merge 4). It edits configuration and shows the
+	// The Pipeline Composer (docs/ui-plan.md merge 9; dispatch moved here later).
+	// It edits configuration and shows the
 	// pipeline's shape, and — as the console's one dispatch surface — enqueues a
 	// run over the deployment's configured ingest location.
 	//
@@ -72,7 +72,7 @@
 	// is what learns it, and the control then explains why it is disabled.
 	let savingDisabled = $state(false);
 
-	// Enqueue-from-composer (docs/ui-ingest-plan.md merge 4). The composer is now
+	// Enqueue-from-composer. The composer is now
 	// the only dispatch surface. The queue carries no config — workers get theirs
 	// from their own `--config` at launch — and ingest/output locations are
 	// deployment settings owned by the Resources Console, not re-input here. So an
@@ -112,20 +112,11 @@
 		return err instanceof Error ? err.message : String(err);
 	}
 
-	// Which of the four dispatch requirements is missing, named so the operator
+	// Which of the three dispatch requirements is missing, named so the operator
 	// sees the actionable fix rather than a bare disabled control. Order matches
-	// the server guard (`ui/execute.py`): the audit-only switch first (a
-	// deliberate choice), then the store, ingest and queue wiring gaps.
+	// the server guard (`ui/execute.py`): the store, ingest and queue wiring gaps.
 	let blocker = $derived.by((): { label: string; detail: string } | null => {
 		if (!execStatus || execStatus.can_execute) return null;
-		if (execStatus.audit_only) {
-			return {
-				label: 'Audit-only',
-				detail:
-					'This console was started with --audit-only, so it can configure and ' +
-					'audit but not dispatch. Restart it without --audit-only to enqueue runs.'
-			};
-		}
 		if (!execStatus.has_store) {
 			return {
 				label: 'No store',
@@ -258,7 +249,7 @@
 	}
 
 	// Hand the composed run into the queue — the composer is the only dispatch
-	// surface (docs/ui-ingest-plan.md merge 4). The queue carries no config;
+	// surface. The queue carries no config;
 	// workers read their own `--config` at launch. Ingest and output are
 	// deployment settings owned by the Resources Console, so this sends no
 	// prefix — the whole configured ingest root is the input — only the optional
@@ -545,7 +536,7 @@
 			</section>
 		</div>
 
-		<!-- Enqueue this composed run (docs/ui-ingest-plan.md merge 4). The composer
+		<!-- Enqueue this composed run. The composer
 			 is the only dispatch surface now. Ingest and output are deployment
 			 settings owned by the Resources Console, so this re-inputs nothing: the
 			 whole configured ingest root is the input. The strip below shows where

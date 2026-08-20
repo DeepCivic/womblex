@@ -1,6 +1,6 @@
 <script lang="ts">
-	// The Resources Console (docs/ui-plan.md merge 10; editable locations,
-	// docs/ui-ingest-plan.md merge 3b): four connection cards, none of them
+	// The Resources Console (docs/ui-plan.md merge 10; editable locations):
+	// four connection cards, none of them
 	// run-scoped — like the Composer, this screen reads deployment configuration,
 	// not a run's artefacts. The ingest and output cards are the two the operator
 	// can *edit* (env/compose values are defaults, not the only source); the
@@ -53,12 +53,11 @@
 	let secretKeyDraft = $state('');
 	let credsSaving = $state(false);
 	let credsSaveError: string | null = $state(null);
-	// A 409 (no writable settings dir) or 403 (audit-only) is a fixed property of
+	// A 409 (no writable settings dir) is a fixed property of
 	// this deployment, not a per-click failure: once seen, editing is disabled
 	// permanently and the card explains the flag — the same pattern the composer
 	// uses for preset saving. `cards.*.editable` already reports the 409 case up
-	// front, so the controls never even render for it; this catches a 403 that
-	// only the first save reveals.
+	// front, so the controls never even render for it.
 	let locationsDisabled = $state(false);
 	let locationsDisabledReason: string | null = $state(null);
 
@@ -66,8 +65,8 @@
 		return err instanceof Error ? err.message : String(err);
 	}
 
-	// flag/env → "from environment"; saved → "set here" (docs/ui-ingest-plan.md
-	// §2). The chip's colour follows: an operator-set value is the notable state.
+	// flag/env → "from environment"; saved → "set here".
+	// The chip's colour follows: an operator-set value is the notable state.
 	function provenance(source: LocationSource): { label: string; status: 'done' | 'skipped' } {
 		return source === 'saved'
 			? { label: 'set here', status: 'done' }
@@ -148,12 +147,12 @@
 		}
 	}
 
-	// A 409/403 is a deployment-wide state, not a per-field one, so it disables
+	// A 409 is a deployment-wide state, not a per-field one, so it disables
 	// *both* location cards' editing at once and explains the flag — the same
 	// pattern the composer uses for preset saving. A 400 is per-value (bad URI,
 	// overlap) and stays inline on the card that raised it.
 	function handleRefusal(err: unknown): string {
-		if (err instanceof LocationsRefused && (err.status === 409 || err.status === 403)) {
+		if (err instanceof LocationsRefused && err.status === 409) {
 			locationsDisabled = true;
 			locationsDisabledReason = err.message;
 		}
@@ -509,7 +508,7 @@
 		</div>
 
 		<!-- The read-only connection cards. Credentials are env-provided and masked;
-			 neither is editable here (docs/ui-ingest-plan.md §2 "accepting a credential
+			 neither is editable here ("accepting a credential
 			 means storing one"). -->
 		<div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
 			<!-- Job queue -->

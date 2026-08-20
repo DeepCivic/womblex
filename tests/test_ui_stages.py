@@ -72,12 +72,7 @@ _CONFIG = {
 
 
 class TestStageDispatchGuards:
-    """The same four-way guard `POST /enqueue` answers to — minus ingest."""
-
-    def test_forbidden_when_audit_only(self, tmp_path: Path) -> None:
-        client = _client(tmp_path, audit_only=True)
-        resp = client.post("/api/execute/stages", json={"run_id": "run-1", "config": _CONFIG})
-        assert resp.status_code == 403
+    """The same guard `POST /enqueue` answers to — minus ingest."""
 
     def test_conflict_without_a_store(self, tmp_path: Path) -> None:
         client = TestClient(create_app(output_root=tmp_path, db_dsn="postgresql://x/y"))

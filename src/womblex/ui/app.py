@@ -27,7 +27,6 @@ def create_app(
     *,
     output_root: Path | None = None,
     store_uri: str | None = None,
-    audit_only: bool = False,
     feedback_dir: Path | None = None,
     db_dsn: str | None = None,
     presets_dir: Path | None = None,
@@ -47,12 +46,6 @@ def create_app(
     (default ``<output_root>/feedback``); see ``UISettings``. Ignored in
     remote mode, which always uses the store's own ``feedback/`` prefix.
 
-    ``audit_only`` switches *off* the Execution Controls (docs/ui-plan.md
-    merge 11): by default the console can dispatch, and pass ``audit_only``
-    to get a pure auditing console whose ``/api/execute`` write action refuses
-    with 403. Dispatch also requires a store and a queue — see
-    :mod:`womblex.ui.execute`.
-
     ``db_dsn`` is the optional job queue the Dashboard reads. Omitted means
     no queue, which is a normal local deployment — the dashboard falls back
     to the run's own per-stage checkpoints.
@@ -61,7 +54,7 @@ def create_app(
     presets (one JSON file each). Omitted disables saving — the built-in
     presets still serve, but ``POST /api/composer/presets`` refuses with 409.
 
-    ``ingest_uri`` names where source documents arrive from (docs/ui-ingest-plan.md).
+    ``ingest_uri`` names where source documents arrive from.
     Omitted, the Execution Controls cannot dispatch. Raises ``ValueError``
     when it is not disjoint from ``store_uri``'s effective ``runs/`` output.
 
@@ -77,7 +70,7 @@ def create_app(
     """
     settings = UISettings(
         output_root=output_root, store_uri=store_uri,
-        audit_only=audit_only, feedback_dir=feedback_dir, db_dsn=db_dsn,
+        feedback_dir=feedback_dir, db_dsn=db_dsn,
         presets_dir=presets_dir, ingest_uri=ingest_uri, settings_dir=settings_dir,
     )
     app = FastAPI(title="Womblex Console")

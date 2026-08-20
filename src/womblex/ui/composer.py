@@ -1,3 +1,4 @@
+
 """The Pipeline Composer's read model (docs/ui-plan.md merge 9).
 
 Two static sources, neither run-scoped — unlike every other screen, the
@@ -181,7 +182,7 @@ def get_config_schema() -> dict[str, Any]:
     from Pydantic. No hand-typed mirror of `config.py` to fall out of sync.
 
     `paths` is stripped: it names the deployment's ingest/output locations,
-    not something the operator retypes per run (docs/ui-ingest-plan.md §3).
+    not something the operator retypes per run.
     `validate_config`/`render_yaml` inject it back before construction.
     """
     schema = WomblexConfig.model_json_schema()

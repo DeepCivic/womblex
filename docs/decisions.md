@@ -139,8 +139,13 @@ Decisions inside it:
   / `enrich` / `money` read the overlay sidecar named by `processing.text_source`
   (with `money.text_source` outranking it); `pii` writes `*.clean_text.parquet`
   only when `write_clean_text`; `enrich` writes `*.enrichment_doc.parquet` only
-  when persisting. Resolving either from the stage name would download the wrong
-  files and — worse — let the output-exists skip fire on an incomplete set.
+  when persisting. The Isaacus gate is config-aware for the same reason: `chunk`
+  needs the API only under AI chunking (`requires_isaacus_api(config)` returns
+  `chunking_model` truthiness), while the static `needs_isaacus_api=True` stays
+  the coarse display answer for the composer graph. Resolving any of these from
+  the stage name would download the wrong files and — worse — let the
+  output-exists skip fire on an incomplete set, or refuse a keyless offline
+  chunk run.
 - **A selected-but-absent overlay is a hard failure, not a fallback.**
   `load_overlay` warns and returns `None`, so locally a missing
   `*.normalised_text.parquet` degrades to verbatim text with a zero exit code.
@@ -182,12 +187,17 @@ Decisions inside it:
   text-only sidecars, and the same download-compute-upload shape as `finalize`,
   just at run scope. It is also the one stage with no `CheckpointManager`, by its
   own design.
-- **Runtime clients fail explicitly.** `chunk_shards` warns and returns
-  `ChunkStageResult(0, 0, 0)` when the Isaacus API is unresolvable — remotely
-  that is a clean-looking run that published nothing, so the runner checks
-  `isaacus_available()` before touching the store and exits non-zero.
-  `link`'s reference register is a worker-*local* file, not a store object, so it
-  gets a preflight that resolves the path.
+- **Runtime clients fail explicitly.** `chunk_shards` under **AI chunking**
+  (`chunking.chunking_model` set) calls the enricher API, so it warns and
+  returns `ChunkStageResult(0, 0, 0)` when Isaacus is unresolvable — remotely a
+  clean-looking run that published nothing. The contract's config-aware
+  `requires_isaacus_api(config)` gate makes the runner refuse *that* case
+  (`prepare_stage_context`) and exit non-zero. Plain token chunking (no
+  `chunking_model`) sizes chunks with the vendored tokeniser and runs offline,
+  so it needs no API and is *not* gated — `chunk_shards` instead checks the
+  tokeniser resolves locally (`tokenizer_available`). `enrich` / `embed`
+  always need the API. `link`'s reference register is a worker-*local* file,
+  not a store object, so it gets a preflight that resolves the path.
 - **Checkpoint staging is opt-in and single-invocation.** Checkpoint state is a
   directory, not a shard suffix, and per-base temp staging gives it nowhere to
   live. The default is the runner-level output-exists skip — the right
@@ -565,7 +575,10 @@ page, and chunking reads `elements` rather than `pages[i].text`.
      enrich after chunk)".
 
   **Verification gates — require a live Isaacus key. Checked 2026-06 against a
-  live `kanon-2-enricher` key with semchunk 4.0.0 / isaacus 0.20.0:**
+  live `kanon-2-enricher` key with semchunk 4.0.0 / isaacus 0.20.0; the
+  end-to-end path is now a standing regression test
+  (`tests/test_pipeline.py::TestAiChunkingLive`, live like the enrich/embed
+  tests — no mocks, skips cleanly without `ISAACUS_API_KEY`):**
   1. ✅ `document.text` is byte-identical to the input narrative (the offset
      basis the whole reuse rests on).
   2. ✅ A rehydrated `Document.model_validate_json()` satisfies semchunk's
@@ -579,12 +592,12 @@ page, and chunking reads `elements` rather than `pages[i].text`.
      not exercised — close this with a large real fixture before declaring
      production-ready.
 
-  **Status:** shipped 2026-06 (offline tests + live round-trip on the vendored
-  Throsby fixture). The `chunk_batch` Document-acceptance change was the main
-  risk and is covered by the byte-identity guard above. Remaining caveat: the
-  gate-3 large-document residual — until a doc exceeding the enricher context
-  window is exercised, treat very large inputs under `chunking_model` + reuse as
-  unverified.
+  **Status:** shipped 2026-06 (offline seam tests + a live AI-chunking test over
+  the vendored Throsby fixture, `tests/test_pipeline.py::TestAiChunkingLive`).
+  The `chunk_batch` Document-acceptance change was the main risk and is covered
+  by the byte-identity guard above. Remaining caveat: the gate-3 large-document
+  residual — until a doc exceeding the enricher context window is exercised,
+  treat very large inputs under `chunking_model` + reuse as unverified.
 
 - **Downstream text-cleaning op (#B/#D)** — *v1 shipped* as `womblex normalise
   --shards` (`process/normalise.py` transforms + `process/normalise_stage.py`

@@ -1,6 +1,6 @@
 # Womblex
 
-Document extraction pipeline for converting Australian government documents into ML-friendly corpus or collections. Extracts text from PDFs and Word documents (native, scanned, forms, hybrid). Spreadsheets are ingested as cell-grained element streams with automatic header/preamble detection, ready for per-record semantic analysis. Reference registers (G-NAF, ABN bulk extract, geospatial) have standalone Parquet ingests that bypass the NLP pipeline.
+Document extraction pipeline for converting files into ML-friendly corpus or collections. Extracts text from PDFs and Word documents (native, scanned, forms, hybrid). Spreadsheets are ingested as cell-grained element streams with automatic header/preamble detection, ready for per-record semantic analysis. Reference registers (G-NAF, ABN bulk extract, geospatial) have standalone Parquet ingests that bypass the NLP pipeline.
 
 ## Runs on your laptop, scales to a cluster
 
@@ -38,7 +38,7 @@ Optionally outputs are prepared for semantic analysis via [Isaacus](https://isaa
 
 ## The Problem
 
-Government document releases arrive as a mix of file formats:
+Files are in a mix of formats:
 - **PDFs** — native (selectable text), scanned (narrative, forms, tables), hybrid, or redacted
 - **Word documents** (`.docx`) — paragraphs and embedded tables
 - **Spreadsheets** (`.csv`, `.xlsx`, `.xls`) — row-level data, glossaries, key-value lookups, and narrative sheets
@@ -427,16 +427,14 @@ store a distributed run published to:
 pip install womblex[ui]                        # reads a local root or an s3:// store out of the box
 womblex ui --output-root output/               # local runs, at :8080
 womblex ui --output-root output/ --presets-dir presets/  # + save composer presets
-womblex ui --store <uri> --dsn <dsn>           # + dispatch (execution on by default)
-womblex ui --store <uri> --dsn <dsn> --audit-only  # read/inspect only, no dispatch
+womblex ui --store <uri> --dsn <dsn>           # + dispatch a run into the queue
 docker compose up -d ui                        # or beside the stack above
 ```
 
-It adds no pipeline logic. Dispatch is on by default: wire a `--store`, a
+It adds no pipeline logic. Wire a `--store`, a
 `--dsn` and an `--ingest` location and the Pipeline Composer can plan a run into
-the queue (workers do the work; the console runs no scheduler). Pass
-`--audit-only` for a
-pure read/inspect console that refuses to dispatch. Its writable surfaces are
+the queue (workers do the work; the console runs no scheduler); a console with
+no store or queue configured still reads and inspects runs. Its writable surfaces are
 deliberately narrow. The report action (`POST /api/runs/{run_id}/feedback`)
 files a reviewer's note about a record as a single JSON file under a
 `feedback/` location that is always a *sibling* of the runs, never inside one
@@ -448,8 +446,7 @@ store-backed mode they land under the object store's own `presets/` prefix,
 alongside `feedback/` — so the compose service writes both feedback and presets
 to the object store, needing no writable mount for them. There is
 no authentication, so it binds to loopback unless `--host` says otherwise; put
-your own control in front of anything wider. The screen designs and data
-sources are documented in [`docs/ui-ingest-plan.md`](docs/ui-ingest-plan.md).
+your own control in front of anything wider.
 
 ## How It Works
 
@@ -582,29 +579,37 @@ console's Pipeline Composer offers the same ones by name (e.g.
 `DEFAULT-Isaacus`); the config file is the CLI source of truth.
 
 **`configs/default-isaacus.yaml` — the reference Isaacus pipeline**
-(`extract → chunk → enrich → build_graph → money → done`, for PDF/DOCX). The
-entity graph and monetary amounts are produced over the one run. Note that
-`womblex run` alone runs only `extract → redaction detection` (extraction only);
-`chunk`, `enrich`, `build_graph` (graph-refresh), `embed`, `money` and `pii`
-are per-stage commands, and `enrich`
-must precede `chunk` so AI chunking reuses the enrichment (no double cost):
+(`extract → normalise → spellfix → enrich → chunk → build_graph → embed →
+money → link → done`, for PDF/DOCX). The text is cleaned first (normalise, then
+spellfix, selected via `processing.text_source`), then the entity graph, chunk
+embeddings, monetary amounts and entity links are produced over the one run.
+Note that `womblex run` alone runs only `extract → redaction detection`
+(extraction only); `normalise`, `spellfix`, `chunk`, `enrich`, `build_graph`
+(graph-refresh), `embed`, `money`, `link` and `pii` are per-stage commands,
+normalise/spellfix run before `enrich`, and `enrich` must precede `chunk` so AI
+chunking reuses the enrichment (no double cost):
 
 ```bash
 RUN=out/$(date -u +run-%Y%m%dT%H%M%SZ); SHARDS=$RUN/documents
 CFG=configs/default-isaacus.yaml
 
 womblex run           --config $CFG --run-id "$(basename "$RUN")"  # 1. extract
-womblex enrich        --shards "$SHARDS" --config $CFG             # 2. enrich BEFORE chunk
-womblex chunk         --shards "$SHARDS" --config $CFG             # 3. AI chunk (reuses enrich)
-womblex graph-refresh --shards "$SHARDS"                           # 4. build_graph edges
-womblex money         --shards "$SHARDS" --config $CFG             # 5. amounts (offline)
-womblex manifest      --shards "$SHARDS"                           # 6. consolidate manifest
+womblex normalise     --shards "$SHARDS" --config $CFG             # 2. clean text
+womblex spellfix      --shards "$SHARDS" --config $CFG             # 3. OCR repair (chains on 2)
+womblex enrich        --shards "$SHARDS" --config $CFG             # 4. enrich BEFORE chunk
+womblex chunk         --shards "$SHARDS" --config $CFG             # 5. AI chunk (reuses enrich)
+womblex graph-refresh --shards "$SHARDS"                           # 6. build_graph edges
+womblex embed         --shards "$SHARDS" --config $CFG             # 7. chunk embeddings
+womblex money         --shards "$SHARDS" --config $CFG             # 8. amounts (offline)
+womblex link          --shards "$SHARDS" --config $CFG             # 9. entity links (needs a register)
+womblex manifest      --shards "$SHARDS"                           # 10. consolidate manifest
 ```
 
-On object storage, steps 2–5 are the same via `womblex run-stage --stage
-<enrich|chunk|graph-refresh|money> --store <uri> --run-id <id> --config $CFG`.
-The full command sequence and per-setting rationale are commented inside the
-config file itself.
+On object storage, steps 2–9 are the same via `womblex run-stage --stage
+<normalise|spellfix|enrich|chunk|graph-refresh|embed|money|link> --store <uri>
+--run-id <id> --config $CFG`. Linking needs a corpus reference register
+(`linking.reference`) you supply. The full command sequence and per-setting
+rationale are commented inside the config file itself.
 
 ## Output
 

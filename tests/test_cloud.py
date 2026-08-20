@@ -164,7 +164,7 @@ def test_store_root_splits_bucket_from_prefix():
 
 
 def test_assert_disjoint_locations():
-    """The table from docs/ui-ingest-plan.md §4 — same bucket, different
+    """Same bucket, different
     folders is fine; either location containing the other is a hard fail.
     """
     # Disjoint: no error.
@@ -376,7 +376,7 @@ def test_process_job_downloads_from_a_second_ingest_store(tmp_path):
     assert ingest_store.exists("people.csv")       # the source document is untouched
 
 
-# --- run logs (docs/ui-ingest-plan.md merge 5) ------------------------------
+# --- run logs ---------------------------------------------------------------
 
 
 def test_capture_batch_log_attaches_and_detaches_cleanly(tmp_path):
@@ -578,8 +578,7 @@ def test_claim_complete_and_fail(queue):
 
 def test_worker_refuses_a_job_whose_ingest_root_mismatches(queue, tmp_path):
     """A job enqueued against one ingest root and claimed by a worker reading
-    from another is refused immediately, not failed per file (docs/ui-ingest-plan.md
-    §4, merge 1 verification step 7).
+    from another is refused immediately, not failed per file.
     """
     from womblex.cloud.queue import JobSpec
     from womblex.cloud.worker import run_worker
@@ -884,14 +883,31 @@ def test_a_stage_that_publishes_nothing_fails_its_row(tmp_path, monkeypatch):
 
 def test_prepare_stage_context_refuses_a_stage_isaacus_cannot_serve(monkeypatch, tmp_path):
     """Without it `chunk_shards` warns, writes nothing and returns cleanly —
-    a remote no-op a queue would record as a completed job."""
+    a remote no-op a queue would record as a completed job.
+
+    ``enrich`` always needs the API. ``chunk`` needs it only under AI chunking
+    (``chunking_model``); plain token chunking runs offline on the vendored
+    tokeniser, so its gate is config-aware."""
     from womblex.cloud.stage_contracts import STAGE_CONTRACTS
     from womblex.cloud.stage_runner import StagePreconditionError, prepare_stage_context
     from womblex.utils import availability
 
     monkeypatch.setattr(availability, "isaacus_available", lambda: False)
+
+    # enrich unconditionally needs the API.
     with pytest.raises(StagePreconditionError, match="needs Isaacus"):
-        prepare_stage_context(STAGE_CONTRACTS["chunk"], _minimal_config(tmp_path))
+        prepare_stage_context(STAGE_CONTRACTS["enrich"], _minimal_config(tmp_path))
+
+    # chunk WITH AI chunking needs the API.
+    ai_cfg = _minimal_config(tmp_path)
+    ai_cfg.chunking.chunking_model = "kanon-2-enricher"
+    with pytest.raises(StagePreconditionError, match="needs Isaacus"):
+        prepare_stage_context(STAGE_CONTRACTS["chunk"], ai_cfg)
+
+    # chunk WITHOUT a chunking_model is offline token chunking — no API needed,
+    # so it must NOT refuse even with Isaacus unavailable (the keyless local
+    # chunking path).
+    assert prepare_stage_context(STAGE_CONTRACTS["chunk"], _minimal_config(tmp_path)) is not None
 
     # A stage with no Isaacus need is unaffected.
     assert prepare_stage_context(STAGE_CONTRACTS["money"], _minimal_config(tmp_path)) is not None

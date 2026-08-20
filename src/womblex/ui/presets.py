@@ -15,9 +15,11 @@ construction ``load_config`` uses, so a preset that would not load is a test
 failure, not a runtime surprise (``tests/test_ui.py`` builds each one).
 
 `DEFAULT-Isaacus` is the reference Isaacus pipeline:
-``extract → chunk → enrich → build_graph → embed → money → done``, with the
-entity graph (enrich + the ``graph-refresh`` mention→chunk edge rebuild), chunk
-embeddings (the kanon-2-embedder retrieval index) and monetary amounts produced
+``extract → normalise → spellfix → enrich → chunk → build_graph → embed →
+money → link → done``, with text cleaning first (normalise + spellfix,
+selected via ``processing.text_source``), the entity graph (enrich + the
+``graph-refresh`` mention→chunk edge rebuild), chunk embeddings (the
+kanon-2-embedder retrieval index), monetary amounts and entity links produced
 over the one run. It targets PDF and DOCX sources — the two narrative formats
 among ``SUPPORTED_EXTENSIONS`` — which is what makes AI chunking and enrichment
 meaningful (spreadsheets are structured, not narrative). The vendored demo run
@@ -26,9 +28,10 @@ shape, so the console's sample corpus and the preset stay in step.
 
 The runnable, CLI-first source of truth for that shape is
 ``configs/default-isaacus.yaml`` — a complete config plus the per-stage command
-sequence a dev runs it with (``womblex run`` alone cannot: enrich / build_graph
-/ money are per-stage commands, and enrich must precede chunk). The overlay
-here mirrors that file's stage toggles and settings; keep the two in step.
+sequence a dev runs it with (``womblex run`` alone cannot: normalise, spellfix,
+enrich, build_graph, money and link are per-stage commands, normalise/spellfix
+run before enrich, and enrich must precede chunk). The overlay here mirrors
+that file's stage toggles and settings; keep the two in step.
 """
 from __future__ import annotations
 
@@ -67,7 +70,8 @@ class Preset:
         }
 
 
-#: `DEFAULT-Isaacus` — extract → chunk → enrich → build_graph → embed → money.
+#: `DEFAULT-Isaacus` — extract → normalise → spellfix → enrich → chunk →
+#: build_graph → embed → money → link.
 #:
 #: Mirrors ``configs/default-isaacus.yaml`` (the runnable, CLI-first source of
 #: truth) and the vendored demo run (``run-throsby-demo``, which is a completed
@@ -75,6 +79,17 @@ class Preset:
 #: `enabled` flags are carried so the composer form seeds sensible values, not
 #: just toggles:
 #:
+#: - `processing.text_source = spellfix` selects the OCR-repaired text layer
+#:   (which chains on top of the normalised layer) as the single string BOTH
+#:   enrich and chunk reassemble from. It is also the gate that puts `normalise`
+#:   and `spellfix` into the downstream-stage dispatch: `normalise` has no
+#:   `enabled` flag of its own, so `enabled_downstream_stages` treats it as
+#:   wanted precisely when a consumer selects its layer (here, via spellfix).
+#:   Both run BEFORE enrich in `PIPELINE_ORDER`, so the cleaned text is what
+#:   enrichment and AI chunking see.
+#: - `spellfix.enabled` runs the dictionary-gated OCR glyph repair; Tier A
+#:   (digit→letter) only, en_AU dictionary — the defaults, carried explicitly so
+#:   the form shows the stage as on.
 #: - `chunking.chunking_model = kanon-2-enricher` selects semchunk-4 AI
 #:   chunking (boundaries follow the enricher's structure). With `enrich` also
 #:   on, `WomblexConfig` auto-enables `enrichment.persist_document` so `chunk`
@@ -90,18 +105,28 @@ class Preset:
 #: - `money.enabled` runs the offline amount annotator over the same run, so the
 #:   graph and money sidecars land side by side (`graph + money over the one run`);
 #:   `default_currency = AUD` matches Australian-government `$` convention.
+#: - `linking.enabled` matches the enrichment entities to a corpus reference
+#:   register. The register is corpus-specific and is NOT carried here (like
+#:   `dataset`/`paths`, it names a real file): the operator supplies
+#:   `linking.reference` at run time, and until they do the stage warns and
+#:   no-ops. Enabling it without a reference still builds a valid `WomblexConfig`
+#:   (there is no model-level requirement), so the preset stays loadable.
 _DEFAULT_ISAACUS = Preset(
     name="DEFAULT-Isaacus",
     description=(
-        "Reference Isaacus pipeline: extract, semantic chunking, Kanon-2 "
-        "enrichment, entity-graph edge rebuild (build_graph), chunk embeddings "
-        "and monetary-amount annotation — graph, embeddings and money produced "
-        "over the one run. For PDF and DOCX sources. Runnable from the CLI as "
-        "configs/default-isaacus.yaml (a per-stage sequence: enrich before chunk, "
-        "then graph-refresh, then embed, then money)."
+        "Reference Isaacus pipeline: extract, text cleaning (normalise + "
+        "spellfix), Kanon-2 enrichment, semantic (AI) chunking, entity-graph "
+        "edge rebuild (build_graph), chunk embeddings, monetary-amount "
+        "annotation and entity linking — cleaning first, then graph, embeddings, "
+        "money and links over the one run. For PDF and DOCX sources. Runnable "
+        "from the CLI as configs/default-isaacus.yaml (a per-stage sequence: "
+        "normalise, spellfix, enrich before chunk, then graph-refresh, embed, "
+        "money, link). Linking needs a corpus reference register (set "
+        "linking.reference) supplied at run time."
     ),
     formats=(".pdf", ".docx"),
     config={
+        "spellfix": {"enabled": True},
         "chunking": {
             "enabled": True,
             "chunking_model": "kanon-2-enricher",
@@ -111,9 +136,10 @@ _DEFAULT_ISAACUS = Preset(
         "enrichment": {"enabled": True},
         "embedding": {"enabled": True},
         "money": {"enabled": True, "default_currency": "AUD"},
-        # Redaction/PII/link stay at their defaults (off, except redaction
-        # flagging) — the preset names the five stages the shape calls for and
-        # leaves everything else to the config schema's own defaults.
+        "linking": {"enabled": True},
+        "processing": {"text_source": "spellfix"},
+        # Redaction/PII stay at their defaults (off, except redaction flagging).
+        # normalise carries no toggle — it is gated by text_source above.
     },
 )
 

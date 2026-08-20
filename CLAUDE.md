@@ -314,9 +314,10 @@ Run with `-rs` to see live reasons. The recurring ones:
   `test_enrichment_output.py`): module-level `importorskip("isaacus")` — the SDK
   is a core dependency now, so these run (mocked clients); the guard only skips
   on a broken install where `isaacus` cannot be imported.
-- **isaacus API key** (`test_embed_stage.py` / `test_enrich_stage.py`): the
-  `isaacus_client` fixture skips without `ISAACUS_API_KEY` (these make real
-  Kanon-2 calls when a key is present).
+- **isaacus API key** (`test_embed_stage.py` / `test_enrich_stage.py` /
+  `test_pipeline.py::TestAiChunkingLive`): the `isaacus_client` fixture skips
+  without `ISAACUS_API_KEY` (these make real Kanon-2 calls — embed, enrich, and
+  AI chunking — when a key is present).
 - **rapidocr** OCR paths (`test_fixtures.py`): `importorskip("rapidocr_onnxruntime")`.
 - **fixture-gated** tests (`test_text_extractor.py`, `test_extract.py`,
   `test_spreadsheet_print.py`, the accuracy suites): skip when the specific
