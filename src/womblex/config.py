@@ -309,11 +309,14 @@ class ChunkingConfig(BaseModel):
 
     The Kanon-2 tokeniser is free on Hugging Face (and vendored under
     ``_models/kanon-2-tokenizer``, resolved locally by ``create_chunker``), so
-    chunk-size token counting is exact and fully offline. **AI chunking**
-    (``chunking_model``) does call the Isaacus API per document, so the chunk
-    stage currently gates on API availability (``ISAACUS_API_KEY`` +
-    ``womblex.utils.availability.isaacus_available``) and skips when absent;
-    plain token chunking needs no key and that gate is conservative.
+    chunk-size token counting is exact and **fully offline** — plain token
+    chunking needs no API key and runs in an air-gapped deployment (it gates
+    only on the tokeniser resolving locally,
+    ``womblex.utils.availability.tokenizer_available``). **AI chunking**
+    (``chunking_model``) does call the Isaacus API per document; that path
+    alone gates on ``womblex.utils.availability.isaacus_available``
+    (``ISAACUS_API_KEY`` or ``ISAACUS_SAGEMAKER_ENDPOINTS``) and skips when
+    absent.
     """
 
 

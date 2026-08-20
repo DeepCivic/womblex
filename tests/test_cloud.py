@@ -883,14 +883,31 @@ def test_a_stage_that_publishes_nothing_fails_its_row(tmp_path, monkeypatch):
 
 def test_prepare_stage_context_refuses_a_stage_isaacus_cannot_serve(monkeypatch, tmp_path):
     """Without it `chunk_shards` warns, writes nothing and returns cleanly —
-    a remote no-op a queue would record as a completed job."""
+    a remote no-op a queue would record as a completed job.
+
+    ``enrich`` always needs the API. ``chunk`` needs it only under AI chunking
+    (``chunking_model``); plain token chunking runs offline on the vendored
+    tokeniser, so its gate is config-aware."""
     from womblex.cloud.stage_contracts import STAGE_CONTRACTS
     from womblex.cloud.stage_runner import StagePreconditionError, prepare_stage_context
     from womblex.utils import availability
 
     monkeypatch.setattr(availability, "isaacus_available", lambda: False)
+
+    # enrich unconditionally needs the API.
     with pytest.raises(StagePreconditionError, match="needs Isaacus"):
-        prepare_stage_context(STAGE_CONTRACTS["chunk"], _minimal_config(tmp_path))
+        prepare_stage_context(STAGE_CONTRACTS["enrich"], _minimal_config(tmp_path))
+
+    # chunk WITH AI chunking needs the API.
+    ai_cfg = _minimal_config(tmp_path)
+    ai_cfg.chunking.chunking_model = "kanon-2-enricher"
+    with pytest.raises(StagePreconditionError, match="needs Isaacus"):
+        prepare_stage_context(STAGE_CONTRACTS["chunk"], ai_cfg)
+
+    # chunk WITHOUT a chunking_model is offline token chunking — no API needed,
+    # so it must NOT refuse even with Isaacus unavailable (the keyless local
+    # chunking path).
+    assert prepare_stage_context(STAGE_CONTRACTS["chunk"], _minimal_config(tmp_path)) is not None
 
     # A stage with no Isaacus need is unaffected.
     assert prepare_stage_context(STAGE_CONTRACTS["money"], _minimal_config(tmp_path)) is not None

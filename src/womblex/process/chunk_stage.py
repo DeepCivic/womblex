@@ -15,6 +15,15 @@ per-stage path see the same tables.
 One ``Chunker`` is created at the top of :func:`chunk_shards` and
 reused across every batch — semchunk's memoise cache then accumulates
 across the whole shard directory.
+
+**Offline by default; only AI chunking needs the API.** Plain token
+chunking sizes chunks with the kanon-2 tokeniser, which is vendored under
+``_models/`` and runs entirely client-side — so a keyless, air-gapped run
+still chunks (gated only on the tokeniser resolving locally, via
+:func:`~womblex.utils.availability.tokenizer_available`). AI chunking
+(``chunking.chunking_model`` set) calls the Isaacus enricher per document
+at chunk time and is the only path that needs a configured deployment
+(:func:`~womblex.utils.availability.isaacus_available`).
 """
 
 from __future__ import annotations
@@ -46,7 +55,7 @@ from womblex.store.output import (
     read_table_cells,
     write_chunks,
 )
-from womblex.utils.availability import isaacus_available
+from womblex.utils.availability import isaacus_available, tokenizer_available
 from womblex.utils.isaacus_client import make_ai_chunking_client
 
 logger = logging.getLogger(__name__)
@@ -89,12 +98,29 @@ def chunk_shards(
         logger.warning("chunk_shards: no batches found in %s", shard_dir)
         return ChunkStageResult(0, 0, 0)
 
-    if not isaacus_available():
+    # AI chunking (chunking_model set) calls the Kanon-2 *API* at chunk time, so
+    # it needs a configured deployment. Plain token chunking sizes chunks with
+    # the vendored tokeniser and runs fully offline — a keyless local run must
+    # still chunk, gating only on the tokeniser resolving locally.
+    if chunking_config.chunking_model:
+        if not isaacus_available():
+            logger.warning(
+                "chunk_shards: AI chunking is enabled (chunking.chunking_model=%r) "
+                "but Isaacus is not available (needs the isaacus SDK + "
+                "ISAACUS_API_KEY, or ISAACUS_SAGEMAKER_ENDPOINTS) — skipping "
+                "chunking for %s; no *.chunks.parquet written. Unset "
+                "chunking.chunking_model to chunk offline with the local "
+                "tokeniser.", chunking_config.chunking_model, shard_dir,
+            )
+            return ChunkStageResult(0, 0, 0)
+    elif not tokenizer_available(chunking_config.tokenizer):
         logger.warning(
-            "chunk_shards: Isaacus not available (needs the isaacus SDK + "
-            "ISAACUS_API_KEY, or ISAACUS_SAGEMAKER_ENDPOINTS) — skipping chunking "
-            "for %s. The chunk-size tokeniser is the Kanon-2 tokeniser, obtainable "
-            "only via the API; no *.chunks.parquet written.", shard_dir,
+            "chunk_shards: chunk-size tokeniser %r is not resolvable locally "
+            "(needs `transformers` plus a bundled copy under _models/ or "
+            "WOMBLEX_MODELS_DIR) — skipping chunking for %s; no *.chunks.parquet "
+            "written. The default kanon-2-tokenizer is vendored; a custom "
+            "tokenizer must be bundled to keep chunking offline.",
+            chunking_config.tokenizer, shard_dir,
         )
         return ChunkStageResult(0, 0, 0)
 

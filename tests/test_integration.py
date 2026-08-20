@@ -31,14 +31,18 @@ from womblex.process.chunker import (
     create_chunker,
     table_to_markdown,
 )
-from womblex.utils.availability import isaacus_available
+from womblex.utils.availability import tokenizer_available
 
-# run_chunking sizes chunks with the Kanon-2 tokeniser (Isaacus API only) and
-# skips when the API isn't configured; tests asserting it produced chunks
-# require Isaacus. Direct create_chunker(callable) tests are unaffected.
-requires_isaacus = pytest.mark.skipif(
-    not isaacus_available(),
-    reason="run_chunking needs the Kanon-2 tokeniser (isaacus SDK + ISAACUS_API_KEY)",
+# Plain (non-AI) chunking sizes chunks with the vendored kanon-2 tokeniser and
+# runs offline — no API key. Tests below that patch `create_chunker` with a
+# word-counter avoid loading any tokeniser, but `run_chunking` still checks the
+# configured tokeniser resolves locally before building the chunker, so they
+# name the vendored tokeniser and gate on its availability (self-skip on a
+# wheel built without the model bundle / without `transformers`).
+_CHUNK_TOKENIZER = "isaacus/kanon-2-tokenizer"
+requires_chunking = pytest.mark.skipif(
+    not tokenizer_available(_CHUNK_TOKENIZER),
+    reason="offline chunking needs `transformers` + the vendored kanon-2 tokeniser",
 )
 
 
@@ -404,7 +408,7 @@ class TestCSVChunkingIntegration:
         assert len(lines) >= 2 + min(len(tbl.rows), 10)
 
 
-    @requires_isaacus
+    @requires_chunking
     def test_csv_pipeline_with_chunking(self, tmp_path: Path) -> None:
 
         """Full run: CSV → detect → extract → chunk."""
@@ -423,7 +427,7 @@ class TestCSVChunkingIntegration:
 
             chunking=ChunkingConfig(
 
-                tokenizer="not-used",
+                tokenizer=_CHUNK_TOKENIZER,
 
                 chunk_size=100,
 
@@ -552,7 +556,7 @@ class TestRedactedPDFChunkingIntegration:
             assert chunk.end_char >= chunk.start_char
 
 
-    @requires_isaacus
+    @requires_chunking
     def test_redacted_pdf_pipeline_produces_chunks(self, tmp_path: Path) -> None:
 
         """Full pipeline run on a redacted PDF produces chunks."""
@@ -571,7 +575,7 @@ class TestRedactedPDFChunkingIntegration:
 
             chunking=ChunkingConfig(
 
-                tokenizer="not-used",
+                tokenizer=_CHUNK_TOKENIZER,
 
                 chunk_size=80,
 
@@ -605,7 +609,7 @@ class TestRedactedPDFChunkingIntegration:
             assert len(chunk.text.strip()) > 0
 
 
-    @requires_isaacus
+    @requires_chunking
     def test_redacted_pdf_chunk_tables_flag(self, tmp_path: Path) -> None:
 
         """When chunk_tables=False, only narrative chunks are produced."""
@@ -624,7 +628,7 @@ class TestRedactedPDFChunkingIntegration:
 
             chunking=ChunkingConfig(
 
-                tokenizer="not-used",
+                tokenizer=_CHUNK_TOKENIZER,
 
                 chunk_size=80,
 

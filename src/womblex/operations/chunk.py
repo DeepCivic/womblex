@@ -9,7 +9,7 @@ from womblex.config import WomblexConfig
 from womblex.operations.models import DocumentResult
 from womblex.process.chunker import build_chunk_input, chunk_batch, create_chunker
 from womblex.redact.stage import annotate_chunks
-from womblex.utils.availability import isaacus_available
+from womblex.utils.availability import isaacus_available, tokenizer_available
 from womblex.utils.isaacus_client import make_ai_chunking_client
 
 if TYPE_CHECKING:
@@ -33,12 +33,26 @@ def run_chunking(
     if not config.chunking.enabled:
         return results
 
-    if not isaacus_available():
+    # AI chunking calls the enricher API; plain token chunking uses the vendored
+    # tokeniser and runs offline. Gate each on what it actually needs so a
+    # keyless local run still chunks (mirrors process/chunk_stage.py).
+    if config.chunking.chunking_model:
+        if not isaacus_available():
+            logger.warning(
+                "run_chunking: AI chunking is enabled (chunking.chunking_model=%r) "
+                "but Isaacus is not available (needs the isaacus SDK + "
+                "ISAACUS_API_KEY, or ISAACUS_SAGEMAKER_ENDPOINTS) — skipping "
+                "chunking. Unset chunking.chunking_model to chunk offline with "
+                "the local tokeniser.", config.chunking.chunking_model,
+            )
+            return results
+    elif not tokenizer_available(config.chunking.tokenizer):
         logger.warning(
-            "run_chunking: Isaacus not available (needs the isaacus SDK + "
-            "ISAACUS_API_KEY, or ISAACUS_SAGEMAKER_ENDPOINTS) — skipping chunking. "
-            "The chunk-size tokeniser is the Kanon-2 tokeniser, obtainable only "
-            "via the API."
+            "run_chunking: chunk-size tokeniser %r is not resolvable locally "
+            "(needs `transformers` plus a bundled copy under _models/ or "
+            "WOMBLEX_MODELS_DIR) — skipping chunking. The default "
+            "kanon-2-tokenizer is vendored; a custom tokenizer must be bundled "
+            "to keep chunking offline.", config.chunking.tokenizer,
         )
         return results
 

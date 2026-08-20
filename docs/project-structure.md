@@ -131,7 +131,7 @@ womblex/
 │   │   ├── checksum.py      # Shared streamed MD5 helper for the standalone register ingests
 │   │   ├── isaacus_client.py # Build the Isaacus SDK client (hosted API or private SageMaker)
 │   │   ├── token_packer.py  # TokenCounter, pack_by_tokens, split_on_boundaries for token-budgeted API batching
-│   │   └── availability.py  # isaacus_available() — gates stages that need the API-only Kanon-2 tokeniser
+│   │   └── availability.py  # isaacus_available() gates API stages (enrich/embed, AI chunking); tokenizer_available() gates offline token chunking on the vendored tokeniser
 │   └── verify/
 │       └── engine.py        # Two-pass extraction quality verification
 └── tests/

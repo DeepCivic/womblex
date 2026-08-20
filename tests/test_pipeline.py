@@ -14,14 +14,16 @@ import pytest
 from womblex.cli.pipeline import _register_chunk, cmd_chunk, cmd_manifest, cmd_run
 from womblex.config import ChunkingConfig, DatasetConfig, PathsConfig, WomblexConfig, load_config
 from womblex.operations import BatchResult, DocumentResult, run_chunking, run_extraction
-from womblex.utils.availability import isaacus_available
+from womblex.utils.availability import tokenizer_available
 
-# Chunking sizes chunks with the Kanon-2 tokeniser, available only via the
-# Isaacus API; the chunk stage skips when it isn't configured (no SDK / key).
-# Tests that assert chunks were produced therefore require Isaacus.
-requires_isaacus = pytest.mark.skipif(
-    not isaacus_available(),
-    reason="chunking needs the Kanon-2 tokeniser (isaacus SDK + ISAACUS_API_KEY)",
+# Plain (non-AI) chunking sizes chunks with the kanon-2 tokeniser, which is
+# vendored and runs offline — no API key needed. It does need `transformers`
+# plus the bundled tokeniser present, so tests that assert chunks were produced
+# gate on that (they self-skip on a wheel built without the model bundle).
+_CHUNK_TOKENIZER = "isaacus/kanon-2-tokenizer"
+requires_chunking = pytest.mark.skipif(
+    not tokenizer_available(_CHUNK_TOKENIZER),
+    reason="offline chunking needs `transformers` + the vendored kanon-2 tokeniser",
 )
 
 
@@ -171,7 +173,7 @@ class TestComposition:
     """Operations compose correctly when called in sequence."""
 
 
-    @requires_isaacus
+    @requires_chunking
     def test_extract_then_chunk(self) -> None:
 
         if not _CSV_FILE.exists():
@@ -216,6 +218,70 @@ class TestComposition:
         # No chunking called — no chunks.
 
         assert all(len(r.chunks) == 0 for r in results)
+
+
+# ---------------------------------------------------------------------------
+# Live AI chunking (semchunk 4, kanon-2-enricher)
+# ---------------------------------------------------------------------------
+
+# The Throsby ACT FOI notice — small, native, real prose the enricher can
+# segment. Same fixture the live enrich test uses.
+_THROSBY_PDF = (
+    FIXTURE_DIR / "_documents"
+    / "00768-213A-270825-Throsby-Out-of-School-Care-"
+      "Administrative-Decision-Other-Notice-and-Direction_Redacted.pdf"
+)
+
+
+class TestAiChunkingLive:
+    """AI chunking (``chunking.chunking_model``) against the **live** Kanon-2
+    enricher — no mocks, real for local validation (CLAUDE.md); skips cleanly
+    without ``ISAACUS_API_KEY`` via the ``isaacus_client`` fixture.
+
+    Boundaries follow the enricher's structure spans instead of the offline
+    token split, so this exercises the one chunk path that actually calls the
+    Isaacus API — the path the config-aware gate (``requires_isaacus_api``)
+    protects.
+    """
+
+    def test_chunk_shards_ai_chunking_produces_chunks(
+        self, tmp_path: Path, isaacus_client
+    ) -> None:
+        if not _THROSBY_PDF.exists():
+            pytest.skip(f"fixture not present: {_THROSBY_PDF}")
+
+        from womblex.ingest.detect import DetectionConfig, detect_file_type
+        from womblex.ingest.extract import extract_text
+        from womblex.process.chunk_stage import chunk_shards
+        from womblex.store.output import chunks_path_for, read_chunks, write_results
+
+        # Build a real extraction shard (mirrors test_enrich_stage.shard_dir).
+        d = tmp_path / "documents"
+        d.mkdir()
+        extraction = extract_text(
+            _THROSBY_PDF, detect_file_type(_THROSBY_PDF, DetectionConfig())
+        )[0]
+        base = d / "batch-0001.parquet"
+        write_results([("throsby", str(_THROSBY_PDF), extraction)], base,
+                      collection_id="test")
+
+        # AI chunking on: boundaries come from the live enricher.
+        cfg = ChunkingConfig(enabled=True, chunking_model="kanon-2-enricher",
+                             chunk_size=480)
+        result = chunk_shards(d, cfg, text_source="elements")
+
+        assert result.batches_written == 1
+        assert result.docs_chunked == 1, "live AI chunking produced no chunked docs"
+        assert result.total_chunks >= 1
+
+        assert chunks_path_for(base).exists()
+        rows = read_chunks(base).to_pylist()
+        assert rows, "live AI chunking wrote an empty chunks sidecar"
+        assert all(r["text"].strip() for r in rows)
+        # Offsets must index back into the reassembled narrative for the
+        # narrative chunks (the page-mapping contract).
+        for r in rows:
+            assert r["end_char"] >= r["start_char"]
 
 
 # ---------------------------------------------------------------------------
@@ -487,7 +553,7 @@ def _seed_run_with_extraction(tmp_path: Path, run_id: str = "i2-test") -> Path:
 
 
 class TestCmdChunkShards:
-    @requires_isaacus
+    @requires_chunking
     def test_writes_chunks_sidecar_for_each_batch(self, tmp_path: Path) -> None:
         if not _CSV_FILE.exists():
             pytest.skip("CSV fixture not available")
@@ -508,7 +574,7 @@ class TestCmdChunkShards:
         for f in chunks_files:
             assert f.stat().st_size > 0
 
-    @requires_isaacus
+    @requires_chunking
     def test_chunks_join_back_to_elements_via_source_hash(self, tmp_path: Path) -> None:
         if not _CSV_FILE.exists():
             pytest.skip("CSV fixture not available")
@@ -546,7 +612,7 @@ class TestCmdChunkShards:
         )
         assert cmd_chunk(args) == 1
 
-    @requires_isaacus
+    @requires_chunking
     def test_no_resume_clears_checkpoint(self, tmp_path: Path) -> None:
         if not _CSV_FILE.exists():
             pytest.skip("CSV fixture not available")
@@ -569,7 +635,7 @@ class TestCmdChunkShards:
         )
         assert cmd_chunk(args2) == 0
 
-    @requires_isaacus
+    @requires_chunking
     def test_resume_recovers_corrupt_chunks_shard(self, tmp_path: Path) -> None:
         """Wire-up test: a corrupt *.chunks.parquet on resume drops the affected
         docs from the chunk checkpoint and re-writes a clean sidecar."""
@@ -631,8 +697,8 @@ class TestChunkCliFlags:
         """The --shards branch reads chunking + text_source from --config."""
         if not _CSV_FILE.exists():
             pytest.skip("CSV fixture not available")
-        if not isaacus_available():
-            pytest.skip("chunking needs the Kanon-2 tokeniser (isaacus SDK + ISAACUS_API_KEY)")
+        if not tokenizer_available(_CHUNK_TOKENIZER):
+            pytest.skip("offline chunking needs `transformers` + the vendored kanon-2 tokeniser")
 
         shard_dir = _seed_run_with_extraction(tmp_path, run_id="i2-cfg")
         cfg = tmp_path / "cfg.yaml"  # written by the seed helper
