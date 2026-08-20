@@ -126,7 +126,7 @@
 		};
 	});
 
-	// --- Logs panel (docs/ui-ingest-plan.md merge 5) ------------------------
+	// --- Logs panel ---------------------------------------------------------
 	//
 	// Reads once per run selection (logs are static once published, unlike the
 	// draining queue), and again when the operator picks a batch. Kept separate
@@ -419,7 +419,7 @@
 			{/if}
 		</section>
 
-		<!-- Run logs (docs/ui-ingest-plan.md merge 5): the per-document failure
+		<!-- Run logs: the per-document failure
 		     lines a worker/`cmd_run` published next to the shards. The `job.error`
 		     cell above is left as-is; this is the detail behind it. -->
 		<section class="flex flex-col gap-3">

@@ -181,7 +181,7 @@ def get_chunk_detail(settings: UISettings, run_id: str, source_hash: str) -> dic
 
 
 # ---------------------------------------------------------------------------
-# Run logs (docs/ui-ingest-plan.md merge 5)
+# Run logs
 # ---------------------------------------------------------------------------
 #
 # Batch logs are the per-document failure lines `operations/extract.py` already

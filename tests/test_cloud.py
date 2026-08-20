@@ -164,7 +164,7 @@ def test_store_root_splits_bucket_from_prefix():
 
 
 def test_assert_disjoint_locations():
-    """The table from docs/ui-ingest-plan.md §4 — same bucket, different
+    """Same bucket, different
     folders is fine; either location containing the other is a hard fail.
     """
     # Disjoint: no error.
@@ -376,7 +376,7 @@ def test_process_job_downloads_from_a_second_ingest_store(tmp_path):
     assert ingest_store.exists("people.csv")       # the source document is untouched
 
 
-# --- run logs (docs/ui-ingest-plan.md merge 5) ------------------------------
+# --- run logs ---------------------------------------------------------------
 
 
 def test_capture_batch_log_attaches_and_detaches_cleanly(tmp_path):
@@ -578,8 +578,7 @@ def test_claim_complete_and_fail(queue):
 
 def test_worker_refuses_a_job_whose_ingest_root_mismatches(queue, tmp_path):
     """A job enqueued against one ingest root and claimed by a worker reading
-    from another is refused immediately, not failed per file (docs/ui-ingest-plan.md
-    §4, merge 1 verification step 7).
+    from another is refused immediately, not failed per file.
     """
     from womblex.cloud.queue import JobSpec
     from womblex.cloud.worker import run_worker

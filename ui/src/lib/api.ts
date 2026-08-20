@@ -173,7 +173,7 @@ export async function getChunkDetail(
 	return (await resp.json()) as ChunkDetail;
 }
 
-// One published batch log (docs/ui-ingest-plan.md merge 5). `modified` is null
+// One published batch log. `modified` is null
 // when the backend cannot report it (some object stores omit it per-listing).
 export interface RunLog {
 	name: string;
@@ -199,7 +199,7 @@ export async function listRunLogs(
  * `batch-NNNN.log` pattern and a valid-but-absent name land here with a 404
  * carrying `available` — the live list of logs — so the picker re-renders
  * inline with "that log is no longer available" and self-corrects a stale link
- * rather than stranding the operator (docs/ui-ingest-plan.md merge 5).
+ * rather than stranding the operator.
  */
 export class RunLogNotFound extends Error {
 	available: RunLog[];
@@ -274,7 +274,7 @@ export interface StoreOptions {
 	region: string | null;
 }
 
-// Where an effective location came from (docs/ui-ingest-plan.md §2): a CLI
+// Where an effective location came from: a CLI
 // `flag`, an `env` var, or a `saved` operator override. The screen collapses
 // `flag`/`env` to one "from environment" chip and shows `saved` as "set here",
 // but the three are carried distinctly because that is what a reset restores to.
@@ -290,14 +290,14 @@ export interface StoreCard {
 	options: Partial<StoreOptions>;
 	source: LocationSource;
 	// Whether this console has a writable settings dir — the one thing that
-	// makes the location editable at all (docs/ui-ingest-plan.md merge 3a).
+	// makes the location editable at all.
 	// False in both modes when no `--settings-dir` was configured.
 	editable: boolean;
 }
 
 // The ingest card. Unlike the store, ingest is optional, so `configured` is
 // the first thing it reports rather than assuming one of two shapes; `uri` is
-// null when unconfigured (docs/ui-ingest-plan.md merge 2/3a).
+// null when unconfigured.
 export interface IngestCard {
 	configured: boolean;
 	uri: string | null;
@@ -364,8 +364,8 @@ export async function testIngest(fetchImpl: typeof fetch = fetch): Promise<Reach
 	return (await resp.json()) as ReachabilityResult;
 }
 
-// Save / update / clear the operator's ingest and output location override
-// (docs/ui-ingest-plan.md merge 3a). A full replace (PUT): each location field
+// Save / update / clear the operator's ingest and output location override.
+// A full replace (PUT): each location field
 // is a new value or `null` ("reset to the flag/env default"), so a caller
 // keeping a field must resubmit its current value.
 //
@@ -396,9 +396,9 @@ export interface SaveLocationsResult {
 /**
  * A location edit the console refused. `status` is the HTTP code so the screen
  * tells the failure shapes apart without parsing the message: 409 (no writable
- * settings dir — editing is disabled on this console), 403 (audit-only, a
- * deliberate choice), 400 (a malformed URI, or an ingest/output pair that would
- * overlap). Mirrors `ui/routes/resources.py`'s guard and `ValueError` paths.
+ * settings dir — editing is disabled on this console), 400 (a malformed URI, or
+ * an ingest/output pair that would overlap). Mirrors `ui/routes/resources.py`'s
+ * guard and `ValueError` paths.
  */
 export class LocationsRefused extends Error {
 	status: number;
@@ -744,17 +744,16 @@ export async function renderConfigYaml(
 	return await resp.text();
 }
 
-// The console's dispatch capability (docs/ui-ingest-plan.md). `ExecutionCapability
-// .as_dict()`: whether this deployment can dispatch work, and which of the four
+// The console's dispatch capability. `ExecutionCapability
+// .as_dict()`: whether this deployment can dispatch work, and which of the three
 // requirements is missing if not. `can_execute` is the conjunction of
-// `!audit_only && has_store && has_ingest && has_queue`; the individual flags
+// `has_store && has_ingest && has_queue`; the individual flags
 // let the composer name the missing piece. `ingest_uri`/`output_uri` feed the
 // composer's read-only deployment-locations strip. There is no stage list: the
 // pipeline's shape comes from `getStageGraph()`, which serves it from the
 // contracts, and the field this once carried was read by nothing.
 export interface ExecutionStatus {
 	can_execute: boolean;
-	audit_only: boolean;
 	has_store: boolean;
 	has_ingest: boolean;
 	has_queue: boolean;
@@ -770,8 +769,8 @@ export async function getExecutionStatus(
 	return (await resp.json()) as ExecutionStatus;
 }
 
-// Reachability + document count of the configured ingest location
-// (docs/ui-ingest-plan.md merge 2). Serves both the composer's "N documents
+// Reachability + document count of the configured ingest location.
+// Serves both the composer's "N documents
 // ready" line and the Resources Console's ingest card, using the same recursive
 // listing + `SUPPORTED_EXTENSIONS` filter the enqueue does — so the count shown
 // is the count that would be enqueued. `uri`/`kind` are null when unconfigured.
@@ -793,8 +792,8 @@ export async function getIngestPreflight(
 }
 
 // The configure-and-run form. `input_prefix` is ingest-relative and optional —
-// omitted means the whole configured ingest root, which is the normal case
-// (docs/ui-ingest-plan.md §2). `run_id` omitted mints a fresh timestamped id,
+// omitted means the whole configured ingest root, which is the normal case.
+// `run_id` omitted mints a fresh timestamped id,
 // and supplying an existing one resumes it (enqueue is idempotent on
 // `(run_id, batch_num)`).
 export interface EnqueueRequest {
@@ -817,10 +816,10 @@ export interface EnqueueResult {
 
 /**
  * An enqueue the console refused or could not serve. `status` carries the HTTP
- * code so the screen can tell the three failure shapes apart without parsing
- * the message: 403 (audit-only, a deliberate choice), 409 (no store or queue
- * configured — a wiring gap), 400 (bad input, e.g. no documents under the
- * prefix). These mirror `ui/execute.py`'s guard and `ValueError` paths.
+ * code so the screen can tell the failure shapes apart without parsing
+ * the message: 409 (no store, ingest or queue configured — a wiring gap), 400
+ * (bad input, e.g. no documents under the prefix). These mirror
+ * `ui/execute.py`'s guard and `ValueError` paths.
  */
 export class EnqueueRefused extends Error {
 	status: number;

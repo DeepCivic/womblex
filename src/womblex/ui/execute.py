@@ -26,12 +26,6 @@ one — and the plan pins exactly how far that goes:
   through); a local ``output_root``-only deployment can configure and audit
   but not run, and :func:`execution_status` says so rather than half-working.
 
-- **`--audit-only` is the switch** (§4, §6). By default the console can
-  dispatch; pass ``--audit-only`` for a pure auditing console where every
-  write action here refuses with :class:`ExecutionDisabled` before it
-  touches the store or the queue, so an audit-only deployment cannot be
-  talked into dispatching work.
-
 "Log streaming" is the queue's own job-status transitions
 (:meth:`JobQueue.list_jobs`) plus the per-stage checkpoints
 :mod:`womblex.ui.dashboard` already reads — a batch-granular feed, labelled
@@ -56,10 +50,9 @@ logger = logging.getLogger(__name__)
 class ExecutionDisabled(Exception):
     """A write action was attempted on a console that cannot execute.
 
-    Carries a machine-readable ``reason`` the route maps to a 403 (execution
-    off) or 409 (store/queue not configured), so the frontend can tell "this
-    deployment is audit-only" from "wire up a queue first" without parsing a
-    message.
+    Carries a machine-readable ``reason`` the route maps to a 409 (store,
+    ingest or queue not configured), so the frontend can tell which piece is
+    unwired without parsing a message.
     """
 
     def __init__(self, reason: str, detail: str):
@@ -72,12 +65,11 @@ class ExecutionDisabled(Exception):
 class ExecutionCapability:
     """Whether this console can dispatch work, and if not, precisely why.
 
-    All four must hold: not ``--audit-only``, an output location a
-    ``RemoteStore`` can publish shards to, an ingest location to enqueue
-    documents from, and a job queue to dispatch through (see the module
-    docstring). ``can_execute`` is their conjunction; the individual flags
-    are surfaced so the screen can name the missing piece rather than a bare
-    "disabled".
+    All three must hold: an output location a ``RemoteStore`` can publish
+    shards to, an ingest location to enqueue documents from, and a job queue
+    to dispatch through (see the module docstring). ``can_execute`` is their
+    conjunction; the individual flags are surfaced so the screen can name the
+    missing piece rather than a bare "disabled".
 
     It reports no stage list. It used to carry ``STAGE_NAMES``, which read as
     "the stages this console dispatches" while nothing here could dispatch
@@ -85,7 +77,6 @@ class ExecutionCapability:
     ``get_stage_graph()``, which serves it from the contracts.
     """
 
-    audit_only: bool
     has_store: bool
     has_ingest: bool
     has_queue: bool
@@ -94,12 +85,11 @@ class ExecutionCapability:
 
     @property
     def can_execute(self) -> bool:
-        return (not self.audit_only) and self.has_store and self.has_ingest and self.has_queue
+        return self.has_store and self.has_ingest and self.has_queue
 
     def as_dict(self) -> dict:
         return {
             "can_execute": self.can_execute,
-            "audit_only": self.audit_only,
             "has_store": self.has_store,
             "has_ingest": self.has_ingest,
             "has_queue": self.has_queue,
@@ -117,7 +107,6 @@ def execution_status(settings: UISettings) -> ExecutionCapability:
     ``test`` actions.
     """
     return ExecutionCapability(
-        audit_only=settings.audit_only,
         has_store=settings.is_remote,
         has_ingest=bool(settings.ingest_uri),
         has_queue=bool(settings.db_dsn),
@@ -129,10 +118,9 @@ def execution_status(settings: UISettings) -> ExecutionCapability:
 def _guard(settings: UISettings, *, needs_ingest: bool = True) -> ExecutionCapability:
     """Refuse any write action the console is not configured to perform.
 
-    Ordered so the operator sees the most actionable failure first: an
-    audit-only deployment is a deliberate choice (403); a missing store,
-    ingest location or queue is a wiring gap (409), checked in that order.
-    Every write path calls this before touching either.
+    Ordered so the operator sees the most actionable failure first: a missing
+    store, ingest location or queue is a wiring gap (409), checked in that
+    order. Every write path calls this before touching either.
 
     *needs_ingest* is false for dispatching the downstream stages: they read
     the shards extraction already published to the store and never look at the
@@ -140,11 +128,6 @@ def _guard(settings: UISettings, *, needs_ingest: bool = True) -> ExecutionCapab
     still finish a run it started.
     """
     cap = execution_status(settings)
-    if cap.audit_only:
-        raise ExecutionDisabled(
-            "execute_disabled",
-            "This console is audit-only. Restart it without --audit-only to dispatch work.",
-        )
     if not cap.has_store:
         raise ExecutionDisabled(
             "no_store",
@@ -209,7 +192,7 @@ def enqueue_extraction(
     write one idempotent queue row each, stamped with the ingest root.
 
     Raises :class:`ExecutionDisabled` when the console cannot dispatch (the
-    route maps it to 403/409) and ``ValueError`` on bad input (→ 400).
+    route maps it to 409) and ``ValueError`` on bad input (→ 400).
     """
     _guard(settings)
     if batch_size < 1:
@@ -349,7 +332,7 @@ def enqueue_downstream_stages(
     reachable through ``womblex run-stage``.
 
     Raises :class:`ExecutionDisabled` when the console cannot dispatch (→
-    403/409), ``pydantic.ValidationError`` on a config that would not load (→
+    409), ``pydantic.ValidationError`` on a config that would not load (→
     400) and ``ValueError`` on an unsafe run id or a config that enables no
     stage at all (→ 400).
     """

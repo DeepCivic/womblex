@@ -121,7 +121,7 @@ def get_log(
 
     A *name* that fails the ``batch-NNNN.log`` pattern and a *name* that passes
     but is not present return the **same 404**, both carrying the ``available``
-    list. That is deliberate (docs/ui-ingest-plan.md merge 5): the operator gets
+    list. That is deliberate: the operator gets
     "that log is not here — these are" in one round trip, and a rejected name is
     indistinguishable from an absent one, so the endpoint cannot be used to probe
     for what exists outside the run's ``logs/`` prefix. Containment happens first

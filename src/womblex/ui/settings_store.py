@@ -1,4 +1,4 @@
-"""Operator-saved ingest/output location override (docs/ui-ingest-plan.md merge 3a).
+"""Operator-saved ingest/output location override.
 
 Env and compose values are *defaults*: the Resources Console can add or
 update a location without a restart, persisted to one ``locations.json`` in a

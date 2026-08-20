@@ -4,8 +4,8 @@ The one writable-to-a-run surface in the console. ``GET /status`` is a
 cheap, network-free read of whether this deployment can dispatch work (and
 if not, why); ``POST /enqueue`` plans an extraction run into the queue and
 ``POST /stages`` dispatches that run's downstream stages. All delegate to
-:mod:`womblex.ui.execute`, which enforces the ``--audit-only`` switch and the
-store+queue requirement (plan §4) before touching anything — this router only
+:mod:`womblex.ui.execute`, which enforces the store+ingest+queue requirement
+(plan §4) before touching anything — this router only
 maps its :class:`~womblex.ui.execute.ExecutionDisabled` reasons onto HTTP
 status codes.
 
@@ -24,13 +24,12 @@ from womblex.ui.deps import UISettings, get_settings
 
 router = APIRouter(prefix="/api/execute", tags=["execute"])
 
-#: `ExecutionDisabled.reason` -> HTTP status. An audit-only deployment is a
-#: deliberate choice (403 Forbidden); a missing store/queue is a wiring gap on
-#: an otherwise willing console (409 Conflict — the request cannot be served in
-#: the console's current state). Kept as data so a new reason must be mapped
-#: explicitly rather than defaulting to a misleading 403.
+#: `ExecutionDisabled.reason` -> HTTP status. A missing store, ingest location
+#: or queue is a wiring gap on an otherwise willing console (409 Conflict — the
+#: request cannot be served in the console's current state). Kept as data so a
+#: new reason must be mapped explicitly rather than defaulting to a misleading
+#: status.
 _REASON_STATUS: dict[str, int] = {
-    "execute_disabled": 403,
     "no_store": 409,
     "no_ingest": 409,
     "no_queue": 409,
@@ -43,7 +42,7 @@ class EnqueueRequest(BaseModel):
     ``input_prefix`` is ingest-relative (the enqueue lists
     ``<ingest_uri>/<prefix>``), matching ``womblex enqueue --input-prefix``.
     Optional: omitted means the whole configured ingest root, which is the
-    normal case (docs/ui-ingest-plan.md §2 "no prefix field on any screen").
+    normal case ("no prefix field on any screen").
     ``run_id`` omitted mints a fresh timestamped id; supplying an existing
     one resumes it, since enqueue is idempotent on ``(run_id, batch_num)``.
     """
@@ -75,10 +74,9 @@ def post_enqueue(
 ) -> dict:
     """Plan an extraction run into the queue; workers the platform brings up run it.
 
-    403 when the console is audit-only, 409 when no store, ingest location
-    or queue is configured (the states :class:`ExecutionDisabled`
-    distinguishes), 400 on bad input (no documents under the prefix, an
-    unsafe run_id).
+    409 when no store, ingest location or queue is configured (the states
+    :class:`ExecutionDisabled` distinguishes), 400 on bad input (no documents
+    under the prefix, an unsafe run_id).
     """
     try:
         result = execute.enqueue_extraction(
@@ -120,8 +118,8 @@ def post_stages(
 ) -> dict:
     """Dispatch this run's downstream stages; workers claim them once it drains.
 
-    Same status shapes as ``POST /enqueue`` — 403 audit-only, 409 store/queue
-    unwired, 400 bad input — plus 400 carrying Pydantic's own error list when
+    Same status shapes as ``POST /enqueue`` — 409 store/ingest/queue unwired,
+    400 bad input — plus 400 carrying Pydantic's own error list when
     the posted config would not load, matching what the composer's preset save
     returns for the same fault.
     """

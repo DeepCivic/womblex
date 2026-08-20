@@ -427,16 +427,14 @@ store a distributed run published to:
 pip install womblex[ui]                        # reads a local root or an s3:// store out of the box
 womblex ui --output-root output/               # local runs, at :8080
 womblex ui --output-root output/ --presets-dir presets/  # + save composer presets
-womblex ui --store <uri> --dsn <dsn>           # + dispatch (execution on by default)
-womblex ui --store <uri> --dsn <dsn> --audit-only  # read/inspect only, no dispatch
+womblex ui --store <uri> --dsn <dsn>           # + dispatch a run into the queue
 docker compose up -d ui                        # or beside the stack above
 ```
 
-It adds no pipeline logic. Dispatch is on by default: wire a `--store`, a
+It adds no pipeline logic. Wire a `--store`, a
 `--dsn` and an `--ingest` location and the Pipeline Composer can plan a run into
-the queue (workers do the work; the console runs no scheduler). Pass
-`--audit-only` for a
-pure read/inspect console that refuses to dispatch. Its writable surfaces are
+the queue (workers do the work; the console runs no scheduler); a console with
+no store or queue configured still reads and inspects runs. Its writable surfaces are
 deliberately narrow. The report action (`POST /api/runs/{run_id}/feedback`)
 files a reviewer's note about a record as a single JSON file under a
 `feedback/` location that is always a *sibling* of the runs, never inside one
@@ -448,8 +446,7 @@ store-backed mode they land under the object store's own `presets/` prefix,
 alongside `feedback/` — so the compose service writes both feedback and presets
 to the object store, needing no writable mount for them. There is
 no authentication, so it binds to loopback unless `--host` says otherwise; put
-your own control in front of anything wider. The screen designs and data
-sources are documented in [`docs/ui-ingest-plan.md`](docs/ui-ingest-plan.md).
+your own control in front of anything wider.
 
 ## How It Works
 

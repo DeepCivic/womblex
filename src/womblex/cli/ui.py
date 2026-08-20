@@ -61,13 +61,6 @@ def _register_ui(p: argparse.ArgumentParser) -> None:
              "Resources Console's location cards are read-only and explain "
              "the flag.",
     )
-    p.add_argument(
-        "--audit-only", action="store_true",
-        help="Disable the Execution Controls (docs/ui-plan.md merge 11) — a pure "
-             "auditing console that can configure and inspect but not dispatch. "
-             "By default the console can enqueue extraction runs into the job queue "
-             "(this also needs a --store and a --dsn to actually dispatch).",
-    )
 
 
 def cmd_ui(args: argparse.Namespace) -> int:
@@ -84,7 +77,7 @@ def cmd_ui(args: argparse.Namespace) -> int:
     try:
         settings = resolve_settings(
             args.output_root, args.store,
-            audit_only=args.audit_only, feedback_dir=args.feedback_dir,
+            feedback_dir=args.feedback_dir,
             db_dsn=args.dsn, presets_dir=args.presets_dir,
             ingest_uri=args.ingest, settings_dir=args.settings_dir,
         )
@@ -95,7 +88,6 @@ def cmd_ui(args: argparse.Namespace) -> int:
     app = create_app(
         output_root=settings.output_root,
         store_uri=settings.store_uri,
-        audit_only=settings.audit_only,
         feedback_dir=settings.feedback_dir,
         db_dsn=settings.db_dsn,
         presets_dir=settings.presets_dir,

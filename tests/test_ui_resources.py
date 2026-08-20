@@ -336,8 +336,7 @@ class TestResourcesApi:
 
 
 class TestSettingsStore:
-    """``ui/settings_store.py`` — the saved-override file's shape
-    (docs/ui-ingest-plan.md merge 3a)."""
+    """``ui/settings_store.py`` — the saved-override file's shape."""
 
     def test_read_missing_file_returns_empty(self, tmp_path: Path) -> None:
         assert read_saved_locations(tmp_path) == SavedLocations()
@@ -388,7 +387,7 @@ class TestSettingsStore:
 
 
 class TestLocationOverlayPrecedence:
-    """flag < env < saved (docs/ui-ingest-plan.md §3) — ``resolve_settings``
+    """flag < env < saved — ``resolve_settings``
     resolves flag/env; the saved override is layered on top per request."""
 
     def test_flag_wins_with_no_env_or_saved(
@@ -443,7 +442,7 @@ class TestLocationOverlayPrecedence:
 
 
 class TestEditableLocations:
-    """``PUT /api/resources/locations`` (docs/ui-ingest-plan.md merge 3a)."""
+    """``PUT /api/resources/locations``."""
 
     def test_cards_report_not_editable_without_a_settings_dir(self, tmp_path: Path) -> None:
         client = TestClient(create_app(output_root=tmp_path))
@@ -456,13 +455,6 @@ class TestEditableLocations:
         body = client.get("/api/resources").json()
         assert body["store"]["editable"] is True
         assert body["ingest"]["editable"] is True
-
-    def test_put_locations_403_when_audit_only(self, tmp_path: Path) -> None:
-        client = TestClient(create_app(
-            output_root=tmp_path, audit_only=True, settings_dir=tmp_path / "settings",
-        ))
-        resp = client.put("/api/resources/locations", json={"ingest_uri": None, "store_uri": None})
-        assert resp.status_code == 403
 
     def test_put_locations_409_without_settings_dir(self, tmp_path: Path) -> None:
         client = TestClient(create_app(output_root=tmp_path))

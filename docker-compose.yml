@@ -266,8 +266,8 @@ services:
         required: false
     environment:
       <<: *cloud-env
-      # Where an operator-saved ingest/output override lives (docs/ui-ingest-plan.md
-      # merge 3a) — its own writable mount, since the override file is what
+      # Where an operator-saved ingest/output override lives
+      # — its own writable mount, since the override file is what
       # *names* the store and so cannot live inside it.
       WOMBLEX_UI_SETTINGS_DIR: /settings
     ports:

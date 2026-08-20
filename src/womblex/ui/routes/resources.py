@@ -8,9 +8,9 @@ letting a slow or dead connection block only the card the operator clicked,
 not the page load.
 
 ``PUT /locations`` is the one write here: save, update or clear the operator
-override for the ingest/output cards. Guarded like dispatch is — 403 when
-``--audit-only``, 409 with no ``--settings-dir`` — since editing where
-documents come from and shards land is dispatch-adjacent, not a pure read.
+override for the ingest/output cards. Guarded like dispatch is — 409 with no
+``--settings-dir`` — since editing where documents come from and shards land
+is dispatch-adjacent, not a pure read.
 """
 from __future__ import annotations
 
@@ -83,15 +83,10 @@ def put_locations(
 ) -> dict:
     """Save / update / clear the ingest and output location override.
 
-    403 when the console is audit-only, 409 when no ``--settings-dir`` (or
-    ``$WOMBLEX_UI_SETTINGS_DIR``) is configured, 400 on an overlapping
-    ingest/output pair or a location ``RemoteStore`` cannot open.
+    409 when no ``--settings-dir`` (or ``$WOMBLEX_UI_SETTINGS_DIR``) is
+    configured, 400 on an overlapping ingest/output pair or a location
+    ``RemoteStore`` cannot open.
     """
-    if base.audit_only:
-        raise HTTPException(
-            status_code=403,
-            detail="This console is audit-only. Restart it without --audit-only to edit locations.",
-        )
     if not base.settings_writable:
         raise HTTPException(
             status_code=409,

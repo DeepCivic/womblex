@@ -291,8 +291,7 @@ def _write_log(run_root: Path, run_id: str, name: str, body: str) -> None:
 
 
 class TestRunLogsApi:
-    """Batch logs readable and downloadable from the console
-    (docs/ui-ingest-plan.md merge 5)."""
+    """Batch logs readable and downloadable from the console."""
 
     def test_lists_logs_newest_first(self, api_client: tuple[TestClient, Path]) -> None:
         client, run_root = api_client
@@ -1347,15 +1346,15 @@ def _seed_store_inputs(store_root: Path, prefix: str, names: list[str]) -> None:
 
 
 class TestExecuteApi:
-    """Dispatch requires a store, an ingest location, and a DSN; `--audit-only`
-    is the opt-out switch (docs/ui-plan.md merge 11, docs/ui-ingest-plan.md §2)."""
+    """Dispatch requires a store, an ingest location, and a DSN
+    (docs/ui-plan.md merge 11)."""
 
-    def test_status_reflects_the_four_flags(self, tmp_path: Path) -> None:
+    def test_status_reflects_the_flags(self, tmp_path: Path) -> None:
         client = TestClient(create_app(output_root=tmp_path))
         body = client.get("/api/execute/status").json()
         assert body["can_execute"] is False
         assert body == {
-            "can_execute": False, "audit_only": False,
+            "can_execute": False,
             "has_store": False, "has_ingest": False, "has_queue": False,
             "ingest_uri": None, "output_uri": str(tmp_path),
         }
@@ -1379,15 +1378,6 @@ class TestExecuteApi:
         assert body["can_execute"] is True
         assert body["ingest_uri"] == str(tmp_path / "inbox")
         assert body["output_uri"] == str(tmp_path / "store")
-
-    def test_enqueue_forbidden_when_audit_only(self, tmp_path: Path) -> None:
-        """--audit-only gives a pure auditing console (plan §6) — 403 before touching anything."""
-        client = TestClient(create_app(
-            store_uri=str(tmp_path / "store"), ingest_uri=str(tmp_path / "inbox"),
-            db_dsn="postgresql://x/y", audit_only=True,
-        ))
-        resp = client.post("/api/execute/enqueue", json={})
-        assert resp.status_code == 403
 
     def test_enqueue_conflict_without_a_store(self, tmp_path: Path) -> None:
         """A local output_root can configure and audit but not dispatch (plan §4)."""
