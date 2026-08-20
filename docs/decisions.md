@@ -575,7 +575,10 @@ page, and chunking reads `elements` rather than `pages[i].text`.
      enrich after chunk)".
 
   **Verification gates — require a live Isaacus key. Checked 2026-06 against a
-  live `kanon-2-enricher` key with semchunk 4.0.0 / isaacus 0.20.0:**
+  live `kanon-2-enricher` key with semchunk 4.0.0 / isaacus 0.20.0; the
+  end-to-end path is now a standing regression test
+  (`tests/test_pipeline.py::TestAiChunkingLive`, live like the enrich/embed
+  tests — no mocks, skips cleanly without `ISAACUS_API_KEY`):**
   1. ✅ `document.text` is byte-identical to the input narrative (the offset
      basis the whole reuse rests on).
   2. ✅ A rehydrated `Document.model_validate_json()` satisfies semchunk's
@@ -589,12 +592,12 @@ page, and chunking reads `elements` rather than `pages[i].text`.
      not exercised — close this with a large real fixture before declaring
      production-ready.
 
-  **Status:** shipped 2026-06 (offline tests + live round-trip on the vendored
-  Throsby fixture). The `chunk_batch` Document-acceptance change was the main
-  risk and is covered by the byte-identity guard above. Remaining caveat: the
-  gate-3 large-document residual — until a doc exceeding the enricher context
-  window is exercised, treat very large inputs under `chunking_model` + reuse as
-  unverified.
+  **Status:** shipped 2026-06 (offline seam tests + a live AI-chunking test over
+  the vendored Throsby fixture, `tests/test_pipeline.py::TestAiChunkingLive`).
+  The `chunk_batch` Document-acceptance change was the main risk and is covered
+  by the byte-identity guard above. Remaining caveat: the gate-3 large-document
+  residual — until a doc exceeding the enricher context window is exercised,
+  treat very large inputs under `chunking_model` + reuse as unverified.
 
 - **Downstream text-cleaning op (#B/#D)** — *v1 shipped* as `womblex normalise
   --shards` (`process/normalise.py` transforms + `process/normalise_stage.py`

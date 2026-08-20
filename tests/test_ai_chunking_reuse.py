@@ -11,10 +11,12 @@ Covers the Womblex-owned seams of the single-enrichment reuse design
 - ``WomblexConfig`` auto-enables ``enrichment.persist_document`` only when AI
   chunking + enrich are both on.
 
-semchunk's actual handling of a real SDK Document is covered by the live
-verification gates recorded in ``docs/decisions.md`` (a fake duck-typed
-Document cannot pass semchunk's ``isinstance`` check, so chunk_batch wiring is
-exercised here with a recording fake chunker).
+semchunk's actual handling of a real SDK Document is covered end-to-end by the
+live AI-chunking test (``tests/test_pipeline.py::TestAiChunkingLive``, real
+``kanon-2-enricher``, skips without a key) and the live verification gates
+recorded in ``docs/decisions.md``; a fake duck-typed Document cannot pass
+semchunk's ``isinstance`` check, so the ``chunk_batch`` wiring is exercised here
+with a recording fake chunker instead.
 """
 
 from __future__ import annotations
