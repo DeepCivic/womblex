@@ -96,6 +96,38 @@ def test_multiplier_is_one_lane_per_magnitude(text, canonical):
     assert _one(text).multiplier == canonical
 
 
+@pytest.mark.parametrize(("text", "value", "canonical"), [
+    ("USD 6.6Mn", Decimal(6600000), "million"),
+    ("USD 6.6Bn", Decimal(6600000000), "billion"),
+    ("USD 10K", Decimal(10000), "thousand"),
+    ("USD 6.6M", Decimal(6600000), "million"),
+    ("6.6Mn USD", Decimal(6600000), "million"),
+    ("10K USD", Decimal(10000), "thousand"),
+])
+def test_capitalised_scale_reads_behind_an_iso_code(text, value, canonical):
+    """A capitalised scale token must survive the case-sensitive ISO patterns.
+
+    p2 / p3 are compiled without `re.IGNORECASE` so `[A-Z]{3}` cannot match a
+    lowercase word, and that reached the shared scale tail: `USD 6.6Mn` matched
+    only `USD 6.6` and stored 6.6 at 0.99 confidence — silently wrong by 10**6,
+    the failure class typed ground truth exists to catch — while `6.6Mn USD`
+    missed outright. The symbol patterns were never affected.
+    """
+    span = _one(text)
+    assert span.value == value
+    assert span.multiplier == canonical
+
+
+def test_scale_letter_does_not_eat_an_iso_codes_first_character():
+    """The guard that keeps the case-insensitive scale tail honest.
+
+    `MXN` opens with a magnitude letter; reading it as `M` + `XN` would turn
+    100 Mexican pesos into 100 million of nothing.
+    """
+    span = _one("The invoice was paid in 100 MXN for the transfer fee.")
+    assert (span.value, span.currency, span.multiplier) == (Decimal(100), "MXN", None)
+
+
 def test_values_are_exact_decimals_not_floats():
     span = _one("$0.10")
     assert span.value == Decimal("0.10")

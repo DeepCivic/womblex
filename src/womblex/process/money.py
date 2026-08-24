@@ -121,7 +121,14 @@ _HGAP = r"[^\S\n]*"
 # the range separator, and admitting it would turn `$10–20m` into a negative.
 _MINUS = r"[-−]"
 
-_SCALE_TAIL = rf"(?:{_GAP}(?P<scale>{_SCALE_ALT})(?![A-Za-z]))?"
+# The scale token is matched case-insensitively *locally*. The ISO patterns
+# (p2 / p3) are compiled case-sensitively so `[A-Z]{3}` cannot match a
+# lowercase word, and that sensitivity used to reach the scale tail too:
+# `USD 6.6Mn` matched only `USD 6.6` and stored 6.6 at 0.99 confidence —
+# silently wrong by 10**6 — while `6.6Mn USD` missed entirely. The trailing
+# `(?![A-Za-z])` still keeps a scale letter out of an ISO code's first
+# character (`100 MUR` is Mauritian rupees, not 100 million UR).
+_SCALE_TAIL = rf"(?:{_GAP}(?i:(?P<scale>{_SCALE_ALT}))(?![A-Za-z]))?"
 _NEG = rf"(?P<neg>{_MINUS}{_HGAP})?"
 
 
