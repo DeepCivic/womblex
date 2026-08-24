@@ -2,7 +2,8 @@
 
 Exercises the post-I2 surface: a single :func:`chunk_batch` entry point
 plus :func:`create_chunker`, :func:`table_to_markdown`,
-:func:`reassemble_narrative`, :func:`collect_tables_from_elements`,
+:func:`reassemble_narrative`, :func:`element_spans`,
+:func:`chunks_in_document_order`, :func:`collect_tables_from_elements`,
 :func:`build_chunk_input`, the :class:`TextChunk` / :class:`ChunkInput`
 dataclasses and the ``_repair_redaction_splits`` helper.
 
@@ -21,8 +22,10 @@ from womblex.process.chunker import (
     _repair_redaction_splits,
     build_chunk_input,
     chunk_batch,
+    chunks_in_document_order,
     collect_tables_from_elements,
     create_chunker,
+    element_spans,
     reassemble_narrative,
     table_to_markdown,
 )
@@ -275,6 +278,123 @@ class TestCollectTablesFromElements:
 
 
 # ---------------------------------------------------------------------------
+# element_spans / chunks_in_document_order
+# ---------------------------------------------------------------------------
+
+
+def _chunk_row(content_type: str, start_char: int, elem_order: int | None = None) -> dict:
+    """A CHUNKS_SCHEMA-shaped row — the shape a consumer reads back."""
+    return {"content_type": content_type, "start_char": start_char, "elem_order": elem_order}
+
+
+class TestElementSpans:
+    def test_spans_index_the_reassembled_narrative(self) -> None:
+        elements = [_para(0, "alpha", 1), _para(1, "beta", 1)]
+        text, _ = reassemble_narrative(elements)
+        spans = element_spans(elements)
+        assert spans == [(0, 0, 5), (1, 5, 11)]
+        # Slicing the narrative by a span returns that element's text (the
+        # leading join belongs to the span, the same convention page breaks use).
+        assert text[spans[0][1]:spans[0][2]] == "alpha"
+        assert text[spans[1][1]:spans[1][2]] == "\n\nbeta"
+        assert spans[-1][2] == len(text)
+
+    def test_only_narrative_bearing_elements_appear(self) -> None:
+        # Tables and empty paragraphs contribute nothing to the narrative, so
+        # they have no span — elem_order 1 and 2 are absent.
+        elements = [
+            _para(0, "x", 1),
+            _table_elem(1, 1, [["a"]], None),
+            _para(2, "", 1),
+            _para(3, "y", 1),
+        ]
+        assert [order for order, _, _ in element_spans(elements)] == [0, 3]
+
+    def test_no_narrative_yields_no_spans(self) -> None:
+        assert element_spans([_table_elem(0, 1, [["a"]], None)]) == []
+
+
+class TestChunksInDocumentOrder:
+    def test_tables_interleave_with_the_prose_they_followed(self) -> None:
+        elements = [
+            _para(0, "alpha", 1),
+            _table_elem(1, 1, [["A"], ["1"]], header_rows=[0]),
+            _para(2, "beta", 1),
+            _table_elem(3, 1, [["B"], ["2"]], header_rows=[0]),
+            _para(4, "gamma", 1),
+        ]
+        spans = element_spans(elements)
+        # Projection order: every narrative chunk, then every table chunk.
+        rows = [
+            _chunk_row("narrative", 0),
+            _chunk_row("narrative", 7),
+            _chunk_row("narrative", 13),
+            _chunk_row("table", 0, elem_order=3),
+            _chunk_row("table", 0, elem_order=1),
+        ]
+        ordered = chunks_in_document_order(rows, spans)
+        assert [(r["content_type"], r["start_char"], r["elem_order"]) for r in ordered] == [
+            ("narrative", 0, None),
+            ("table", 0, 1),
+            ("narrative", 7, None),
+            ("table", 0, 3),
+            ("narrative", 13, None),
+        ]
+
+    def test_table_sorts_before_the_narrative_chunk_it_precedes(self) -> None:
+        # A table anchors where the next element begins; the table element
+        # comes first in the document, so it sorts first on the tie.
+        elements = [_para(0, "alpha", 1), _table_elem(1, 1, [["A"]], None), _para(2, "beta", 1)]
+        spans = element_spans(elements)
+        rows = [_chunk_row("narrative", spans[1][1]), _chunk_row("table", 0, elem_order=1)]
+        assert [r["content_type"] for r in chunks_in_document_order(rows, spans)] == [
+            "table", "narrative",
+        ]
+
+    def test_trailing_table_sorts_last(self) -> None:
+        elements = [_para(0, "alpha", 1), _table_elem(1, 1, [["A"]], None)]
+        spans = element_spans(elements)
+        rows = [_chunk_row("table", 0, elem_order=1), _chunk_row("narrative", 0)]
+        assert [r["content_type"] for r in chunks_in_document_order(rows, spans)] == [
+            "narrative", "table",
+        ]
+
+    def test_multiple_chunks_of_one_table_keep_markdown_order(self) -> None:
+        # A table's own chunks order by their offset into its markdown — not by
+        # the order the rows happened to arrive in, so an unordered read is safe.
+        elements = [_para(0, "alpha", 1), _table_elem(1, 1, [["A"]], None), _para(2, "beta", 1)]
+        spans = element_spans(elements)
+        rows = [
+            _chunk_row("table", 40, elem_order=1),
+            _chunk_row("narrative", 0),
+            _chunk_row("table", 0, elem_order=1),
+        ]
+        ordered = chunks_in_document_order(rows, spans)
+        assert [r["start_char"] for r in ordered if r["content_type"] == "table"] == [0, 40]
+
+    def test_sheets_sort_last_in_their_existing_order(self) -> None:
+        # A spreadsheet sheet has no anchor and no narrative to be ordered
+        # against; it must not displace anything that does.
+        elements = [_para(0, "alpha", 1)]
+        spans = element_spans(elements)
+        rows = [
+            _chunk_row("table", 0, elem_order=None),
+            _chunk_row("table", 99, elem_order=None),
+            _chunk_row("narrative", 0),
+        ]
+        ordered = chunks_in_document_order(rows, spans)
+        assert [r["content_type"] for r in ordered] == ["narrative", "table", "table"]
+        assert [r["start_char"] for r in ordered[1:]] == [0, 99]
+
+    def test_no_narrative_orders_tables_by_anchor(self) -> None:
+        rows = [_chunk_row("table", 0, elem_order=3), _chunk_row("table", 0, elem_order=1)]
+        assert [r["elem_order"] for r in chunks_in_document_order(rows, [])] == [1, 3]
+
+    def test_empty_input(self) -> None:
+        assert chunks_in_document_order([], []) == []
+
+
+# ---------------------------------------------------------------------------
 # build_chunk_input
 # ---------------------------------------------------------------------------
 
@@ -353,6 +473,35 @@ class TestChunkBatch:
         )
         assert [c.elem_order for c in tables] == [1, 3]
         assert "A" in tables[0].text and "B" in tables[1].text
+
+    def test_real_chunks_interleave_via_element_spans(self) -> None:
+        # End to end: chunk a doc whose prose brackets two tables, then put the
+        # two projections back into document order from the anchors + spans.
+        # chunk_size=2 (words) splits each paragraph into its own chunk, so the
+        # narrative really is interleaved rather than one chunk with tables after.
+        chunker = _make_test_chunker(chunk_size=2)
+        elements = [
+            _para(0, "alpha prose", 1),
+            _table_elem(1, 1, [["Aardvark"], ["1"]], header_rows=[0]),
+            _para(2, "beta prose", 1),
+            _table_elem(3, 1, [["Bison"], ["2"]], header_rows=[0]),
+            _para(4, "gamma prose", 1),
+        ]
+        out = chunk_batch([build_chunk_input("a", elements)], chunker)
+        rows = [
+            {"content_type": c.content_type, "start_char": c.start_char,
+             "elem_order": c.elem_order, "text": c.text}
+            for c in out["a"]
+        ]
+        ordered = chunks_in_document_order(rows, element_spans(elements))
+
+        def first_with(marker: str) -> int:
+            return next(k for k, r in enumerate(ordered) if marker in r["text"])
+
+        positions = [first_with(m) for m in ("alpha", "Aardvark", "beta", "Bison", "gamma")]
+        assert positions == sorted(positions)
+        # Unordered, the table chunks would all sit past every narrative chunk.
+        assert positions[1] < first_with("gamma")
 
     def test_multiple_docs_keyed_by_source_hash(self) -> None:
         chunker = _make_test_chunker(chunk_size=50)

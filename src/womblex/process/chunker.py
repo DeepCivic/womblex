@@ -35,6 +35,10 @@ Womblex-only surface (no semchunk equivalent):
 - :func:`table_to_markdown` — TableData → markdown projection.
 - :func:`reassemble_narrative` / :func:`collect_tables_from_elements` /
   :func:`build_chunk_input` — element-stream → ``ChunkInput`` projection.
+- :func:`element_spans` / :func:`chunks_in_document_order` — the narrative
+  offset map, and the interleave it enables. The two projections above are
+  disjoint, so document order survives only as the ``elem_order`` anchor on
+  table chunks; these turn that anchor back into a position.
 - :func:`_repair_redaction_splits` — heal ``<REDACTED>`` markers split
   across a chunk boundary; semchunk has no opinion about our marker.
 
@@ -55,9 +59,9 @@ from __future__ import annotations
 
 import bisect
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
 import semchunk
 
@@ -464,6 +468,27 @@ def _build_narrative_chunk(
 # ---------------------------------------------------------------------------
 
 
+def _narrative_pieces(
+    elements: list[Element],
+) -> Iterator[tuple[Element, str, int, int]]:
+    """Yield ``(element, piece, start, end)`` for the narrative-bearing elements.
+
+    The one place the narrative's coordinate space is defined —
+    :func:`reassemble_narrative` and :func:`element_spans` are both views
+    over it, so the two cannot drift. ``start`` includes the
+    ``NARRATIVE_JOIN`` that separates an element from its predecessor.
+    """
+    cursor = 0
+    first = True
+    for e in elements:
+        if e.kind not in TEXT_KINDS or not e.text:
+            continue
+        piece = e.text if first else NARRATIVE_JOIN + e.text
+        first = False
+        start, cursor = cursor, cursor + len(piece)
+        yield e, piece, start, cursor
+
+
 def reassemble_narrative(
     elements: list[Element],
 ) -> tuple[str, list[tuple[int, int]]]:
@@ -478,23 +503,38 @@ def reassemble_narrative(
     """
     parts: list[str] = []
     spans: list[list] = []
-    cursor = 0
 
-    for e in elements:
-        if e.kind not in TEXT_KINDS or not e.text:
-            continue
-        piece = e.text if not parts else NARRATIVE_JOIN + e.text
+    for e, piece, start, end in _narrative_pieces(elements):
         parts.append(piece)
-        next_cursor = cursor + len(piece)
-        if e.page is not None:
-            if spans and spans[-1][2] == e.page:
-                spans[-1][1] = next_cursor
-            else:
-                spans.append([cursor, next_cursor, e.page])
-        cursor = next_cursor
+        if e.page is None:
+            continue
+        if spans and spans[-1][2] == e.page:
+            spans[-1][1] = end
+        else:
+            spans.append([start, end, e.page])
 
     page_breaks = [(end, page) for _, end, page in spans]
     return "".join(parts), page_breaks
+
+
+def element_spans(elements: list[Element]) -> list[tuple[int, int, int]]:
+    """``(elem_order, start, end)`` per element contributing to the narrative.
+
+    The offset map :func:`reassemble_narrative` does not return. It places
+    an element in the narrative coordinate space, which is what recovering
+    narrative ↔ table document order needs: a table chunk's only positional
+    anchor is its source element's ``elem_order``, and nothing else maps
+    that to a narrative offset (chunks otherwise join to elements by
+    offset overlap, never by ``elem_order``). See
+    :func:`chunks_in_document_order`.
+
+    Spans are contiguous, sorted by ``elem_order``, and cover the whole
+    narrative; the last ``end`` is its length. Elements are assumed
+    already sorted by ``order``, and must be the *same* element stream
+    (same ``text_source`` overlay) the narrative was reassembled from —
+    a different overlay is a different coordinate space.
+    """
+    return [(e.order, start, end) for e, _piece, start, end in _narrative_pieces(elements)]
 
 
 def collect_tables_from_elements(
@@ -541,3 +581,68 @@ def build_chunk_input(
         page_breaks=page_breaks,
         tables=tables,
     )
+
+
+# ---------------------------------------------------------------------------
+# Document order
+# ---------------------------------------------------------------------------
+
+_Row = TypeVar("_Row", bound=Mapping[str, Any])
+
+
+def _table_anchor(elem_order: int, spans: Sequence[tuple[int, int, int]]) -> int:
+    """Narrative offset a table element sits at: where the next element begins.
+
+    A table past every narrative element anchors at the narrative's end.
+    """
+    idx = bisect.bisect_right(spans, elem_order, key=lambda s: s[0])
+    if idx < len(spans):
+        return spans[idx][1]  # start of the first element after the table
+    return spans[-1][2] if spans else 0
+
+
+def _document_order_key(
+    row: Mapping[str, Any], spans: Sequence[tuple[int, int, int]],
+) -> tuple[int, int, int, int]:
+    """Sort key: (position, rank at that position, element, offset in element).
+
+    Rank orders a table (0) before the narrative chunk (1) it is anchored
+    at — the table element precedes that text — and puts sheets (2) last.
+    The final slot keeps one table's own chunks in markdown order without
+    relying on the caller's input order; sheets have no such handle (the
+    chunks sidecar carries nothing that tells one sheet from another), so
+    they hold their input order and take 0.
+    """
+    narrative_end = spans[-1][2] if spans else 0
+    if row["content_type"] == "narrative":
+        return (row["start_char"], 1, 0, 0)
+    elem_order = row["elem_order"]
+    if elem_order is None:  # spreadsheet sheet — no narrative to be ordered against
+        return (narrative_end, 2, 0, 0)
+    return (_table_anchor(elem_order, spans), 0, elem_order, row["start_char"])
+
+
+def chunks_in_document_order(
+    chunks: Sequence[_Row], spans: Sequence[tuple[int, int, int]],
+) -> list[_Row]:
+    """Sort chunk rows into document order — narrative and tables interleaved.
+
+    The two chunk projections carry their positions in two coordinate
+    spaces: a narrative chunk's ``start_char`` indexes the reassembled
+    narrative, while a table chunk's only anchor is the ``elem_order`` of
+    the element it came from. *spans* — :func:`element_spans` over the
+    same element stream, under the same ``text_source`` overlay the chunks
+    were produced under — is what makes the two comparable.
+
+    *chunks* are ``CHUNKS_SCHEMA`` rows (``content_type``, ``start_char``,
+    ``elem_order``); one document's, since offsets are per source_hash.
+    A table anchored at a narrative chunk's start sorts before it — the
+    table element precedes that text in the document. Spreadsheet sheets
+    (null ``elem_order``) have no narrative to be ordered against and sort
+    last, in the order they arrive — nothing in the chunks sidecar tells
+    one sheet from another, so pass the rows in ``chunk_index`` order to
+    keep each sheet's chunks together. A table chunk read from a shard
+    written before the anchor column existed is null too, so it sorts
+    there as well — that shard holds no position to recover.
+    """
+    return sorted(chunks, key=lambda r: _document_order_key(r, spans))

@@ -690,8 +690,9 @@ is the only requirement, not a hard dependency.
   inputs are typically large tabular/reference data that should not be routed to
   the enricher at all (reference data belongs on the graph/reference path).
 - **No projection carries narrative ↔ table document order into chunks.**
-  *Anchor shipped 2026-08 (option b below); the interleaved-projection question
-  stays open.* `build_chunk_input`
+  *Option (b) complete 2026-08 — anchor plus the offset map that makes it
+  usable; the interleaved-projection question (option a) stays open.*
+  `build_chunk_input`
   (`chunker.py:517`) splits the element stream into two disjoint projections:
   `reassemble_narrative` takes TEXT_KINDS only (tables skipped, `:475`) and
   `collect_tables_from_elements` takes `kind='table'` only (`:502`).
@@ -723,11 +724,41 @@ is the only requirement, not a hard dependency.
   disturbing the chunking strategy.
 
   **(b) shipped 2026-08.** `CHUNKS_SCHEMA.elem_order` is populated for table
-  chunks only; sort narrative chunks by `start_char` and table chunks by
-  `elem_order` to recover document order. Chosen over (a) because it changes no
-  coordinate space — narrative chunks, the enrichment input and the mention↔chunk
-  offset mapping are untouched, so no existing offsets shift and no
-  re-enrichment is needed. `read_chunks` back-fills nulls for older shards.
+  chunks only. Chosen over (a) because it changes no coordinate space —
+  narrative chunks, the enrichment input and the mention↔chunk offset mapping
+  are untouched, so no existing offsets shift and no re-enrichment is needed.
+  `read_chunks` back-fills nulls for older shards.
+
+  **The anchor alone did not recover the order, though** — as first shipped it
+  had no consumer, and could not have had one. The recipe recorded in three
+  places ("sort narrative chunks by `start_char` and table chunks by
+  `elem_order`") yields two orderings in two *incomparable* key spaces:
+  interleaving them needs the narrative offset each `elem_order` sits at, and
+  nothing exposed it (`reassemble_narrative` returns only `page_breaks`, and
+  chunks otherwise join to elements by offset overlap, never by `elem_order`).
+  `page_start` is a page-granular workaround on PDFs and no workaround at all
+  on DOCX/spreadsheets, where `Element.page` is `None` by design — precisely
+  the interleaved budget-statement case the anchor exists for.
+
+  **Completed 2026-08 by exposing the offset map.** `chunker.element_spans`
+  returns `(elem_order, start, end)` per narrative-bearing element, and
+  `chunker.chunks_in_document_order(rows, spans)` does the interleave — a table
+  anchors at the narrative offset where the element after it begins, sorting
+  before a narrative chunk that starts there (the table precedes that text),
+  with sheets last (no anchor, no narrative to be ordered against).
+  `element_spans` and `reassemble_narrative` are both views over one internal
+  `_narrative_pieces` generator, so the coordinate space cannot drift between
+  them. The ordering lives in the library rather than in each consumer, per the
+  corpus/library split: the benchmark must not derive an ordering of its own.
+  Still a projection, not a chunking change — no schema change, no offset
+  shifts, and the spans must be read under the same `text_source` overlay the
+  chunks were written under.
+
+  **Remaining consumer work.** The Chunk Inspector still renders in
+  `chunk_index` order (`ui/readers.py`), i.e. all narrative then all tables, so
+  every table shows detached at the end of the document. Wiring it up needs the
+  reader to pull `*.elements.parquet` per `source_hash` (local *and* remote
+  paths) and to know the run's `text_source` — a separate change.
 
   **(a) remains open, and is a cost decision rather than an engineering one.**
   Folding tables into `reassemble_narrative` would change the coordinate space
@@ -744,12 +775,14 @@ is the only requirement, not a hard dependency.
   cheap to test offline (build the interleaved string for a sample, compare
   retrieval) before committing to any schema change.
 
-  **It has a blocked consumer.** The benchmark's tabular and financial review
+  **The consumer it blocked.** The benchmark's tabular and financial review
   surface is a document-order spine with tables anchored in position, and the
-  ANAO and DFAT ground truth is built through it; both wait on this. The
-  benchmark deliberately does not derive an ordering of its own — a review file
-  it renders itself would have a reviewer correcting the benchmark's guess
-  instead of the pipeline's output.
+  ANAO and DFAT ground truth is built through it. `chunks_in_document_order`
+  is that spine — the benchmark deliberately does not derive an ordering of its
+  own, since a review file it ordered itself would have a reviewer correcting
+  the benchmark's guess instead of the pipeline's output. Option (a) is not
+  what it was waiting on: it needs tables *positioned*, not tables folded into
+  the enrichment input.
 
 ### Modality routing — prose / tabular / register as the primary fork — *proposed (2026-06), not yet implemented*
 Extraction currently makes its coarsest cut by *format* (`extract_text` splits

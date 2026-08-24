@@ -29,10 +29,16 @@ for sources without page semantics (DOCX, spreadsheets).
 
 The one exception is ``elem_order``, which is populated **only** for table
 chunks (a table chunk comes from exactly one element, so the anchor is
-well-defined). It is the document-order anchor: sort narrative chunks by
-``start_char`` and table chunks by ``elem_order`` to recover narrative ↔
-table order, which the two disjoint chunk projections otherwise lose. Null
-for narrative chunks and for spreadsheet sheets.
+well-defined). It is the document-order anchor for the narrative ↔ table
+order the two disjoint chunk projections otherwise lose. Null for narrative
+chunks and for spreadsheet sheets.
+
+The anchor and a narrative ``start_char`` are in different coordinate
+spaces, so ordering the two together needs the elements as well:
+``chunker.element_spans`` maps each element to its narrative offsets, and
+``chunker.chunks_in_document_order(rows, spans)`` does the interleave.
+Read the elements under the same ``text_source`` overlay the chunks were
+written under — a different overlay is a different coordinate space.
 """
 
 from __future__ import annotations
