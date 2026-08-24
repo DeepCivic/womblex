@@ -98,7 +98,7 @@ def test_multiplier_is_one_lane_per_magnitude(text, canonical):
 
 @pytest.mark.parametrize(("text", "value", "canonical"), [
     ("USD 6.6Mn", Decimal(6600000), "million"),
-    ("USD 6.6Bn", Decimal("6600000000"), "billion"),
+    ("USD 6.6Bn", Decimal(6600000000), "billion"),
     ("USD 10K", Decimal(10000), "thousand"),
     ("USD 6.6M", Decimal(6600000), "million"),
     ("6.6Mn USD", Decimal(6600000), "million"),
