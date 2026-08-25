@@ -7,7 +7,7 @@
 #
 # The builder stage compiles `ui/` to static JS/CSS/HTML; only those files
 # cross into the final stage, so no Node runtime ships in the image
-# (docs/ui-plan.md §6 "Frontend"). `womblex.ui.app.create_app` mounts
+# (docs/ui-plan.md, the "Frontend" section). `womblex.ui.app.create_app` mounts
 # `ui/build` if it finds it there and serves the read API alone otherwise —
 # same image shape as before merge 4, just with the frontend now present.
 FROM node:22-slim AS frontend-builder
@@ -22,6 +22,8 @@ FROM python:3.11-slim AS base
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    # Supplements the wheel-bundled womblex/_models/ root, never replaces it
+    # (utils.models searches every root per artefact).
     WOMBLEX_MODELS_DIR=/app/models
 
 # The console imports `store/` readers, which reach `ingest.extract` for
@@ -37,7 +39,7 @@ COPY . /app
 COPY --from=frontend-builder /app/ui/build /app/ui/build
 
 # `[ui]` is fastapi + uvicorn only. The object-storage reads a distributed run
-# needs (docs/ui-plan.md §2 — remote reads are in scope from the first merge)
+# needs (docs/ui-plan.md section 2 — remote reads are in scope from the first merge)
 # ride on fsspec + s3fs, which are now *core* dependencies, so a bare
 # `womblex[ui]` console reads an `s3://` store out of the box — no `[cloud]`
 # required. boto3 is core too, but the console never imports it (it reads
@@ -55,7 +57,7 @@ RUN pip install --upgrade pip \
 
 # Bind beyond loopback: the CLI defaults to 127.0.0.1, which inside a
 # container would refuse every request from the published port. The console
-# has no auth by design (docs/ui-plan.md §6), so a deployment that exposes
+# has no auth by design (docs/ui-plan.md), so a deployment that exposes
 # this port is choosing to, and puts its own control in front.
 EXPOSE 8080
 ENTRYPOINT ["womblex", "ui", "--host", "0.0.0.0", "--port", "8080"]

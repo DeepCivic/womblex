@@ -13,8 +13,10 @@ FROM python:3.11-slim AS base
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    # The bundled models/ dir lives at the image root, not as a sibling of the
-    # installed package, so point the resolver at it explicitly.
+    # The large model artefacts live at the image root, not as a sibling of
+    # the installed package, so name that root explicitly. It SUPPLEMENTS the
+    # wheel-bundled womblex/_models/ (en_AU, kanon-2-tokenizer) rather than
+    # replacing it: utils.models searches every root per artefact.
     WOMBLEX_MODELS_DIR=/app/models
 
 # OpenCV (headless) + PyMuPDF need libglib/libGL at import time.

@@ -8,6 +8,10 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 ## [Unreleased]
 
+### Fixed
+- **Local model artefacts resolve per artefact across every root, so `WOMBLEX_MODELS_DIR` no longer shadows the wheel-bundled ones.** `utils/models.py` returned a single directory (`find_models_dir`) and looked only there, but the roots hold different artefacts: a container image mounts the large ones at `WOMBLEX_MODELS_DIR=/app/models` while the small ones (`en_AU`, `kanon-2-tokenizer`) ship inside the wheel under `womblex/_models/`. Setting the override therefore made `resolve_local_model_path("en_AU")` return the bare string and the `spellfix` stage die inside spylls on the relative path `en_AU/index.aff`. The new `model_roots()` enumerates every existing root in priority order and `resolve_local_model_path` returns the first that actually holds the named artefact — the override supplements the bundled root rather than replacing it. `find_models_dir()` is retained (highest-priority root) but must not be used to build an artefact path. Both Dockerfiles' comments corrected to match. Pinned by `tests/test_models_resolution.py`, which covers the exact image scenario (override root lacking `en_AU`) alongside the HF `snapshots/<hash>/` and bare-`.pt` behaviours.
+- **`spellfix` fails loudly when its dictionary cannot be resolved.** A bundled-only Hunspell dictionary has no remote fallback, but `_dictionary` turned the resolver's "not found" bare string into the relative path `en_AU/index` and surfaced as `FileNotFoundError: 'en_AU/index.aff'` several frames inside spylls. It now raises a `FileNotFoundError` naming the artefact, the roots searched, and where the dictionary is meant to ship.
+
 ## [0.5.11] - 2026-08-19
 Minor, additive. Spreadsheet merge extents are captured and merge-covered
 cells emitted; DOCX multi-row table headers are derived from `w:tblHeader`;
