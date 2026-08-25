@@ -1,0 +1,101 @@
+# Path traversal — paths built by interpolation, and joins reaching a sink
+# without canonicalisation.
+#
+# Vendored from DeepCivic/runwAI at f67a2c5a8e2289817d7a65e1920fa5d67953d3e6
+# (Apache-2.0), controls/rules/path-traversal.yaml. The JS/TS rules in the
+# upstream file are dropped — womblex is Python only. Rule IDs are kept verbatim
+# so a finding here can be traced back to the upstream rule it came from.
+#
+# `open(f"/var/data/{name}")` looks like working code, reviews as working code,
+# and hands the caller the whole filesystem the moment `name` contains `../`.
+#
+# Womblex's live exposure is the distributed path: `store/remote.py` stages files
+# named by object-store keys into a local directory, and `cloud/worker.py` runs
+# whatever a queue row points at. `download_to_dir` takes the basename of each
+# key before joining, which is what makes it safe today.
+#
+# WHAT THIS DOES NOT CATCH, recorded rather than implied
+#
+#   A path assembled several statements before the sink, through a helper, or
+#   read from a config object. Sink matching does not follow values across a
+#   call boundary — which means most of womblex's `Path` handling, where the
+#   base comes from a YAML config and is threaded through a stage function.
+#
+#   Traversal through an archive entry name (zip slip), symlink following, and
+#   TOCTOU races. All three are path-handling defects; none has this shape.
+#
+# KNOWN FALSE-POSITIVE CLASSES
+#
+#   Interpolated segment that is a module constant, an enum value, or a
+#   formatted integer — `Path(f"batch-{n:04d}.elements.parquet")` is this shape.
+#     The sink match ignores provenance. Suppress with a reason naming it.
+#   A join under a directory the process just created (a tmpdir, a shard dir).
+#     Real, and worth a suppression rather than a rule exception: the same code
+#     copied under a caller-supplied base is the defect.
+#
+# REMEDIATION, because "canonicalise it" is not an instruction
+#
+#   Path(candidate).resolve(), then assert .is_relative_to(base.resolve()).
+#   Resolving without then comparing to the base is not a fix — it normalises
+#   the path and still opens whatever it names.
+#
+# Suppress individually, with a reason after `--`, never blanket:
+#
+#   # nosemgrep: runwai-python-path-traversal-sink -- shard name is a batch counter
+#
+# A bare `# nosemgrep` with no justification should fail review.
+rules:
+  - id: runwai-python-path-traversal-sink
+    languages: [python]
+    severity: ERROR
+    message: >-
+      File path built by interpolation reaches a filesystem call. Canonicalise with
+      Path(...).resolve() and assert the result is inside the intended base
+      directory before opening it.
+    metadata:
+      category: security
+      confidence: HIGH
+      source: runwAI controls/rules/path-traversal.yaml (RWA-0027 / ISM-1240, ISM-2016)
+    patterns:
+      - pattern-either:
+          - pattern: open(f"...", ...)
+          - pattern: open("..." + $X, ...)
+          - pattern: open("..." % ..., ...)
+          - pattern: open("...".format(...), ...)
+          - pattern: pathlib.Path(f"...")
+          - pattern: pathlib.Path("..." + $X)
+          - pattern: Path(f"...")
+          - pattern: Path("..." + $X)
+          - pattern: os.remove(f"...")
+          - pattern: os.remove("..." + $X)
+          - pattern: shutil.rmtree(f"...")
+
+  - id: runwai-python-path-join-unresolved
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A joined path reaches a filesystem call without canonicalisation. Joining an
+      absolute path discards the base entirely, and '..' walks out of it. Use
+      Path(...).resolve() and check the result is inside the base.
+    metadata:
+      category: security
+      confidence: MEDIUM
+      source: runwAI controls/rules/path-traversal.yaml (RWA-0027 / ISM-1240, ISM-2016)
+    patterns:
+      - pattern-either:
+          - pattern: open(os.path.join(...), ...)
+          - pattern: open(os.path.join(...))
+          - pattern: os.remove(os.path.join(...))
+          - pattern: pathlib.Path($BASE).joinpath($SEG).open(...)
+          - pattern: Path($BASE).joinpath($SEG).open(...)
+          - pattern: (Path($BASE) / $SEG).read_text(...)
+          - pattern: (Path($BASE) / $SEG).open(...)
+      # A join of string literals carries no caller-supplied segment. This is the
+      # safe case the rule has to stay quiet on, and by far the most common one.
+      - pattern-not: open(os.path.join("...", "..."), ...)
+      - pattern-not: open(os.path.join("...", "...", "..."), ...)
+      - pattern-not: os.remove(os.path.join("...", "..."))
+      # Already canonicalised at the sink. The comparison against the base still
+      # has to happen, and no rule here can see that it did — see the header.
+      - pattern-not: open(os.path.realpath(...), ...)
+      - pattern-not: open(os.path.abspath(...), ...)

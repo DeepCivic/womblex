@@ -1,0 +1,227 @@
+[project]
+name = "womblex"
+version = "0.5.10"
+description = "Document extraction pipeline for Australian government documents"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "DeepCivic" }]
+keywords = [
+    "pdf",
+    "ocr",
+    "document-extraction",
+    "foi",
+    "government-documents",
+    "parquet",
+    "nlp",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Text Processing",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+
+# Core dependencies. Womblex is plug-and-play: Isaacus enrichment/embeddings,
+# hosted-VLM (Bedrock) OCR, the AWS SDK, object-storage staging (fsspec + s3fs)
+# and the Postgres job queue (psycopg) are all part of the base install.
+# Every real deployment uses them, and they are comparatively tiny next to the
+# vision/ML stack already here (pymupdf, ultralytics, sentence-transformers) —
+# gating them behind extras only produced misconfiguration (a missing SDK read
+# as "no API key", and a cloud deployment 500ing on `s3://` because the image
+# was built without `[cloud]`). rapidocr-onnxruntime is the bundled CPU OCR
+# engine; boto3 backs both the mistral-ocr engine and the isaacus-sagemaker
+# HTTP client. A local / air-gapped run touches none of s3fs/psycopg — they
+# stay dormant until a `s3://` store or a `--dsn` names them — so shipping them
+# costs a CPU-only box nothing but keeps `s3://` working the moment it is asked
+# for, on any install.
+dependencies = [
+    "pymupdf>=1.24",
+    "rapidocr-onnxruntime>=1.4",
+    "ultralytics>=8.0",
+    "opencv-python-headless",
+    "semchunk>=4.0",
+    "pandas>=2.0",
+    "openpyxl",
+    "pyarrow",
+    "pydantic>=2.0",
+    "pyyaml",
+    "tqdm",
+    "numpy",
+    "python-dotenv",
+    "python-docx>=1.0",
+    "presidio-anonymizer>=2.2",
+    "sentence-transformers>=3.0",
+    "spylls>=0.1.7",
+    "isaacus>=0.19",
+    "isaacus-sagemaker>=0.1.4",
+    "boto3>=1.34",
+    "fsspec>=2024.0",
+    "s3fs>=2024.0",
+    "psycopg[binary]>=3.1",
+]
+
+[project.optional-dependencies]
+# Local CPU-only execution - pip install womblex[local]
+# Deliberately empty: the base install IS the local deployment. Extraction,
+# OCR, chunking and PII all run CPU-only against the local filesystem with no
+# extra packages. The extra exists so an install can *state* which deployment
+# it is, and so `[local]` and `[cloud]` read as a pair.
+local = []
+
+# Cloud / distributed execution - pip install womblex[cloud]
+# Now empty, like [local]: object-storage staging (fsspec + s3fs) and the
+# Postgres job queue (psycopg) are core dependencies, so `s3://` and `--dsn`
+# work on any install (a cloud image built without the extra used to 500 on
+# `s3://` — "Install s3fs to access S3"). The extra is retained so an install
+# can still *state* it is a cloud deployment and `[local]`/`[cloud]` read as a
+# pair, and so existing `pip install womblex[cloud]` invocations keep resolving.
+cloud = []
+
+# Console sidecar - pip install womblex[ui]
+# `womblex ui` serves an API over the artefacts the pipeline writes and lets an
+# operator act on the deployment (the Pipeline Composer dispatches runs into
+# the queue; feedback/presets are filed into the store). fastapi + uvicorn and
+# nothing else: the console adds no pipeline logic, so it stays as CPU-light as
+# the worker it sits beside. Reading a *distributed* run's object storage needs
+# fsspec + s3fs, which are now core — so a bare `womblex[ui]` console reads an
+# `s3://` store out of the box, no `[cloud]` required.
+ui = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+]
+
+# Development tools - pip install womblex[dev]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov",
+    # Upper-bounded deliberately: ruff expands its *default* rule set on minor
+    # bumps (0.16.0 turned on FURB/RUF/BLE/I/DTZ/S and 297 errors appeared in
+    # a tree that had been green), so an unpinned ruff turns CI red on an
+    # upstream release rather than on a change of ours. Raise the ceiling as a
+    # deliberate commit that also clears whatever the new rules flag.
+    "ruff>=0.16,<0.17",
+    "mypy",
+    # Starlette's TestClient transport, for the [ui] route tests. Test-only:
+    # the console itself never makes an HTTP request, so this stays out of [ui].
+    "httpx>=0.27",
+]
+
+# Full install - pip install womblex[all]
+all = ["womblex[cloud,ui,dev]"]  # [local] is empty; isaacus + Bedrock OCR + AWS SDK are core
+
+[project.urls]
+Homepage = "https://github.com/DeepCivic/womblex"
+Repository = "https://github.com/DeepCivic/womblex"
+Changelog = "https://github.com/DeepCivic/womblex/blob/main/CHANGELOG.md"
+Issues = "https://github.com/DeepCivic/womblex/issues"
+
+[project.scripts]
+womblex = "womblex.cli:main"
+
+[build-system]
+# >=77.0.3 for PEP 639 SPDX `license` / `license-files` support.
+requires = ["setuptools>=77.0.3"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+# Bundle the small en_AU Hunspell dictionary (MIT/SCOWL) for offline spellfix,
+# and the kanon-2 tokenizer so token packing + chunking need no HF round-trip.
+# Large model artefacts under _models/ are resolved via WOMBLEX_MODELS_DIR, not shipped.
+womblex = ["_models/en_AU/*", "_models/kanon-2-tokenizer/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = [
+    "benchmark: OCR accuracy benchmarks (slow, run with -m benchmark)",
+    "slow: OCR-fixture tests, historically slow under EasyOCR. Now fast under rapidocr-onnxruntime (~7s for the whole cohort) so they run by default; the marker is retained for ad-hoc filtering via -m slow / -m 'not slow'.",
+]
+# Live console stays quiet (WARNING+) so the slow-test/hang monitor's alerts
+# (conftest.py `pytest.monitor`) surface during a run without flooding normal
+# output. Full INFO progress (extraction/OCR/orchestrator loggers) is captured
+# to pytest.log for post-hoc debugging. Tune the hang threshold with the
+# PYTEST_SLOW_ALERT env var (seconds, default 60).
+log_cli = true
+log_cli_level = "WARNING"
+log_cli_format = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+log_cli_date_format = "%H:%M:%S"
+log_file = "pytest.log"
+log_file_level = "INFO"
+log_file_format = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+# These three are off because the codebase deliberately does what they flag,
+# not because the findings are noisy. Every site is a batch- or per-document
+# isolation boundary, where CLAUDE.md's contract is explicit: "Individual
+# document failures shouldn't stop the batch" and "Reject unusual data — warn
+# about it, but continue processing". Narrowing those handlers to named
+# exception types would let one malformed document abort a 1500-document run,
+# which is the bug they exist to prevent. Suppressing them here keeps that a
+# single stated decision rather than 68 scattered `noqa` comments.
+ignore = [
+    "BLE001",  # blind-except: the isolation handlers, by design
+    "S110",    # try-except-pass: best-effort probes with a documented fallback
+    "S112",    # try-except-continue: skip the bad record, keep the batch going
+]
+
+[tool.mypy]
+# No python_version pin: each CI matrix leg checks at its own interpreter
+# version. Pinning 3.11 broke the 3.12 leg — numpy >= 2.5 (3.12-only) ships
+# PEP 695 `type` statements in its stubs, which mypy rejects under a 3.11
+# target.
+warn_return_any = true
+warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = [
+    "fitz",
+    "fitz.*",
+    "rapidocr_onnxruntime",
+    "rapidocr_onnxruntime.*",
+    "pyarrow",
+    "pyarrow.*",
+    "sentence_transformers",
+    "sentence_transformers.*",
+    "pandas",
+    "pandas.*",
+    "geopandas",
+    "geopandas.*",
+    "pyogrio",
+    "pyogrio.*",
+    "yaml",
+    "isaacus",
+    "isaacus.*",
+    "isaacus_sagemaker",
+    "isaacus_sagemaker.*",
+    "spylls",
+    "spylls.*",
+    "fsspec",
+    "fsspec.*",
+    "openpyxl",
+    "openpyxl.*",
+    "boto3",
+    "boto3.*",
+    "botocore",
+    "botocore.*",
+    "psycopg",
+    "psycopg.*",
+    "torch",
+    "torch.*",
+    "ultralytics",
+    "ultralytics.*",
+]
+ignore_missing_imports = true

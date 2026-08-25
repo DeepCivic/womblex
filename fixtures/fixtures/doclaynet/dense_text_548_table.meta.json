@@ -1,0 +1,5 @@
+{
+  "n_header_rows": 3,
+  "key_column": null,
+  "notes": "Header row 1 is flattened and uniquified. Rows 2 and 3 contain the printed units and column-letter/footnote annotations respectively. Participant names are on their own rows with empty data columns. Em-dashes are preserved as printed."
+}

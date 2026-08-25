@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Testing
+.coverage
+.pytest_cache/
+htmlcov/
+
+# Environment
+.env
+.venv/
+venv/
+
+# Local-only compose overrides (host-specific ports, etc.)
+docker-compose.local.yml
+docker-compose.override.yml
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Data — fetched datasets contain large binaries
+datasets/FUNSD/
+datasets/FUNSD_plus/
+raw_documents/
+
+# Test fixtures (see THIRD_PARTY_DATA.md): a minimal *redistributable* set is
+# vendored under fixtures/fixtures/ for a self-contained dev run. The full set —
+# including the research-use-only ACT FOI 213A documents, which are NOT vendored
+# here — lives only in the external womblex-development-fixtures repo. Tests that
+# need the non-vendored documents skip cleanly in a fresh clone.
+
+# DVC
+*.dvc
+.dvc/
+
+# OS
+.DS_Store
+
+# Local agent state
+.claude/
+
+# pytest logging (slow-test monitor + lib progress)
+pytest.log

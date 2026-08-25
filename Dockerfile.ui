@@ -1,0 +1,61 @@
+# Womblex console sidecar image (`womblex ui`, docs/ui-plan.md).
+#
+# Separate from the pipeline `Dockerfile` rather than a build-arg variant of
+# it, because the two images diverge once the SPA lands: this one gains a
+# Node build stage that the worker image has no reason to carry, and it
+# installs a different extras set.
+#
+# The builder stage compiles `ui/` to static JS/CSS/HTML; only those files
+# cross into the final stage, so no Node runtime ships in the image
+# (docs/ui-plan.md §6 "Frontend"). `womblex.ui.app.create_app` mounts
+# `ui/build` if it finds it there and serves the read API alone otherwise —
+# same image shape as before merge 4, just with the frontend now present.
+FROM node:22-slim AS frontend-builder
+WORKDIR /app/ui
+COPY ui/package.json ui/package-lock.json ./
+RUN npm ci
+COPY ui/ .
+RUN npm run build
+
+FROM python:3.11-slim AS base
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    WOMBLEX_MODELS_DIR=/app/models
+
+# The console imports `store/` readers, which reach `ingest.extract` for
+# `ExtractionResult` and so import PyMuPDF and numpy at module load. Verified
+# by import trace: fitz, numpy and semchunk load; ultralytics, torch,
+# sentence-transformers and cv2 do not. libglib/libGL are what PyMuPDF needs.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libglib2.0-0 libgl1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY . /app
+COPY --from=frontend-builder /app/ui/build /app/ui/build
+
+# `[ui]` is fastapi + uvicorn only. The object-storage reads a distributed run
+# needs (docs/ui-plan.md §2 — remote reads are in scope from the first merge)
+# ride on fsspec + s3fs, which are now *core* dependencies, so a bare
+# `womblex[ui]` console reads an `s3://` store out of the box — no `[cloud]`
+# required. boto3 is core too, but the console never imports it (it reads
+# artefacts, makes no AWS call). This was the cloud-deployment break: the image
+# used to depend on `[cloud]` carrying s3fs, so any build that dropped the
+# extra 500'd on `s3://` with "Install s3fs to access S3".
+ARG EXTRAS=ui
+# Upgrade pip first: the stock pip on python:3.11-slim is old enough that its
+# resolver stalls/fails on the boto stack (s3fs -> aiobotocore pins a narrow
+# botocore range that must co-resolve with boto3's own botocore pin). The
+# newer resolver finds the compatible set. Baked in here rather than patched
+# on the instance so every build is reproducible from the tag.
+RUN pip install --upgrade pip \
+    && pip install ".[${EXTRAS}]"
+
+# Bind beyond loopback: the CLI defaults to 127.0.0.1, which inside a
+# container would refuse every request from the published port. The console
+# has no auth by design (docs/ui-plan.md §6), so a deployment that exposes
+# this port is choosing to, and puts its own control in front.
+EXPOSE 8080
+ENTRYPOINT ["womblex", "ui", "--host", "0.0.0.0", "--port", "8080"]

@@ -1,0 +1,29 @@
+.git
+.github
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+pytest.log
+output/
+# ...but keep the vendored demo corpus: `womblex seed-demo` publishes it into a
+# fresh console's store, and both Dockerfiles rely on `COPY . /app` carrying it
+# to /app/output/console-demo (see store/demo_corpus.py).
+!output/console-demo/
+.venv/
+venv/
+# Local development virtualenvs (e.g. `.venv-312`, `.venv-test`). Never belong
+# in the image and, unignored, dominate the build context (multi-GB) — the
+# same reason `.venv/` above is excluded. Kept broad so any `.venv*` variant a
+# contributor creates stays out.
+.venv*/
+**/.venv*/
+# Benchmark fixtures are large and not needed in the runtime image.
+fixtures/fixtures/
+docs/accuracy/
+*.egg-info/
+# Built by Dockerfile.ui's frontend-builder stage, not the base build context.
+ui/node_modules/
+ui/build/
+ui/.svelte-kit/

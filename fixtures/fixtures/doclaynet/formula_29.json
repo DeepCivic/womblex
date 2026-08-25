@@ -1,0 +1,297 @@
+{
+  "bboxes": [
+    [
+      275.0,
+      118.0,
+      612.0,
+      131.0
+    ],
+    [
+      683.0,
+      118.0,
+      824.0,
+      131.0
+    ],
+    [
+      246.0,
+      148.0,
+      700.0,
+      160.0
+    ],
+    [
+      214.0,
+      161.0,
+      700.0,
+      173.0
+    ],
+    [
+      214.0,
+      173.0,
+      352.0,
+      185.0
+    ],
+    [
+      214.0,
+      173.0,
+      352.0,
+      185.0
+    ],
+    [
+      214.0,
+      186.0,
+      708.0,
+      198.0
+    ],
+    [
+      214.0,
+      186.0,
+      708.0,
+      198.0
+    ],
+    [
+      181.0,
+      199.0,
+      708.0,
+      210.0
+    ],
+    [
+      181.0,
+      211.0,
+      708.0,
+      223.0
+    ],
+    [
+      181.0,
+      224.0,
+      260.0,
+      236.0
+    ],
+    [
+      181.0,
+      224.0,
+      260.0,
+      236.0
+    ],
+    [
+      214.0,
+      236.0,
+      233.0,
+      248.0
+    ],
+    [
+      214.0,
+      236.0,
+      233.0,
+      248.0
+    ],
+    [
+      237.0,
+      236.0,
+      701.0,
+      248.0
+    ],
+    [
+      237.0,
+      236.0,
+      701.0,
+      248.0
+    ],
+    [
+      181.0,
+      249.0,
+      710.0,
+      261.0
+    ],
+    [
+      717.0,
+      251.0,
+      731.0,
+      260.0
+    ],
+    [
+      734.0,
+      251.0,
+      797.0,
+      260.0
+    ],
+    [
+      717.0,
+      261.0,
+      748.0,
+      271.0
+    ],
+    [
+      181.0,
+      262.0,
+      709.0,
+      274.0
+    ],
+    [
+      181.0,
+      274.0,
+      259.0,
+      286.0
+    ],
+    [
+      181.0,
+      296.0,
+      451.0,
+      306.0
+    ],
+    [
+      214.0,
+      312.0,
+      232.0,
+      324.0
+    ],
+    [
+      237.0,
+      312.0,
+      709.0,
+      324.0
+    ],
+    [
+      717.0,
+      314.0,
+      731.0,
+      324.0
+    ],
+    [
+      734.0,
+      314.0,
+      797.0,
+      324.0
+    ],
+    [
+      717.0,
+      324.0,
+      748.0,
+      334.0
+    ],
+    [
+      181.0,
+      325.0,
+      710.0,
+      337.0
+    ],
+    [
+      181.0,
+      337.0,
+      215.0,
+      349.0
+    ],
+    [
+      197.0,
+      365.0,
+      388.0,
+      377.0
+    ],
+    [
+      181.0,
+      799.0,
+      466.0,
+      808.0
+    ],
+    [
+      181.0,
+      814.0,
+      471.0,
+      823.0
+    ],
+    [
+      222.0,
+      824.0,
+      454.0,
+      834.0
+    ],
+    [
+      222.0,
+      834.0,
+      469.0,
+      844.0
+    ],
+    [
+      433.0,
+      850.0,
+      455.0,
+      864.0
+    ]
+  ],
+  "labels": [
+    6,
+    6,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    2,
+    2,
+    2,
+    2,
+    5
+  ],
+  "words": [
+    "PUBLIC LAW 116–30—JULY 25, 2019 ",
+    "133 STAT. 1033 ",
+    "‘‘(2) new construction would be required to create a lacta-",
+    "tion room in the public building and the cost of such construc-",
+    "tion is unfeasible. ",
+    "tion is unfeasible. ",
+    "‘‘(d) NO UNAUTHORIZED ENTRY.—Nothing in this section shall ",
+    "‘‘(d) NO UNAUTHORIZED ENTRY.—Nothing in this section shall ",
+    "be construed to authorize an individual to enter a public building ",
+    "or portion thereof that the individual is not otherwise authorized ",
+    "to enter.’’. ",
+    "to enter.’’. ",
+    "(b)",
+    "(b)",
+    "CLERICAL AMENDMENT.—The table of sections at the begin-",
+    "CLERICAL AMENDMENT.—The table of sections at the begin-",
+    "ning of chapter 33 of title 40, United States Code, is amended ",
+    "40",
+    "USC 3301 ",
+    "prec. ",
+    "by inserting after the item related to section 3316 the following ",
+    "new item: ",
+    "‘‘3318. Lactation room in public buildings.’’. ",
+    "(c)",
+    "EFFECTIVE DATE.—The amendments made by this section ",
+    "40",
+    "USC 3318 ",
+    "note. ",
+    "shall take effect 1 year after the date of the enactment of this ",
+    "Act. ",
+    "Approved July 25, 2019. ",
+    "LEGISLATIVE HISTORY—H.R. 866 (S. 528): ",
+    "CONGRESSIONAL RECORD, Vol. 165 (2019): ",
+    "Feb. 6, considered and passed House. ",
+    "June 26, considered and passed Senate. ",
+    "Æ "
+  ],
+  "split": "test"
+}

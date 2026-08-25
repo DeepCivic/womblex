@@ -1,0 +1,281 @@
+# Local distributed-run stack: Postgres (job queue) + MinIO (object store) +
+# scalable Womblex workers. Mirrors the Wayfinder quickstart shape so the two
+# projects can share infra.
+#
+# REQUIRES Docker Compose >= 2.20.0 (for the `required: false` dependency
+# flag the cloud path leans on — `docker compose version` to check). If you
+# are on an older engine, see "OLDER COMPOSE" at the foot of this header for
+# the one mechanical edit that makes the cloud path work without it.
+#
+# ONE FILE, TWO DEPLOYMENTS. It is self-contained by default (bundled
+# Postgres + MinIO), and points at externally-provided Postgres + S3 the
+# moment you set the connection env vars — no separate override file, no code
+# change. Which one you get is decided entirely by whether those vars are set:
+#
+#   LOCAL (default) — bring the bundled backends up under the `local` profile:
+#
+#     docker compose --profile local up -d postgres minio createbuckets init
+#     # upload source docs to the 'womblex' bucket under inbox/, then:
+#     docker compose run --rm womblex enqueue --config configs/example.yaml --create-schema
+#     docker compose up --scale worker=4 worker
+#     # once drained, consolidate the run manifest:
+#     docker compose run --rm womblex finalize --run-id <run_id>
+#     # optional console over the same bucket, at :8080:
+#     docker compose up -d ui
+#
+#   CLOUD — set the three connection vars (+ S3 creds) to external services and
+#   DO NOT start the bundled backends. `init`/`worker`/`ui` do not wait on
+#   postgres/minio (their deps are `required: false`), so an absent bundled
+#   backend is not a missing dependency — it points at the external one instead:
+#
+#     export WOMBLEX_DB_DSN=postgresql://user:pass@db.example:5432/shared
+#     export WOMBLEX_STORE_URI=s3://shared/womblex     # own prefix of a shared bucket
+#     export WOMBLEX_INGEST_URI=s3://shared/womblex/inbox  # disjoint from the store's runs/
+#     export WOMBLEX_S3_ENDPOINT=                       # empty => real AWS S3
+#     export AWS_REGION=...
+#     # S3 store credentials go on the STORE-SPECIFIC vars, NOT AWS_ACCESS_KEY_ID:
+#     export WOMBLEX_S3_ACCESS_KEY_ID=...  WOMBLEX_S3_SECRET_ACCESS_KEY=...
+#     # Leave AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY UNSET. Setting them is
+#     # process-global and disables boto3's instance-role resolution for the
+#     # isaacus-sagemaker SigV4 signer, which then signs the store key against
+#     # SageMaker and 403s. Unset, SageMaker uses the EC2 instance role while
+#     # s3fs gets the store creds above. If the S3 store is reachable by the
+#     # SAME instance role (real AWS S3, not MinIO), leave the store vars unset
+#     # too and s3fs uses the role as well.
+#     docker compose run --rm init                     # create womblex_jobs in the external DSN
+#     docker compose up --scale worker=4 worker
+#   See the README "Cloud deployment" section for the full walk-through.
+#
+#   # Just want to see the console with a sample corpus (no workers)?
+#   # Bring up the infra, seed the vendored demo run into the bucket, then the
+#   # console. Postgres is included so the Dashboard/Execution panels see a
+#   # reachable queue (an empty one) rather than "queue unreachable":
+#   docker compose --profile local up -d postgres minio createbuckets init
+#   docker compose --profile seed up seed-demo
+#   docker compose up -d ui           # run-throsby-demo now shows at :8080
+#
+# Inputs and outputs share the s3://womblex bucket, on disjoint prefixes:
+# source documents live under inbox/, shards land at runs/<run_id>/documents/.
+#
+# Two images, one stack: the pipeline/worker services build the plain
+# `Dockerfile`; the `ui` console builds `Dockerfile.ui` (adds a Node stage
+# for the SPA). Both are named explicitly below so the split is legible.
+#
+# OLDER COMPOSE (< 2.20.0, no `required: false`): the cloud path relies on
+# `required: false` to let `init`/`worker`/`ui` come up without the bundled
+# `postgres`/`minio`. On an engine that rejects that key, make this one
+# mechanical edit for a cloud deployment and commit it to your fork:
+#   1. delete the `postgres`, `minio` and `createbuckets` services, AND
+#   2. delete every `depends_on:` block that names them (in `init`, `worker`,
+#      `womblex`, `seed-demo`, `ui`).
+# Nothing else changes — the env vars still point every service at the
+# external Postgres + S3. (The local stack is unaffected; it needs 2.20.0
+# only if you keep the `required: false` keys, which are harmless there.)
+
+# Connection + credential surface, read from the environment with the bundled
+# local stack as the fallback. UNSET env == today's self-contained local stack,
+# byte-for-byte (the defaults below point at the bundled `postgres`/`minio`
+# services). SET env == external Postgres + external S3. This is the whole
+# local/cloud switch — there is no profile or flag to flip.
+x-cloud-env: &cloud-env
+  WOMBLEX_DB_DSN: ${WOMBLEX_DB_DSN:-postgresql://womblex:womblex@postgres:5432/womblex}
+  WOMBLEX_STORE_URI: ${WOMBLEX_STORE_URI:-s3://womblex}
+  # Source documents live on their own prefix of the same bucket, disjoint
+  # from the store's runs/ output — see assert_disjoint_locations.
+  WOMBLEX_INGEST_URI: ${WOMBLEX_INGEST_URI:-s3://womblex/inbox}
+  # Empty WOMBLEX_S3_ENDPOINT (the cloud case) => s3fs talks to real AWS S3;
+  # the bundled default points at MinIO.
+  WOMBLEX_S3_ENDPOINT: ${WOMBLEX_S3_ENDPOINT:-http://minio:9000}
+  # Store credentials for s3fs, read store-specifically so the ambient
+  # AWS_ACCESS_KEY_ID can stay UNSET. That matters in cloud: setting
+  # AWS_ACCESS_KEY_ID is process-global and disables boto3's instance-role
+  # resolution for the isaacus-sagemaker SigV4 signer too (it would sign the
+  # store key against SageMaker and 403). Leaving it unset lets SageMaker use
+  # the EC2 instance role while s3fs still gets these explicitly. The bundled
+  # default is MinIO's static key; a cloud deployment on an instance role can
+  # leave BOTH unset (s3fs then uses the instance role for S3 as well).
+  WOMBLEX_S3_ACCESS_KEY_ID: ${WOMBLEX_S3_ACCESS_KEY_ID:-minioadmin}
+  WOMBLEX_S3_SECRET_ACCESS_KEY: ${WOMBLEX_S3_SECRET_ACCESS_KEY:-minioadmin}
+  # Passed through only if the operator sets them; unset by default so the
+  # SageMaker signer resolves the instance role. AWS_REGION is safe to set
+  # (it is not a credential) and both the store and SageMaker read it.
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+  AWS_REGION: ${AWS_REGION:-us-east-1}
+  ISAACUS_API_KEY: ${ISAACUS_API_KEY:-}
+
+services:
+  # Bundled local backends — Postgres (queue) + MinIO (object store). All three
+  # sit behind the `local` profile so a cloud deployment (external Postgres +
+  # external S3) does not start them: `docker compose up worker` brings up only
+  # the services with no profile, and the consumers below declare their deps on
+  # these as `required: false`, so an absent bundled backend is not a missing
+  # dependency. Start them explicitly for the local stack:
+  #   docker compose --profile local up -d postgres minio createbuckets init
+  postgres:
+    image: postgres:16
+    profiles: ["local"]
+    environment:
+      POSTGRES_USER: womblex
+      POSTGRES_PASSWORD: womblex
+      POSTGRES_DB: womblex
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U womblex"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio
+    profiles: ["local"]
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # console
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot: create the bucket the pipeline reads/writes. Local-stack only —
+  # a cloud deployment's bucket is provisioned externally (its prefix is set
+  # via WOMBLEX_STORE_URI, e.g. s3://shared/womblex).
+  createbuckets:
+    image: minio/mc
+    profiles: ["local"]
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc mb --ignore-existing local/womblex
+      "
+
+  # One-shot: create the womblex_jobs table in whatever WOMBLEX_DB_DSN names
+  # (bundled Postgres locally, the external DSN in cloud mode). `required:
+  # false` so cloud mode does not wait on a bundled Postgres that was never
+  # started — the health gate only binds when the `local`-profile postgres is
+  # up. Equivalent to `psql "$WOMBLEX_DB_DSN" -f sql/womblex_jobs.sql`.
+  init:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+    environment: *cloud-env
+    command: ["jobs", "--create-schema"]
+
+  # General-purpose CLI entry (enqueue, run, manifest, ...). Use with `run`.
+  womblex:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+      minio:
+        condition: service_healthy
+        required: false
+    environment: *cloud-env
+    volumes:
+      - ./configs:/app/configs
+    profiles: ["cli"]
+
+  # Scale horizontally: docker compose up --scale worker=4 worker
+  # Depends on the two one-shots (`init` creates the table, `createbuckets`
+  # the bucket) only when they run — both are `required: false`, so a cloud
+  # deployment whose table/bucket are provisioned externally (run `init` once
+  # against the external DSN, or apply sql/womblex_jobs.sql; the bucket is
+  # created out-of-band) does not wait on the bundled one-shots.
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      init:
+        condition: service_completed_successfully
+        required: false
+      createbuckets:
+        condition: service_completed_successfully
+        required: false
+    environment: *cloud-env
+    volumes:
+      - ./configs:/app/configs
+    command: ["worker", "--config", "configs/example.yaml",
+              "--poll-interval", "5", "--stale-timeout", "900"]
+
+  # One-shot, opt-in: publish the vendored sample corpus (run-throsby-demo)
+  # into the bucket so a fresh console shows a browsable run instead of
+  # "Sample corpus not present". Behind a profile so a real deployment does
+  # not seed a sample into its own store unasked; run it explicitly with
+  # `docker compose --profile seed up seed-demo`.
+  seed-demo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      createbuckets:
+        condition: service_completed_successfully
+        required: false
+    environment: *cloud-env
+    command: ["seed-demo"]   # resolves WOMBLEX_STORE_URI -> s3://womblex
+    profiles: ["seed"]
+
+  # Optional console (`womblex ui`), at :8080. An interactive operator
+  # surface, not a passive viewer: it reads the same s3://womblex bucket the
+  # workers publish to (the shared cloud-env anchor supplies WOMBLEX_STORE_URI,
+  # the run source the CLI resolves when neither --output-root nor --store is
+  # passed) AND acts on the deployment — the Pipeline Composer dispatches runs
+  # into the queue, and it files feedback/presets into the store.
+  #
+  # Depends on postgres AND minio being *healthy*, not just createbuckets: the
+  # console advertises WOMBLEX_DB_DSN (the queue the Dashboard and Execution
+  # panels read) and WOMBLEX_STORE_URI, so bringing it up before either is
+  # ready is what produced the reported "queue unreachable" / intermittent
+  # Composer 500s + failed-to-fetch — every screen's first reads raced the
+  # backends' startup. Gating on health makes the console come up only once
+  # both are answering. The gates are `required: false`: in cloud mode the
+  # bundled backends are absent, and the console reads the external DSN/S3 the
+  # same env vars name — a reachable-but-schemaless external queue reads as an
+  # empty queue, not a fault (v0.5.6), so it comes up cleanly there too.
+  ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.ui
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+      minio:
+        condition: service_healthy
+        required: false
+      createbuckets:
+        condition: service_completed_successfully
+        required: false
+    environment:
+      <<: *cloud-env
+      # Where an operator-saved ingest/output override lives
+      # — its own writable mount, since the override file is what
+      # *names* the store and so cannot live inside it.
+      WOMBLEX_UI_SETTINGS_DIR: /settings
+    ports:
+      - "8080:8080"
+    volumes:
+      - ui-settings:/settings
+
+volumes:
+  pgdata:
+  miniodata:
+  ui-settings:

@@ -1,0 +1,109 @@
+@import 'tailwindcss';
+@import '@fontsource/barlow-condensed/900.css';
+@import '@fontsource/inclusive-sans/400.css';
+@import '@fontsource/inclusive-sans/600.css';
+
+/*
+ * Tokens per DESIGN.md. Values marked "console" are given explicitly there
+ * (dark + light) and are exact. Values marked "base" are DeepCivic-inherited
+ * tokens DESIGN.md names but does not restate the hex for (that table lives
+ * in DeepCivic's own DESIGN.md, a separate, non-Womblex repo not available
+ * here) — chosen to satisfy the properties DESIGN.md *does* state (the
+ * measured-contrast table's dark-mode values, lime/purple never doubling as
+ * page surface or body text, near-black #18182a as the pill-text colour) and
+ * flagged in docs/decisions.md rather than asserted as a pixel match.
+ */
+@theme {
+	--font-display: 'Barlow Condensed', sans-serif;
+	--font-sans: 'Inclusive Sans', sans-serif;
+	--font-mono:
+		ui-monospace, SFMono-Regular, 'Cascadia Mono', Menlo, monospace;
+}
+
+:root {
+	--background: #f7f7f2; /* base */
+	--foreground: #18182a; /* base — the pill near-black, reused as light-mode body text */
+	--border: #dcdce2; /* base */
+	--ring: #7b6ff0; /* console: --accent doubles as focus ring (role table) */
+
+	--surface-raised: #ffffff; /* console */
+	--surface-sunken: #c0ff00; /* console */
+	--muted-foreground: #5a5a4e; /* base */
+
+	--primary: #c8ef35; /* console: lime, buttons/active-nav/logo, never page surface */
+	--primary-foreground: #18182a;
+	--accent: #7b6ff0; /* console: structural only — focus ring, selected-row rule, graph edges */
+	--destructive: #c44536; /* base (DeepCivic value) — fills only, never text */
+	--destructive-foreground: #ffffff;
+
+	--status-pending: #38382a; /* console */
+	--status-running: #c8ef35; /* console */
+	--status-done: #15803d; /* console */
+	--status-failed: #c44536; /* console */
+	--status-warning: #b45309; /* console */
+	--status-foreground: #18182a; /* console: near-black text on every status fill */
+}
+
+:root[data-theme='dark'] {
+	--background: #1a1a24; /* console */
+	--foreground: #f0f0e8; /* base (measured-contrast table) */
+	--border: #33333f; /* base */
+	--ring: #7b6ff0;
+
+	--surface-raised: #22222e; /* console */
+	--surface-sunken: #141420; /* console */
+	--muted-foreground: #a0a090; /* base (measured-contrast table) */
+
+	--primary: #c8ef35;
+	--primary-foreground: #18182a;
+	--accent: #7b6ff0;
+	--destructive: #c44536;
+	--destructive-foreground: #ffffff;
+
+	--status-pending: #a0a090; /* console */
+	--status-running: #c8ef35; /* console */
+	--status-done: #4ade80; /* console */
+	--status-failed: #ef4444; /* console */
+	--status-warning: #f59e0b; /* console */
+	--status-foreground: #18182a;
+}
+
+@theme inline {
+	--color-background: var(--background);
+	--color-foreground: var(--foreground);
+	--color-border: var(--border);
+	--color-ring: var(--ring);
+	--color-surface-raised: var(--surface-raised);
+	--color-surface-sunken: var(--surface-sunken);
+	--color-muted-foreground: var(--muted-foreground);
+	--color-primary: var(--primary);
+	--color-primary-foreground: var(--primary-foreground);
+	--color-accent: var(--accent);
+	--color-destructive: var(--destructive);
+	--color-destructive-foreground: var(--destructive-foreground);
+	--color-status-pending: var(--status-pending);
+	--color-status-running: var(--status-running);
+	--color-status-done: var(--status-done);
+	--color-status-failed: var(--status-failed);
+	--color-status-warning: var(--status-warning);
+	--color-status-foreground: var(--status-foreground);
+}
+
+body {
+	background: var(--background);
+	color: var(--foreground);
+	font-family: var(--font-sans);
+	line-height: 1.6;
+}
+
+/* Density scale (DESIGN.md "Density and layout") — a shell attribute, not a
+   per-table prop, so any component can read it via the CSS variable. */
+:root {
+	--row-height: 40px; /* default */
+}
+[data-density='comfortable'] {
+	--row-height: 48px;
+}
+[data-density='compact'] {
+	--row-height: 32px;
+}

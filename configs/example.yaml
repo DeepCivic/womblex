@@ -1,0 +1,204 @@
+dataset:
+  name: my_dataset
+  # run_id: my-named-run        # Optional. Per-run identifier; outputs land under
+                                 # <output_root>/<run_id>/documents/. If omitted, an
+                                 # auto-generated timestamp (run-YYYYMMDDTHHMMSSZ) is used.
+                                 # CLI: pass --run-id to override.
+
+paths:
+  input_root: ./data/raw/my_dataset
+  output_root: ./data/processed/my_dataset
+  checkpoint_dir: ./data/checkpoints/my_dataset
+
+detection:
+  min_text_coverage: 0.3
+  form_signal_threshold: 0.5
+  table_signal_threshold: 0.4
+
+extraction:
+  native:
+    include_tables: true
+  ocr:
+    # engine: paddleocr      — local rapidocr-onnxruntime (region-based)
+    # engine: mistral-ocr    — Mistral Pixtral Large via AWS Bedrock (markdown, native reading order)
+    # engine: ollama         — local multimodal LLM via Ollama (markdown, native reading order)
+    engine: paddleocr
+    dpi: 300
+    lang: eng
+    # engine_options forwards engine-specific kwargs.
+    # For mistral-ocr (AWS Bedrock; credentials via the standard boto3 chain):
+    #   model:  mistral.pixtral-large-2502-v1:0   (or set MISTRAL_OCR_MODEL_ID env)
+    #   region: us-east-1                          (or set AWS_REGION / AWS_DEFAULT_REGION env)
+    # For ollama:
+    #   model:    llama3.2-vision
+    #   base_url: http://localhost:11435/v1        (or set OLLAMA_BASE_URL env)
+    #   prompt:   "Transcribe all text in this image verbatim, preserving reading order."
+    engine_options: {}
+
+# Redaction runs as a separate pipeline stage after extraction.
+# mode: flag     — mark records/chunks that contain redacted regions (no text change)
+# mode: blackout — replace affected page text with <REDACTED> markers
+# mode: delete   — remove affected page text entirely
+redaction:
+  enabled: true
+  mode: flag
+  threshold: 50
+  min_area_ratio: 0.001
+  max_area_ratio: 0.9
+  dpi: 150
+  # Raster-fallback only: drop contour hits inside figure / chart /
+  # form-background regions detected by YOLO layout analysis. Suppresses
+  # scanned_mixed CRM-form false positives (02737-class). Best-effort —
+  # no-op if ultralytics is unavailable.
+  use_layout_filter: true
+
+chunking:
+  # The Kanon-2 tokeniser is free on Hugging Face (isaacus/kanon-2-tokenizer),
+  # so chunk-size token counting is exact and fully offline — no API key needed
+  # for plain token chunking. Only AI chunking (chunking_model below) calls the
+  # Isaacus API, since boundaries then follow the enricher's structure spans.
+  tokenizer: "isaacus/kanon-2-tokenizer"
+  chunk_size: 480       # Max tokens/chunk. null = auto-derive from tokeniser's model_max_length.
+  enabled: true
+  chunk_tables: true
+  # chunking_model: kanon-2-enricher  # semchunk 4 AI chunking — boundaries follow the
+  #                        # Isaacus enricher's structure spans. null (default) = offline
+  #                        # token chunking. With the enrich stage also on, run `enrich`
+  #                        # BEFORE `chunk`: enrich persists the Document and chunk reuses
+  #                        # it (no double-enrich). Out of order, chunk self-enriches.
+  # tokenizer_kwargs: null  # Extra kwargs forwarded to the tokeniser/token counter.
+  # overlap: null          # Token overlap between chunks. <1 = proportion, >=1 = absolute tokens.
+  # memoize: true          # Cache token counts for repeated substrings.
+  # cache_maxsize: null     # Bound memoization cache. null = unbounded.
+  # max_token_chars: null   # Max chars per token estimate (optimisation).
+  # processes: 1           # Parallel workers. Default 1 (Chromebook-friendly).
+  # progress: false        # Show a tqdm progress bar during chunking.
+
+# Downstream text-cleaning op (`womblex normalise --shards`). Verbatim-policy
+# cleanup applied AFTER extraction; writes a `*.normalised_text.parquet` text
+# layer over the narrative elements (a cleaning layer, distinct from the PII
+# stage's masking `*.clean_text.parquet`).
+normalise:
+  collapse_whitespace: true   # Collapse space/tab runs to one; strip trailing (newlines kept).
+  despace_page_marker: true   # Heal '3|P age' footers → '3|Page' (footer/header kinds only).
+  # substitutions: {}         # Literal {find: replace} for known letterhead/font-map typos.
+
+# Dictionary-gated OCR character-confusion repair (`womblex spellfix --shards`).
+# Separate, opt-in op (distinct from `normalise`). Reads `*.elements.parquet`
+# (chaining off the normalise overlay when present) and writes a
+# `*.spellfix_text.parquet` element-text overlay + `*.spellfix_corrections.parquet`
+# (audit); raw elements untouched. Consumers opt in via processing.text_source
+# below. Only rewrites out-of-dict tokens with a single unambiguous in-dict
+# candidate one character away.
+spellfix:
+  enabled: false
+  general_edits: false        # Tier A homoglyph (digit→letter) only. true = Tier B edit-1 (proper-noun risk).
+  # dict_name: en_AU          # Hunspell dict resolved via utils.models (bundled under _models/en_AU).
+
+# Monetary amount annotation (`womblex money --shards`). Offline, API-free,
+# annotation only — writes `*.money_spans.parquet` (one row per amount across
+# the narrative / table_cell / sheet_cell loci) + `*.money_columns.parquet`
+# (the column-classification audit). Never rewrites element or chunk text.
+# Narrative offsets index the processing.text_source layer below. See
+# docs/money-extraction.md.
+money:
+  enabled: true
+  # narrative: true            # Scan reassembled narrative (self-evidencing amounts,
+                               # digits or words — `two million dollars`).
+  # default_currency: AUD      # `$` means AUD unless a document establishes otherwise.
+  # international_numbers: false  # Accept 1.000,50. Off: Australia has no comma decimals.
+  # implicit_context: false    # Pattern 10 (bare number near "cost"/"fee"/…). Low precision.
+  # min_confidence: 0.5        # Drop narrative candidates below this.
+  # context_chars: 160         # Surrounding text stored with each narrative span.
+  # text_source: null          # null = inherit processing.text_source.
+  columns:
+    enabled: true
+    # numeric_fraction_min: 0.7  # Of non-null cells; null markers (—, n/a, nil) excluded.
+    # min_cells: 3               # Non-null cells before header evidence is trusted.
+    # extra_header_terms: []     # Corpus money headers, added to the built-in set.
+    # extra_veto_terms: []       # Corpus headers that suppress a column (whole-word).
+
+# PII cleaning uses regex pattern recognisers (Presidio-style) validated by
+# a Sentence Transformers context model (all-MiniLM-L6-v2, 22M params).
+#
+# pipeline_point: post_extraction — clean page texts before chunking
+#                 post_chunk      — clean individual chunk texts after chunking
+#                 post_enrichment — clean chunks using Isaacus graph entities
+#                                   as high-confidence candidates + regex fallback
+pii:
+  enabled: false
+  entities:
+    - PERSON
+    # - ADDRESS          # street addresses (regex, implemented)
+    # - EMAIL            # not yet implemented
+    # - PHONE_NUMBER     # not yet implemented
+    # - ID_NUMBER        # not yet implemented
+  person_types:
+    - natural
+    # - corporate        # not yet implemented
+    # - politic          # not yet implemented
+  pipeline_point: post_chunk
+  context_similarity_threshold: 0.5
+  model: all-MiniLM-L6-v2
+
+# Kanon-2 enrichment (`womblex enrich --shards`). Runs on the WHOLE document
+# (reassembled per processing.text_source); Kanon-2 chunks long inputs itself.
+enrichment:
+  enabled: false
+  model: kanon-2-enricher
+  overflow_strategy: auto       # auto/chunk = internal chunk+stitch (>16k tokens); drop_end | null
+  # skip_short_documents: 0     # skip docs shorter than N chars (0 = enrich all)
+  # persist_document: false     # write *.enrichment_doc.parquet (raw ILGS Document) for
+  #                             # AI-chunking reuse. Auto-enabled when chunking.chunking_model
+  #                             # is set; off otherwise (the blob is large).
+
+# Entity linking (`womblex enrich --shards` then `womblex link --shards`).
+# Resolves document mentions to canonical reference-register entities. The
+# library is corpus-agnostic: the corpus declares which register columns play
+# which role. Below is the ACT childcare register mapping as a worked example.
+linking:
+  enabled: false
+  # candidate_kinds: enrichment entity_type values treated as link candidates
+  # (pass-through to the Kanon-2 taxonomy — corporate persons + address locations).
+  candidate_kinds:
+    - corporate
+    - address
+  name_threshold: 0.85        # min difflib similarity for a name match
+  reference:
+    path: Registers/Education-services-act-export.csv
+    format: csv               # only csv implemented (bundle/geospatial seam reserved)
+    id_col: ServiceApprovalNumber          # canonical id -> entity_id (SE-*)
+    name_col: ServiceName                  # canonical display name
+    entity_type: service                   # constant tag for matches
+    parent_id_col: "Provider Approval Number"   # hierarchy FK (PR-*)
+    match_exact_cols:                      # concatenated + normalised => address key
+      - ServiceAddress
+      - Suburb
+      - Postcode
+    match_fuzzy_cols:                      # scored by normalised fuzzy similarity
+      - ServiceName
+      - ProviderLegalName
+    # alias_table: aliases.csv             # optional: alias,entity_id overrides (prior trustees)
+
+# Embedding (`womblex embed --shards`) — vectorise chunks for retrieval/analysis.
+# Thin pass-through to the Kanon-2 embedder; consumes *.chunks.parquet.
+embedding:
+  enabled: false
+  model: kanon-2-embedder
+  task: retrieval/document        # retrieval/document (index) | retrieval/query | null
+  # dimensions: null              # model default unless set
+
+processing:
+  batch_size: 25
+  checkpoint_every: 25
+  # Single pipeline-level selector for the element-text layer that BOTH chunking
+  # and enrichment reassemble from. 'elements' = verbatim; 'normalised' = the
+  # normalise overlay; 'spellfix' = the spellfix overlay (chained on top of
+  # normalise). One knob on purpose: enrichment runs on the whole document and
+  # PII maps Kanon-2 mention offsets onto chunks, so both must read the same text.
+  text_source: elements         # elements | normalised | spellfix
+  # Run-output retention controls how many prior run dirs survive under
+  # <output_root>/. The current run is always preserved.
+  retention:
+    policy: rolling            # rolling | keep_all
+    keep: 2                    # number of runs to retain under rolling (current + previous)

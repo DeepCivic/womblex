@@ -1,0 +1,209 @@
+# DEFAULT-Isaacus — the reference Isaacus pipeline.
+#
+#   extract → normalise → spellfix → enrich → chunk → build_graph
+#           → embed → money → link → done
+#
+# The text is cleaned first (normalise, then dictionary-gated spellfix chaining
+# on top of it), so enrichment and AI chunking reassemble from the repaired
+# text layer — selected once via processing.text_source below. The entity graph
+# (enrich + the offline graph-refresh mention→chunk edge rebuild), chunk
+# embeddings (the kanon-2-embedder retrieval index), monetary amounts and
+# entity links are then produced over the one run. For PDF and DOCX sources
+# (narrative documents — spreadsheets are structured, not narrative, so AI
+# chunking and enrichment add nothing there).
+#
+# AI chunking (chunking.chunking_model=kanon-2-enricher) is on: chunk
+# boundaries follow the Kanon-2 enricher's structure spans, and — with enrich
+# also on — WomblexConfig auto-enables enrichment.persist_document so chunk
+# reuses the enrich Document rather than paying for a second enrichment pass.
+# Run enrich BEFORE chunk (see the command sequence).
+#
+# This file is the source of truth for the "DEFAULT-Isaacus" preset the console's
+# Pipeline Composer offers (src/womblex/ui/presets.py mirrors the stage toggles
+# and settings here) and the vendored demo run (output/console-demo, a completed
+# run of this exact shape). Edit all three together.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# HOW TO RUN IT (important: `womblex run` does NOT execute this whole shape).
+#
+# `womblex run` only extracts (extract → optional redaction detection) in one
+# process (womblex/batch.py). normalise, spellfix, chunk, enrich, build_graph
+# (graph-refresh), embed, money, link and pii are per-stage commands. So the
+# pipeline is a SEQUENCE of per-stage commands over one shard directory.
+# normalise/spellfix run first (they write the text overlay enrich and chunk
+# reassemble from, selected by processing.text_source); enrich MUST run before
+# chunk (AI chunking reuses the enrichment Document — otherwise every document
+# is enriched twice):
+#
+#   RUN=out/$(date -u +run-%Y%m%dT%H%M%SZ); SHARDS=$RUN/documents
+#
+#   # 1. extract (writes *.elements.parquet + sidecars per batch)
+#   womblex run          --config configs/default-isaacus.yaml --run-id "$(basename "$RUN")"
+#   #    ^ `run` extracts only; the toggles below declare the pipeline shape
+#   #      but are NOT run in-batch — dispatch them per-stage (steps 2–8) over
+#   #      $SHARDS.
+#
+#   # 2. normalise (writes *.normalised_text.parquet — the cleaned text layer)
+#   womblex normalise    --shards "$SHARDS" --config configs/default-isaacus.yaml
+#
+#   # 3. spellfix (writes *.spellfix_text.parquet, chaining on top of normalise)
+#   womblex spellfix     --shards "$SHARDS" --config configs/default-isaacus.yaml
+#
+#   # 4. enrich BEFORE chunk (persists *.enrichment_doc.parquet for reuse;
+#   #    reads the spellfix text layer via processing.text_source)
+#   womblex enrich       --shards "$SHARDS" --config configs/default-isaacus.yaml
+#
+#   # 5. chunk (AI chunking reuses the enrich Document — no double enrich)
+#   womblex chunk        --shards "$SHARDS" --config configs/default-isaacus.yaml
+#
+#   # 6. build_graph: rebuild mention→chunk edges now that chunks exist
+#   womblex graph-refresh --shards "$SHARDS"
+#
+#   # 7. embed (vectorise chunks with the kanon-2-embedder — the retrieval index)
+#   womblex embed        --shards "$SHARDS" --config configs/default-isaacus.yaml
+#
+#   # 8. money (offline, order-independent — reads the extraction Parquet)
+#   womblex money        --shards "$SHARDS" --config configs/default-isaacus.yaml
+#
+#   # 9. link: match enrichment entities to the corpus reference register
+#   #    (requires linking.reference below — supply your own CSV)
+#   womblex link         --shards "$SHARDS" --config configs/default-isaacus.yaml
+#
+#   # 10. consolidate the run-level documents manifest
+#   womblex manifest     --shards "$SHARDS"
+#
+# On object storage, steps 2–9 are the same via `womblex run-stage --stage
+# <normalise|spellfix|enrich|chunk|graph-refresh|embed|money|link> --store <uri>
+# --run-id <id> --config …`.
+# ─────────────────────────────────────────────────────────────────────────────
+
+dataset:
+  name: default-isaacus
+  # run_id: my-named-run   # Optional; else --run-id or an auto timestamp.
+
+paths:
+  input_root: ./data/raw
+  output_root: ./data/processed
+  checkpoint_dir: ./data/checkpoints
+
+# Detection defaults are fine for mixed PDF/DOCX narrative corpora.
+detection:
+  min_text_coverage: 0.3
+  form_signal_threshold: 0.5
+  table_signal_threshold: 0.4
+
+extraction:
+  native:
+    include_tables: true
+  ocr:
+    engine: paddleocr      # local, CPU-only, no network. mistral-ocr/ollama opt-in.
+    dpi: 300
+    lang: eng
+
+# Redaction stays on in flag mode (the default): it marks records/chunks that
+# overlap redacted regions without changing text — safe and cheap. Switch to
+# blackout/delete only when the corpus is actually redacted.
+redaction:
+  enabled: true
+  mode: flag
+
+# Text cleaning runs FIRST, before enrich and chunk, so both reassemble from the
+# repaired text (selected once by processing.text_source below, = 'spellfix').
+#
+# normalise: fidelity-neutral formatting cleanup (whitespace, glyph-kerned
+# footers). It has no `enabled` flag — its transforms are always applicable; it
+# is "on" whenever a consumer selects its layer, which text_source='spellfix'
+# does (spellfix chains on top of the normalised layer). Writes
+# *.normalised_text.parquet; the raw elements are never modified.
+normalise:
+  unicode_hygiene: true
+  collapse_whitespace: true
+  despace_page_marker: true
+  # substitutions: {}       # Corpus-specific letterhead/font-map typo fixes.
+
+# spellfix: dictionary-gated OCR glyph repair, chaining on top of normalise.
+# Rewrites only out-of-dictionary tokens with a single unambiguous in-dictionary
+# candidate (en_AU Hunspell). Writes *.spellfix_text.parquet + an audit trail.
+spellfix:
+  enabled: true
+  general_edits: false     # Tier A digit→letter only (Tier B risks proper nouns).
+  dict_name: en_AU
+
+# AI chunking: boundaries follow the Kanon-2 enricher's structure spans.
+# REQUIRES enrich to have run first (see the command sequence above) —
+# WomblexConfig auto-enables enrichment.persist_document so chunk reuses the
+# enrich Document instead of calling Kanon-2 a second time per document.
+chunking:
+  enabled: true
+  tokenizer: "isaacus/kanon-2-tokenizer"
+  chunk_size: 480          # The Kanon-2 512-token window minus 32-token headroom.
+  chunking_model: kanon-2-enricher
+  chunk_tables: true
+  overlap: 0.1             # 10% of chunk_size shared across boundaries, so an
+                           # entity mention straddling a boundary survives in a
+                           # chunk — the graph maps mentions onto chunks by offset.
+  processes: 1             # Single-threaded (Chromebook-friendly). Raise on servers.
+
+# Kanon-2 enrichment over the whole reassembled document. Kanon-2 chunks long
+# inputs internally (overflow_strategy) and stitches the graph back; returned
+# offsets still index the full source, so mention→chunk mapping is unaffected.
+enrichment:
+  enabled: true
+  model: kanon-2-enricher
+  overflow_strategy: auto  # chunk+stitch >16k-token docs (FOI bundles exceed it).
+  # Token-budgeted batching — defaults are reasonable starting points; probe
+  # against your rate limits and raise if you have headroom.
+  max_texts_per_request: 8 # Isaacus per-request document ceiling.
+  token_budget: 32768      # Pack requests up to this many combined tokens.
+  split_ceiling: 100000    # Split a solo doc above this client-side (429 margin).
+  # persist_document is auto-enabled here because chunking_model is set + enrich
+  # is on; it lets the chunk stage reuse this stage's Document (no double enrich).
+
+# Monetary amounts (offline, API-free, annotation only). Order-independent —
+# it reads the extraction Parquet, never the graph or chunks — but produced in
+# the same run so *.money_spans.parquet lands beside *.graph_edges.parquet,
+# keyed on source_hash, and narrative amounts join to chunks by offset.
+money:
+  enabled: true
+  narrative: true
+  default_currency: AUD    # `$` means AUD in Australian government publications.
+  columns:
+    enabled: true          # Classify table/sheet money columns from headers/formats.
+
+# Chunk embeddings (the kanon-2-embedder retrieval index) over the same run, so
+# *.embeddings.parquet lands beside the chunks and graph. task/dimensions stay
+# at the model defaults (retrieval/document, full width) — set dimensions only
+# to reduce below the model default. Run AFTER chunk (it embeds *.chunks.parquet).
+embedding:
+  enabled: true
+  # model: kanon-2-embedder   # default
+  # task: retrieval/document  # default; retrieval/query | null for other uses
+  # dimensions: null          # model default width unless you must reduce it
+# Entity links: match the corporate/address entities enrich found to a corpus
+# reference register (a canonical id/name table), so mentions resolve to stable
+# entity ids across documents. Generic — the corpus supplies the register: set
+# linking.reference to your own CSV (path + id_col/name_col + match columns) or
+# the stage warns and no-ops. Runs AFTER enrich (it reads the enrichment
+# entities). See ReferenceConfig in config.py for the mapping fields.
+linking:
+  enabled: true
+  # reference:               # REQUIRED at run time — supply your corpus register.
+  #   path: ./data/reference/register.csv
+  #   id_col: entity_id
+  #   name_col: legal_name
+  #   match_fuzzy_cols: [legal_name, trading_name]
+pii:
+  enabled: false
+
+processing:
+  batch_size: 25
+  checkpoint_every: 25
+  # 'spellfix' selects the OCR-repaired text layer (which chains on top of
+  # normalised) as the single string BOTH enrich and chunk reassemble from, so
+  # their offsets — and the mention→chunk mapping — share one coordinate space. A
+  # missing overlay falls back to verbatim. This is what enables normalise +
+  # spellfix in the downstream-stage gate (pipeline_order.enabled_downstream_stages).
+  text_source: spellfix
+  retention:
+    policy: rolling
+    keep: 2
