@@ -1548,7 +1548,7 @@ class TestStoreUnreachable:
     """
 
     def _client(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> TestClient:
-        def _boom(_uri: str) -> object:
+        def _boom(_uri: str, _credentials: tuple[str, str] | None = None) -> object:
             raise readers.StoreUnreachable("Install s3fs to access S3")
 
         monkeypatch.setattr(readers, "_open_store", _boom)
