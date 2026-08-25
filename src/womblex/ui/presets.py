@@ -15,9 +15,9 @@ construction ``load_config`` uses, so a preset that would not load is a test
 failure, not a runtime surprise (``tests/test_ui.py`` builds each one).
 
 `DEFAULT-Isaacus` is the reference Isaacus pipeline:
-``extract → normalise → spellfix → enrich → chunk → build_graph → embed →
-money → link → done``, with text cleaning first (normalise + spellfix,
-selected via ``processing.text_source``), the entity graph (enrich + the
+``extract → normalise → enrich → chunk → build_graph → embed →
+money → link → done``, with text cleaning first (normalise, selected via
+``processing.text_source``), the entity graph (enrich + the
 ``graph-refresh`` mention→chunk edge rebuild), chunk embeddings (the
 kanon-2-embedder retrieval index), monetary amounts and entity links produced
 over the one run. It targets PDF and DOCX sources — the two narrative formats
@@ -28,8 +28,8 @@ shape, so the console's sample corpus and the preset stay in step.
 
 The runnable, CLI-first source of truth for that shape is
 ``configs/default-isaacus.yaml`` — a complete config plus the per-stage command
-sequence a dev runs it with (``womblex run`` alone cannot: normalise, spellfix,
-enrich, build_graph, money and link are per-stage commands, normalise/spellfix
+sequence a dev runs it with (``womblex run`` alone cannot: normalise,
+enrich, build_graph, money and link are per-stage commands, normalise
 run before enrich, and enrich must precede chunk). The overlay here mirrors
 that file's stage toggles and settings; keep the two in step.
 """
@@ -70,7 +70,7 @@ class Preset:
         }
 
 
-#: `DEFAULT-Isaacus` — extract → normalise → spellfix → enrich → chunk →
+#: `DEFAULT-Isaacus` — extract → normalise → enrich → chunk →
 #: build_graph → embed → money → link.
 #:
 #: Mirrors ``configs/default-isaacus.yaml`` (the runnable, CLI-first source of
@@ -79,17 +79,19 @@ class Preset:
 #: `enabled` flags are carried so the composer form seeds sensible values, not
 #: just toggles:
 #:
-#: - `processing.text_source = spellfix` selects the OCR-repaired text layer
-#:   (which chains on top of the normalised layer) as the single string BOTH
-#:   enrich and chunk reassemble from. It is also the gate that puts `normalise`
-#:   and `spellfix` into the downstream-stage dispatch: `normalise` has no
+#: - `processing.text_source = normalised` selects the cleaned text layer as
+#:   the single string BOTH enrich and chunk reassemble from. It is also the
+#:   gate that puts `normalise` into the downstream-stage dispatch: it has no
 #:   `enabled` flag of its own, so `enabled_downstream_stages` treats it as
-#:   wanted precisely when a consumer selects its layer (here, via spellfix).
-#:   Both run BEFORE enrich in `PIPELINE_ORDER`, so the cleaned text is what
-#:   enrichment and AI chunking see.
-#: - `spellfix.enabled` runs the dictionary-gated OCR glyph repair; Tier A
-#:   (digit→letter) only, en_AU dictionary — the defaults, carried explicitly so
-#:   the form shows the stage as on.
+#:   wanted precisely when a consumer selects its layer. It runs BEFORE enrich
+#:   in `PIPELINE_ORDER`, so the cleaned text is what enrichment and AI chunking
+#:   see.
+#: - `spellfix` is deliberately absent. Dictionary-gated OCR repair rewrites
+#:   source text on a dictionary judgement, and Australian government documents
+#:   are dense with proper nouns, statute short titles and agency acronyms that
+#:   are legitimately out-of-dictionary — so it is a per-corpus call to make
+#:   after measuring, not a reference default. The stage and its config are
+#:   unchanged; the composer still offers them.
 #: - `chunking.chunking_model = kanon-2-enricher` selects semchunk-4 AI
 #:   chunking (boundaries follow the enricher's structure). With `enrich` also
 #:   on, `WomblexConfig` auto-enables `enrichment.persist_document` so `chunk`
@@ -114,19 +116,18 @@ class Preset:
 _DEFAULT_ISAACUS = Preset(
     name="DEFAULT-Isaacus",
     description=(
-        "Reference Isaacus pipeline: extract, text cleaning (normalise + "
-        "spellfix), Kanon-2 enrichment, semantic (AI) chunking, entity-graph "
+        "Reference Isaacus pipeline: extract, text cleaning (normalise), "
+        "Kanon-2 enrichment, semantic (AI) chunking, entity-graph "
         "edge rebuild (build_graph), chunk embeddings, monetary-amount "
         "annotation and entity linking — cleaning first, then graph, embeddings, "
         "money and links over the one run. For PDF and DOCX sources. Runnable "
         "from the CLI as configs/default-isaacus.yaml (a per-stage sequence: "
-        "normalise, spellfix, enrich before chunk, then graph-refresh, embed, "
+        "normalise, enrich before chunk, then graph-refresh, embed, "
         "money, link). Linking needs a corpus reference register (set "
         "linking.reference) supplied at run time."
     ),
     formats=(".pdf", ".docx"),
     config={
-        "spellfix": {"enabled": True},
         "chunking": {
             "enabled": True,
             "chunking_model": "kanon-2-enricher",
@@ -137,9 +138,10 @@ _DEFAULT_ISAACUS = Preset(
         "embedding": {"enabled": True},
         "money": {"enabled": True, "default_currency": "AUD"},
         "linking": {"enabled": True},
-        "processing": {"text_source": "spellfix"},
+        "processing": {"text_source": "normalised"},
         # Redaction/PII stay at their defaults (off, except redaction flagging).
-        # normalise carries no toggle — it is gated by text_source above.
+        # normalise carries no toggle — it is gated by text_source above, and
+        # spellfix stays off (see the note above).
     },
 )
 

@@ -579,15 +579,16 @@ console's Pipeline Composer offers the same ones by name (e.g.
 `DEFAULT-Isaacus`); the config file is the CLI source of truth.
 
 **`configs/default-isaacus.yaml` — the reference Isaacus pipeline**
-(`extract → normalise → spellfix → enrich → chunk → build_graph → embed →
-money → link → done`, for PDF/DOCX). The text is cleaned first (normalise, then
-spellfix, selected via `processing.text_source`), then the entity graph, chunk
+(`extract → normalise → enrich → chunk → build_graph → embed →
+money → link → done`, for PDF/DOCX). The text is cleaned first (normalise,
+selected via `processing.text_source`), then the entity graph, chunk
 embeddings, monetary amounts and entity links are produced over the one run.
-Note that `womblex run` alone runs only `extract → redaction detection`
-(extraction only); `normalise`, `spellfix`, `chunk`, `enrich`, `build_graph`
-(graph-refresh), `embed`, `money`, `link` and `pii` are per-stage commands,
-normalise/spellfix run before `enrich`, and `enrich` must precede `chunk` so AI
-chunking reuses the enrichment (no double cost):
+`spellfix` is not in the reference shape — dictionary-gated OCR repair is a
+per-corpus opt-in (see the note in the config). Note that `womblex run` alone
+runs only `extract → redaction detection` (extraction only); `normalise`,
+`chunk`, `enrich`, `build_graph` (graph-refresh), `embed`, `money`, `link` and
+`pii` are per-stage commands, `normalise` runs before `enrich`, and `enrich`
+must precede `chunk` so AI chunking reuses the enrichment (no double cost):
 
 ```bash
 RUN=out/$(date -u +run-%Y%m%dT%H%M%SZ); SHARDS=$RUN/documents
@@ -595,18 +596,17 @@ CFG=configs/default-isaacus.yaml
 
 womblex run           --config $CFG --run-id "$(basename "$RUN")"  # 1. extract
 womblex normalise     --shards "$SHARDS" --config $CFG             # 2. clean text
-womblex spellfix      --shards "$SHARDS" --config $CFG             # 3. OCR repair (chains on 2)
-womblex enrich        --shards "$SHARDS" --config $CFG             # 4. enrich BEFORE chunk
-womblex chunk         --shards "$SHARDS" --config $CFG             # 5. AI chunk (reuses enrich)
-womblex graph-refresh --shards "$SHARDS"                           # 6. build_graph edges
-womblex embed         --shards "$SHARDS" --config $CFG             # 7. chunk embeddings
-womblex money         --shards "$SHARDS" --config $CFG             # 8. amounts (offline)
-womblex link          --shards "$SHARDS" --config $CFG             # 9. entity links (needs a register)
-womblex manifest      --shards "$SHARDS"                           # 10. consolidate manifest
+womblex enrich        --shards "$SHARDS" --config $CFG             # 3. enrich BEFORE chunk
+womblex chunk         --shards "$SHARDS" --config $CFG             # 4. AI chunk (reuses enrich)
+womblex graph-refresh --shards "$SHARDS"                           # 5. build_graph edges
+womblex embed         --shards "$SHARDS" --config $CFG             # 6. chunk embeddings
+womblex money         --shards "$SHARDS" --config $CFG             # 7. amounts (offline)
+womblex link          --shards "$SHARDS" --config $CFG             # 8. entity links (needs a register)
+womblex manifest      --shards "$SHARDS"                           # 9. consolidate manifest
 ```
 
-On object storage, steps 2–9 are the same via `womblex run-stage --stage
-<normalise|spellfix|enrich|chunk|graph-refresh|embed|money|link> --store <uri>
+On object storage, steps 2–8 are the same via `womblex run-stage --stage
+<normalise|enrich|chunk|graph-refresh|embed|money|link> --store <uri>
 --run-id <id> --config $CFG`. Linking needs a corpus reference register
 (`linking.reference`) you supply. The full command sequence and per-setting
 rationale are commented inside the config file itself.
