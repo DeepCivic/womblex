@@ -8,6 +8,14 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 ## [Unreleased]
 
+## [0.5.12] - 2026-08-25
+Patch. Local model artefacts resolve per artefact across every models
+root, so `WOMBLEX_MODELS_DIR` no longer shadows the wheel-bundled en_AU
+dictionary and kanon-2 tokeniser; `spellfix` fails loudly on an unresolved
+dictionary; a stage job blocked only on a not-yet-produced upstream input
+is released rather than failed; and `spellfix` leaves the `DEFAULT-Isaacus`
+reference shape. No parquet schema changed.
+
 ### Changed
 - **`spellfix` dropped from the `DEFAULT-Isaacus` reference shape.** The reference pipeline is now `extract → normalise → enrich → chunk → build_graph → embed → money → link → done`, with `processing.text_source: normalised`. Dictionary-gated OCR repair rewrites source text on a dictionary judgement, and Australian government documents are dense with proper nouns, statute short titles and agency acronyms that are legitimately out-of-dictionary — that is a per-corpus call to make after measuring, not a reference default. The stage, its config section, its CLI command and its place in `PIPELINE_ORDER` are all unchanged and still reachable (`spellfix: {enabled: true}` plus `text_source: spellfix`); only the default composition changed. Config, preset overlay (`ui/presets.py`) and README's per-stage sequence (now 9 steps) edited together; `test_config_file_and_ui_preset_agree` pins that neither carries it.
 
