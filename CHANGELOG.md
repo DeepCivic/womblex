@@ -8,6 +8,22 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 ## [Unreleased]
 
+## [0.5.12] - 2026-08-25
+Patch. Local model artefacts resolve per artefact across every models
+root, so `WOMBLEX_MODELS_DIR` no longer shadows the wheel-bundled en_AU
+dictionary and kanon-2 tokeniser; `spellfix` fails loudly on an unresolved
+dictionary; a stage job blocked only on a not-yet-produced upstream input
+is released rather than failed; and `spellfix` leaves the `DEFAULT-Isaacus`
+reference shape. No parquet schema changed.
+
+### Changed
+- **`spellfix` dropped from the `DEFAULT-Isaacus` reference shape.** The reference pipeline is now `extract → normalise → enrich → chunk → build_graph → embed → money → link → done`, with `processing.text_source: normalised`. Dictionary-gated OCR repair rewrites source text on a dictionary judgement, and Australian government documents are dense with proper nouns, statute short titles and agency acronyms that are legitimately out-of-dictionary — that is a per-corpus call to make after measuring, not a reference default. The stage, its config section, its CLI command and its place in `PIPELINE_ORDER` are all unchanged and still reachable (`spellfix: {enabled: true}` plus `text_source: spellfix`); only the default composition changed. Config, preset overlay (`ui/presets.py`) and README's per-stage sequence (now 9 steps) edited together; `test_config_file_and_ui_preset_agree` pins that neither carries it.
+
+### Fixed
+- **Local model artefacts resolve per artefact across every root, so `WOMBLEX_MODELS_DIR` no longer shadows the wheel-bundled ones.** `utils/models.py` returned a single directory (`find_models_dir`) and looked only there, but the roots hold different artefacts: a container image mounts the large ones at `WOMBLEX_MODELS_DIR=/app/models` while the small ones (`en_AU`, `kanon-2-tokenizer`) ship inside the wheel under `womblex/_models/`. Setting the override therefore made `resolve_local_model_path("en_AU")` return the bare string and the `spellfix` stage die inside spylls on the relative path `en_AU/index.aff`. The new `model_roots()` enumerates every existing root in priority order and `resolve_local_model_path` returns the first that actually holds the named artefact — the override supplements the bundled root rather than replacing it. `find_models_dir()` is retained (highest-priority root) but must not be used to build an artefact path. Both Dockerfiles' comments corrected to match. Pinned by `tests/test_models_resolution.py`, which covers the exact image scenario (override root lacking `en_AU`) alongside the HF `snapshots/<hash>/` and bare-`.pt` behaviours.
+- **`spellfix` fails loudly when its dictionary cannot be resolved.** A bundled-only Hunspell dictionary has no remote fallback, but `_dictionary` turned the resolver's "not found" bare string into the relative path `en_AU/index` and surfaced as `FileNotFoundError: 'en_AU/index.aff'` several frames inside spylls. It now raises a `FileNotFoundError` naming the artefact, the roots searched, and where the dictionary is meant to ship.
+- **A stage job blocked purely on a not-yet-produced upstream input is released, not failed.** A stage whose every base raised `NotReady` exited non-zero, which `cloud/worker.py` recorded via `queue.fail` — so a stage claimed ahead of its upstream spent an attempt per poll and, on a slow-draining run, landed terminally failed for a pipeline that was merely early. `_run_stage` now distinguishes the all-blocked case as `StageNotReady`, and the worker loop `release`s it (attempt not consumed, reason recorded, backs off by `poll_interval`) exactly as it already did for the ingest-root mismatch. A real failure, a discovery failure, and a partially-blocked still-draining run are all unchanged. Queue-semantics only; the up-front whole-DAG composition check stays open in `docs/functional_requirements.md`.
+
 ## [0.5.11] - 2026-08-19
 Minor, additive. Spreadsheet merge extents are captured and merge-covered
 cells emitted; DOCX multi-row table headers are derived from `w:tblHeader`;

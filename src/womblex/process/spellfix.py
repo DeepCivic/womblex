@@ -38,7 +38,7 @@ from pathlib import Path
 
 from spylls.hunspell import Dictionary
 
-from womblex.utils.models import resolve_local_model_path
+from womblex.utils.models import model_roots, resolve_local_model_path
 
 # OCR digit→letter glyph confusions (Tier A). Lowercase targets only — the
 # dictionary lookup folds case. Kept tight on purpose: an embedded digit is the
@@ -79,10 +79,26 @@ class Correction:
 
 @lru_cache(maxsize=4)
 def _dictionary(dict_name: str) -> Dictionary:
-    """Load the bundled Hunspell dictionary (resolved via ``utils.models``)."""
+    """Load the bundled Hunspell dictionary (resolved via ``utils.models``).
+
+    Raises when the dictionary is not on disk. Every other caller of
+    ``resolve_local_model_path`` treats a bare-string return as "not vendored,
+    fall back to the hub"; a Hunspell dictionary has no such fallback, so the
+    string would reach spylls as the relative path ``en_AU/index`` and surface
+    as ``FileNotFoundError: 'en_AU/index.aff'`` — the symptom, several frames
+    from the cause.
+    """
     base = resolve_local_model_path(dict_name)
-    index = str(Path(base) / "index") if isinstance(base, Path) else f"{base}/index"
-    return Dictionary.from_files(index)
+    if not isinstance(base, Path) or not (base / "index.aff").is_file():
+        searched = ", ".join(str(r) for r in model_roots()) or "(no models root exists)"
+        raise FileNotFoundError(
+            f"spellfix dictionary {dict_name!r} not found: no models root holds "
+            f"{dict_name}/index.aff. Searched: {searched}. The en_AU dictionary "
+            "ships inside the wheel under womblex/_models/; WOMBLEX_MODELS_DIR "
+            "supplements that root rather than replacing it, so check the "
+            "install rather than the override."
+        )
+    return Dictionary.from_files(str(base / "index"))
 
 
 def _in_dict(d: Dictionary, word: str) -> bool:

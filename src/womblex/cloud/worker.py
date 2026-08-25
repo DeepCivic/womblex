@@ -77,6 +77,15 @@ class StageJobFailed(Exception):
     """A stage job ran but its summary reported a non-zero exit."""
 
 
+class StageNotReady(Exception):
+    """Every base of a stage job is blocked on an upstream input that is absent.
+
+    Distinct from :class:`StageJobFailed` because nothing went wrong: the stage
+    was claimed before the sidecar it reads existed. Treated like the
+    ingest-root refusal — released, not failed — so the attempt is not consumed.
+    """
+
+
 def _process_job(job: Job, config: WomblexConfig, store: RemoteStore, ingest: RemoteStore) -> None:
     """Run one claimed job, capturing and publishing its log either way.
 
@@ -132,6 +141,10 @@ def _run_stage(job: Job, config: WomblexConfig, store: RemoteStore) -> None:
 
     A non-zero summary is raised rather than returned, so the row records the
     failure and retries — a stage that published nothing must not read as done.
+    Two shapes of non-zero, though: a stage whose every base is blocked on an
+    absent upstream sidecar raises :class:`StageNotReady` instead, because the
+    caller must release it rather than spend an attempt on work that has not
+    become runnable yet.
     """
     from womblex.cloud.stage_contracts import STAGE_CONTRACTS
     from womblex.cloud.stage_runner import (
@@ -147,11 +160,22 @@ def _run_stage(job: Job, config: WomblexConfig, store: RemoteStore) -> None:
         checkpoint_prefix=checkpoint_prefix_for(contract, _output_prefix(job)),
     )
     summary.log()
-    if summary.exit_code != 0:
-        raise StageJobFailed(
-            f"stage {contract.name}: {summary.failed} failed, "
-            f"{summary.not_ready} not-ready of {summary.bases} base(s)"
-        )
+    if summary.exit_code == 0:
+        return
+    detail = (
+        f"stage {contract.name}: {summary.failed} failed, "
+        f"{summary.not_ready} not-ready of {summary.bases} base(s)"
+    )
+    blocked_only = (
+        not summary.failed
+        and not summary.discovery_failed
+        and summary.bases
+        and summary.not_ready == summary.bases
+    )
+    if blocked_only:
+        missing = ", ".join(sorted(summary.not_ready_missing)) or "an upstream sidecar"
+        raise StageNotReady(f"{detail} — every base awaits {missing}")
+    raise StageJobFailed(detail)
 
 
 def run_worker(
@@ -238,6 +262,20 @@ def run_worker(
                 _process_job(job, config, store, ingest)
                 queue.complete(job.id)
                 completed += 1
+            except StageNotReady as e:
+                # Released, not failed, for the same reason as the ingest
+                # mismatch above: the stage is fine, it is just early. Failing
+                # here spends an attempt per poll on a stage whose upstream has
+                # not published yet, so a slow-draining run exhausts the retry
+                # budget and lands the stage terminally failed — the operator
+                # then sees "failed" for a pipeline that was merely in order.
+                logger.warning("job %d (%s) released: %s", job.id, job.label, e)
+                queue.release(job.id, str(e))
+                if once:
+                    break
+                idle_since = time.monotonic()
+                time.sleep(poll_interval)
+                continue
             except Exception as e:  # one bad job must not kill the worker
                 logger.exception("job %d (%s) failed", job.id, job.label)
                 queue.fail(
@@ -254,4 +292,4 @@ def run_worker(
     return completed
 
 
-__all__ = ["StageJobFailed", "default_worker_id", "run_worker"]
+__all__ = ["StageJobFailed", "StageNotReady", "default_worker_id", "run_worker"]

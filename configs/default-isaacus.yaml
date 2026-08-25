@@ -1,12 +1,12 @@
 # DEFAULT-Isaacus — the reference Isaacus pipeline.
 #
-#   extract → normalise → spellfix → enrich → chunk → build_graph
+#   extract → normalise → enrich → chunk → build_graph
 #           → embed → money → link → done
 #
-# The text is cleaned first (normalise, then dictionary-gated spellfix chaining
-# on top of it), so enrichment and AI chunking reassemble from the repaired
-# text layer — selected once via processing.text_source below. The entity graph
-# (enrich + the offline graph-refresh mention→chunk edge rebuild), chunk
+# The text is cleaned first (normalise), so enrichment and AI chunking
+# reassemble from the cleaned text layer — selected once via
+# processing.text_source below. The entity graph (enrich + the offline
+# graph-refresh mention→chunk edge rebuild), chunk
 # embeddings (the kanon-2-embedder retrieval index), monetary amounts and
 # entity links are then produced over the one run. For PDF and DOCX sources
 # (narrative documents — spreadsheets are structured, not narrative, so AI
@@ -27,10 +27,10 @@
 # HOW TO RUN IT (important: `womblex run` does NOT execute this whole shape).
 #
 # `womblex run` only extracts (extract → optional redaction detection) in one
-# process (womblex/batch.py). normalise, spellfix, chunk, enrich, build_graph
+# process (womblex/batch.py). normalise, chunk, enrich, build_graph
 # (graph-refresh), embed, money, link and pii are per-stage commands. So the
 # pipeline is a SEQUENCE of per-stage commands over one shard directory.
-# normalise/spellfix run first (they write the text overlay enrich and chunk
+# normalise runs first (it writes the text overlay enrich and chunk
 # reassemble from, selected by processing.text_source); enrich MUST run before
 # chunk (AI chunking reuses the enrichment Document — otherwise every document
 # is enriched twice):
@@ -46,34 +46,31 @@
 #   # 2. normalise (writes *.normalised_text.parquet — the cleaned text layer)
 #   womblex normalise    --shards "$SHARDS" --config configs/default-isaacus.yaml
 #
-#   # 3. spellfix (writes *.spellfix_text.parquet, chaining on top of normalise)
-#   womblex spellfix     --shards "$SHARDS" --config configs/default-isaacus.yaml
-#
-#   # 4. enrich BEFORE chunk (persists *.enrichment_doc.parquet for reuse;
-#   #    reads the spellfix text layer via processing.text_source)
+#   # 3. enrich BEFORE chunk (persists *.enrichment_doc.parquet for reuse;
+#   #    reads the normalised text layer via processing.text_source)
 #   womblex enrich       --shards "$SHARDS" --config configs/default-isaacus.yaml
 #
-#   # 5. chunk (AI chunking reuses the enrich Document — no double enrich)
+#   # 4. chunk (AI chunking reuses the enrich Document — no double enrich)
 #   womblex chunk        --shards "$SHARDS" --config configs/default-isaacus.yaml
 #
-#   # 6. build_graph: rebuild mention→chunk edges now that chunks exist
+#   # 5. build_graph: rebuild mention→chunk edges now that chunks exist
 #   womblex graph-refresh --shards "$SHARDS"
 #
-#   # 7. embed (vectorise chunks with the kanon-2-embedder — the retrieval index)
+#   # 6. embed (vectorise chunks with the kanon-2-embedder — the retrieval index)
 #   womblex embed        --shards "$SHARDS" --config configs/default-isaacus.yaml
 #
-#   # 8. money (offline, order-independent — reads the extraction Parquet)
+#   # 7. money (offline, order-independent — reads the extraction Parquet)
 #   womblex money        --shards "$SHARDS" --config configs/default-isaacus.yaml
 #
-#   # 9. link: match enrichment entities to the corpus reference register
+#   # 8. link: match enrichment entities to the corpus reference register
 #   #    (requires linking.reference below — supply your own CSV)
 #   womblex link         --shards "$SHARDS" --config configs/default-isaacus.yaml
 #
-#   # 10. consolidate the run-level documents manifest
+#   # 9. consolidate the run-level documents manifest
 #   womblex manifest     --shards "$SHARDS"
 #
-# On object storage, steps 2–9 are the same via `womblex run-stage --stage
-# <normalise|spellfix|enrich|chunk|graph-refresh|embed|money|link> --store <uri>
+# On object storage, steps 2–8 are the same via `womblex run-stage --stage
+# <normalise|enrich|chunk|graph-refresh|embed|money|link> --store <uri>
 # --run-id <id> --config …`.
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -108,26 +105,25 @@ redaction:
   mode: flag
 
 # Text cleaning runs FIRST, before enrich and chunk, so both reassemble from the
-# repaired text (selected once by processing.text_source below, = 'spellfix').
+# cleaned text (selected once by processing.text_source below, = 'normalised').
 #
 # normalise: fidelity-neutral formatting cleanup (whitespace, glyph-kerned
 # footers). It has no `enabled` flag — its transforms are always applicable; it
-# is "on" whenever a consumer selects its layer, which text_source='spellfix'
-# does (spellfix chains on top of the normalised layer). Writes
-# *.normalised_text.parquet; the raw elements are never modified.
+# is "on" whenever a consumer selects its layer, which text_source='normalised'
+# does. Writes *.normalised_text.parquet; the raw elements are never modified.
 normalise:
   unicode_hygiene: true
   collapse_whitespace: true
   despace_page_marker: true
   # substitutions: {}       # Corpus-specific letterhead/font-map typo fixes.
 
-# spellfix: dictionary-gated OCR glyph repair, chaining on top of normalise.
-# Rewrites only out-of-dictionary tokens with a single unambiguous in-dictionary
-# candidate (en_AU Hunspell). Writes *.spellfix_text.parquet + an audit trail.
-spellfix:
-  enabled: true
-  general_edits: false     # Tier A digit→letter only (Tier B risks proper nouns).
-  dict_name: en_AU
+# spellfix (dictionary-gated OCR glyph repair) is deliberately NOT part of this
+# reference shape. It rewrites source text on a dictionary judgement, which is a
+# corpus-specific call — Australian government documents are dense with proper
+# nouns, statute short titles and agency acronyms that are legitimately
+# out-of-dictionary. Turn it on per corpus once you have measured it there:
+#
+#   spellfix: {enabled: true}       # then set processing.text_source: spellfix
 
 # AI chunking: boundaries follow the Kanon-2 enricher's structure spans.
 # REQUIRES enrich to have run first (see the command sequence above) —
@@ -198,12 +194,13 @@ pii:
 processing:
   batch_size: 25
   checkpoint_every: 25
-  # 'spellfix' selects the OCR-repaired text layer (which chains on top of
-  # normalised) as the single string BOTH enrich and chunk reassemble from, so
-  # their offsets — and the mention→chunk mapping — share one coordinate space. A
-  # missing overlay falls back to verbatim. This is what enables normalise +
-  # spellfix in the downstream-stage gate (pipeline_order.enabled_downstream_stages).
-  text_source: spellfix
+  # 'normalised' selects the cleaned text layer as the single string BOTH
+  # enrich and chunk reassemble from, so their offsets — and the mention→chunk
+  # mapping — share one coordinate space. A missing overlay falls back to
+  # verbatim. This is also what enables normalise in the downstream-stage gate
+  # (pipeline_order.enabled_downstream_stages), which has no `enabled` flag of
+  # its own. Set to 'spellfix' only alongside spellfix.enabled above.
+  text_source: normalised
   retention:
     policy: rolling
     keep: 2

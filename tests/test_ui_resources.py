@@ -630,13 +630,25 @@ class TestCredentialOverride:
         layered = apply_saved_locations(base, SavedLocations(ingest_uri="s3://bucket/inbox"))
         assert layered.s3_credentials == ("base-k", "base-s")
 
-    def test_save_credentials_persists_and_masks(self, tmp_path: Path) -> None:
+    def test_save_credentials_persists_and_masks(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """A saved pair is written to the volume, but the response only ever
-        carries the masked tail and its source — never the raw secret."""
+        carries the masked tail and its source — never the raw secret.
+
+        The store is an ``s3://`` URI because the credential summary reports
+        the options ``storage_options_from_env`` would actually pass, and it
+        passes none for any other scheme — a saved key against a local store
+        configures nothing, and the card says so. The endpoint is pinned at a
+        closed local port so the reachability probe in the save response fails
+        immediately instead of dialling AWS; reachability is reported, not
+        required, so a refused connection does not affect the save.
+        """
         pytest.importorskip("fsspec")
+        monkeypatch.setenv("WOMBLEX_S3_ENDPOINT", "http://127.0.0.1:1")
         settings_dir = tmp_path / "settings"
         client = TestClient(create_app(
-            store_uri=str(tmp_path / "store"), settings_dir=settings_dir,
+            store_uri=f"s3://{tmp_path}/bucket", settings_dir=settings_dir,
         ))
         resp = client.put("/api/resources/locations", json={
             "s3_access_key_id": "AKIAROTATED9999",

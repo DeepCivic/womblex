@@ -1004,13 +1004,16 @@ class TestComposerApi:
     def test_default_isaacus_enables_the_full_reference_shape(
         self, client: TestClient
     ) -> None:
-        """The preset is the reference extract → normalise → spellfix → enrich →
-        chunk → build_graph → embed → money → link pipeline: text cleaning (via
-        processing.text_source=spellfix, which also gates normalise), AI chunking,
-        enrichment, embedding, money and linking all on; graph produced by enrich
-        + the offline graph-refresh edge rebuild. Embed is part of the shape (the
-        demo run carries it); a preset that omitted it disagreed with the sample
-        corpus, which is the bug this pins."""
+        """The preset is the reference extract → normalise → enrich → chunk →
+        build_graph → embed → money → link pipeline: text cleaning (via
+        processing.text_source=normalised, which is also what gates normalise),
+        AI chunking, enrichment, embedding, money and linking all on; graph
+        produced by enrich + the offline graph-refresh edge rebuild. Embed is
+        part of the shape (the demo run carries it); a preset that omitted it
+        disagreed with the sample corpus, which is the bug this pins.
+
+        spellfix is NOT in the shape: dictionary-gated repair is a per-corpus
+        call, so the reference default must not carry it."""
         preset = client.get("/api/composer/presets/DEFAULT-Isaacus").json()
         cfg = preset["config"]
         assert cfg["chunking"]["enabled"] is True
@@ -1019,10 +1022,10 @@ class TestComposerApi:
         assert cfg["embedding"]["enabled"] is True
         assert cfg["money"]["enabled"] is True
         assert cfg["linking"]["enabled"] is True
-        assert cfg["spellfix"]["enabled"] is True
-        # Text cleaning is selected once; this is also what gates normalise +
-        # spellfix into the downstream-stage dispatch and puts them before enrich.
-        assert cfg["processing"]["text_source"] == "spellfix"
+        assert "spellfix" not in cfg
+        # Text cleaning is selected once; this is also what gates normalise into
+        # the downstream-stage dispatch and puts it before enrich.
+        assert cfg["processing"]["text_source"] == "normalised"
         # No dataset/paths: the operator supplies the run's identity and paths.
         assert "dataset" not in cfg
         assert "paths" not in cfg
@@ -1057,9 +1060,9 @@ class TestComposerApi:
         assert cfg.embedding.enabled
         assert cfg.money.enabled
         assert cfg.linking.enabled
-        assert cfg.spellfix.enabled
+        assert not cfg.spellfix.enabled, "spellfix is a per-corpus opt-in"
         # Text cleaning runs before enrich/chunk: the overlay both reassemble from.
-        assert cfg.processing.text_source == "spellfix"
+        assert cfg.processing.text_source == "normalised"
         # AI chunking + enrich both on => reuse auto-wired, so no double enrich.
         assert cfg.enrichment.persist_document is True
 
@@ -1078,10 +1081,11 @@ class TestComposerApi:
         assert overlay["embedding"]["enabled"] == cfg.embedding.enabled
         assert overlay["money"]["enabled"] == cfg.money.enabled
         assert overlay["money"]["default_currency"] == cfg.money.default_currency
-        assert overlay["spellfix"]["enabled"] == cfg.spellfix.enabled
         assert overlay["linking"]["enabled"] == cfg.linking.enabled
-        # The text-cleaning selector (which also gates normalise + spellfix into
-        # the downstream dispatch, before enrich) agrees.
+        # Neither carries spellfix: absent from the overlay, off in the config.
+        assert "spellfix" not in overlay and not cfg.spellfix.enabled
+        # The text-cleaning selector (which also gates normalise into the
+        # downstream dispatch, before enrich) agrees.
         assert overlay["processing"]["text_source"] == cfg.processing.text_source
 
     def test_validate_accepts_a_minimal_config(self, client: TestClient) -> None:
@@ -1544,7 +1548,7 @@ class TestStoreUnreachable:
     """
 
     def _client(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> TestClient:
-        def _boom(_uri: str) -> object:
+        def _boom(_uri: str, _credentials: tuple[str, str] | None = None) -> object:
             raise readers.StoreUnreachable("Install s3fs to access S3")
 
         monkeypatch.setattr(readers, "_open_store", _boom)

@@ -881,27 +881,66 @@ def test_process_job_runs_the_stage_contract_and_publishes_its_log(tmp_path, mon
     assert store.exists("runs/r1/logs/stage-money.log")
 
 
-def test_a_stage_that_publishes_nothing_fails_its_row(tmp_path, monkeypatch):
-    """A non-zero summary must not read as done — the row records it and retries."""
-    from womblex.cloud import stage_runner as sr
+def _stage_job(**over):
     from womblex.cloud.queue import Job
-    from womblex.cloud.worker import StageJobFailed, _process_job
 
-    def _fake_run(contract, store, shard_prefix, config, **kwargs):
-        return sr.StageRunSummary(stage=contract.name, bases=2, not_ready=2)
+    return Job(
+        id=1, run_id="r1", batch_num=1, input_keys=[], shard_prefix="runs/r1/documents",
+        attempts=1, kind="stage", stage=over.pop("stage", "chunk"), **over,
+    )
+
+
+def _patch_stage_run(monkeypatch, summary_kwargs):
+    from womblex.cloud import stage_runner as sr
 
     monkeypatch.setattr(sr, "prepare_stage_context", lambda contract, config: sr.RunContext())
-    monkeypatch.setattr(sr, "run_stage_remote", _fake_run)
+    monkeypatch.setattr(
+        sr, "run_stage_remote",
+        lambda contract, store, prefix, config, **kw: sr.StageRunSummary(
+            stage=contract.name, **summary_kwargs,
+        ),
+    )
+
+
+def test_a_stage_that_publishes_nothing_fails_its_row(tmp_path, monkeypatch):
+    """A non-zero summary must not read as done — the row records it and retries."""
+    from womblex.cloud.worker import StageJobFailed, _process_job
+
+    _patch_stage_run(monkeypatch, {"bases": 2, "failed": 2})
 
     store = RemoteStore.from_uri(str(tmp_path / "store"))
-    job = Job(
-        id=1, run_id="r1", batch_num=1, input_keys=[], shard_prefix="runs/r1/documents",
-        attempts=1, kind="stage", stage="chunk",
-    )
     with pytest.raises(StageJobFailed):
-        _process_job(job, _minimal_config(tmp_path), store, store)
+        _process_job(_stage_job(), _minimal_config(tmp_path), store, store)
     # The log is still published — that is the case the operator most needs it.
     assert store.exists("runs/r1/logs/stage-chunk.log")
+
+
+def test_a_stage_blocked_on_an_absent_upstream_is_not_ready_not_failed(tmp_path, monkeypatch):
+    """Every base awaiting a sidecar upstream has not written yet is "early",
+    not "broken" — a distinct exception so the loop releases instead of
+    spending an attempt (which would land the stage terminally failed on a
+    slow-draining run)."""
+    from womblex.cloud.worker import StageJobFailed, StageNotReady, _process_job
+
+    _patch_stage_run(monkeypatch, {
+        "bases": 2, "not_ready": 2, "not_ready_missing": {".enrichment_doc.parquet"},
+    })
+
+    store = RemoteStore.from_uri(str(tmp_path / "store"))
+    with pytest.raises(StageNotReady, match=r"\.enrichment_doc\.parquet"):
+        _process_job(_stage_job(), _minimal_config(tmp_path), store, store)
+    assert not issubclass(StageNotReady, StageJobFailed)
+    assert store.exists("runs/r1/logs/stage-chunk.log")
+
+
+def test_a_partially_blocked_stage_still_succeeds(tmp_path, monkeypatch):
+    """Not-ready under the base count is a still-draining fleet: exit 0, done."""
+    from womblex.cloud.worker import _process_job
+
+    _patch_stage_run(monkeypatch, {"bases": 3, "processed": 2, "not_ready": 1, "published": 2})
+
+    store = RemoteStore.from_uri(str(tmp_path / "store"))
+    _process_job(_stage_job(), _minimal_config(tmp_path), store, store)
 
 
 def test_prepare_stage_context_refuses_a_stage_isaacus_cannot_serve(monkeypatch, tmp_path):
