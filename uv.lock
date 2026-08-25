@@ -3862,7 +3862,7 @@ wheels = [
 
 [[package]]
 name = "womblex"
-version = "0.5.8"
+version = "0.5.11"
 source = { editable = "." }
 dependencies = [
     { name = "boto3" },
