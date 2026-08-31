@@ -42,7 +42,7 @@ def cmd_embed(args: argparse.Namespace) -> int:
     from womblex.analyse.embed_stage import embed_shards
     from womblex.config import EmbeddingConfig, load_config
     from womblex.store.checkpoint import CheckpointManager
-    from womblex.store.output import EMBEDDINGS_SUFFIX
+    from womblex.store.embed_output import EMBEDDINGS_SUFFIX
     from womblex.store.shard_audit import reconcile_stage_checkpoint_with_shards
 
     shard_dir: Path = args.shards

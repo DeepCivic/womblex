@@ -18,12 +18,8 @@ from womblex.analyse.embed import embed_texts
 from womblex.config import EmbeddingConfig
 from womblex.process.chunk_stage import _batch_bases
 from womblex.store.checkpoint import CheckpointManager
-from womblex.store.output import (
-    embeddings_path_for,
-    read_chunks,
-    read_manifest,
-    write_embeddings,
-)
+from womblex.store.embed_output import embeddings_path_for, write_embeddings
+from womblex.store.output import read_chunks, read_manifest
 
 logger = logging.getLogger(__name__)
 

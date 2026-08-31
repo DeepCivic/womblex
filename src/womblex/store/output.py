@@ -146,27 +146,6 @@ CHUNKS_SCHEMA = pa.schema([
 # `_read_chunks_shard` asks for.
 _CHUNKS_BACKFILL: tuple[str, ...] = ("elem_order",)
 
-# Entity-link sidecar (link stage). Generic by design: a link is a resolved
-# (or attempted) attribution of a document mention to a canonical reference
-# entity. ``entity_type`` is a free value (e.g. ``provider`` / ``service``) —
-# there are NO domain-specific columns. Rows are at mention/span grain; the
-# per-doc view is derived (see :func:`read_entity_links`). Unmatched candidates
-# are written with ``matched=False`` so they stay inspectable.
-ENTITY_LINKS_SCHEMA = pa.schema([
-    ("source_hash", pa.string()),
-    ("candidate_text", pa.string()),    # surface form extracted from the doc
-    ("candidate_kind", pa.string()),    # enrichment kind that produced it (e.g. corporate, address)
-    ("mention_start", pa.int32()),      # char offset into the enrichment text (-1 if unknown)
-    ("mention_end", pa.int32()),
-    ("entity_id", pa.string()),         # canonical reference id (e.g. PR-/SE-); "" if unmatched
-    ("entity_type", pa.string()),       # reference entity type (provider | service | ...)
-    ("canonical_name", pa.string()),    # reference display name; "" if unmatched
-    ("parent_entity_id", pa.string()),  # hierarchy FK (e.g. service -> provider); "" if none
-    ("confidence", pa.float32()),
-    ("match_method", pa.string()),      # address_exact | name_fuzzy | alias | unmatched
-    ("matched", pa.bool_()),
-])
-
 
 ELEMENTS_SUFFIX = ".elements.parquet"
 
@@ -185,21 +164,6 @@ _SHARD_SCHEMA = {
 }
 
 CHUNKS_SUFFIX = ".chunks.parquet"
-ENTITY_LINKS_SUFFIX = ".entity_links.parquet"
-EMBEDDINGS_SUFFIX = ".embeddings.parquet"
-
-# Embedding sidecar (embed stage). One row per embedded chunk, joinable to
-# `*.chunks.parquet` on (source_hash, chunk_index, content_type). The vector
-# is a variable-length float32 list; `dim` is stored explicitly for readers.
-EMBEDDINGS_SCHEMA = pa.schema([
-    ("source_hash", pa.string()),
-    ("chunk_index", pa.int32()),
-    ("content_type", pa.string()),
-    ("model", pa.string()),
-    ("task", pa.string()),
-    ("dim", pa.int32()),
-    ("vector", pa.list_(pa.float32())),
-])
 
 
 # ---------------------------------------------------------------------------
@@ -414,149 +378,6 @@ def _read_chunks_shard(path: Path) -> pa.Table:
         fld = CHUNKS_SCHEMA.field(name)
         raw = raw.append_column(fld, pa.nulls(raw.num_rows, type=fld.type))
     return raw.select([f.name for f in CHUNKS_SCHEMA]).cast(CHUNKS_SCHEMA)
-
-
-# ---------------------------------------------------------------------------
-# Entity-links stage writer / reader (sibling parquet to the extraction shard)
-# ---------------------------------------------------------------------------
-
-
-def entity_links_path_for(base_path: Path) -> Path:
-    """Return ``<base>.entity_links.parquet`` sibling for a shard base path."""
-    return base_path.parent / f"{base_path.stem}{ENTITY_LINKS_SUFFIX}"
-
-
-def write_entity_links(rows: list[dict], output_path: Path) -> Path:
-    """Write a batch's entity-link rows to ``batch-NNNN.entity_links.parquet``.
-
-    ``rows`` must match :data:`ENTITY_LINKS_SCHEMA`. Empty input produces an
-    empty-but-schema-correct file so downstream readers can glob safely.
-    """
-    target = entity_links_path_for(output_path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    _write_rows(rows, target, ENTITY_LINKS_SCHEMA)
-    logger.info("Wrote entity_links shard %s: rows=%d", target.name, len(rows))
-    return target
-
-
-def read_entity_links(path: Path, *, grain: str = "span") -> pa.Table:
-    """Read entity links from a single shard file or a shard-directory glob.
-
-    ``grain='span'`` returns the persisted mention-level rows verbatim.
-    ``grain='doc'`` returns a derived doc-level view: one row per
-    ``(source_hash, entity_id)`` matched attribution, with mention count and
-    max confidence — computed on read, never persisted (no second file to
-    drift). Unmatched rows are excluded from the doc view.
-    """
-    p = Path(path)
-    if p.is_dir():
-        shards = sorted(p.glob(f"*{ENTITY_LINKS_SUFFIX}"))
-        if not shards:
-            table = pa.table(
-                {f.name: pa.array([], type=f.type) for f in ENTITY_LINKS_SCHEMA},
-                schema=ENTITY_LINKS_SCHEMA,
-            )
-        else:
-            table = pa.concat_tables([_read_entity_links_shard(s) for s in shards])
-    else:
-        links_p = p if p.name.endswith(ENTITY_LINKS_SUFFIX) else entity_links_path_for(p)
-        table = _read_entity_links_shard(links_p)
-
-    if grain == "span":
-        return table
-    if grain == "doc":
-        return _entity_links_doc_view(table)
-    raise ValueError(f"grain must be 'span' or 'doc', got {grain!r}")
-
-
-def _read_entity_links_shard(path: Path) -> pa.Table:
-    raw = pq.read_table(str(path))
-    missing = [f.name for f in ENTITY_LINKS_SCHEMA if f.name not in raw.schema.names]
-    if missing:
-        raise ValueError(
-            f"entity_links shard {path} missing columns {missing}; schema bump without compat shim?"
-        )
-    return raw.select([f.name for f in ENTITY_LINKS_SCHEMA]).cast(ENTITY_LINKS_SCHEMA)
-
-
-def embeddings_path_for(base_path: Path) -> Path:
-    """Return ``<base>.embeddings.parquet`` sibling for a shard base path."""
-    return base_path.parent / f"{base_path.stem}{EMBEDDINGS_SUFFIX}"
-
-
-def write_embeddings(rows: list[dict], output_path: Path) -> Path:
-    """Write a batch's embedding rows to ``batch-NNNN.embeddings.parquet``.
-
-    ``rows`` must match :data:`EMBEDDINGS_SCHEMA`. Empty input produces an
-    empty-but-schema-correct file so downstream readers can glob safely.
-    """
-    target = embeddings_path_for(output_path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    _write_rows(rows, target, EMBEDDINGS_SCHEMA)
-    logger.info("Wrote embeddings shard %s: rows=%d", target.name, len(rows))
-    return target
-
-
-def read_embeddings(path: Path) -> pa.Table:
-    """Read embeddings from a single shard file or a shard-directory glob."""
-    p = Path(path)
-    if p.is_dir():
-        shards = sorted(p.glob(f"*{EMBEDDINGS_SUFFIX}"))
-        if not shards:
-            return pa.table(
-                {f.name: pa.array([], type=f.type) for f in EMBEDDINGS_SCHEMA},
-                schema=EMBEDDINGS_SCHEMA,
-            )
-        return pa.concat_tables([_read_embeddings_shard(s) for s in shards])
-    emb_p = p if p.name.endswith(EMBEDDINGS_SUFFIX) else embeddings_path_for(p)
-    return _read_embeddings_shard(emb_p)
-
-
-def _read_embeddings_shard(path: Path) -> pa.Table:
-    raw = pq.read_table(str(path))
-    missing = [f.name for f in EMBEDDINGS_SCHEMA if f.name not in raw.schema.names]
-    if missing:
-        raise ValueError(
-            f"embeddings shard {path} missing columns {missing}; schema bump without compat shim?"
-        )
-    return raw.select([f.name for f in EMBEDDINGS_SCHEMA]).cast(EMBEDDINGS_SCHEMA)
-
-
-def _entity_links_doc_view(table: pa.Table) -> pa.Table:
-    """Group matched span rows to one row per (source_hash, entity_id)."""
-    agg: dict[tuple[str, str], dict] = {}
-    rows = table.to_pylist()
-    for r in rows:
-        if not r["matched"]:
-            continue
-        key = (r["source_hash"], r["entity_id"])
-        cur = agg.get(key)
-        if cur is None:
-            agg[key] = {
-                "source_hash": r["source_hash"],
-                "entity_id": r["entity_id"],
-                "entity_type": r["entity_type"],
-                "canonical_name": r["canonical_name"],
-                "parent_entity_id": r["parent_entity_id"],
-                "mention_count": 1,
-                "max_confidence": r["confidence"],
-            }
-        else:
-            cur["mention_count"] += 1
-            cur["max_confidence"] = max(cur["max_confidence"], r["confidence"])
-    doc_schema = pa.schema([
-        ("source_hash", pa.string()),
-        ("entity_id", pa.string()),
-        ("entity_type", pa.string()),
-        ("canonical_name", pa.string()),
-        ("parent_entity_id", pa.string()),
-        ("mention_count", pa.int32()),
-        ("max_confidence", pa.float32()),
-    ])
-    out = list(agg.values())
-    if not out:
-        return pa.table({f.name: pa.array([], type=f.type) for f in doc_schema}, schema=doc_schema)
-    return pa.Table.from_pylist(out, schema=doc_schema)
 
 
 # ---------------------------------------------------------------------------

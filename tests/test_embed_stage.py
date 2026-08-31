@@ -19,13 +19,8 @@ from womblex.analyse.embed_stage import embed_shards
 from womblex.config import EmbeddingConfig
 from womblex.ingest.strategies_file import DocxExtractor
 from womblex.store.checkpoint import CheckpointManager
-from womblex.store.output import (
-    embeddings_path_for,
-    read_embeddings,
-    read_manifest,
-    write_chunks,
-    write_results,
-)
+from womblex.store.embed_output import embeddings_path_for, read_embeddings
+from womblex.store.output import read_manifest, write_chunks, write_results
 
 _FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "fixtures"
 _BUDGET_DOCX = (

@@ -31,16 +31,12 @@ from pathlib import Path
 import pyarrow.parquet as pq
 
 from womblex.pipeline_order import sort_by_pipeline
+from womblex.store.embed_output import EMBEDDINGS_SUFFIX
 from womblex.store.enrichment_output import ENRICHMENT_ENTITIES_SUFFIX
+from womblex.store.entity_links_output import ENTITY_LINKS_SUFFIX
 from womblex.store.money_output import MONEY_SPANS_SUFFIX
 from womblex.store.normalise_output import NORMALISED_TEXT_SUFFIX
-from womblex.store.output import (
-    CHUNKS_SUFFIX,
-    ELEMENTS_SUFFIX,
-    EMBEDDINGS_SUFFIX,
-    ENTITY_LINKS_SUFFIX,
-    read_manifest,
-)
+from womblex.store.output import CHUNKS_SUFFIX, ELEMENTS_SUFFIX, read_manifest
 from womblex.store.pii_output import PII_SPANS_SUFFIX
 from womblex.store.quality_output import CHUNK_QUALITY_SUFFIX
 from womblex.store.run_manifest import RUN_MANIFEST_FILENAME

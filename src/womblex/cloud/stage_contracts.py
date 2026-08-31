@@ -37,21 +37,17 @@ from typing import TYPE_CHECKING
 # automatically — the same cross-module private-import idiom the stages already
 # use for `chunk_stage._batch_bases`.
 from womblex.process.text_overlay import _SUFFIX as _OVERLAY_SUFFIX
+from womblex.store.embed_output import EMBEDDINGS_SUFFIX
 from womblex.store.enrichment_doc import ENRICHMENT_DOC_SUFFIX
 from womblex.store.enrichment_output import (
     ENRICHMENT_ENTITIES_SUFFIX,
     ENRICHMENT_META_SUFFIX,
     GRAPH_EDGES_SUFFIX,
 )
+from womblex.store.entity_links_output import ENTITY_LINKS_SUFFIX
 from womblex.store.money_output import MONEY_COLUMNS_SUFFIX, MONEY_SPANS_SUFFIX
 from womblex.store.normalise_output import NORMALISED_TEXT_SUFFIX
-from womblex.store.output import (
-    _SHARD_ROLES,
-    _SHARD_SUFFIX,
-    CHUNKS_SUFFIX,
-    EMBEDDINGS_SUFFIX,
-    ENTITY_LINKS_SUFFIX,
-)
+from womblex.store.output import _SHARD_ROLES, _SHARD_SUFFIX, CHUNKS_SUFFIX
 from womblex.store.pii_output import CLEAN_TEXT_SUFFIX, PII_SPANS_SUFFIX
 from womblex.store.quality_output import CHUNK_QUALITY_SUFFIX
 from womblex.store.spellfix_output import SPELLFIX_CORRECTIONS_SUFFIX, SPELLFIX_TEXT_SUFFIX

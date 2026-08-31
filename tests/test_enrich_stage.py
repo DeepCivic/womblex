@@ -28,7 +28,8 @@ from womblex.store.enrichment_output import (
     read_enrichment_entities,
     read_graph_edges,
 )
-from womblex.store.output import read_entity_links, write_results
+from womblex.store.entity_links_output import read_entity_links
+from womblex.store.output import write_results
 
 _FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "fixtures"
 _THROSBY_PDF = (

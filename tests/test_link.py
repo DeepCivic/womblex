@@ -17,7 +17,7 @@ from womblex.config import ReferenceConfig
 from womblex.link.matcher import Candidate, resolve
 from womblex.link.normalise import normalise_address, normalise_name
 from womblex.link.reference import load_reference
-from womblex.store.output import (
+from womblex.store.entity_links_output import (
     ENTITY_LINKS_SCHEMA,
     entity_links_path_for,
     read_entity_links,
