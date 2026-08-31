@@ -53,6 +53,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from womblex.ingest.extract import ExtractionResult
+from womblex.store.source_provenance import IngestProvenance
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +117,8 @@ MANIFEST_SCHEMA = pa.schema([
     ("source_hash", pa.string()),
     ("collection_id", pa.string()),
     ("doc_id", pa.string()),
+    ("ingest_root", pa.string()),
+    ("source_relpath", pa.string()),
     ("filename", pa.string()),
     ("ext", pa.string()),
     ("extraction_method", pa.string()),
@@ -127,6 +130,14 @@ MANIFEST_SCHEMA = pa.schema([
     ("extracted_at_iso", pa.string()),
     ("parser_version", pa.string()),
 ])
+
+# Manifest columns added after parser 2.0. Older shards back-fill on read
+# rather than failing — the compat convention `_CHUNKS_BACKFILL` states, but
+# with "" where chunks use nulls: "" is exactly what a writer that declared no
+# root emits, so "written before the columns" and "no root declared" read the
+# same, which is the truth in both cases. `doc_id` keeps its own derivation
+# (from `filename`) in `_read_shard` because a better value than "" exists.
+_MANIFEST_BACKFILL: tuple[str, ...] = ("ingest_root", "source_relpath")
 
 CHUNKS_SCHEMA = pa.schema([
     ("source_hash", pa.string()),
@@ -218,22 +229,36 @@ def write_results(
     output_path: Path,
     *,
     collection_id: str = "",
+    provenance: IngestProvenance | None = None,
 ) -> Path:
     """Write a batch's results to sibling element + sidecar + manifest parquets.
 
     ``output_path`` is the legacy shard path (``batch-NNNN.parquet``);
     the four sibling files are written next to it sharing its stem.
     Returns ``output_path`` for caller back-compat.
+
+    ``provenance`` declares where the documents were read from: it supplies
+    the ``ingest_root`` / ``source_relpath`` manifest columns, the
+    ``collection_id`` (overriding the bare keyword), and the namespaced footer
+    key-value metadata stamped onto all four files. Without it the three
+    columns are empty and no footer is written — the shape a caller that has
+    not declared a root gets, never a root guessed from the process's cwd.
     """
     paths = _shard_paths(output_path)
+    if provenance is not None:
+        collection_id = provenance.collection_id
     elements_rows: list[dict] = []
     table_cells_rows: list[dict] = []
     form_fields_rows: list[dict] = []
     manifest_rows: list[dict] = []
     extracted_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
+    relpaths: list[str] = []
+
     for doc_id, source_path, res in results:
         src_hash = _source_hash(source_path)
+        relpath = provenance.relpath_for(source_path) if provenance is not None else ""
+        relpaths.append(relpath)
         tc_count = 0
         ff_count = 0
 
@@ -289,6 +314,8 @@ def write_results(
             "source_hash": src_hash,
             "collection_id": collection_id,
             "doc_id": doc_id,
+            "ingest_root": provenance.ingest_root if provenance is not None else "",
+            "source_relpath": relpath,
             "filename": Path(source_path).name,
             "ext": Path(source_path).suffix.lower(),
             "extraction_method": res.method,
@@ -302,10 +329,11 @@ def write_results(
         })
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    _write_rows(elements_rows, paths["elements"], ELEMENT_SCHEMA)
-    _write_rows(table_cells_rows, paths["table_cells"], TABLE_CELLS_SCHEMA)
-    _write_rows(form_fields_rows, paths["form_fields"], FORM_FIELDS_SCHEMA)
-    _write_rows(manifest_rows, paths["manifest"], MANIFEST_SCHEMA)
+    footer = provenance.footer_metadata(relpaths) if provenance is not None else None
+    _write_rows(elements_rows, paths["elements"], ELEMENT_SCHEMA, metadata=footer)
+    _write_rows(table_cells_rows, paths["table_cells"], TABLE_CELLS_SCHEMA, metadata=footer)
+    _write_rows(form_fields_rows, paths["form_fields"], FORM_FIELDS_SCHEMA, metadata=footer)
+    _write_rows(manifest_rows, paths["manifest"], MANIFEST_SCHEMA, metadata=footer)
 
     logger.info(
         "Wrote shard %s: docs=%d elements=%d table_cells=%d form_fields=%d",
@@ -316,7 +344,15 @@ def write_results(
     return output_path
 
 
-def _write_rows(rows: list[dict], path: Path, schema: pa.Schema) -> None:
+def _write_rows(
+    rows: list[dict],
+    path: Path,
+    schema: pa.Schema,
+    *,
+    metadata: dict[bytes, bytes] | None = None,
+) -> None:
+    if metadata:
+        schema = schema.with_metadata(metadata)
     if rows:
         table = pa.Table.from_pylist(rows, schema=schema)
     else:
@@ -420,21 +456,30 @@ def _read_shard(shard_path: Path, role: str) -> pa.Table:
 
     The manifest schema gained ``doc_id`` after initial release; for runs
     written before that, derive it from ``Path(filename).stem`` on read so
-    existing checkpoints can still be reconciled.
+    existing checkpoints can still be reconciled. It later gained
+    ``ingest_root`` / ``source_relpath``, which have no derivable value — a
+    shard written before them says nothing about the root it was read from —
+    so those back-fill as empty strings (``_MANIFEST_BACKFILL``).
     """
     schema = _SHARD_SCHEMA[role]
     raw = pq.read_table(str(shard_path))
     missing = [f.name for f in schema if f.name not in raw.schema.names]
     if not missing:
         return raw.select([f.name for f in schema]).cast(schema)
-    if role == "manifest" and missing == ["doc_id"]:
+    if role == "manifest" and "doc_id" in missing:
         filenames = raw.column("filename").to_pylist()
         derived = pa.array([Path(f).stem for f in filenames], type=pa.string())
         raw = raw.append_column("doc_id", derived)
-        return raw.select([f.name for f in schema]).cast(schema)
-    raise ValueError(
-        f"shard {shard_path} missing columns {missing}; schema bump without compat shim?"
-    )
+        missing.remove("doc_id")
+    backfill = _MANIFEST_BACKFILL if role == "manifest" else ()
+    hard = [name for name in missing if name not in backfill]
+    if hard:
+        raise ValueError(
+            f"shard {shard_path} missing columns {hard}; schema bump without compat shim?"
+        )
+    for name in missing:
+        raw = raw.append_column(name, pa.array([""] * raw.num_rows, type=pa.string()))
+    return raw.select([f.name for f in schema]).cast(schema)
 
 
 # Back-compat alias for callers that still expect read_results to return

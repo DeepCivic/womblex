@@ -53,6 +53,7 @@ from womblex.store.output import (
     _write_rows,
 )
 from womblex.store.provenance_output import write_provenance_shard
+from womblex.store.source_provenance import qualify_root
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,11 @@ class RecordFieldMapping:
     text_field: str
     provenance_fields: list[str] = field(default_factory=list)
     collection_id: str = ""
+    # Where the record set was published, recorded on every manifest row.
+    # `source_relpath` stays empty: a record is content-addressed over its id
+    # plus text, not file bytes, so no file under the root names it — the
+    # provenance sidecar is the back-link.
+    ingest_root: str = ""
 
 
 @dataclass
@@ -163,6 +169,7 @@ def _write_batch(
     import time
 
     extracted_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    ingest_root = qualify_root(mapping.ingest_root) if mapping.ingest_root else ""
     element_rows: list[dict] = []
     manifest_rows: list[dict] = []
     provenance_rows: list[dict] = []
@@ -181,6 +188,8 @@ def _write_batch(
             "source_hash": source_hash,
             "collection_id": mapping.collection_id,
             "doc_id": doc_id,
+            "ingest_root": ingest_root,
+            "source_relpath": "",
             "filename": doc_id,
             "ext": "",
             "extraction_method": _EXTRACTION_METHOD,
