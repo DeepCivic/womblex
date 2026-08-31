@@ -198,3 +198,49 @@ class TestBackFill:
         )
         out = read_manifest(tmp_path).to_pylist()[0]
         assert (out["ingest_root"], out["source_relpath"]) == ("", "")
+
+
+class TestMaskingLeavesProvenanceAlone:
+    """Stated non-goal: the manifest is not a masking surface.
+
+    FOI source paths carry personal names, so masking them would be tempting.
+    The `pii` stage must not: it writes its own sidecars and leaves the
+    manifest's columns and footer byte-identical.
+    """
+
+    def test_the_pii_stage_leaves_manifest_bytes_untouched(self, stamped):
+        from womblex.config import PIIConfig
+        from womblex.pii.pii_stage import pii_shards
+        from womblex.store.enrichment_output import ENTITY_SCHEMA, enrichment_entities_path_for
+        from womblex.store.output import write_chunks
+
+        root, shard = stamped
+        source_hash = read_manifest(shard).to_pylist()[0]["source_hash"]
+        write_chunks(
+            [{
+                "source_hash": source_hash, "chunk_index": 0,
+                "text": "The officer Jane Doe signed the notice.",
+                "start_char": 0, "end_char": 38, "content_type": "narrative",
+                "has_redaction": False, "page_start": 1, "page_end": 1, "elem_order": None,
+            }],
+            shard,
+        )
+        pq.write_table(
+            pa.Table.from_pylist(
+                [{
+                    "document_id": source_hash, "entity_id": "e1", "entity_label": "person",
+                    "name": "Jane Doe", "entity_type": "natural", "role": "other",
+                    "mention_start": 12, "mention_end": 20, "chunk_index": -1,
+                }],
+                schema=ENTITY_SCHEMA,
+            ),
+            str(enrichment_entities_path_for(shard)),
+        )
+
+        manifest_path = _shard_paths(shard)["manifest"]
+        before = manifest_path.read_bytes()
+        pii_shards(shard.parent, PIIConfig(use_regex_backstop=False))
+
+        assert manifest_path.read_bytes() == before
+        prov = read_footer_provenance(pq.read_metadata(str(manifest_path)).metadata)
+        assert prov["ingest_root"] == f"file://{root}"

@@ -102,6 +102,17 @@ class IngestProvenance:
         keyed = {str(Path(k).expanduser().resolve()): v for k, v in (relpaths or {}).items()}
         return cls(qualify_root(root), collection_id, keyed)
 
+    @classmethod
+    def from_config(cls, config: object) -> IngestProvenance:
+        """Derive from a ``WomblexConfig``: declared ``paths.ingest_root`` wins
+        (the only way to name an object-store root for a run over staged
+        copies), else the already-required ``paths.input_root``."""
+        paths = config.paths  # type: ignore[attr-defined]
+        return cls.declare(
+            paths.ingest_root or paths.input_root,
+            config.dataset.name,  # type: ignore[attr-defined]
+        )
+
     def relpath_for(self, source_path: str | Path) -> str:
         """Root-relative path of *source_path*: explicit mapping, else derived."""
         mapped = self.relpaths.get(str(Path(source_path).expanduser().resolve()))

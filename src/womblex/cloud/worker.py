@@ -27,6 +27,7 @@ from womblex.batch import process_batch
 from womblex.cloud.queue import Job, JobQueue
 from womblex.config import WomblexConfig
 from womblex.store.remote import RemoteStore, same_location
+from womblex.store.source_provenance import IngestProvenance
 from womblex.utils.run_log import capture_batch_log
 
 logger = logging.getLogger(__name__)
@@ -86,8 +87,18 @@ class StageNotReady(Exception):
     """
 
 
-def _process_job(job: Job, config: WomblexConfig, store: RemoteStore, ingest: RemoteStore) -> None:
+def _process_job(
+    job: Job,
+    config: WomblexConfig,
+    store: RemoteStore,
+    ingest: RemoteStore,
+    ingest_root: str = "",
+) -> None:
     """Run one claimed job, capturing and publishing its log either way.
+
+    ``ingest_root`` is the location this worker reads documents from, which
+    ``run_worker`` always knows and a job row may not (it is NULL when the
+    inputs live under the store itself). It reaches the shards as provenance.
 
     The log is captured for the whole run and published in a ``finally``, so a
     failed job still leaves its ``batch-NNNN.log`` / ``stage-<name>.log`` in the
@@ -102,7 +113,7 @@ def _process_job(job: Job, config: WomblexConfig, store: RemoteStore, ingest: Re
                 if job.kind == "stage":
                     _run_stage(job, config, store)
                 else:
-                    _run_batch(job, config, store, ingest, root)
+                    _run_batch(job, config, store, ingest, root, ingest_root)
         finally:
             # Outside the capture (the file is now closed and complete) but
             # inside the temp dir; publish on success and failure alike.
@@ -113,14 +124,39 @@ def _process_job(job: Job, config: WomblexConfig, store: RemoteStore, ingest: Re
 
 
 def _run_batch(
-    job: Job, config: WomblexConfig, store: RemoteStore, ingest: RemoteStore, root: Path,
+    job: Job,
+    config: WomblexConfig,
+    store: RemoteStore,
+    ingest: RemoteStore,
+    root: Path,
+    ingest_root: str = "",
 ) -> None:
-    """Stage this batch's inputs, extract them, publish the shards."""
+    """Stage this batch's inputs, extract them, publish the shards.
+
+    The staged scratch paths say nothing about where the documents came from,
+    so provenance is built from what the job already carries: the root it was
+    enqueued against (or this worker's, when the row names none) and the store
+    keys it named, zipped in the download order ``download_to_dir`` preserves.
+    With neither root the shards go unstamped rather than carrying a root
+    invented from the scratch directory.
+    """
     inputs_dir = root / "inputs"
     shards_dir = root / "shards"
     shards_dir.mkdir(parents=True, exist_ok=True)
     files = ingest.download_to_dir(job.input_keys, inputs_dir)
-    outcome = process_batch(files, config, batch_num=job.batch_num, shard_dir=shards_dir)
+    declared = ingest_root or job.ingest_root or ""
+    provenance = (
+        IngestProvenance.declare(
+            declared,
+            config.dataset.name,
+            relpaths=dict(zip(files, job.input_keys, strict=True)),
+        )
+        if declared
+        else None
+    )
+    outcome = process_batch(
+        files, config, batch_num=job.batch_num, shard_dir=shards_dir, provenance=provenance,
+    )
     # Glob off the shard path the batch reported, so the naming scheme lives
     # only in womblex.batch.
     store.upload_glob(shards_dir, f"{outcome.shard_path.stem}.*", job.shard_prefix)
@@ -259,7 +295,7 @@ def run_worker(
 
             idle_since = None
             try:
-                _process_job(job, config, store, ingest)
+                _process_job(job, config, store, ingest, worker_ingest_root)
                 queue.complete(job.id)
                 completed += 1
             except StageNotReady as e:

@@ -35,6 +35,7 @@ from womblex.operations import (
     run_redaction,
     write_batch_parquet,
 )
+from womblex.store.source_provenance import IngestProvenance
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ def process_batch(
     *,
     batch_num: int,
     shard_dir: Path,
+    provenance: IngestProvenance | None = None,
 ) -> BatchOutcome:
     """Extract *batch_files* (plus optional redaction detection) and write one shard.
 
@@ -66,6 +68,14 @@ def process_batch(
     fed the same config produces byte-identical shards. Returns a
     :class:`BatchOutcome`; the caller decides how to verify, checkpoint, or
     publish.
+
+    ``provenance`` declares where the documents came from — the ingest root
+    and each document's path under it — and is stamped onto the shard's
+    manifest columns and every shard file's footer. The caller supplies it
+    because only the caller can know it: the local runner reads the root the
+    config declares, while the worker's documents arrive in a scratch dir
+    whose paths say nothing about the store keys they came from. Omitted, the
+    shard goes unstamped — this body never invents a root of its own.
     """
     results = run_extraction(batch_files, config)
     if config.redaction.enabled:
@@ -76,7 +86,7 @@ def process_batch(
     rows_written = sum(
         1 for r in batch.results if r.status == "completed" and r.extraction is not None
     )
-    write_batch_parquet(batch, shard_path)
+    write_batch_parquet(batch, shard_path, provenance=provenance)
     return BatchOutcome(batch=batch, shard_path=shard_path, rows_written=rows_written)
 
 

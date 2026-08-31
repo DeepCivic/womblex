@@ -21,6 +21,24 @@ class PathsConfig(BaseModel):
 
     checkpoint_dir: Path
 
+    ingest_root: str | None = Field(
+        default=None,
+        description="Scheme-qualified location the corpus is published at (e.g. "
+                    "s3://bucket/inbox), recorded on every manifest row and Parquet "
+                    "footer. Declare it when `input_root` is a local staging copy of a "
+                    "corpus that lives elsewhere; unset, `input_root` is the recorded "
+                    "root as file://. Never inferred from the working directory.",
+    )
+
+    @field_validator("ingest_root")
+    @classmethod
+    def _check_ingest_root(cls, v: str | None) -> str | None:
+        # Deferred import: at module scope it pulls in `womblex.store`, whose
+        # package init reaches `ingest.extract` and back to this module.
+        from womblex.store.source_provenance import qualify_root
+
+        return qualify_root(v) if v is not None else None
+
 
 
 class DetectionConfig(BaseModel):
