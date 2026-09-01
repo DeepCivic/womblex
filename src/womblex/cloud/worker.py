@@ -139,11 +139,15 @@ def _run_batch(
     keys it named, zipped in the download order ``download_to_dir`` preserves.
     With neither root the shards go unstamped rather than carrying a root
     invented from the scratch directory.
+
+    Staging is nested, because a job's keys come from a recursive listing of an
+    ingest prefix: two documents under different prefixes routinely share a
+    basename, and staging flat would land them on one local file.
     """
     inputs_dir = root / "inputs"
     shards_dir = root / "shards"
     shards_dir.mkdir(parents=True, exist_ok=True)
-    files = ingest.download_to_dir(job.input_keys, inputs_dir)
+    files = ingest.download_to_dir(job.input_keys, inputs_dir, nested=True)
     declared = ingest_root or job.ingest_root or ""
     provenance = (
         IngestProvenance.declare(

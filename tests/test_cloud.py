@@ -339,6 +339,38 @@ def test_remote_store_download_to_dir_and_upload_glob(tmp_path):
     assert not store.exists("runs/r1/documents/other.txt")
 
 
+def test_download_to_dir_nested_keeps_same_named_keys_apart(tmp_path):
+    """Two documents under different prefixes sharing a basename stay two files."""
+    store = RemoteStore.from_uri(str(tmp_path / "store"))
+    for prefix in ("2026-07", "2026-08"):
+        f = tmp_path / f"{prefix}.pdf"
+        f.write_bytes(prefix.encode())
+        store.upload_file(f, f"{prefix}/report.pdf")
+
+    local = tmp_path / "scratch"
+    fetched = store.download_to_dir(
+        ["2026-07/report.pdf", "2026-08/report.pdf"], local, nested=True
+    )
+
+    assert [p.relative_to(local).as_posix() for p in fetched] == [
+        "2026-07/report.pdf",
+        "2026-08/report.pdf",
+    ]
+    assert [p.read_bytes() for p in fetched] == [b"2026-07", b"2026-08"]
+
+
+def test_download_to_dir_refuses_a_key_that_would_escape_the_staging_dir(tmp_path):
+    """A key is whatever a queue row or listing named — it does not get to pick
+    where it lands. Refused before anything is written."""
+    store = RemoteStore.from_uri(str(tmp_path / "store"))
+    local = tmp_path / "scratch"
+
+    with pytest.raises(ValueError, match="does not stage under"):
+        store.download_to_dir(["../escaped.pdf"], local, nested=True)
+
+    assert not (tmp_path / "escaped.pdf").exists()
+
+
 def test_remote_store_list_dirs(tmp_path):
     store = RemoteStore.from_uri(str(tmp_path / "store"))
     (tmp_path / "store" / "runs" / "run-a" / "documents").mkdir(parents=True)
@@ -397,6 +429,46 @@ def test_process_job_downloads_from_a_second_ingest_store(tmp_path):
     assert output_store.list_files("runs/r1/documents", "*._manifest.parquet")
     assert not output_store.exists("people.csv")  # never lands in the output tree
     assert ingest_store.exists("people.csv")       # the source document is untouched
+
+
+def test_process_job_extracts_both_same_named_documents(tmp_path):
+    """A job's keys come from a recursive listing, so two prefixes routinely hold
+    a `people.csv` apiece. Flat staging landed them on one local file — one
+    document extracted twice, one not at all, and the recorded source path the
+    survivor's. Both are extracted, each under its own relpath."""
+    import pyarrow.parquet as pq
+
+    from womblex.cloud.queue import Job
+    from womblex.cloud.worker import _process_job
+
+    ingest_store = RemoteStore.from_uri(str(tmp_path / "ingest"))
+    for prefix, body in (
+        ("2026-07", "name,role\nAlice,Director\n"),
+        ("2026-08", "name,role\nBob,Assistant\n"),
+    ):
+        local = tmp_path / f"{prefix}.csv"
+        local.write_text(body)
+        ingest_store.upload_file(local, f"{prefix}/people.csv")
+
+    output_store = RemoteStore.from_uri(str(tmp_path / "store"))
+    job = Job(
+        id=1, run_id="r1", batch_num=1,
+        input_keys=["2026-07/people.csv", "2026-08/people.csv"],
+        shard_prefix="runs/r1/documents", attempts=1,
+        ingest_root="s3://bucket/inbox",
+    )
+
+    _process_job(job, _minimal_config(tmp_path), output_store, ingest_store)
+
+    manifest = pq.read_table(
+        str(tmp_path / "store" / "runs" / "r1" / "documents" / "batch-0001._manifest.parquet")
+    ).to_pylist()
+    assert len(manifest) == 2
+    assert len({row["source_hash"] for row in manifest}) == 2  # distinct documents
+    assert sorted(row["source_relpath"] for row in manifest) == [
+        "2026-07/people.csv",
+        "2026-08/people.csv",
+    ]
 
 
 # --- run logs ---------------------------------------------------------------
