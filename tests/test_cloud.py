@@ -529,6 +529,63 @@ def test_process_job_publishes_the_batch_log_beside_the_shards(tmp_path):
     assert output_store.exists("runs/r1/logs/batch-0003.log")
 
 
+def _publish_one_batch(tmp_path, run_id: str):
+    """Run one batch through the real worker; return the published shard's stamp."""
+    import pyarrow.parquet as pq
+
+    from womblex.cloud.queue import Job
+    from womblex.cloud.worker import _process_job
+    from womblex.store.run_stamp import read_footer_stamp
+
+    ingest_store = RemoteStore.from_uri(str(tmp_path / "ingest"))
+    csv = tmp_path / "people.csv"
+    csv.write_text("name,role\nAlice,Director\n")
+    ingest_store.upload_file(csv, "people.csv")
+
+    output_store = RemoteStore.from_uri(str(tmp_path / "store"))
+    job = Job(
+        id=1, run_id=run_id, batch_num=3, input_keys=["people.csv"],
+        shard_prefix=f"runs/{run_id}/documents", attempts=1,
+    )
+    _process_job(job, _minimal_config(tmp_path), output_store, ingest_store)
+
+    shard = (
+        tmp_path / "store" / "runs" / run_id / "documents" / "batch-0003.elements.parquet"
+    )
+    return csv, read_footer_stamp(pq.read_metadata(str(shard)).metadata)
+
+
+def test_a_published_shard_stamps_the_same_run_a_local_batch_would(tmp_path):
+    """Local and distributed agree, stage and write timestamp aside: the worker
+    declares from the job row's run id and the same config, and where the
+    documents were staged is not in the digest."""
+    from womblex.batch import process_batch
+    from womblex.store.run_stamp import RunStamp, read_footer_stamp
+
+    csv, published = _publish_one_batch(tmp_path, "r1")
+
+    local_dir = tmp_path / "local"
+    local_dir.mkdir()
+    config = _minimal_config(tmp_path)
+    process_batch(
+        [csv], config, batch_num=3, shard_dir=local_dir,
+        stamp=RunStamp.declare("r1", config, stage="extract"),
+    )
+    import pyarrow.parquet as pq
+    local = read_footer_stamp(
+        pq.read_metadata(str(local_dir / "batch-0003.elements.parquet")).metadata,
+    )
+    assert published == local
+    assert published["run_id"] == "r1"
+
+
+def test_a_row_naming_no_run_is_published_unstamped_not_failed(tmp_path):
+    """A malformed row loses its stamp, not its extraction — the same terms an
+    undeclared ingest root is already on."""
+    _, stamp = _publish_one_batch(tmp_path, "")
+    assert stamp == {}
+
+
 def test_process_job_publishes_the_log_even_when_the_batch_fails(tmp_path, monkeypatch):
     """The failing case is the one that matters: the log is uploaded outside the
     try, so a job that raises still leaves its `batch-NNNN.log` in the store, and
