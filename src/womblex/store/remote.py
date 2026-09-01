@@ -308,30 +308,57 @@ class RemoteStore:
         self.fs.mv(src, dst)  # type: ignore[attr-defined]
         return dst_rel
 
-    def download_to_dir(self, rels: list[str], local_dir: Path) -> list[Path]:
-        """Fetch each store-relative key in *rels* into *local_dir* (flat).
+    def download_to_dir(
+        self, rels: list[str], local_dir: Path, *, nested: bool = False
+    ) -> list[Path]:
+        """Fetch each store-relative key in *rels* into *local_dir*.
 
-        Flat, so two keys under different prefixes sharing a basename land on
-        one local file and the second wins. Warned about rather than refused
-        (a batch is still worth processing), but it does mean one document is
-        extracted twice and one not at all — and, since the caller pairs these
-        paths back to their keys for provenance, that the recorded source path
-        is the surviving key's.
+        Flat by default: the key's basename is the local name. That is what a
+        caller staging one prefix's siblings wants — a batch's shards, a
+        checkpoint dir — because the local dir is then exactly the flat
+        directory the ``*_shards()`` entry points and the manifest readers
+        expect, and sibling keys cannot collide.
+
+        ``nested=True`` mirrors each key's prefix under *local_dir* instead.
+        Documents are the case that needs it: an ingest prefix is enumerated
+        recursively, so ``2026-07/report.pdf`` and ``2026-08/report.pdf`` are
+        two documents that flat staging would land on one local file — the
+        second winning, one document extracted twice, one not at all, and the
+        recorded source path the survivor's. A key is canonicalised and asserted
+        to stay under *local_dir* before anything is written to it.
         """
         local_dir.mkdir(parents=True, exist_ok=True)
-        names = [rel.rsplit("/", 1)[-1] for rel in rels]
-        if len(set(names)) != len(names):
-            clashing = sorted({n for n in names if names.count(n) > 1})
+        targets = [
+            self._nested_target(local_dir, rel) if nested else local_dir / rel.rsplit("/", 1)[-1]
+            for rel in rels
+        ]
+        shared = sorted({t.name for t in targets if targets.count(t) > 1})
+        if shared:
             logger.warning(
-                "Staging %d key(s) with clashing basenames into one flat dir "
+                "Staging %d key(s) onto a local path another key already claims "
                 "(%s); each such document is overwritten by its namesake",
-                len(names) - len(set(names)), ", ".join(clashing),
+                len(targets) - len(set(targets)), ", ".join(shared),
             )
         out: list[Path] = []
-        for rel, name in zip(rels, names, strict=True):
-            out.append(self.download_file(rel, local_dir / name))
+        for rel, target in zip(rels, targets, strict=True):
+            out.append(self.download_file(rel, target))
         logger.info("Staged %d input file(s) -> %s", len(out), local_dir)
         return out
+
+    @staticmethod
+    def _nested_target(local_dir: Path, rel: str) -> Path:
+        """Local path for *rel* under *local_dir*, with its prefix preserved.
+
+        A store key is whatever the queue row or a listing named, so it is
+        canonicalised and checked against the staging directory rather than
+        trusted: ``../`` segments in a key would otherwise write outside the
+        scratch dir the caller created.
+        """
+        base = local_dir.resolve()
+        target = (base / rel.strip("/")).resolve()
+        if target == base or not target.is_relative_to(base):
+            raise ValueError(f"store key {rel!r} does not stage under {local_dir}")
+        return target
 
     def upload_glob(self, local_dir: Path, glob: str, remote_rel_dir: str) -> list[str]:
         """Push every file in *local_dir* matching *glob* under *remote_rel_dir*."""

@@ -11,8 +11,10 @@
 #
 # Womblex's live exposure is the distributed path: `store/remote.py` stages files
 # named by object-store keys into a local directory, and `cloud/worker.py` runs
-# whatever a queue row points at. `download_to_dir` takes the basename of each
-# key before joining, which is what makes it safe today.
+# whatever a queue row points at. `download_to_dir` is what makes that safe: it
+# takes the basename of each key before joining, and where it preserves a key's
+# prefix instead (`nested=True`, how documents are staged) it resolves the joined
+# path and asserts it stays under the staging directory before writing.
 #
 # WHAT THIS DOES NOT CATCH, recorded rather than implied
 #
