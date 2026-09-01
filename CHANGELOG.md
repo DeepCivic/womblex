@@ -8,6 +8,12 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 ## [Unreleased]
 
+### Added
+- **Manifest and Parquet footers record where the source document came from.** `MANIFEST_SCHEMA` gains `ingest_root` (scheme-qualified: `file:///srv/corpus`, `s3://bucket/inbox`) and `source_relpath` (the path under it), so root + relpath names the document and a corpus that moves to a new root re-resolves without a rewrite; `collection_id` is populated rather than left empty. The same pair is stamped into every extraction Parquet's footer key-value metadata under `womblex.*` keys, reusing the namespacing convention `store/register_manifest.py` already reads back from the register ingests, so a shard copied out of its run still names its corpus. New `store/source_provenance.py` holds root qualification, relative-path resolution and the footer keys; the root is declared by `paths.ingest_root` (new, optional) or `paths.input_root`, or by the enqueue invocation for a distributed run — never inferred from the working directory. Shards written before the columns read back with them empty (`_MANIFEST_BACKFILL`), and footer metadata is additive, so existing readers are unaffected. Masking is a stated non-goal: a `pii` run over a completed run leaves the manifest byte-identical.
+
+### Changed
+- **The link and embed stage sidecars moved out of `store/output.py` into their own modules.** `store/entity_links_output.py` and `store/embed_output.py` now hold the `*.entity_links.parquet` and `*.embeddings.parquet` schemas, path conventions and readers/writers, matching the one-module-per-stage-sidecar shape `store/pii_output.py`, `store/money_output.py`, `store/normalise_output.py` and `store/spellfix_output.py` already follow. `store/output.py` is the *extraction* writer, a different concern, and carrying two downstream sidecars had taken it past the 750-line file cap. A pure move: no schema, filename or behaviour changed, and import sites were updated rather than shimmed, so there is no second name for anything.
+
 ## [0.5.12] - 2026-08-25
 Patch. Local model artefacts resolve per artefact across every models
 root, so `WOMBLEX_MODELS_DIR` no longer shadows the wheel-bundled en_AU

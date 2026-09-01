@@ -169,12 +169,24 @@ One row per source file in the batch.
 | column | type |
 |---|---|
 | `source_hash`, `collection_id`, `doc_id`, `filename`, `ext` | string |
+| `ingest_root` | string — scheme-qualified corpus root (`file://…`, `s3://…`) |
+| `source_relpath` | string — path under that root; root + relpath names the document |
 | `extraction_method` | string |
 | `elements_count`, `table_cells_count`, `form_fields_count` | int64 |
 | `status` | string — `completed` or `error` |
 | `error` | string — empty on success |
 | `extracted_at_iso` | string |
 | `parser_version` | string |
+
+All four shard files also carry the ingest root, the collection and the
+batch's relative paths in their Parquet footer key-value metadata, under
+`womblex.*` keys — the namespace `store/register_manifest.py` already reads
+back from the register ingests. Footer metadata is additive: a reader that
+ignores it reads the file unchanged. `ingest_root` is declared by
+`paths.ingest_root` (or, unset, by `paths.input_root`) and is never inferred
+from the working directory; both columns are empty for a writer that declared
+no root. Masking never rewrites either — the manifest is not a masking
+surface, and a `pii` run over a completed run leaves it byte-identical.
 
 ### *.redactions.parquet (optional sidecar)
 

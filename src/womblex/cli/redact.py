@@ -117,6 +117,7 @@ def _cmd_redact_config(args: argparse.Namespace) -> int:
     """E2E composition: extract + redact in-memory from a config YAML."""
     from womblex.config import load_config
     from womblex.operations import BatchResult, run_extraction, run_redaction, write_batch_parquet
+    from womblex.store.source_provenance import IngestProvenance
 
     config = load_config(args.config)
     if not config.redaction.enabled:
@@ -143,7 +144,11 @@ def _cmd_redact_config(args: argparse.Namespace) -> int:
     results = run_redaction(results, config)
 
     batch = BatchResult(results=results)
-    write_batch_parquet(batch, output_root / "documents.parquet")
+    write_batch_parquet(
+        batch,
+        output_root / "documents.parquet",
+        provenance=IngestProvenance.from_config(config),
+    )
 
     redacted_count = sum(
         bool(

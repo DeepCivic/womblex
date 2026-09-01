@@ -21,7 +21,8 @@ from womblex.store.checkpoint import CheckpointManager
 from womblex.store.enrichment_output import (
     read_enrichment_entities,
 )
-from womblex.store.output import entity_links_path_for, read_manifest, write_entity_links
+from womblex.store.entity_links_output import entity_links_path_for, write_entity_links
+from womblex.store.output import read_manifest
 
 logger = logging.getLogger(__name__)
 

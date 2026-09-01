@@ -51,6 +51,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     from womblex.store.output import ShardVerificationError, verify_shard_persistence
     from womblex.store.retention import apply_retention, generate_run_id, most_recent_run
     from womblex.store.shard_audit import reconcile_checkpoint_with_shards
+    from womblex.store.source_provenance import IngestProvenance
     from womblex.utils.run_log import capture_batch_log
 
     config = load_config(args.config)
@@ -142,6 +143,11 @@ def cmd_run(args: argparse.Namespace) -> int:
         logger.info("All documents already processed")
         return 0
 
+    # Declared once for the run: every batch stamps the same root, so a shard
+    # copied out of the run still names the corpus it was extracted from.
+    provenance = IngestProvenance.from_config(config)
+    logger.info("ingest_root: %s (collection %s)", provenance.ingest_root, provenance.collection_id)
+
     batch_size = args.batch_size or config.processing.batch_size
     total_files = len(all_files)
     total_succeeded = 0
@@ -184,7 +190,10 @@ def cmd_run(args: argparse.Namespace) -> int:
         )
 
         with capture_batch_log(logs_dir / f"batch-{batch_num:04d}.log"):
-            outcome = process_batch(batch_files, config, batch_num=batch_num, shard_dir=shard_dir)
+            outcome = process_batch(
+                batch_files, config, batch_num=batch_num, shard_dir=shard_dir,
+                provenance=provenance,
+            )
         batch = outcome.batch
         total_succeeded += batch.succeeded
         total_failed += batch.failed
@@ -288,6 +297,7 @@ def cmd_extract(args: argparse.Namespace) -> int:
         logger.info("  %s -> %s (%d chars)", r.doc_id, out_path, len(r.extraction.full_text))
     else:
         from womblex.store.output import write_results
+        from womblex.store.source_provenance import IngestProvenance
 
         rows = [
             (r.doc_id, str(r.path), r.extraction)
@@ -296,7 +306,9 @@ def cmd_extract(args: argparse.Namespace) -> int:
         ]
         if rows:
             out_path = output_dir / f"{path.stem}.parquet"
-            write_results(rows, out_path)
+            write_results(
+                rows, out_path, provenance=IngestProvenance.from_config(config),
+            )
             logger.info("Wrote %d unit(s) to %s", len(rows), out_path)
 
     for r in results:
@@ -420,6 +432,7 @@ def _cmd_chunk_config(args: argparse.Namespace) -> int:
     """E2E composition: extract + chunk in one pass (back-compat path)."""
     from womblex.config import load_config
     from womblex.operations import BatchResult, run_chunking, run_extraction, write_batch_parquet
+    from womblex.store.source_provenance import IngestProvenance
 
     config = load_config(args.config)
     if not config.chunking.enabled:
@@ -446,7 +459,11 @@ def _cmd_chunk_config(args: argparse.Namespace) -> int:
     results = run_chunking(results, config)
 
     batch = BatchResult(results=results)
-    write_batch_parquet(batch, output_root / "documents.parquet")
+    write_batch_parquet(
+        batch,
+        output_root / "documents.parquet",
+        provenance=IngestProvenance.from_config(config),
+    )
 
     total_chunks = sum(len(r.chunks) for r in results if r.status == "completed")
     logger.info(

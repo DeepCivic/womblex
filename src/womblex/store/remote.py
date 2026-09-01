@@ -309,11 +309,26 @@ class RemoteStore:
         return dst_rel
 
     def download_to_dir(self, rels: list[str], local_dir: Path) -> list[Path]:
-        """Fetch each store-relative key in *rels* into *local_dir* (flat)."""
+        """Fetch each store-relative key in *rels* into *local_dir* (flat).
+
+        Flat, so two keys under different prefixes sharing a basename land on
+        one local file and the second wins. Warned about rather than refused
+        (a batch is still worth processing), but it does mean one document is
+        extracted twice and one not at all — and, since the caller pairs these
+        paths back to their keys for provenance, that the recorded source path
+        is the surviving key's.
+        """
         local_dir.mkdir(parents=True, exist_ok=True)
+        names = [rel.rsplit("/", 1)[-1] for rel in rels]
+        if len(set(names)) != len(names):
+            clashing = sorted({n for n in names if names.count(n) > 1})
+            logger.warning(
+                "Staging %d key(s) with clashing basenames into one flat dir "
+                "(%s); each such document is overwritten by its namesake",
+                len(names) - len(set(names)), ", ".join(clashing),
+            )
         out: list[Path] = []
-        for rel in rels:
-            name = rel.rsplit("/", 1)[-1]
+        for rel, name in zip(rels, names, strict=True):
             out.append(self.download_file(rel, local_dir / name))
         logger.info("Staged %d input file(s) -> %s", len(out), local_dir)
         return out

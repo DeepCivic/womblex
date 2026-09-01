@@ -149,7 +149,7 @@ def cmd_link(args: argparse.Namespace) -> int:
     from womblex.config import load_config
     from womblex.link.stage import link_shards
     from womblex.store.checkpoint import CheckpointManager
-    from womblex.store.output import ENTITY_LINKS_SUFFIX
+    from womblex.store.entity_links_output import ENTITY_LINKS_SUFFIX
     from womblex.store.shard_audit import reconcile_stage_checkpoint_with_shards
 
     shard_dir: Path = args.shards
