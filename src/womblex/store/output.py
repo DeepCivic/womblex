@@ -53,6 +53,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from womblex.ingest.extract import ExtractionResult
+from womblex.store.run_stamp import RunStamp
 from womblex.store.source_provenance import IngestProvenance
 
 logger = logging.getLogger(__name__)
@@ -230,6 +231,7 @@ def write_results(
     *,
     collection_id: str = "",
     provenance: IngestProvenance | None = None,
+    stamp: RunStamp | None = None,
 ) -> Path:
     """Write a batch's results to sibling element + sidecar + manifest parquets.
 
@@ -243,6 +245,12 @@ def write_results(
     key-value metadata stamped onto all four files. Without it the three
     columns are empty and no footer is written — the shape a caller that has
     not declared a root gets, never a root guessed from the process's cwd.
+
+    ``stamp`` names the run that produced the shard — run id, version,
+    configuration digest and stage — in the same footer, so a shard copied out
+    of its run directory still says which run it belongs to. Supplied by the
+    caller for the same reason ``provenance`` is: only the caller knows the run
+    id. Omitted, no run keys are written.
     """
     paths = _shard_paths(output_path)
     if provenance is not None:
@@ -329,7 +337,10 @@ def write_results(
         })
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    footer = provenance.footer_metadata(relpaths) if provenance is not None else None
+    footer = _merge_footers(
+        provenance.footer_metadata(relpaths) if provenance is not None else None,
+        stamp.footer_metadata() if stamp is not None else None,
+    )
     _write_rows(elements_rows, paths["elements"], ELEMENT_SCHEMA, metadata=footer)
     _write_rows(table_cells_rows, paths["table_cells"], TABLE_CELLS_SCHEMA, metadata=footer)
     _write_rows(form_fields_rows, paths["form_fields"], FORM_FIELDS_SCHEMA, metadata=footer)
@@ -342,6 +353,15 @@ def write_results(
         len(table_cells_rows), len(form_fields_rows),
     )
     return output_path
+
+
+def _merge_footers(*parts: dict[bytes, bytes] | None) -> dict[bytes, bytes] | None:
+    """Combine the namespaced footer blocks a writer has; ``None`` when it has none."""
+    merged: dict[bytes, bytes] = {}
+    for part in parts:
+        if part:
+            merged.update(part)
+    return merged or None
 
 
 def _write_rows(
