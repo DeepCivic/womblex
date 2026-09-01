@@ -56,12 +56,12 @@
 # the local stack cannot inherit a cloud endpoint from the host environment.
 # Mirrors the base file's bundled defaults exactly.
 x-local-env: &local-env
-  WOMBLEX_DB_DSN: postgresql://womblex:womblex@postgres:5432/womblex
+  WOMBLEX_DB_DSN: postgresql://womblex:womblex@postgres:5432/womblex  # pragma: allowlist secret -- bundled-local Postgres, service-pinned
   WOMBLEX_STORE_URI: s3://womblex
   WOMBLEX_INGEST_URI: s3://womblex/inbox
   WOMBLEX_S3_ENDPOINT: http://minio:9000
   AWS_ACCESS_KEY_ID: minioadmin
-  AWS_SECRET_ACCESS_KEY: minioadmin
+  AWS_SECRET_ACCESS_KEY: minioadmin  # pragma: allowlist secret -- MinIO's own default, reachable only inside the local stack
   AWS_REGION: us-east-1
 
 services:

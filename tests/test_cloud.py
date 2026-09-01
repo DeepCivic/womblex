@@ -93,14 +93,14 @@ def test_storage_options_prefers_store_specific_credentials(monkeypatch):
     monkeypatch.setenv("WOMBLEX_S3_SECRET_ACCESS_KEY", "store-secret")
     opts = storage_options_from_env("s3://bucket/x")
     assert opts["key"] == "store-key"
-    assert opts["secret"] == "store-secret"
+    assert opts["secret"] == "store-secret"  # pragma: allowlist secret -- test literal
 
     # Store-specific wins over the AWS fallback when both are set.
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "aws-key")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "aws-secret")
     opts = storage_options_from_env("s3://bucket/x")
     assert opts["key"] == "store-key"
-    assert opts["secret"] == "store-secret"
+    assert opts["secret"] == "store-secret"  # pragma: allowlist secret -- test literal
 
 
 def test_storage_options_omits_credentials_when_none_are_set(monkeypatch):
@@ -129,7 +129,7 @@ def test_storage_options_explicit_credentials_win_over_env(monkeypatch):
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "aws-secret")
     opts = storage_options_from_env("s3://bucket/x", credentials=("saved-key", "saved-secret"))
     assert opts["key"] == "saved-key"
-    assert opts["secret"] == "saved-secret"
+    assert opts["secret"] == "saved-secret"  # pragma: allowlist secret -- test literal
 
 
 def test_from_uri_threads_the_credential_override(tmp_path, monkeypatch):

@@ -33,6 +33,13 @@ repos:
       #       '^(src/womblex/_models/|fixtures/|models/|uv\.lock$|docs/accuracy/)' \
       #       > .secrets.baseline
       #
+      # `detect-secrets scan` walks files git already knows about, so run it
+      # after staging: a baseline generated in the same commit that adds a new
+      # file does not cover that file, and CI fails on a hit the author never
+      # saw. Prefer an inline `# pragma: allowlist secret -- <reason>` at the
+      # site anyway — it travels with the line, where a baseline entry goes
+      # stale the moment the file is edited.
+      #
       # Vendored model artefacts, benchmark fixtures and the generated accuracy
       # docs are excluded because they are third-party or generated data, and
       # their high-entropy content (tokeniser vocabularies, base64 image blobs)
