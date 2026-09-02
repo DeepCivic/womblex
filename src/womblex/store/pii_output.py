@@ -16,6 +16,9 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from womblex.store.output import _write_rows
+from womblex.store.run_stamp import sidecar_footer
+
 logger = logging.getLogger(__name__)
 
 PII_SPANS_SUFFIX = ".pii_spans.parquet"
@@ -61,14 +64,7 @@ def write_pii_spans(rows: list[dict], output_path: Path) -> Path:
     """
     target = pii_spans_path_for(output_path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    if rows:
-        table = pa.Table.from_pylist(rows, schema=PII_SPANS_SCHEMA)
-    else:
-        table = pa.table(
-            {f.name: pa.array([], type=f.type) for f in PII_SPANS_SCHEMA},
-            schema=PII_SPANS_SCHEMA,
-        )
-    pq.write_table(table, str(target), compression="zstd", compression_level=3)
+    _write_rows(rows, target, PII_SPANS_SCHEMA, metadata=sidecar_footer(output_path, "pii"))
     logger.info("Wrote pii_spans shard %s: rows=%d", target.name, len(rows))
     return target
 
@@ -111,14 +107,7 @@ def write_clean_text(rows: list[dict], output_path: Path) -> Path:
     """
     target = clean_text_path_for(output_path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    if rows:
-        table = pa.Table.from_pylist(rows, schema=CLEAN_TEXT_SCHEMA)
-    else:
-        table = pa.table(
-            {f.name: pa.array([], type=f.type) for f in CLEAN_TEXT_SCHEMA},
-            schema=CLEAN_TEXT_SCHEMA,
-        )
-    pq.write_table(table, str(target), compression="zstd", compression_level=3)
+    _write_rows(rows, target, CLEAN_TEXT_SCHEMA, metadata=sidecar_footer(output_path, "pii"))
     logger.info("Wrote clean_text shard %s: rows=%d", target.name, len(rows))
     return target
 

@@ -28,6 +28,9 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from womblex.store.output import _write_rows
+from womblex.store.run_stamp import sidecar_footer
+
 logger = logging.getLogger(__name__)
 
 ENRICHMENT_DOC_SUFFIX = ".enrichment_doc.parquet"
@@ -58,14 +61,8 @@ def write_enrichment_doc_shard(
         {"source_hash": sh, "text_source": ts, "document_json": dj}
         for sh, ts, dj in rows
     ]
-    if records:
-        table = pa.Table.from_pylist(records, schema=ENRICHMENT_DOC_SCHEMA)
-    else:
-        table = pa.table(
-            {f.name: pa.array([], type=f.type) for f in ENRICHMENT_DOC_SCHEMA},
-            schema=ENRICHMENT_DOC_SCHEMA,
-        )
-    pq.write_table(table, str(target), compression="zstd", compression_level=3)
+    _write_rows(records, target, ENRICHMENT_DOC_SCHEMA,
+                metadata=sidecar_footer(base_path, "enrich"))
     logger.info("Wrote enrichment doc shard %s: rows=%d", target.name, len(records))
     return target
 

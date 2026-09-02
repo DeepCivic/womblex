@@ -19,6 +19,7 @@ import pyarrow.parquet as pq
 
 from womblex.analyse.graph import DocumentGraph
 from womblex.analyse.models import EnrichmentResult
+from womblex.store.run_stamp import sidecar_footer
 
 logger = logging.getLogger(__name__)
 
@@ -361,7 +362,8 @@ def write_enrichment_entities_shard(
         rows.extend(_entity_mentions_from_enrichment(source_hash, enrichment, None))
     target = enrichment_entities_path_for(base_path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    _write_enrichment_rows(rows, target, ENTITY_SCHEMA)
+    _write_enrichment_rows(rows, target, ENTITY_SCHEMA,
+                          metadata=sidecar_footer(base_path, "enrich"))
     logger.info("Wrote enrichment entities shard %s: rows=%d", target.name, len(rows))
     return target
 
@@ -373,7 +375,8 @@ def write_enrichment_meta_shard(
     rows = [_enrichment_meta_row(src, enr) for src, enr in results]
     target = enrichment_meta_path_for(base_path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    _write_enrichment_rows(rows, target, ENRICHMENT_META_SCHEMA)
+    _write_enrichment_rows(rows, target, ENRICHMENT_META_SCHEMA,
+                          metadata=sidecar_footer(base_path, "enrich"))
     return target
 
 
@@ -392,7 +395,8 @@ def write_graph_edges_shard(
         rows.extend(_graph_edges_to_rows(source_hash, graph))
     target = graph_edges_path_for(base_path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    _write_enrichment_rows(rows, target, GRAPH_EDGE_SCHEMA)
+    _write_enrichment_rows(rows, target, GRAPH_EDGE_SCHEMA,
+                          metadata=sidecar_footer(base_path, "enrich"))
     logger.info("Wrote graph edges shard %s: rows=%d", target.name, len(rows))
     return target
 
@@ -406,7 +410,8 @@ def write_enrichment_entities_rows(rows: list[dict[str, Any]], base_path: Path) 
     """
     target = enrichment_entities_path_for(base_path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    _write_enrichment_rows(rows, target, ENTITY_SCHEMA)
+    _write_enrichment_rows(rows, target, ENTITY_SCHEMA,
+                          metadata=sidecar_footer(base_path, "graph-refresh"))
     return target
 
 
@@ -419,7 +424,8 @@ def write_graph_edges_rows(rows: list[dict[str, Any]], base_path: Path) -> Path:
     """
     target = graph_edges_path_for(base_path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    _write_enrichment_rows(rows, target, GRAPH_EDGE_SCHEMA)
+    _write_enrichment_rows(rows, target, GRAPH_EDGE_SCHEMA,
+                          metadata=sidecar_footer(base_path, "graph-refresh"))
     return target
 
 
@@ -453,7 +459,15 @@ def read_enrichment_entities(path: Path) -> pa.Table:
     return _read_enrichment_shard(target, ENTITY_SCHEMA)
 
 
-def _write_enrichment_rows(rows: list[dict[str, Any]], path: Path, schema: pa.Schema) -> None:
+def _write_enrichment_rows(
+    rows: list[dict[str, Any]],
+    path: Path,
+    schema: pa.Schema,
+    *,
+    metadata: dict[bytes, bytes] | None = None,
+) -> None:
+    if metadata:
+        schema = schema.with_metadata(metadata)
     if rows:
         table = pa.Table.from_pylist(rows, schema=schema)
     else:

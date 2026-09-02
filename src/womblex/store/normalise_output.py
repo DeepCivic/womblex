@@ -20,6 +20,9 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from womblex.store.output import _write_rows
+from womblex.store.run_stamp import sidecar_footer
+
 logger = logging.getLogger(__name__)
 
 NORMALISED_TEXT_SUFFIX = ".normalised_text.parquet"
@@ -47,14 +50,7 @@ def write_normalised_text(rows: list[dict], output_path: Path) -> Path:
     """
     target = normalised_text_path_for(output_path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    if rows:
-        table = pa.Table.from_pylist(rows, schema=NORMALISED_TEXT_SCHEMA)
-    else:
-        table = pa.table(
-            {f.name: pa.array([], type=f.type) for f in NORMALISED_TEXT_SCHEMA},
-            schema=NORMALISED_TEXT_SCHEMA,
-        )
-    pq.write_table(table, str(target), compression="zstd", compression_level=3)
+    _write_rows(rows, target, NORMALISED_TEXT_SCHEMA, metadata=sidecar_footer(output_path, "normalise"))
     logger.info("Wrote normalised_text shard %s: rows=%d", target.name, len(rows))
     return target
 

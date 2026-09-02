@@ -40,6 +40,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from womblex.store.output import _write_rows
+from womblex.store.run_stamp import sidecar_footer
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +127,7 @@ def write_money_spans(rows: list[dict], output_path: Path) -> Path:
     """Write a batch's money spans (rows match :data:`MONEY_SPANS_SCHEMA`)."""
     target = money_spans_path_for(output_path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    _write_rows(rows, target, MONEY_SPANS_SCHEMA)
+    _write_rows(rows, target, MONEY_SPANS_SCHEMA, metadata=sidecar_footer(output_path, "money"))
     logger.info("Wrote money_spans shard %s: rows=%d", target.name, len(rows))
     return target
 
@@ -135,7 +136,8 @@ def write_money_columns(rows: list[dict], output_path: Path) -> Path:
     """Write a batch's column verdicts (rows match :data:`MONEY_COLUMNS_SCHEMA`)."""
     target = money_columns_path_for(output_path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    _write_rows(rows, target, MONEY_COLUMNS_SCHEMA)
+    _write_rows(rows, target, MONEY_COLUMNS_SCHEMA,
+                metadata=sidecar_footer(output_path, "money"))
     logger.info("Wrote money_columns shard %s: rows=%d", target.name, len(rows))
     return target
 

@@ -188,6 +188,18 @@ from the working directory; both columns are empty for a writer that declared
 no root. Masking never rewrites either — the manifest is not a masking
 surface, and a `pii` run over a completed run leaves it byte-identical.
 
+The same footer also names the run: `womblex.run_id`, `womblex.version`,
+`womblex.config_digest` and `womblex.stage`, so a shard read outside its run
+directory still says what produced it. Every downstream sidecar carries the
+four keys as well, but does not declare them — a stage is handed a shard
+directory rather than a run, so it inherits `run_id` and `config_digest` from
+a stamped sibling of its batch and stamps its own `version` and `stage`. The
+sibling is the `.elements.parquet` or the manifest by preference, then any
+sibling of the batch: a stage worker stages in only the inputs its contract
+declares, and several stages never see the elements shard. A sidecar whose
+siblings carry no run, or name two, is written unstamped rather than given an
+invented run.
+
 ### *.redactions.parquet (optional sidecar)
 
 Written by `womblex.redact.batch.annotate_redactions_for_shards` as an
