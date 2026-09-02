@@ -27,6 +27,7 @@ from womblex.config import DatasetConfig, PathsConfig, WomblexConfig
 from womblex.store.embed_output import write_embeddings
 from womblex.store.enrichment_doc import write_enrichment_doc_shard
 from womblex.store.enrichment_output import (
+    ENTITY_SCHEMA,
     write_enrichment_entities_rows,
     write_enrichment_entities_shard,
     write_enrichment_meta_shard,
@@ -36,7 +37,13 @@ from womblex.store.enrichment_output import (
 from womblex.store.entity_links_output import write_entity_links
 from womblex.store.money_output import write_money_columns, write_money_spans
 from womblex.store.normalise_output import write_normalised_text
-from womblex.store.output import ELEMENT_SCHEMA, MANIFEST_SCHEMA, _write_rows, write_chunks
+from womblex.store.output import (
+    CHUNKS_SCHEMA,
+    ELEMENT_SCHEMA,
+    MANIFEST_SCHEMA,
+    _write_rows,
+    write_chunks,
+)
 from womblex.store.pii_output import write_clean_text, write_pii_spans
 from womblex.store.quality_output import write_chunk_quality
 from womblex.store.run_manifest import write_run_manifest
@@ -177,10 +184,11 @@ class TestSidecarsInheritTheRun:
         # What a worker actually has on disk for each stage that does not
         # declare the elements shard: `embed`/`pii` (chunks + manifest),
         # `link` (entities + manifest), `graph-refresh` (adds graph edges),
-        # and `quality`, whose only declared input is the chunks sidecar.
-        ["._manifest.parquet", ".chunks.parquet"],
-        ["._manifest.parquet", ".enrichment_entities.parquet"],
-        [".chunks.parquet"],
+        # and `quality`, whose only declared input is the chunks sidecar — the
+        # one case that reaches past the preferred sources to the glob.
+        [("._manifest.parquet", MANIFEST_SCHEMA), (".chunks.parquet", CHUNKS_SCHEMA)],
+        [("._manifest.parquet", MANIFEST_SCHEMA), (".enrichment_entities.parquet", ENTITY_SCHEMA)],
+        [(".chunks.parquet", CHUNKS_SCHEMA)],
     ], ids=["chunks+manifest", "entities+manifest", "chunks-only"])
     def test_a_stage_that_never_sees_the_elements_shard_still_names_the_run(
         self, staged, tmp_path, stamp
@@ -190,12 +198,26 @@ class TestSidecarsInheritTheRun:
         # worker — the divergence the stamp exists to rule out.
         shard_dir = tmp_path / "documents"
         shard_dir.mkdir(parents=True)
-        for suffix in staged:
-            _write_rows([], shard_dir / f"batch-0001{suffix}", MANIFEST_SCHEMA,
+        for suffix, schema in staged:
+            _write_rows([], shard_dir / f"batch-0001{suffix}", schema,
                         metadata=stamp.footer_metadata())
         base = shard_dir / "batch-0001.parquet"
 
         assert _stamp_of(write_chunk_quality([], base))["run_id"] == stamp.run_id
+
+    def test_a_corrupt_elements_shard_falls_through_to_the_manifest(self, tmp_path, stamp):
+        # `shard_audit` deals in zero-byte and unreadable shards; an
+        # unreadable preferred source is skipped, not fatal, and not a reason
+        # to lose the run.
+        shard_dir = tmp_path / "documents"
+        shard_dir.mkdir(parents=True)
+        (shard_dir / "batch-0001.elements.parquet").write_bytes(b"")
+        _write_rows([], shard_dir / "batch-0001._manifest.parquet", MANIFEST_SCHEMA,
+                    metadata=stamp.footer_metadata())
+
+        written = write_chunks([], shard_dir / "batch-0001.parquet")
+
+        assert _stamp_of(written)["run_id"] == stamp.run_id
 
     def test_siblings_naming_two_runs_leave_the_sidecar_unstamped(self, tmp_path, stamp):
         shard_dir = tmp_path / "documents"

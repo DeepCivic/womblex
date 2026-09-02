@@ -193,9 +193,12 @@ The same footer also names the run: `womblex.run_id`, `womblex.version`,
 directory still says what produced it. Every downstream sidecar carries the
 four keys as well, but does not declare them — a stage is handed a shard
 directory rather than a run, so it inherits `run_id` and `config_digest` from
-the `.elements.parquet` it sits beside and stamps its own `version` and
-`stage`. A sidecar of an unstamped shard is written unstamped rather than
-given an invented run.
+a stamped sibling of its batch and stamps its own `version` and `stage`. The
+sibling is the `.elements.parquet` or the manifest by preference, then any
+sibling of the batch: a stage worker stages in only the inputs its contract
+declares, and several stages never see the elements shard. A sidecar whose
+siblings carry no run, or name two, is written unstamped rather than given an
+invented run.
 
 ### *.redactions.parquet (optional sidecar)
 
