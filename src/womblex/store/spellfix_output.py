@@ -28,6 +28,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from womblex.store.output import _write_rows
+from womblex.store.run_stamp import sidecar_footer
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,8 @@ def write_spellfix_text(rows: list[dict], output_path: Path) -> Path:
     """Write a batch's repaired element-text rows (match :data:`SPELLFIX_TEXT_SCHEMA`)."""
     target = spellfix_text_path_for(output_path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    _write_rows(rows, target, SPELLFIX_TEXT_SCHEMA)
+    _write_rows(rows, target, SPELLFIX_TEXT_SCHEMA,
+                metadata=sidecar_footer(output_path, "spellfix"))
     logger.info("Wrote spellfix_text shard %s: rows=%d", target.name, len(rows))
     return target
 
@@ -76,7 +78,8 @@ def write_spellfix_corrections(rows: list[dict], output_path: Path) -> Path:
     """Write a batch's correction-audit rows (match :data:`SPELLFIX_CORRECTIONS_SCHEMA`)."""
     target = spellfix_corrections_path_for(output_path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    _write_rows(rows, target, SPELLFIX_CORRECTIONS_SCHEMA)
+    _write_rows(rows, target, SPELLFIX_CORRECTIONS_SCHEMA,
+                metadata=sidecar_footer(output_path, "spellfix"))
     logger.info("Wrote spellfix corrections shard %s: rows=%d", target.name, len(rows))
     return target
 

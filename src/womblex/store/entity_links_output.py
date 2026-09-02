@@ -16,6 +16,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from womblex.store.output import _write_rows
+from womblex.store.run_stamp import sidecar_footer
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ def write_entity_links(rows: list[dict], output_path: Path) -> Path:
     """
     target = entity_links_path_for(output_path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    _write_rows(rows, target, ENTITY_LINKS_SCHEMA)
+    _write_rows(rows, target, ENTITY_LINKS_SCHEMA, metadata=sidecar_footer(output_path, "link"))
     logger.info("Wrote entity_links shard %s: rows=%d", target.name, len(rows))
     return target
 

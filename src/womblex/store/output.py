@@ -53,7 +53,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from womblex.ingest.extract import ExtractionResult
-from womblex.store.run_stamp import RunStamp
+from womblex.store.run_stamp import RunStamp, sidecar_footer
 from womblex.store.source_provenance import IngestProvenance
 
 logger = logging.getLogger(__name__)
@@ -402,7 +402,7 @@ def write_chunks(rows: list[dict], output_path: Path) -> Path:
     """
     target = chunks_path_for(output_path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    _write_rows(rows, target, CHUNKS_SCHEMA)
+    _write_rows(rows, target, CHUNKS_SCHEMA, metadata=sidecar_footer(output_path, "chunk"))
     logger.info("Wrote chunks shard %s: rows=%d", target.name, len(rows))
     return target
 

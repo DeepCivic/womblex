@@ -16,6 +16,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from womblex.store.output import _write_rows
+from womblex.store.run_stamp import sidecar_footer
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ def write_embeddings(rows: list[dict], output_path: Path) -> Path:
     """
     target = embeddings_path_for(output_path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    _write_rows(rows, target, EMBEDDINGS_SCHEMA)
+    _write_rows(rows, target, EMBEDDINGS_SCHEMA, metadata=sidecar_footer(output_path, "embed"))
     logger.info("Wrote embeddings shard %s: rows=%d", target.name, len(rows))
     return target
 

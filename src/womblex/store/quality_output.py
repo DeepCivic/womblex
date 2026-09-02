@@ -15,6 +15,9 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from womblex.store.output import _write_rows
+from womblex.store.run_stamp import sidecar_footer
+
 logger = logging.getLogger(__name__)
 
 CHUNK_QUALITY_SUFFIX = ".chunk_quality.parquet"
@@ -41,14 +44,7 @@ def write_chunk_quality(rows: list[dict], output_path: Path) -> Path:
     """Write a batch's chunk-quality rows. Empty input -> empty schema-correct file."""
     target = chunk_quality_path_for(output_path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    if rows:
-        table = pa.Table.from_pylist(rows, schema=CHUNK_QUALITY_SCHEMA)
-    else:
-        table = pa.table(
-            {f.name: pa.array([], type=f.type) for f in CHUNK_QUALITY_SCHEMA},
-            schema=CHUNK_QUALITY_SCHEMA,
-        )
-    pq.write_table(table, str(target), compression="zstd", compression_level=3)
+    _write_rows(rows, target, CHUNK_QUALITY_SCHEMA, metadata=sidecar_footer(output_path, "quality"))
     logger.info("Wrote chunk_quality shard %s: rows=%d", target.name, len(rows))
     return target
 
