@@ -50,6 +50,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     from womblex.store.checkpoint import CheckpointManager
     from womblex.store.output import ShardVerificationError, verify_shard_persistence
     from womblex.store.retention import apply_retention, generate_run_id, most_recent_run
+    from womblex.store.run_stamp import RunStamp
     from womblex.store.shard_audit import reconcile_checkpoint_with_shards
     from womblex.store.source_provenance import IngestProvenance
     from womblex.utils.run_log import capture_batch_log
@@ -148,6 +149,11 @@ def cmd_run(args: argparse.Namespace) -> int:
     provenance = IngestProvenance.from_config(config)
     logger.info("ingest_root: %s (collection %s)", provenance.ingest_root, provenance.collection_id)
 
+    # Likewise declared once: the run id is otherwise only a directory name, so
+    # a shard moved out of the run loses which run produced it.
+    stamp = RunStamp.declare(run_id, config, stage="extract")
+    logger.info("run stamp: version %s, config %s", stamp.version, stamp.config_digest)
+
     batch_size = args.batch_size or config.processing.batch_size
     total_files = len(all_files)
     total_succeeded = 0
@@ -192,7 +198,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         with capture_batch_log(logs_dir / f"batch-{batch_num:04d}.log"):
             outcome = process_batch(
                 batch_files, config, batch_num=batch_num, shard_dir=shard_dir,
-                provenance=provenance,
+                provenance=provenance, stamp=stamp,
             )
         batch = outcome.batch
         total_succeeded += batch.succeeded

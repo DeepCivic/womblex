@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from womblex.operations.models import BatchResult
+from womblex.store.run_stamp import RunStamp
 from womblex.store.source_provenance import IngestProvenance
 
 logger = logging.getLogger(__name__)
@@ -17,11 +18,13 @@ def write_batch_parquet(
     output_path: Path,
     *,
     provenance: IngestProvenance | None = None,
+    stamp: RunStamp | None = None,
 ) -> Path | None:
     """Write completed batch results to Parquet.
 
     ``provenance`` names the declared ingest root the documents were read
-    from; it reaches the manifest columns and every shard's footer.
+    from; it reaches the manifest columns and every shard's footer. ``stamp``
+    names the run that produced them, in the same footer.
     """
     from womblex.store.output import write_results
 
@@ -34,7 +37,7 @@ def write_batch_parquet(
         logger.warning("No completed results to write to Parquet")
         return None
 
-    return write_results(rows, output_path, provenance=provenance)
+    return write_results(rows, output_path, provenance=provenance, stamp=stamp)
 
 
 def write_batch_enrichment(batch: BatchResult, output_dir: Path) -> dict[str, Path | None]:

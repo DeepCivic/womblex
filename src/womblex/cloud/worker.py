@@ -27,6 +27,7 @@ from womblex.batch import process_batch
 from womblex.cloud.queue import Job, JobQueue
 from womblex.config import WomblexConfig
 from womblex.store.remote import RemoteStore, same_location
+from womblex.store.run_stamp import RunStamp
 from womblex.store.source_provenance import IngestProvenance
 from womblex.utils.run_log import capture_batch_log
 
@@ -143,6 +144,12 @@ def _run_batch(
     Staging is nested, because a job's keys come from a recursive listing of an
     ingest prefix: two documents under different prefixes routinely share a
     basename, and staging flat would land them on one local file.
+
+    The run stamp comes off the job row, which has always carried the run id —
+    so a distributed shard's stamp matches the local run's for the same config
+    and corpus, the stage and the write timestamp aside. A row naming no run is
+    published unstamped, on the same terms as an undeclared root: a malformed
+    row is not a reason to lose the batch's extraction.
     """
     inputs_dir = root / "inputs"
     shards_dir = root / "shards"
@@ -158,8 +165,12 @@ def _run_batch(
         if declared
         else None
     )
+    stamp = (
+        RunStamp.declare(job.run_id, config, stage="extract") if job.run_id.strip() else None
+    )
     outcome = process_batch(
         files, config, batch_num=job.batch_num, shard_dir=shards_dir, provenance=provenance,
+        stamp=stamp,
     )
     # Glob off the shard path the batch reported, so the naming scheme lives
     # only in womblex.batch.
