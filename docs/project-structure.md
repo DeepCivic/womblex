@@ -98,6 +98,8 @@ womblex/
 │   │   ├── money_output.py  # *.money_spans.parquet (decimal128 values) + *.money_columns.parquet schemas + IO
 │   │   ├── provenance_output.py  # *.provenance.parquet sidecar + manifest for pre-extracted-record corpora
 │   │   ├── feedback_output.py    # One-file-per-report console feedback records (JSON, not parquet)
+│   │   ├── source_provenance.py  # Ingest root + source relpath, and their womblex.* Parquet footer keys
+│   │   ├── run_stamp.py     # RunStamp — run id / version / config digest / stage, as womblex.* footer keys
 │   │   ├── run_manifest.py  # Consolidate per-batch manifests into a run-root manifest.parquet
 │   │   ├── register_manifest.py  # Manifest for standalone register ingests (G-NAF/ABN/geospatial)
 │   │   ├── remote.py        # fsspec stage-in/stage-out object-storage adapter for distributed runs

@@ -93,6 +93,8 @@ src/womblex/
 │   ├── pii_output.py, normalise_output.py, spellfix_output.py, quality_output.py, money_output.py
 │   │                       # Per-stage sidecar parquet schemas + IO (self-contained, one per stage)
 │   ├── provenance_output.py / run_manifest.py / register_manifest.py  # Manifest consolidation (NLP run + registers)
+│   ├── source_provenance.py  # Where a source document came from: ingest root + relpath, and their womblex.* footer keys
+│   ├── run_stamp.py       # Which run produced a file: run id / version / config digest / stage, as womblex.* footer keys
 │   ├── remote.py          # fsspec stage-in/stage-out object-storage adapter for distributed runs
 │   ├── retention.py       # run_id-based retention policy
 │   └── checkpoint.py      # JSON-based checkpoint manager for resumable batch runs
@@ -307,6 +309,8 @@ Wrappers in `analyse/` call the Isaacus SDK:
 - `entities.parquet` — entity type, name, mentions, chunk mapping
 - `graph_edges.parquet` — source/target node IDs, relation type, metadata
 - `enrichment_meta.parquet` — per-document enrichment summary (segment count, entity counts, etc.)
+
+Every Parquet on the pipeline path also carries provenance in its footer key-value metadata, under one `womblex.*` namespace and additive, so a reader that ignores footers is unaffected. `store/source_provenance.py` supplies the scheme-qualified ingest root and the document's path under it — the same pair the manifest carries as `ingest_root` / `source_relpath` — and `store/run_stamp.py` supplies the run id, the Womblex version, the digest of the *validated* configuration and the writing stage. Extraction declares the stamp once per run and re-points it at each writer; a downstream stage does not declare its own but inherits it from a stamped sibling of the batch its sidecar sits beside (`stamp_for_sidecar`), which is what makes a local and a distributed run stamp identically. The effect is that a shard copied out of its run directory still names the run and the corpus it came from.
 
 `store/checkpoint.py` provides `CheckpointManager` for resumable batch runs. Checkpoints are JSON files recording processed document IDs and batch metadata. On resume, already-processed documents are skipped.
 
