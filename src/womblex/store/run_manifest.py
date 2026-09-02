@@ -18,6 +18,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from womblex.store.output import read_manifest
+from womblex.store.run_stamp import stamp_from_footers
 from womblex.store.source_provenance import IngestProvenance
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,23 @@ def _footer_from_columns(table: pa.Table) -> dict[bytes, bytes] | None:
     )
 
 
+def _merged_footer(shard_dir: Path, table: pa.Table) -> dict[bytes, bytes] | None:
+    """The consolidated manifest's footer: where the corpus came from, and which run.
+
+    The run is read back from the per-batch manifests' own stamps rather than
+    recomputed, for the reason the batch sidecars inherit theirs — consolidation
+    is handed a shard directory, not the run's configuration, and `womblex
+    manifest` may be re-run long after. Batches naming more than one run leave
+    the run keys off, the rule the ingest-root block above already follows.
+    """
+    stamp = stamp_from_footers(sorted(shard_dir.glob("*._manifest.parquet")), "manifest")
+    merged: dict[bytes, bytes] = {}
+    for part in (_footer_from_columns(table), stamp.footer_metadata() if stamp else None):
+        if part:
+            merged.update(part)
+    return merged or None
+
+
 def run_manifest_path_for(shard_dir: Path) -> Path:
     """Default consolidated-manifest path: ``<run_root>/manifest.parquet``."""
     return shard_dir.parent / RUN_MANIFEST_FILENAME
@@ -62,7 +80,7 @@ def write_run_manifest(shard_dir: Path, output_path: Path | None = None) -> Path
     empty-but-schema-correct file so downstream reads are safe.
     """
     table = read_manifest(shard_dir)
-    footer = _footer_from_columns(table)
+    footer = _merged_footer(shard_dir, table)
     if footer:
         table = table.replace_schema_metadata(footer)
     target = output_path or run_manifest_path_for(shard_dir)

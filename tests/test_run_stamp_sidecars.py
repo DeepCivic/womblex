@@ -39,6 +39,7 @@ from womblex.store.normalise_output import write_normalised_text
 from womblex.store.output import ELEMENT_SCHEMA, MANIFEST_SCHEMA, _write_rows, write_chunks
 from womblex.store.pii_output import write_clean_text, write_pii_spans
 from womblex.store.quality_output import write_chunk_quality
+from womblex.store.run_manifest import write_run_manifest
 from womblex.store.run_stamp import (
     RunStamp,
     read_footer_stamp,
@@ -214,6 +215,39 @@ class TestSidecarsInheritTheRun:
         elsewhere.write_bytes(written.read_bytes())
 
         assert _stamp_of(elsewhere)["run_id"] == stamp.run_id
+
+
+class TestConsolidatedRunManifest:
+    def test_the_run_manifest_names_the_run_its_batches_name(self, tmp_path, stamp):
+        shard_dir = tmp_path / "documents"
+        _extraction_shard(shard_dir, stamp, "batch-0001")
+        _extraction_shard(shard_dir, stamp, "batch-0002")
+
+        assert _stamp_of(write_run_manifest(shard_dir)) == {
+            "run_id": "run-A",
+            "version": __version__,
+            "config_digest": stamp.config_digest,
+            "stage": "manifest",
+        }
+
+    def test_batches_from_two_runs_leave_the_run_keys_off(self, tmp_path, stamp):
+        # Naming one of two runs would be worse than naming none — the rule the
+        # ingest-root footer already follows for a mixed-root directory.
+        shard_dir = tmp_path / "documents"
+        _extraction_shard(shard_dir, stamp, "batch-0001")
+        other = RunStamp("run-B", stamp.version, stamp.config_digest, "extract")
+        _extraction_shard(shard_dir, other, "batch-0002")
+
+        assert _stamp_of(write_run_manifest(shard_dir)) == {}
+
+    def test_regenerating_the_manifest_reproduces_the_record(self, tmp_path, stamp):
+        shard_dir = tmp_path / "documents"
+        _extraction_shard(shard_dir, stamp)
+
+        first = _stamp_of(write_run_manifest(shard_dir))
+        second = _stamp_of(write_run_manifest(shard_dir))
+
+        assert first == second != {}
 
 
 def test_every_store_writer_is_stamped_or_exempt_with_a_reason():
