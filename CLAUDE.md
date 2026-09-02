@@ -412,6 +412,7 @@ belongs on the orchestrator path, not here.
 - Keep code simple — direct implementations over complex abstractions
 - Add docstrings — but keep them concise (explain what/why, not how)
 - Check files before commit — ensure each commit is aligned to docs/steering and one-off use files don't get merged
+- Update the technical docs in the same PR as the code — a change that adds, moves or retires a module updates `docs/architecture.md` and `docs/project-structure.md` beside it, and a change that satisfies a written requirement retires that requirement where it is recorded. Doc edits count against the 500-line merge cap like any other line, so keep them proportionate; where the requirement lives in womblex-benchmark, raise the two merges as a pair
 - Add type hints to all functions
 - Handle individual document failures gracefully
 - Keep extraction strategies isolated and swappable
