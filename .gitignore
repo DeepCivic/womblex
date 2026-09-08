@@ -1,3 +1,8 @@
+# Build stamp — generated at build time by the release workflow so a wheel can
+# name the commit it came from. Never committed: in a checkout the work tree is
+# the answer, and a stale stamp beside it would be the wrong one.
+src/womblex/_build_stamp.py
+
 # Python
 __pycache__/
 *.py[cod]

@@ -2,10 +2,10 @@
 
 A run id exists today only as a directory name, so a shard copied out of its
 run loses it and a file mixed in from another run is indistinguishable from a
-native one. This stamps four facts into every pipeline Parquet's footer
+native one. This stamps five facts into every pipeline Parquet's footer
 key-value metadata at the moment it is written — run id, Womblex version,
-configuration digest and the stage that wrote it — so attribution survives the
-file being moved.
+source commit, configuration digest and the stage that wrote it — so
+attribution survives the file being moved.
 
 The keys share the ``womblex.*`` namespace ``store/source_provenance.py``
 established (itself the convention ``store/register_manifest.py`` reads back
@@ -25,6 +25,14 @@ extracts from a scratch directory it was handed, and digesting that would make
 a distributed run's stamp differ from the local run of the same pipeline over
 the same corpus. The run id is stamped in its own right, so folding it into the
 digest would only make every run's digest unique and say nothing.
+
+**The version and the commit describe the bytes, not the run.** A version
+alone does not identify a build — the same version is cut from every commit
+between two releases — so ``store/build_info.py`` resolves the commit beside
+it, from the work tree or a build stamp, and reports ``unavailable`` with a
+reason where neither answers. Both are the *running* values wherever a stamp is
+made, which is why a stage run at a later build than extraction says so instead
+of repeating what extraction claimed.
 
 **A downstream stage inherits its run rather than declaring one.** Extraction's
 caller knows the run; a stage is handed a shard directory, and its own
@@ -51,10 +59,12 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from womblex import __version__
+from womblex.store.build_info import resolve_commit
 from womblex.store.source_provenance import NAMESPACE
 
 RUN_ID_KEY = f"{NAMESPACE}.run_id"
 VERSION_KEY = f"{NAMESPACE}.version"
+COMMIT_KEY = f"{NAMESPACE}.commit"
 CONFIG_DIGEST_KEY = f"{NAMESPACE}.config_digest"
 STAGE_KEY = f"{NAMESPACE}.stage"
 
@@ -82,15 +92,16 @@ def config_digest(config: object) -> str:
 
 @dataclass(frozen=True)
 class RunStamp:
-    """The four facts a written file carries about the run that produced it.
+    """The five facts a written file carries about the run that produced it.
 
     One stamp is declared per run and re-pointed at each stage that writes
-    (:meth:`for_stage`), so run id, version and digest cannot drift between the
-    files of one run.
+    (:meth:`for_stage`), so run id, version, commit and digest cannot drift
+    between the files of one run.
     """
 
     run_id: str
     version: str
+    commit: str
     config_digest: str
     stage: str
 
@@ -105,7 +116,13 @@ class RunStamp:
             raise ValueError("run_id is empty; a stamp names the run or is not written")
         if not str(stage).strip():
             raise ValueError("stage is empty; a stamp names the writer or is not written")
-        return cls(str(run_id).strip(), __version__, config_digest(config), str(stage).strip())
+        return cls(
+            str(run_id).strip(),
+            __version__,
+            resolve_commit(),
+            config_digest(config),
+            str(stage).strip(),
+        )
 
     @classmethod
     def inherit(cls, run_id: str, digest: str, *, stage: str) -> RunStamp:
@@ -115,15 +132,21 @@ class RunStamp:
         the run — its own ``dataset.run_id`` may be anything a copied config
         holds — so the run id and configuration digest are taken from the
         extraction shard the sidecar sits beside. Those two are facts about the
-        *run*; the version is the Womblex that wrote these bytes, so it is the
-        running one rather than the inherited one. A stage run at a later
-        version than the extraction therefore says so.
+        *run*; the version and the commit are the Womblex that wrote these
+        bytes, so they are the running ones rather than the inherited ones. A
+        stage run at a later build than the extraction therefore says so.
         """
         if not str(run_id).strip():
             raise ValueError("run_id is empty; a stamp names the run or is not written")
         if not str(stage).strip():
             raise ValueError("stage is empty; a stamp names the writer or is not written")
-        return cls(str(run_id).strip(), __version__, str(digest), str(stage).strip())
+        return cls(
+            str(run_id).strip(),
+            __version__,
+            resolve_commit(),
+            str(digest),
+            str(stage).strip(),
+        )
 
     def for_stage(self, stage: str) -> RunStamp:
         """The same run, stamped for another writer."""
@@ -136,6 +159,7 @@ class RunStamp:
         return {
             RUN_ID_KEY.encode(): self.run_id.encode(),
             VERSION_KEY.encode(): self.version.encode(),
+            COMMIT_KEY.encode(): self.commit.encode(),
             CONFIG_DIGEST_KEY.encode(): self.config_digest.encode(),
             STAGE_KEY.encode(): self.stage.encode(),
         }
@@ -154,6 +178,7 @@ def read_footer_stamp(metadata: Mapping[bytes, bytes] | None) -> dict[str, str]:
     names = (
         (RUN_ID_KEY, "run_id"),
         (VERSION_KEY, "version"),
+        (COMMIT_KEY, "commit"),
         (CONFIG_DIGEST_KEY, "config_digest"),
         (STAGE_KEY, "stage"),
     )
@@ -215,6 +240,7 @@ def sidecar_footer(base_path: Path, stage: str) -> dict[bytes, bytes] | None:
 
 
 __all__ = [
+    "COMMIT_KEY",
     "CONFIG_DIGEST_KEY",
     "RUN_ID_KEY",
     "STAGE_KEY",

@@ -20,6 +20,13 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Stamp the commit into the package
+        # Written before the build so the wheel carries it. A checkout resolves
+        # its commit from the work tree; an installed wheel has none, so this
+        # is the only moment the fact can be captured.
+        run: |
+          printf 'COMMIT = "%s"\n' "${GITHUB_SHA}" > src/womblex/_build_stamp.py
+
       - name: Build sdist and wheel
         run: |
           python -m pip install --upgrade pip build
