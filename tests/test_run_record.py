@@ -31,13 +31,30 @@ from womblex.store.run_manifest import (
     write_run_manifest,
 )
 from womblex.store.run_stamp import RunStamp
-from womblex.utils.models import reset_loaded_models
+from womblex.utils.models import (
+    digest_model_path,
+    reset_loaded_models,
+    resolve_local_model_path,
+)
 
 _FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "fixtures"
 _BUDGET_DOCX = (
     _FIXTURES / "womblex-collection" / "_documents"
     / "foreign-affairs-and-trade-2025-26-portfolio-budget-statements.docx"
 )
+
+# The names a run's credentials arrive under; none of their values may reach
+# the record, which carries endpoints, regions, digests and model ids.
+CREDENTIAL_ENV = (
+    "ISAACUS_API_KEY",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "WOMBLEX_S3_ACCESS_KEY_ID",
+    "WOMBLEX_S3_SECRET_ACCESS_KEY",
+    "WOMBLEX_DB_DSN",
+)
+
 
 @pytest.fixture(autouse=True)
 def _clean_record():
@@ -165,6 +182,59 @@ class TestStagesAreObserved:
         _sidecar(shards, ".embeddings.parquet", empty, "embed")
         names = [s["stage"] for s in read_run_record(write_run_manifest(shards))["stages"]]
         assert names == ["extract", "embed"]
+
+
+class TestLocalModels:
+    def test_a_loaded_model_is_named_with_a_digest_that_recomputes(
+        self, tmp_path, extraction,
+    ):
+        """The criterion: the digest checks out against the model files alone."""
+        resolve_local_model_path("en_AU")
+        shards = _extracted(tmp_path, extraction)
+        record = read_run_record(write_run_manifest(shards))
+
+        entry = next(m for m in record["local_models"] if m["name"] == "en_AU")
+        assert entry["digest"] == digest_model_path(
+            Path(str(resolve_local_model_path("en_AU"))),
+        )
+        assert entry["stages"] == ["extract"]
+
+    def test_a_run_that_loaded_none_says_so_rather_than_listing_the_build(
+        self, tmp_path, extraction,
+    ):
+        shards = _extracted(tmp_path, extraction)
+        record = read_run_record(write_run_manifest(shards))
+        assert record["local_models"] == []
+        assert any("local models" in p for p in record["partial"])
+
+
+class TestCredentials:
+    def test_no_credential_value_reaches_the_record(self, tmp_path, extraction, monkeypatch):
+        for name in CREDENTIAL_ENV:
+            monkeypatch.setenv(name, f"SECRET-{name}")
+        monkeypatch.setenv(
+            "ISAACUS_SAGEMAKER_ENDPOINTS", "embed-001@ap-southeast-2=kanon-2-embedder",
+        )
+        shards = _extracted(tmp_path, extraction)
+        manifest = write_run_manifest(shards)
+
+        blob = pq.read_metadata(str(manifest)).metadata[RUN_RECORD_KEY.encode()]
+        for name in CREDENTIAL_ENV:
+            assert f"SECRET-{name}".encode() not in blob
+
+    def test_a_deployment_is_named_by_endpoint_region_and_models(
+        self, tmp_path, extraction, monkeypatch,
+    ):
+        monkeypatch.setenv(
+            "ISAACUS_SAGEMAKER_ENDPOINTS", "embed-001@ap-southeast-2=kanon-2-embedder",
+        )
+        shards = _extracted(tmp_path, extraction)
+        assert read_run_record(write_run_manifest(shards))["services"] == [{
+            "kind": "isaacus-sagemaker",
+            "endpoint": "embed-001",
+            "region": "ap-southeast-2",
+            "models": ["kanon-2-embedder"],
+        }]
 
 
 class TestPartialRecord:

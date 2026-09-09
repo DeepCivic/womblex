@@ -19,7 +19,8 @@ lifecycle the record needs.
 Everything in it is **observed, not declared**. The stages are read from the
 run stamps the files themselves carry, so a stage that was configured and never
 ran is absent while one that ran and produced nothing is present with no rows —
-a distinction a list taken from configuration flags cannot make. The documents,
+a distinction a list taken from configuration flags cannot make. The local
+models are the union of what each file recorded loading. The documents,
 extraction methods and statuses are counted off the consolidated rows. Nothing
 is taken from a configuration file, because ``womblex manifest`` may be re-run
 long after the run and against a configuration that has since moved on.
@@ -46,8 +47,13 @@ import pyarrow.parquet as pq
 
 from womblex.pipeline_order import stage_rank
 from womblex.store.output import read_manifest
-from womblex.store.run_stamp import read_footer_stamp, stamp_from_footers
+from womblex.store.run_stamp import (
+    read_footer_models,
+    read_footer_stamp,
+    stamp_from_footers,
+)
 from womblex.store.source_provenance import NAMESPACE, IngestProvenance
+from womblex.utils.isaacus_client import endpoints_from_env, sagemaker_configured
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +64,11 @@ RUN_MANIFEST_FILENAME = "manifest.parquet"
 #: not, rather than inferring the shape from which fields happen to be present.
 RUN_RECORD_KEY = f"{NAMESPACE}.run_record"
 RUN_RECORD_VERSION = 1
+
+#: The sidecar whose rows name the Isaacus model that was actually called.
+#: Every other stage's use of the API is inferable at best, so this is the one
+#: served-model fact the shard directory can supply.
+_EMBEDDINGS_SUFFIX = ".embeddings.parquet"
 
 
 def _footer_from_columns(table: pa.Table) -> dict[bytes, bytes] | None:
@@ -94,7 +105,7 @@ def _merged_footer(shard_dir: Path, table: pa.Table) -> dict[bytes, bytes] | Non
     the run keys off, the rule the ingest-root block above already follows.
 
     The run record is written unconditionally, because a record that cannot
-    name its run still names the documents and the stages, and says
+    name its run still names the documents, the stages and the models, and says
     in its own ``partial`` list what it could not establish. Withholding it
     would lose all of that to the one fact it is missing.
     """
@@ -174,6 +185,75 @@ def _observed_stages(footers: list[tuple[dict[bytes, bytes] | None, int]]) -> li
     ]
 
 
+def _observed_models(footers: list[tuple[dict[bytes, bytes] | None, int]]) -> list[dict]:
+    """The local models the run's files recorded loading, with the stages that did.
+
+    Keyed on name *and* digest, so a model swapped part-way through a run comes
+    back as two entries rather than one of them silently winning. Each digest
+    recomputes from the model files alone (`utils/models.py`), which is what
+    makes the entry checkable by someone holding the model and not the run.
+    """
+    stages: dict[tuple[str, str], set[str]] = {}
+    for meta, _rows in footers:
+        stage = read_footer_stamp(meta).get("stage", "")
+        for entry in read_footer_models(meta):
+            key = (entry["name"], entry["digest"])
+            stages.setdefault(key, set())
+            if stage:
+                stages[key].add(stage)
+    return [
+        {"name": name, "digest": digest, "stages": sorted(stages[(name, digest)])}
+        for name, digest in sorted(stages)
+    ]
+
+
+def _called_models(shard_dir: Path) -> list[str]:
+    """Isaacus models the run's embedding sidecars name as having been called."""
+    seen: set[str] = set()
+    for path in sorted(shard_dir.glob(f"*{_EMBEDDINGS_SUFFIX}")):
+        try:
+            table = pq.read_table(str(path), columns=["model"])
+        except (OSError, KeyError, pa.ArrowInvalid):
+            continue
+        seen.update(m for m in table.column("model").to_pylist() if m)
+    return sorted(seen)
+
+
+def _services(shard_dir: Path) -> list[dict]:
+    """The external services the run reached, by endpoint, region and models.
+
+    The deployment is declared in the environment rather than recorded in the
+    output, so this describes the environment the record is written in. That is
+    the run's own environment at both finalisation moments; a regeneration
+    elsewhere is noted in ``partial`` rather than left to look like a fact
+    about the run.
+
+    Credentials are structurally absent: an endpoint name, a region and a model
+    id are the whole of what is read, and the API key is never consulted.
+    """
+    called = _called_models(shard_dir)
+    if sagemaker_configured():
+        return [
+            {
+                "kind": "isaacus-sagemaker",
+                "endpoint": e.name,
+                "region": e.region,
+                "models": list(e.models) if e.models else called or None,
+            }
+            for e in sorted(endpoints_from_env(), key=lambda e: e.name)
+        ]
+    if called:
+        return [{
+            "kind": "isaacus-hosted-api",
+            # Not spelled out: the SDK resolves its own default endpoint, and
+            # naming a URL this module does not read would be inventing one.
+            "endpoint": "sdk-default",
+            "region": None,
+            "models": called,
+        }]
+    return []
+
+
 def _partial(record: dict, footers: list) -> list[str]:
     """What the record could not establish, named rather than left to look absent."""
     gaps: list[str] = []
@@ -186,6 +266,19 @@ def _partial(record: dict, footers: list) -> list[str]:
         )
     if not record["stages"]:
         gaps.append("stages: no file names the stage that wrote it")
+    if not record["local_models"]:
+        gaps.append(
+            "local models: no file records one, so either none was loaded or "
+            "the run predates the record",
+        )
+    gaps.append(
+        "external services describe the environment this record was written "
+        "in, not one recorded during the run",
+    )
+    gaps.append(
+        "the OCR engine is not recorded on the element stream, so a VLM-OCR "
+        "service cannot be established from the shard directory",
+    )
     return gaps
 
 
@@ -216,6 +309,8 @@ def build_run_record(shard_dir: Path, table: pa.Table) -> dict:
             "statuses": dict(sorted(statuses.items())),
         },
         "stages": _observed_stages(footers),
+        "local_models": _observed_models(footers),
+        "services": _services(shard_dir),
     }
     record["partial"] = _partial(record, footers)
     return record
