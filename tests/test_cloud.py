@@ -1102,3 +1102,38 @@ def test_prepare_stage_context_refuses_a_stage_isaacus_cannot_serve(monkeypatch,
 
     # A stage with no Isaacus need is unaffected.
     assert prepare_stage_context(STAGE_CONTRACTS["money"], _minimal_config(tmp_path)) is not None
+
+
+def test_read_parquet_footer_reads_metadata_without_downloading(tmp_path):
+    """`womblex finalize` stages in only the manifests, so it reads every other
+    shard's footer where it lives. A local-filesystem store exercises the same
+    fsspec path an object store takes."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    from womblex.store.remote import RemoteStore
+
+    table = pa.table({"a": pa.array([1, 2, 3])})
+    (tmp_path / "documents").mkdir()
+    target = tmp_path / "documents" / "batch-0001.embeddings.parquet"
+    pq.write_table(table.replace_schema_metadata({b"womblex.stage": b"embed"}), str(target))
+
+    store = RemoteStore.from_uri(str(tmp_path))
+    observed = store.read_parquet_footer("documents/batch-0001.embeddings.parquet")
+    assert observed is not None
+    metadata, num_rows = observed
+    assert num_rows == 3
+    assert metadata[b"womblex.stage"] == b"embed"
+
+
+def test_read_parquet_footer_reports_an_unreadable_object_rather_than_raising(tmp_path):
+    """The caller is building a record; a file it cannot read is one it reports
+    as absent, not one it fails the finalisation over."""
+    from womblex.store.remote import RemoteStore
+
+    (tmp_path / "documents").mkdir()
+    (tmp_path / "documents" / "junk.parquet").write_bytes(b"not a parquet")
+
+    store = RemoteStore.from_uri(str(tmp_path))
+    assert store.read_parquet_footer("documents/junk.parquet") is None
+    assert store.read_parquet_footer("documents/absent.parquet") is None

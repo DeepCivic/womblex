@@ -13,6 +13,7 @@ fixture, as `test_run_stamp` does.
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pyarrow as pa
@@ -26,6 +27,7 @@ from womblex.store.output import write_results
 from womblex.store.run_manifest import (
     RUN_RECORD_KEY,
     RUN_RECORD_VERSION,
+    _footers,
     read_run_record,
     run_manifest_path_for,
     write_run_manifest,
@@ -263,3 +265,110 @@ class TestPartialRecord:
         record = read_run_record(write_run_manifest(shards))
         assert record["inputs"]["documents"] == 0
         assert any("no readable parquet" in p for p in record["partial"])
+
+class TestStagedSubset:
+    """The distributed shape: `womblex finalize` stages in only the manifests.
+
+    A record built from that directory can see extraction and nothing else, and
+    a missing stage is indistinguishable from one that never ran — so it either
+    says so, or is handed the footers read where the shards actually live.
+    """
+
+    @pytest.fixture
+    def with_embed(self, tmp_path, extraction) -> Path:
+        shards = _extracted(tmp_path, extraction)
+        empty = pa.table(
+            {f.name: pa.array([], type=f.type) for f in EMBEDDINGS_SCHEMA},
+            schema=EMBEDDINGS_SCHEMA,
+        )
+        _sidecar(shards, ".embeddings.parquet", empty, "embed")
+        return shards
+
+    @staticmethod
+    def _manifests_only(shards: Path, tmp_path: Path) -> Path:
+        staged = tmp_path / "staged" / "documents"
+        staged.mkdir(parents=True)
+        for path in shards.glob("*._manifest.parquet"):
+            shutil.copy(path, staged / path.name)
+        return staged
+
+    def test_a_manifest_only_directory_declares_what_it_cannot_see(
+        self, with_embed, tmp_path,
+    ):
+        staged = self._manifests_only(with_embed, tmp_path)
+        record = read_run_record(write_run_manifest(staged))
+        assert [s["stage"] for s in record["stages"]] == ["extract"]
+        assert any("manifest shards alone" in p for p in record["partial"])
+
+    def test_supplied_footers_restore_the_stages_the_staging_left_behind(
+        self, with_embed, tmp_path,
+    ):
+        """What `womblex finalize` does: read the footers where the shards live
+        and hand them in, rather than staging the whole run to observe it."""
+        staged = self._manifests_only(with_embed, tmp_path)
+        record = read_run_record(
+            write_run_manifest(staged, footers=_footers(with_embed)),
+        )
+        assert [s["stage"] for s in record["stages"]] == ["extract", "embed"]
+        assert not any("manifest shards alone" in p for p in record["partial"])
+
+    def test_a_full_shard_directory_makes_no_such_claim(self, with_embed):
+        record = read_run_record(write_run_manifest(with_embed))
+        assert not any("manifest shards alone" in p for p in record["partial"])
+        assert not any("does not hold the whole run" in p for p in record["partial"])
+
+    def test_supplied_footers_still_declare_the_served_model_limit(
+        self, with_embed, tmp_path,
+    ):
+        """Footers carry the stages and models, but served models are read from
+        the embedding sidecars' rows — which supplied footers cannot stand in
+        for, so the limit outlives the fix for the other two."""
+        staged = self._manifests_only(with_embed, tmp_path)
+        record = read_run_record(
+            write_run_manifest(staged, footers=_footers(with_embed)),
+        )
+        assert any("does not hold the whole run" in p for p in record["partial"])
+
+
+class TestEndpointIdentity:
+    """No account identifier reaches the record, whatever shape the ARN takes."""
+
+    ARNS = (
+        "arn:aws:sagemaker:ap-southeast-2:123456789012:endpoint/embed-001",
+        "arn:aws:sagemaker:ap-southeast-2:123456789012",
+        "arn:aws:sagemaker:ap-southeast-2:123456789012:",
+        "arn:aws:sagemaker:ap-southeast-2:123456789012:endpoint/",
+        "arn:aws:sagemaker:ap-southeast-2:123456789012:endpoint/a/embed-001",
+    )
+
+    @pytest.mark.parametrize("arn", ARNS)
+    def test_no_arn_shape_puts_the_account_id_in_the_record(
+        self, arn, tmp_path, extraction, monkeypatch,
+    ):
+        monkeypatch.setenv("ISAACUS_SAGEMAKER_ENDPOINTS", f"{arn}=kanon-2-embedder")
+        shards = _extracted(tmp_path, extraction)
+        blob = pq.read_metadata(
+            str(write_run_manifest(shards)),
+        ).metadata[RUN_RECORD_KEY.encode()]
+        assert b"123456789012" not in blob
+
+    def test_an_arn_is_reduced_to_its_endpoint_name_and_region(
+        self, tmp_path, extraction, monkeypatch,
+    ):
+        monkeypatch.setenv(
+            "ISAACUS_SAGEMAKER_ENDPOINTS",
+            "arn:aws:sagemaker:ap-southeast-2:123456789012:endpoint/embed-001"
+            "=kanon-2-embedder",
+        )
+        shards = _extracted(tmp_path, extraction)
+        assert read_run_record(write_run_manifest(shards))["services"] == [{
+            "kind": "isaacus-sagemaker",
+            "endpoint": "embed-001",
+            "region": "ap-southeast-2",
+            "models": ["kanon-2-embedder"],
+        }]
+
+    def test_a_plain_endpoint_name_is_untouched(self, tmp_path, extraction, monkeypatch):
+        monkeypatch.setenv("ISAACUS_SAGEMAKER_ENDPOINTS", "embed-001@ap-southeast-2")
+        services = read_run_record(write_run_manifest(_extracted(tmp_path, extraction)))
+        assert services["services"][0]["endpoint"] == "embed-001"

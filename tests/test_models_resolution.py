@@ -22,6 +22,7 @@ from womblex.utils.models import (
     find_models_dir,
     loaded_models,
     model_roots,
+    record_loaded_path,
     reset_loaded_models,
     resolve_local_model_path,
 )
@@ -152,6 +153,21 @@ class TestLoadRecord:
 
     def test_a_name_that_does_not_resolve_records_nothing(self):
         assert resolve_local_model_path("no-such-model") == "no-such-model"
+        assert loaded_models() == ()
+
+    def test_a_library_bundled_artefact_can_be_recorded_too(self, tmp_path: Path):
+        """RapidOCR loads its fallback models from inside its own wheel, so they
+        never reach the resolver — the loader records them explicitly instead,
+        or the record shows no OCR model for a run that OCR'd."""
+        bundled = tmp_path / "wheel" / "models"
+        bundled.mkdir(parents=True)
+        (bundled / "det.onnx").write_bytes(b"weights")
+        record_loaded_path("rapidocr-bundled-v4", bundled)
+        assert [m.name for m in loaded_models()] == ["rapidocr-bundled-v4"]
+        assert loaded_models()[0].digest == digest_model_path(bundled)
+
+    def test_an_absent_path_is_not_recorded_undigestable(self, tmp_path: Path):
+        record_loaded_path("gone", tmp_path / "nowhere")
         assert loaded_models() == ()
 
     def test_the_record_is_name_sorted_not_load_ordered(self):

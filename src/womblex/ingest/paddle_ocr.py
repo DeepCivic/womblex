@@ -97,6 +97,27 @@ OCRRegion = OCRRegionResult
 LayoutRegion = LayoutRegionResult
 
 
+def _record_bundled_v4() -> None:
+    """Note the PaddleOCR v4 models that ship inside the rapidocr wheel.
+
+    They are loaded by the library from its own package directory and never
+    pass through `utils/models.py`, so the run record would otherwise show no
+    OCR model for a run that OCR'd.
+    """
+    from pathlib import Path
+
+    from womblex.utils.models import record_loaded_path
+
+    try:
+        import rapidocr_onnxruntime
+    except ImportError:  # pragma: no cover - the caller has just imported it
+        return
+    record_loaded_path(
+        "rapidocr-bundled-v4",
+        Path(rapidocr_onnxruntime.__file__).resolve().parent / "models",
+    )
+
+
 class PaddleOCRReader:
     """OCR reader backed by rapidocr-onnxruntime.
 
@@ -166,6 +187,10 @@ class PaddleOCRReader:
             )
         else:
             self._engine = RapidOCR(**thread_opts)
+            # These come out of the rapidocr wheel, not a models root, so the
+            # resolver never sees them. Record them here or the run record
+            # shows no OCR model for a run that OCR'd.
+            _record_bundled_v4()
             logger.info(
                 "RapidOCR (PaddleOCR v4 bundled) loaded for lang=%s (threads=%d)",
                 self.lang, n,

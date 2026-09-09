@@ -230,6 +230,27 @@ def loaded_models() -> tuple[LoadedModel, ...]:
     return tuple(out)
 
 
+def record_loaded_path(model_name: str, path: str | Path) -> None:
+    """Record an artefact loaded from outside the models roots.
+
+    :func:`resolve_local_model_path` covers every artefact Womblex resolves,
+    but not one a *library* loads from inside its own wheel — RapidOCR falls
+    back to its bundled PaddleOCR v4 models when the v5 directory is absent,
+    and those never pass through the resolver. Without this the record would
+    show no OCR model for a run that OCR'd, which is the silent kind of wrong
+    the record exists to avoid. The caller names what it loaded and where.
+
+    A path that does not exist is not recorded — there would be nothing to
+    digest — but it is logged: a caller reaching for an artefact that has moved
+    is exactly the case that would otherwise leave the record quietly short.
+    """
+    resolved = Path(path)
+    if not resolved.exists():
+        logger.warning("model %s not recorded: nothing at %s", model_name, resolved)
+        return
+    _record_resolved(model_name, resolved)
+
+
 def reset_loaded_models() -> None:
     """Forget what this process resolved. For tests that swap models roots."""
     _RESOLVED.clear()
@@ -242,6 +263,7 @@ __all__ = [
     "find_models_dir",
     "loaded_models",
     "model_roots",
+    "record_loaded_path",
     "reset_loaded_models",
     "resolve_local_model_path",
 ]
