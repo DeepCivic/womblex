@@ -26,8 +26,10 @@ from womblex.config import (
     WomblexConfig,
 )
 from womblex.ingest.strategies_file import DocxExtractor
+from womblex.store.build_info import resolve_commit
 from womblex.store.output import _shard_paths, read_manifest, write_results
 from womblex.store.run_stamp import (
+    COMMIT_KEY,
     CONFIG_DIGEST_KEY,
     RUN_ID_KEY,
     STAGE_KEY,
@@ -147,7 +149,8 @@ class TestFooterMetadata:
     def test_every_extraction_parquet_carries_the_four_keys(self, stamped):
         for role, path in _shard_paths(stamped).items():
             keys = {k.decode() for k in pq.read_metadata(str(path)).metadata}
-            assert {RUN_ID_KEY, VERSION_KEY, CONFIG_DIGEST_KEY, STAGE_KEY} <= keys, role
+            expected = {RUN_ID_KEY, VERSION_KEY, COMMIT_KEY, CONFIG_DIGEST_KEY, STAGE_KEY}
+            assert expected <= keys, role
 
     def test_the_stamp_reads_back_as_the_run_that_wrote_it(self, stamped):
         meta = pq.read_metadata(str(_shard_paths(stamped)["elements"])).metadata
@@ -155,6 +158,7 @@ class TestFooterMetadata:
         assert stamp == {
             "run_id": "run-A",
             "version": __version__,
+            "commit": resolve_commit(),
             "config_digest": stamp["config_digest"],
             "stage": "extract",
         }

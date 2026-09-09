@@ -189,11 +189,14 @@ no root. Masking never rewrites either — the manifest is not a masking
 surface, and a `pii` run over a completed run leaves it byte-identical.
 
 The same footer also names the run: `womblex.run_id`, `womblex.version`,
-`womblex.config_digest` and `womblex.stage`, so a shard read outside its run
-directory still says what produced it. Every downstream sidecar carries the
-four keys as well, but does not declare them — a stage is handed a shard
-directory rather than a run, so it inherits `run_id` and `config_digest` from
-a stamped sibling of its batch and stamps its own `version` and `stage`. The
+`womblex.commit`, `womblex.config_digest` and `womblex.stage`, so a shard read
+outside its run directory still says what produced it. `womblex.commit` is the
+source the version was built from — resolved from the work tree or a build
+stamp, and `unavailable:<reason>` where neither answers, since a version alone
+does not identify a build. Every downstream sidecar carries the five keys as
+well, but does not declare them — a stage is handed a shard directory rather
+than a run, so it inherits `run_id` and `config_digest` from a stamped sibling
+of its batch and stamps its own `version`, `commit` and `stage`. The
 sibling is the `.elements.parquet` or the manifest by preference, then any
 sibling of the batch: a stage worker stages in only the inputs its contract
 declares, and several stages never see the elements shard. A sidecar whose

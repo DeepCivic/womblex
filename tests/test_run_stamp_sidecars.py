@@ -24,6 +24,7 @@ import pytest
 import womblex.store as store_pkg
 from womblex import __version__
 from womblex.config import DatasetConfig, PathsConfig, WomblexConfig
+from womblex.store.build_info import resolve_commit
 from womblex.store.embed_output import write_embeddings
 from womblex.store.enrichment_doc import write_enrichment_doc_shard
 from womblex.store.enrichment_output import (
@@ -145,6 +146,7 @@ class TestSidecarsInheritTheRun:
         assert _stamp_of(written) == {
             "run_id": stamp.run_id,
             "version": __version__,
+            "commit": resolve_commit(),
             "config_digest": stamp.config_digest,
             "stage": stage,
         }
@@ -172,7 +174,7 @@ class TestSidecarsInheritTheRun:
         # run_id and config_digest describe the run; the version describes the
         # bytes, so a stage running at a later build says so rather than
         # repeating what extraction claimed.
-        stale = RunStamp("run-A", "0.0.1-ancient", "sha256:abc", "extract")
+        stale = RunStamp("run-A", "0.0.1-ancient", "f" * 40, "sha256:abc", "extract")
         base = _extraction_shard(tmp_path / "documents", stale)
 
         written = _stamp_of(write_chunks([], base))
@@ -222,7 +224,7 @@ class TestSidecarsInheritTheRun:
     def test_siblings_naming_two_runs_leave_the_sidecar_unstamped(self, tmp_path, stamp):
         shard_dir = tmp_path / "documents"
         base = _extraction_shard(shard_dir, None)
-        other = RunStamp("run-B", stamp.version, stamp.config_digest, "chunk")
+        other = RunStamp("run-B", stamp.version, stamp.commit, stamp.config_digest, "chunk")
         _write_rows([], shard_dir / "batch-0001.chunks.parquet", MANIFEST_SCHEMA,
                     metadata=stamp.footer_metadata())
         _write_rows([], shard_dir / "batch-0001.money_spans.parquet", MANIFEST_SCHEMA,
@@ -248,6 +250,7 @@ class TestConsolidatedRunManifest:
         assert _stamp_of(write_run_manifest(shard_dir)) == {
             "run_id": "run-A",
             "version": __version__,
+            "commit": resolve_commit(),
             "config_digest": stamp.config_digest,
             "stage": "manifest",
         }
@@ -257,7 +260,7 @@ class TestConsolidatedRunManifest:
         # ingest-root footer already follows for a mixed-root directory.
         shard_dir = tmp_path / "documents"
         _extraction_shard(shard_dir, stamp, "batch-0001")
-        other = RunStamp("run-B", stamp.version, stamp.config_digest, "extract")
+        other = RunStamp("run-B", stamp.version, stamp.commit, stamp.config_digest, "extract")
         _extraction_shard(shard_dir, other, "batch-0002")
 
         assert _stamp_of(write_run_manifest(shard_dir)) == {}
