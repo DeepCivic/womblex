@@ -7,23 +7,57 @@ shipped run need that mapping in one place, so the end of ``womblex run``
 — and the standalone ``womblex manifest`` command — consolidate them
 into a single ``manifest.parquet`` at the run root, one row per document
 (``MANIFEST_SCHEMA``).
+
+**It also carries the run record** — what produced the run, in the file's own
+footer key-value metadata. Footer rather than columns because the record is run
+grain and the manifest is document grain, which is the rule ``decisions.md``
+already states for run- and corpus-shaped provenance; this file rather than a
+new one because consolidation is already the moment both finalisation paths
+pass through and is already regenerable on demand, which is exactly the
+lifecycle the record needs.
+
+Everything in it is **observed, not declared**. The stages are read from the
+run stamps the files themselves carry, so a stage that was configured and never
+ran is absent while one that ran and produced nothing is present with no rows —
+a distinction a list taken from configuration flags cannot make. The documents,
+extraction methods and statuses are counted off the consolidated rows. Nothing
+is taken from a configuration file, because ``womblex manifest`` may be re-run
+long after the run and against a configuration that has since moved on.
+
+What cannot be established is named rather than omitted or invented: a run
+finalised before the stamps existed produces a record whose ``partial`` list
+says so, instead of a record that quietly claims a run had no stages.
+
+Attribution, not reproduction. Outputs are not bit-reproducible — OCR and model
+variability mean two runs over one corpus differ — so the record inventories
+what a run did and never promises the run can be recomputed from it.
 """
 
 from __future__ import annotations
 
+import json
 import logging
+from collections import Counter
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from womblex.pipeline_order import stage_rank
 from womblex.store.output import read_manifest
-from womblex.store.run_stamp import stamp_from_footers
-from womblex.store.source_provenance import IngestProvenance
+from womblex.store.run_stamp import read_footer_stamp, stamp_from_footers
+from womblex.store.source_provenance import NAMESPACE, IngestProvenance
 
 logger = logging.getLogger(__name__)
 
 RUN_MANIFEST_FILENAME = "manifest.parquet"
+
+#: The run record's footer key, and the version of its shape. The version is
+#: carried so a later reader can tell a record it understands from one it does
+#: not, rather than inferring the shape from which fields happen to be present.
+RUN_RECORD_KEY = f"{NAMESPACE}.run_record"
+RUN_RECORD_VERSION = 1
 
 
 def _footer_from_columns(table: pa.Table) -> dict[bytes, bytes] | None:
@@ -51,20 +85,158 @@ def _footer_from_columns(table: pa.Table) -> dict[bytes, bytes] | None:
 
 
 def _merged_footer(shard_dir: Path, table: pa.Table) -> dict[bytes, bytes] | None:
-    """The consolidated manifest's footer: where the corpus came from, and which run.
+    """Where the corpus came from, which run, and the record of what that run did.
 
     The run is read back from the per-batch manifests' own stamps rather than
     recomputed, for the reason the batch sidecars inherit theirs — consolidation
     is handed a shard directory, not the run's configuration, and `womblex
     manifest` may be re-run long after. Batches naming more than one run leave
     the run keys off, the rule the ingest-root block above already follows.
+
+    The run record is written unconditionally, because a record that cannot
+    name its run still names the documents and the stages, and says
+    in its own ``partial`` list what it could not establish. Withholding it
+    would lose all of that to the one fact it is missing.
     """
     stamp = stamp_from_footers(sorted(shard_dir.glob("*._manifest.parquet")), "manifest")
+    record = {
+        RUN_RECORD_KEY.encode(): json.dumps(
+            build_run_record(shard_dir, table), sort_keys=True,
+        ).encode(),
+    }
     merged: dict[bytes, bytes] = {}
-    for part in (_footer_from_columns(table), stamp.footer_metadata() if stamp else None):
+    for part in (
+        _footer_from_columns(table),
+        stamp.footer_metadata() if stamp else None,
+        record,
+    ):
         if part:
             merged.update(part)
     return merged or None
+
+
+# ---------------------------------------------------------------------------
+# The run record
+# ---------------------------------------------------------------------------
+
+
+def _footers(shard_dir: Path) -> list[tuple[dict[bytes, bytes] | None, int]]:
+    """Every parquet in *shard_dir* as (footer metadata, row count).
+
+    One footer read per file, which is what makes the record cheap: the row
+    counts come out of the same metadata block as the stamps, so nothing reads
+    a column to build the record.
+    """
+    out = []
+    for path in sorted(shard_dir.glob("*.parquet")):
+        try:
+            meta = pq.read_metadata(str(path))
+        except (OSError, pa.ArrowInvalid):  # unreadable, or not parquet
+            logger.warning("run record: skipping unreadable %s", path.name)
+            continue
+        out.append((meta.metadata, meta.num_rows))
+    return out
+
+
+def _corpus_identity(table: pa.Table) -> dict[str, str | None]:
+    """The one root and collection the rows agree on, or ``None`` where they do not.
+
+    Same rule as the ingest-root footer block: a record naming one of several
+    roots would be worse than one admitting it has more than one.
+    """
+    def one(column: str) -> str | None:
+        values = {v for v in table.column(column).to_pylist() if v} if table.num_rows else set()
+        return values.pop() if len(values) == 1 else None
+
+    return {"ingest_root": one("ingest_root"), "collection_id": one("collection_id")}
+
+
+def _observed_stages(footers: list[tuple[dict[bytes, bytes] | None, int]]) -> list[dict]:
+    """The stages the files say wrote them, in pipeline order, with their output.
+
+    A stage appears because a file it wrote says so, never because a
+    configuration asked for it. So a stage that ran and produced nothing is
+    here with ``rows`` zero — the empty-but-schema-correct sidecar the writers
+    already emit — and a stage that was configured and never ran is absent.
+    That is the whole distinction, and it is only available from the artefacts.
+    """
+    files: Counter[str] = Counter()
+    rows: Counter[str] = Counter()
+    for meta, num_rows in footers:
+        stage = read_footer_stamp(meta).get("stage")
+        if not stage:
+            continue
+        files[stage] += 1
+        rows[stage] += num_rows
+    return [
+        {"stage": stage, "files": files[stage], "rows": rows[stage]}
+        for stage in sorted(files, key=stage_rank)
+    ]
+
+
+def _partial(record: dict, footers: list) -> list[str]:
+    """What the record could not establish, named rather than left to look absent."""
+    gaps: list[str] = []
+    if not footers:
+        gaps.append("no readable parquet in the shard directory")
+    if record["run"] is None:
+        gaps.append(
+            "run identity: no file carries a run stamp, or the files name more "
+            "than one run",
+        )
+    if not record["stages"]:
+        gaps.append("stages: no file names the stage that wrote it")
+    return gaps
+
+
+def build_run_record(shard_dir: Path, table: pa.Table) -> dict:
+    """Assemble the run record for *shard_dir*, whose rows are *table*.
+
+    Deterministic apart from ``generated_at``: every collection is sorted, the
+    stages by pipeline position and the rest by name, so re-running over an
+    unchanged run reproduces the record.
+    """
+    footers = _footers(shard_dir)
+    stamp = stamp_from_footers(sorted(shard_dir.glob("*._manifest.parquet")), "manifest")
+    methods = Counter(m for m in table.column("extraction_method").to_pylist() if m)
+    statuses = Counter(s for s in table.column("status").to_pylist() if s)
+    record: dict = {
+        "record_version": RUN_RECORD_VERSION,
+        "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "run": None if stamp is None else {
+            "run_id": stamp.run_id,
+            "version": stamp.version,
+            "commit": stamp.commit,
+            "config_digest": stamp.config_digest,
+        },
+        "inputs": {
+            **_corpus_identity(table),
+            "documents": table.num_rows,
+            "extraction_methods": dict(sorted(methods.items())),
+            "statuses": dict(sorted(statuses.items())),
+        },
+        "stages": _observed_stages(footers),
+    }
+    record["partial"] = _partial(record, footers)
+    return record
+
+
+def read_run_record(path: Path) -> dict | None:
+    """The run record in the manifest at *path*, or ``None`` if it carries none."""
+    try:
+        meta = pq.read_metadata(str(path)).metadata
+    except (OSError, pa.ArrowInvalid):
+        return None
+    raw = (meta or {}).get(RUN_RECORD_KEY.encode())
+    if raw is None:
+        return None
+    try:
+        record = json.loads(raw.decode())
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    # A record that is not an object is not one this reader wrote; treat it as
+    # absent rather than handing a caller something it cannot index.
+    return record if isinstance(record, dict) else None
 
 
 def run_manifest_path_for(shard_dir: Path) -> Path:
@@ -90,4 +262,12 @@ def write_run_manifest(shard_dir: Path, output_path: Path | None = None) -> Path
     return target
 
 
-__all__ = ["RUN_MANIFEST_FILENAME", "run_manifest_path_for", "write_run_manifest"]
+__all__ = [
+    "RUN_MANIFEST_FILENAME",
+    "RUN_RECORD_KEY",
+    "RUN_RECORD_VERSION",
+    "build_run_record",
+    "read_run_record",
+    "run_manifest_path_for",
+    "write_run_manifest",
+]
