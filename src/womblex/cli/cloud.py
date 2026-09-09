@@ -21,7 +21,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from womblex.cli._shared import SUPPORTED_EXTENSIONS, Command
+from womblex.cli._shared import Command, NestedCorpusError, select_supported
 
 logger = logging.getLogger("womblex")
 
@@ -134,10 +134,20 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
 
     ingest_store = RemoteStore.from_uri(ingest_uri) if ingest_uri else RemoteStore.from_uri(store_uri)
     input_prefix = args.input_prefix or ""
+    location = f"{ingest_uri or store_uri}/{input_prefix}".rstrip("/")
     all_keys = ingest_store.list_files(input_prefix, "*", recursive=True)
-    keys = sorted(k for k in all_keys if Path(k).suffix.lower() in SUPPORTED_EXTENSIONS)
+    # `list_files` returns store-relative keys, so the prefix comes off before
+    # the nesting check and goes back on after — the worker stages by key.
+    base = input_prefix.strip("/")
+    scope = f"{base}/" if base else ""
+    try:
+        names = select_supported((k.removeprefix(scope) for k in all_keys), location=location)
+    except NestedCorpusError as e:
+        logger.error(str(e))
+        return 1
+    keys = [f"{scope}{n}" for n in names]
     if not keys:
-        logger.error("No supported documents under %s/%s", ingest_uri or store_uri, input_prefix)
+        logger.error("No supported documents under %s", location)
         return 1
 
     specs = [
