@@ -95,7 +95,7 @@ src/womblex/
 │   ├── provenance_output.py / run_manifest.py / register_manifest.py  # Manifest consolidation (NLP run + registers)
 │   ├── source_provenance.py  # Where a source document came from: ingest root + relpath, and their womblex.* footer keys
 │   ├── build_info.py      # Which build is running: version + source commit (work tree / build stamp / unavailable)
-│   ├── run_stamp.py       # Which run produced a file: run id / version / commit / config digest / stage, as womblex.* footer keys
+│   ├── run_stamp.py       # Which run produced a file: run id / version / commit / config digest / stage / loaded models, as womblex.* footer keys
 │   ├── remote.py          # fsspec stage-in/stage-out object-storage adapter for distributed runs
 │   ├── retention.py       # run_id-based retention policy
 │   └── checkpoint.py      # JSON-based checkpoint manager for resumable batch runs
@@ -103,7 +103,7 @@ src/womblex/
 ├── verify/
 │   └── engine.py          # Two-pass verification (structural + weak-signal) — defined, not wired in; see §11
 ├── utils/
-│   ├── models.py          # Local model path resolution (models/ dir + HF snapshot layout)
+│   ├── models.py          # Local model path resolution (models/ dir + HF snapshot layout) + the load record each footer carries
 │   ├── metrics.py         # CER, WER, CER-s accuracy metrics (numpy-accelerated Levenshtein + spatial sort)
 │   ├── tabular_metrics.py # Tabular extraction accuracy (structural fidelity, data integrity, key preservation)
 │   ├── checksum.py        # Shared streamed MD5 helper for the standalone register ingests
@@ -311,7 +311,7 @@ Wrappers in `analyse/` call the Isaacus SDK:
 - `graph_edges.parquet` — source/target node IDs, relation type, metadata
 - `enrichment_meta.parquet` — per-document enrichment summary (segment count, entity counts, etc.)
 
-Every Parquet on the pipeline path also carries provenance in its footer key-value metadata, under one `womblex.*` namespace and additive, so a reader that ignores footers is unaffected. `store/source_provenance.py` supplies the scheme-qualified ingest root and the document's path under it — the same pair the manifest carries as `ingest_root` / `source_relpath` — and `store/run_stamp.py` supplies the run id, the Womblex version, the source commit, the digest of the *validated* configuration and the writing stage. The commit comes from `store/build_info.py`, which asks the work tree first and a build-time stamp second, and reports `unavailable` with a reason where neither can answer rather than defaulting to one — a version alone does not identify a build, since the same version is cut from every commit between two releases. Extraction declares the stamp once per run and re-points it at each writer; a downstream stage does not declare its own but inherits it from a stamped sibling of the batch its sidecar sits beside (`stamp_for_sidecar`), which is what makes a local and a distributed run stamp identically. The effect is that a shard copied out of its run directory still names the run and the corpus it came from.
+Every Parquet on the pipeline path also carries provenance in its footer key-value metadata, under one `womblex.*` namespace and additive, so a reader that ignores footers is unaffected. `store/source_provenance.py` supplies the scheme-qualified ingest root and the document's path under it — the same pair the manifest carries as `ingest_root` / `source_relpath` — and `store/run_stamp.py` supplies the run id, the Womblex version, the source commit, the digest of the *validated* configuration, the writing stage and the local models the writing process had loaded. The commit comes from `store/build_info.py`, which asks the work tree first and a build-time stamp second, and reports `unavailable` with a reason where neither can answer rather than defaulting to one — a version alone does not identify a build, since the same version is cut from every commit between two releases. The models are read from `utils/models.py` at footer time rather than held on the stamp, because a stamp is declared before any model loads — so each file names what was loaded when it was written, and the union across a run's files is the run's set. Extraction declares the stamp once per run and re-points it at each writer; a downstream stage does not declare its own but inherits it from a stamped sibling of the batch its sidecar sits beside (`stamp_for_sidecar`), which is what makes a local and a distributed run stamp identically. The effect is that a shard copied out of its run directory still names the run and the corpus it came from.
 
 `store/checkpoint.py` provides `CheckpointManager` for resumable batch runs. Checkpoints are JSON files recording processed document IDs and batch metadata. On resume, already-processed documents are skipped.
 
@@ -347,7 +347,7 @@ Distributed (cloud) runs execute the same stage bodies via `cloud/stage_runner.p
 
 **PaddleOCR via rapidocr-onnxruntime.** The `rapidocr-onnxruntime` package bundles pre-exported PaddleOCR v4 ONNX models (~15 MB wheel) — no PaddlePaddle or PyTorch framework, no separate model download. Layout analysis uses YOLOv8 (`ultralytics` + bundled `yolov8n.pt`).
 
-**Local model resolution.** `utils/models.py` provides `resolve_local_model_path(name)` which checks a `models/` directory (sibling of `src/`) before falling back to runtime downloads. Handles the HuggingFace hub snapshot layout (`refs/main` → `snapshots/<hash>/`) and bare files (`.pt`). Override location with `WOMBLEX_MODELS_DIR`. Models loaded lazily — no import cost unless the stage actually runs.
+**Local model resolution.** `utils/models.py` provides `resolve_local_model_path(name)` which checks a `models/` directory (sibling of `src/`) before falling back to runtime downloads. It is also the load record: a resolution that finds an artefact is noted, and `loaded_models()` digests each one over its bytes so the digest recomputes from the model files alone. A caller only probing for presence passes `record=False`. Handles the HuggingFace hub snapshot layout (`refs/main` → `snapshots/<hash>/`) and bare files (`.pt`). Override location with `WOMBLEX_MODELS_DIR`. Models loaded lazily — no import cost unless the stage actually runs.
 
 **No external Levenshtein dependency.** `utils/metrics.py` provides CER, WER, and CER-s (spatially-sorted CER) using a numpy-accelerated Levenshtein implementation. Short strings (≤500 chars) use a pure-Python DP loop; longer strings use numpy vectorised row operations. `spatial_sort_text()` reorders words by bounding-box centroid to isolate recognition errors from reading-order errors. No rapidfuzz or other C-extension dependency.
 

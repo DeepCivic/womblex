@@ -100,7 +100,7 @@ womblex/
 │   │   ├── feedback_output.py    # One-file-per-report console feedback records (JSON, not parquet)
 │   │   ├── source_provenance.py  # Ingest root + source relpath, and their womblex.* Parquet footer keys
 │   │   ├── build_info.py    # BuildInfo — package version + source commit, or unavailable with a reason
-│   │   ├── run_stamp.py     # RunStamp — run id / version / commit / config digest / stage, as womblex.* footer keys
+│   │   ├── run_stamp.py     # RunStamp — run id / version / commit / config digest / stage / loaded models, as womblex.* footer keys
 │   │   ├── run_manifest.py  # Consolidate per-batch manifests into a run-root manifest.parquet
 │   │   ├── register_manifest.py  # Manifest for standalone register ingests (G-NAF/ABN/geospatial)
 │   │   ├── remote.py        # fsspec stage-in/stage-out object-storage adapter for distributed runs
@@ -130,7 +130,7 @@ womblex/
 │   ├── utils/
 │   │   ├── metrics.py       # WER/CER accuracy metrics
 │   │   ├── tabular_metrics.py # Tabular extraction accuracy (structural fidelity, data integrity)
-│   │   ├── models.py        # Local model path resolution (models/ dir, HF snapshot layout)
+│   │   ├── models.py        # Local model path resolution (models/ dir, HF snapshot layout) + load record with byte digests
 │   │   ├── checksum.py      # Shared streamed MD5 helper for the standalone register ingests
 │   │   ├── isaacus_client.py # Build the Isaacus SDK client (hosted API or private SageMaker)
 │   │   ├── token_packer.py  # TokenCounter, pack_by_tokens, split_on_boundaries for token-budgeted API batching
