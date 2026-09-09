@@ -236,6 +236,25 @@ class RemoteStore:
     def exists(self, rel: str) -> bool:
         return bool(self.fs.exists(self._full(rel)))  # type: ignore[attr-defined]
 
+    def read_parquet_footer(self, rel: str) -> tuple[dict[bytes, bytes] | None, int] | None:
+        """A parquet's footer metadata and row count, read in place.
+
+        Parquet keeps both in a footer, so this is a couple of ranged reads
+        rather than a download — which is what makes it affordable to ask it of
+        every file in a run at finalisation. ``None`` when the object cannot be
+        read as parquet; the caller is building a record and a file it cannot
+        read is one it reports as absent, not one it fails over.
+        """
+        import pyarrow.parquet as pq
+
+        try:
+            with self.fs.open(self._full(rel), "rb") as handle:  # type: ignore[attr-defined]
+                meta = pq.read_metadata(handle)
+        except Exception as exc:  # any backend or format error: report, never fail
+            logger.warning("could not read parquet footer for %s: %s", rel, exc)
+            return None
+        return meta.metadata, meta.num_rows
+
     def read_text(self, rel: str, *, encoding: str = "utf-8") -> str:
         """Read a small text object in place (no staging) — e.g. a saved preset."""
         with self.fs.open(self._full(rel), "r", encoding=encoding) as handle:  # type: ignore[attr-defined]

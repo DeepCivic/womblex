@@ -16,12 +16,42 @@ the override **shadow** the bundled artefacts rather than supplement them, and
 ``resolve_local_model_path("en_AU")`` starts returning the bare string.
 
 Supports both HuggingFace hub-style cache layouts and flat model directories.
+
+**Resolution is also the record of what a run loaded.** Which local models a
+run used is not recoverable after the fact: nothing on disk says whether a
+shard was OCR'd by one layout model or its replacement, and a model directory
+is swapped in place far more often than it is renamed. So every resolution that
+actually finds an artefact is recorded here, and the run stamp carries the
+recorded set — name and content digest — into each Parquet footer as it is
+written. `store/run_manifest.py` unions those per-file records into the run
+record.
+
+Recording at resolution rather than at load is deliberate: this is the one
+choke point every model path in the library already goes through, so a new
+model cannot be loaded without appearing in the record. A caller that is only
+*probing* for a model it will not load passes ``record=False`` — the record
+says what the run loaded, and a resolution that leads to no load would
+overstate it.
+
+Digests are over the artefact's bytes, so they recompute from the model files
+alone, and they are taken lazily: a run that loads a model pays the hash once,
+at the first file it writes afterwards, and a run that loads none pays nothing.
 """
 
 from __future__ import annotations
 
+import hashlib
+import logging
 import os
+from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+#: Bytes per read while digesting. Model artefacts run to hundreds of
+#: megabytes; the whole file is never held in memory.
+_DIGEST_CHUNK = 1 << 20
 
 
 def _repo_models_dir() -> Path | None:
@@ -83,7 +113,7 @@ def _resolve_under(root: Path, model_name: str) -> Path | None:
     return None
 
 
-def resolve_local_model_path(model_name: str) -> str | Path:
+def resolve_local_model_path(model_name: str, *, record: bool = True) -> str | Path:
     """Return a local path to *model_name* if pre-downloaded, else the name itself.
 
     Every root from :func:`model_roots` is searched, in order, and the first
@@ -102,6 +132,9 @@ def resolve_local_model_path(model_name: str) -> str | Path:
 
     Args:
         model_name: HuggingFace model identifier or bare filename.
+        record: Whether a successful resolution counts as this run having
+            loaded the model. Left on for every real load; passed ``False`` by
+            callers that only ask whether an artefact is present.
 
     Returns:
         Local ``Path`` if found, otherwise the original *model_name* string
@@ -110,8 +143,127 @@ def resolve_local_model_path(model_name: str) -> str | Path:
     for root in model_roots():
         resolved = _resolve_under(root, model_name)
         if resolved is not None:
+            if record:
+                _record_resolved(model_name, resolved)
             return resolved
     return model_name
 
 
-__all__ = ["find_models_dir", "model_roots", "resolve_local_model_path"]
+# ---------------------------------------------------------------------------
+# What this process loaded
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class LoadedModel:
+    """One local model artefact a run resolved, and the digest of its bytes.
+
+    ``digest`` is ``sha256:…`` over the artefact's contents and nothing else,
+    so a reader holding the same model files recomputes it without needing the
+    run, the machine or the path it was resolved from. The path itself is
+    deliberately not carried: it is deployment location, excluded for the same
+    reason ``paths`` is excluded from the configuration digest.
+    """
+
+    name: str
+    digest: str
+
+
+#: Requested name -> resolved path, for every artefact this process actually
+#: found. Insertion-ordered, but read back sorted so a run's record does not
+#: depend on the order its stages happened to load models in.
+_RESOLVED: dict[str, Path] = {}
+
+
+def _record_resolved(model_name: str, path: Path) -> None:
+    """Note that *model_name* resolved to *path*, for the run record.
+
+    First resolution wins, matching the resolver itself: a name resolves to one
+    artefact per process, so a later call cannot change what was loaded.
+    """
+    _RESOLVED.setdefault(model_name, path)
+
+
+def _digest_file(digest: hashlib._Hash, path: Path) -> None:
+    with path.open("rb") as fh:
+        while block := fh.read(_DIGEST_CHUNK):
+            digest.update(block)
+
+
+@cache
+def digest_model_path(path: Path) -> str:
+    """``sha256:…`` over the artefact at *path* — a file's bytes, or a tree's.
+
+    A directory digests every file beneath it, each contributing its
+    root-relative POSIX path and its bytes, walked in sorted order. Naming the
+    relative path as well as the content is what makes a rename of two
+    same-sized files inside the tree a different digest rather than the same
+    one.
+
+    Cached per path: a run writes many files and would otherwise re-hash
+    hundreds of megabytes for each of them.
+    """
+    digest = hashlib.sha256()
+    if path.is_file():
+        _digest_file(digest, path)
+        return "sha256:" + digest.hexdigest()
+    for child in sorted(p for p in path.rglob("*") if p.is_file()):
+        digest.update(child.relative_to(path).as_posix().encode())
+        _digest_file(digest, child)
+    return "sha256:" + digest.hexdigest()
+
+
+def loaded_models() -> tuple[LoadedModel, ...]:
+    """Every local model this process resolved, name-sorted, each digested.
+
+    An artefact that has become unreadable since it was resolved is dropped
+    with a warning rather than failing the write it was asked for: the run's
+    output is not worth losing to an incomplete record of it, and a missing
+    entry is visible in the record as an absence.
+    """
+    out: list[LoadedModel] = []
+    for name, path in sorted(_RESOLVED.items()):
+        try:
+            out.append(LoadedModel(name, digest_model_path(path)))
+        except OSError as exc:
+            logger.warning("model %s at %s could not be digested: %s", name, path, exc)
+    return tuple(out)
+
+
+def record_loaded_path(model_name: str, path: str | Path) -> None:
+    """Record an artefact loaded from outside the models roots.
+
+    :func:`resolve_local_model_path` covers every artefact Womblex resolves,
+    but not one a *library* loads from inside its own wheel — RapidOCR falls
+    back to its bundled PaddleOCR v4 models when the v5 directory is absent,
+    and those never pass through the resolver. Without this the record would
+    show no OCR model for a run that OCR'd, which is the silent kind of wrong
+    the record exists to avoid. The caller names what it loaded and where.
+
+    A path that does not exist is not recorded — there would be nothing to
+    digest — but it is logged: a caller reaching for an artefact that has moved
+    is exactly the case that would otherwise leave the record quietly short.
+    """
+    resolved = Path(path)
+    if not resolved.exists():
+        logger.warning("model %s not recorded: nothing at %s", model_name, resolved)
+        return
+    _record_resolved(model_name, resolved)
+
+
+def reset_loaded_models() -> None:
+    """Forget what this process resolved. For tests that swap models roots."""
+    _RESOLVED.clear()
+    digest_model_path.cache_clear()
+
+
+__all__ = [
+    "LoadedModel",
+    "digest_model_path",
+    "find_models_dir",
+    "loaded_models",
+    "model_roots",
+    "record_loaded_path",
+    "reset_loaded_models",
+    "resolve_local_model_path",
+]

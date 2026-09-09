@@ -67,7 +67,7 @@ def tokenizer_available(tokenizer: str | object) -> bool:
         return False
     from womblex.utils.models import resolve_local_model_path
 
-    resolved = resolve_local_model_path(tokenizer.split("/")[-1])
+    resolved = resolve_local_model_path(tokenizer.split("/")[-1], record=False)
     # resolve_local_model_path returns a Path only when a bundled copy exists;
     # a returned str means "not vendored" (the hub id echoed back).
     return isinstance(resolved, Path)

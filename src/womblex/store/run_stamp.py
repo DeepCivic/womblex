@@ -5,7 +5,10 @@ run loses it and a file mixed in from another run is indistinguishable from a
 native one. This stamps five facts into every pipeline Parquet's footer
 key-value metadata at the moment it is written — run id, Womblex version,
 source commit, configuration digest and the stage that wrote it — so
-attribution survives the file being moved.
+attribution survives the file being moved. A sixth key, the local models the
+writing process had loaded, rides alongside them; it is not a field on the
+stamp because a stamp is declared before any model loads, so it is read from
+``utils/models.py`` at footer time (:meth:`RunStamp.footer_metadata`).
 
 The keys share the ``womblex.*`` namespace ``store/source_provenance.py``
 established (itself the convention ``store/register_manifest.py`` reads back
@@ -61,12 +64,14 @@ import pyarrow.parquet as pq
 from womblex import __version__
 from womblex.store.build_info import resolve_commit
 from womblex.store.source_provenance import NAMESPACE
+from womblex.utils.models import loaded_models
 
 RUN_ID_KEY = f"{NAMESPACE}.run_id"
 VERSION_KEY = f"{NAMESPACE}.version"
 COMMIT_KEY = f"{NAMESPACE}.commit"
 CONFIG_DIGEST_KEY = f"{NAMESPACE}.config_digest"
 STAGE_KEY = f"{NAMESPACE}.stage"
+MODELS_KEY = f"{NAMESPACE}.models"
 
 # Excluded from the digest: see the module docstring. `paths` is deployment
 # location and `dataset.run_id` is the run's own identity, already a key.
@@ -155,14 +160,29 @@ class RunStamp:
         return replace(self, stage=str(stage).strip())
 
     def footer_metadata(self) -> dict[bytes, bytes]:
-        """Namespaced footer metadata for a file this stage is writing."""
-        return {
+        """Namespaced footer metadata for a file this stage is writing.
+
+        The local models are read from the resolver at call time rather than
+        held on the stamp, because a stamp is declared once at the start of a
+        run and models load lazily during it — a field filled in at
+        :meth:`declare` would be empty on every file. So the key names what
+        this process had loaded when it wrote *this* file, which is the honest
+        file-grain claim; the union across a run's files is the run's set, and
+        that is what ``store/run_manifest.py`` records. A process that loaded
+        no local model writes no key, on the same terms an unstamped file is
+        written for a run that cannot be named.
+        """
+        meta = {
             RUN_ID_KEY.encode(): self.run_id.encode(),
             VERSION_KEY.encode(): self.version.encode(),
             COMMIT_KEY.encode(): self.commit.encode(),
             CONFIG_DIGEST_KEY.encode(): self.config_digest.encode(),
             STAGE_KEY.encode(): self.stage.encode(),
         }
+        if models := loaded_models():
+            payload = [{"name": m.name, "digest": m.digest} for m in models]
+            meta[MODELS_KEY.encode()] = json.dumps(payload).encode()
+        return meta
 
 
 def read_footer_stamp(metadata: Mapping[bytes, bytes] | None) -> dict[str, str]:
@@ -183,6 +203,32 @@ def read_footer_stamp(metadata: Mapping[bytes, bytes] | None) -> dict[str, str]:
         (STAGE_KEY, "stage"),
     )
     return {name: decoded[key] for key, name in names if key in decoded}
+
+
+def read_footer_models(metadata: Mapping[bytes, bytes] | None) -> list[dict[str, str]]:
+    """Decode the local-model key out of a Parquet footer.
+
+    ``[]`` when the file carries none — written before this landed, or by a
+    process that loaded no local model. A malformed value reads as ``[]``
+    rather than raising: a footer is additive metadata, and a file whose
+    contents are fine is not worth refusing over its record of itself.
+    """
+    if not metadata:
+        return []
+    raw = metadata.get(MODELS_KEY.encode())
+    if raw is None:
+        return []
+    try:
+        entries = json.loads(raw.decode())
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return []
+    if not isinstance(entries, list):
+        return []
+    return [
+        {"name": str(e["name"]), "digest": str(e["digest"])}
+        for e in entries
+        if isinstance(e, dict) and "name" in e and "digest" in e
+    ]
 
 
 def stamp_from_footers(paths: Iterable[Path], stage: str) -> RunStamp | None:
@@ -242,11 +288,13 @@ def sidecar_footer(base_path: Path, stage: str) -> dict[bytes, bytes] | None:
 __all__ = [
     "COMMIT_KEY",
     "CONFIG_DIGEST_KEY",
+    "MODELS_KEY",
     "RUN_ID_KEY",
     "STAGE_KEY",
     "VERSION_KEY",
     "RunStamp",
     "config_digest",
+    "read_footer_models",
     "read_footer_stamp",
     "sidecar_footer",
     "stamp_for_sidecar",

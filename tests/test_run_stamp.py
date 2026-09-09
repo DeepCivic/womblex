@@ -31,12 +31,19 @@ from womblex.store.output import _shard_paths, read_manifest, write_results
 from womblex.store.run_stamp import (
     COMMIT_KEY,
     CONFIG_DIGEST_KEY,
+    MODELS_KEY,
     RUN_ID_KEY,
     STAGE_KEY,
     VERSION_KEY,
     RunStamp,
     config_digest,
+    read_footer_models,
     read_footer_stamp,
+)
+from womblex.utils.models import (
+    digest_model_path,
+    reset_loaded_models,
+    resolve_local_model_path,
 )
 
 _FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "fixtures"
@@ -222,3 +229,62 @@ class TestCredentials:
         blob = b"".join(stamp.footer_metadata().values())
         for name in CREDENTIAL_ENV:
             assert f"SECRET-{name}".encode() not in blob
+
+
+class TestLocalModels:
+    """The models key: what this process had loaded when it wrote the file.
+
+    Held off the stamp and read at footer time, because a stamp is declared
+    once at the start of a run and models load lazily during it.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clean_record(self):
+        reset_loaded_models()
+        yield
+        reset_loaded_models()
+
+    def test_a_process_that_loaded_no_local_model_writes_no_key(self, tmp_path):
+        stamp = RunStamp.declare("run-A", _config(tmp_path), stage="extract")
+        assert MODELS_KEY.encode() not in stamp.footer_metadata()
+
+    def test_a_loaded_model_reaches_the_footer_by_name_and_digest(self, tmp_path):
+        resolve_local_model_path("en_AU")
+        stamp = RunStamp.declare("run-A", _config(tmp_path), stage="spellfix")
+        recorded = read_footer_models(stamp.footer_metadata())
+        assert [e["name"] for e in recorded] == ["en_AU"]
+        assert recorded[0]["digest"] == digest_model_path(
+            Path(str(resolve_local_model_path("en_AU"))),
+        )
+
+    def test_a_model_loaded_after_declaration_still_reaches_the_footer(self, tmp_path):
+        """The lazy read is the point: a stamp declared before the stage loads
+        its model must not write an empty list."""
+        stamp = RunStamp.declare("run-A", _config(tmp_path), stage="chunk")
+        assert MODELS_KEY.encode() not in stamp.footer_metadata()
+        resolve_local_model_path("kanon-2-tokenizer")
+        assert [e["name"] for e in read_footer_models(stamp.footer_metadata())] == [
+            "kanon-2-tokenizer",
+        ]
+
+    def test_the_written_parquet_carries_the_record(self, tmp_path, extraction):
+        resolve_local_model_path("en_AU")
+        shard = tmp_path / "run-A" / "documents" / "batch-0001.parquet"
+        write_results(
+            [("budget", str(_BUDGET_DOCX), extraction)],
+            shard,
+            collection_id="test-corpus",
+            stamp=RunStamp.declare("run-A", _config(tmp_path), stage="extract"),
+        )
+        meta = pq.read_metadata(str(_shard_paths(shard)["elements"])).metadata
+        assert [e["name"] for e in read_footer_models(meta)] == ["en_AU"]
+
+    def test_a_file_without_the_key_reads_back_empty_not_raising(self):
+        assert read_footer_models(None) == []
+        assert read_footer_models({b"womblex.run_id": b"run-A"}) == []
+
+    def test_a_malformed_value_reads_back_empty_rather_than_failing(self):
+        """A footer is additive: a file whose contents are fine is not refused
+        over its record of itself."""
+        assert read_footer_models({MODELS_KEY.encode(): b"not json"}) == []
+        assert read_footer_models({MODELS_KEY.encode(): b'[{"name": "x"}]'}) == []

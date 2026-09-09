@@ -305,10 +305,24 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         logger.error("No *._manifest.parquet under %s/%s", store_uri, shard_prefix)
         return 1
 
+    # The run record is built from every shard's footer, but only the manifests
+    # are staged in — so the footers are read where the shards actually live.
+    # Without this the record would name extraction and nothing else, and a
+    # missing stage is indistinguishable from one that never ran: silent, which
+    # is the one thing the record must not be.
+    shard_keys = store.list_files(shard_prefix, "*.parquet")
+    footers = [
+        observed
+        for observed in (store.read_parquet_footer(k) for k in shard_keys)
+        if observed is not None
+    ]
+    logger.info("Read %d/%d shard footer(s) for the run record",
+                len(footers), len(shard_keys))
+
     with tempfile.TemporaryDirectory(prefix="womblex-finalize-") as tmp:
         docs = Path(tmp) / "documents"
         store.download_to_dir(manifest_keys, docs)
-        local_manifest = write_run_manifest(docs)
+        local_manifest = write_run_manifest(docs, footers=footers)
         store.upload_file(local_manifest, f"{output_prefix}/{RUN_MANIFEST_FILENAME}")
 
     logger.info(

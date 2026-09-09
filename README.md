@@ -630,6 +630,16 @@ elements, one row per field. Same join key.
 **`batch-NNNN._manifest.parquet`** — one row per source file with
 provenance, status, and element / cell / field counts.
 
+`womblex manifest --shards` (run automatically at the end of `womblex run`,
+and by `womblex finalize` for a distributed run) consolidates those into
+`<run_root>/manifest.parquet`, and writes a **run record** into that file's
+footer key-value metadata: the run id, version, commit and configuration
+digest, the corpus and document counts, the stages observed to have run, the
+local models loaded with a digest each, and the external services declared.
+It is regenerated from the shard directory alone, so re-running the command
+reproduces it; anything it could not establish is named in its `partial` list
+rather than omitted.
+
 See [docs/extraction.md](https://github.com/DeepCivic/womblex/blob/main/docs/extraction.md) for the canonical schema
 reference, element kinds, the reassembly query, and the verbatim-text
 policy.
