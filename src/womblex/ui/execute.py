@@ -36,10 +36,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from pathlib import Path
 from typing import cast
 
-from womblex.cli._shared import SUPPORTED_EXTENSIONS
+from womblex.cli._shared import NestedCorpusError, select_supported
 from womblex.store.feedback_output import is_safe_run_id
 from womblex.store.retention import generate_run_id
 from womblex.ui.deps import UISettings
@@ -207,10 +206,14 @@ def enqueue_extraction(
     ingest_uri = cast(str, settings.ingest_uri)
     ingest_store = RemoteStore.from_uri(ingest_uri, credentials=settings.s3_credentials)
     prefix = input_prefix or ""
+    location = f"{ingest_uri}/{prefix}".rstrip("/")
     all_keys = ingest_store.list_files(prefix, "*", recursive=True)
-    keys = sorted(k for k in all_keys if Path(k).suffix.lower() in SUPPORTED_EXTENSIONS)
+    # Store-relative keys: strip the prefix for the nesting check, restore after.
+    scope = f"{prefix.strip('/')}/" if prefix.strip("/") else ""
+    names = select_supported((k.removeprefix(scope) for k in all_keys), location=location)
+    keys = [f"{scope}{n}" for n in names]
     if not keys:
-        raise ValueError(f"no supported documents under {ingest_uri}/{prefix}".rstrip("/"))
+        raise ValueError(f"no supported documents under {location}")
 
     output_prefix = f"runs/{resolved_run_id}"
     shard_prefix = f"{output_prefix}/documents"
@@ -269,7 +272,15 @@ def ingest_preflight(settings: UISettings) -> dict:
             "uri": uri, "kind": kind, "reachable": False,
             "document_count": 0, "sample": [], "error": str(e),
         }
-    keys = sorted(k for k in all_keys if Path(k).suffix.lower() in SUPPORTED_EXTENSIONS)
+    try:
+        keys = select_supported(all_keys, location=uri)
+    except NestedCorpusError as e:
+        # The count must be the count that would be enqueued, so a layout the
+        # enqueue will refuse reports the refusal here rather than a number.
+        return {
+            "uri": uri, "kind": kind, "reachable": True,
+            "document_count": 0, "sample": [], "error": str(e),
+        }
     return {
         "uri": uri, "kind": kind, "reachable": True,
         "document_count": len(keys), "sample": keys[:5], "error": None,

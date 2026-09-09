@@ -209,6 +209,42 @@ Decisions inside it:
 (`chunk_shards` builds one chunker and reuses it across bases). Output is
 byte-identical; only warm-cache speed is lost.
 
+### A run ingests what is directly under the location it is given
+
+Local and distributed enumerated a corpus differently. `womblex run` (and
+`redact`, and the back-compat E2E chunk path) listed the immediate level of the
+input root; the enqueue path in `cli/cloud.py` and the console's in
+`ui/execute.py` listed recursively. A corpus laid out under dated or per-agency
+prefixes therefore extracted in full through the workers and yielded nothing at
+all locally, reported as "no supported files found" with no indication that
+nested documents had been passed over.
+
+Parity between local and cloud is the design invariant, so both conform to one
+rule: `select_supported` in `cli/_shared.py` decides what a location yields, and
+every entry point calls it. A corpus with supported documents in subdirectories
+is refused — by the local CLI with a non-zero exit, by the console with a 400,
+naming a subdirectory and its document count. A subdirectory holding no
+supported document is ignored, so a corpus alongside `.git` or a notes directory
+still runs. The refusal fires on a mixed layout too: ingesting only the top level
+is a partial ingest, which is the same defect as ingesting nothing.
+
+*Rejected: recursion everywhere.* It is the smaller diff and it breaks nothing
+that works today, but it makes the location a run was pointed at no longer
+describe what the run consumed — an operator who points at a parent directory
+silently ingests every corpus beneath it. Refusal keeps the location honest and
+is recoverable in one command.
+
+*Rejected: a `--recursive` opt-out.* It reintroduces the two behaviours the rule
+exists to remove, and a resolver reading back a run's provenance would have to
+encode both again.
+
+The cost is borne by the console, which has no ingest-prefix field on any screen:
+an operator whose documents sit a level down cannot repoint at the subdirectory
+from the UI and must change the configured ingest location. The preflight count
+reports the refusal and its reason rather than a bare zero, so the reason is at
+least visible; a prefix field is the follow-up if the layout turns out to be
+common.
+
 ### Reference registers — dedicated ingests; document formats — generic
 Two pathways, chosen deliberately (2026-06). Widely-used reference registers
 with novel format quirks (G-NAF PSV, ABN bulk extract XML) get **dedicated

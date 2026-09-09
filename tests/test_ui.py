@@ -1445,8 +1445,7 @@ class TestExecuteApi:
         pytest.importorskip("fsspec")
         monkeypatch.setattr("womblex.cloud.queue.JobQueue", _FakeQueue)
         ingest_root = tmp_path / "inbox"
-        _seed_store_inputs(ingest_root, "", [f"doc-{i}.pdf" for i in range(4)])
-        _seed_store_inputs(ingest_root, "2026-08", ["doc-4.pdf"])  # a nested key counts too
+        _seed_store_inputs(ingest_root, "", [f"doc-{i}.pdf" for i in range(5)])
         client = TestClient(create_app(
             store_uri=str(tmp_path / "store"), ingest_uri=str(ingest_root),
             db_dsn="postgresql://x/y",
@@ -1470,6 +1469,29 @@ class TestExecuteApi:
         assert [len(s.input_keys) for s in specs] == [2, 2, 1]
         assert all(s.shard_prefix == "runs/run-exec/documents" for s in specs)
         assert all(s.ingest_root == str(ingest_root) for s in specs)
+
+    def test_enqueue_refuses_a_nested_ingest_layout(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """P11: a run ingests what is directly under the location it is given.
+        The console refuses the same layout the local CLI does, as bad input,
+        and nothing reaches the queue."""
+        pytest.importorskip("fsspec")
+        monkeypatch.setattr("womblex.cloud.queue.JobQueue", _FakeQueue)
+        _FakeQueue.last = None
+        ingest_root = tmp_path / "inbox"
+        _seed_store_inputs(ingest_root, "", ["top.pdf"])
+        _seed_store_inputs(ingest_root, "2026-08", ["nested.pdf"])
+        client = TestClient(create_app(
+            store_uri=str(tmp_path / "store"), ingest_uri=str(ingest_root),
+            db_dsn="postgresql://x/y",
+        ))
+        resp = client.post(
+            "/api/execute/enqueue", json={"run_id": "run-exec", "batch_size": 2},
+        )
+        assert resp.status_code == 400
+        assert "2026-08/" in resp.json()["detail"]
+        assert _FakeQueue.last is None
 
     def test_enqueue_mints_a_run_id_when_omitted(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1506,11 +1528,15 @@ class TestIngestPreflight:
             "document_count": 0, "sample": [], "error": "no ingest location configured",
         }
 
-    def test_nested_prefixes_are_counted(self, tmp_path: Path) -> None:
-        """Object stores have no folders: `inbox/2026-08/foo.pdf` is one key.
-        A listing that stops at the first level reports 0 documents ready for
-        an entirely normal upload layout — and, with no prefix field on any
-        screen, leaves the operator no way to reach them."""
+    def test_nested_prefixes_report_the_refusal_not_a_count(self, tmp_path: Path) -> None:
+        """P11: nested documents are refused, not ingested, so the preflight
+        reports the refusal rather than a count the enqueue will not honour.
+
+        Object stores have no folders — `inbox/2026-08/foo.pdf` is one key — so
+        this layout is a normal upload and the operator needs to be told why it
+        is rejected, not shown 0 documents with no reason. Reaching those
+        documents means repointing the ingest location, which no screen offers
+        today; see the note under P11."""
         pytest.importorskip("fsspec")
         ingest_root = tmp_path / "inbox"
         _seed_store_inputs(ingest_root, "", ["top.pdf"])
@@ -1519,8 +1545,9 @@ class TestIngestPreflight:
             store_uri=str(tmp_path / "store"), ingest_uri=str(ingest_root),
         ))
         body = client.get("/api/execute/ingest").json()
-        assert body["document_count"] == 2
-        assert sorted(body["sample"]) == ["2026-08/health/nested.pdf", "top.pdf"]
+        assert body["reachable"] is True
+        assert body["document_count"] == 0
+        assert "2026-08/" in body["error"]
 
     def test_reachable_ingest_reports_count_and_sample(self, tmp_path: Path) -> None:
         pytest.importorskip("fsspec")

@@ -9,7 +9,7 @@ import json
 import logging
 from pathlib import Path
 
-from womblex.cli._shared import Command, discover_files
+from womblex.cli._shared import Command, NestedCorpusError, discover_files
 
 logger = logging.getLogger("womblex")
 
@@ -129,7 +129,11 @@ def _cmd_redact_config(args: argparse.Namespace) -> int:
         logger.error("Input directory does not exist: %s", input_root)
         return 1
 
-    all_files = discover_files(input_root, args.limit)
+    try:
+        all_files = discover_files(input_root, args.limit)
+    except NestedCorpusError as e:
+        logger.error(str(e))
+        return 1
     if not all_files:
         logger.error("No supported files found in %s", input_root)
         return 1
