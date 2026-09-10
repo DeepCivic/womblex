@@ -163,6 +163,33 @@ class TestAudit:
         report = audit_shard_directory(tmp_path, input_dir=src)
         assert report.source_count == 2
 
+    def test_source_count_uses_the_rule_a_run_ingests_by(self, tmp_path, budget_extraction):
+        # The count is compared against the manifest, so it has to be what a run
+        # would ingest. It once used its own extension list, which counted .txt
+        # and .html a run passes over and missed the .xls a run takes -- drift
+        # reported in both directions on a corpus a run handled perfectly.
+        _write_batch(tmp_path, 1, budget_extraction, "doc-a")
+        src = tmp_path / "src"
+        src.mkdir()
+        for name in ("a.pdf", "b.xls", "c.docx"):
+            (src / name).write_bytes(b"x")
+        for name in ("readme.txt", "index.html", "notes.md"):
+            (src / name).write_text("not a document a run ingests")
+        report = audit_shard_directory(tmp_path, input_dir=src)
+        assert report.source_count == 3
+
+    def test_source_count_is_none_for_a_corpus_a_run_would_refuse(
+        self, tmp_path, budget_extraction,
+    ):
+        # A nested corpus is refused at ingest, so there is no count to compare;
+        # None ("not available") beats a number that would read as drift.
+        _write_batch(tmp_path, 1, budget_extraction, "doc-a")
+        src = tmp_path / "src"
+        (src / "2026-08").mkdir(parents=True)
+        (src / "2026-08" / "a.pdf").write_bytes(b"x")
+        report = audit_shard_directory(tmp_path, input_dir=src)
+        assert report.source_count is None
+
     def test_skips_corrupted_batches_in_metrics(self, tmp_path, budget_extraction):
         _write_batch(tmp_path, 1, budget_extraction, "doc-a")
         shard2 = _write_batch(tmp_path, 2, budget_extraction, "doc-b")

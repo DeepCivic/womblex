@@ -35,6 +35,7 @@ from typing import Any
 
 import pyarrow.parquet as pq
 
+from womblex.cli._shared import NestedCorpusError, discover_files
 from womblex.store.output import (
     _SHARD_ROLES,
     _SHARD_SUFFIX,
@@ -249,18 +250,24 @@ def scan_shard_directory(shard_dir: Path) -> ShardScanReport:
 # ---------------------------------------------------------------------------
 
 
-_SOURCE_EXTS = {".pdf", ".docx", ".csv", ".xlsx", ".txt", ".html", ".htm"}
-
-
 def _count_source_files(input_dir: Path | None) -> int | None:
-    if input_dir is None:
+    """How many documents a run would ingest from *input_dir*.
+
+    The count exists to be compared against the manifest's row count, so it has
+    to be the count a run would actually produce. That means the one
+    enumeration rule every entry point ingests by (``discover_files``), not a
+    second list of extensions that agrees with it until it does not.
+
+    A corpus a run would refuse — documents in subdirectories — has no such
+    count, so this reports ``None``, the value the field already carries for
+    "not available", rather than a number that would read as drift.
+    """
+    if input_dir is None or not input_dir.is_dir():
         return None
-    if not input_dir.is_dir():
+    try:
+        return len(discover_files(input_dir))
+    except NestedCorpusError:
         return None
-    return sum(
-        1 for p in input_dir.iterdir()
-        if p.is_file() and p.suffix.lower() in _SOURCE_EXTS
-    )
 
 
 def audit_shard_directory(

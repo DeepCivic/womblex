@@ -320,15 +320,15 @@ The chain is walkable in both directions. `store/source_resolver.py` is the retu
 
 `store/checkpoint.py` provides `CheckpointManager` for resumable batch runs. Checkpoints are JSON files recording processed document IDs and batch metadata. On resume, already-processed documents are skipped.
 
-### 11. Verify — Quality Checks
+### 11. Verify — Integrity Checks
 
-Two separate mechanisms, neither of which is `verify/engine.py`:
+Three mechanisms. None of them scores quality — each checks that what was written is intact and attributable:
 
-- **Per-batch integrity** — `verify_shard_persistence()` (`store/output.py`) runs after every batch write from `cli/pipeline.py`, checking row counts and sidecar joinability.
-- **Directory-level audit** — `womblex verify-shards` (`cli/verify.py`) uses `store/shard_audit.py` (`audit_shard_directory` / `scan_shard_directory`), optionally diffing across runs.
-- **Source resolution** — `womblex resolve-source` (`cli/verify.py`) uses `store/source_resolver.py` to take a run's rows back out to the corpus. All three inspect a finished run without changing it; this is the only one that leaves the run directory.
+- **Per-batch integrity** — `verify_shard_persistence()` (`store/output.py`) runs *during* a run, after every batch write from `cli/pipeline.py`, checking row counts and sidecar joinability. It is the only one that runs before a run is finished.
+- **Directory-level audit** — `womblex verify-shards` (`cli/verify.py`) uses `store/shard_audit.py` (`audit_shard_directory` / `scan_shard_directory`) over a finished shard directory, optionally diffing across runs and, with `--input-dir`, comparing the manifest against the count of documents a run would ingest from the source directory — counted through `discover_files`, the same rule the run used, so the comparison cannot report drift that is only a disagreement about what counts as a document.
+- **Source resolution** — `womblex resolve-source` (`cli/verify.py`) uses `store/source_resolver.py` to take a run's rows back out to the corpus and verify the bytes.
 
-`verify/engine.py`'s `run_verifications` (two-pass structural + weak-signal scan, classifying results `passed` / `warning` / `failed`) is defined and exported but **not wired into the pipeline** — its `required_columns` default (`document_id`, `source_path`, `text`) predates the element-stream schema.
+There is no fourth. A `verify/` package once held a `run_verifications` two-pass structural and weak-signal scan; it was never wired into any pipeline and is deleted — see `decisions.md`. Chunk-level quality annotation is `process/quality.py` and its stage, which is a different concern from the integrity checks above.
 
 ### 12. Additional Per-Stage Sidecars
 

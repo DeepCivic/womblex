@@ -105,11 +105,9 @@ document count; that every `(source_hash, parent_elem_order)` in
 `table_cells` / `form_fields` references an element of the matching kind;
 and that the shard directory has not shrunk (overwrite guard).
 
-`verify/engine.py`'s `run_verifications` (structural checks + weak-signal
-scan) is defined but not wired into the batch pipeline — its
-`required_columns` default predates the element-stream schema. The
-`womblex verify-shards` CLI command instead uses `store/shard_audit.py`
-(`audit_shard_directory` / `scan_shard_directory`), a different module.
+The `womblex verify-shards` CLI command uses `store/shard_audit.py`
+(`audit_shard_directory` / `scan_shard_directory`), a different module
+operating over a whole shard directory rather than one batch.
 
 ## Per-Document Flow
 
