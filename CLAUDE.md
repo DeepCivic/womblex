@@ -289,17 +289,19 @@ The minimal set is vendored under `fixtures/fixtures/`, so a bare checkout runs 
 `pytest` lives in the `[dev]` extra, not the base deps, so install it first, then
 run via `uv run` (not bare `pytest`) to keep the project venv active:
 ```bash
-uv sync --extra dev            # one-time: installs pytest, ruff, mypy
+# One-time. `--extra ui` is not optional for a full run: without fastapi,
+# `test_demo_corpus.py` and the UI tests fail *collection* rather than skipping,
+# which aborts the whole run.
+uv sync --extra dev --extra ui
 
 # Default run. NOTE: there is NO addopts filter — this runs the WHOLE suite,
-# including the OCR-fixture (`slow`) and accuracy/`benchmark` tests. On a bare
+# including the OCR-fixture (`slow`) and VLM (`benchmark`) tests. On a bare
 # checkout most heavy tests skip (see below); with the full fixtures and an
 # Isaacus key they run, and the suite is slow (tens of minutes).
 uv run python -m pytest tests/ -v
 
-# Fast subset — skip the OCR-fixture and benchmark tests:
+# Fast subset — skip the OCR-fixture and VLM benchmark tests:
 uv run python -m pytest tests/ -v -m "not slow and not benchmark"
-
 ```
 
 Accuracy benchmarks are **not** in this repository. They live in

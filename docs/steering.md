@@ -108,11 +108,12 @@ majority of the corpus's monetary amounts live.
 **Measurement.** The reconstructor is measured with `utils/tabular_metrics.py`
 (structural fidelity, data integrity) over rendered-clean and DocLayNet
 fixtures, conditioned on a correct table rect (detection is scored separately
-as the per-class layout F1). The benchmark (`tests/test_table_benchmark.py`)
-surfaces into `accuracy/EXTRACTION.md` via a `## Table Reconstruction` section,
-and the rendered-clean / false-table asserts are build-failing gates. The
-metric set, the two-stage decomposition and the ground-truth authoring spec
-are documented in [evaluation.md](evaluation.md) §2b. Precision matters more
+as the per-class layout F1). The benchmark (`test_table_benchmark.py`, in the
+womblex-benchmark repository) surfaces into `accuracy/EXTRACTION.md` via a
+`## Table Reconstruction` section, and the rendered-clean / false-table asserts
+are build-failing gates. The metric set, the two-stage decomposition and the
+ground-truth authoring spec are documented in the table section of
+[evaluation.md](evaluation.md). Precision matters more
 than coverage here: a wrongly-binned grid produces confidently wrong values
 downstream, which is worse than honest silence.
 
