@@ -322,11 +322,11 @@ The chain is walkable in both directions. `store/source_resolver.py` is the retu
 
 ### 11. Verify — Quality Checks
 
-Three mechanisms, all of which inspect a finished run without changing it:
+Three mechanisms. None of them scores quality — each checks that what was written is intact and attributable:
 
-- **Per-batch integrity** — `verify_shard_persistence()` (`store/output.py`) runs after every batch write from `cli/pipeline.py`, checking row counts and sidecar joinability.
-- **Directory-level audit** — `womblex verify-shards` (`cli/verify.py`) uses `store/shard_audit.py` (`audit_shard_directory` / `scan_shard_directory`), optionally diffing across runs.
-- **Source resolution** — `womblex resolve-source` (`cli/verify.py`) uses `store/source_resolver.py` to take a run's rows back out to the corpus. This is the only one that leaves the run directory.
+- **Per-batch integrity** — `verify_shard_persistence()` (`store/output.py`) runs *during* a run, after every batch write from `cli/pipeline.py`, checking row counts and sidecar joinability. It is the only one that runs before a run is finished.
+- **Directory-level audit** — `womblex verify-shards` (`cli/verify.py`) uses `store/shard_audit.py` (`audit_shard_directory` / `scan_shard_directory`) over a finished shard directory, optionally diffing across runs and, with `--input-dir`, comparing the manifest against a count of the source directory's files.
+- **Source resolution** — `womblex resolve-source` (`cli/verify.py`) uses `store/source_resolver.py` to take a run's rows back out to the corpus and verify the bytes.
 
 There is no fourth. A `verify/` package once held a `run_verifications` two-pass structural and weak-signal scan; it was never wired into any pipeline and is deleted — see `decisions.md`. Chunk-level quality annotation is `process/quality.py` and its stage, which is a different concern from the integrity checks above.
 
