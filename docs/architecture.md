@@ -322,13 +322,13 @@ The chain is walkable in both directions. `store/source_resolver.py` is the retu
 
 ### 11. Verify — Quality Checks
 
-Two separate mechanisms, neither of which is `verify/engine.py`:
+Three mechanisms, all of which inspect a finished run without changing it:
 
 - **Per-batch integrity** — `verify_shard_persistence()` (`store/output.py`) runs after every batch write from `cli/pipeline.py`, checking row counts and sidecar joinability.
 - **Directory-level audit** — `womblex verify-shards` (`cli/verify.py`) uses `store/shard_audit.py` (`audit_shard_directory` / `scan_shard_directory`), optionally diffing across runs.
-- **Source resolution** — `womblex resolve-source` (`cli/verify.py`) uses `store/source_resolver.py` to take a run's rows back out to the corpus. All three inspect a finished run without changing it; this is the only one that leaves the run directory.
+- **Source resolution** — `womblex resolve-source` (`cli/verify.py`) uses `store/source_resolver.py` to take a run's rows back out to the corpus. This is the only one that leaves the run directory.
 
-`verify/engine.py`'s `run_verifications` (two-pass structural + weak-signal scan, classifying results `passed` / `warning` / `failed`) is defined and exported but **not wired into the pipeline** — its `required_columns` default (`document_id`, `source_path`, `text`) predates the element-stream schema.
+There is no fourth. A `verify/` package once held a `run_verifications` two-pass structural and weak-signal scan; it was never wired into any pipeline and is deleted — see `decisions.md`. Chunk-level quality annotation is `process/quality.py` and its stage, which is a different concern from the integrity checks above.
 
 ### 12. Additional Per-Stage Sidecars
 

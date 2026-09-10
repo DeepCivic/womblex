@@ -128,15 +128,13 @@ womblex/
 │   │       ├── composer.py     # /api/composer — graph, schema, validate, yaml, GET/POST/DELETE presets (presets/ sibling)
 │   │       ├── resources.py    # /api/resources — connection cards + test/store, test/queue
 │   │       └── execute.py      # /api/execute — status + enqueue an extraction run into the queue
-│   ├── utils/
-│   │   ├── metrics.py       # WER/CER accuracy metrics
-│   │   ├── tabular_metrics.py # Tabular extraction accuracy (structural fidelity, data integrity)
-│   │   ├── models.py        # Local model path resolution (models/ dir, HF snapshot layout) + load record with byte digests
-│   │   ├── checksum.py      # Shared streamed MD5 helper for the standalone register ingests
-│   │   ├── isaacus_client.py # Build the Isaacus SDK client (hosted API or private SageMaker)
-│   │   ├── token_packer.py  # TokenCounter, pack_by_tokens, split_on_boundaries for token-budgeted API batching
-│   │   └── availability.py  # isaacus_available() gates API stages (enrich/embed, AI chunking); tokenizer_available() gates offline token chunking on the vendored tokeniser
-│   └── verify/
-│       └── engine.py        # Two-pass extraction quality verification
+│   └── utils/
+│       ├── metrics.py       # WER/CER accuracy metrics
+│       ├── tabular_metrics.py # Tabular extraction accuracy (structural fidelity, data integrity)
+│       ├── models.py        # Local model path resolution (models/ dir, HF snapshot layout) + load record with byte digests
+│       ├── checksum.py      # Shared streamed MD5 helper for the standalone register ingests
+│       ├── isaacus_client.py # Build the Isaacus SDK client (hosted API or private SageMaker)
+│       ├── token_packer.py  # TokenCounter, pack_by_tokens, split_on_boundaries for token-budgeted API batching
+│       └── availability.py  # isaacus_available() gates API stages (enrich/embed, AI chunking); tokenizer_available() gates offline token chunking on the vendored tokeniser
 └── tests/
 ```

@@ -512,6 +512,25 @@ page, and chunking reads `elements` rather than `pages[i].text`.
   `page.annots()` returns nothing when redaction tooling flattens bars into the
   page content stream (a common publication step). No annotation-based path is
   available there; detection must work from drawings/raster.
+- **A generic document-verification engine — deleted rather than wired in.** A
+  `verify/` package held `run_verifications`: a two-pass structural check plus a
+  weak-signal scan classifying a run `passed` / `warning` / `failed` on a
+  garbled-character ratio, a redaction-garbling ratio, a confidence floor and a
+  page-count ceiling. It was never called by any pipeline path, and its own
+  tests exercised the helpers rather than the entry point. Wiring it in was not
+  a matter of renaming columns: it expects one row per document carrying
+  `document_id`, `source_path` and `text`, where the manifest names the first
+  `doc_id`, expresses provenance as `ingest_root` plus `source_relpath`, and
+  carries no text at all — text is per-*element*, as is `confidence`, and
+  `page_count` exists in no schema. Adapting it therefore meant a grain change
+  and narrative reassembly, which is a rewrite. Its remit is also taken:
+  `process/quality.py` and its stage annotate chunk quality properly, with a
+  sidecar and a checkpoint. And its central idea is one this repository
+  declines on purpose — threshold-based quality scoring, which the contributor
+  guidance rules out while the corpus is still poorly understood. Deleted with
+  its exports and tests. Integrity checking that *is* wired lives in
+  `verify_shard_persistence()` and `store/shard_audit.py`, neither of which
+  scores anything.
 - **"All native-text element bboxes are zero" — retracted.** This was a probe
   formatter artefact (`:.0f` rounding 0–1 normalised floats to "0"); native-text
   kinds are bbox-populated. The narrower real issue was OCR-form bbox loss,
