@@ -320,7 +320,7 @@ The chain is walkable in both directions. `store/source_resolver.py` is the retu
 
 `store/checkpoint.py` provides `CheckpointManager` for resumable batch runs. Checkpoints are JSON files recording processed document IDs and batch metadata. On resume, already-processed documents are skipped.
 
-### 11. Verify — Quality Checks
+### 11. Verify — Integrity Checks
 
 Three mechanisms. None of them scores quality — each checks that what was written is intact and attributable:
 
