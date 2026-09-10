@@ -326,6 +326,7 @@ Two separate mechanisms, neither of which is `verify/engine.py`:
 
 - **Per-batch integrity** — `verify_shard_persistence()` (`store/output.py`) runs after every batch write from `cli/pipeline.py`, checking row counts and sidecar joinability.
 - **Directory-level audit** — `womblex verify-shards` (`cli/verify.py`) uses `store/shard_audit.py` (`audit_shard_directory` / `scan_shard_directory`), optionally diffing across runs.
+- **Source resolution** — `womblex resolve-source` (`cli/verify.py`) uses `store/source_resolver.py` to take a run's rows back out to the corpus. All three inspect a finished run without changing it; this is the only one that leaves the run directory.
 
 `verify/engine.py`'s `run_verifications` (two-pass structural + weak-signal scan, classifying results `passed` / `warning` / `failed`) is defined and exported but **not wired into the pipeline** — its `required_columns` default (`document_id`, `source_path`, `text`) predates the element-stream schema.
 

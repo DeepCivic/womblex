@@ -288,7 +288,7 @@ a resolver reading back a run's provenance encodes one enumeration, not two.
 *Rejected: inferring the corpus location.* An object-store root, or a directory
 whose rows name several roots, raises at construction rather than resolving
 nothing row by row. Guessing a local path for an `s3://` root would resolve
-against whatever happened to be there. An explicit root is how a caller names a local
+against whatever happened to be there. `--root` is how an operator names a local
 copy, which is also what makes a moved corpus re-resolve.
 
 ### Reference registers — dedicated ingests; document formats — generic
