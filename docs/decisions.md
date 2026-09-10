@@ -245,6 +245,52 @@ reports the refusal and its reason rather than a bare zero, so the reason is at
 least visible; a prefix field is the follow-up if the layout turns out to be
 common.
 
+### Resolving a row back to its document — path first, hash second
+
+`store/source_resolver.py` is the return leg of the provenance chain: a row's
+`source_hash` back to the file it describes. Two things shaped it.
+
+*Path first, then hash.* The obvious build is an index — scan the corpus, hash
+every document, look the value up — and the requirement was written expecting
+one. But a manifest row already records the path under the ingest root (P1), so
+the common case, a corpus still sitting where the run found it, is answered by
+one file read. The index is built only when the path has not answered, which is
+what makes the resolver usable against a corpus of thousands rather than a tool
+you run once and wait on. Both orders verify the bytes, so neither trades
+correctness for the speed: the difference is only how much of the corpus is read
+to reach the same answer.
+
+*Every call returns a result, and the failures are told apart.* A resolver that
+returns nothing for a row a consumer holds is indistinguishable from a corpus
+that has been tampered with, so there is no empty return and no exception: a
+`Resolution` carries a status and a reason. The statuses exist because the ways
+resolution fails are not equally bad. A re-saved corpus — same content, new
+bytes, which is what a bulk re-export or a virus scanner produces — reports the
+mismatch *and the path it found*, because knowing the file is there and has
+changed is worth more than being told nothing matched. A document moved within
+the corpus is found by hash. Only a genuine absence is `not_found`.
+
+The two hash bases are distinguished rather than conflated. A file ingest hashes
+source bytes; the pre-extracted records ingest hashes record id plus text, so
+there is no file to hash at all. Those rows are *declined by name*, naming
+`*.provenance.parquet` as the back-link that does answer for them — a row that
+is out of scope is accounted for, not missing, and reporting it as missing would
+have made every records corpus look corrupt.
+
+*Rejected: a second corpus walk.* The resolver could enumerate the corpus its
+own way, and for a while that would agree with what a run ingests. It would stop
+agreeing the first time either changed. Both paths go through `select_supported`
+instead — the rule the entry above settled — so a document the resolver returns
+is one a run could have processed, and a nested corpus is refused here exactly
+as a run refuses it. That is also the answer to what the entry above left open:
+a resolver reading back a run's provenance encodes one enumeration, not two.
+
+*Rejected: inferring the corpus location.* An object-store root, or a directory
+whose rows name several roots, raises at construction rather than resolving
+nothing row by row. Guessing a local path for an `s3://` root would resolve
+against whatever happened to be there. An explicit root is how a caller names a local
+copy, which is also what makes a moved corpus re-resolve.
+
 ### Reference registers — dedicated ingests; document formats — generic
 Two pathways, chosen deliberately (2026-06). Widely-used reference registers
 with novel format quirks (G-NAF PSV, ABN bulk extract XML) get **dedicated
