@@ -5,6 +5,8 @@ mapping from that key back to a document — but a manifest row names a corpus
 and a path, not a file that is known to still be there. This closes the loop:
 given a run's manifest and access to the corpus, hand it a ``source_hash`` and
 it returns the file, having verified the bytes, or says precisely why it cannot.
+:meth:`SourceResolver.for_run` is the entry point from a run directory, and
+``womblex resolve-source`` the command over it.
 
 **Every call returns a** :class:`Resolution` — a status and a reason, never an
 empty return and never an exception — so a consumer walking a run's rows gets
@@ -37,11 +39,13 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
+from urllib.parse import unquote
 
 import pyarrow as pa
 
 from womblex.cli._shared import NestedCorpusError, discover_files, select_supported
-from womblex.store.output import _source_hash
+from womblex.store.output import _read_shard, _source_hash, read_manifest
+from womblex.store.run_manifest import RUN_MANIFEST_FILENAME
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +99,30 @@ def hash_basis_for(extraction_method: str) -> str:
     )
 
 
+def load_manifest(location: Path) -> pa.Table:
+    """Read the document manifest for a run, from whichever shape is given.
+
+    A run root (preferring the consolidated ``manifest.parquet`` P9 publishes,
+    else its ``documents/`` shard directory), a shard directory, or a manifest
+    Parquet directly. Raises ``FileNotFoundError`` when none of the three is
+    there, rather than returning an empty table that would resolve nothing.
+    """
+    p = Path(location)
+    if p.is_file():
+        return _read_shard(p, "manifest")
+    consolidated = p / RUN_MANIFEST_FILENAME
+    if consolidated.is_file():
+        return _read_shard(consolidated, "manifest")
+    documents = p / "documents"
+    shard_dir = documents if documents.is_dir() else p
+    if not any(shard_dir.glob("*._manifest.parquet")):
+        raise FileNotFoundError(
+            f"no manifest under {p}: expected {RUN_MANIFEST_FILENAME}, "
+            f"a documents/ shard directory, or *._manifest.parquet siblings"
+        )
+    return read_manifest(shard_dir)
+
+
 def _ingestable(relpath: str, root: Path) -> bool:
     """Would a run ingest *relpath* from *root*? The shared enumeration rule."""
     if not relpath:
@@ -127,6 +155,20 @@ class SourceResolver:
         self._rows = _rows_by_hash(manifest)
         self._index: dict[str, Path] | None = None
         self._index_error: str | None = None
+
+    @classmethod
+    def for_run(cls, location: Path, *, root: str | Path | None = None) -> SourceResolver:
+        """Build from a run root / shard dir / manifest file.
+
+        *root* overrides the corpus location — that is how a corpus that has
+        moved is re-resolved. Without it the root is taken from the manifest's
+        own ``ingest_root``, which must be a single ``file://`` root: an
+        object-store root has no local corpus to index, and a mixed or absent
+        root names nothing, so both raise here rather than resolving nothing
+        row by row.
+        """
+        manifest = load_manifest(Path(location))
+        return cls(manifest, root if root is not None else _declared_root(manifest, location))
 
     @property
     def index(self) -> dict[str, Path]:
@@ -241,6 +283,25 @@ def _rows_by_hash(manifest: pa.Table) -> dict[str, _Row]:
     return rows
 
 
+def _declared_root(manifest: pa.Table, location: Path) -> str:
+    """The single ``file://`` ingest root the manifest declares."""
+    if "ingest_root" not in manifest.schema.names:
+        raise ValueError(f"{location} declares no ingest_root; pass root= explicitly")
+    declared = {str(v or "") for v in manifest.column("ingest_root").to_pylist()} - {""}
+    if len(declared) != 1:
+        raise ValueError(
+            f"{location} declares {len(declared)} ingest roots; pass root= explicitly"
+        )
+    root = declared.pop()
+    if not root.startswith("file://"):
+        raise ValueError(
+            f"{location} was ingested from {root}, which has no local corpus to index; "
+            "pass root= naming a local copy"
+        )
+    # `qualify_root` records the root via `Path.as_uri()`, which percent-encodes.
+    return unquote(root.removeprefix("file://"))
+
+
 __all__ = [
     "HASH_BASIS_FILE_BYTES",
     "HASH_BASIS_RECORD_ID_TEXT",
@@ -252,4 +313,5 @@ __all__ = [
     "ResolutionStatus",
     "SourceResolver",
     "hash_basis_for",
+    "load_manifest",
 ]

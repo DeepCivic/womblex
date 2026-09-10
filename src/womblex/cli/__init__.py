@@ -22,6 +22,7 @@ Usage:
     womblex validate-redactions  --labels DIR --pdfs DIR [--report PATH]
     womblex score                --labels DIR --shards DIR
     womblex verify-shards        <run-or-shard-dir> [--compare-to <other>]
+    womblex resolve-source       <run-or-shard-dir> [--root DIR] [--hash H]
     womblex profile              <file> [--sample-rows N]
     womblex ingest-gnaf          <input> -o output/gnaf
     womblex ingest-geo           <input> -o output/geo

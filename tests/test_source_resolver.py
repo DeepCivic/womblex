@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 from womblex.cli._shared import NestedCorpusError, discover_files
@@ -22,6 +23,7 @@ from womblex.store.source_resolver import (
     RESOLVED,
     UNSUPPORTED_BASIS,
     SourceResolver,
+    load_manifest,
 )
 
 
@@ -175,3 +177,103 @@ class TestIndexAgreesWithIngest:
         r = resolver.resolve(digests["2026-08/a.pdf"])
         assert r.status == NOT_FOUND
         assert "subdirectories" in r.detail
+
+
+def _publish(manifest: pa.Table, target: Path) -> Path:
+    """Write *manifest* to *target*, creating its directory. Returns it."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    pq.write_table(manifest, str(target))
+    return target
+
+
+class TestLoadManifest:
+    def test_reads_a_consolidated_run_manifest(self, tmp_path, corpus):
+        _, digests, manifest = corpus
+        _publish(manifest, tmp_path / "run" / "manifest.parquet")
+        assert load_manifest(tmp_path / "run").num_rows == len(digests)
+
+    def test_reads_a_shard_directory_and_the_run_root_above_it(self, tmp_path, corpus):
+        _, digests, manifest = corpus
+        shards = _publish(
+            manifest, tmp_path / "run" / "documents" / "batch-0001._manifest.parquet"
+        ).parent
+        assert load_manifest(shards).num_rows == len(digests)
+        assert load_manifest(shards.parent).num_rows == len(digests)
+
+    def test_absent_manifest_raises_rather_than_resolving_nothing(self, tmp_path):
+        with pytest.raises(FileNotFoundError, match="no manifest"):
+            load_manifest(tmp_path)
+
+    def test_for_run_takes_the_root_from_the_manifest(self, tmp_path, corpus):
+        _, digests, manifest = corpus
+        _publish(manifest, tmp_path / "run" / "manifest.parquet")
+        assert SourceResolver.for_run(tmp_path / "run").resolve(digests["a.pdf"]).ok
+
+    def test_an_explicit_root_rescues_an_object_store_ingest(self, tmp_path, corpus):
+        # A distributed run records an s3:// root; resolving it needs a local
+        # copy of the corpus, which --root is how an operator names.
+        root, _, manifest = corpus
+        rows = manifest.to_pylist()
+        for r in rows:
+            r["ingest_root"] = "s3://bucket/inbox"
+        _publish(
+            pa.Table.from_pylist(rows, schema=MANIFEST_SCHEMA),
+            tmp_path / "run" / "manifest.parquet",
+        )
+        resolved = SourceResolver.for_run(tmp_path / "run", root=root).resolve_all()
+        assert all(r.ok for r in resolved)
+
+    def test_object_store_root_declines_with_a_reason(self, tmp_path, corpus):
+        rows = corpus[2].to_pylist()
+        for r in rows:
+            r["ingest_root"] = "s3://bucket/inbox"
+        _publish(
+            pa.Table.from_pylist(rows, schema=MANIFEST_SCHEMA),
+            tmp_path / "run" / "manifest.parquet",
+        )
+        with pytest.raises(ValueError, match="no local corpus"):
+            SourceResolver.for_run(tmp_path / "run")
+
+
+class TestCommand:
+    """The thin CLI over the resolver: its exit-code contract."""
+
+    def _run(self, tmp_path, manifest, root, **kw):
+        import argparse
+
+        import pyarrow.parquet as pq
+
+        from womblex.cli.verify import cmd_resolve_source
+
+        run = tmp_path / "run"
+        run.mkdir(exist_ok=True)
+        pq.write_table(manifest, str(run / "manifest.parquet"))
+        args = argparse.Namespace(
+            run_dir=run, root=root, source_hash=None, format="text", **kw
+        )
+        return cmd_resolve_source(args)
+
+    def test_all_rows_resolving_exits_zero(self, tmp_path, corpus):
+        root, _, manifest = corpus
+        assert self._run(tmp_path, manifest, root) == 0
+
+    def test_an_unresolved_row_exits_two(self, tmp_path, corpus):
+        root, _, manifest = corpus
+        (root / "a.pdf").unlink()
+        assert self._run(tmp_path, manifest, root) == 2
+
+    def test_a_declined_hash_basis_is_not_a_failure(self, tmp_path):
+        root = tmp_path / "corpus"
+        root.mkdir()
+        manifest = _manifest(root, {"rec-1": "ab" * 32}, method="records")
+        assert self._run(tmp_path, manifest, root) == 0
+
+    def test_a_bad_target_exits_one(self, tmp_path, corpus):
+        import argparse
+
+        from womblex.cli.verify import cmd_resolve_source
+
+        args = argparse.Namespace(
+            run_dir=tmp_path / "nope", root=None, source_hash=None, format="text",
+        )
+        assert cmd_resolve_source(args) == 1

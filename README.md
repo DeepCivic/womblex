@@ -210,6 +210,11 @@ womblex ingest-geo  shapefiles/ -o output/geo                    # SHP → GeoPa
 
 # Audit shard integrity (extraction stage)
 womblex verify-shards output/<run_id>/
+
+# Resolve a run's rows back to the source documents (verified by content hash)
+womblex resolve-source output/<run_id>/                    # every row
+womblex resolve-source output/<run_id>/ --hash <source_hash>
+womblex resolve-source output/<run_id>/ --root /new/corpus # corpus has moved
 ```
 
 ## Environment-Agnostic Execution
