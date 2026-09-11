@@ -92,9 +92,9 @@ class TestEnrichShards:
         assert graph_edges_path_for(base).exists()
         edges = read_graph_edges(base)
         assert edges.num_rows > 0, "real enrichment produced no graph edges"
-        # document_id carries the source_hash so the graph joins the sidecars
-        hashes = set(read_enrichment_entities(base).column("document_id").to_pylist())
-        assert set(edges.column("document_id").to_pylist()) <= hashes
+        # entities and edges join the other sidecars on source_hash
+        hashes = set(read_enrichment_entities(base).column("source_hash").to_pylist())
+        assert set(edges.column("source_hash").to_pylist()) <= hashes
 
     def test_checkpoint_skips_on_resume(self, shard_dir, isaacus_client, tmp_path):
         ckpt = CheckpointManager(tmp_path / ".enrich-ckpt", "t_enrich")

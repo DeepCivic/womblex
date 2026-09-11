@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 ENTITY_SCHEMA = pa.schema([
-    ("document_id", pa.string()),
+    ("source_hash", pa.string()),
     ("entity_id", pa.string()),
     ("entity_label", pa.string()),       # person | location | term | external_document
     ("name", pa.string()),
@@ -45,7 +45,7 @@ ENTITY_SCHEMA = pa.schema([
 # ---------------------------------------------------------------------------
 
 GRAPH_EDGE_SCHEMA = pa.schema([
-    ("document_id", pa.string()),
+    ("source_hash", pa.string()),
     ("source_id", pa.string()),
     ("target_id", pa.string()),
     ("relation", pa.string()),
@@ -58,7 +58,7 @@ GRAPH_EDGE_SCHEMA = pa.schema([
 # ---------------------------------------------------------------------------
 
 ENRICHMENT_META_SCHEMA = pa.schema([
-    ("document_id", pa.string()),
+    ("source_hash", pa.string()),
     ("doc_type_enriched", pa.string()),  # statute | regulation | decision | contract | other
     ("jurisdiction", pa.string()),
     ("title", pa.string()),
@@ -79,7 +79,7 @@ ENRICHMENT_META_SCHEMA = pa.schema([
 
 
 def _entity_mentions_from_enrichment(
-    document_id: str,
+    source_hash: str,
     enrichment: EnrichmentResult,
     chunks: list[object] | None = None,
 ) -> list[dict[str, Any]]:
@@ -95,7 +95,7 @@ def _entity_mentions_from_enrichment(
         for mention in per.mentions:
             chunk_indices = _find_chunks_for_span(mention, chunk_list) if chunk_list else []  # type: ignore[arg-type]
             rows.append({
-                "document_id": document_id,
+                "source_hash": source_hash,
                 "entity_id": per.id,
                 "entity_label": "person",
                 "name": name,
@@ -112,7 +112,7 @@ def _entity_mentions_from_enrichment(
         for mention in loc.mentions:
             chunk_indices = _find_chunks_for_span(mention, chunk_list) if chunk_list else []  # type: ignore[arg-type]
             rows.append({
-                "document_id": document_id,
+                "source_hash": source_hash,
                 "entity_id": loc.id,
                 "entity_label": "location",
                 "name": name,
@@ -129,7 +129,7 @@ def _entity_mentions_from_enrichment(
         for mention in term.mentions:
             chunk_indices = _find_chunks_for_span(mention, chunk_list) if chunk_list else []  # type: ignore[arg-type]
             rows.append({
-                "document_id": document_id,
+                "source_hash": source_hash,
                 "entity_id": term.id,
                 "entity_label": "term",
                 "name": name,
@@ -146,7 +146,7 @@ def _entity_mentions_from_enrichment(
         for mention in exd.mentions:
             chunk_indices = _find_chunks_for_span(mention, chunk_list) if chunk_list else []  # type: ignore[arg-type]
             rows.append({
-                "document_id": document_id,
+                "source_hash": source_hash,
                 "entity_id": exd.id,
                 "entity_label": "external_document",
                 "name": name,
@@ -166,7 +166,7 @@ def _entity_mentions_from_enrichment(
 
 
 def _graph_edges_to_rows(
-    document_id: str,
+    source_hash: str,
     graph: DocumentGraph,
 ) -> list[dict[str, Any]]:
     """Flatten graph edges to rows, one per edge-property pair."""
@@ -175,7 +175,7 @@ def _graph_edges_to_rows(
         if edge.properties:
             for key, value in edge.properties.items():
                 rows.append({
-                    "document_id": document_id,
+                    "source_hash": source_hash,
                     "source_id": edge.source,
                     "target_id": edge.target,
                     "relation": edge.relation,
@@ -184,7 +184,7 @@ def _graph_edges_to_rows(
                 })
         else:
             rows.append({
-                "document_id": document_id,
+                "source_hash": source_hash,
                 "source_id": edge.source,
                 "target_id": edge.target,
                 "relation": edge.relation,
@@ -200,13 +200,13 @@ def _graph_edges_to_rows(
 
 
 def _enrichment_meta_row(
-    document_id: str,
+    source_hash: str,
     enrichment: EnrichmentResult,
 ) -> dict[str, Any]:
     """Build a single enrichment metadata row."""
     title = enrichment.title.decode(enrichment.text) if enrichment.title else ""
     return {
-        "document_id": document_id,
+        "source_hash": source_hash,
         "doc_type_enriched": enrichment.type,
         "jurisdiction": enrichment.jurisdiction or "",
         "title": title,
@@ -224,6 +224,14 @@ def _enrichment_meta_row(
 # ---------------------------------------------------------------------------
 # Writers
 # ---------------------------------------------------------------------------
+#
+# The three whole-corpus E2E writers below predate the sharded layout and write
+# whatever document identity their caller supplies into ``source_hash``. Their
+# only caller, ``operations.write_batch_enrichment``, supplies a ``doc_id`` and
+# has had no caller of its own since in-batch enrichment was removed in 0.5.10
+# — which is why they are a fossil noted for retirement rather than a second
+# supported shape. Everything a run actually writes goes through the sharded
+# writers further down, which supply the source_hash the name states.
 
 
 def write_entity_mentions(
@@ -233,15 +241,15 @@ def write_entity_mentions(
     """Write entity mentions to a Parquet file.
 
     Args:
-        results: List of (document_id, EnrichmentResult, chunks) tuples.
+        results: List of (identity, EnrichmentResult, chunks) tuples.
         output_path: Destination Parquet file path.
 
     Returns:
         The output path written.
     """
     all_rows: list[dict[str, Any]] = []
-    for doc_id, enrichment, chunks in results:
-        all_rows.extend(_entity_mentions_from_enrichment(doc_id, enrichment, chunks))
+    for ident, enrichment, chunks in results:
+        all_rows.extend(_entity_mentions_from_enrichment(ident, enrichment, chunks))
 
     if not all_rows:
         table = pa.table(
@@ -264,15 +272,15 @@ def write_graph_edges(
     """Write graph edges to a Parquet file.
 
     Args:
-        graphs: List of (document_id, DocumentGraph) tuples.
+        graphs: List of (identity, DocumentGraph) tuples.
         output_path: Destination Parquet file path.
 
     Returns:
         The output path written.
     """
     all_rows: list[dict[str, Any]] = []
-    for doc_id, graph in graphs:
-        all_rows.extend(_graph_edges_to_rows(doc_id, graph))
+    for ident, graph in graphs:
+        all_rows.extend(_graph_edges_to_rows(ident, graph))
 
     if not all_rows:
         table = pa.table(
@@ -295,13 +303,13 @@ def write_enrichment_metadata(
     """Write enrichment metadata to a Parquet file.
 
     Args:
-        results: List of (document_id, EnrichmentResult) tuples.
+        results: List of (identity, EnrichmentResult) tuples.
         output_path: Destination Parquet file path.
 
     Returns:
         The output path written.
     """
-    rows = [_enrichment_meta_row(doc_id, enrichment) for doc_id, enrichment in results]
+    rows = [_enrichment_meta_row(ident, enrichment) for ident, enrichment in results]
 
     if not rows:
         table = pa.table(
@@ -323,10 +331,10 @@ def write_enrichment_metadata(
 #
 # The sharded enrich stage (``analyse.enrich_stage``) writes one sibling
 # parquet per extraction batch, joinable to ``*.elements.parquet`` /
-# ``*.chunks.parquet`` on ``source_hash``. The flat ``ENTITY_SCHEMA`` /
-# ``ENRICHMENT_META_SCHEMA`` are reused unchanged; the existing
-# ``document_id`` column carries the **source_hash** in the sharded layout
-# so joins line up with the other sidecars without forking the schema.
+# ``*.chunks.parquet`` on ``source_hash`` — the column every sidecar in the
+# library names its document identity with, these three included since 0.6.0.
+# They carried the same values under ``document_id`` before that; see
+# ``LEGACY_HASH_COLUMN`` for the reader shim and its removal release.
 
 ENRICHMENT_ENTITIES_SUFFIX = ".enrichment_entities.parquet"
 ENRICHMENT_META_SUFFIX = ".enrichment_meta.parquet"
@@ -353,9 +361,8 @@ def write_enrichment_entities_shard(
 ) -> Path:
     """Write a batch's entity mentions to ``<base>.enrichment_entities.parquet``.
 
-    ``results`` is ``(source_hash, EnrichmentResult)``; the source_hash is
-    written into ``ENTITY_SCHEMA``'s ``document_id`` column. Empty input
-    produces an empty-but-schema-correct file so downstream globs are safe.
+    ``results`` is ``(source_hash, EnrichmentResult)``. Empty input produces an
+    empty-but-schema-correct file so downstream globs are safe.
     """
     rows: list[dict[str, Any]] = []
     for source_hash, enrichment in results:
@@ -385,9 +392,7 @@ def write_graph_edges_shard(
 ) -> Path:
     """Write a batch's graph edges to ``<base>.graph_edges.parquet``.
 
-    ``graphs`` is ``(source_hash, DocumentGraph)``; the source_hash is
-    written into ``GRAPH_EDGE_SCHEMA``'s ``document_id`` column so the
-    sidecar joins with the others. Empty input produces an
+    ``graphs`` is ``(source_hash, DocumentGraph)``. Empty input produces an
     empty-but-schema-correct file so downstream globs are safe.
     """
     rows: list[dict[str, Any]] = []
@@ -475,8 +480,21 @@ def _write_enrichment_rows(
     pq.write_table(table, str(path), compression="zstd", compression_level=3)
 
 
+#: The name these three sidecars gave their document identity column before
+#: 0.6.0. Values were byte-identical to the ``source_hash`` every other sidecar
+#: joins on, so a shard written under the old name reads back through
+#: :func:`_read_enrichment_shard` as if it had been written under the new one.
+#: **Removed in 0.7.0** — from then a pre-0.6.0 shard is a missing-column error
+#: and must be re-enriched.
+LEGACY_HASH_COLUMN = "document_id"
+
+
 def _read_enrichment_shard(path: Path, schema: pa.Schema) -> pa.Table:
     raw = pq.read_table(str(path))
+    if "source_hash" not in raw.schema.names and LEGACY_HASH_COLUMN in raw.schema.names:
+        raw = raw.rename_columns([
+            "source_hash" if n == LEGACY_HASH_COLUMN else n for n in raw.schema.names
+        ])
     missing = [f.name for f in schema if f.name not in raw.schema.names]
     if missing:
         raise ValueError(

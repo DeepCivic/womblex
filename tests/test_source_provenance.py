@@ -213,6 +213,7 @@ class TestMaskingLeavesProvenanceAlone:
         from womblex.pii.pii_stage import pii_shards
         from womblex.store.enrichment_output import ENTITY_SCHEMA, enrichment_entities_path_for
         from womblex.store.output import write_chunks
+        from womblex.store.pii_output import read_clean_text
 
         root, shard = stamped
         source_hash = read_manifest(shard).to_pylist()[0]["source_hash"]
@@ -228,7 +229,7 @@ class TestMaskingLeavesProvenanceAlone:
         pq.write_table(
             pa.Table.from_pylist(
                 [{
-                    "document_id": source_hash, "entity_id": "e1", "entity_label": "person",
+                    "source_hash": source_hash, "entity_id": "e1", "entity_label": "person",
                     "name": "Jane Doe", "entity_type": "natural", "role": "other",
                     "mention_start": 12, "mention_end": 20, "chunk_index": -1,
                 }],
@@ -244,3 +245,8 @@ class TestMaskingLeavesProvenanceAlone:
         assert manifest_path.read_bytes() == before
         prov = read_footer_provenance(pq.read_metadata(str(manifest_path)).metadata)
         assert prov["ingest_root"] == f"file://{root}"
+        # The stage must actually have masked something, or "left the manifest
+        # alone" is satisfied by a run that did nothing — which is what a
+        # mis-keyed entity row quietly turns this into.
+        masked = read_clean_text(shard).to_pylist()
+        assert masked and "<PERSON_1>" in masked[0]["text"], masked

@@ -24,7 +24,11 @@ pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
 
 from womblex.cli import ALL_COMMANDS
-from womblex.store.enrichment_output import ENRICHMENT_ENTITIES_SUFFIX, ENTITY_SCHEMA
+from womblex.store.enrichment_output import (
+    ENRICHMENT_ENTITIES_SUFFIX,
+    ENTITY_SCHEMA,
+    LEGACY_HASH_COLUMN,
+)
 from womblex.store.feedback_output import write_feedback_record
 from womblex.store.money_output import MONEY_SPANS_SCHEMA, MONEY_SPANS_SUFFIX
 from womblex.store.output import CHUNKS_SCHEMA, CHUNKS_SUFFIX, ELEMENTS_SUFFIX, MANIFEST_SCHEMA
@@ -237,15 +241,30 @@ class TestRunsApi:
     def test_stage_presence_reads_the_enrich_sidecar_hash_column(
         self, api_client: tuple[TestClient, Path]
     ) -> None:
-        """The sharded enrichment sidecar stores the source_hash in `document_id`,
-        not `source_hash` (see `enrichment_output.py`). Presence must read the
-        column the file actually carries, or `enrich` reports empty even though
-        the stage ran.
-        """
+        """The enrich sidecar joins on `source_hash` like every other one."""
         client, run_root = api_client
         shard_dir = run_root / "run-a" / "documents"
         _write_manifest_shard(shard_dir, _ROWS)
         _write_shard(shard_dir, ENRICHMENT_ENTITIES_SUFFIX, ENTITY_SCHEMA, [_ENTITY_ROW])
+        body = client.get("/api/runs/run-a/stage-presence/enrich").json()
+        assert body == {"run_id": "run-a", "stage": "enrich", "source_hashes": ["hash-a"]}
+
+    def test_stage_presence_reads_a_pre_rename_enrich_sidecar(
+        self, api_client: tuple[TestClient, Path]
+    ) -> None:
+        """A sidecar written before 0.6.0 carries the hash in the legacy column.
+
+        The console reads parquet directly so the predicate pushes down, which
+        bypasses the store reader's shim — without the same fallback here,
+        `enrich` reports empty on a completed pre-rename run.
+        """
+        client, run_root = api_client
+        shard_dir = run_root / "run-a" / "documents"
+        _write_manifest_shard(shard_dir, _ROWS)
+        _write_shard(
+            shard_dir, ENRICHMENT_ENTITIES_SUFFIX, _legacy_entity_schema(),
+            [_legacy_entity_row(_ENTITY_ROW)],
+        )
         body = client.get("/api/runs/run-a/stage-presence/enrich").json()
         assert body == {"run_id": "run-a", "stage": "enrich", "source_hashes": ["hash-a"]}
 
@@ -513,7 +532,7 @@ _CHUNK_ROW_0 = {**_CHUNK_ROW, "chunk_index": 0, "text": "first chunk", "start_ch
 _OTHER_DOC_CHUNK = {**_CHUNK_ROW, "source_hash": "hash-b"}
 
 _ENTITY_ROW = {
-    "document_id": "hash-a", "entity_id": "PR-1", "entity_label": "person",
+    "source_hash": "hash-a", "entity_id": "PR-1", "entity_label": "person",
     "name": "Jane Citizen", "entity_type": "natural", "role": "other",
     "mention_start": 0, "mention_end": 12, "chunk_index": 0,
 }
@@ -539,6 +558,18 @@ _QUALITY_ROW = {
     "char_len": 19, "alpha_frac": 0.9, "is_short": False, "boilerplate_flag": False,
     "exact_dup_id": None, "near_dup_id": None,
 }
+
+
+def _legacy_entity_schema() -> pa.Schema:
+    """ENTITY_SCHEMA as it was before 0.6.0 — hash under the legacy column."""
+    return pa.schema([
+        pa.field(LEGACY_HASH_COLUMN, f.type) if f.name == "source_hash" else f
+        for f in ENTITY_SCHEMA
+    ])
+
+
+def _legacy_entity_row(row: dict) -> dict:
+    return {LEGACY_HASH_COLUMN if k == "source_hash" else k: v for k, v in row.items()}
 
 
 def _write_shard(
@@ -582,7 +613,7 @@ class TestChunkDetailApi:
 
         assert len(body["entities"]) == 1
         assert body["entities"][0]["source_hash"] == "hash-a"
-        assert "document_id" not in body["entities"][0]
+        assert LEGACY_HASH_COLUMN not in body["entities"][0]
 
         assert [p["entity_type"] for p in body["pii_spans"]] == ["PERSON"]
 

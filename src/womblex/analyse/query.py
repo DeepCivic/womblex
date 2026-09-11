@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 class EntityMention:
     """An entity mention loaded from Parquet."""
 
-    document_id: str
+    source_hash: str
     entity_id: str
     entity_label: str
     name: str
@@ -38,7 +38,7 @@ class EntityMention:
 class Edge:
     """A relationship edge loaded from Parquet."""
 
-    document_id: str
+    source_hash: str
     source_id: str
     target_id: str
     relation: str
@@ -50,7 +50,7 @@ def load_entity_mentions(path: Path) -> list[EntityMention]:
     table = pq.read_table(str(path))
     return [
         EntityMention(
-            document_id=table.column("document_id")[i].as_py(),
+            source_hash=table.column("source_hash")[i].as_py(),
             entity_id=table.column("entity_id")[i].as_py(),
             entity_label=table.column("entity_label")[i].as_py(),
             name=table.column("name")[i].as_py(),
@@ -75,7 +75,7 @@ def load_graph_edges(path: Path) -> list[Edge]:
         if pk:
             props[pk] = pv or ""
         edges.append(Edge(
-            document_id=table.column("document_id")[i].as_py(),
+            source_hash=table.column("source_hash")[i].as_py(),
             source_id=table.column("source_id")[i].as_py(),
             target_id=table.column("target_id")[i].as_py(),
             relation=table.column("relation")[i].as_py(),
@@ -85,27 +85,27 @@ def load_graph_edges(path: Path) -> list[Edge]:
 
 
 def mentions_for_document(
-    mentions: list[EntityMention], document_id: str, *, label: str | None = None,
+    mentions: list[EntityMention], source_hash: str, *, label: str | None = None,
 ) -> list[EntityMention]:
     """Filter mentions for a document, optionally by entity label."""
-    result = [m for m in mentions if m.document_id == document_id]
+    result = [m for m in mentions if m.source_hash == source_hash]
     if label:
         result = [m for m in result if m.entity_label == label]
     return result
 
 
 def edges_for_document(
-    edges: list[Edge], document_id: str, *, relation: str | None = None,
+    edges: list[Edge], source_hash: str, *, relation: str | None = None,
 ) -> list[Edge]:
     """Filter edges for a document, optionally by relation type."""
-    result = [e for e in edges if e.document_id == document_id]
+    result = [e for e in edges if e.source_hash == source_hash]
     if relation:
         result = [e for e in result if e.relation == relation]
     return result
 
 
 def pii_spans_from_mentions(
-    mentions: list[EntityMention], document_id: str, *, labels: set[str] | None = None,
+    mentions: list[EntityMention], source_hash: str, *, labels: set[str] | None = None,
 ) -> list[tuple[int, int, str]]:
     """Extract PII-relevant (start, end, label) spans for masking."""
     if labels is None:
@@ -113,7 +113,7 @@ def pii_spans_from_mentions(
     spans = [
         (m.mention_start, m.mention_end, m.entity_label)
         for m in mentions
-        if m.document_id == document_id
+        if m.source_hash == source_hash
         and m.entity_label in labels
         and m.mention_start >= 0
         and m.mention_end > m.mention_start

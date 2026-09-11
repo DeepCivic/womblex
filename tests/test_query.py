@@ -116,7 +116,7 @@ class TestLoadEntityMentions:
         mentions = load_entity_mentions(entity_parquet)
         persons = [m for m in mentions if m.entity_label == "person"]
         assert len(persons) == 1
-        assert persons[0].document_id == "doc1"
+        assert persons[0].source_hash == "doc1"
         assert persons[0].entity_type == "politic"
         assert persons[0].mention_start == 4
         assert persons[0].mention_end == 31
@@ -142,7 +142,7 @@ class TestLoadGraphEdges:
         edges = load_graph_edges(edge_parquet)
         contains = [e for e in edges if e.relation == "contains"]
         assert len(contains) >= 1
-        assert all(e.document_id == "doc1" for e in contains)
+        assert all(e.source_hash == "doc1" for e in contains)
 
 
 # ---------------------------------------------------------------------------

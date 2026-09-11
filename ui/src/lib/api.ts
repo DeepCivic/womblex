@@ -87,8 +87,7 @@ export interface Chunk {
 	elem_order: number | null;
 }
 
-// Entity mention. The reader re-keys the sharded layout's `document_id` onto
-// `source_hash` before serialising, so it joins like every other overlay.
+// Entity mention. Joins on `source_hash` like every other overlay.
 // `chunk_index` is -1 when the mention did not map to a chunk.
 export interface EntityMention {
 	source_hash: string;

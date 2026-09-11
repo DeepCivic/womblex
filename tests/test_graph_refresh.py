@@ -31,7 +31,7 @@ def _src() -> str:
 
 def _entity_row(src: str, entity_id: str, start: int, end: int) -> dict:
     return {
-        "document_id": src, "entity_id": entity_id, "entity_label": "location",
+        "source_hash": src, "entity_id": entity_id, "entity_label": "location",
         "name": "somewhere", "entity_type": "address", "role": "",
         "mention_start": start, "mention_end": end, "chunk_index": -1,
     }
@@ -79,9 +79,9 @@ def test_preserves_non_mention_edges_and_replaces_stale(tmp_path):
     d, base, src = _setup_shard(tmp_path)
     # a pre-existing 'cites' edge (must survive) + a stale 'mentioned_in' (dropped)
     write_graph_edges_rows([
-        {"document_id": src, "source_id": src, "target_id": f"{src}:ext:0",
+        {"source_hash": src, "source_id": src, "target_id": f"{src}:ext:0",
          "relation": "cites", "prop_key": "", "prop_value": ""},
-        {"document_id": src, "source_id": f"{src}:loc:0", "target_id": f"{src}:chunk:9",
+        {"source_hash": src, "source_id": f"{src}:loc:0", "target_id": f"{src}:chunk:9",
          "relation": "mentioned_in", "prop_key": "start", "prop_value": "999"},
     ], base)
 

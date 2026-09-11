@@ -16,7 +16,11 @@ from typing import TYPE_CHECKING, cast
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from womblex.store.enrichment_output import ENRICHMENT_ENTITIES_SUFFIX, ENTITY_SCHEMA
+from womblex.store.enrichment_output import (
+    ENRICHMENT_ENTITIES_SUFFIX,
+    ENTITY_SCHEMA,
+    LEGACY_HASH_COLUMN,
+)
 from womblex.store.feedback_output import (
     FEEDBACK_DIRNAME,
     build_feedback_record,
@@ -106,10 +110,9 @@ def get_stage_presence(settings: UISettings, run_id: str, stage: str) -> list[st
     enrichment sidecars.
     """
     suffix = STAGE_SUFFIXES[stage]
-    column = _PRESENCE_HASH_COLUMN.get(suffix, "source_hash")
     if settings.is_remote:
         return _remote_stage_presence(
-            cast(str, settings.store_uri), run_id, suffix, column,
+            cast(str, settings.store_uri), run_id, suffix,
             credentials=settings.s3_credentials,
         )
     run_dir = cast(Path, settings.output_root) / run_id
@@ -118,7 +121,7 @@ def get_stage_presence(settings: UISettings, run_id: str, stage: str) -> list[st
     shard_dir = run_dir / "documents"
     if not shard_dir.is_dir():
         return []
-    return _scan_stage_presence(shard_dir, suffix, column)
+    return _scan_stage_presence(shard_dir, suffix)
 
 
 def get_shard_audit(settings: UISettings, run_id: str) -> dict | None:
@@ -132,30 +135,16 @@ def get_shard_audit(settings: UISettings, run_id: str) -> dict | None:
 
 
 # The Chunk Inspector's overlay sidecars, each filtered to one document:
-# (response key, suffix, canonical schema, join column).
-# Suffix and schema are taken from the same store module so a renamed suffix
-# cannot drift away from the schema it describes. `entities` alone joins on
-# `document_id` — see `enrichment_output.py`'s note that the sharded layout
-# writes the source_hash into that column.
-_CHUNK_DETAIL_SIDECARS: tuple[tuple[str, str, pa.Schema, str], ...] = (
-    ("chunks", CHUNKS_SUFFIX, CHUNKS_SCHEMA, "source_hash"),
-    ("entities", ENRICHMENT_ENTITIES_SUFFIX, ENTITY_SCHEMA, "document_id"),
-    ("pii_spans", PII_SPANS_SUFFIX, PII_SPANS_SCHEMA, "source_hash"),
-    ("money_spans", MONEY_SPANS_SUFFIX, MONEY_SPANS_SCHEMA, "source_hash"),
-    ("quality", CHUNK_QUALITY_SUFFIX, CHUNK_QUALITY_SCHEMA, "source_hash"),
+# (response key, suffix, canonical schema) — both taken from the same store
+# module so a renamed suffix cannot drift from the schema it describes. All five
+# join on `source_hash`; the enrichment one named it `document_id` before 0.6.0.
+_CHUNK_DETAIL_SIDECARS: tuple[tuple[str, str, pa.Schema], ...] = (
+    ("chunks", CHUNKS_SUFFIX, CHUNKS_SCHEMA),
+    ("entities", ENRICHMENT_ENTITIES_SUFFIX, ENTITY_SCHEMA),
+    ("pii_spans", PII_SPANS_SUFFIX, PII_SPANS_SCHEMA),
+    ("money_spans", MONEY_SPANS_SUFFIX, MONEY_SPANS_SCHEMA),
+    ("quality", CHUNK_QUALITY_SUFFIX, CHUNK_QUALITY_SCHEMA),
 )
-
-#: Sidecar suffix -> the column that carries the source_hash, for the stage
-#: presence scan (:func:`_scan_stage_presence`). Every sidecar joins on
-#: ``source_hash`` *except* the sharded enrichment layout, which writes the
-#: source_hash into ``document_id`` (see ``enrichment_output.py``'s note and
-#: the ``entities`` join column above). Derived from `_CHUNK_DETAIL_SIDECARS`
-#: so the two cannot drift; a suffix absent here defaults to ``source_hash``.
-#: This is why ``GET /stage-presence/enrich`` returned ``[]`` even after enrich
-#: ran — it scanned a ``source_hash`` column the enrich sidecar does not have.
-_PRESENCE_HASH_COLUMN: dict[str, str] = {
-    suffix: column for _key, suffix, _schema, column in _CHUNK_DETAIL_SIDECARS
-}
 
 
 def get_chunk_detail(settings: UISettings, run_id: str, source_hash: str) -> dict | None:
@@ -175,7 +164,7 @@ def get_chunk_detail(settings: UISettings, run_id: str, source_hash: str) -> dic
     shard_dir = run_dir / "documents"  # glob yields nothing if it doesn't exist yet
     paths = {
         suffix: [str(p) for p in sorted(shard_dir.glob(f"*{suffix}"))]
-        for _key, suffix, _schema, _column in _CHUNK_DETAIL_SIDECARS
+        for _key, suffix, _schema in _CHUNK_DETAIL_SIDECARS
     }
     return _chunk_detail(paths, source_hash)
 
@@ -450,28 +439,44 @@ def _conform(table: pa.Table, schema: pa.Schema) -> pa.Table:
 def _read_filtered(
     paths: list[str],
     schema: pa.Schema,
-    column: str,
     value: str,
     *,
     filesystem: object | None = None,
 ) -> list[dict]:
-    """Rows with ``column == value`` across *paths*, conformed to *schema*.
+    """Rows for source_hash *value* across *paths*, conformed to *schema*.
 
     The predicate is pushed into the parquet reader rather than applied after
     a full read, so a whole-corpus sidecar costs only the row groups whose
-    statistics admit *value*. Same skip-unreadable-and-warn policy as
-    :func:`_scan_stage_presence` — one corrupt batch narrows a document's
-    overlay data, it doesn't blank the screen.
+    statistics admit *value*. The hash column is resolved per file
+    (:func:`_hash_column`) so a pre-0.6.0 enrichment sidecar reads too, and the
+    rows come back under the canonical name either way. Same
+    skip-unreadable-and-warn policy as :func:`_scan_stage_presence` — one
+    corrupt batch narrows a document's overlay data, it doesn't blank the
+    screen.
     """
     rows: list[dict] = []
     for p in paths:
         try:
+            column = _hash_column(p, filesystem=filesystem)
             table = pq.read_table(p, filesystem=filesystem, filters=[(column, "=", value)])
+            if column != "source_hash":
+                table = table.rename_columns(
+                    ["source_hash" if n == column else n for n in table.schema.names]
+                )
             rows.extend(_conform(table, schema).to_pylist())
         except Exception as e:
             logger.warning("chunk-detail: skipping unreadable sidecar %s: %s", p, e)
-            continue
     return rows
+
+
+def _hash_column(path: str, *, filesystem: object | None = None) -> str:
+    """``source_hash``, or the pre-0.6.0 name when the file carries that instead.
+
+    One footer read. The store reader's legacy shim on the console's pushdown
+    path, which reads parquet directly rather than through it; both go in 0.7.0.
+    """
+    names = pq.read_schema(path, filesystem=filesystem).names
+    return "source_hash" if "source_hash" in names else LEGACY_HASH_COLUMN
 
 
 def _chunk_detail(
@@ -486,15 +491,11 @@ def _chunk_detail(
     the filesystem differ.
     """
     detail: dict = {}
-    for key, suffix, schema, column in _CHUNK_DETAIL_SIDECARS:
+    for key, suffix, schema in _CHUNK_DETAIL_SIDECARS:
         detail[key] = _read_filtered(
-            paths_by_suffix.get(suffix, []), schema, column, source_hash,
+            paths_by_suffix.get(suffix, []), schema, source_hash,
             filesystem=filesystem,
         )
-    # The sharded enrichment layout writes source_hash into `document_id`;
-    # present it under the name every other sidecar joins on.
-    for entity in detail["entities"]:
-        entity["source_hash"] = entity.pop("document_id")
     # chunk_index is re-sequenced per document across narrative *and* table
     # chunks (process/chunker.py), so it totally orders a document's chunks.
     detail["chunks"].sort(key=lambda r: r["chunk_index"])
@@ -509,15 +510,13 @@ def _chunk_detail(
     return detail
 
 
-def _scan_stage_presence(shard_dir: Path, suffix: str, column: str = "source_hash") -> list[str]:
+def _scan_stage_presence(shard_dir: Path, suffix: str) -> list[str]:
     """source_hash values across every ``*<suffix>`` sidecar in *shard_dir*.
 
-    *column* names the field carrying the source_hash — ``source_hash`` for
-    every sidecar bar the sharded enrichment one, which stores it in
-    ``document_id`` (see :data:`_PRESENCE_HASH_COLUMN`). Reading the wrong
-    column is why ``enrich`` presence came back empty; the values are always
-    returned under the ``source_hash`` name the documents grid joins on,
-    whichever column they were read from.
+    Every sidecar carries them in ``source_hash``; a pre-0.6.0 enrichment
+    sidecar carries the same values in the legacy column, resolved per file by
+    :func:`_hash_column`. Reading the wrong column is why ``enrich`` presence
+    once came back empty.
 
     An unreadable sidecar is warned about and skipped rather than failing the
     whole screen: presence is an annotation on the documents grid, and one
@@ -529,6 +528,7 @@ def _scan_stage_presence(shard_dir: Path, suffix: str, column: str = "source_has
         if p.name.endswith(ARCHIVE_SUFFIX):
             continue
         try:
+            column = _hash_column(str(p))
             col = pq.read_table(str(p), columns=[column]).column(column)
         except Exception as e:
             logger.warning("stage-presence: skipping unreadable sidecar %s: %s", p.name, e)
@@ -630,7 +630,7 @@ def _remote_stages_present(store: RemoteStore, prefix: str) -> tuple[str, ...]:
 
 
 def _remote_stage_presence(
-    store_uri: str, run_id: str, suffix: str, column: str = "source_hash",
+    store_uri: str, run_id: str, suffix: str,
     *, credentials: tuple[str, str] | None = None,
 ) -> list[str] | None:
     store = _open_store(store_uri, credentials)
@@ -642,7 +642,7 @@ def _remote_stage_presence(
     with tempfile.TemporaryDirectory(prefix="womblex-ui-") as tmp:
         tmp_dir = Path(tmp)
         store.download_to_dir(keys, tmp_dir)
-        return _scan_stage_presence(tmp_dir, suffix, column)
+        return _scan_stage_presence(tmp_dir, suffix)
 
 
 def _remote_chunk_detail(
@@ -667,7 +667,7 @@ def _remote_chunk_detail(
     # way RemoteStore roots its own filesystem calls.
     paths = {
         suffix: [f"{store.root}/{key}" for key in store.list_files(prefix, f"*{suffix}")]
-        for _key, suffix, _schema, _column in _CHUNK_DETAIL_SIDECARS
+        for _key, suffix, _schema in _CHUNK_DETAIL_SIDECARS
     }
     return _chunk_detail(paths, source_hash, filesystem=store.fs)
 
