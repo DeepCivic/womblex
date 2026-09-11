@@ -119,7 +119,7 @@ womblex/
 │   │   ├── dashboard.py        # Queue + per-stage checkpoint views for GET /api/dashboard
 │   │   ├── composer.py         # Stage-graph, config JSON Schema, validate + YAML render for the Pipeline Composer
 │   │   ├── presets.py          # Named pipeline presets — built-in (DEFAULT-Isaacus) + operator-saved (format: filename/bytes/parse)
-│   │   ├── execute.py          # Execution capability + enqueue-into-queue (the one writable-to-a-run surface)
+│   │   ├── execute.py          # Execution capability + ingest preflight + enqueue-into-queue (the one writable-to-a-run surface)
 │   │   ├── resources.py        # Store / queue / Isaacus connection cards + live test actions
 │   │   └── routes/
 │   │       ├── runs.py         # /api/runs — manifest, stage-presence, audit, chunk detail
@@ -127,7 +127,7 @@ womblex/
 │   │       ├── dashboard.py    # GET /api/dashboard — queue state + per-stage progress
 │   │       ├── composer.py     # /api/composer — graph, schema, validate, yaml, GET/POST/DELETE presets (presets/ sibling)
 │   │       ├── resources.py    # /api/resources — connection cards + test/store, test/queue
-│   │       └── execute.py      # /api/execute — status + enqueue an extraction run into the queue
+│   │       └── execute.py      # /api/execute — status + prefix-scoped ingest preflight + enqueue an extraction run into the queue
 │   └── utils/
 │       ├── metrics.py       # WER/CER accuracy metrics
 │       ├── tabular_metrics.py # Tabular extraction accuracy (structural fidelity, data integrity)
