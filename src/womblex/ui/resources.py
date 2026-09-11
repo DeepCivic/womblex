@@ -1,9 +1,8 @@
 """The Resources Console's read model (docs/ui-plan.md merge 10).
 
-Three connection cards, none backed by new detection logic — the plan's §3
-row for this screen says connection *testing* already exists as library
-code, so this module's job is only to call it and shape the answer for a
-screen:
+Three connection cards, none backed by new detection logic — connection
+*testing* already exists as library code, so this module's job is only to
+call it and shape the answer for a screen:
 
 - **Run store** — `store/remote.is_remote_uri` / `storage_options_from_env`
   describe how the console is configured to reach state; the live
@@ -95,7 +94,7 @@ def _mask_dsn(dsn: str | None) -> str | None:
     (``postgresql://user:pw@host/db``), whose password ``urlsplit`` finds,  # pragma: allowlist secret -- docstring example, not a real credential
     and libpq's keyword/value form (``host=… password=…``), which has no
     netloc at all and so would otherwise be returned verbatim — a full
-    credential leak from an endpoint with no auth in front of it (plan §6).
+    credential leak from an endpoint with no auth in front of it.
     """
     if not dsn:
         return None
@@ -174,7 +173,7 @@ def _store_source(settings: UISettings) -> str:
 
 
 def get_store_card(settings: UISettings) -> dict:
-    """Where runs are read from, and how (docs/ui-plan.md §3).
+    """Where runs are read from, and how.
 
     ``editable`` is just "this deployment has a writable settings dir" — true
     in both branches, since saving a location is what switches a local

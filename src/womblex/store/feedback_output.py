@@ -1,4 +1,4 @@
-"""One-file-per-report feedback writer (docs/ui-plan.md §4).
+"""One-file-per-report feedback writer.
 
 Any record the console's inspectors show can carry a report action. Each
 report writes exactly one JSON file — never an append, so there is no
@@ -32,7 +32,7 @@ def is_safe_run_id(run_id: str) -> bool:
     """True if *run_id* is a single path segment safe to join onto a root.
 
     The feedback root is a sibling of the run directories, never a child of
-    one (docs/ui-plan.md §4). A ``..`` segment would break that invariant by
+    one. A ``..`` segment would break that invariant by
     walking the write back up into ``runs/`` — measured, not theorised: it
     lands a report at ``runs/runs/<id>/`` instead of ``feedback/<id>/``.
     """
@@ -64,7 +64,7 @@ def build_feedback_record(
     note: str,
     reported_by: str | None,
 ) -> dict[str, Any]:
-    """Assemble the feedback record's on-disk shape (docs/ui-plan.md §4)."""
+    """Assemble the feedback record's on-disk shape."""
     return {
         "reported_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "reported_by": reported_by,
@@ -80,8 +80,8 @@ def build_feedback_record(
 def write_feedback_record(feedback_root: Path, run_id: str, record: dict[str, Any]) -> Path:
     """Write *record* to its own file under ``<feedback_root>/<run_id>/``.
 
-    ``feedback_root`` is never a run directory itself (docs/ui-plan.md §4)
-    — callers resolve it as a sibling location, not a child of any run, so
+    ``feedback_root`` is never a run directory itself — callers resolve it
+    as a sibling location, not a child of any run, so
     retention purges and re-runs cannot disturb accumulated feedback. This
     function owns the root/run_id join, so it is where that containment is
     enforced: an unsafe *run_id* raises rather than writing somewhere else.

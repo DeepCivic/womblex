@@ -1,5 +1,5 @@
-// Thin fetch wrapper over the read API `womblex.ui.routes` serves
-// (docs/ui-plan.md §3). No client-side caching or state management beyond
+// Thin fetch wrapper over the read API `womblex.ui.routes` serves. No
+// client-side caching or state management beyond
 // what each screen needs — the console reads shard artefacts, it doesn't
 // mutate them, so there is nothing to keep in sync.
 
@@ -54,8 +54,8 @@ export async function getManifest(
 	return body.documents;
 }
 
-// Which documents have a sidecar row for one stage (docs/ui-plan.md §3
-// "lifecycle checkpoints are sidecar presence").
+// Which documents have a sidecar row for one stage — a lifecycle
+// checkpoint *is* sidecar presence.
 export async function getStagePresence(
 	runId: string,
 	stage: string,
@@ -487,8 +487,7 @@ export interface JobRow {
 
 // The whole queue section, or null when there is no queue to read. `stale` is
 // the running rows past `stale_after_seconds` — the same predicate a worker's
-// `--stale-timeout` recovers, reported not acted on (§4 "Stalled-job
-// identification").
+// `--stale-timeout` recovers: stalled jobs are identified, not acted on.
 export interface QueueSection {
 	stats: Record<string, number>;
 	total: number;
@@ -500,8 +499,7 @@ export interface QueueSection {
 
 // One stage's checkpoint progress for the selected run, in pipeline order.
 // `documents_per_minute` is the run's lifetime average, null when the
-// timestamps are too close to divide by — a smoother rate would be fiction
-// (§4 "Live local-run progress").
+// timestamps are too close to divide by — a smoother rate would be fiction.
 export interface StageProgress {
 	stage: string;
 	name: string;
@@ -539,7 +537,7 @@ export async function getDashboard(
 // The Pipeline Composer (docs/ui-plan.md merge 9). Neither read is run-scoped:
 // the DAG comes from `STAGE_CONTRACTS` and the form's fields from
 // `WomblexConfig`'s JSON Schema, so the frontend hand-codes neither the stage
-// ordering nor the config field list — §3's "do not hand-code the DAG".
+// ordering nor the config field list.
 export interface ConditionalInput {
 	suffix: string;
 	reason: string;

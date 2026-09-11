@@ -169,7 +169,7 @@ def feedback_client(request: pytest.FixtureRequest, tmp_path: Path) -> tuple[Tes
     """(client, run_root, feedback_root) — feedback_root is where reports land.
 
     Separate from ``api_client`` because the two run sources put feedback in
-    different places relative to ``run_root`` (docs/ui-plan.md §4): nested
+    different places relative to ``run_root``: nested
     under ``output_root`` locally (a plain dir, not a ``run-*`` one, so
     retention never touches it) but a sibling *of* ``runs/`` remotely — the
     store root has no read-only mount to work around.
@@ -388,7 +388,7 @@ class TestRunLogsApi:
 
 
 class TestFeedbackApi:
-    """The report action (docs/ui-plan.md §4, merge 7): one file per report."""
+    """The report action (merge 7): one file per report."""
 
     def test_writes_one_file_per_report(
         self, feedback_client: tuple[TestClient, Path, Path]
@@ -468,8 +468,8 @@ class TestFeedbackApi:
 
         Routing already stops this over HTTP (a path param never matches
         ``/``), so this exercises ``readers.write_feedback`` directly — it is
-        library API, and the sibling-of-runs invariant (docs/ui-plan.md §4)
-        is the module's guarantee, not the router's.
+            library API, and the sibling-of-runs invariant is the module's
+        guarantee, not the router's.
         """
         output_root = tmp_path / "runs"
         _write_manifest_shard(output_root / "run-a" / "documents", _ROWS[:1])
@@ -1203,7 +1203,7 @@ class TestComposerSavePresets:
 
     Parametrised over local (a writable `presets_dir`) and remote (the store's
     own `presets/` prefix, a sibling of `runs/` and `feedback/`) — the same
-    local-vs-store split feedback keeps (§C). A store-backed console therefore
+    local-vs-store split feedback keeps. A store-backed console therefore
     saves without any writable mount; a local console without a presets dir
     refuses with 409, the same shape the Execution Controls use.
     """
@@ -1239,7 +1239,7 @@ class TestComposerSavePresets:
 
     def test_remote_save_lands_under_the_store_presets_prefix(self, tmp_path: Path) -> None:
         """A store-backed console writes presets to `presets/`, a sibling of
-        `runs/` — so the compose ui service needs no writable mount (§C)."""
+        `runs/` — so the compose ui service needs no writable mount."""
         pytest.importorskip("fsspec")
         store_root = tmp_path / "store"
         client = TestClient(create_app(store_uri=str(store_root)))
@@ -1399,7 +1399,7 @@ class TestExecuteApi:
         assert body["output_uri"] == str(tmp_path / "store")
 
     def test_enqueue_conflict_without_a_store(self, tmp_path: Path) -> None:
-        """A local output_root can configure and audit but not dispatch (plan §4)."""
+        """A local output_root can configure and audit but not dispatch."""
         client = TestClient(create_app(
             output_root=tmp_path, ingest_uri=str(tmp_path / "inbox"), db_dsn="postgresql://x/y",
         ))
@@ -1850,8 +1850,8 @@ class TestSidecarImage:
 
 
 class TestFrontendCi:
-    """`ui/`'s CI job (docs/ui-plan.md §6 "CI") must call scripts that still exist —
-    otherwise a rename here silently stops linting or building the SPA.
+    """`ui/`'s CI job must call scripts that still exist — otherwise a rename
+    here silently stops linting or building the SPA.
     """
 
     def test_frontend_job_runs_declared_package_scripts(self) -> None:

@@ -93,7 +93,7 @@ _CLAIM_RUN = (
 _STATS_ALL = "SELECT status, count(*) FROM womblex_jobs GROUP BY status"
 _STATS_RUN = "SELECT status, count(*) FROM womblex_jobs WHERE run_id = %s GROUP BY status"
 
-# The read-only queries behind the console dashboard (docs/ui-plan.md §3).
+# The read-only queries behind the console dashboard.
 # Their optional run filter is expressed as `(%s::text IS NULL OR ...)` rather
 # than a second spelled-out variant: the parameter carries the value, so each
 # query stays one literal string no matter how the caller scopes it. The cast
@@ -202,8 +202,8 @@ class WorkerState:
     """A worker's live hold on the queue, derived from ``locked_by``.
 
     This is *not* liveness: an exited worker leaves its locks behind, so a
-    row here past the stale threshold means orphaned work, not a busy worker
-    (docs/ui-plan.md §4).
+    row here past the stale threshold means orphaned work, not a busy
+    worker.
     """
 
     worker_id: str
@@ -437,7 +437,7 @@ class JobQueue:
         rows = self.conn.execute(sql, params).fetchall()
         return {status: count for status, count in rows}
 
-    # --- read-only views (the console dashboard; docs/ui-plan.md §3) ---------
+    # --- read-only views (the console dashboard) -----------------------------
 
     def list_jobs(
         self, run_id: str | None = None, *, status: str | None = None, limit: int = 200,
@@ -477,8 +477,8 @@ class JobQueue:
     ) -> Throughput:
         """Batches completed in the trailing window, as a rate.
 
-        Derived from ``updated_at`` on ``done`` rows — no new schema
-        (docs/ui-plan.md §4). A retried batch that later succeeds counts once,
+        Derived from ``updated_at`` on ``done`` rows — no new schema. A
+        retried batch that later succeeds counts once,
         because only its final transition leaves the row ``done``.
         """
         row = self.conn.execute(

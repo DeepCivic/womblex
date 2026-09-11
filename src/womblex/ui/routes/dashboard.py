@@ -1,4 +1,4 @@
-"""``/api/dashboard`` — queue state and per-stage progress (docs/ui-plan.md §3).
+"""``/api/dashboard`` — queue state and per-stage progress.
 
 Read-only, like every other console route: it calls
 :mod:`womblex.ui.dashboard`, which reads the job queue and the checkpoints

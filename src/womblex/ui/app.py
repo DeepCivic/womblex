@@ -14,8 +14,8 @@ from fastapi.staticfiles import StaticFiles
 from womblex.ui.deps import UISettings
 from womblex.ui.routes import composer, dashboard, execute, feedback, resources, runs
 
-# `ui/` is not vendored into the wheel (docs/ui-plan.md §6 "SPA delivery") —
-# only Dockerfile.ui's builder stage produces this directory, at the
+# `ui/` is not vendored into the wheel — only Dockerfile.ui's builder
+# stage produces this directory, at the
 # container's WORKDIR. Resolved from cwd rather than `__file__`: a normal
 # (non-editable) `pip install` copies this module into site-packages, where
 # there is no sibling `ui/` to find, so cwd is the only path that agrees

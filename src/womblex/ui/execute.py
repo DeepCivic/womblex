@@ -3,8 +3,8 @@
 The one console surface that *does* something to a run rather than reading
 one — and the plan pins exactly how far that goes:
 
-- **Dispatch is always the queue** (§4 "Running the pipeline from the
-  screen"). The console never shells out and never runs a batch in-process:
+- **Dispatch is always the queue** — running the pipeline from the screen
+  enqueues. The console never shells out and never runs a batch in-process:
   it enqueues, and the workers a platform brings up do the work. Both write
   actions here are thin wrappers over :mod:`womblex.cli.cloud`'s own building
   blocks — enqueue an extraction run (``JobQueue.enqueue`` + the same
@@ -14,14 +14,14 @@ one — and the plan pins exactly how far that goes:
   through the store the sidecar already reads. No web request can become an
   arbitrary command because there is no command, only a queue row.
 
-  The console is therefore a skin over the CLI sequence in README §"the full
-  pipeline", not a second orchestration concept: it supplies the ordering
-  ``run-stage`` says is the caller's, from the one declaration in
+  The console is therefore a skin over the full-pipeline CLI sequence the
+  README documents, not a second orchestration concept: it supplies the
+  ordering ``run-stage`` says is the caller's, from the one declaration in
   :mod:`womblex.pipeline_order`.
 
 - **Queue-only, so a store *and* a DSN are required.** A queue-less local
   console would need its own background runner and progress reporting, which
-  the plan defers (§4). Execution therefore needs both a remote store (to
+  is out of scope. Execution therefore needs both a remote store (to
   enqueue keys from and publish shards to) and a job queue (to dispatch
   through); a local ``output_root``-only deployment can configure and audit
   but not run, and :func:`execution_status` says so rather than half-working.
@@ -29,8 +29,7 @@ one — and the plan pins exactly how far that goes:
 "Log streaming" is the queue's own job-status transitions
 (:meth:`JobQueue.list_jobs`) plus the per-stage checkpoints
 :mod:`womblex.ui.dashboard` already reads — a batch-granular feed, labelled
-as such (§4 "Live local-run progress"), not a fabricated line-by-line log
-the pipeline does not emit.
+as such, not a fabricated line-by-line log the pipeline does not emit.
 """
 from __future__ import annotations
 

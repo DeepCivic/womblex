@@ -43,9 +43,9 @@ jobs:
   frontend:
     name: Console frontend (ui/)
     runs-on: ubuntu-latest
-    # Separate from `test`'s Python matrix (docs/ui-plan.md §6 "CI") — a
-    # broken SvelteKit build must fail its own job, not hide inside (or
-    # block on) a pipeline test run it has nothing to do with.
+    # Separate from `test`'s Python matrix — a broken SvelteKit build must
+    # fail its own job, not hide inside (or block on) a pipeline test run it
+    # has nothing to do with.
     steps:
       - uses: actions/checkout@v4
 

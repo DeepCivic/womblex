@@ -1,6 +1,6 @@
 """``/api/runs/{run_id}/feedback`` — the report action both inspectors share.
 
-The console's only write path (docs/ui-plan.md §4, §6). Even this one never
+The console's only write path. Even this one never
 touches a run: it writes to a ``feedback/`` location that is always a
 sibling of the run it reports on, never a child of it, so nothing here can
 disturb a run's own artefacts. Same governing rule as the read routes —
@@ -19,8 +19,7 @@ from womblex.ui.deps import UISettings, get_settings
 router = APIRouter(prefix="/api/runs", tags=["feedback"])
 
 # A trusted reverse proxy sets this; there is no auth layer to verify it
-# against (docs/ui-plan.md §6), so it is advisory the same way the env
-# fallback below is.
+# against, so it is advisory the same way the env fallback below is.
 _REPORTED_BY_HEADER = "X-Womblex-Reported-By"
 
 
