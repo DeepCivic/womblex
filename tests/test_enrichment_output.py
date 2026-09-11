@@ -6,7 +6,9 @@ The isaacus SDK is a core dependency (always installed).
 from __future__ import annotations
 
 from pathlib import Path
+from typing import ClassVar
 
+import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
@@ -27,8 +29,12 @@ from womblex.store.enrichment_output import (
     ENRICHMENT_META_SCHEMA,
     ENTITY_SCHEMA,
     GRAPH_EDGE_SCHEMA,
+    LEGACY_HASH_COLUMN,
+    enrichment_entities_path_for,
     graph_edges_path_for,
+    read_enrichment_entities,
     read_graph_edges,
+    write_enrichment_entities_shard,
     write_enrichment_metadata,
     write_entity_mentions,
     write_graph_edges,
@@ -133,7 +139,7 @@ class TestWriteEntityMentions:
         )], output)
 
         table = pq.read_table(str(output))
-        doc_ids = table.column("document_id").to_pylist()
+        doc_ids = table.column("source_hash").to_pylist()
         assert all(d == "doc1" for d in doc_ids)
 
         labels = table.column("entity_label").to_pylist()
@@ -215,7 +221,7 @@ class TestGraphEdgesShard:
         by_base = read_graph_edges(base)
         by_dir = read_graph_edges(tmp_path)
         assert by_base.num_rows == by_dir.num_rows > 0
-        assert set(by_base.column("document_id").to_pylist()) == {"hash1"}
+        assert set(by_base.column("source_hash").to_pylist()) == {"hash1"}
         relations = set(by_base.column("relation").to_pylist())
         # containment + chunk-mention edges both present when chunks are passed
         assert "contains" in relations
@@ -264,7 +270,7 @@ class TestWriteEnrichmentMetadata:
 
         table = pq.read_table(str(output))
         row = table.to_pydict()
-        assert row["document_id"][0] == "doc1"
+        assert row["source_hash"][0] == "doc1"
         assert row["doc_type_enriched"][0] == "other"
         assert row["jurisdiction"][0] == "AU"
         assert row["segment_count"][0] == 1
@@ -278,3 +284,96 @@ class TestWriteEnrichmentMetadata:
         assert output.exists()
         table = pq.read_table(str(output))
         assert table.num_rows == 0
+
+
+class TestJoinKeyName:
+    """One document-identity column name across every sidecar in the library.
+
+    These three sidecars named theirs ``document_id`` until 0.6.0 with values
+    byte-identical to the ``source_hash`` the others join on, so every consumer
+    carried a note and a rename. The enumeration case below is what stops the
+    next sidecar reintroducing a second name; it lives here because this module
+    held the one that diverged.
+    """
+
+    # The register ingests bypass the NLP pipeline, hash no source document and
+    # have no source_hash to carry — the one schema outside the convention.
+    EXEMPT: ClassVar[set[str]] = {"REGISTER_MANIFEST_SCHEMA"}
+
+    def _store_schemas(self) -> dict[str, pa.Schema]:
+        import importlib
+        import pkgutil
+
+        import womblex.store as store_pkg
+
+        found: dict[str, pa.Schema] = {}
+        for mod_info in pkgutil.iter_modules(store_pkg.__path__):
+            mod = importlib.import_module(f"womblex.store.{mod_info.name}")
+            for name, obj in vars(mod).items():
+                if isinstance(obj, pa.Schema) and name.isupper():
+                    found[f"{mod_info.name}.{name}"] = obj
+        return found
+
+    def test_every_sidecar_joins_on_source_hash(self) -> None:
+        schemas = self._store_schemas()
+        assert schemas, "no store schemas found — did the enumeration break?"
+        offenders = {
+            name: schema.names
+            for name, schema in schemas.items()
+            if name.split(".")[-1] not in self.EXEMPT and "source_hash" not in schema.names
+        }
+        assert not offenders, f"schemas with no source_hash column: {offenders}"
+
+    def test_no_sidecar_reintroduces_the_legacy_name(self) -> None:
+        offenders = [
+            name for name, schema in self._store_schemas().items()
+            if LEGACY_HASH_COLUMN in schema.names
+        ]
+        assert not offenders, (
+            f"{LEGACY_HASH_COLUMN} is the pre-0.6.0 name for source_hash; "
+            f"found on {offenders}"
+        )
+
+
+class TestLegacyColumnShim:
+    """A shard written before 0.6.0 reads back as one written after it.
+
+    Removed in 0.7.0 along with ``LEGACY_HASH_COLUMN`` — from then a pre-rename
+    shard is a missing-column error and must be re-enriched.
+    """
+
+    def _legacy(self, schema: pa.Schema) -> pa.Schema:
+        return pa.schema([
+            pa.field(LEGACY_HASH_COLUMN, f.type) if f.name == "source_hash" else f
+            for f in schema
+        ])
+
+    def test_entities_shard_written_under_the_old_name(self, tmp_path: Path) -> None:
+        text = _make_text()
+        enrichment = _make_enrichment(text)
+        base = tmp_path / "batch-0001.parquet"
+        write_enrichment_entities_shard([("hash1", enrichment)], base)
+        current = read_enrichment_entities(base).to_pylist()
+
+        legacy_table = pq.read_table(str(enrichment_entities_path_for(base)))
+        legacy_table = legacy_table.rename_columns([
+            LEGACY_HASH_COLUMN if n == "source_hash" else n for n in legacy_table.schema.names
+        ]).cast(self._legacy(ENTITY_SCHEMA))
+        pq.write_table(legacy_table, str(enrichment_entities_path_for(base)))
+
+        assert read_enrichment_entities(base).to_pylist() == current
+
+    def test_graph_edges_shard_written_under_the_old_name(self, tmp_path: Path) -> None:
+        text = _make_text()
+        graph = build_document_graph("hash1", _make_enrichment(text), [])
+        base = tmp_path / "batch-0001.parquet"
+        write_graph_edges_shard([("hash1", graph)], base)
+        current = read_graph_edges(base).to_pylist()
+
+        legacy_table = pq.read_table(str(graph_edges_path_for(base)))
+        legacy_table = legacy_table.rename_columns([
+            LEGACY_HASH_COLUMN if n == "source_hash" else n for n in legacy_table.schema.names
+        ]).cast(self._legacy(GRAPH_EDGE_SCHEMA))
+        pq.write_table(legacy_table, str(graph_edges_path_for(base)))
+
+        assert read_graph_edges(base).to_pylist() == current

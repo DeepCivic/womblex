@@ -142,7 +142,7 @@ def _relink_mentions(
     docs_with_edges: set[str] = set()
 
     for row in entity_rows:
-        source_hash = row["document_id"]  # sharded layout carries source_hash here
+        source_hash = row["source_hash"]
         chunks = chunks_by_hash.get(source_hash, [])
         overlaps = _overlapping_chunks(row["mention_start"], row["mention_end"], chunks)
 
@@ -154,12 +154,12 @@ def _relink_mentions(
         for ci in overlaps:
             chunk_node = f"{source_hash}:chunk:{ci}"
             edges.append({
-                "document_id": source_hash, "source_id": entity_node,
+                "source_hash": source_hash, "source_id": entity_node,
                 "target_id": chunk_node, "relation": _MENTION_RELATION,
                 "prop_key": "start", "prop_value": str(row["mention_start"]),
             })
             edges.append({
-                "document_id": source_hash, "source_id": entity_node,
+                "source_hash": source_hash, "source_id": entity_node,
                 "target_id": chunk_node, "relation": _MENTION_RELATION,
                 "prop_key": "end", "prop_value": str(row["mention_end"]),
             })

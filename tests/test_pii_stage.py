@@ -47,7 +47,7 @@ def _chunk_row(idx: int, text: str, content_type: str) -> dict:
 
 def _entity_row(start: int, end: int, entity_type: str, eid: str = "e1") -> dict:
     return {
-        "document_id": DOC, "entity_id": eid, "entity_label": "person",
+        "source_hash": DOC, "entity_id": eid, "entity_label": "person",
         "name": "Jane Doe", "entity_type": entity_type, "role": "other",
         "mention_start": start, "mention_end": end, "chunk_index": -1,
     }

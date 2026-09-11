@@ -316,7 +316,7 @@ the chunking stage.
 
 | Column | Description |
 |--------|-------------|
-| `document_id` | FK to `_manifest.parquet` (joined via `source_hash`) |
+| `source_hash` | FK to `_manifest.parquet` |
 | `entity_id` | Entity identifier (shared across a person/location/term's mentions) |
 | `entity_label` | `person` \| `location` \| `term` \| `external_document` |
 | `name` | Resolved entity name |
@@ -329,7 +329,7 @@ the chunking stage.
 
 | Column | Description |
 |--------|-------------|
-| `document_id` | FK to `_manifest.parquet` (joined via `source_hash`) |
+| `source_hash` | FK to `_manifest.parquet` |
 | `source_id` | Source node identifier |
 | `target_id` | Target node identifier |
 | `relation` | Relationship type |
@@ -339,7 +339,7 @@ the chunking stage.
 
 | Column | Description |
 |--------|-------------|
-| `document_id` | FK to `_manifest.parquet` (joined via `source_hash`) |
+| `source_hash` | FK to `_manifest.parquet` |
 | `doc_type_enriched` | `statute` \| `regulation` \| `decision` \| `contract` \| `other` |
 | `jurisdiction`, `title` | Document-level metadata Kanon-2 inferred |
 | `segment_count` | Number of structural segments |

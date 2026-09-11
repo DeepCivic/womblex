@@ -118,10 +118,8 @@ def _candidates_for_batch(
 ) -> dict[str, list[Candidate]]:
     """Read the entities sidecar and group candidate mentions by source_hash.
 
-    The sharded entities sidecar carries source_hash in the ``document_id``
-    column (see store.enrichment_output). Candidates are rows whose
-    ``entity_type`` is in ``candidate_kinds`` (corporate persons + address
-    locations by default).
+    Candidates are rows whose ``entity_type`` is in ``candidate_kinds``
+    (corporate persons + address locations by default).
     """
     table = read_enrichment_entities(base_path)
     if table.num_rows == 0:
@@ -131,10 +129,10 @@ def _candidates_for_batch(
     for r in table.to_pylist():
         if r["entity_type"] not in kinds:
             continue
-        out[r["document_id"]].append(Candidate(
+        out[r["source_hash"]].append(Candidate(
             text=r["name"] or "",
             kind=r["entity_type"],
-            source_hash=r["document_id"],
+            source_hash=r["source_hash"],
             mention_start=r["mention_start"] if r["mention_start"] is not None else -1,
             mention_end=r["mention_end"] if r["mention_end"] is not None else -1,
         ))
