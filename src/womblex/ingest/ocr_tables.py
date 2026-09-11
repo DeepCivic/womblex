@@ -36,8 +36,8 @@ logger = logging.getLogger(__name__)
 # Precision gates. Below any gate the reconstructor refuses (returns
 # None); a wrongly-binned grid is worse than today's silence. Calibrated
 # against the rendered-clean fixtures (must pass) and the false-table set
-# (must refuse) — see tests/test_table_benchmark.py and
-# docs/evaluation.md §2b.
+# (must refuse) — see the table benchmark in the womblex-benchmark
+# repository, and the table section of docs/evaluation.md.
 MIN_COLUMNS = 3
 # Three, not two: ``columns_from_data`` independently drops any x-cluster
 # holding fewer than 3 spans, so every column of a 2-body-row table is

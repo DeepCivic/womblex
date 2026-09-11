@@ -700,8 +700,9 @@ uv sync --all-extras
 # bare checkout). Use -m "not slow and not benchmark" for the fast subset.
 uv run python -m pytest
 
-# Run OCR and accuracy benchmarks (need the full fixtures; minutes-long)
-uv run python -m pytest tests/test_fixture_accuracy.py tests/test_womblex_collection_accuracy.py -v
+# Accuracy benchmarks live in womblex-benchmark, not here; run them from that
+# checkout and they regenerate docs/accuracy/*.md in this one:
+#   uv run python -m pytest accuracy/ -v
 
 # Type checking
 uv run mypy src/

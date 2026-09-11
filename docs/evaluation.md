@@ -38,6 +38,10 @@ See `docs/accuracy/` for measured baselines per stage.
 
 Measurement follows a two-stage decomposition: **detection** is the per-class `table` layout F1 (§1's DocLayNet harness); **reconstruction** is scored *conditioned on a correct table rect* (the GT rect is fed straight to `reconstruct_table`, no detector in the loop), so the reconstruction number tracks the grid builder alone. A blended end-to-end (detection × reconstruction) stage is deferred to a scanned-document round, once real-scan GT exists to blend against.
 
+The `test_table_benchmark.py` named below lives in the **womblex-benchmark**
+repository, under `accuracy/`, with the ground truth it scores against; it
+publishes its rows into `docs/accuracy/EXTRACTION.md` here.
+
 | Metric | Implementation | Location | Ground Truth Source |
 |--------|---------------|----------|---------------------|
 | **Structural Fidelity** | Same `structural_fidelity` as §2, over an alignment projection (`cells → DataFrame`, header row → uniquified column names). Rows/cols/column-name agreement. | `utils/tabular_metrics.py → structural_fidelity()`; projection in `test_table_benchmark.py → _table_to_frame()` | Rendered-clean GT (source spreadsheet drawn to a page) + `dense_text_548_table.csv` |
