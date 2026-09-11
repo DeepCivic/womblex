@@ -400,6 +400,7 @@ def _chunks_to_rows(
                 "page_start": c.page_start,
                 "page_end": c.page_end,
                 "elem_order": c.elem_order,
+                "token_count": c.token_count,
             })
     return rows
 

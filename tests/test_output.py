@@ -152,6 +152,7 @@ _SAMPLE_CHUNK_ROWS = [
         "page_start": 1,
         "page_end": 1,
         "elem_order": None,
+        "token_count": 2,
     },
     {
         "source_hash": "h" * 64,
@@ -164,6 +165,7 @@ _SAMPLE_CHUNK_ROWS = [
         "page_start": 1,
         "page_end": 2,
         "elem_order": None,
+        "token_count": 2,
     },
     {
         "source_hash": "h" * 64,
@@ -176,6 +178,7 @@ _SAMPLE_CHUNK_ROWS = [
         "page_start": 3,
         "page_end": 3,
         "elem_order": 4,
+        "token_count": 9,
     },
 ]
 
@@ -246,6 +249,30 @@ class TestChunksSchemaRoundTrip:
         assert out.schema.equals(CHUNKS_SCHEMA)
         assert out.num_rows == len(_SAMPLE_CHUNK_ROWS)
         assert all(r["elem_order"] is None for r in out.to_pylist())
+
+    def test_pre_token_count_shard_backfills(self, tmp_path):
+        # Same compat convention for the token count: a run completed before
+        # the column exists reads back with nulls rather than failing.
+        legacy_schema = pa.schema([
+            f for f in CHUNKS_SCHEMA if f.name != "token_count"
+        ])
+        legacy_rows = [
+            {k: v for k, v in r.items() if k != "token_count"}
+            for r in _SAMPLE_CHUNK_ROWS
+        ]
+        target = chunks_path_for(tmp_path / "batch-0001.parquet")
+        pq.write_table(
+            pa.Table.from_pylist(legacy_rows, schema=legacy_schema), str(target),
+        )
+        out = read_chunks(target)
+        assert out.schema.equals(CHUNKS_SCHEMA)
+        assert all(r["token_count"] is None for r in out.to_pylist())
+
+    def test_token_count_round_trips(self, tmp_path):
+        base = tmp_path / "batch-0001.parquet"
+        write_chunks(_SAMPLE_CHUNK_ROWS, base)
+        rows = read_chunks(base).to_pylist()
+        assert [r["token_count"] for r in rows] == [2, 2, 9]
 
     def test_genuinely_missing_column_still_raises(self, tmp_path):
         # The shim is scoped to elem_order; other gaps remain hard errors.

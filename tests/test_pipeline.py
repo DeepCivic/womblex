@@ -602,6 +602,34 @@ class TestCmdChunkShards:
         assert chunk_hashes <= elem_hashes
         assert chunk_hashes <= manifest_hashes
 
+    @requires_chunking
+    def test_written_rows_carry_the_chunkers_token_count(
+        self, tmp_path: Path,
+    ) -> None:
+        """The count reaches the sidecar, and is the tokeniser's, not a proxy."""
+        if not _CSV_FILE.exists():
+            pytest.skip("CSV fixture not available")
+
+        from womblex.process.chunker import create_chunker
+        from womblex.store.output import read_chunks
+
+        shard_dir = _seed_run_with_extraction(tmp_path, run_id="i2-tokens")
+        args = argparse.Namespace(
+            shards=shard_dir, config=None,
+            checkpoint_dir=None, dataset="i2-tokens",
+            no_resume=True, limit=None,
+        )
+        assert cmd_chunk(args) == 0
+
+        rows = read_chunks(shard_dir).to_pylist()
+        assert rows, "chunk stage wrote no rows to count"
+        assert all(r["token_count"] is not None for r in rows)
+
+        # A chunker built from the same tokeniser reproduces every count —
+        # which a character or word proxy would not.
+        counter = create_chunker(_CHUNK_TOKENIZER, chunk_size=512).token_counter
+        assert all(r["token_count"] == counter(r["text"]) for r in rows)
+
     def test_rejects_dir_without_manifests(self, tmp_path: Path) -> None:
         empty = tmp_path / "empty"
         empty.mkdir()

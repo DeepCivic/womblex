@@ -39,6 +39,15 @@ spaces, so ordering the two together needs the elements as well:
 ``chunker.chunks_in_document_order(rows, spans)`` does the interleave.
 Read the elements under the same ``text_source`` overlay the chunks were
 written under — a different overlay is a different coordinate space.
+
+``token_count`` is the chunk's length in the units the chunker budgeted
+with — its own token counter, applied to the final chunk text. It earns a
+column because it cannot be recovered from the row: character and word
+counts follow from ``text``, a token count needs the tokeniser. It is
+**exact at or below the budget and a floor above it** — semchunk's counter
+short-circuits over-budget text to ``chunk_size + 1``, and only a
+redaction-repaired chunk is ever over budget (see ``_count_tokens`` in
+``process/chunker.py``). Null for shards written before the column existed.
 """
 
 from __future__ import annotations
@@ -151,12 +160,13 @@ CHUNKS_SCHEMA = pa.schema([
     ("page_start", pa.int32()),
     ("page_end", pa.int32()),
     ("elem_order", pa.int32()),
+    ("token_count", pa.int32()),
 ])
 
 # Columns added to CHUNKS_SCHEMA after parser 2.0. Shards written before them
 # are back-filled with nulls on read instead of failing — the compat shim
 # `_read_chunks_shard` asks for.
-_CHUNKS_BACKFILL: tuple[str, ...] = ("elem_order",)
+_CHUNKS_BACKFILL: tuple[str, ...] = ("elem_order", "token_count")
 
 
 ELEMENTS_SUFFIX = ".elements.parquet"

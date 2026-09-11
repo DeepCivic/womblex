@@ -85,6 +85,7 @@ export interface Chunk {
 	page_start: number | null;
 	page_end: number | null;
 	elem_order: number | null;
+	token_count: number | null;
 }
 
 // Entity mention. Joins on `source_hash` like every other overlay.

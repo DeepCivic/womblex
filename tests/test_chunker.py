@@ -19,6 +19,7 @@ from womblex.ingest.elements import BBox, Cell, Element
 from womblex.process.chunker import (
     ChunkInput,
     TextChunk,
+    _count_tokens,
     _repair_redaction_splits,
     build_chunk_input,
     chunk_batch,
@@ -555,6 +556,54 @@ class TestChunkBatch:
         out = chunk_batch([ci], chunker)
         for c in out["a"]:
             assert text[c.start_char:c.end_char] == c.text
+
+    def test_token_count_uses_the_chunkers_own_counter(self) -> None:
+        # The number on the row is the one semchunk budgeted with, applied to
+        # the text that actually landed — not a downstream re-estimate.
+        chunker = _make_test_chunker(chunk_size=10)
+        text = " ".join(f"word{i}" for i in range(30))
+        out = chunk_batch([ChunkInput("a", text)], chunker)
+        assert out["a"]
+        for c in out["a"]:
+            assert c.token_count == _word_token_counter(c.text)
+
+    def test_token_count_respects_the_budget(self) -> None:
+        chunker = _make_test_chunker(chunk_size=7)
+        text = " ".join(f"word{i}" for i in range(40))
+        out = chunk_batch([ChunkInput("a", text)], chunker)
+        assert all(c.token_count is not None and c.token_count <= 7 for c in out["a"])
+
+    def test_table_chunks_counted_too(self) -> None:
+        chunker = _make_test_chunker(chunk_size=50)
+        md = table_to_markdown(["H"], [["v"]])
+        ci = ChunkInput(source_hash="a", narrative="", tables=[(1, 0, md)])
+        out = chunk_batch([ci], chunker)
+        assert out["a"][0].token_count == _word_token_counter(out["a"][0].text)
+
+    def test_repaired_chunk_counts_the_merged_text(self) -> None:
+        # The repair concatenates two chunks; the count must be of the result,
+        # not the sum of the two pre-merge counts (which the join would miss).
+        chunker = _make_test_chunker(chunk_size=3)
+        text = "lots of text before <REDACTED> and then lots of text after"
+        out = chunk_batch([ChunkInput("a", text)], chunker)
+        merged = [c for c in out["a"] if "<REDACTED>" in c.text]
+        assert merged, "no chunk carries the whole marker"
+        for c in out["a"]:
+            assert c.token_count == _word_token_counter(c.text)
+
+    def test_over_budget_count_is_a_floor_not_an_exact_figure(self) -> None:
+        # semchunk's counter short-circuits over-budget text to chunk_size + 1
+        # rather than tokenising it, so the column is exact at or below the
+        # budget and a floor above it. Only a repaired chunk is ever above.
+        # Pinned here because the docs on the column state it.
+        chunker = semchunk.chunkerify(
+            _word_token_counter, chunk_size=10, max_token_chars=8,
+        )
+        long_text = " ".join(f"word{i}" for i in range(100))
+        chunks = _count_tokens(
+            [TextChunk(long_text, 0, len(long_text), 0)], chunker.token_counter,
+        )
+        assert chunks[0].token_count == 11 < _word_token_counter(long_text)
 
     def test_split_redaction_marker_repaired(self) -> None:
         # Construct text such that semchunk plausibly splits around the
