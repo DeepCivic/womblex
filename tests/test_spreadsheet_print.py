@@ -90,7 +90,7 @@ class TestQualifier:
     def test_qualifier_rejects_compliance_notice_shape(self) -> None:
         # Compliance-notice cohort: every page has `has_table_signal=True`
         # (real rules-of-law tables exist) but `has_manifest_signal=False`
-        # (tables are small, not manifest-shape). Pre-§2 qualifier tripped
+        # (tables are small, not manifest-shape). An earlier qualifier tripped
         # on the 50%-of-pages rule and routed the doc through the manifest
         # extractor, producing conf=0.70 garbage in `tables[0]`.
         from womblex.ingest.page_profile import PageProfile

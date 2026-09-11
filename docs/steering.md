@@ -151,7 +151,7 @@ PERSON and ADDRESS are now both detected (regex + `all-MiniLM-L6-v2` context val
 
 Measured on Throsby fixture (7 GT `<REDACTED>` tags across 3 pages); vector-first detection is described in [decisions.md](decisions.md) "Redaction detection" and [CHANGELOG.md](../CHANGELOG.md).
 
-- **Native cohort recall significantly improved post vector-first detection.** `redact/stage.py:detect_redactions` now tries `page.get_drawings()` for filled near-black rectangles before falling back to the raster CV2 contour detector. On the §1 residual pages (01093 / 01094 / 01349) recall jumped 6→14, 7→13, 3→68 without regressing FOI master (0 regions preserved).
+- **Native cohort recall significantly improved post vector-first detection.** `redact/stage.py:detect_redactions` now tries `page.get_drawings()` for filled near-black rectangles before falling back to the raster CV2 contour detector. On the residual pages (01093 / 01094 / 01349) recall jumped 6→14, 7→13, 3→68 without regressing FOI master (0 regions preserved).
 - **Filters** (each surfaced during validation): near-black RGB/CMYK fill; `min_width ≥ 3pt` excludes narrow vertical separators in manifest tables; `min_height ≥ 8pt` excludes glyph-rendering small filled rects on PDFs that draw text as filled-path glyphs (01125-class regression: 14,184 false positives → 144 actual).
 - **Open — scanned/raster cohort precision.** Direct-Complaint forms with dark form-field backgrounds (02737-class scanned_mixed docs) still trigger the area-threshold contour detector even with `max_area_ratio=0.05`. Higher precision on this cohort would need a different detection signal (e.g. layout-aware classes that distinguish form fields from redaction bars). `stories/STATUS.md` was retired into [CHANGELOG.md](../CHANGELOG.md) "Historical engineering notes" — see the vector-first redaction detection entry there for the original write-up of this cohort.
 
@@ -167,7 +167,8 @@ implementation plan (formerly `table-cell-reconstruction-plan.md`) has been
 folded into the standard docs and removed: the mechanism and refusal rationale
 live in [decisions.md](decisions.md) “Table-cell reconstruction on OCR pages”,
 the metric set + two-stage decomposition + ground-truth authoring spec in
-[evaluation.md](evaluation.md) §2b, and the component status above.
+the Document-Table Reconstruction section of [evaluation.md](evaluation.md),
+and the component status above.
 
 ### 2026-07-29: B4 — table reconstruction report + docs wiring
 
@@ -184,9 +185,9 @@ plumbing. Money recall is deliberately omitted (no labelled money GT — see
 [money-extraction.md](money-extraction.md)) rather than fabricated;
 CHUNKING.md's table knock-on is noted
 (its generator is unwritten and numbers predate tables on OCR pages).
-`evaluation.md` gained §2b (Document-Table Reconstruction Accuracy),
-distinct from §2's spreadsheet→parquet. Only B5 (CI gates) remains. See
-[evaluation.md](evaluation.md) §2b.
+`evaluation.md` gained a Document-Table Reconstruction Accuracy section,
+distinct from Tabular Extraction Accuracy's spreadsheet→parquet. Only B5
+(CI gates) remains. See [evaluation.md](evaluation.md).
 
 ### 2026-07-29: B2 — precision-gate calibration + benchmark metric set
 
@@ -207,7 +208,8 @@ symmetry — is the guardrail. Benchmark additions in
 `tests/test_table_benchmark.py`: an alignment projection feeding
 `utils/tabular_metrics.py` (`structural_fidelity` + `data_integrity`), the
 false-table cohort (FP count gates), and the GT acceptance
-checker. See [evaluation.md](evaluation.md) §2b.
+checker. See the Document-Table Reconstruction section of
+[evaluation.md](evaluation.md).
 
 ### 2026-07-28: B0 — table metric fixed before measuring reconstruction against it
 
@@ -222,7 +224,7 @@ class TP1/FP0/FN3 (R 25%, F1 40%) → TP1/FP0/FN1 (R 50%, F1 66.7%), the
 remaining FN being `sparse_text_344`'s genuinely undetected 8-word block; all
 other classes unchanged. `docs/accuracy/EXTRACTION.md` still shows the
 pre-fix numbers until the next full accuracy-suite run regenerates it. See
-[evaluation.md](evaluation.md) §2b.
+the Document-Table Reconstruction section of [evaluation.md](evaluation.md).
 
 ### 2026-03-22: Benchmark test performance + stale findings cleanup
 
