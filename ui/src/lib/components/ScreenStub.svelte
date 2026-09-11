@@ -11,7 +11,6 @@
 		     DESIGN.md measures #7b6ff0 at 4.4:1, "Fails body", and this
 		     confirms 4.42:1 dark / 3.64:1 light. -->
 		Reads <code class="font-mono">{reads}</code>. Ships in
-		<span class="text-foreground">delivery merge {merge}</span> — see
-		<code class="font-mono">docs/ui-plan.md</code> §5.
+		<span class="text-foreground">delivery merge {merge}</span>.
 	</p>
 </div>

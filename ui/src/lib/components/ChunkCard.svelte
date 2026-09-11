@@ -9,7 +9,7 @@
 	// into the reassembled document narrative, a different coordinate space; the
 	// screen groups them onto their chunk (entities by `chunk_index`, money by
 	// range containment) and lists them beside the text rather than inventing a
-	// mapping the pipeline never wrote (the §1 "surface what exists" rule).
+	// mapping the pipeline never wrote — the console surfaces what exists.
 	import type { Chunk, PiiSpan, EntityMention, MoneySpan, ChunkQuality } from '$lib/api';
 
 	let {

@@ -1,4 +1,4 @@
-"""``/api/runs`` — the run selector's data source (docs/ui-plan.md §3).
+"""``/api/runs`` — the run selector's data source.
 
 Read-only: calls nothing but ``womblex.ui.readers``, which calls nothing but
 existing ``store/`` readers. No pipeline logic lives here.

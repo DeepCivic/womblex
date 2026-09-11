@@ -7,8 +7,8 @@
 	// while the tab is hidden so a backgrounded console stops hitting the queue.
 	//
 	// Nothing here requeues, cancels or claims: the dashboard *names* a stalled
-	// job (§4 "Stalled-job identification"), a worker recovers it. Adding an
-	// action would make this a second producer of queue state, which the whole
+	// job, a worker recovers it. Adding an action would make this a second
+	// producer of queue state, which the whole
 	// console is built to avoid.
 	import {
 		getDashboard,
@@ -246,8 +246,8 @@
 			<section class="flex flex-col gap-3">
 				<h2 class="font-display text-sm">Job queue</h2>
 				<!-- KPI tiles: the exact queue counts, plus total and throughput.
-				     Throughput is derived from `updated_at` deltas, no new schema
-				     (§4 "Real-time throughput"). -->
+				     Throughput is derived from `updated_at` deltas, no new
+				     schema. -->
 				<div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
 					{#each statTiles as tile (tile.status)}
 						<div
@@ -276,8 +276,8 @@
 				</div>
 
 				<!-- Worker fleet, from `locked_by` on running rows. Not liveness:
-				     an exited worker leaves a stale lock, which reads as stalled
-				     (§4 "Worker fleet status"). -->
+				     an exited worker leaves a stale lock, which reads as
+				     stalled. -->
 				<div class="flex flex-col gap-2 rounded-md border border-border bg-surface-raised p-4">
 					<h3 class="font-display text-xs">Worker fleet</h3>
 					{#if data.queue.workers.length > 0}
@@ -340,7 +340,7 @@
 				</div>
 			</section>
 		{:else}
-			<!-- No queue is a normal local deployment, not a fault (§2): the
+			<!-- No queue is a normal local deployment, not a fault: the
 			     checkpoint half below still renders. -->
 			<div class="rounded-md border border-border bg-surface-raised p-4">
 				<h2 class="font-display text-sm">Job queue</h2>
@@ -404,7 +404,7 @@
 							</dl>
 							{#if pct(stage) !== null}
 								<!-- Success fraction of processed. Batch-granular, labelled
-								     as such — a smoother bar would be fiction (§4). -->
+								     as such — a smoother bar would be fiction. -->
 								<div class="h-1.5 overflow-hidden rounded-full bg-background">
 									<div class="h-full bg-status-done" style="width: {pct(stage)}%"></div>
 								</div>

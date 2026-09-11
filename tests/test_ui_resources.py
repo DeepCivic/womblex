@@ -278,7 +278,7 @@ class TestResourcesApi:
 
         The keyword form has no netloc for ``urlsplit`` to find a password
         in, so a URI-only mask returns it verbatim — a full credential leak
-        from an endpoint with no auth in front of it (plan §6).
+        from an endpoint with no auth in front of it.
         """
         masked = resources._mask_dsn(
             "host=db.internal user=ops password=hunter2 dbname=womblex"  # pragma: allowlist secret

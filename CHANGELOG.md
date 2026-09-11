@@ -268,7 +268,7 @@ Minor, additive (the `money` op + two sidecars; the shared table-grid algorithm)
   - A2/A3 — OCR-PDF path emits `kind="table"` with cells; narrative rebuilt from regions *outside* the rect (no double-count); deskewed pages refuse rather than mis-bin.
   - A4 — images already reached reconstruction via `extract_text`; the dead `ImageExtractor` deleted (breaking for direct importers; nothing internal used it). `get_extractor` signature now `(profile)`.
   - B0/B2 — GT aggregation fix (recall 25%→50% by artefact); `MIN_ROW_FILL_RATIO=0.75` density gate closes three false positives.
-  - B3/B4/B5 — rendered-table benchmark (`tests/test_table_benchmark.py`) + `EXTRACTION.md`/`evaluation.md §2b` wiring; sanity asserts become build-failing gates (exact row/col counts + `MIN_CELL_MATCH`, false-table count == 0). #17 round 1 complete.
+  - B3/B4/B5 — rendered-table benchmark (`tests/test_table_benchmark.py`) + `EXTRACTION.md` / `evaluation.md`'s Document-Table Reconstruction section wiring; sanity asserts become build-failing gates (exact row/col counts + `MIN_CELL_MATCH`, false-table count == 0). #17 round 1 complete.
 
 ### Fixed
 - **Declined continental number no longer leaks its decimal tail.** `1.234,56 EUR` came back as `56 EUR` (wrong by 10³); ambiguous numeric runs are now blocked whole. Only suffix-pattern forms leaked; international mode unaffected.

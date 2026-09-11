@@ -1,7 +1,7 @@
-// The five domains (docs/ui-plan.md §3 "Screen → data source"). Order
-// matches the delivery sequence so the rail reads top-to-bottom as the plan
-// does; only the shell exists so far (merge 4) — each route is a stub until
-// its own merge lands.
+// The five domains, each mapped to its own data source. Order matches the
+// delivery sequence so the rail reads top-to-bottom in build order; only the
+// shell exists so far (merge 4) — each route is a stub until its own merge
+// lands.
 import Gauge from '@lucide/svelte/icons/gauge';
 import FolderSearch from '@lucide/svelte/icons/folder-search';
 import ScrollText from '@lucide/svelte/icons/scroll-text';

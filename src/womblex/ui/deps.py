@@ -1,8 +1,8 @@
 """Where the console reads run state from.
 
-The sidecar reaches run state exactly the way a worker does
-(docs/ui-plan.md §2), so it adds no configuration surface of its own: a
-local deployment points at an ``output_root`` that is bind-mounted
+The sidecar reaches run state exactly the way a worker does, so it adds no
+configuration surface of its own: a local deployment points at an
+``output_root`` that is bind-mounted
 read-only, and a cloud deployment sets ``WOMBLEX_STORE_URI`` — the same
 variable ``womblex-cloud`` already reads.
 """
@@ -34,11 +34,11 @@ class UISettings:
     orthogonal to the run source rather than paired with it: a queue is
     present whenever one is configured (env or argument) and absent
     otherwise, and a deployment with no queue falls back to the per-stage
-    checkpoints inside the run itself (docs/ui-plan.md §2).
+    checkpoints inside the run itself.
 
     ``feedback_dir`` is local-mode only — the report action's writable
-    surface (docs/ui-plan.md §4). ``None`` means the default,
-    ``<output_root>/feedback``; an explicit value is the escape hatch for a
+    surface. ``None`` means the default ``<output_root>/feedback``; an
+    explicit value is the escape hatch for a
     deployment that mounts ``output_root`` read-only and needs feedback to
     land somewhere else entirely. Remote mode has no equivalent field: it
     always writes under the store's own ``feedback/`` prefix, a sibling of

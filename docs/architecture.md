@@ -102,7 +102,7 @@ src/womblex/
 │   └── checkpoint.py      # JSON-based checkpoint manager for resumable batch runs
 ├── cloud/                 # Distributed run support (queue.py, worker.py, stage_contracts.py, stage_runner.py)
 ├── verify/
-│   └── engine.py          # Two-pass verification (structural + weak-signal) — defined, not wired in; see §11
+│   └── engine.py          # Two-pass verification (structural + weak-signal) — defined, not wired in; see the Verify stage
 ├── utils/
 │   ├── models.py          # Local model path resolution (models/ dir + HF snapshot layout) + the load record each footer carries
 │   ├── metrics.py         # CER, WER, CER-s accuracy metrics (numpy-accelerated Levenshtein + spatial sort)

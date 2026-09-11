@@ -7,8 +7,7 @@ read a run's artefacts:
 
 - `cloud/stage_contracts.py`'s `STAGE_CONTRACTS` is already the pipeline's
   DAG as data. `get_stage_graph()` renders it as nodes/edges instead of the
-  frontend hand-coding one — the plan's §3 "Do not hand-code the DAG in the
-  frontend" rule.
+  frontend hand-coding one, so the DAG keeps a single definition.
 - `config.py`'s `WomblexConfig` is already a validated Pydantic model. The
   form is its JSON Schema; validation and the YAML download both go through
   the same `WomblexConfig(**raw)` construction `load_config` uses, so the
@@ -80,9 +79,9 @@ def _producer(suffix: str) -> str | None:
 def get_stage_graph() -> dict[str, Any]:
     """The pipeline DAG `STAGE_CONTRACTS` implies, at schema defaults.
 
-    Edges come from `required_inputs` only — the hard ordering guardrail the
-    plan's §3 names ("ensuring extraction precedes chunking"). Conditional
-    inputs ride along on each node instead: they are config-derived, so an
+    Edges come from `required_inputs` only — the hard ordering guardrail
+    (extraction precedes chunking). Conditional inputs ride along on each
+    node instead: they are config-derived, so an
     edge for one would hold only for whatever config the form happens to
     have, and a graph that reshapes as an operator edits a batch size reads
     worse than a fixed one annotated with what a stage *might* also read.

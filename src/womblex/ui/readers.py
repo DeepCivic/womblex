@@ -100,9 +100,9 @@ def get_stage_presence(settings: UISettings, run_id: str, stage: str) -> list[st
     """``source_hash`` values with a ``stage`` sidecar row in run_id.
 
     None if the run doesn't exist, else a (possibly empty) sorted list —
-    the lifecycle-checkpoint switcher's data (docs/ui-plan.md §3 "lifecycle
-    checkpoints are sidecar presence"). Reads only the ``source_hash``
-    column of each sidecar, so this stays cheap even for large chunks /
+    the lifecycle-checkpoint switcher's data, since a lifecycle checkpoint
+    *is* sidecar presence. Reads only the ``source_hash`` column of each
+    sidecar, so this stays cheap even for large chunks /
     enrichment sidecars.
     """
     suffix = STAGE_SUFFIXES[stage]
@@ -131,8 +131,8 @@ def get_shard_audit(settings: UISettings, run_id: str) -> dict | None:
     return audit_shard_directory(run_dir / "documents").as_dict()
 
 
-# The Chunk Inspector's overlay sidecars (docs/ui-plan.md §3), each filtered
-# to one document: (response key, suffix, canonical schema, join column).
+# The Chunk Inspector's overlay sidecars, each filtered to one document:
+# (response key, suffix, canonical schema, join column).
 # Suffix and schema are taken from the same store module so a renamed suffix
 # cannot drift away from the schema it describes. `entities` alone joins on
 # `document_id` — see `enrichment_output.py`'s note that the sharded layout
@@ -262,7 +262,7 @@ def write_feedback(
     """Write one report-action file for run_id; None if the run doesn't exist.
 
     Local and remote both land at a ``feedback/<run_id>/`` sibling of the
-    run directories, never inside one (docs/ui-plan.md §4) — see
+    run directories, never inside one — see
     :mod:`womblex.store.feedback_output`'s module docstring for why. The
     two branches differ only in where that sibling sits: locally it nests
     under ``output_root`` (a plain directory, not a run-id one, so
@@ -592,7 +592,7 @@ def _describe_remote_run(store: RemoteStore, run_id: str) -> RunDescription:
         run_id=run_id,
         document_count=table.num_rows,
         stages=_remote_stages_present(store, prefix),
-        created_at=None,  # object stores don't expose this uniformly (docs/ui-plan.md §4)
+        created_at=None,  # object stores don't expose this uniformly
         updated_at=None,
     )
 

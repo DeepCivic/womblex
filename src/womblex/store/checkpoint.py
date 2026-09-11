@@ -70,8 +70,8 @@ class CheckpointProgress:
     ``documents_per_minute`` is the run's average over its own lifetime
     (``started_at`` → ``updated_at``), not an instantaneous rate: a
     checkpoint is written once per batch, so anything finer would be
-    fiction (docs/ui-plan.md §4). ``None`` when the timestamps are unusable
-    or too close together to divide by — see :data:`_MIN_RATE_SPAN_SECONDS`.
+    fiction. ``None`` when the timestamps are unusable or too close together
+    to divide by — see :data:`_MIN_RATE_SPAN_SECONDS`.
     """
 
     name: str

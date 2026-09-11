@@ -5,9 +5,9 @@ cheap, network-free read of whether this deployment can dispatch work (and
 if not, why); ``POST /enqueue`` plans an extraction run into the queue and
 ``POST /stages`` dispatches that run's downstream stages. All delegate to
 :mod:`womblex.ui.execute`, which enforces the store+ingest+queue requirement
-(plan §4) before touching anything — this router only
-maps its :class:`~womblex.ui.execute.ExecutionDisabled` reasons onto HTTP
-status codes.
+before touching anything — this router only maps its
+:class:`~womblex.ui.execute.ExecutionDisabled` reasons onto HTTP status
+codes.
 
 The run/log feed is the queue's own view the Dashboard already serves
 (``/api/dashboard``); nothing is duplicated here.
