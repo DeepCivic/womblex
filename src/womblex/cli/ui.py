@@ -2,8 +2,8 @@
 
 Binds to loopback by default. The console has no authentication by design
 — it is kept undiscoverable at the network layer instead — so exposing it
-beyond localhost is an explicit ``--host`` choice
-the operator makes alongside whatever fronts it.
+beyond localhost is an explicit ``--host`` choice the operator makes
+alongside whatever fronts it.
 """
 from __future__ import annotations
 

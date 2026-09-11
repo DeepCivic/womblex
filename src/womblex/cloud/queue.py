@@ -202,8 +202,7 @@ class WorkerState:
     """A worker's live hold on the queue, derived from ``locked_by``.
 
     This is *not* liveness: an exited worker leaves its locks behind, so a
-    row here past the stale threshold means orphaned work, not a busy
-    worker.
+    row here past the stale threshold means orphaned work, not a busy worker.
     """
 
     worker_id: str
@@ -478,8 +477,8 @@ class JobQueue:
         """Batches completed in the trailing window, as a rate.
 
         Derived from ``updated_at`` on ``done`` rows — no new schema. A
-        retried batch that later succeeds counts once,
-        because only its final transition leaves the row ``done``.
+        retried batch that later succeeds counts once, because only its
+        final transition leaves the row ``done``.
         """
         row = self.conn.execute(
             _THROUGHPUT, (window_seconds, run_id, run_id)

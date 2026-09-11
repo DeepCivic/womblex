@@ -169,8 +169,8 @@ def feedback_client(request: pytest.FixtureRequest, tmp_path: Path) -> tuple[Tes
     """(client, run_root, feedback_root) — feedback_root is where reports land.
 
     Separate from ``api_client`` because the two run sources put feedback in
-    different places relative to ``run_root``: nested
-    under ``output_root`` locally (a plain dir, not a ``run-*`` one, so
+    different places relative to ``run_root``: nested under ``output_root``
+    locally (a plain dir, not a ``run-*`` one, so
     retention never touches it) but a sibling *of* ``runs/`` remotely — the
     store root has no read-only mount to work around.
     """
@@ -388,7 +388,7 @@ class TestRunLogsApi:
 
 
 class TestFeedbackApi:
-    """The report action (merge 7): one file per report."""
+    """The report action (docs/ui-plan.md merge 7): one file per report."""
 
     def test_writes_one_file_per_report(
         self, feedback_client: tuple[TestClient, Path, Path]
@@ -468,7 +468,7 @@ class TestFeedbackApi:
 
         Routing already stops this over HTTP (a path param never matches
         ``/``), so this exercises ``readers.write_feedback`` directly — it is
-            library API, and the sibling-of-runs invariant is the module's
+        library API, and the sibling-of-runs invariant is the module's
         guarantee, not the router's.
         """
         output_root = tmp_path / "runs"

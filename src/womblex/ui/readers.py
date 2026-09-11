@@ -101,8 +101,8 @@ def get_stage_presence(settings: UISettings, run_id: str, stage: str) -> list[st
 
     None if the run doesn't exist, else a (possibly empty) sorted list —
     the lifecycle-checkpoint switcher's data, since a lifecycle checkpoint
-    *is* sidecar presence. Reads only the ``source_hash``
-    column of each sidecar, so this stays cheap even for large chunks /
+    *is* sidecar presence. Reads only the ``source_hash`` column of each
+    sidecar, so this stays cheap even for large chunks /
     enrichment sidecars.
     """
     suffix = STAGE_SUFFIXES[stage]

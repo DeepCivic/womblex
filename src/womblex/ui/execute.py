@@ -20,11 +20,11 @@ one — and the plan pins exactly how far that goes:
   :mod:`womblex.pipeline_order`.
 
 - **Queue-only, so a store *and* a DSN are required.** A queue-less local
-  console would need its own background runner and progress reporting, which
-  is out of scope. Execution therefore needs both a remote store (to
-  enqueue keys from and publish shards to) and a job queue (to dispatch
-  through); a local ``output_root``-only deployment can configure and audit
-  but not run, and :func:`execution_status` says so rather than half-working.
+  console would need its own background runner and progress reporting, both
+  deferred. Execution therefore needs both a remote store (to enqueue keys
+  from and publish shards to) and a job queue (to dispatch through); a local
+  ``output_root``-only deployment can configure and audit but not run, and
+  :func:`execution_status` says so rather than half-working.
 
 "Log streaming" is the queue's own job-status transitions
 (:meth:`JobQueue.list_jobs`) plus the per-stage checkpoints

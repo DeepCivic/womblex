@@ -32,8 +32,8 @@ def is_safe_run_id(run_id: str) -> bool:
     """True if *run_id* is a single path segment safe to join onto a root.
 
     The feedback root is a sibling of the run directories, never a child of
-    one. A ``..`` segment would break that invariant by
-    walking the write back up into ``runs/`` — measured, not theorised: it
+    one. A ``..`` segment would break that invariant by walking the write
+    back up into ``runs/`` — measured, not theorised: it
     lands a report at ``runs/runs/<id>/`` instead of ``feedback/<id>/``.
     """
     return (
@@ -81,8 +81,8 @@ def write_feedback_record(feedback_root: Path, run_id: str, record: dict[str, An
     """Write *record* to its own file under ``<feedback_root>/<run_id>/``.
 
     ``feedback_root`` is never a run directory itself — callers resolve it
-    as a sibling location, not a child of any run, so
-    retention purges and re-runs cannot disturb accumulated feedback. This
+    as a sibling location, not a child of any run, so retention purges and
+    re-runs cannot disturb accumulated feedback. This
     function owns the root/run_id join, so it is where that containment is
     enforced: an unsafe *run_id* raises rather than writing somewhere else.
     """

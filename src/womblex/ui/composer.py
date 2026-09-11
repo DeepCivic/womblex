@@ -80,8 +80,8 @@ def get_stage_graph() -> dict[str, Any]:
     """The pipeline DAG `STAGE_CONTRACTS` implies, at schema defaults.
 
     Edges come from `required_inputs` only — the hard ordering guardrail
-    (extraction precedes chunking). Conditional
-    inputs ride along on each node instead: they are config-derived, so an
+    (extraction precedes chunking). Conditional inputs ride along on each
+    node instead: they are config-derived, so an
     edge for one would hold only for whatever config the form happens to
     have, and a graph that reshapes as an operator edits a batch size reads
     worse than a fixed one annotated with what a stage *might* also read.

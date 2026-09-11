@@ -7,8 +7,8 @@
 	// while the tab is hidden so a backgrounded console stops hitting the queue.
 	//
 	// Nothing here requeues, cancels or claims: the dashboard *names* a stalled
-	// job, a worker recovers it. Adding an
-	// action would make this a second producer of queue state, which the whole
+	// job, a worker recovers it. Adding an action would make this a second
+	// producer of queue state, which the whole
 	// console is built to avoid.
 	import {
 		getDashboard,

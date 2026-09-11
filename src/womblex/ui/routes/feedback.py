@@ -1,7 +1,7 @@
 """``/api/runs/{run_id}/feedback`` — the report action both inspectors share.
 
-The console's only write path. Even this one never
-touches a run: it writes to a ``feedback/`` location that is always a
+The console's only write path. Even this one never touches a run: it
+writes to a ``feedback/`` location that is always a
 sibling of the run it reports on, never a child of it, so nothing here can
 disturb a run's own artefacts. Same governing rule as the read routes —
 ``womblex.ui.readers`` does the IO, this module stays a thin DI wrapper.
