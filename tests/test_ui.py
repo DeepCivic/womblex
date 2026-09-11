@@ -527,6 +527,7 @@ _CHUNK_ROW = {
     "source_hash": "hash-a", "chunk_index": 1, "text": "second chunk",
     "start_char": 20, "end_char": 32, "content_type": "narrative",
     "has_redaction": False, "page_start": 1, "page_end": 1, "elem_order": 3,
+    "token_count": 2,
 }
 _CHUNK_ROW_0 = {**_CHUNK_ROW, "chunk_index": 0, "text": "first chunk", "start_char": 0, "end_char": 19}
 _OTHER_DOC_CHUNK = {**_CHUNK_ROW, "source_hash": "hash-b"}

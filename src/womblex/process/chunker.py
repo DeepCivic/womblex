@@ -31,7 +31,7 @@ Pass-through to semchunk:
 Womblex-only surface (no semchunk equivalent):
 
 - :class:`TextChunk` — Womblex's chunk schema (offsets, content type,
-  page span, redaction flag).
+  page span, redaction flag, token count).
 - :func:`table_to_markdown` — TableData → markdown projection.
 - :func:`reassemble_narrative` / :func:`collect_tables_from_elements` /
   :func:`build_chunk_input` — element-stream → ``ChunkInput`` projection.
@@ -97,6 +97,11 @@ class TextChunk:
     # reconstruct narrative ↔ table document order, which the two disjoint
     # projections (narrative string vs per-table markdown) otherwise lose.
     elem_order: int | None = None
+    # Length of `text` in the units the chunker budgeted with — its own
+    # token counter, not a re-estimate. Set by chunk_batch after the
+    # redaction-split repair, so a merged chunk reports the merged text.
+    # None on a TextChunk built outside chunk_batch.
+    token_count: int | None = None
 
 
 @dataclass
@@ -326,8 +331,9 @@ def chunk_batch(
 
     Returns ``{source_hash: list[TextChunk]}`` with ``chunk_index``
     re-sequenced per doc, ``has_redaction`` populated from the chunk
-    text, and ``page_start`` / ``page_end`` resolved from per-doc page
-    breaks (or the table's page for table chunks).
+    text, ``page_start`` / ``page_end`` resolved from per-doc page
+    breaks (or the table's page for table chunks), and ``token_count``
+    measured by ``chunker.token_counter``.
     """
     if not inputs:
         return {}
@@ -391,9 +397,39 @@ def chunk_batch(
                 )
 
     for src, doc_chunks in out.items():
-        out[src] = _repair_redaction_splits(doc_chunks)
+        out[src] = _count_tokens(
+            _repair_redaction_splits(doc_chunks), chunker.token_counter,
+        )
 
     return out
+
+
+def _count_tokens(
+    chunks: list[TextChunk], token_counter: Callable[[str], int],
+) -> list[TextChunk]:
+    """Stamp each chunk with its length under the chunker's own counter.
+
+    Runs after ``_repair_redaction_splits`` so a merged chunk reports the
+    merged text rather than the sum of two pre-merge counts. ``token_counter``
+    is the callable semchunk budgeted with, so the number is the one it
+    compared against ``chunk_size``.
+
+    **The count saturates above budget.** ``chunkerify`` derives
+    ``max_token_chars`` from the tokeniser's vocabulary whenever it exposes one
+    — so for a real tokeniser, not just an explicit
+    ``create_chunker(max_token_chars=...)``, the counter it builds short-circuits
+    to ``chunk_size + 1`` for text over budget rather than tokenising it
+    (measured: a 193-token string counts 65 under a 64-token budget). Every
+    chunk semchunk emits is at or under budget, so every count is exact; the
+    one chunk that can exceed it is a repaired one, whose count is then a lower
+    bound. Hence the rule on the column: **exact at or below ``chunk_size``, a
+    floor above it.** Recovering the true figure for a repaired chunk means
+    tokenising it again with a second counter, which is the re-estimate this
+    column exists not to be.
+    """
+    for chunk in chunks:
+        chunk.token_count = token_counter(chunk.text)
+    return chunks
 
 
 def _resolve_narrative_input(doc: ChunkInput, overrides: dict[str, object]) -> object:

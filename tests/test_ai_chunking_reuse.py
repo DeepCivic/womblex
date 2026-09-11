@@ -47,6 +47,9 @@ class _RecordingChunker:
 
     def __init__(self) -> None:
         self.received: list[object] | None = None
+        # A real semchunk.Chunker exposes the counter it budgeted with;
+        # chunk_batch reads it to stamp each chunk's token_count.
+        self.token_counter = lambda text: len(text.split())
 
     def __call__(
         self, texts, *, offsets=False, overlap=None, processes=1, progress=False,
