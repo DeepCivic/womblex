@@ -116,6 +116,13 @@ x-cloud-env: &cloud-env
   AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
   AWS_REGION: ${AWS_REGION:-us-east-1}
   ISAACUS_API_KEY: ${ISAACUS_API_KEY:-}
+  # Which image the run is executing inside, for the run record. It has to be
+  # handed in: a digest is content-addressed after the push, so it cannot be
+  # baked into the image it names, and a container cannot read its own labels.
+  # Same value the services are pinned to, so the record names what compose
+  # actually ran. A tag here records no digest rather than a false one; the
+  # `ui` service overrides it with the console image below.
+  WOMBLEX_IMAGE_REF: ${WOMBLEX_PIPELINE_IMAGE:-ghcr.io/deepcivic/womblex:latest}
 
 services:
   # Bundled local backends — Postgres (queue) + MinIO (object store). All three
@@ -269,6 +276,9 @@ services:
         required: false
     environment:
       <<: *cloud-env
+      # The console runs the other image, so it names that one rather than
+      # inheriting the pipeline's reference from the anchor.
+      WOMBLEX_IMAGE_REF: ${WOMBLEX_CONSOLE_IMAGE:-ghcr.io/deepcivic/womblex-console:latest}
       # Where an operator-saved ingest/output override lives
       # — its own writable mount, since the override file is what
       # *names* the store and so cannot live inside it.

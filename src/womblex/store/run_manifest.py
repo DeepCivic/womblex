@@ -46,6 +46,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from womblex.pipeline_order import stage_rank
+from womblex.store.build_info import image_info
 from womblex.store.output import read_manifest
 from womblex.store.run_stamp import (
     read_footer_models,
@@ -62,8 +63,12 @@ RUN_MANIFEST_FILENAME = "manifest.parquet"
 #: The run record's footer key, and the version of its shape. The version is
 #: carried so a later reader can tell a record it understands from one it does
 #: not, rather than inferring the shape from which fields happen to be present.
+#: Version 2 adds ``image`` — which container image, if any, the run executed
+#: inside. Bumped rather than added silently, since telling a record that has
+#: no image block from one whose run was not containerised is exactly the
+#: distinction a reader inferring from presence would get wrong.
 RUN_RECORD_KEY = f"{NAMESPACE}.run_record"
-RUN_RECORD_VERSION = 1
+RUN_RECORD_VERSION = 2
 
 #: What one observed parquet contributes: its footer key-value metadata and its
 #: row count. A caller that reads files where they live supplies these rather
@@ -346,6 +351,18 @@ def _partial(
         "external services describe the environment this record was written "
         "in, not one recorded during the run",
     )
+    image = record["image"]
+    if image["digest"]:
+        # Stated even when the digest is present, and especially then: the
+        # record must not read as though it verified the image it names.
+        gaps.append(
+            "the image digest is supplied to the container by the deployment, "
+            "not read from the running image — a digest is content-addressed "
+            "after the push and cannot be baked into the image it names, so "
+            "this is operator-honest rather than self-verifying",
+        )
+    else:
+        gaps.append(f"image digest: {image['reason']}")
     gaps.append(
         "the OCR engine is not recorded on the element stream, so a VLM-OCR "
         "service cannot be established from the shard directory",
@@ -393,6 +410,7 @@ def build_run_record(
         "stages": _observed_stages(footers),
         "local_models": _observed_models(footers),
         "services": _services(shard_dir),
+        "image": image_info().as_record(),
     }
     # Two different limits. A caller that supplied footers read them where the
     # files live, so the stages and models are complete and the staged-subset

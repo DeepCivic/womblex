@@ -69,6 +69,11 @@ x-local-env: &local-env
   AWS_ACCESS_KEY_ID: minioadmin
   AWS_SECRET_ACCESS_KEY: minioadmin  # pragma: allowlist secret -- MinIO's own default, reachable only inside the local stack
   AWS_REGION: us-east-1
+  # Emptied deliberately. These services BUILD, so the base file's published
+  # reference would have the run record name an image the run is not executing
+  # inside — the one dishonest outcome available here. Empty records the
+  # absence of a digest with its reason, which is what a local build is.
+  WOMBLEX_IMAGE_REF: ""
 
 services:
   init:
