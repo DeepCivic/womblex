@@ -40,9 +40,10 @@ class EnqueueRequest(BaseModel):
     """The configure-and-run form: which documents, at what run id and batching.
 
     ``input_prefix`` is ingest-relative (the enqueue lists
-    ``<ingest_uri>/<prefix>``), matching ``womblex enqueue --input-prefix``.
-    Optional: omitted means the whole configured ingest root, which is the
-    normal case ("no prefix field on any screen").
+    ``<ingest_uri>/<prefix>``), matching ``womblex enqueue --input-prefix`` and
+    ``GET /ingest``'s query parameter — the composer previews a prefix there
+    and posts that same string here. Optional: omitted means the whole
+    configured ingest root, which is the normal case.
     ``run_id`` omitted mints a fresh timestamped id; supplying an existing
     one resumes it, since enqueue is idempotent on ``(run_id, batch_num)``.
     """
@@ -60,12 +61,25 @@ def get_status(settings: UISettings = Depends(get_settings)) -> dict:  # noqa: B
 
 
 @router.get("/ingest")
-def get_ingest(settings: UISettings = Depends(get_settings)) -> dict:  # noqa: B008
-    """Reachability + document count of the configured ingest location.
+def get_ingest(
+    input_prefix: str | None = None, settings: UISettings = Depends(get_settings),  # noqa: B008
+) -> dict:
+    """Reachability + document count of the ingest location a prefix names.
 
     Feeds the composer's "N documents ready" line before it enqueues.
+    ``input_prefix`` is the same ingest-relative prefix
+    :class:`EnqueueRequest` takes, and the response echoes it back, so the
+    composer posts the prefix it previewed and the two cannot disagree about
+    which documents a press will run. Omitted, the whole ingest root, as
+    before.
+
+    400 on a prefix that escapes the ingest root — the refusal the enqueue
+    applies to the same string.
     """
-    return execute.ingest_preflight(settings)
+    try:
+        return execute.ingest_preflight(settings, input_prefix=input_prefix)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.post("/enqueue")

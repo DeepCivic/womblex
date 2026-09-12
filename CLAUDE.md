@@ -312,6 +312,14 @@ uv run python -m pytest tests/ -v
 uv run python -m pytest tests/ -v -m "not slow and not benchmark"
 ```
 
+CI gates on three steps in this order, and **the type check is one of them** — a
+green suite is not a green build:
+```bash
+uv run ruff check src/ tests/
+uv run mypy src/          # src/ only; tests are not type-checked
+uv run python -m pytest tests/ -v
+```
+
 Accuracy benchmarks are **not** in this repository. They live in
 womblex-benchmark and regenerate `docs/accuracy/*.md` here:
 

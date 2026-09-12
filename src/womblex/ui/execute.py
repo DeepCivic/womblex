@@ -37,7 +37,7 @@ import logging
 from dataclasses import dataclass
 from typing import cast
 
-from womblex.cli._shared import NestedCorpusError, select_supported
+from womblex.cli._shared import NestedCorpusError, normalise_prefix, select_supported
 from womblex.store.feedback_output import is_safe_run_id
 from womblex.store.retention import generate_run_id
 from womblex.ui.deps import UISettings
@@ -147,6 +147,26 @@ def _guard(settings: UISettings, *, needs_ingest: bool = True) -> ExecutionCapab
     return cap
 
 
+def _supported_under(settings: UISettings, prefix: str) -> tuple[str, list[str]]:
+    """The location *prefix* names, and the store keys a run there would ingest.
+
+    One listing for both write and preview, so the count the composer shows is
+    the count its press enqueues rather than a second walk that agrees today.
+    Raises :class:`~womblex.cli._shared.NestedCorpusError` on a layout a run
+    refuses.
+    """
+    from womblex.store.remote import RemoteStore
+
+    ingest_uri = cast(str, settings.ingest_uri)
+    location = f"{ingest_uri}/{prefix}".rstrip("/")
+    ingest_store = RemoteStore.from_uri(ingest_uri, credentials=settings.s3_credentials)
+    all_keys = ingest_store.list_files(prefix, "*", recursive=True)
+    # Store-relative keys: strip the prefix for the nesting check, restore after.
+    scope = f"{prefix}/" if prefix else ""
+    names = select_supported((k.removeprefix(scope) for k in all_keys), location=location)
+    return location, [f"{scope}{n}" for n in names]
+
+
 @dataclass(frozen=True)
 class EnqueueResult:
     """The outcome of an enqueue, for the screen to report and then poll.
@@ -189,8 +209,13 @@ def enqueue_extraction(
     ingest root when omitted), split them into ``batch_size`` batches, and
     write one idempotent queue row each, stamped with the ingest root.
 
+    *input_prefix* is ingest-relative and goes through the listing
+    :func:`ingest_preflight` previews, so a prefix the operator saw a count for
+    enqueues that count.
+
     Raises :class:`ExecutionDisabled` when the console cannot dispatch (the
-    route maps it to 409) and ``ValueError`` on bad input (→ 400).
+    route maps it to 409) and ``ValueError`` on bad input (→ 400) — an unsafe
+    run id or prefix, a nested layout, or no documents under the prefix.
     """
     _guard(settings)
     if batch_size < 1:
@@ -200,17 +225,9 @@ def enqueue_extraction(
         raise ValueError(f"unsafe run_id: {resolved_run_id!r}")
 
     from womblex.cloud.queue import JobQueue, JobSpec
-    from womblex.store.remote import RemoteStore
 
     ingest_uri = cast(str, settings.ingest_uri)
-    ingest_store = RemoteStore.from_uri(ingest_uri, credentials=settings.s3_credentials)
-    prefix = input_prefix or ""
-    location = f"{ingest_uri}/{prefix}".rstrip("/")
-    all_keys = ingest_store.list_files(prefix, "*", recursive=True)
-    # Store-relative keys: strip the prefix for the nesting check, restore after.
-    scope = f"{prefix.strip('/')}/" if prefix.strip("/") else ""
-    names = select_supported((k.removeprefix(scope) for k in all_keys), location=location)
-    keys = [f"{scope}{n}" for n in names]
+    location, keys = _supported_under(settings, normalise_prefix(input_prefix))
     if not keys:
         raise ValueError(f"no supported documents under {location}")
 
@@ -244,45 +261,59 @@ def enqueue_extraction(
     )
 
 
-def ingest_preflight(settings: UISettings) -> dict:
-    """Reachability + document count of the configured ingest location.
+def ingest_preflight(settings: UISettings, *, input_prefix: str | None = None) -> dict:
+    """Reachability + document count of the ingest location *input_prefix* names.
 
-    Feeds the composer's "N documents ready" line, using the same recursive
-    listing and ``SUPPORTED_EXTENSIONS`` filter the enqueue does — so the
-    count shown is the count that would be enqueued.
+    Feeds the composer's "N documents ready" line through
+    :func:`_supported_under` — the listing the enqueue itself uses — so the
+    count shown is the count that press would enqueue, for the *same*
+    ingest-relative prefix the composer then posts.
+
+    A nested layout reports the refusal rather than a number, and names the
+    immediate subdirectories holding documents with a count and a ready-to-send
+    prefix each: the recovery from that refusal is to point at one of them, so
+    the operator picks one here rather than reaching for the CLI or having the
+    deployment's ingest location repointed. Each count is the documents
+    anywhere beneath that subdirectory — enough to tell an intended corpus from
+    a stray directory, which is what it is for — so one that is itself nested
+    previews as a refusal of its own, naming the level below.
+
+    Raises ``ValueError`` on a prefix that escapes the ingest root (→ 400),
+    which is where the enqueue refuses it too.
     """
+    prefix = normalise_prefix(input_prefix)
+    empty: dict[str, object] = {
+        "uri": settings.ingest_uri, "input_prefix": prefix, "kind": None,
+        "reachable": False, "document_count": 0, "sample": [],
+        "subdirectories": [], "error": None,
+    }
     if not settings.ingest_uri:
-        return {
-            "uri": None, "kind": None, "reachable": False,
-            "document_count": 0, "sample": [],
-            "error": "no ingest location configured",
-        }
-    from womblex.store.remote import RemoteStore, is_remote_uri
+        return {**empty, "error": "no ingest location configured"}
+    from womblex.store.remote import is_remote_uri
 
-    uri = settings.ingest_uri
-    kind = "remote" if is_remote_uri(uri) else "local"
+    kind = "remote" if is_remote_uri(settings.ingest_uri) else "local"
     try:
-        all_keys = RemoteStore.from_uri(
-            uri, credentials=settings.s3_credentials
-        ).list_files("", "*", recursive=True)
-    except Exception as e:
-        logger.warning("execute: ingest unreachable: %s", e)
-        return {
-            "uri": uri, "kind": kind, "reachable": False,
-            "document_count": 0, "sample": [], "error": str(e),
-        }
-    try:
-        keys = select_supported(all_keys, location=uri)
+        _, keys = _supported_under(settings, prefix)
     except NestedCorpusError as e:
         # The count must be the count that would be enqueued, so a layout the
         # enqueue will refuse reports the refusal here rather than a number.
         return {
-            "uri": uri, "kind": kind, "reachable": True,
-            "document_count": 0, "sample": [], "error": str(e),
+            **empty, "kind": kind, "reachable": True, "error": str(e),
+            "subdirectories": [
+                {
+                    "name": name,
+                    "input_prefix": f"{prefix}/{name}" if prefix else name,
+                    "document_count": count,
+                }
+                for name, count in sorted(e.nested.items())
+            ],
         }
+    except Exception as e:
+        logger.warning("execute: ingest unreachable: %s", e)
+        return {**empty, "kind": kind, "error": str(e)}
     return {
-        "uri": uri, "kind": kind, "reachable": True,
-        "document_count": len(keys), "sample": keys[:5], "error": None,
+        **empty, "kind": kind, "reachable": True,
+        "document_count": len(keys), "sample": keys[:5],
     }
 
 

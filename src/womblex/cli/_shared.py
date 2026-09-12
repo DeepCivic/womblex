@@ -88,6 +88,40 @@ def select_supported(relpaths: Iterable[str], *, location: str) -> list[str]:
     return sorted(top)
 
 
+# An ingest-relative prefix becomes a path segment joined onto the ingest root,
+# the way a run id is joined onto the feedback root. ``RemoteStore`` strips
+# leading and trailing slashes but does not resolve ``..``, so a climbing prefix
+# lists — and enqueues — outside the location the deployment configured.
+# Refused rather than sanitised, on the same footing as ``is_safe_run_id``: a
+# real prefix is a key scope inside the corpus, so there is nothing legitimate
+# to rewrite.
+_UNSAFE_IN_PREFIX = ("\\", "\x00", "://")
+
+
+def normalise_prefix(input_prefix: str | None) -> str:
+    """*input_prefix* as a store-key scope, or ``ValueError`` if it escapes.
+
+    Returns the segments joined back with single slashes (``""`` for the whole
+    ingest root), so every spelling of one location yields one scope and the
+    entry points cannot disagree about what a prefix selects.
+
+    Rebuilt from the path's parts rather than merely stripped, because the
+    prefix is not only a listing scope: the keys under it are what an enqueue
+    writes to the queue, what the worker downloads, and what is recorded as each
+    document's ``source_relpath``. A ``.`` segment or doubled slash the operator
+    typed would ride into all three — harmless on a local path, a different key
+    on an object store, which has no path semantics to collapse it.
+    """
+    prefix = (input_prefix or "").strip().strip("/")
+    parts = PurePosixPath(prefix).parts  # collapses `.` and `//`; keeps `..`
+    if any(c in prefix for c in _UNSAFE_IN_PREFIX) or ".." in parts:
+        raise ValueError(
+            f"unsafe input_prefix: {input_prefix!r} — a prefix names a location "
+            "inside the configured ingest root."
+        )
+    return "/".join(parts)
+
+
 def discover_files(input_root: Path, limit: int | None = None, skip: int = 0) -> list[Path]:
     """Discover supported documents directly under *input_root*.
 

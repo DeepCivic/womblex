@@ -21,7 +21,12 @@ import os
 import tempfile
 from pathlib import Path
 
-from womblex.cli._shared import Command, NestedCorpusError, select_supported
+from womblex.cli._shared import (
+    Command,
+    NestedCorpusError,
+    normalise_prefix,
+    select_supported,
+)
 
 logger = logging.getLogger("womblex")
 
@@ -98,7 +103,15 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
     if not store_uri:
         logger.error("No store URI (pass --store or set WOMBLEX_STORE_URI)")
         return 1
-    if not ingest_uri and not args.input_prefix:
+    # Normalised before the guard reads it: `--input-prefix ./` is truthy and
+    # scopes to nothing, which without `--ingest` would list the whole store —
+    # the run's own output included.
+    try:
+        input_prefix = normalise_prefix(args.input_prefix)
+    except ValueError as e:
+        logger.error(str(e))
+        return 1
+    if not ingest_uri and not input_prefix:
         logger.error(
             "No source documents location (pass --ingest, or --input-prefix under --store)"
         )
@@ -133,13 +146,11 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
             return 1
 
     ingest_store = RemoteStore.from_uri(ingest_uri) if ingest_uri else RemoteStore.from_uri(store_uri)
-    input_prefix = args.input_prefix or ""
     location = f"{ingest_uri or store_uri}/{input_prefix}".rstrip("/")
     all_keys = ingest_store.list_files(input_prefix, "*", recursive=True)
     # `list_files` returns store-relative keys, so the prefix comes off before
     # the nesting check and goes back on after — the worker stages by key.
-    base = input_prefix.strip("/")
-    scope = f"{base}/" if base else ""
+    scope = f"{input_prefix}/" if input_prefix else ""
     try:
         names = select_supported((k.removeprefix(scope) for k in all_keys), location=location)
     except NestedCorpusError as e:

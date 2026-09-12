@@ -115,7 +115,7 @@ src/womblex/
 ├── batch.py               # process_batch() — shared per-batch pipeline body (local run + cloud worker)
 ├── cli/                   # CLI subpackage — per-topic modules:
 │   ├── __init__.py        # main() + ALL_COMMANDS aggregation + dispatch
-│   ├── _shared.py         # Command NamedTuple, setup_logging, select_supported/discover_files
+│   ├── _shared.py         # Command NamedTuple, setup_logging, select_supported/discover_files, normalise_prefix
 │   ├── pipeline.py        # run, extract, chunk subcommands
 │   ├── cloud.py           # enqueue / worker / jobs / finalize / run-stage subcommands
 │   ├── redact.py          # redact, annotate-redactions, validate-redactions subcommands
