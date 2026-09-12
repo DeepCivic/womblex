@@ -371,6 +371,39 @@ API key and no egress. Three choices behind `utils/isaacus_client.py`:
 Only *API* calls move; the vendored tokeniser makes offline chunking identical
 in both deployments.
 
+### Container images are built in CI and stamped with the commit they came from
+Two Dockerfiles existed that no workflow built, so a change that broke an image
+was found on deploy; and the image build context excludes `.git`, so a
+containerised run resolved its commit as `unavailable`. Three choices behind the
+`images` CI job and the stamp block at the foot of each Dockerfile:
+
+- **The commit is supplied, never discovered.** `SOURCE_COMMIT` is a build
+  argument. A build context is a copy of a work tree rather than one, so a build
+  that shelled out to git would be reading nothing — and putting `.git` into the
+  context to make it readable would ship the repository's whole history in the
+  image to answer a question one argument answers. *Rejected:* un-ignoring
+  `.git`; deriving the commit from the package version, which is the same string
+  for every commit between two releases.
+- **Stamped after the install, not before.** The stamp is written into the
+  *installed* package — the copy `store/build_info.py` actually asks — as the
+  last layer. Writing it into the source tree before `pip install` would put a
+  per-commit value underneath the dependency layer and re-resolve the whole
+  vision/ML stack on every push, which is the difference between a check that
+  runs on every change and one nobody waits for.
+- **A published image must name its commit; a local build need not.**
+  `REQUIRE_STAMP=1` fails a build given no commit. The publish path sets it, and
+  `docker compose build` does not — so an operator's local image still reports
+  `unavailable` with a reason and stays frictionless, while a published image
+  that could not say what it was becomes a build failure rather than an artefact
+  making an honest-looking claim about nothing. CI builds both ways and asserts
+  each: the stamped image's label and resolved commit against the commit, and an
+  unstamped published build against a non-zero exit.
+
+The label and the stamp carry the same fact for different readers — `docker
+inspect` reads the image, `build_info` reads from inside a run. Neither is a
+digest: what identifies a published *artefact* is deferred to the publication
+that does not exist yet.
+
 ### PII — graph-driven detection, masking after Isaacus
 PII detection **is** the enrichment graph: select PII-typed entities (`natural`
 → PERSON, `address` → ADDRESS), map their mention offsets onto chunks, mask.

@@ -55,6 +55,31 @@ ARG EXTRAS=ui
 RUN pip install --upgrade pip \
     && pip install ".[${EXTRAS}]"
 
+# The source commit, supplied rather than discovered: `.dockerignore` excludes
+# `.git`, and a build context is a copy of a work tree rather than one, so a
+# build that tried to read it would be reading nothing. Stamped into the
+# *installed* package, which is the copy `store/build_info.py` asks — and
+# after the install above, so the expensive dependency layer stays cached
+# across commits while only this cheap layer changes per build.
+ARG SOURCE_COMMIT=""
+# Whether an unstamped build is a defect. The publish path sets it; a local
+# `docker compose build` does not, and its image reports `unavailable` with a
+# reason. A published image is a claim about what it holds, so one that cannot
+# name its commit is a build failure rather than an honest answer.
+ARG REQUIRE_STAMP=0
+RUN if [ -n "${SOURCE_COMMIT}" ]; then \
+        stamp="$(python -c 'import importlib.util, pathlib; print(pathlib.Path(importlib.util.find_spec("womblex").origin).parent / "_build_stamp.py")')" \
+        && printf 'COMMIT = "%s"\n' "${SOURCE_COMMIT}" > "${stamp}"; \
+    elif [ "${REQUIRE_STAMP}" = "1" ]; then \
+        echo "SOURCE_COMMIT is required when REQUIRE_STAMP=1" >&2 && exit 1; \
+    fi
+
+# The same fact as image metadata, readable with `docker inspect` without
+# running the image. Standard OCI keys, so any registry or scanner reads them.
+LABEL org.opencontainers.image.title="womblex-console" \
+      org.opencontainers.image.source="https://github.com/DeepCivic/womblex" \
+      org.opencontainers.image.revision="${SOURCE_COMMIT}"
+
 # Bind beyond loopback: the CLI defaults to 127.0.0.1, which inside a
 # container would refuse every request from the published port. The console
 # has no auth by design (docs/ui-plan.md), so a deployment that exposes

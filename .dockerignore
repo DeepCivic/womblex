@@ -23,6 +23,11 @@ venv/
 fixtures/fixtures/
 docs/accuracy/
 *.egg-info/
+# A stamp left by a local `python -m build` names whatever commit that build
+# saw. The image writes its own after install (or honestly reports none), so
+# keeping a work tree's out of the context is what stops a stale commit riding
+# in and being believed.
+src/womblex/_build_stamp.py
 # Built by Dockerfile.ui's frontend-builder stage, not the base build context.
 ui/node_modules/
 ui/build/
