@@ -6,6 +6,12 @@
 .mypy_cache
 .ruff_cache
 pytest.log
+# The release pin, kept OUT of the artefact it names. A digest is recorded
+# after the push, so an image built at one release would carry the digests of
+# the previous one — a file inside the artefact making a stale claim about
+# which artefact it is. A run reads its image from WOMBLEX_IMAGE_REF, injected
+# by the deployment; nothing in the image reads this file.
+deploy/
 output/
 # ...but keep the vendored demo corpus: `womblex seed-demo` publishes it into a
 # fresh console's store, and both Dockerfiles rely on `COPY . /app` carrying it
