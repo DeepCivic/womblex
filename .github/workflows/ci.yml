@@ -176,3 +176,4 @@ jobs:
           docker logs console
           test "${served:-0}" = "1"
           curl -fsS http://localhost:8080/api/runs | grep -q run-throsby-demo
+

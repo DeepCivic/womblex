@@ -61,14 +61,26 @@ jobs:
       - name: Name the image and the tags it publishes under
         id: name
         # GHCR rejects an upper-case path and this owner has one, so the owner
-        # is lower-cased rather than assumed. A release publishes the version
-        # and moves `latest`; a dispatch publishes only a commit-specific tag,
-        # so exercising the path cannot move what a deployment follows.
+        # is lower-cased rather than assumed. A dispatch publishes only a
+        # commit-specific tag, so exercising the path cannot move what a
+        # deployment follows.
+        #
+        # `latest` moves only for a FINAL release. A pre-release tag —
+        # v1.0.0-rc1, -beta.2, anything carrying a hyphen after the version, as
+        # SemVer spells a pre-release — publishes under its own version and
+        # leaves `latest` where it is. Otherwise a release candidate would
+        # become what every deployment following `latest` picks up, which is
+        # the opposite of what cutting a candidate means.
         run: |
           owner=$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
           image="$REGISTRY/$owner/${{ matrix.repository }}"
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            tags="$image:${GITHUB_REF_NAME#v},$image:latest"
+            version="${GITHUB_REF_NAME#v}"
+            tags="$image:$version"
+            case "$version" in
+              *-*) echo "pre-release $version: leaving :latest where it is" ;;
+              *)   tags="$tags,$image:latest" ;;
+            esac
           else
             tags="$image:edge-${GITHUB_SHA:0:12}"
           fi
