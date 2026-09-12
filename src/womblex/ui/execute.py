@@ -282,7 +282,7 @@ def ingest_preflight(settings: UISettings, *, input_prefix: str | None = None) -
     which is where the enqueue refuses it too.
     """
     prefix = normalise_prefix(input_prefix)
-    empty = {
+    empty: dict[str, object] = {
         "uri": settings.ingest_uri, "input_prefix": prefix, "kind": None,
         "reachable": False, "document_count": 0, "sample": [],
         "subdirectories": [], "error": None,
