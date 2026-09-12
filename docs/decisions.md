@@ -392,12 +392,12 @@ containerised run resolved its commit as `unavailable`. Three choices behind the
   runs on every change and one nobody waits for.
 - **A published image must name its commit; a local build need not.**
   `REQUIRE_STAMP=1` fails a build given no commit. The publish path sets it, and
-  `docker compose build` does not — so an operator's local image still reports
-  `unavailable` with a reason and stays frictionless, while a published image
-  that could not say what it was becomes a build failure rather than an artefact
-  making an honest-looking claim about nothing. CI builds both ways and asserts
-  each: the stamped image's label and resolved commit against the commit, and an
-  unstamped published build against a non-zero exit.
+  a local build does not (they live in the compose override) — so an operator's
+  local image still reports `unavailable` with a reason and stays frictionless,
+  while a published image that could not say what it was becomes a build failure
+  rather than an artefact making an honest-looking claim about nothing. CI builds
+  both ways and asserts each: the stamped image's label and resolved commit
+  against the commit, and an unstamped published build against a non-zero exit.
 
 The label and the stamp carry the same fact for different readers — `docker
 inspect` reads the image, `build_info` reads from inside a run. Neither is a

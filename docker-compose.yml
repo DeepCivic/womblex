@@ -7,12 +7,17 @@
 # are on an older engine, see "OLDER COMPOSE" at the foot of this header for
 # the one mechanical edit that makes the cloud path work without it.
 #
-# ONE FILE, TWO DEPLOYMENTS. It is self-contained by default (bundled
-# Postgres + MinIO), and points at externally-provided Postgres + S3 the
-# moment you set the connection env vars — no separate override file, no code
-# change. Which one you get is decided entirely by whether those vars are set:
+# TWO DEPLOYMENTS. It is self-contained by default (bundled Postgres + MinIO),
+# and points at externally-provided Postgres + S3 the moment you set the
+# connection env vars — no code change. Which one you get is decided entirely
+# by whether those vars are set:
 #
-#   LOCAL (default) — bring the bundled backends up under the `local` profile:
+#   LOCAL (default) — bring the bundled backends up under the `local` profile.
+#   Name the override file FIRST: this file builds nothing, so a local stack
+#   that does not pass it pulls a published image instead of building your
+#   working tree. Exported once, every command below reads both files:
+#
+#     export COMPOSE_FILE=docker-compose.yml:docker-compose.local.override.yml
 #
 #     docker compose --profile local up -d postgres minio createbuckets init
 #     # upload source docs to the 'womblex' bucket under inbox/, then:
@@ -49,7 +54,10 @@
 #   # Just want to see the console with a sample corpus (no workers)?
 #   # Bring up the infra, seed the vendored demo run into the bucket, then the
 #   # console. Postgres is included so the Dashboard/Execution panels see a
-#   # reachable queue (an empty one) rather than "queue unreachable":
+#   # reachable queue (an empty one) rather than "queue unreachable".
+#   # Same COMPOSE_FILE export as the LOCAL path above — without it these
+#   # pull a published image rather than building your tree:
+#   export COMPOSE_FILE=docker-compose.yml:docker-compose.local.override.yml
 #   docker compose --profile local up -d postgres minio createbuckets init
 #   docker compose --profile seed up seed-demo
 #   docker compose up -d ui           # run-throsby-demo now shows at :8080

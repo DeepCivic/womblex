@@ -172,6 +172,8 @@ jobs:
       - name: Commit it
         # Rebase-and-retry rather than force: main moves on its own schedule and
         # a release must never overwrite a commit that landed while it built.
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -184,10 +186,13 @@ jobs:
 
           Written by the publish-images workflow. Both references are digests,
           so a deployment pins the artefact rather than a moving tag."
+          # Remote and branch named explicitly rather than relying on upstream
+          # tracking, which the checkout action does not guarantee to configure
+          # — a bare `git push` would fail on "no upstream branch" instead.
           for attempt in 1 2 3; do
-            if git push; then exit 0; fi
+            if git push origin "HEAD:${DEFAULT_BRANCH}"; then exit 0; fi
             echo "push rejected (attempt $attempt); rebasing onto the branch tip"
-            git pull --rebase
+            git pull --rebase origin "${DEFAULT_BRANCH}"
           done
           echo "could not record the digests on the default branch." >&2
           echo "they are in this run's summary and in the registry." >&2

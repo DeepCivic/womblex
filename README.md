@@ -347,11 +347,18 @@ scale to zero on its own once the run drains.
 
 A ready-to-run stack (Postgres + MinIO + scalable workers) lives in
 `docker-compose.yml`. It is self-contained by default and points at external
-Postgres + S3 the moment you set the connection env vars — one file, no code
-change. The bundled Postgres/MinIO sit behind a `local` profile, so bring the
-local stack up explicitly:
+Postgres + S3 the moment you set the connection env vars — no code change. The
+bundled Postgres/MinIO sit behind a `local` profile, so bring the local stack
+up explicitly.
+
+Name the override file first. `docker-compose.yml` builds nothing — it names
+published images — so a local stack that does not pass
+`docker-compose.local.override.yml` pulls a release instead of building your
+working tree. Exported once, every command below reads both:
 
 ```bash
+export COMPOSE_FILE=docker-compose.yml:docker-compose.local.override.yml
+
 docker compose --profile local up -d postgres minio createbuckets init
 # upload source docs to the 'womblex' bucket under inbox/, then:
 docker compose run --rm womblex enqueue --config configs/example.yaml --create-schema
@@ -736,9 +743,12 @@ docker run --rm --entrypoint python womblex:... \
   -c 'from womblex.store.build_info import build_info; print(build_info().commit_value)'
 ```
 
-A local `docker compose build` passes neither argument and its image reports
-`unavailable` with a reason — honest for a build that is not published, and
-one less thing between an edit and a running stack.
+A local build passes neither argument and its image reports `unavailable` with
+a reason — honest for a build that is not published, and one less thing between
+an edit and a running stack. (Local builds live in
+`docker-compose.local.override.yml`, so the command is `docker compose -f
+docker-compose.yml -f docker-compose.local.override.yml build`; the base file
+names published images and builds nothing.)
 
 Where each compose service's image comes from is enumerated per service in
 [`docs/deployment-images.md`](docs/deployment-images.md), with a recorded
