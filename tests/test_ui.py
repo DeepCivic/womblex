@@ -1472,7 +1472,7 @@ class TestExecuteApi:
     def test_enqueue_plans_batches_into_the_queue(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """List the whole ingest root (no prefix field), batch, one idempotent
+        """List the whole ingest root (no prefix posted), batch, one idempotent
         row each, stamped with the ingest root."""
         pytest.importorskip("fsspec")
         monkeypatch.setattr("womblex.cloud.queue.JobQueue", _FakeQueue)
@@ -1550,6 +1550,27 @@ class TestExecuteApi:
         assert resp.json()["document_count"] == preview["document_count"] == 2
         _, specs = _FakeQueue.last.enqueued  # type: ignore[union-attr, misc]
         assert sorted(specs[0].input_keys) == ["2026-08/a.pdf", "2026-08/b.pdf"]
+
+    def test_the_keys_enqueued_carry_no_dot_segment(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A queued key is downloaded by the worker and recorded as the
+        document's `source_relpath`, so a prefix spelled `./2026-08` must not
+        publish provenance naming a key that only a local path would resolve."""
+        pytest.importorskip("fsspec")
+        monkeypatch.setattr("womblex.cloud.queue.JobQueue", _FakeQueue)
+        ingest_root = tmp_path / "inbox"
+        _seed_store_inputs(ingest_root, "2026-08", ["a.pdf"])
+        client = TestClient(create_app(
+            store_uri=str(tmp_path / "store"), ingest_uri=str(ingest_root),
+            db_dsn="postgresql://x/y",
+        ))
+        resp = client.post("/api/execute/enqueue", json={
+            "run_id": "run-dot", "input_prefix": "./2026-08/",
+        })
+        assert resp.status_code == 200
+        _, specs = _FakeQueue.last.enqueued  # type: ignore[union-attr, misc]
+        assert specs[0].input_keys == ["2026-08/a.pdf"]
 
     def test_enqueue_refuses_a_prefix_escaping_the_ingest_root(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1654,8 +1675,9 @@ class TestIngestPreflight:
         ]
 
     def test_a_prefix_resolving_flat_reports_its_count(self, tmp_path: Path) -> None:
-        """P12: the recovery the refusal names works — the subdirectory it
-        pointed at previews as a count, on the layout the enqueue accepts."""
+        """P12: the recovery the refusal names works, from the refusal alone —
+        the prefix it hands back previews as a count, with no second tool and
+        nothing for the operator to compose by hand."""
         pytest.importorskip("fsspec")
         ingest_root = tmp_path / "inbox"
         _seed_store_inputs(ingest_root, "", ["top.pdf"])
@@ -1663,12 +1685,35 @@ class TestIngestPreflight:
         client = TestClient(create_app(
             store_uri=str(tmp_path / "store"), ingest_uri=str(ingest_root),
         ))
-        body = client.get("/api/execute/ingest", params={"input_prefix": "2026-08"}).json()
+        refused = client.get("/api/execute/ingest").json()
+        chosen = refused["subdirectories"][0]["input_prefix"]
+        body = client.get("/api/execute/ingest", params={"input_prefix": chosen}).json()
         assert body["error"] is None
         assert body["input_prefix"] == "2026-08"
         assert body["document_count"] == 2
         # The sample is the keys, prefix and all, as the enqueue would stage them.
         assert sorted(body["sample"]) == ["2026-08/a.pdf", "2026-08/b.pdf"]
+
+    def test_every_spelling_of_a_prefix_normalises_to_one_key_scope(
+        self, tmp_path: Path
+    ) -> None:
+        """The prefix is not only a listing scope — the keys under it are what
+        the enqueue queues, the worker downloads and the manifest records as
+        `source_relpath`. A `.` segment or a doubled slash the operator typed
+        rides into all three, and an object store has no path semantics to
+        collapse it, so it is collapsed here instead."""
+        pytest.importorskip("fsspec")
+        ingest_root = tmp_path / "inbox"
+        _seed_store_inputs(ingest_root, "2026-08", ["a.pdf"])
+        client = TestClient(create_app(
+            store_uri=str(tmp_path / "store"), ingest_uri=str(ingest_root),
+        ))
+        for spelling in ("2026-08", "./2026-08", "2026-08/", "2026-08//", "/2026-08"):
+            body = client.get(
+                "/api/execute/ingest", params={"input_prefix": spelling},
+            ).json()
+            assert body["input_prefix"] == "2026-08", spelling
+            assert body["sample"] == ["2026-08/a.pdf"], spelling
 
     def test_a_prefix_escaping_the_ingest_root_is_refused(self, tmp_path: Path) -> None:
         """Same footing as the unsafe-run-id check: 400, and no listing."""

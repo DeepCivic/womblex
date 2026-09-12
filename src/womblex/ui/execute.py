@@ -161,19 +161,23 @@ _UNSAFE_IN_PREFIX = ("\\", "\x00", "://")
 def normalise_prefix(input_prefix: str | None) -> str:
     """*input_prefix* as a store-key scope, or ``ValueError`` if it escapes.
 
-    Returns the slash-stripped form (``""`` for the whole ingest root), so
-    preview and dispatch derive one scope from one string.
+    Returns the segments joined back with single slashes (``""`` for the whole
+    ingest root), so preview and dispatch derive one scope from one string.
+    Rebuilt from the path's parts rather than merely stripped, because the
+    prefix is not only a listing scope: the keys under it are what the enqueue
+    writes to the queue, what the worker downloads, and what P1 records as each
+    document's ``source_relpath``. A ``.`` or doubled slash the operator typed
+    would ride into all three — harmless on a local path, a different key on an
+    object store, which has no path semantics to collapse it.
     """
     prefix = (input_prefix or "").strip().strip("/")
-    if (
-        any(c in prefix for c in _UNSAFE_IN_PREFIX)
-        or ".." in PurePosixPath(prefix).parts
-    ):
+    parts = PurePosixPath(prefix).parts  # collapses `.` and `//`; keeps `..`
+    if any(c in prefix for c in _UNSAFE_IN_PREFIX) or ".." in parts:
         raise ValueError(
             f"unsafe input_prefix: {input_prefix!r} — a prefix names a location "
             "inside the configured ingest root."
         )
-    return prefix
+    return "/".join(parts)
 
 
 def _supported_under(settings: UISettings, prefix: str) -> tuple[str, list[str]]:
@@ -302,7 +306,10 @@ def ingest_preflight(settings: UISettings, *, input_prefix: str | None = None) -
     immediate subdirectories holding documents with a count and a ready-to-send
     prefix each: the recovery from that refusal is to point at one of them, so
     the operator picks one here rather than reaching for the CLI or having the
-    deployment's ingest location repointed.
+    deployment's ingest location repointed. Each count is the documents
+    anywhere beneath that subdirectory — enough to tell an intended corpus from
+    a stray directory, which is what it is for — so one that is itself nested
+    previews as a refusal of its own, naming the level below.
 
     Raises ``ValueError`` on a prefix that escapes the ingest root (→ 400),
     which is where the enqueue refuses it too.
