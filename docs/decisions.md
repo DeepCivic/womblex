@@ -404,6 +404,17 @@ inspect` reads the image, `build_info` reads from inside a run. Neither is a
 digest: what identifies a published *artefact* is deferred to the publication
 that does not exist yet.
 
+**Which services that publication would cover is settled and written down.**
+`docs/deployment-images.md` enumerates every compose service with a verdict
+each, and a test holds it to the files. Two findings shaped it: the five
+build-from-source services collapse to two images rather than five, because
+four of them build the same Dockerfile and differ only in the command they run;
+and a third-party service on a moving tag is the same unidentifiability as a
+local build, so the audit covers those too and records that two of the three
+carry no tag at all. *Not done:* pinning them — a database image's tag is a
+deployment decision with an upgrade path attached, and an audit that fixed its
+own findings would be making that decision without one.
+
 ### PII — graph-driven detection, masking after Isaacus
 PII detection **is** the enrichment graph: select PII-typed entities (`natural`
 → PERSON, `address` → ADDRESS), map their mention offsets onto chunks, mask.

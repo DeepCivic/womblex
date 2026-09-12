@@ -8,7 +8,7 @@ module-responsibility table in [`../CLAUDE.md`](../CLAUDE.md).
 ```
 womblex/
 ├── configs/           # Dataset-specific configurations
-├── docs/              # Architecture docs, ADRs, accuracy reports
+├── docs/              # Architecture docs, ADRs, accuracy reports, the deployment-image audit
 ├── fixtures/          # Test fixtures (separate repo, see ../THIRD_PARTY_DATA.md)
 ├── src/womblex/
 │   ├── cli/                # CLI subpackage — per-topic modules: pipeline, cloud, redact, link, embed,
@@ -136,5 +136,9 @@ womblex/
 │       ├── isaacus_client.py # Build the Isaacus SDK client (hosted API or private SageMaker)
 │       ├── token_packer.py  # TokenCounter, pack_by_tokens, split_on_boundaries for token-budgeted API batching
 │       └── availability.py  # isaacus_available() gates API stages (enrich/embed, AI chunking); tokenizer_available() gates offline token chunking on the vendored tokeniser
-└── tests/
+├── tests/
+├── Dockerfile         # Pipeline/worker image (CLI, worker, per-stage commands)
+├── Dockerfile.ui      # Console image (adds a Node stage for the SPA)
+├── docker-compose.yml # Local + cloud stack; per-service image decisions in docs/deployment-images.md
+└── docker-compose.local.override.yml  # Pins the bundled-local stack's connection surface
 ```
