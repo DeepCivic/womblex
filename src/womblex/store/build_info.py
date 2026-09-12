@@ -39,6 +39,7 @@ that the run can be recomputed from it.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from dataclasses import dataclass
 from functools import lru_cache
@@ -60,8 +61,13 @@ IMAGE_REF_ENV = "WOMBLEX_IMAGE_REF"
 #: second; both are the runtime's own marker rather than something inferred.
 _CONTAINER_MARKERS = (Path("/.dockerenv"), Path("/run/.containerenv"))
 
-#: The separator that makes a reference a digest rather than a tag.
+#: The separator that makes a reference a digest rather than a tag, and the
+#: shape of the digest itself. Checked rather than assumed: this module exists
+#: not to claim what it cannot establish, and a string that cannot be a digest
+#: recorded as one would be exactly that. The algorithm is not pinned to
+#: sha256 — a registry may serve another — but the form is.
 _DIGEST_SEP = "@"
+_DIGEST_RE = re.compile(r"^[a-z0-9]+(?:[.+_-][a-z0-9]+)*:[0-9a-f]{32,}$")
 
 # Every git call is bounded: a resolver that hangs would hang the run that
 # asked it, for a fact the run can honestly do without.
@@ -247,11 +253,16 @@ def image_info() -> ImageInfo:
         return ImageInfo(
             True, "", "", f"{IMAGE_REF_ENV} was not supplied to the container",
         )
-    _name, separator, digest = reference.partition(_DIGEST_SEP)
-    if not separator or not digest:
+    name, separator, digest = reference.partition(_DIGEST_SEP)
+    if not separator:
         return ImageInfo(
             True, reference, "",
             "the deployment names a tag, which does not identify an image",
+        )
+    if not name or not _DIGEST_RE.match(digest):
+        return ImageInfo(
+            True, reference, "",
+            "the reference is not a name and a well-formed digest",
         )
     return ImageInfo(True, reference, digest, "")
 

@@ -446,6 +446,26 @@ class TestTheImageTheRunExecutedInside:
         assert info.reference == "ghcr.io/deepcivic/womblex:0.5.12"
         assert "tag" in info.reason
 
+    @pytest.mark.parametrize("reference", [
+        "ghcr.io/x@",                       # separator, nothing after it
+        "@sha256:" + "a" * 64,              # a digest naming no image
+        "ghcr.io/x@sha256:abc",             # too short to be one
+        "ghcr.io/x@SHA256:" + "A" * 64,     # digests are lower-case hex
+        "a@b@c",                            # not a reference at all
+    ])
+    def test_a_malformed_reference_yields_no_digest(self, monkeypatch, reference):
+        """A string that cannot be a digest is never recorded as one.
+
+        The value is injected, so a deployment that sets it wrongly is the
+        realistic failure. Recording whatever followed the separator would put
+        a fabricated identifier in the record — the one thing this module is
+        written not to do.
+        """
+        self._in_container(monkeypatch, reference)
+        info = image_info()
+        assert info.digest == ""
+        assert "well-formed digest" in info.reason
+
     def test_the_record_carries_the_image_block(self, tmp_path, extraction, monkeypatch):
         pinned = "ghcr.io/deepcivic/womblex@sha256:" + "b" * 64
         self._in_container(monkeypatch, pinned)
