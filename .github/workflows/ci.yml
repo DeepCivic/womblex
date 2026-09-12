@@ -116,12 +116,16 @@ jobs:
 
       - name: The image names its commit
         # Both halves of it: the label a registry can read without running the
-        # image, and the stamp the running package resolves.
+        # image, and the stamp the running package resolves. The stamp is read
+        # off a marker rather than taken as the whole of stdout: importing
+        # `store` reaches PyMuPDF, which prints its `fitz` deprecation notice
+        # there, and any such preamble would otherwise land in the value.
         run: |
           image=womblex-${{ matrix.name }}:ci
           label=$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image")
           stamp=$(docker run --rm --entrypoint python "$image" -c \
-            'from womblex.store.build_info import build_info; print(build_info().commit_value)')
+            'from womblex.store.build_info import build_info; print("stamp:" + build_info().commit_value)' \
+            | sed -n 's/^stamp://p')
           echo "label=$label stamp=$stamp expected=$GITHUB_SHA"
           test "$label" = "$GITHUB_SHA"
           test "$stamp" = "$GITHUB_SHA"
