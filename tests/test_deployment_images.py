@@ -93,10 +93,24 @@ def services() -> dict[str, dict]:
     return out
 
 
+#: What marks an image reference as this project's own rather than a third
+#: party's. The published references are `${WOMBLEX_*_IMAGE:-ghcr.io/...}`, so
+#: either half of that carries the name.
+_OURS = "womblex"
+
+
 def _kind(body: dict) -> str:
+    """`build`, `published` (an image of this project), `image` (third party).
+
+    Published and third-party are separated because the audit asks a different
+    question of each: a third-party reference is audited for whether its tag
+    moves, while one of ours is audited for whether a deployment can pin it.
+    """
     if "build" in body:
         return "build"
-    return "image" if "image" in body else "settings"
+    if "image" not in body:
+        return "settings"
+    return "published" if _OURS in body["image"] else "image"
 
 
 def _reference(body: dict) -> str:
@@ -127,6 +141,12 @@ class TestTheAuditIsComplete:
         assert declared["Of the base file: reference a third-party image"] == kinds.count(
             "image",
         )
+        assert declared[
+            "Of the base file: reference an image of this project"
+        ] == kinds.count("published")
+        assert declared["Of the override: build from source"] == [
+            _kind(v) for k, v in services.items() if k[0] == "override"
+        ].count("build")
 
     def test_every_service_is_enumerated_exactly_once(
         self, enumerated: list[dict[str, str]], services: dict,
@@ -151,6 +171,22 @@ class TestEveryServiceHasAVerdict:
     def test_no_verdict_is_empty(self, enumerated: list[dict[str, str]]) -> None:
         missing = [r["service"] for r in enumerated if not r["verdict"].strip(f" {_EM_DASH}")]
         assert not missing, f"services with no recorded decision: {missing}"
+
+    def test_a_published_service_is_pinnable_by_a_declared_value(
+        self, enumerated: list[dict[str, str]], services: dict,
+    ) -> None:
+        """The switch between published and built is one value, not a file edit.
+
+        A bare `image: ghcr.io/...` would satisfy "references an image" while
+        leaving a deployment no way to name a digest, which is the criterion
+        that actually matters.
+        """
+        for row in (r for r in enumerated if r["kind"] == "published"):
+            reference = _reference(services[(row["file"], row["service"].strip("`"))])
+            assert reference.startswith("${WOMBLEX_") and ":-" in reference, (
+                f"{row['service']} names a published image but not through an "
+                f"overridable value: {reference!r}"
+            )
 
     def test_a_build_from_source_service_names_where_its_image_comes_from(
         self, enumerated: list[dict[str, str]],

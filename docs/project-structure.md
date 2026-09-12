@@ -139,6 +139,7 @@ womblex/
 ├── tests/
 ├── Dockerfile         # Pipeline/worker image (CLI, worker, per-stage commands)
 ├── Dockerfile.ui      # Console image (adds a Node stage for the SPA)
+├── deploy/images.env  # The published image digests a release pinned (written by publish-images.yml)
 ├── docker-compose.yml # Local + cloud stack; per-service image decisions in docs/deployment-images.md
 └── docker-compose.local.override.yml  # Pins the bundled-local stack's connection surface
 ```

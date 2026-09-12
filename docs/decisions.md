@@ -392,17 +392,33 @@ containerised run resolved its commit as `unavailable`. Three choices behind the
   runs on every change and one nobody waits for.
 - **A published image must name its commit; a local build need not.**
   `REQUIRE_STAMP=1` fails a build given no commit. The publish path sets it, and
-  `docker compose build` does not — so an operator's local image still reports
-  `unavailable` with a reason and stays frictionless, while a published image
-  that could not say what it was becomes a build failure rather than an artefact
-  making an honest-looking claim about nothing. CI builds both ways and asserts
-  each: the stamped image's label and resolved commit against the commit, and an
-  unstamped published build against a non-zero exit.
+  a local build does not (they live in the compose override) — so an operator's
+  local image still reports `unavailable` with a reason and stays frictionless,
+  while a published image that could not say what it was becomes a build failure
+  rather than an artefact making an honest-looking claim about nothing. CI builds
+  both ways and asserts each: the stamped image's label and resolved commit
+  against the commit, and an unstamped published build against a non-zero exit.
 
 The label and the stamp carry the same fact for different readers — `docker
 inspect` reads the image, `build_info` reads from inside a run. Neither is a
 digest: what identifies a published *artefact* is deferred to the publication
 that does not exist yet.
+
+**The publication is GHCR, on a release tag, recorded as a digest.** GHCR
+because it takes the workflow's ambient token for this repository's own
+packages, so the "no credential is committed" property holds by construction
+rather than by care. A release tag because that is when a version exists to
+publish under; a manual dispatch publishes an `edge-<sha>` tag instead, so the
+path can be exercised without moving `latest`. And a digest in
+`deploy/images.env` rather than a tag in a deployment's head, because a tag is
+a pointer someone can move and the artefact is what a run needs to name.
+*Rejected:* a registry needing a provisioned secret, which would have put a
+credential in repository settings to satisfy a requirement about not having
+one; recording the digest only in release notes, which leaves the pin outside
+the repository and manual. Publication is a separate workflow from the PyPI
+release for a concrete reason — that one runs under Trusted Publishing and a
+re-run would attempt a duplicate upload, so it cannot carry the
+`workflow_dispatch` this needs.
 
 **Which services that publication would cover is settled and written down.**
 `docs/deployment-images.md` enumerates every compose service with a verdict

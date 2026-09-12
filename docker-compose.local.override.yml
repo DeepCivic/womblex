@@ -32,6 +32,12 @@
 # It changes nothing about the cloud path: the base file is used on its own for
 # cloud, this override is never passed there.
 #
+# IT ALSO CARRIES THE BUILDS. The base file names published images and builds
+# nothing, so this file holds the `build:` blocks for all five services — which
+# makes passing it the one declared switch between running the published
+# artefact and building from the working tree. Compose builds whenever a
+# `build:` key is present, so the two could not have lived in one file.
+#
 # MERGE SAFETY
 # ------------
 # `environment:` is map-form on purpose. Compose merges maps key-by-key, so the
@@ -66,6 +72,9 @@ x-local-env: &local-env
 
 services:
   init:
+    build:
+      context: .
+      dockerfile: Dockerfile
     depends_on:
       postgres:
         condition: service_healthy
@@ -74,6 +83,9 @@ services:
       <<: *local-env
 
   womblex:
+    build:
+      context: .
+      dockerfile: Dockerfile
     depends_on:
       postgres:
         condition: service_healthy
@@ -85,6 +97,9 @@ services:
       <<: *local-env
 
   worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
     depends_on:
       init:
         condition: service_completed_successfully
@@ -96,6 +111,9 @@ services:
       <<: *local-env
 
   seed-demo:
+    build:
+      context: .
+      dockerfile: Dockerfile
     depends_on:
       createbuckets:
         condition: service_completed_successfully
@@ -104,6 +122,9 @@ services:
       <<: *local-env
 
   ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.ui
     depends_on:
       postgres:
         condition: service_healthy

@@ -63,8 +63,8 @@ RUN pip install --upgrade pip \
 # across commits while only this cheap layer changes per build.
 ARG SOURCE_COMMIT=""
 # Whether an unstamped build is a defect. The publish path sets it; a local
-# `docker compose build` does not, and its image reports `unavailable` with a
-# reason. A published image is a claim about what it holds, so one that cannot
+# a local build does not (those live in `docker-compose.local.override.yml`),
+# and its image reports `unavailable` with a reason. A published image is a claim about what it holds, so one that cannot
 # name its commit is a build failure rather than an honest answer.
 ARG REQUIRE_STAMP=0
 RUN if [ -n "${SOURCE_COMMIT}" ]; then \

@@ -1,0 +1,199 @@
+name: Publish images
+
+# Publishes both images to GHCR and records the digest each one got.
+#
+# Separate from `release.yml` rather than a job inside it, for two reasons: that
+# workflow publishes the wheel to PyPI under Trusted Publishing, and a manual
+# re-run of it would attempt a duplicate upload — so it cannot carry the
+# `workflow_dispatch` this one needs. The credentials differ too; this one holds
+# nothing but the ambient GITHUB_TOKEN.
+on:
+  push:
+    tags: ["v*"]
+  # So the publish path can be exercised without cutting a version. A dispatch
+  # publishes under an `edge-<sha>` tag and does NOT write deploy/images.env:
+  # that file records what a release pinned, and a manual build is not one.
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  publish:
+    name: Publish ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # The whole of the publication credential: GHCR accepts the ambient token
+      # for the repository's own packages, so there is no secret to provision
+      # and none to leak. Nothing is baked into an image either — the only
+      # build arguments are the commit and the stamp guard.
+      packages: write
+    # One runner per image, for the reason the CI build job gives: each carries
+    # the whole vision/ML stack on top of a 100 MB models/ directory.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: pipeline
+            dockerfile: Dockerfile
+            repository: womblex
+          - name: console
+            dockerfile: Dockerfile.ui
+            repository: womblex-console
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reclaim runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          df -h /
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ${{ env.REGISTRY }}
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Name the image and the tags it publishes under
+        id: name
+        # GHCR rejects an upper-case path and this owner has one, so the owner
+        # is lower-cased rather than assumed. A release publishes the version
+        # and moves `latest`; a dispatch publishes only a commit-specific tag,
+        # so exercising the path cannot move what a deployment follows.
+        run: |
+          owner=$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
+          image="$REGISTRY/$owner/${{ matrix.repository }}"
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            tags="$image:${GITHUB_REF_NAME#v},$image:latest"
+          else
+            tags="$image:edge-${GITHUB_SHA:0:12}"
+          fi
+          {
+            echo "image=$image"
+            echo "tags=$tags"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.name.outputs.tags }}
+          # REQUIRE_STAMP is the asymmetry R2 established, and this is the path
+          # it was written for: a published image that cannot name its commit
+          # fails the build rather than reaching the registry.
+          build-args: |
+            SOURCE_COMMIT=${{ github.sha }}
+            REQUIRE_STAMP=1
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,scope=${{ matrix.name }}
+
+      - name: The published image is the one that was built
+        # Pulled back by digest, not by tag: a tag is a moving pointer and
+        # checking one would prove nothing about the artefact recorded below.
+        # This is R2's guarantee re-asserted against the published thing rather
+        # than the local build — the only place it can actually be checked.
+        run: |
+          pinned="${{ steps.name.outputs.image }}@${{ steps.build.outputs.digest }}"
+          stamp=$(docker run --rm --entrypoint python "$pinned" -c \
+            'from womblex.store.build_info import build_info; print("stamp:" + build_info().commit_value)' \
+            | sed -n 's/^stamp://p')
+          echo "pinned=$pinned stamp=$stamp expected=$GITHUB_SHA"
+          test "$stamp" = "$GITHUB_SHA"
+
+      - name: Hand the digest to the recording job
+        run: |
+          mkdir -p digest
+          printf '%s@%s\n' \
+            "${{ steps.name.outputs.image }}" "${{ steps.build.outputs.digest }}" \
+            > "digest/${{ matrix.name }}"
+          {
+            echo "### ${{ matrix.name }}"
+            echo '```'
+            cat "digest/${{ matrix.name }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.name }}
+          path: digest/
+
+  record:
+    name: Record the published digests
+    needs: publish
+    # A release pin only. A dispatch publishes an edge tag for exercising the
+    # path; writing it here would pin deployments to a build nobody released.
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The tag is what was built, but the file has to land somewhere a
+          # later checkout reads, and a tag is immutable — so the commit goes
+          # to the default branch.
+          ref: ${{ github.event.repository.default_branch }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: digests
+          pattern: digest-*
+          merge-multiple: false
+
+      - name: Write deploy/images.env
+        run: |
+          pipeline=$(cat digests/digest-pipeline/pipeline)
+          console=$(cat digests/digest-console/console)
+          cat > deploy/images.env <<EOF
+          # Written by .github/workflows/publish-images.yml when a release is cut.
+          # Edit the workflow, not this file — a release overwrites it.
+          #
+          # Each reference is a digest rather than a tag. A tag can be moved to
+          # point at different bytes; a digest is those bytes. Dependencies
+          # resolve at image build time and the base tag moves, so the commit
+          # does not determine the image — this is what identifies the artefact.
+          #
+          #   docker compose --env-file deploy/images.env up
+          WOMBLEX_IMAGE_RELEASE=${GITHUB_REF_NAME}
+          WOMBLEX_IMAGE_COMMIT=${GITHUB_SHA}
+          WOMBLEX_PIPELINE_IMAGE=${pipeline}
+          WOMBLEX_CONSOLE_IMAGE=${console}
+          EOF
+          cat deploy/images.env
+
+      - name: Commit it
+        # Rebase-and-retry rather than force: main moves on its own schedule and
+        # a release must never overwrite a commit that landed while it built.
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- deploy/images.env; then
+            echo "digests unchanged; nothing to commit"
+            exit 0
+          fi
+          git add deploy/images.env
+          git commit -m "Record the images published for ${GITHUB_REF_NAME}
+
+          Written by the publish-images workflow. Both references are digests,
+          so a deployment pins the artefact rather than a moving tag."
+          # Remote and branch named explicitly rather than relying on upstream
+          # tracking, which the checkout action does not guarantee to configure
+          # — a bare `git push` would fail on "no upstream branch" instead.
+          for attempt in 1 2 3; do
+            if git push origin "HEAD:${DEFAULT_BRANCH}"; then exit 0; fi
+            echo "push rejected (attempt $attempt); rebasing onto the branch tip"
+            git pull --rebase origin "${DEFAULT_BRANCH}"
+          done
+          echo "could not record the digests on the default branch." >&2
+          echo "they are in this run's summary and in the registry." >&2
+          exit 1
