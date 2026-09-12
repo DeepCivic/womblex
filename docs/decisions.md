@@ -404,6 +404,22 @@ inspect` reads the image, `build_info` reads from inside a run. Neither is a
 digest: what identifies a published *artefact* is deferred to the publication
 that does not exist yet.
 
+**The publication is GHCR, on a release tag, recorded as a digest.** GHCR
+because it takes the workflow's ambient token for this repository's own
+packages, so the "no credential is committed" property holds by construction
+rather than by care. A release tag because that is when a version exists to
+publish under; a manual dispatch publishes an `edge-<sha>` tag instead, so the
+path can be exercised without moving `latest`. And a digest in
+`deploy/images.env` rather than a tag in a deployment's head, because a tag is
+a pointer someone can move and the artefact is what a run needs to name.
+*Rejected:* a registry needing a provisioned secret, which would have put a
+credential in repository settings to satisfy a requirement about not having
+one; recording the digest only in release notes, which leaves the pin outside
+the repository and manual. Publication is a separate workflow from the PyPI
+release for a concrete reason — that one runs under Trusted Publishing and a
+re-run would attempt a duplicate upload, so it cannot carry the
+`workflow_dispatch` this needs.
+
 **Which services that publication would cover is settled and written down.**
 `docs/deployment-images.md` enumerates every compose service with a verdict
 each, and a test holds it to the files. Two findings shaped it: the five

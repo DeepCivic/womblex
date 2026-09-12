@@ -746,6 +746,37 @@ decision for every one of them and a note on which third-party tags are
 unpinned. `tests/test_deployment_images.py` holds the document to the compose
 files, so the enumeration cannot go stale.
 
+### Published images
+
+Cutting a release publishes both images to GHCR — `ghcr.io/deepcivic/womblex`
+and `ghcr.io/deepcivic/womblex-console` — under the release version and
+`latest`, and records the digest each one received in
+[`deploy/images.env`](deploy/images.env):
+
+```bash
+docker compose --env-file deploy/images.env up   # runs the pinned artefact
+```
+
+The reference recorded there is a **digest**, not a tag. A tag can be moved to
+point at different bytes; a digest is those bytes. That distinction is the
+whole reason the file exists: dependencies resolve at image build time and the
+base image tag moves, so one commit can yield materially different images — the
+commit says which source, the digest says which artefact.
+
+Publication holds no credential of its own. GHCR accepts the workflow's ambient
+`GITHUB_TOKEN` for this repository's own packages, so there is nothing to
+provision and nothing to commit; the only build arguments are the commit and
+the stamp guard. `REQUIRE_STAMP=1` is set on this path, so an image that cannot
+name its commit fails the build instead of reaching the registry, and each
+published image is pulled back **by digest** afterwards and asked what it was
+built from — the one place that guarantee can be checked against the artefact
+rather than a local build.
+
+The workflow can also be run manually (Actions, "Publish images"), which
+publishes an `edge-<sha>` tag and leaves `deploy/images.env` alone — useful for
+exercising the path without cutting a version, and it cannot move what a
+deployment follows.
+
 ### Commit hook
 
 Two checks run on the files you stage: a secret scan (`detect-secrets`) and SAST over the

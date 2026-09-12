@@ -1901,7 +1901,10 @@ class TestSidecarImage:
 
     def test_compose_ui_service_is_read_only_with_tmpfs(self) -> None:
         ui = _compose_service("ui")
-        assert ui["build"]["dockerfile"] == "Dockerfile.ui"
+        # The console image, named rather than built: the base file pins a
+        # published image and the local override carries the build. Which
+        # service runs which image is audited in docs/deployment-images.md.
+        assert "womblex-console" in ui["image"]
         assert ui["read_only"] is True
         # A store-backed read stages the manifest through a temp dir.
         assert "/tmp" in ui["tmpfs"]

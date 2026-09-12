@@ -57,9 +57,22 @@
 # Inputs and outputs share the s3://womblex bucket, on disjoint prefixes:
 # source documents live under inbox/, shards land at runs/<run_id>/documents/.
 #
-# Two images, one stack: the pipeline/worker services build the plain
-# `Dockerfile`; the `ui` console builds `Dockerfile.ui` (adds a Node stage
-# for the SPA). Both are named explicitly below so the split is legible.
+# Two images, one stack: the pipeline/worker services run the image built from
+# the plain `Dockerfile`; the `ui` console runs the one from `Dockerfile.ui`
+# (adds a Node stage for the SPA).
+#
+# PUBLISHED OR BUILT — decided by which files you pass, not by editing one.
+# This file NAMES both images and builds neither; the local override carries
+# the `build:` blocks. (Compose builds whenever a `build:` key is present, so
+# an `image:` beside one is not a switch — the blocks had to move.)
+#
+#   docker compose --env-file deploy/images.env up          # published artefact
+#   docker compose -f docker-compose.yml \
+#                  -f docker-compose.local.override.yml up  # built from the tree
+#
+# The references below are `${WOMBLEX_*_IMAGE:-<latest tag>}`, so the digest a
+# release recorded in deploy/images.env overrides the tag with no file edit.
+# Every service's decision is enumerated in docs/deployment-images.md.
 #
 # OLDER COMPOSE (< 2.20.0, no `required: false`): the cloud path relies on
 # `required: false` to let `init`/`worker`/`ui` come up without the bundled
@@ -166,9 +179,7 @@ services:
   # started — the health gate only binds when the `local`-profile postgres is
   # up. Equivalent to `psql "$WOMBLEX_DB_DSN" -f sql/womblex_jobs.sql`.
   init:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ${WOMBLEX_PIPELINE_IMAGE:-ghcr.io/deepcivic/womblex:latest}
     depends_on:
       postgres:
         condition: service_healthy
@@ -178,9 +189,7 @@ services:
 
   # General-purpose CLI entry (enqueue, run, manifest, ...). Use with `run`.
   womblex:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ${WOMBLEX_PIPELINE_IMAGE:-ghcr.io/deepcivic/womblex:latest}
     depends_on:
       postgres:
         condition: service_healthy
@@ -200,9 +209,7 @@ services:
   # against the external DSN, or apply sql/womblex_jobs.sql; the bucket is
   # created out-of-band) does not wait on the bundled one-shots.
   worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ${WOMBLEX_PIPELINE_IMAGE:-ghcr.io/deepcivic/womblex:latest}
     depends_on:
       init:
         condition: service_completed_successfully
@@ -222,9 +229,7 @@ services:
   # not seed a sample into its own store unasked; run it explicitly with
   # `docker compose --profile seed up seed-demo`.
   seed-demo:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ${WOMBLEX_PIPELINE_IMAGE:-ghcr.io/deepcivic/womblex:latest}
     depends_on:
       createbuckets:
         condition: service_completed_successfully
@@ -251,9 +256,7 @@ services:
   # same env vars name — a reachable-but-schemaless external queue reads as an
   # empty queue, not a fault (v0.5.6), so it comes up cleanly there too.
   ui:
-    build:
-      context: .
-      dockerfile: Dockerfile.ui
+    image: ${WOMBLEX_CONSOLE_IMAGE:-ghcr.io/deepcivic/womblex-console:latest}
     depends_on:
       postgres:
         condition: service_healthy
