@@ -740,6 +740,12 @@ A local `docker compose build` passes neither argument and its image reports
 `unavailable` with a reason — honest for a build that is not published, and
 one less thing between an edit and a running stack.
 
+Where each compose service's image comes from is enumerated per service in
+[`docs/deployment-images.md`](docs/deployment-images.md), with a recorded
+decision for every one of them and a note on which third-party tags are
+unpinned. `tests/test_deployment_images.py` holds the document to the compose
+files, so the enumeration cannot go stale.
+
 ### Commit hook
 
 Two checks run on the files you stage: a secret scan (`detect-secrets`) and SAST over the
