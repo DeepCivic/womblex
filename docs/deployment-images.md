@@ -71,9 +71,10 @@ enumerated like any other.
 
 All five build-from-source services carry the same verdict, and that is not five
 decisions that happened to agree. Four of them — `init`, `womblex`, `worker` and
-`seed-demo` — build the identical `Dockerfile` and differ only in the command
-they run, so they are one artefact with four entry points; building them
-separately would produce four copies of the same bytes. The console is the
+`seed-demo` — build the identical `Dockerfile`, differing only in the command
+they run and, for two of them, a `./configs` mount. Nothing that distinguishes
+them is part of the image, so they are one artefact with four entry points;
+building them separately would produce four copies of the same bytes. The console is the
 second image because `Dockerfile.ui` carries a Node build stage the pipeline has
 no reason to hold.
 
