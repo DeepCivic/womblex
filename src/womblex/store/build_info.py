@@ -38,6 +38,8 @@ that the run can be recomputed from it.
 
 from __future__ import annotations
 
+import os
+import re
 import subprocess
 from dataclasses import dataclass
 from functools import lru_cache
@@ -48,6 +50,24 @@ from womblex import __version__
 #: The commit value when neither source can answer, and the prefix its reason
 #: is appended to. A first-class value, not an empty string.
 UNAVAILABLE = "unavailable"
+
+#: Where the running image's own reference is read from. It has to be *given* —
+#: a digest is content-addressed after the push, so it cannot be baked into the
+#: image it names, and a container cannot read its own labels from inside. The
+#: compose stack supplies it from the same value R3 pins the service to.
+IMAGE_REF_ENV = "WOMBLEX_IMAGE_REF"
+
+#: Files a container runtime leaves behind. Docker writes the first, Podman the
+#: second; both are the runtime's own marker rather than something inferred.
+_CONTAINER_MARKERS = (Path("/.dockerenv"), Path("/run/.containerenv"))
+
+#: The separator that makes a reference a digest rather than a tag, and the
+#: shape of the digest itself. Checked rather than assumed: this module exists
+#: not to claim what it cannot establish, and a string that cannot be a digest
+#: recorded as one would be exactly that. The algorithm is not pinned to
+#: sha256 — a registry may serve another — but the form is.
+_DIGEST_SEP = "@"
+_DIGEST_RE = re.compile(r"^[a-z0-9]+(?:[.+_-][a-z0-9]+)*:[0-9a-f]{32,}$")
 
 # Every git call is bounded: a resolver that hangs would hang the run that
 # asked it, for a fact the run can honestly do without.
@@ -165,4 +185,94 @@ def resolve_commit() -> str:
     return build_info().commit_value
 
 
-__all__ = ["UNAVAILABLE", "BuildInfo", "build_info", "resolve_commit"]
+# ---------------------------------------------------------------------------
+# Which image, if any, the run is executing inside
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ImageInfo:
+    """The container image a run is executing inside, as far as it can be known.
+
+    ``containerised`` is the only fact this module establishes on its own.
+    ``reference`` and ``digest`` are read from the environment, because neither
+    is discoverable from inside: a digest is content-addressed *after* the push,
+    so it cannot be baked into the image it names, and a container cannot read
+    its own labels. ``reason`` is empty only when a digest was established.
+    """
+
+    containerised: bool
+    reference: str
+    digest: str
+    reason: str
+
+    def as_record(self) -> dict:
+        """The block the run record carries. Every field present, none invented."""
+        return {
+            "containerised": self.containerised,
+            "reference": self.reference or None,
+            "digest": self.digest or None,
+            "reason": self.reason or None,
+        }
+
+
+def _is_containerised() -> bool:
+    """Whether the process is running inside a container runtime.
+
+    Asked of the runtime's own marker files rather than inferred from cgroups,
+    which differ by kernel, runtime and orchestrator and would turn a plain
+    fact into a guess. A false negative here is honest — it reports "not
+    containerised" and records no digest, which is what an unrecognised runtime
+    should produce rather than a claim about an image nobody named.
+    """
+    return any(marker.exists() for marker in _CONTAINER_MARKERS)
+
+
+@lru_cache(maxsize=1)
+def image_info() -> ImageInfo:
+    """Resolve the running image once per process.
+
+    Four outcomes, each a recorded fact rather than an absence:
+
+    - **Not containerised.** No digest, and the reason says so — a local run is
+      not a deployment that failed to identify itself.
+    - **Containerised, nothing injected.** The deployment did not supply the
+      reference; a locally built image is the ordinary case.
+    - **Containerised, a tag.** The deployment named a tag, which does not
+      identify bytes, so there is no digest to record.
+    - **Containerised, a digest.** Recorded, with the full reference beside it.
+
+    :func:`image_info.cache_clear` resets it, which only a test changing the
+    environment under it needs.
+    """
+    containerised = _is_containerised()
+    reference = os.environ.get(IMAGE_REF_ENV, "").strip()
+    if not containerised:
+        return ImageInfo(False, reference, "", "not running in a container")
+    if not reference:
+        return ImageInfo(
+            True, "", "", f"{IMAGE_REF_ENV} was not supplied to the container",
+        )
+    name, separator, digest = reference.partition(_DIGEST_SEP)
+    if not separator:
+        return ImageInfo(
+            True, reference, "",
+            "the deployment names a tag, which does not identify an image",
+        )
+    if not name or not _DIGEST_RE.match(digest):
+        return ImageInfo(
+            True, reference, "",
+            "the reference is not a name and a well-formed digest",
+        )
+    return ImageInfo(True, reference, digest, "")
+
+
+__all__ = [
+    "IMAGE_REF_ENV",
+    "UNAVAILABLE",
+    "BuildInfo",
+    "ImageInfo",
+    "build_info",
+    "image_info",
+    "resolve_commit",
+]

@@ -22,12 +22,14 @@ import pytest
 
 from womblex.config import DatasetConfig, PathsConfig, WomblexConfig
 from womblex.ingest.strategies_file import DocxExtractor
+from womblex.store.build_info import IMAGE_REF_ENV, image_info
 from womblex.store.embed_output import EMBEDDINGS_SCHEMA
-from womblex.store.output import write_results
+from womblex.store.output import read_manifest, write_results
 from womblex.store.run_manifest import (
     RUN_RECORD_KEY,
     RUN_RECORD_VERSION,
     _footers,
+    build_run_record,
     read_run_record,
     run_manifest_path_for,
     write_run_manifest,
@@ -372,3 +374,126 @@ class TestEndpointIdentity:
         monkeypatch.setenv("ISAACUS_SAGEMAKER_ENDPOINTS", "embed-001@ap-southeast-2")
         services = read_run_record(write_run_manifest(_extracted(tmp_path, extraction)))
         assert services["services"][0]["endpoint"] == "embed-001"
+
+
+class TestTheImageTheRunExecutedInside:
+    """R4: the record names the image by digest, or says honestly why it cannot.
+
+    The digest has to be handed in — it is content-addressed after the push, so
+    it cannot be baked into the image it names, and a container cannot read its
+    own labels. So every one of these outcomes is a *recorded* fact and none is
+    an empty value standing in for one.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _reset(self):
+        image_info.cache_clear()
+        yield
+        image_info.cache_clear()
+
+    @staticmethod
+    def _in_container(monkeypatch, ref: str | None) -> None:
+        """Run as though inside a container, optionally given *ref*."""
+        monkeypatch.setattr(
+            "womblex.store.build_info._CONTAINER_MARKERS", (Path("/"),),
+        )
+        if ref is None:
+            monkeypatch.delenv(IMAGE_REF_ENV, raising=False)
+        else:
+            monkeypatch.setenv(IMAGE_REF_ENV, ref)
+
+    def test_a_published_image_is_named_by_its_digest(self, monkeypatch):
+        pinned = "ghcr.io/deepcivic/womblex@sha256:" + "a" * 64
+        self._in_container(monkeypatch, pinned)
+        info = image_info()
+        assert info.containerised is True
+        assert info.digest == "sha256:" + "a" * 64
+        assert info.reference == pinned
+        assert info.reason == ""
+
+    def test_a_run_outside_a_container_says_so_rather_than_going_empty(
+        self, monkeypatch,
+    ):
+        monkeypatch.setattr(
+            "womblex.store.build_info._CONTAINER_MARKERS",
+            (Path("/definitely-not-here"),),
+        )
+        monkeypatch.delenv(IMAGE_REF_ENV, raising=False)
+        record = image_info().as_record()
+        assert record["containerised"] is False
+        assert record["digest"] is None
+        assert record["reason"] == "not running in a container"
+
+    def test_a_locally_built_image_records_the_absence_and_does_not_fail(
+        self, monkeypatch,
+    ):
+        """What the local compose override produces: it builds, so it pins nothing."""
+        self._in_container(monkeypatch, "")
+        record = image_info().as_record()
+        assert record["containerised"] is True
+        assert record["digest"] is None
+        assert IMAGE_REF_ENV in record["reason"]
+
+    def test_a_tag_is_not_recorded_as_a_digest(self, monkeypatch):
+        """A tag can be moved to point at other bytes, so it identifies nothing.
+
+        Recording it in the digest field would be the one dishonest outcome
+        available here — a moving pointer presented as an artefact's identity.
+        """
+        self._in_container(monkeypatch, "ghcr.io/deepcivic/womblex:0.5.12")
+        info = image_info()
+        assert info.digest == ""
+        assert info.reference == "ghcr.io/deepcivic/womblex:0.5.12"
+        assert "tag" in info.reason
+
+    @pytest.mark.parametrize("reference", [
+        "ghcr.io/x@",                       # separator, nothing after it
+        "@sha256:" + "a" * 64,              # a digest naming no image
+        "ghcr.io/x@sha256:abc",             # too short to be one
+        "ghcr.io/x@SHA256:" + "A" * 64,     # digests are lower-case hex
+        "a@b@c",                            # not a reference at all
+    ])
+    def test_a_malformed_reference_yields_no_digest(self, monkeypatch, reference):
+        """A string that cannot be a digest is never recorded as one.
+
+        The value is injected, so a deployment that sets it wrongly is the
+        realistic failure. Recording whatever followed the separator would put
+        a fabricated identifier in the record — the one thing this module is
+        written not to do.
+        """
+        self._in_container(monkeypatch, reference)
+        info = image_info()
+        assert info.digest == ""
+        assert "well-formed digest" in info.reason
+
+    def test_the_record_carries_the_image_block(self, tmp_path, extraction, monkeypatch):
+        pinned = "ghcr.io/deepcivic/womblex@sha256:" + "b" * 64
+        self._in_container(monkeypatch, pinned)
+        shards = _extracted(tmp_path, extraction)
+        record = build_run_record(shards, read_manifest(shards))
+        assert record["image"]["digest"] == "sha256:" + "b" * 64
+        assert record["record_version"] == RUN_RECORD_VERSION
+
+    def test_a_recorded_digest_still_declares_it_was_not_self_verified(
+        self, tmp_path, extraction, monkeypatch,
+    ):
+        """The limitation is stated loudest when the digest IS present.
+
+        The value is operator-supplied, so a record that named it without this
+        would read as though the run had verified the image it was running in.
+        """
+        self._in_container(monkeypatch, "ghcr.io/x@sha256:" + "c" * 64)
+        shards = _extracted(tmp_path, extraction)
+        record = build_run_record(shards, read_manifest(shards))
+        assert any("operator-honest" in gap for gap in record["partial"])
+
+    def test_an_absent_digest_names_its_reason_in_partial(
+        self, tmp_path, extraction, monkeypatch,
+    ):
+        self._in_container(monkeypatch, None)
+        shards = _extracted(tmp_path, extraction)
+        record = build_run_record(shards, read_manifest(shards))
+        assert any(
+            gap.startswith("image digest:") and IMAGE_REF_ENV in gap
+            for gap in record["partial"]
+        )

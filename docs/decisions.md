@@ -404,6 +404,19 @@ inspect` reads the image, `build_info` reads from inside a run. Neither is a
 digest: what identifies a published *artefact* is deferred to the publication
 that does not exist yet.
 
+**A run's image digest is injected, and the record says so.** A digest is
+content-addressed after the push, so it cannot be baked into the image it
+names, and a container cannot read its own labels from inside — so the run
+record's `image` block is operator-honest rather than self-verifying, and its
+`partial` list says that even when the digest is present. That is the same
+shape the declared-services entry already has: the record describes the
+environment it was written in and never claims to have verified it. *Rejected:*
+recording the image's tag as its identity, which is a pointer someone can move
+presented as an artefact; inferring the container from cgroups, which vary by
+kernel, runtime and orchestrator and would turn a plain fact into a guess — the
+runtime's own marker file is asked instead, and an unrecognised runtime reports
+"not containerised" rather than a claim about an image nobody named.
+
 **The publication is GHCR, on a release tag, recorded as a digest.** GHCR
 because it takes the workflow's ambient token for this repository's own
 packages, so the "no credential is committed" property holds by construction
