@@ -115,6 +115,16 @@ upgrade path attached, and folding it into an audit is how it would get made
 without one. The audit's job is that the finding exists in writing and is
 re-checked, not that it is resolved in the same breath.
 
+**The finding has since been observed, not just predicted.** An attempt to
+bring the bundled stack up on a clean CI runner failed at `minio/minio`:
+`pull access denied ... repository does not exist or may require 'docker
+login'`. An untagged reference resolves to `latest`, and whether that tag
+still exists — or whether an anonymous pull is simply refused — is exactly
+what an unpinned reference cannot tell you. The stack came up on developer
+machines throughout, because those had the image cached from an earlier pull.
+That is the failure mode in miniature: the same compose file, working for
+whoever pulled first and broken for whoever pulls now.
+
 ## What re-checks this
 
 `tests/test_deployment_images.py` parses this document's tables and both compose
