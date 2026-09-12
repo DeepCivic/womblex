@@ -787,6 +787,12 @@ publishes an `edge-<sha>` tag and leaves `deploy/images.env` alone — useful fo
 exercising the path without cutting a version, and it cannot move what a
 deployment follows.
 
+Where each compose service's image comes from is enumerated per service in
+[`docs/deployment-images.md`](docs/deployment-images.md), with a recorded
+decision for every one of them and a note on which third-party tags are
+unpinned. `tests/test_deployment_images.py` holds the document to the compose
+files, so the enumeration cannot go stale.
+
 ### Commit hook
 
 Two checks run on the files you stage: a secret scan (`detect-secrets`) and SAST over the
