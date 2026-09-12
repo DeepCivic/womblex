@@ -133,25 +133,42 @@ jobs:
         # the layers the build above produced, so this reaches the stamp in
         # seconds. No output is asked for; the exit status is the whole test.
         run: |
-          if docker buildx build --build-arg REQUIRE_STAMP=1 -f Dockerfile . ; then
+          if docker buildx build --build-arg REQUIRE_STAMP=1 \
+              -f Dockerfile . > "$RUNNER_TEMP/unstamped.log" 2>&1; then
             echo "build should have failed with no SOURCE_COMMIT" >&2
             exit 1
           fi
+          # It must fail for the stated reason: any build failure passing this
+          # test would make a broken build look like the guard working.
+          grep -q "SOURCE_COMMIT is required" "$RUNNER_TEMP/unstamped.log" || {
+            echo "build failed, but not on the stamp guard:" >&2
+            cat "$RUNNER_TEMP/unstamped.log" >&2
+            exit 1
+          }
 
       - name: The CLI runs
         if: matrix.name == 'pipeline'
-        run: docker run --rm womblex-pipeline:ci --help
+        # `--help` proves the entry point; the import proves the system
+        # libraries the image installs for PyMuPDF and OpenCV, which a missing
+        # apt package breaks at load rather than at build.
+        run: |
+          docker run --rm womblex-pipeline:ci --help
+          docker run --rm --entrypoint python womblex-pipeline:ci -c \
+            'import womblex.ingest.extract, womblex.ingest.heuristics_cv2, womblex.cloud.worker'
 
       - name: The console serves
         if: matrix.name == 'console'
         # A run source is required (the console reads exactly one), so point it
-        # at the demo corpus the image already carries.
+        # at the vendored demo corpus the image already carries — which also
+        # makes this more than a liveness check: the run listing proves the
+        # image can read a real run's artefacts, not just answer a health stub.
         run: |
           docker run -d --name console -p 8080:8080 \
-            -e WOMBLEX_UI_OUTPUT_ROOT=/app/output womblex-console:ci
+            -e WOMBLEX_UI_OUTPUT_ROOT=/app/output/console-demo womblex-console:ci
           for _ in $(seq 1 30); do
             if curl -fsS http://localhost:8080/api/health; then served=1; break; fi
             sleep 2
           done
           docker logs console
           test "${served:-0}" = "1"
+          curl -fsS http://localhost:8080/api/runs | grep -q run-throsby-demo
