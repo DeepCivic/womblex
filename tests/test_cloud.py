@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import uuid
 from pathlib import Path
+from typing import Self
 
 import pytest
 
@@ -1137,3 +1138,74 @@ def test_read_parquet_footer_reports_an_unreadable_object_rather_than_raising(tm
     store = RemoteStore.from_uri(str(tmp_path))
     assert store.read_parquet_footer("documents/junk.parquet") is None
     assert store.read_parquet_footer("documents/absent.parquet") is None
+
+
+# --- enqueue: the prefix an operator types vs the keys that are queued -------
+
+
+class _CapturingQueue:
+    """A `JobQueue` stand-in that records the specs `cmd_enqueue` builds."""
+
+    keys: list[str] | None = None
+
+    def __init__(self, dsn: str, **_kw: object) -> None:
+        pass
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        pass
+
+    def ensure_schema(self) -> None:
+        pass
+
+    def enqueue(self, _run_id: str, specs: list) -> int:
+        _CapturingQueue.keys = [k for s in specs for k in s.input_keys]
+        return len(specs)
+
+
+def _enqueue_args(tmp_path: Path, prefix: str | None, *, ingest: bool = True):
+    import argparse
+
+    return argparse.Namespace(
+        store=str(tmp_path / "store"),
+        ingest=str(tmp_path / "inbox") if ingest else None,
+        input_prefix=prefix, config=None, run_id="run-cli", output_prefix=None,
+        batch_size=None, max_attempts=3, dsn="postgresql://x/y", create_schema=False,
+    )
+
+
+@pytest.mark.parametrize("prefix", ["2026-08", "./2026-08", "2026-08/", "2026-08//", "2026-08/."])
+def test_enqueue_queues_one_key_however_the_prefix_was_typed(tmp_path, monkeypatch, prefix):
+    """A queued key is downloaded by the worker and recorded as the document's
+    `source_relpath`, and an object store has no path semantics to collapse a
+    `.` segment, so every spelling has to scope identically here."""
+    import womblex.cloud.queue as queue_module
+    from womblex.cli import cloud
+
+    monkeypatch.setattr(queue_module, "JobQueue", _CapturingQueue)
+    (tmp_path / "inbox" / "2026-08").mkdir(parents=True)
+    (tmp_path / "inbox" / "2026-08" / "a.pdf").write_bytes(b"%PDF-1.4\n")
+
+    _CapturingQueue.keys = None
+    assert cloud.cmd_enqueue(_enqueue_args(tmp_path, prefix)) == 0
+    assert _CapturingQueue.keys == ["2026-08/a.pdf"]
+
+
+def test_a_prefix_scoping_to_nothing_is_not_a_licence_to_list_the_whole_store(
+    tmp_path, monkeypatch
+):
+    """`--input-prefix ./` is truthy but scopes to nothing. Without `--ingest`
+    that would enqueue the store root — the run's own output included — so the
+    guard reads the normalised prefix, not the string typed."""
+    import womblex.cloud.queue as queue_module
+    from womblex.cli import cloud
+
+    monkeypatch.setattr(queue_module, "JobQueue", _CapturingQueue)
+    (tmp_path / "store").mkdir()
+    (tmp_path / "store" / "stray.pdf").write_bytes(b"%PDF-1.4\n")
+
+    _CapturingQueue.keys = None
+    assert cloud.cmd_enqueue(_enqueue_args(tmp_path, "./", ingest=False)) == 1
+    assert _CapturingQueue.keys is None

@@ -10,7 +10,12 @@ from pathlib import Path
 
 import pytest
 
-from womblex.cli._shared import NestedCorpusError, discover_files, select_supported
+from womblex.cli._shared import (
+    NestedCorpusError,
+    discover_files,
+    normalise_prefix,
+    select_supported,
+)
 
 
 def _make(root: Path, *relpaths: str) -> None:
@@ -58,6 +63,38 @@ class TestSelectSupported:
         # ui/execute raises ValueError for bad input, which the route maps to
         # 400; the refusal travels the same way without a route change.
         assert issubclass(NestedCorpusError, ValueError)
+
+
+class TestNormalisePrefix:
+    """One key scope per location, for the CLI enqueue and the console alike.
+
+    A spelling that survives normalisation is published provenance: the keys
+    under the prefix are what the queue carries and what is recorded as each
+    document's `source_relpath`.
+    """
+
+    @pytest.mark.parametrize(
+        "spelling", ["2026-08", "./2026-08", "2026-08/", "/2026-08", "2026-08//", " 2026-08 "],
+    )
+    def test_every_spelling_of_one_location_yields_one_scope(self, spelling):
+        assert normalise_prefix(spelling) == "2026-08"
+
+    def test_an_inner_dot_segment_is_collapsed(self):
+        assert normalise_prefix("2026-08/./health") == "2026-08/health"
+
+    def test_omitted_or_empty_means_the_whole_root(self):
+        assert normalise_prefix(None) == normalise_prefix("") == normalise_prefix("./") == ""
+
+    @pytest.mark.parametrize(
+        "escape", ["../elsewhere", "2026-08/../../etc", "..", "s3://other-bucket", "a\\b"],
+    )
+    def test_a_prefix_that_leaves_the_root_is_refused_not_sanitised(self, escape):
+        with pytest.raises(ValueError, match="unsafe input_prefix"):
+            normalise_prefix(escape)
+
+    def test_a_literal_dotted_name_is_not_an_escape(self):
+        # `....` and `..foo` are directory names, not traversal.
+        assert normalise_prefix("..../elsewhere") == "..../elsewhere"
 
 
 class TestDiscoverFiles:

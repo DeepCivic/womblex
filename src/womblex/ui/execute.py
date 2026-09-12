@@ -35,10 +35,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from pathlib import PurePosixPath
 from typing import cast
 
-from womblex.cli._shared import NestedCorpusError, select_supported
+from womblex.cli._shared import NestedCorpusError, normalise_prefix, select_supported
 from womblex.store.feedback_output import is_safe_run_id
 from womblex.store.retention import generate_run_id
 from womblex.ui.deps import UISettings
@@ -146,38 +145,6 @@ def _guard(settings: UISettings, *, needs_ingest: bool = True) -> ExecutionCapab
             "(--dsn / $WOMBLEX_DB_DSN) to enqueue work.",
         )
     return cap
-
-
-# An ingest-relative prefix becomes a path segment joined onto the ingest root,
-# exactly as a run id is joined onto the feedback root. `RemoteStore` strips
-# leading and trailing slashes but does not resolve `..`, so a climbing prefix
-# would list — and enqueue — outside the location the deployment configured.
-# Refused rather than sanitised, on the same footing as `is_safe_run_id`: a real
-# prefix is a key scope inside the corpus, so there is nothing legitimate to
-# rewrite.
-_UNSAFE_IN_PREFIX = ("\\", "\x00", "://")
-
-
-def normalise_prefix(input_prefix: str | None) -> str:
-    """*input_prefix* as a store-key scope, or ``ValueError`` if it escapes.
-
-    Returns the segments joined back with single slashes (``""`` for the whole
-    ingest root), so preview and dispatch derive one scope from one string.
-    Rebuilt from the path's parts rather than merely stripped, because the
-    prefix is not only a listing scope: the keys under it are what the enqueue
-    writes to the queue, what the worker downloads, and what P1 records as each
-    document's ``source_relpath``. A ``.`` or doubled slash the operator typed
-    would ride into all three — harmless on a local path, a different key on an
-    object store, which has no path semantics to collapse it.
-    """
-    prefix = (input_prefix or "").strip().strip("/")
-    parts = PurePosixPath(prefix).parts  # collapses `.` and `//`; keeps `..`
-    if any(c in prefix for c in _UNSAFE_IN_PREFIX) or ".." in parts:
-        raise ValueError(
-            f"unsafe input_prefix: {input_prefix!r} — a prefix names a location "
-            "inside the configured ingest root."
-        )
-    return "/".join(parts)
 
 
 def _supported_under(settings: UISettings, prefix: str) -> tuple[str, list[str]]:

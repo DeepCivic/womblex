@@ -1694,26 +1694,23 @@ class TestIngestPreflight:
         # The sample is the keys, prefix and all, as the enqueue would stage them.
         assert sorted(body["sample"]) == ["2026-08/a.pdf", "2026-08/b.pdf"]
 
-    def test_every_spelling_of_a_prefix_normalises_to_one_key_scope(
+    def test_a_prefix_is_echoed_normalised_so_the_composer_posts_one_scope(
         self, tmp_path: Path
     ) -> None:
-        """The prefix is not only a listing scope — the keys under it are what
-        the enqueue queues, the worker downloads and the manifest records as
-        `source_relpath`. A `.` segment or a doubled slash the operator typed
-        rides into all three, and an object store has no path semantics to
-        collapse it, so it is collapsed here instead."""
+        """Spelling-by-spelling normalisation is pinned on the shared rule in
+        `test_discovery_parity`; what this holds is that the preflight echoes
+        the normalised prefix, since that string is what the composer posts."""
         pytest.importorskip("fsspec")
         ingest_root = tmp_path / "inbox"
         _seed_store_inputs(ingest_root, "2026-08", ["a.pdf"])
         client = TestClient(create_app(
             store_uri=str(tmp_path / "store"), ingest_uri=str(ingest_root),
         ))
-        for spelling in ("2026-08", "./2026-08", "2026-08/", "2026-08//", "/2026-08"):
-            body = client.get(
-                "/api/execute/ingest", params={"input_prefix": spelling},
-            ).json()
-            assert body["input_prefix"] == "2026-08", spelling
-            assert body["sample"] == ["2026-08/a.pdf"], spelling
+        body = client.get(
+            "/api/execute/ingest", params={"input_prefix": "./2026-08/"},
+        ).json()
+        assert body["input_prefix"] == "2026-08"
+        assert body["sample"] == ["2026-08/a.pdf"]
 
     def test_a_prefix_escaping_the_ingest_root_is_refused(self, tmp_path: Path) -> None:
         """Same footing as the unsafe-run-id check: 400, and no listing."""
