@@ -713,6 +713,33 @@ uv run ruff check src/
 
 Accuracy docs (`docs/accuracy/*.md`) are regenerated automatically at the end of each test run — no manual editing needed.
 
+### Container images
+
+CI builds both images on every pull request and on `main` — the pipeline image
+(`Dockerfile`) and the console image (`Dockerfile.ui`) — runs the CLI and the
+console's health endpoint against what it built, and fails the change if either
+build fails. It builds the same instructions a deployment builds, with no
+CI-only variant.
+
+Each build takes the source commit as an argument and stamps it into the
+installed package and onto the image as `org.opencontainers.image.revision`, so
+a container says what it was built from instead of reporting `unavailable`:
+
+```bash
+# A published build: the commit is required, and a build without one fails.
+docker build --build-arg SOURCE_COMMIT=$(git rev-parse HEAD) \
+             --build-arg REQUIRE_STAMP=1 -t womblex:$(git rev-parse --short HEAD) .
+
+# Read it back, from the image or from inside it.
+docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' womblex:...
+docker run --rm --entrypoint python womblex:... \
+  -c 'from womblex.store.build_info import build_info; print(build_info().commit_value)'
+```
+
+A local `docker compose build` passes neither argument and its image reports
+`unavailable` with a reason — honest for a build that is not published, and
+one less thing between an edit and a running stack.
+
 ### Commit hook
 
 Two checks run on the files you stage: a secret scan (`detect-secrets`) and SAST over the

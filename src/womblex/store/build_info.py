@@ -21,8 +21,11 @@ stamp answers for the wheel. Where neither answers, the commit is
 ``unavailable`` **with a reason**, which is a value rather than an absence: an
 empty string reads as "no commit" and a default reads as a wrong one, and the
 whole point of the record is that it does not claim what it cannot establish.
-A container is that third case today, and stays it until a published image
-carries a stamp.
+A container is that third case only when its build was given no commit: the
+image build takes the commit as an argument and writes this stamp into the
+installed package, so an image built by CI or by any build that supplies one
+answers here, and a local ``docker compose build`` — which supplies none —
+reports ``unavailable`` with its reason.
 
 **A dirty work tree gets its sha suffixed ``-dirty``.** The bytes that ran are
 not the bytes at that commit, and reporting the sha bare would claim exactly

@@ -71,3 +71,108 @@ jobs:
       - name: Build (vite)
         working-directory: ui
         run: npm run build
+
+  images:
+    name: Container image (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    # One runner per image rather than two builds in one job: each carries the
+    # whole vision/ML stack on top of a 100 MB models/ directory, and a single
+    # runner's disk does not comfortably hold both.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: pipeline
+            dockerfile: Dockerfile
+          - name: console
+            dockerfile: Dockerfile.ui
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reclaim runner disk
+        # The preinstalled toolchains are what the build would otherwise run
+        # out of room behind; torch, ultralytics and opencv need the space.
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          df -h /
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          load: true
+          tags: womblex-${{ matrix.name }}:ci
+          # The instructions a deployment builds, with nothing overridden but
+          # the provenance compose does not supply: no CI-only variant, and
+          # each Dockerfile's own EXTRAS default is what compose gets too.
+          build-args: |
+            SOURCE_COMMIT=${{ github.sha }}
+            REQUIRE_STAMP=1
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,scope=${{ matrix.name }}
+
+      - name: The image names its commit
+        # Both halves of it: the label a registry can read without running the
+        # image, and the stamp the running package resolves. The stamp is read
+        # off a marker rather than taken as the whole of stdout: importing
+        # `store` reaches PyMuPDF, which prints its `fitz` deprecation notice
+        # there, and any such preamble would otherwise land in the value.
+        run: |
+          image=womblex-${{ matrix.name }}:ci
+          label=$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image")
+          stamp=$(docker run --rm --entrypoint python "$image" -c \
+            'from womblex.store.build_info import build_info; print("stamp:" + build_info().commit_value)' \
+            | sed -n 's/^stamp://p')
+          echo "label=$label stamp=$stamp expected=$GITHUB_SHA"
+          test "$label" = "$GITHUB_SHA"
+          test "$stamp" = "$GITHUB_SHA"
+
+      - name: An unstamped published build fails
+        if: matrix.name == 'pipeline'
+        # The asymmetry is the requirement: a published image that cannot name
+        # its commit must not build at all. Cheap here — the builder still holds
+        # the layers the build above produced, so this reaches the stamp in
+        # seconds. No output is asked for; the exit status is the whole test.
+        run: |
+          if docker buildx build --build-arg REQUIRE_STAMP=1 \
+              -f Dockerfile . > "$RUNNER_TEMP/unstamped.log" 2>&1; then
+            echo "build should have failed with no SOURCE_COMMIT" >&2
+            exit 1
+          fi
+          # It must fail for the stated reason: any build failure passing this
+          # test would make a broken build look like the guard working.
+          grep -q "SOURCE_COMMIT is required" "$RUNNER_TEMP/unstamped.log" || {
+            echo "build failed, but not on the stamp guard:" >&2
+            cat "$RUNNER_TEMP/unstamped.log" >&2
+            exit 1
+          }
+
+      - name: The CLI runs
+        if: matrix.name == 'pipeline'
+        # `--help` proves the entry point; the import proves the system
+        # libraries the image installs for PyMuPDF and OpenCV, which a missing
+        # apt package breaks at load rather than at build.
+        run: |
+          docker run --rm womblex-pipeline:ci --help
+          docker run --rm --entrypoint python womblex-pipeline:ci -c \
+            'import womblex.ingest.extract, womblex.ingest.heuristics_cv2, womblex.cloud.worker'
+
+      - name: The console serves
+        if: matrix.name == 'console'
+        # A run source is required (the console reads exactly one), so point it
+        # at the vendored demo corpus the image already carries — which also
+        # makes this more than a liveness check: the run listing proves the
+        # image can read a real run's artefacts, not just answer a health stub.
+        run: |
+          docker run -d --name console -p 8080:8080 \
+            -e WOMBLEX_UI_OUTPUT_ROOT=/app/output/console-demo womblex-console:ci
+          for _ in $(seq 1 30); do
+            if curl -fsS http://localhost:8080/api/health; then served=1; break; fi
+            sleep 2
+          done
+          docker logs console
+          test "${served:-0}" = "1"
+          curl -fsS http://localhost:8080/api/runs | grep -q run-throsby-demo
