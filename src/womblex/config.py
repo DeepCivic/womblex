@@ -4,7 +4,7 @@
 import logging
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -495,19 +495,12 @@ class SegmentationConfig(BaseModel):
                     "budget, so a segment is bounded by whichever binds first. A source "
                     "with no page concept (DOCX, spreadsheet) is bounded by the budget alone.",
     )
-    oversize: str = Field(
+    oversize: Literal["flag", "error"] = Field(
         default="flag",
         description="What to do with an element that exceeds token_budget on its own: "
                     "'flag' emits it as a solo segment marked oversize; 'error' refuses "
                     "to segment the document.",
     )
-
-    @field_validator("oversize")
-    @classmethod
-    def _check_oversize(cls, v: str) -> str:
-        if v not in ("flag", "error"):
-            raise ValueError(f"oversize must be flag|error, got {v!r}")
-        return v
 
 
 class QualityConfig(BaseModel):

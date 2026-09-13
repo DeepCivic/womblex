@@ -23,11 +23,13 @@ within a single :class:`~womblex.ingest.elements.Element`.
 
 Segments of one document tile it — gapless and non-overlapping — which
 is what lets a future re-cut of boundaries be arithmetic over existing
-corrections rather than a re-review.
+corrections rather than a re-review. That rests on one document's stream
+being contiguous, so a filtered stream is refused rather than quietly
+segmented into ranges that do not tile.
 
-The budget is in tokens because that is what the packer counts. The
-human-facing word count is recorded alongside on each segment rather
-than converted at the boundary, so no rounding sits between the two.
+The budget is in tokens because that is what the packer counts; the
+human-facing word count is recorded alongside rather than converted at
+the boundary, so no rounding sits between the two.
 """
 
 from __future__ import annotations
@@ -44,9 +46,9 @@ from womblex.utils.token_packer import pack_by_tokens
 
 CountFn = Callable[[list[str]], list[int]]
 
-# One `label: value` line per form field — the same closed set of
-# structural delimiters the reviewer-facing renderer is allowed to emit,
-# so a segment's measured size matches what a reviewer will be handed.
+# One `label: value` line per form field — the form projection the
+# reviewer-facing renderer is specified to emit, so a segment is budgeted
+# against the shape a reviewer is handed rather than a second one.
 FIELD_JOIN = "\n"
 
 
@@ -55,9 +57,15 @@ class Segment:
     """One reviewable run of elements, and what it measured.
 
     ``element_range`` and ``page_range`` are half-open, over ``elem_order``
-    and zero-based page indices respectively. ``page_range`` is ``None``
-    when no element in the segment carries a page — a source with no page
-    concept (DOCX, spreadsheet) segments on the token budget alone.
+    and zero-based page indices respectively.
+
+    ``page_range`` is ``None`` when no element in the segment carries a
+    page — a fact about the segment, not the source. A paged document can
+    hold page-less elements (spreadsheet-print manifest tables span pages
+    and so anchor to none), so this does not mean the source is unpaged;
+    a caller filling a ground-truth sidecar, whose ``page_range`` separates
+    "no pages exist" from "none was produced", decides that from the whole
+    document.
 
     ``oversize`` marks the one segment shape the budget cannot honour: a
     single element whose own token count exceeds the budget, emitted alone
@@ -74,12 +82,11 @@ class Segment:
 def element_text(element: Element) -> str:
     """The text an element contributes to its segment's measured size.
 
-    Narrative kinds contribute their verbatim text; a table contributes its
-    markdown projection and a form its ``label: value`` lines, so a segment
-    is budgeted against what a reviewer actually reads. Structural elements
-    with no text (page breaks, sheet metadata) contribute nothing and are
-    carried by whichever segment they fall in — dropping them would leave a
-    gap in the tiling.
+    Narrative kinds contribute verbatim text, a table its markdown and a
+    form its ``label: value`` lines, so a segment is budgeted against what
+    a reviewer reads. Structural kinds (page breaks, sheet metadata)
+    contribute nothing but are still carried — dropping them would gap the
+    tiling.
     """
     if element.kind in TEXT_KINDS:
         return element.text or ""
@@ -102,17 +109,17 @@ def segment_elements(
 ) -> list[Segment]:
     """Cut an ordered element stream into budgeted, page-bounded segments.
 
-    ``count_fn`` maps a list of texts to their exact token counts — e.g.
-    ``TokenCounter().count_batch``. It is passed in rather than constructed
-    here so segmentation stays offline-testable and so the caller chooses
-    the tokeniser its budget is expressed in.
+    ``count_fn`` maps texts to exact token counts (e.g.
+    ``TokenCounter().count_batch``). Passed in rather than constructed here,
+    so the caller picks the tokeniser its budget is expressed in and
+    segmentation stays offline-testable.
 
-    Raises ``ValueError`` if the stream is not strictly increasing by
-    ``order`` (segment ranges would not tile), or if an element exceeds the
-    budget on its own under ``oversize='error'``.
+    Raises ``ValueError`` if the stream is not one document's elements,
+    contiguous and in order (segment ranges would not tile), or if an
+    element exceeds the budget on its own under ``oversize='error'``.
     """
     ordered = list(elements)
-    _check_monotonic(ordered)
+    _check_contiguous(ordered)
     if not ordered:
         return []
 
@@ -150,21 +157,32 @@ def segment_elements(
 # ---------------------------------------------------------------------------
 
 
-def _check_monotonic(elements: Sequence[Element]) -> None:
+def _check_contiguous(elements: Sequence[Element]) -> None:
+    """Refuse a stream whose segments could not tile the document.
+
+    Every producer increments ``order`` only on append, so one document's
+    stream is contiguous: a gap means the caller filtered it, and segments
+    cut from a subset report ranges that silently fail to tile.
+    """
     for prev, curr in pairwise(elements):
         if curr.order <= prev.order:
             raise ValueError(
                 "element stream must be sorted by strictly increasing order; "
                 f"saw {prev.order} then {curr.order}"
             )
+        if curr.order != prev.order + 1:
+            raise ValueError(
+                f"element stream must be contiguous; order jumps {prev.order} "
+                f"to {curr.order}. Segment the document's whole element stream, "
+                "not a filtered subset — segments of a subset cannot tile it"
+            )
 
 
 def _page_runs(elements: Sequence[Element], page_ceiling: int) -> Iterator[list[Element]]:
     """Partition into runs spanning at most ``page_ceiling`` pages.
 
-    Elements with no page (spreadsheet cells, DOCX paragraphs) never widen
-    the span, so a source with no page concept yields exactly one run and
-    is bounded by the token budget alone.
+    A page-less element never widens the span, so an unpaged source yields
+    one run, bounded by the token budget alone.
     """
     run: list[Element] = []
     low: int | None = None

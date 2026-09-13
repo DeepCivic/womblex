@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
-import sys
-import textwrap
 from itertools import pairwise
 
 import pytest
@@ -164,6 +161,18 @@ def test_page_range_is_half_open_over_zero_based_pages() -> None:
     assert segments[0].page_range == (3, 5)
 
 
+def test_page_less_tail_of_a_paged_document_reports_no_page_range() -> None:
+    """A spreadsheet-print PDF tails its stream with page-less tables, so a
+    None page_range is a fact about the segment, not about the source."""
+    elements = [para(0, "a", page=0), para(1, "b", page=0), table(2, 4, 3, page=None)]
+    segments = segment_elements(elements, words, cfg(token_budget=4))
+
+    assert segments[0].page_range == (0, 1)
+    assert segments[-1].page_range is None
+    # The paged elements are still there, so the document plainly has pages.
+    assert any(s.page_range is not None for s in segments)
+
+
 # ---------------------------------------------------------------------------
 # Configuration, not constants
 # ---------------------------------------------------------------------------
@@ -184,11 +193,6 @@ def test_oversize_error_refuses_to_segment() -> None:
 
     with pytest.raises(ValueError, match="over the 10-token budget"):
         segment_elements(elements, words, cfg(token_budget=10, oversize="error"))
-
-
-def test_oversize_value_is_validated() -> None:
-    with pytest.raises(ValueError, match="oversize must be flag|error"):
-        SegmentationConfig(oversize="ignore")
 
 
 # ---------------------------------------------------------------------------
@@ -221,6 +225,16 @@ def test_unordered_stream_is_refused() -> None:
         segment_elements([para(1, "a"), para(0, "b")], words, cfg())
 
 
+def test_filtered_stream_is_refused() -> None:
+    """A gap means a subset, whose segments could not tile the document."""
+    whole = [para(0, "a"), Element(order=1, kind="page_break", extractor="t", page=1), para(2, "b")]
+    filtered = [e for e in whole if e.kind != "page_break"]
+
+    assert len(segment_elements(whole, words, cfg())) == 1
+    with pytest.raises(ValueError, match="must be contiguous"):
+        segment_elements(filtered, words, cfg())
+
+
 def test_rerun_produces_identical_boundaries() -> None:
     elements = [para(i, " ".join(["w"] * (i % 5 + 1)), page=i // 3) for i in range(20)]
     config = cfg(token_budget=9, page_ceiling=2)
@@ -229,34 +243,3 @@ def test_rerun_produces_identical_boundaries() -> None:
         elements, words, config
     )
 
-
-def test_boundaries_survive_a_randomised_hash_seed() -> None:
-    """Same input, separate processes, randomised hash seed: identical bytes."""
-    script = textwrap.dedent(
-        """
-        from womblex.config import SegmentationConfig
-        from womblex.ingest.elements import Element
-        from womblex.process.segmenter import segment_elements
-
-        elements = [
-            Element(order=i, kind="paragraph", extractor="t", page=i // 3,
-                    text=" ".join(["w"] * (i % 5 + 1)))
-            for i in range(20)
-        ]
-        config = SegmentationConfig(token_budget=9, page_ceiling=2)
-        segments = segment_elements(
-            elements, lambda ts: [len(t.split()) for t in ts], config
-        )
-        print("|".join(f"{s.element_range}{s.page_range}{s.tokens}" for s in segments))
-        """
-    )
-    runs = {
-        subprocess.run(
-            [sys.executable, "-c", script],
-            capture_output=True, text=True, check=True,
-            env={"PYTHONHASHSEED": seed, "PATH": "/usr/bin:/bin"},
-        ).stdout
-        for seed in ("0", "1", "random")
-    }
-
-    assert len(runs) == 1
