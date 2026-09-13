@@ -91,13 +91,15 @@ def test_word_count_recorded_alongside_tokens() -> None:
 
 
 def test_table_and_its_cells_stay_in_one_segment() -> None:
-    elements = [para(0, "intro"), table(1, rows=8, cols=4), para(2, "outro")]
-    segments = segment_elements(elements, words, cfg(token_budget=10))
+    tbl = table(1, rows=8, cols=4)
+    els = [para(0, "intro"), tbl, para(2, "outro")]
+    segments = segment_elements(els, words, cfg(token_budget=10))
 
     holding = [s for s in segments if s.element_range[0] <= 1 < s.element_range[1]]
     assert len(holding) == 1
-    # The table is one element, so every cell is inside that one segment.
-    assert holding[0].element_range[1] - holding[0].element_range[0] >= 1
+    # Every cell measured inside that one segment — a table is one element,
+    # so no boundary can fall between its cells.
+    assert holding[0].tokens == len(element_text(tbl).split())
 
 
 def test_form_fields_stay_with_their_form() -> None:
@@ -109,7 +111,9 @@ def test_form_fields_stay_with_their_form() -> None:
 
     holding = [s for s in segments if s.element_range[0] <= 1 < s.element_range[1]]
     assert len(holding) == 1
-    assert holding[0].oversize  # 60 words, over the 10-token budget, so solo
+    # Over budget as one element, so emitted solo with every field measured.
+    assert holding[0].oversize
+    assert holding[0].tokens == len(element_text(form).split())
 
 
 def test_element_text_projects_tables_and_forms() -> None:
