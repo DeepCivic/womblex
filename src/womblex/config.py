@@ -473,6 +473,43 @@ class SpellfixConfig(BaseModel):
     )
 
 
+class SegmentationConfig(BaseModel):
+    """Ground-truth segmentation of an element stream into reviewable units.
+
+    Cuts a document's elements into contiguous ranges a human can correct in
+    one sitting. Boundaries are a function of the element stream and these
+    values alone — never of a stage's output — so a reviewed unit survives
+    any change to chunking, cleaning or enrichment. See
+    :mod:`womblex.process.segmenter`.
+    """
+
+    token_budget: int = Field(
+        default=2000, ge=1,
+        description="Maximum tokens per segment, counted by the caller's tokeniser. "
+                    "A single element over this is emitted alone and flagged oversize — "
+                    "there is no boundary inside an element to split at.",
+    )
+    page_ceiling: int = Field(
+        default=5, ge=1,
+        description="Maximum pages one segment may span. Applied before the token "
+                    "budget, so a segment is bounded by whichever binds first. A source "
+                    "with no page concept (DOCX, spreadsheet) is bounded by the budget alone.",
+    )
+    oversize: str = Field(
+        default="flag",
+        description="What to do with an element that exceeds token_budget on its own: "
+                    "'flag' emits it as a solo segment marked oversize; 'error' refuses "
+                    "to segment the document.",
+    )
+
+    @field_validator("oversize")
+    @classmethod
+    def _check_oversize(cls, v: str) -> str:
+        if v not in ("flag", "error"):
+            raise ValueError(f"oversize must be flag|error, got {v!r}")
+        return v
+
+
 class QualityConfig(BaseModel):
     """Chunk-quality annotation op (``womblex quality``).
 
@@ -839,6 +876,7 @@ class WomblexConfig(BaseModel):
     chunking: ChunkingConfig = ChunkingConfig()
     normalise: NormaliseConfig = NormaliseConfig()
     spellfix: SpellfixConfig = SpellfixConfig()
+    segmentation: SegmentationConfig = SegmentationConfig()
     quality: QualityConfig = QualityConfig()
     money: MoneyConfig = MoneyConfig()
     enrichment: EnrichmentConfig = EnrichmentConfig()

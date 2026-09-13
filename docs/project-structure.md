@@ -64,6 +64,7 @@ womblex/
 │   │   ├── spellfix_stage.py # spellfix_shards() — drives `womblex spellfix --shards`; writes *.spellfix_text.parquet + corrections
 │   │   ├── quality.py       # Chunk-quality annotation heuristics
 │   │   ├── quality_stage.py # quality_shards() — drives `womblex quality --shards`; writes *.chunk_quality.parquet
+│   │   ├── segmenter.py     # segment_elements() — contiguous element ranges under a token budget + page ceiling
 │   │   ├── money.py         # Self-evidencing money recognition (find_money) — patterns, FP blocking, exact Decimals
 │   │   ├── money_numbers.py # Number reading, currency symbol/ISO resolution, Australian false-positive blocking
 │   │   ├── money_words.py   # Worded amounts (find_worded_amounts, parse_number_words)
