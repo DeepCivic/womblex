@@ -41,9 +41,13 @@ Guarantees held here, each pinned by a test:
 - **Verbatim.** Redaction markers present in the element stream — in
   narrative, a table cell, or a form field — survive unchanged because
   nothing here rewrites text.
-- **Determinism** is inherent to a pure projection over an ordered list;
-  the formal cross-process guarantee, and the extension of it over table
-  numeric formatting, is U4 and lands with it.
+- **Determinism.** The render is byte-identical on re-run — in one process
+  and across processes under a randomised hash seed — because it is a pure
+  projection over an ordered list that iterates no mapping in output order
+  (:func:`~womblex.ingest.views._element_to_table_data` orders its rows with
+  ``sorted``) and reads no clock, path or process state. Cell and field
+  values are ``str`` by schema, so table numbers render verbatim with no
+  default-``repr`` path. Pinned by the determinism tests (U4).
 """
 
 from __future__ import annotations

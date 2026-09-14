@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 from womblex.ingest.elements import Cell, Element, FieldEntry
 from womblex.process.chunker import reassemble_narrative, table_to_markdown
 from womblex.process.renderer import render_elements, rendered_order
@@ -219,3 +224,90 @@ def test_rendered_output_minus_structural_set_is_subsequence_of_element_text() -
     rendered = _strip_structural(render_elements(elements))
     content = _strip_structural("".join(_element_content(e) for e in elements))
     assert _is_subsequence(rendered, content)
+
+
+# ---------------------------------------------------------------------------
+# Determinism (U4): the render is byte-identical on re-run, in one process and
+# across processes under a randomised hash seed.
+# ---------------------------------------------------------------------------
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _canonical_fixture() -> list[Element]:
+    """A mixed segment that would expose any non-determinism in the render.
+
+    Table cells are supplied in scrambled ``(row, col)`` order and carry
+    numeric-looking string values: a projection leaning on dict insertion
+    order (rather than ``sorted``) or a default-``repr`` numeric path would
+    show up here, and doubly so under a randomised hash seed.
+    """
+    cells = [
+        Cell(row=1, col=1, value="1,000.50"),
+        Cell(row=0, col=1, value="Amount"),
+        Cell(row=1, col=0, value="Alpha"),
+        Cell(row=0, col=0, value="Name"),
+        Cell(row=2, col=0, value="Beta"),
+        Cell(row=2, col=1, value="0007"),
+    ]
+    return [
+        para(0, "A cover note about the schedule."),
+        form(1, [("Reference", "FOI-2026-001"), ("Officer", "<REDACTED>")]),
+        Element(
+            order=2, kind="table", extractor="test", page=0,
+            cells=cells, header_rows=[0],
+        ),
+        para(3, "A closing remark, signed by <REDACTED>."),
+    ]
+
+
+def _canonical_render() -> str:
+    return render_elements(_canonical_fixture())
+
+
+def _subprocess_render() -> bytes:
+    """Render the canonical fixture in a fresh process under a random hash seed."""
+    script = (
+        "import sys\n"
+        "from tests.test_renderer import _canonical_render\n"
+        "sys.stdout.buffer.write(_canonical_render().encode('utf-8'))\n"
+    )
+    env = {**os.environ, "PYTHONHASHSEED": "random", "PYTHONPATH": str(_REPO_ROOT)}
+    proc = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True, check=True, cwd=str(_REPO_ROOT), env=env,
+    )
+    return proc.stdout
+
+
+def test_render_is_byte_identical_across_processes_under_random_hash_seed() -> None:
+    # Four bytes must agree: in-process twice and in two separate processes,
+    # each child under its own random PYTHONHASHSEED. A hash-order or
+    # wall-clock surface in the renderer would break one of these comparisons.
+    inproc = _canonical_render().encode("utf-8")
+    inproc_again = _canonical_render().encode("utf-8")
+    child_a = _subprocess_render()
+    child_b = _subprocess_render()
+    assert inproc == inproc_again
+    assert inproc == child_a
+    assert inproc == child_b
+    assert child_a == child_b
+
+
+def test_render_contains_no_volatile_content() -> None:
+    # Every byte is accounted for by the closed projection of the inputs: no
+    # timestamp, run id, absolute path or wall-clock-derived value can hide in
+    # an exact-match assertion.
+    assert _canonical_render() == (
+        "A cover note about the schedule.\n\n"
+        "Reference: FOI-2026-001\nOfficer: <REDACTED>\n\n"
+        "| Name | Amount |\n| --- | --- |\n| Alpha | 1,000.50 |\n| Beta | 0007 |\n\n"
+        "A closing remark, signed by <REDACTED>."
+    )
+
+
+def test_numeric_cell_values_are_not_reformatted() -> None:
+    # Numeric formatting in a rendered table is fixed by an explicit format,
+    # not default repr. Cell.value is `str`, so the format is verbatim: the
+    # zero-padded "0007" survives and is never coerced to `7`.
+    assert "| Beta | 0007 |" in _canonical_render()
