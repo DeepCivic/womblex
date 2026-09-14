@@ -8,25 +8,38 @@ presentation and are regenerable, the corrected text is not — so the
 renderer is a pure, order-preserving projection of the element stream,
 inventing nothing beyond a closed set of structural delimiters.
 
-**This is the narrative slice of that renderer.** Narrative-bearing
-elements (:data:`~womblex.ingest.elements.TEXT_KINDS`) render verbatim,
-one blank line between elements, via the same reassembly the chunker
-uses (:func:`~womblex.process.chunker.reassemble_narrative`) so a
-reviewed unit and a chunked one cannot drift into two coordinate spaces.
-Table and form rendering — the other members of the closed structural
-set — arrive in the next merge; until then a non-text element
-contributes nothing to the output rather than being dropped from a place
-it never occupied. On a narrative-only source (the per-page cohort the
-first proof runs against) the two states are identical.
+The closed structural set is exactly three things and nothing else:
+
+- one **blank line** between elements,
+- one **GitHub-flavoured markdown table** (pipe rows plus one header
+  separator row) per ``table`` element, and
+- one ``label: value`` line per field of a ``form`` element.
+
+Narrative-bearing elements (:data:`~womblex.ingest.elements.TEXT_KINDS`)
+render verbatim via the same reassembly the chunker uses
+(:func:`~womblex.process.chunker.reassemble_narrative`), so a reviewed
+unit and a chunked one cannot drift into two coordinate spaces. Table
+markdown reuses the chunker's :func:`~womblex.process.chunker.table_to_markdown`
+projection — the one :func:`womblex.process.segmenter.element_text` budgets
+against — so a segment is rendered in the shape it was measured in.
+Tables and forms are interleaved with narrative at their real position in
+the element stream (elements arrive in ``order``, so a walk of the stream
+*is* document order), never appended. Images, page breaks and spreadsheet
+cells are outside this closed set and contribute nothing.
 
 Guarantees held here, each pinned by a test:
 
-- **Order.** Rendered narrative follows element order exactly.
-  :func:`rendered_order` returns the ``order`` sequence as it appears in
-  the output, which a test compares against the input sequence.
-- **Verbatim.** The only bytes emitted are element text plus the
-  blank-line join between elements. Redaction markers present in the
-  element text survive unchanged because nothing here rewrites text.
+- **Order.** Rendered output follows element order exactly — narrative,
+  tables and forms alike. :func:`rendered_order` returns the ``order``
+  sequence as it appears in the output, which a test compares against the
+  input sequence.
+- **Invent nothing.** The only bytes emitted beyond element / cell / field
+  content are the closed structural set above. A test strips that set from
+  the rendered output and asserts the remainder is a subsequence of the
+  element text, so any other invented character fails.
+- **Verbatim.** Redaction markers present in the element stream — in
+  narrative, a table cell, or a form field — survive unchanged because
+  nothing here rewrites text.
 - **Determinism** is inherent to a pure projection over an ordered list;
   the formal cross-process guarantee, and the extension of it over table
   numeric formatting, is U4 and lands with it.
@@ -37,9 +50,20 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from womblex.ingest.elements import Element
-from womblex.process.chunker import element_spans, reassemble_narrative
+from womblex.ingest.views import _element_to_table_data
+from womblex.process.chunker import (
+    NARRATIVE_JOIN,
+    element_spans,
+    reassemble_narrative,
+    table_to_markdown,
+)
 
 __all__ = ["render_elements", "rendered_order"]
+
+# One `label: value` line per form field — the same projection
+# `segmenter.element_text` budgets a form against, so a segment renders in
+# the shape it was measured in. Must stay equal to segmenter.FIELD_JOIN.
+_FIELD_JOIN = "\n"
 
 
 def render_elements(elements: Sequence[Element]) -> str:
@@ -47,25 +71,83 @@ def render_elements(elements: Sequence[Element]) -> str:
 
     ``elements`` is a segment's element slice, assumed already sorted by
     ``order`` (a segment's range is contiguous and ordered by
-    construction). Narrative-bearing elements render verbatim, separated
-    by one blank line; non-text kinds contribute nothing in this merge.
+    construction). Narrative-bearing elements render verbatim, tables as
+    GitHub-flavoured markdown and forms as ``label: value`` lines, each
+    separated from its neighbour by one blank line and interleaved at its
+    real position in the stream. Kinds outside the closed structural set
+    (images, page breaks, sheet cells) contribute nothing.
 
-    The narrative projection is :func:`reassemble_narrative`'s text —
-    reused rather than reimplemented, so the bytes a reviewer corrects
-    are the bytes the chunker sees.
+    The narrative projection is :func:`reassemble_narrative`'s text and the
+    table projection is :func:`table_to_markdown` — reused rather than
+    reimplemented, so the bytes a reviewer corrects are the bytes the
+    chunker and the segmenter's budget see.
     """
-    text, _page_breaks = reassemble_narrative(list(elements))
-    return text
+    pieces: list[str] = []
+    run: list[Element] = []
+    for e in elements:
+        structural = _structural_piece(e)
+        if structural is None:
+            # Narrative or a kind outside the closed set; reassemble_narrative
+            # keeps the former and drops the latter, so accumulate and let it
+            # decide rather than filtering here.
+            run.append(e)
+            continue
+        _flush_narrative(run, pieces)
+        run = []
+        pieces.append(structural)
+    _flush_narrative(run, pieces)
+    return NARRATIVE_JOIN.join(pieces)
 
 
 def rendered_order(elements: Sequence[Element]) -> list[int]:
     """The element ``order`` values in the sequence they appear in the output.
 
-    A pure narrative projection follows element order, so this is the
-    ``order`` of each narrative-bearing element in output order — the
-    handle a reading-order check compares against the source element
-    sequence without parsing the rendered markdown back apart. Elements
-    that contribute no text (empty text kinds, and every non-text kind in
-    this merge) do not appear, exactly as they do not appear in the output.
+    The handle a reading-order check compares against the source element
+    sequence without parsing the rendered markdown back apart: the
+    ``order`` of each element that contributes to the output, in output
+    order. That is every narrative-bearing element with text plus every
+    table / form element that renders a non-empty piece. Elements that
+    contribute nothing (empty text kinds, images, page breaks, sheet
+    cells, an empty table) do not appear, exactly as they do not in the
+    output.
+
+    Contribution here uses the same predicates as :func:`render_elements`
+    — :func:`element_spans` for narrative, :func:`_structural_piece` for
+    tables and forms — so the two cannot disagree about what was rendered.
     """
-    return [order for order, _start, _end in element_spans(list(elements))]
+    ordered = list(elements)
+    narrative_orders = {order for order, _start, _end in element_spans(ordered)}
+    out: list[int] = []
+    for e in ordered:
+        if e.order in narrative_orders or _structural_piece(e) is not None:
+            out.append(e.order)
+    return out
+
+
+def _flush_narrative(run: list[Element], pieces: list[str]) -> None:
+    """Append the narrative reassembly of ``run`` to ``pieces`` if non-empty."""
+    if not run:
+        return
+    text, _page_breaks = reassemble_narrative(run)
+    if text:
+        pieces.append(text)
+
+
+def _structural_piece(element: Element) -> str | None:
+    """The markdown a table or form element contributes, or ``None``.
+
+    ``None`` for every other kind — narrative (rendered via
+    :func:`reassemble_narrative`) and the kinds outside the closed set
+    alike — and for a table or form that projects to nothing (no cells, no
+    fields), which then contributes no piece and no blank line.
+    """
+    if element.kind == "table":
+        td = _element_to_table_data(element)
+        md = table_to_markdown(td.headers, td.rows)
+        return md if md.strip() else None
+    if element.kind == "form":
+        if not element.fields:
+            return None
+        lines = _FIELD_JOIN.join(f"{f.name}: {f.value}" for f in element.fields)
+        return lines if lines.strip() else None
+    return None
