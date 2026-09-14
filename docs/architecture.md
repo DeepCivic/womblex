@@ -69,6 +69,7 @@ src/womblex/
 │   ├── spellfix.py / spellfix_stage.py     # Hunspell-gated OCR character-confusion repair + driver
 │   ├── quality.py / quality_stage.py       # Chunk-quality annotation heuristics + driver
 │   ├── segmenter.py       # Element stream → budgeted, page-bounded ground-truth segments
+│   ├── renderer.py        # Segment element run → reviewer-facing markdown (narrative slice; tables/forms next)
 │   ├── money.py, money_numbers.py, money_words.py, money_vocab.py, money_columns.py, money_stage.py
 │   │                       # Money recognition: patterns, number/currency resolution, worded amounts,
 │   │                       # vocab tables, column classification, per-stage driver — see money-extraction.md
