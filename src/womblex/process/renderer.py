@@ -18,10 +18,11 @@ The closed structural set is exactly three things and nothing else:
 Narrative-bearing elements (:data:`~womblex.ingest.elements.TEXT_KINDS`)
 render verbatim via the same reassembly the chunker uses
 (:func:`~womblex.process.chunker.reassemble_narrative`), so a reviewed
-unit and a chunked one cannot drift into two coordinate spaces. Table
-markdown reuses the chunker's :func:`~womblex.process.chunker.table_to_markdown`
-projection — the one :func:`womblex.process.segmenter.element_text` budgets
-against — so a segment is rendered in the shape it was measured in.
+unit and a chunked one cannot drift into two coordinate spaces. Tables
+and forms reuse :func:`womblex.process.segmenter.element_text` — the very
+projection a segment's token budget is measured over (GFM markdown for a
+table, ``label: value`` lines for a form) — so a segment is rendered in
+the shape it was measured in, with no second copy of that logic to drift.
 Tables and forms are interleaved with narrative at their real position in
 the element stream (elements arrive in ``order``, so a walk of the stream
 *is* document order), never appended. Images, page breaks and spreadsheet
@@ -50,20 +51,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from womblex.ingest.elements import Element
-from womblex.ingest.views import _element_to_table_data
-from womblex.process.chunker import (
-    NARRATIVE_JOIN,
-    element_spans,
-    reassemble_narrative,
-    table_to_markdown,
-)
+from womblex.process.chunker import NARRATIVE_JOIN, element_spans, reassemble_narrative
+from womblex.process.segmenter import element_text
 
 __all__ = ["render_elements", "rendered_order"]
-
-# One `label: value` line per form field — the same projection
-# `segmenter.element_text` budgets a form against, so a segment renders in
-# the shape it was measured in. Must stay equal to segmenter.FIELD_JOIN.
-_FIELD_JOIN = "\n"
 
 
 def render_elements(elements: Sequence[Element]) -> str:
@@ -136,18 +127,16 @@ def _flush_narrative(run: list[Element], pieces: list[str]) -> None:
 def _structural_piece(element: Element) -> str | None:
     """The markdown a table or form element contributes, or ``None``.
 
-    ``None`` for every other kind — narrative (rendered via
-    :func:`reassemble_narrative`) and the kinds outside the closed set
-    alike — and for a table or form that projects to nothing (no cells, no
-    fields), which then contributes no piece and no blank line.
+    Reuses :func:`~womblex.process.segmenter.element_text` — the very
+    projection a segment's token budget is measured over — so a table or
+    form renders in the shape it was budgeted in, with no second copy of
+    the table-to-markdown or ``label: value`` logic to drift. ``None`` for
+    every other kind (narrative is rendered via :func:`reassemble_narrative`;
+    images, page breaks and sheet cells are outside the closed set) and for
+    a table or form that projects to nothing (no cells, no fields), which
+    then contributes no piece and no blank line.
     """
-    if element.kind == "table":
-        td = _element_to_table_data(element)
-        md = table_to_markdown(td.headers, td.rows)
-        return md if md.strip() else None
-    if element.kind == "form":
-        if not element.fields:
-            return None
-        lines = _FIELD_JOIN.join(f"{f.name}: {f.value}" for f in element.fields)
-        return lines if lines.strip() else None
+    if element.kind in ("table", "form"):
+        text = element_text(element)
+        return text if text.strip() else None
     return None

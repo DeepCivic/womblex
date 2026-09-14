@@ -5,6 +5,7 @@ from __future__ import annotations
 from womblex.ingest.elements import Cell, Element, FieldEntry
 from womblex.process.chunker import reassemble_narrative, table_to_markdown
 from womblex.process.renderer import render_elements, rendered_order
+from womblex.process.segmenter import element_text
 
 
 def para(order: int, text: str, page: int | None = 0) -> Element:
@@ -111,6 +112,15 @@ def test_table_reuses_chunker_table_to_markdown() -> None:
     # Same projection the segmenter budgets against — no second markdown code.
     t = table(0)
     assert render_elements([t]) == table_to_markdown(["r0c0", "r0c1"], [["r1c0", "r1c1"]])
+
+
+def test_table_and_form_render_the_segmenter_budget_projection() -> None:
+    # A lone table/form renders exactly what element_text budgets it as, so
+    # the shape a reviewer reads is the shape the segment was measured in.
+    t = table(0)
+    f = form(0, [("Name", "Jane Doe"), ("Date", "2026-01-01")])
+    assert render_elements([t]) == element_text(t)
+    assert render_elements([f]) == element_text(f)
 
 
 def test_table_interleaved_at_document_position_not_appended() -> None:
