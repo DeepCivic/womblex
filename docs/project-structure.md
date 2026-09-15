@@ -65,7 +65,8 @@ womblex/
 │   │   ├── quality.py       # Chunk-quality annotation heuristics
 │   │   ├── quality_stage.py # quality_shards() — drives `womblex quality --shards`; writes *.chunk_quality.parquet
 │   │   ├── segmenter.py     # segment_elements() — contiguous element ranges under a token budget + page ceiling
-│   │   ├── renderer.py      # render_elements() / rendered_order() — segment → reviewer markdown (narrative + GFM tables + label:value forms, interleaved; reuses reassemble_narrative + table_to_markdown)
+│   │   ├── renderer.py      # render_elements() / rendered_order() — segment → reviewer markdown (narrative + GFM tables + label:value forms, interleaved; reuses reassemble_narrative + table_to_markdown); RENDERER_VERSION + baseline_digest
+│   │   ├── ground_truth.py  # build_ground_truth() over a shard dir — segment → render → *.gt.md baseline + *.meta.json sidecar (identity from manifest, derivation from footer stamp + config, review unreviewed)
 │   │   ├── money.py         # Self-evidencing money recognition (find_money) — patterns, FP blocking, exact Decimals
 │   │   ├── money_numbers.py # Number reading, currency symbol/ISO resolution, Australian false-positive blocking
 │   │   ├── money_words.py   # Worded amounts (find_worded_amounts, parse_number_words)

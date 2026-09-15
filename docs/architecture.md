@@ -69,7 +69,8 @@ src/womblex/
 │   ├── spellfix.py / spellfix_stage.py     # Hunspell-gated OCR character-confusion repair + driver
 │   ├── quality.py / quality_stage.py       # Chunk-quality annotation heuristics + driver
 │   ├── segmenter.py       # Element stream → budgeted, page-bounded ground-truth segments
-│   ├── renderer.py        # Segment element run → reviewer-facing markdown (narrative + tables + forms, interleaved in element order)
+│   ├── renderer.py        # Segment element run → reviewer-facing markdown (narrative + tables + forms, interleaved in element order); RENDERER_VERSION + baseline_digest
+│   ├── ground_truth.py    # build_ground_truth() over a shard dir — segment → render → .gt.md baseline + .meta.json sidecar (identity from manifest, derivation from footer)
 │   ├── money.py, money_numbers.py, money_words.py, money_vocab.py, money_columns.py, money_stage.py
 │   │                       # Money recognition: patterns, number/currency resolution, worded amounts,
 │   │                       # vocab tables, column classification, per-stage driver — see money-extraction.md
