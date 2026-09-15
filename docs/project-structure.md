@@ -12,7 +12,7 @@ womblex/
 ├── fixtures/          # Test fixtures (separate repo, see ../THIRD_PARTY_DATA.md)
 ├── src/womblex/
 │   ├── cli/                # CLI subpackage — per-topic modules: pipeline, cloud, redact, link, embed,
-│   │                       #   normalise, spellfix, quality, money, pii, ingest, score, profile, verify, ui
+│   │                       #   normalise, spellfix, quality, money, pii, ingest, score, ground_truth, profile, verify, ui
 │   ├── config.py           # Pydantic config models
 │   ├── batch.py            # process_batch() — shared per-batch pipeline body (extract → optional redaction detection; extraction only)
 │   ├── operations/         # Independent operations, one module each: extract, redact, chunk, pii, enrich
@@ -105,7 +105,7 @@ womblex/
 │   │   ├── source_provenance.py  # Ingest root + source relpath, and their womblex.* Parquet footer keys
 │   │   ├── source_resolver.py    # SourceResolver — resolve a published row's source_hash back to its source file
 │   │   ├── build_info.py    # BuildInfo — package version + source commit, or unavailable with a reason
-│   │   ├── run_stamp.py     # RunStamp — run id / version / commit / config digest / stage / loaded models, as womblex.* footer keys
+│   │   ├── run_stamp.py     # RunStamp — run id / version / commit / config digest / stage / preset (config name) / loaded models, as womblex.* footer keys
 │   │   ├── run_manifest.py  # Consolidate per-batch manifests into a run-root manifest.parquet + the run record in its footer
 │   │   ├── register_manifest.py  # Manifest for standalone register ingests (G-NAF/ABN/geospatial)
 │   │   ├── remote.py        # fsspec stage-in/stage-out object-storage adapter for distributed runs

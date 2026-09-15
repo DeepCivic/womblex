@@ -32,6 +32,7 @@ from womblex.store.run_stamp import (
     COMMIT_KEY,
     CONFIG_DIGEST_KEY,
     MODELS_KEY,
+    PRESET_KEY,
     RUN_ID_KEY,
     STAGE_KEY,
     VERSION_KEY,
@@ -168,6 +169,7 @@ class TestFooterMetadata:
             "commit": resolve_commit(),
             "config_digest": stamp["config_digest"],
             "stage": "extract",
+            "preset": "test-corpus",
         }
 
     def test_a_reader_ignoring_the_footer_reads_the_file_unchanged(self, stamped):
@@ -288,3 +290,41 @@ class TestLocalModels:
         over its record of itself."""
         assert read_footer_models({MODELS_KEY.encode(): b"not json"}) == []
         assert read_footer_models({MODELS_KEY.encode(): b'[{"name": "x"}]'}) == []
+
+
+class TestPreset:
+    """`preset` is the config's `dataset.name`, carried like the other keys so
+    the ground-truth sidecar inherits it from the artefacts (design decision B).
+    """
+
+    def test_declare_fills_the_preset_from_the_dataset_name(self, tmp_path):
+        stamp = RunStamp.declare("run-A", _config(tmp_path), stage="extract")
+        assert stamp.preset == "test-corpus"
+        meta = stamp.footer_metadata()
+        assert meta[PRESET_KEY.encode()] == b"test-corpus"
+        assert read_footer_stamp(meta)["preset"] == "test-corpus"
+
+    def test_a_different_dataset_name_is_a_different_preset(self, tmp_path):
+        other = WomblexConfig(
+            dataset=DatasetConfig(name="other-corpus"),
+            paths=PathsConfig(
+                input_root=tmp_path / "in",
+                output_root=tmp_path / "out",
+                checkpoint_dir=tmp_path / "ckpt",
+            ),
+        )
+        assert RunStamp.declare("run-A", other, stage="extract").preset == "other-corpus"
+
+    def test_inherit_carries_a_supplied_preset(self, tmp_path):
+        stamp = RunStamp.inherit("run-A", "sha256:x", stage="chunk", preset="test-corpus")
+        assert stamp.preset == "test-corpus"
+        assert read_footer_stamp(stamp.footer_metadata())["preset"] == "test-corpus"
+
+    def test_no_name_writes_no_preset_key(self):
+        # An inherited stamp of a shard written before the key existed carries
+        # no preset, and writes none rather than an empty one.
+        stamp = RunStamp.inherit("run-A", "sha256:x", stage="chunk")
+        assert stamp.preset == ""
+        meta = stamp.footer_metadata()
+        assert PRESET_KEY.encode() not in meta
+        assert "preset" not in read_footer_stamp(meta)
