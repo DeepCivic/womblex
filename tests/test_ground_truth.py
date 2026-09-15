@@ -49,6 +49,7 @@ def _write_shard(
     doc_id: str = "doc-a",
     stamp: bool = True,
     provenance: bool = True,
+    preset: str = "",
 ) -> Path:
     """Write one real batch shard and return its directory."""
     corpus = tmp_path / "corpus"
@@ -64,7 +65,7 @@ def _write_shard(
     run_stamp = (
         RunStamp(
             run_id=_RUN_ID, version=_VERSION, commit="deadbeef",
-            config_digest=_DIGEST, stage="extract",
+            config_digest=_DIGEST, stage="extract", preset=preset,
         )
         if stamp else None
     )
@@ -121,7 +122,7 @@ def test_element_ranges_tile_the_document(tmp_path: Path) -> None:
 
 
 def test_derivation_comes_from_the_footer_and_the_renderer(tmp_path: Path) -> None:
-    shard_dir = _write_shard(tmp_path, [para(0, "alpha beta gamma")])
+    shard_dir = _write_shard(tmp_path, [para(0, "alpha beta gamma")], preset="collection-gt")
     out = tmp_path / "gt"
     build_ground_truth(shard_dir, out, SegmentationConfig(), count_fn=words)
 
@@ -132,7 +133,7 @@ def test_derivation_comes_from_the_footer_and_the_renderer(tmp_path: Path) -> No
     assert derivation["parser_version"] == _VERSION
     assert derivation["text_source"] == "elements"
     assert derivation["renderer_version"] == RENDERER_VERSION
-    assert derivation["preset"] == UNFILLED
+    assert derivation["preset"] == "collection-gt"  # the run's dataset.name, from the footer
 
     md = min(out.glob(f"*{BASELINE_SUFFIX}")).read_text(encoding="utf-8")
     assert derivation["baseline_digest"] == baseline_digest(md)
@@ -151,8 +152,21 @@ def test_unstamped_shard_leaves_derivation_facts_unfilled(tmp_path: Path) -> Non
     assert derivation["run_id"] == UNFILLED
     assert derivation["preset_digest"] == UNFILLED
     assert derivation["parser_version"] == UNFILLED
+    assert derivation["preset"] == UNFILLED
     assert derivation["renderer_version"] == RENDERER_VERSION
     assert derivation["baseline_digest"].startswith("sha256:")
+
+
+def test_preset_falls_back_to_the_sentinel_when_the_shard_names_none(tmp_path: Path) -> None:
+    # A shard stamped before the preset key existed, or by a config with no
+    # dataset name: preset_digest is present, preset is unfilled.
+    shard_dir = _write_shard(tmp_path, [para(0, "stamped but preset-less")], preset="")
+    out = tmp_path / "gt"
+    build_ground_truth(shard_dir, out, SegmentationConfig(), count_fn=words)
+
+    derivation = _sidecars(out)[0]["derivation"]
+    assert derivation["preset_digest"] == _DIGEST
+    assert derivation["preset"] == UNFILLED
 
 
 def test_page_range_is_the_segment_range_when_paged(tmp_path: Path) -> None:

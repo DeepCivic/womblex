@@ -151,6 +151,7 @@ class TestSidecarsInheritTheRun:
             "commit": resolve_commit(),
             "config_digest": stamp.config_digest,
             "stage": stage,
+            "preset": stamp.preset,
         }
 
     @pytest.mark.parametrize(
@@ -255,6 +256,7 @@ class TestConsolidatedRunManifest:
             "commit": resolve_commit(),
             "config_digest": stamp.config_digest,
             "stage": "manifest",
+            "preset": stamp.preset,
         }
 
     def test_batches_from_two_runs_leave_the_run_keys_off(self, tmp_path, stamp):

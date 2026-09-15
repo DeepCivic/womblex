@@ -5,10 +5,18 @@ run loses it and a file mixed in from another run is indistinguishable from a
 native one. This stamps five facts into every pipeline Parquet's footer
 key-value metadata at the moment it is written — run id, Womblex version,
 source commit, configuration digest and the stage that wrote it — so
-attribution survives the file being moved. A sixth key, the local models the
-writing process had loaded, rides alongside them; it is not a field on the
-stamp because a stamp is declared before any model loads, so it is read from
-``utils/models.py`` at footer time (:meth:`RunStamp.footer_metadata`).
+attribution survives the file being moved. Two further keys ride alongside
+them, each written only when it has a value: the configuration's self-declared
+name (``dataset.name``) as the run's *preset*, and the local models the writing
+process had loaded. The models key is not a field on the stamp because a stamp
+is declared before any model loads, so it is read from ``utils/models.py`` at
+footer time (:meth:`RunStamp.footer_metadata`); the preset is a field, filled
+from the config at :meth:`RunStamp.declare` and carried through inheritance.
+
+The preset key is general provenance — which configuration produced this file —
+not a ground-truth concern: no stage reads it, and it exists so the ground-truth
+sidecar's ``preset`` field is inherited from the artefacts like its
+``preset_digest`` sibling rather than asserted by a caller.
 
 The keys share the ``womblex.*`` namespace ``store/source_provenance.py``
 established (itself the convention ``store/register_manifest.py`` reads back
@@ -72,6 +80,7 @@ COMMIT_KEY = f"{NAMESPACE}.commit"
 CONFIG_DIGEST_KEY = f"{NAMESPACE}.config_digest"
 STAGE_KEY = f"{NAMESPACE}.stage"
 MODELS_KEY = f"{NAMESPACE}.models"
+PRESET_KEY = f"{NAMESPACE}.preset"
 
 # Excluded from the digest: see the module docstring. `paths` is deployment
 # location and `dataset.run_id` is the run's own identity, already a key.
@@ -95,13 +104,26 @@ def config_digest(config: object) -> str:
     return "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
 
 
+def _preset_name(config: object) -> str:
+    """The configuration's self-declared identity — ``dataset.name`` — for the
+    ``preset`` footer key.
+
+    Read structurally like :func:`config_digest`, and empty rather than raising
+    for a config that has no dataset name, so an unnamed run writes no preset
+    key on the same terms a modelless process writes no models key.
+    """
+    dataset = getattr(config, "dataset", None)
+    return str(getattr(dataset, "name", "") or "")
+
+
 @dataclass(frozen=True)
 class RunStamp:
-    """The five facts a written file carries about the run that produced it.
+    """The facts a written file carries about the run that produced it.
 
     One stamp is declared per run and re-pointed at each stage that writes
     (:meth:`for_stage`), so run id, version, commit and digest cannot drift
-    between the files of one run.
+    between the files of one run. ``preset`` is the config's ``dataset.name``,
+    carried the same way and empty for a config that declares none.
     """
 
     run_id: str
@@ -109,6 +131,7 @@ class RunStamp:
     commit: str
     config_digest: str
     stage: str
+    preset: str = ""
 
     @classmethod
     def declare(cls, run_id: str, config: object, *, stage: str) -> RunStamp:
@@ -127,10 +150,11 @@ class RunStamp:
             resolve_commit(),
             config_digest(config),
             str(stage).strip(),
+            preset=_preset_name(config),
         )
 
     @classmethod
-    def inherit(cls, run_id: str, digest: str, *, stage: str) -> RunStamp:
+    def inherit(cls, run_id: str, digest: str, *, stage: str, preset: str = "") -> RunStamp:
         """The stamp a downstream sidecar carries: the run it extends, by *stage*.
 
         A stage runs over a shard directory and has no independent knowledge of
@@ -151,6 +175,7 @@ class RunStamp:
             resolve_commit(),
             str(digest),
             str(stage).strip(),
+            preset=str(preset),
         )
 
     def for_stage(self, stage: str) -> RunStamp:
@@ -179,6 +204,8 @@ class RunStamp:
             CONFIG_DIGEST_KEY.encode(): self.config_digest.encode(),
             STAGE_KEY.encode(): self.stage.encode(),
         }
+        if self.preset:
+            meta[PRESET_KEY.encode()] = self.preset.encode()
         if models := loaded_models():
             payload = [{"name": m.name, "digest": m.digest} for m in models]
             meta[MODELS_KEY.encode()] = json.dumps(payload).encode()
@@ -201,6 +228,7 @@ def read_footer_stamp(metadata: Mapping[bytes, bytes] | None) -> dict[str, str]:
         (COMMIT_KEY, "commit"),
         (CONFIG_DIGEST_KEY, "config_digest"),
         (STAGE_KEY, "stage"),
+        (PRESET_KEY, "preset"),
     )
     return {name: decoded[key] for key, name in names if key in decoded}
 
@@ -239,6 +267,7 @@ def stamp_from_footers(paths: Iterable[Path], stage: str) -> RunStamp | None:
     no stamp, which is the rule the ingest-root footer already follows.
     """
     seen: set[tuple[str, str]] = set()
+    preset = ""
     for path in paths:
         try:
             existing = read_footer_stamp(pq.read_schema(str(path)).metadata)
@@ -246,10 +275,13 @@ def stamp_from_footers(paths: Iterable[Path], stage: str) -> RunStamp | None:
             continue
         if run_id := existing.get("run_id", ""):
             seen.add((run_id, existing.get("config_digest", "")))
+            preset = existing.get("preset", "") or preset
     if len(seen) != 1:
         return None
     run_id, digest = seen.pop()
-    return RunStamp.inherit(run_id, digest, stage=stage)
+    # `preset` is determined by the config digest (dataset.name is inside it),
+    # so the one run the files agree on has one preset; carry it forward.
+    return RunStamp.inherit(run_id, digest, stage=stage, preset=preset)
 
 
 def stamp_for_sidecar(base_path: Path, stage: str) -> RunStamp | None:
@@ -289,6 +321,7 @@ __all__ = [
     "COMMIT_KEY",
     "CONFIG_DIGEST_KEY",
     "MODELS_KEY",
+    "PRESET_KEY",
     "RUN_ID_KEY",
     "STAGE_KEY",
     "VERSION_KEY",

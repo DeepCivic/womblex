@@ -573,6 +573,29 @@ The subtraction is an element-stream concern; page text feeds `_text_coverage`
 and the accuracy suite's CER, which compare against a transcript of the whole
 page, and chunking reads `elements` rather than `pages[i].text`.
 
+### The ground-truth preset name rides the run stamp, not a helper argument
+
+A ground-truth unit's sidecar records both `preset_digest` (which configuration,
+exactly) and `preset` (its readable name). The digest was already the run's
+`config_digest`, read by the producer from the extraction shard's footer along
+with `run_id` and `parser_version` — every derivation-recipe field inherited
+from the artefacts, none asserted by a caller. `preset` had no footer source, so
+it stayed a sentinel.
+
+It is filled the same way rather than by a new argument to `build_ground_truth`:
+`store/run_stamp.py` stamps the configuration's `dataset.name` as a sixth
+`womblex.*` footer key, written whenever a config names one and carried through
+stage inheritance like `config_digest`, and the producer reads it beside its
+`preset_digest` sibling. A helper argument would have been the one recipe field
+taken on a caller's word rather than checked against the file, and would have
+made the producer — handed a shard directory, not a config — reach back for the
+config to supply it.
+
+The key is general provenance, "which configuration produced this file", not a
+ground-truth concern: no stage branches on it, so the pipeline keeps no
+ground-truth mode. It falls back to the sentinel for a shard stamped before the
+key existed or by a config that declared no name.
+
 ## Rejected approaches / dead-ends
 
 - **OCR-side table-detection relaxation — do not retry without a new

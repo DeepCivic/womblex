@@ -19,7 +19,9 @@ then. The field derivation is the whole of this module's judgement, per
   the extraction shard (``run_id``, ``config_digest``, ``version``), so the
   recipe checks against the artefacts; ``text_source`` and the renderer's
   ``renderer_version`` / ``baseline_digest`` pin what this render produced.
-  ``preset`` stays a sentinel — no human-readable preset name is stamped.
+  ``preset`` is the run's ``dataset.name``, read from the same footer as its
+  ``preset_digest`` sibling; it falls back to the sentinel for a shard stamped
+  before the preset key existed, or by a config that declared no name.
 - **review** at its unreviewed defaults.
 
 Composition only — the boundaries, the rendering and the schema each belong to
@@ -159,6 +161,7 @@ def _units_for_document(
             collection=identity_row["collection_id"],
             page_range=_page_range(segment, source_is_paged),
             element_range=segment.element_range,
+            preset=stamp.get("preset") or UNFILLED,
             preset_digest=stamp.get("config_digest") or UNFILLED,
             parser_version=stamp.get("version") or UNFILLED,
             text_source=text_source,
