@@ -52,13 +52,31 @@ Guarantees held here, each pinned by a test:
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Sequence
 
 from womblex.ingest.elements import Element
 from womblex.process.chunker import NARRATIVE_JOIN, element_spans, reassemble_narrative
 from womblex.process.segmenter import element_text
 
-__all__ = ["render_elements", "rendered_order"]
+#: The renderer's own version, stamped onto a ground-truth unit's sidecar
+#: (``derivation.renderer_version``). Bump it whenever the closed structural set
+#: or the projection would change the bytes emitted for an unchanged element
+#: stream — the signal that a re-derived baseline may differ from a corrected one.
+RENDERER_VERSION = "renderer-1"
+
+__all__ = ["RENDERER_VERSION", "baseline_digest", "render_elements", "rendered_order"]
+
+
+def baseline_digest(text: str) -> str:
+    """``sha256:…`` over the baseline bytes a reviewer corrects.
+
+    Digested as UTF-8, the same encoding the baseline is written in, so the
+    stored digest is over exactly the bytes on disk. The ``sha256:`` prefix
+    matches the run stamp's ``config_digest`` convention, so a reader can tell
+    the algorithm from the value without a second field.
+    """
+    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def render_elements(elements: Sequence[Element]) -> str:
