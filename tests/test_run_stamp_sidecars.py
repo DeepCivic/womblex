@@ -87,6 +87,8 @@ EXEMPT: dict[str, str] = {
     "write_results": "the extraction writer; takes the run's stamp explicitly (part 1)",
     "write_run_manifest": "consolidates the batch stamps; covered by its own cases here",
     "write_feedback_record": "a console report, written as JSON, not a pipeline parquet",
+    "write_sidecar": "a ground-truth .meta.json: JSON, and the run is recorded inside "
+                     "the sidecar's derivation block, not as parquet footer keys",
     "write_register_manifest": "the standalone register ingests, which bypass the pipeline",
     "write_provenance_shard": "the pre-extracted records ingest, which is not a run",
     "write_corpus_manifest": "the pre-extracted records ingest, which is not a run",
