@@ -1,28 +1,21 @@
 """The ground-truth metadata sidecar: schema, validation and IO.
 
-Every ground-truth unit carries exactly one sidecar — a JSON file beside
-its artefact, named ``<stem>.meta.json`` — recording which segment of which
-source document the unit is, the recipe that produced the baseline a
-reviewer corrected, and what a human asserted about it. This module owns
-that on-disk shape: field names, types, the ``unfilled`` sentinel, the
-enumerations, unit-id derivation, and read / write. It does *not* classify
-a unit's census status or validate a whole fixtures tree — that is the
-benchmark's concern, built against the schema this module encodes.
+Every ground-truth unit carries one sidecar — a JSON file beside its
+artefact, named ``<stem>.meta.json`` — recording which segment of which
+source document it is, the recipe that produced the baseline a reviewer
+corrected, and what a human asserted. This module owns that on-disk shape:
+field names, types, the ``unfilled`` sentinel, the enumerations, unit-id
+derivation, and read / write. It does *not* classify a unit's census status
+or validate a whole tree — that is the benchmark's concern, built against
+this schema. Self-contained like :mod:`womblex.store.feedback_output` — no
+pyarrow, just JSON — because a reviewer hand-edits it as often as a tool
+writes it.
 
-Self-contained like :mod:`womblex.store.feedback_output` — no pyarrow, just
-JSON — because a reviewer hand-edits this file as often as a tool writes it.
-
-Two rules :func:`validate_sidecar` enforces:
-
-- **No required field carries a default.** A producer that has not supplied
-  a field writes the string ``unfilled`` (:data:`UNFILLED`) rather than
-  omitting or guessing it. ``review_class`` is exempt (``unreviewed``
-  already means "nobody has done this yet"); ``page_range`` carries three
-  states — a range, the sentinel, and ``null`` for "this source is unpaged".
-- **Unknown keys are refused**, so a stray key from an older convention
-  fails rather than surviving unnoticed.
-
-The canonical specification is ``docs/ground-truth-units.md`` in the
+Two rules :func:`validate_sidecar` enforces: **no required field carries a
+default** (a producer that has not supplied one writes :data:`UNFILLED`;
+``review_class`` is exempt via ``unreviewed`` and ``page_range`` also takes
+``null`` for an unpaged source), and **unknown keys are refused**. The
+canonical specification is ``docs/ground-truth-units.md`` in the
 womblex-benchmark repository; this module is its executable form.
 """
 
@@ -30,6 +23,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import date
 from pathlib import Path
 from typing import Any, TypeGuard
 
@@ -73,11 +67,6 @@ class SidecarError(ValueError):
     """A sidecar that does not conform to the schema."""
 
 
-# ---------------------------------------------------------------------------
-# Build
-# ---------------------------------------------------------------------------
-
-
 def build_sidecar(
     *,
     kind: str,
@@ -105,8 +94,7 @@ def build_sidecar(
     The four identity fields a document and its run always supply are
     required; every producer-supplied field defaults to :data:`UNFILLED` and
     ``review_class`` to ``unreviewed``, so a freshly produced, unreviewed
-    unit is valid rather than incomplete. The result is validated before it
-    is returned, so a bad argument fails here rather than at write time.
+    unit is valid rather than incomplete. Validated before return.
     """
     sidecar: dict[str, Any] = {
         "kind": kind,
@@ -142,33 +130,21 @@ def build_sidecar(
     return sidecar
 
 
-# ---------------------------------------------------------------------------
-# Validate
-# ---------------------------------------------------------------------------
-
-
 def validate_sidecar(sidecar: Any) -> None:
     """Raise :class:`SidecarError` unless *sidecar* conforms to the schema.
 
     Checks presence, type and enumeration of every field, the three-state
     ``page_range`` and two-state ``element_range``, and refuses unknown keys
-    at every level. A conforming sidecar returns ``None``.
+    at every level.
     """
     if not isinstance(sidecar, dict):
         raise SidecarError(f"sidecar must be a JSON object, got {type(sidecar).__name__}")
     _refuse_unknown("(top level)", sidecar, _TOP_LEVEL)
-
     if sidecar.get("kind") not in KINDS:
         raise SidecarError(f"kind must be one of {KINDS}, got {sidecar.get('kind')!r}")
-
-    identity = _require_block(sidecar, "identity", _IDENTITY_FIELDS)
-    _validate_identity(identity)
-
-    derivation = _require_block(sidecar, "derivation", _DERIVATION_FIELDS)
-    _validate_derivation(derivation)
-
-    review = _require_block(sidecar, "review", _REVIEW_FIELDS)
-    _validate_review(review)
+    _validate_identity(_require_block(sidecar, "identity", _IDENTITY_FIELDS))
+    _validate_derivation(_require_block(sidecar, "derivation", _DERIVATION_FIELDS))
+    _validate_review(_require_block(sidecar, "review", _REVIEW_FIELDS))
     note = sidecar.get("note")
     if note is not None and not isinstance(note, str):
         raise SidecarError(f"note must be a string or absent, got {type(note).__name__}")
@@ -180,17 +156,19 @@ def _validate_identity(identity: dict[str, Any]) -> None:
         raise SidecarError("identity.source_hash must be a 64-character lowercase hex string")
     for field in ("ingest_root", "source_relpath", "collection"):
         value = identity[field]
-        if not isinstance(value, str) or not value:
-            raise SidecarError(f"identity.{field} must be a non-empty string (never a sentinel)")
+        if not isinstance(value, str) or not value or value == UNFILLED:
+            raise SidecarError(f"identity.{field} must be a non-empty string, never a sentinel")
     page_range = identity["page_range"]
-    if page_range is not None and page_range != UNFILLED and not _is_index_pair(page_range):
+    if page_range is not None and page_range != UNFILLED and not _valid_index_range(page_range):
         raise SidecarError(
-            "identity.page_range must be a [start, end] integer pair, null, or the sentinel"
+            "identity.page_range must be a [start, end] pair with 0 <= start <= end, "
+            "null, or the sentinel"
         )
     element_range = identity["element_range"]
-    if element_range != UNFILLED and not _is_index_pair(element_range):
+    if element_range != UNFILLED and not _valid_index_range(element_range):
         raise SidecarError(
-            "identity.element_range must be a [start, end] integer pair or the sentinel"
+            "identity.element_range must be a [start, end] pair with 0 <= start <= end "
+            "or the sentinel"
         )
 
 
@@ -216,10 +194,10 @@ def _validate_review(review: dict[str, Any]) -> None:
     if not isinstance(review["reviewer"], str) or not review["reviewer"]:
         raise SidecarError("review.reviewer must be a non-empty string or the sentinel")
     reviewed_date = review["reviewed_date"]
-    if reviewed_date != UNFILLED and not (
-        isinstance(reviewed_date, str) and _ISO_DATE.match(reviewed_date)
-    ):
-        raise SidecarError("review.reviewed_date must be an ISO-8601 date or the sentinel")
+    if reviewed_date != UNFILLED and not _is_iso_date(reviewed_date):
+        raise SidecarError(
+            "review.reviewed_date must be a real ISO-8601 date (YYYY-MM-DD) or the sentinel"
+        )
     edit_distance = review["edit_distance"]
     if edit_distance != UNFILLED and not (
         isinstance(edit_distance, int) and not isinstance(edit_distance, bool)
@@ -244,27 +222,34 @@ def _refuse_unknown(where: str, obj: dict[str, Any], allowed: set[str]) -> None:
         raise SidecarError(f"{where} has unknown key(s): {', '.join(sorted(unknown))}")
 
 
-def _is_index_pair(value: Any) -> TypeGuard[list[int]]:
+def _valid_index_range(value: Any) -> TypeGuard[list[int]]:
+    """A half-open range over zero-based indices: an integer pair, 0<=start<=end."""
     return (
         isinstance(value, (list, tuple))
         and len(value) == 2
         and all(isinstance(v, int) and not isinstance(v, bool) for v in value)
+        and 0 <= value[0] <= value[1]
     )
 
 
-# ---------------------------------------------------------------------------
-# Unit identity
-# ---------------------------------------------------------------------------
+def _is_iso_date(value: Any) -> bool:
+    """A strict ``YYYY-MM-DD`` string naming a real calendar date."""
+    if not isinstance(value, str) or not _ISO_DATE.match(value):
+        return False
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
 
 
 def unit_id(sidecar: dict[str, Any]) -> str:
     """The unit's derived id: ``<source_hash>:<start>-<end>``.
 
     Derived from the identity block, never assigned — two runs over one
-    source produce the same id, a re-cut boundary a different one, and no
-    filename participates. A unit whose ``element_range`` is still
-    :data:`UNFILLED` has no derivable id (the segmenter clears that), so this
-    raises rather than inventing one.
+    source produce the same id, a re-cut boundary a different one, no
+    filename participates. An ``element_range`` still :data:`UNFILLED` has no
+    derivable id (the segmenter clears that), so this raises for it.
     """
     identity = sidecar.get("identity")
     if not isinstance(identity, dict):
@@ -272,15 +257,13 @@ def unit_id(sidecar: dict[str, Any]) -> str:
     element_range = identity.get("element_range")
     if element_range == UNFILLED:
         raise SidecarError("element_range is unfilled; the unit has no derivable id yet")
-    if not _is_index_pair(element_range):
-        raise SidecarError("element_range must be a [start, end] integer pair to derive an id")
+    if not _valid_index_range(element_range):
+        raise SidecarError("element_range must be a [start, end] pair with 0 <= start <= end")
+    source_hash = identity.get("source_hash")
+    if not (isinstance(source_hash, str) and _HEX64.match(source_hash)):
+        raise SidecarError("identity.source_hash is missing or malformed; cannot derive a unit id")
     start, end = element_range
-    return f"{identity['source_hash']}:{start}-{end}"
-
-
-# ---------------------------------------------------------------------------
-# IO
-# ---------------------------------------------------------------------------
+    return f"{source_hash}:{start}-{end}"
 
 
 def write_sidecar(path: Path, sidecar: dict[str, Any]) -> Path:
@@ -299,8 +282,7 @@ def read_sidecar(path: Path) -> dict[str, Any]:
     """Read and validate the sidecar at *path*.
 
     Raises :class:`SidecarError` if the file is not valid JSON or does not
-    conform to the schema, so a corrupt sidecar is a loud failure rather
-    than a silently half-read dict.
+    conform to the schema, so a corrupt sidecar is a loud failure.
     """
     try:
         loaded = json.loads(path.read_text(encoding="utf-8"))

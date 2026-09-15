@@ -35,7 +35,6 @@ def test_fresh_sidecar_is_valid_and_awaiting_review() -> None:
     sidecar = build_sidecar(**_identity_kwargs())
     validate_sidecar(sidecar)  # does not raise
     assert sidecar["review"]["review_class"] == "unreviewed"
-    # Every producer-supplied field carries the sentinel, legibly unfilled.
     assert sidecar["derivation"]["preset"] == UNFILLED
     assert sidecar["identity"]["element_range"] == UNFILLED
     assert sidecar["identity"]["page_range"] == UNFILLED
@@ -99,9 +98,10 @@ def test_bad_kind_refused() -> None:
         validate_sidecar(sidecar)
 
 
-def test_identity_fields_may_not_be_sentinel() -> None:
+@pytest.mark.parametrize("bad", ["", UNFILLED])
+def test_identity_fields_may_not_be_sentinel(bad: str) -> None:
     with pytest.raises(SidecarError, match="collection"):
-        build_sidecar(**{**_identity_kwargs(), "collection": ""})
+        build_sidecar(**{**_identity_kwargs(), "collection": bad})
 
 
 def test_short_source_hash_refused() -> None:
@@ -115,23 +115,24 @@ def test_bad_text_source_refused() -> None:
 
 
 def test_edit_distance_bool_refused() -> None:
-    # A bool is an int in Python; the schema means a real integer.
     sidecar = build_sidecar(**_identity_kwargs())
     sidecar["review"]["edit_distance"] = True
     with pytest.raises(SidecarError, match="edit_distance"):
         validate_sidecar(sidecar)
 
 
-def test_bad_reviewed_date_refused() -> None:
+@pytest.mark.parametrize("bad", ["15/09/2026", "2026-13-45"])
+def test_bad_reviewed_date_refused(bad: str) -> None:
     sidecar = build_sidecar(**_identity_kwargs())
-    sidecar["review"]["reviewed_date"] = "15/09/2026"
+    sidecar["review"]["reviewed_date"] = bad
     with pytest.raises(SidecarError, match="reviewed_date"):
         validate_sidecar(sidecar)
 
 
-def test_element_range_pair_shape_enforced() -> None:
+@pytest.mark.parametrize("bad", [[0, 1, 2], [20, 4], [-1, 3]])
+def test_bad_element_range_refused(bad: list[int]) -> None:
     sidecar = build_sidecar(**_identity_kwargs())
-    sidecar["identity"]["element_range"] = [0, 1, 2]
+    sidecar["identity"]["element_range"] = bad
     with pytest.raises(SidecarError, match="element_range"):
         validate_sidecar(sidecar)
 
@@ -144,6 +145,12 @@ def test_unit_id_derived_from_range() -> None:
 def test_unit_id_unavailable_while_unfilled() -> None:
     sidecar = build_sidecar(**_identity_kwargs())  # element_range unfilled
     with pytest.raises(SidecarError, match="no derivable id"):
+        unit_id(sidecar)
+
+
+def test_unit_id_reports_missing_source_hash_as_sidecar_error() -> None:
+    sidecar = {"identity": {"element_range": [0, 3]}}
+    with pytest.raises(SidecarError, match="source_hash"):
         unit_id(sidecar)
 
 
