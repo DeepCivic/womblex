@@ -94,6 +94,7 @@ src/womblex/
 │   ├── enrichment_output.py / enrichment_doc.py  # Enrichment sidecars + raw ILGS Document for AI-chunking reuse
 │   ├── pii_output.py, normalise_output.py, spellfix_output.py, quality_output.py, money_output.py
 │   │                       # Per-stage sidecar parquet schemas + IO (self-contained, one per stage)
+│   ├── ground_truth_output.py  # Ground-truth *.meta.json sidecar: schema, validation, unit-id, IO (JSON, self-contained)
 │   ├── provenance_output.py / run_manifest.py / register_manifest.py  # Manifest consolidation (NLP run + registers) + the run record
 │   ├── source_provenance.py  # Where a source document came from: ingest root + relpath, and their womblex.* footer keys
 │   ├── source_resolver.py  # The way back: source_hash → the source file, verified by content hash, or an explicit reason

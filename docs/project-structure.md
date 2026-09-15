@@ -100,6 +100,7 @@ womblex/
 │   │   ├── money_output.py  # *.money_spans.parquet (decimal128 values) + *.money_columns.parquet schemas + IO
 │   │   ├── provenance_output.py  # *.provenance.parquet sidecar + manifest for pre-extracted-record corpora
 │   │   ├── feedback_output.py    # One-file-per-report console feedback records (JSON, not parquet)
+│   │   ├── ground_truth_output.py  # Ground-truth *.meta.json sidecar: schema, validation, unit-id, IO (JSON, not parquet)
 │   │   ├── source_provenance.py  # Ingest root + source relpath, and their womblex.* Parquet footer keys
 │   │   ├── source_resolver.py    # SourceResolver — resolve a published row's source_hash back to its source file
 │   │   ├── build_info.py    # BuildInfo — package version + source commit, or unavailable with a reason
