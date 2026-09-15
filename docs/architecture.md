@@ -127,6 +127,7 @@ src/womblex/
 │   │                       # link, embed, normalise, spellfix, quality, money, pii subcommands
 │   ├── ingest.py          # ingest-gnaf, ingest-geo, ingest-abn subcommands
 │   ├── score.py           # score subcommand
+│   ├── ground_truth.py    # ground-truth subcommand (segment + render a shard dir into baselines + sidecars)
 │   ├── profile.py         # profile subcommand
 │   └── verify.py          # verify-shards subcommand
 ├── config.py              # Pydantic config models and YAML loader

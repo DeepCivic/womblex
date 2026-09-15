@@ -244,3 +244,95 @@ def test_document_without_provenance_is_skipped_not_fatal(tmp_path: Path) -> Non
     assert result.documents == 1
     assert result.units_written == 0
     assert not list(out.glob(f"*{SIDECAR_SUFFIX}"))
+
+
+def test_determinism_by_recorded_inputs(tmp_path: Path) -> None:
+    """Decision 5 (`ground-truth-review.md`): re-derivation from the recorded
+    inputs reproduces the artefact exactly. Two builds over the same shard —
+    same run, digest, preset and elements — write byte-identical baselines and
+    sidecars, so a GT unit is re-derivable without ever being persisted."""
+    shard_dir = _write_shard(
+        tmp_path, [para(i, " ".join(["word"] * 6)) for i in range(8)], preset="collection-gt"
+    )
+    a = tmp_path / "gt-a"
+    b = tmp_path / "gt-b"
+    build_ground_truth(shard_dir, a, SegmentationConfig(token_budget=12), count_fn=words)
+    build_ground_truth(shard_dir, b, SegmentationConfig(token_budget=12), count_fn=words)
+
+    names_a = sorted(p.name for p in a.iterdir())
+    assert names_a == sorted(p.name for p in b.iterdir())
+    assert names_a  # something was written
+    for name in names_a:
+        assert (a / name).read_bytes() == (b / name).read_bytes(), name
+
+
+def test_the_helper_transforms_no_text(tmp_path: Path) -> None:
+    """Criterion 2: the helper splits, names and stamps — it performs no text
+    transformation. Double spaces and a redaction marker survive verbatim into
+    the baseline (nothing normalises or rewrites the element text)."""
+    verbatim = "Total  amount:  <REDACTED>  paid"
+    shard_dir = _write_shard(tmp_path, [para(0, verbatim)])
+    out = tmp_path / "gt"
+    build_ground_truth(shard_dir, out, SegmentationConfig(), count_fn=words)
+
+    baseline = min(out.glob(f"*{BASELINE_SUFFIX}")).read_text(encoding="utf-8")
+    assert verbatim in baseline
+
+
+def _preset_yaml(tmp_path: Path, **seg) -> Path:
+    import yaml
+
+    path = tmp_path / "preset.yaml"
+    path.write_text(
+        yaml.safe_dump({
+            "dataset": {"name": "cli-preset"},
+            "paths": {
+                "input_root": str(tmp_path / "in"),
+                "output_root": str(tmp_path / "outp"),
+                "checkpoint_dir": str(tmp_path / "ckpt"),
+            },
+            "segmentation": {"token_budget": 1234, "page_ceiling": 1, **seg},
+            "processing": {"text_source": "elements"},
+        }),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_cli_loads_the_preset_and_hands_the_helper_its_settings(tmp_path, monkeypatch) -> None:
+    """The CLI's job: validate the shard dir, load the preset, and pass the
+    config's segmentation budget and text_source to the helper. The rendering
+    is build_ground_truth's own contract, tested above — no need to reload the
+    real tokeniser here."""
+    import argparse
+
+    import womblex.process.ground_truth as gt
+    from womblex.cli.ground_truth import cmd_ground_truth
+
+    seen: dict = {}
+
+    def fake_build(shard_dir, out, seg, *, text_source, count_fn=None):
+        seen["token_budget"] = seg.token_budget
+        seen["text_source"] = text_source
+        return gt.GroundTruthResult(1, 1, 0)
+
+    monkeypatch.setattr(gt, "build_ground_truth", fake_build)
+
+    shard_dir = tmp_path / "documents"
+    shard_dir.mkdir()
+    rc = cmd_ground_truth(argparse.Namespace(
+        shards=shard_dir, out=tmp_path / "gt", config=_preset_yaml(tmp_path),
+    ))
+    assert rc == 0
+    assert seen == {"token_budget": 1234, "text_source": "elements"}
+
+
+def test_cli_rejects_a_missing_shard_dir(tmp_path) -> None:
+    import argparse
+
+    from womblex.cli.ground_truth import cmd_ground_truth
+
+    rc = cmd_ground_truth(argparse.Namespace(
+        shards=tmp_path / "nope", out=tmp_path / "gt", config=tmp_path / "c.yaml",
+    ))
+    assert rc == 1

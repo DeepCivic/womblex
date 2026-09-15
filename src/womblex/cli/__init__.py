@@ -21,6 +21,7 @@ Usage:
     womblex annotate-redactions  <shards> <pdfs> [--checkpoint PATH]   (deprecated alias)
     womblex validate-redactions  --labels DIR --pdfs DIR [--report PATH]
     womblex score                --labels DIR --shards DIR
+    womblex ground-truth         --shards <dir> --out <dir> --config configs/ground-truth.yaml
     womblex verify-shards        <run-or-shard-dir> [--compare-to <other>]
     womblex resolve-source       <run-or-shard-dir> [--root DIR] [--hash H]
     womblex profile              <file> [--sample-rows N]
@@ -40,6 +41,7 @@ from womblex.cli import (
     cloud,
     demo,
     embed,
+    ground_truth,
     ingest,
     link,
     money,
@@ -65,6 +67,7 @@ ALL_COMMANDS = [
     *redact.COMMANDS,
     *link.COMMANDS,
     *embed.COMMANDS,
+    *ground_truth.COMMANDS,
     *normalise.COMMANDS,
     *spellfix.COMMANDS,
     *quality.COMMANDS,
