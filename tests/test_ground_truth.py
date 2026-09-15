@@ -327,12 +327,19 @@ def test_cli_loads_the_preset_and_hands_the_helper_its_settings(tmp_path, monkey
     assert seen == {"token_budget": 1234, "text_source": "elements"}
 
 
-def test_cli_rejects_a_missing_shard_dir(tmp_path) -> None:
+def test_cli_rejects_a_missing_shard_dir_or_config(tmp_path) -> None:
     import argparse
 
     from womblex.cli.ground_truth import cmd_ground_truth
 
-    rc = cmd_ground_truth(argparse.Namespace(
+    # missing shard dir
+    assert cmd_ground_truth(argparse.Namespace(
         shards=tmp_path / "nope", out=tmp_path / "gt", config=tmp_path / "c.yaml",
-    ))
-    assert rc == 1
+    )) == 1
+
+    # shard dir present, config missing
+    shard_dir = tmp_path / "documents"
+    shard_dir.mkdir()
+    assert cmd_ground_truth(argparse.Namespace(
+        shards=shard_dir, out=tmp_path / "gt", config=tmp_path / "absent.yaml",
+    )) == 1

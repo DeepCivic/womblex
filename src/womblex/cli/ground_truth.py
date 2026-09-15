@@ -47,6 +47,9 @@ def cmd_ground_truth(args: argparse.Namespace) -> int:
     if not shard_dir.is_dir():
         logger.error("shards dir not found: %s", shard_dir)
         return 1
+    if not Path(args.config).is_file():
+        logger.error("config file not found: %s", args.config)
+        return 1
 
     config = load_config(args.config)
     result = build_ground_truth(
