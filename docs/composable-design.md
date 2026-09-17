@@ -113,7 +113,16 @@ Document to `*.enrichment_doc.parquet`; `chunk` reuses it when `chunking_model`
 is set, guarded by byte-identity of `Document.text` against the reassembled
 narrative. It is an *ordering* requirement, not a hard dependency: run out of
 order or without the sidecar and `chunk` self-enriches (composable fallback,
-the same "missing overlay falls back to verbatim" idiom as `text_source`).
+the same idiom the transform stages apply to a missing `text_source` overlay —
+`load_overlay` returns `None` and reassembly proceeds on verbatim text).
+
+That verbatim fallback is a convenience of the transform stages (chunk /
+enrich / money), where re-running with the sidecar present refines the result;
+it is **not** universal. The render path (`build_ground_truth`) declares its
+`text_source` — no default — and calls `load_overlay(..., required=True)`: a
+declared non-`elements` overlay that is missing raises rather than baselining
+verbatim text, so a ground-truth baseline is never silently produced under a
+declared cleaning layer it did not apply.
 
 The `build_graph → money` row is not a data dependency — it is two independent
 sidecars over one run. `money` reads the extraction Parquet (`*.elements.parquet`
