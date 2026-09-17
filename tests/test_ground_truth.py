@@ -296,7 +296,7 @@ def test_the_helper_transforms_no_text(tmp_path: Path) -> None:
     assert verbatim in baseline
 
 
-def _preset_yaml(tmp_path: Path, **seg) -> Path:
+def _preset_yaml(tmp_path: Path, *, text_source: str = "elements", **seg) -> Path:
     import yaml
 
     path = tmp_path / "preset.yaml"
@@ -309,7 +309,7 @@ def _preset_yaml(tmp_path: Path, **seg) -> Path:
                 "checkpoint_dir": str(tmp_path / "ckpt"),
             },
             "segmentation": {"token_budget": 1234, "page_ceiling": 1, **seg},
-            "processing": {"text_source": "elements"},
+            "processing": {"text_source": text_source},
         }),
         encoding="utf-8",
     )
@@ -342,6 +342,23 @@ def test_cli_loads_the_preset_and_hands_the_helper_its_settings(tmp_path, monkey
     ))
     assert rc == 0
     assert seen == {"token_budget": 1234, "text_source": "elements"}
+
+
+def test_cli_reports_a_missing_declared_overlay_as_exit_1(tmp_path) -> None:
+    """The CLI turns the render path's loud failure (a declared overlay missing
+    beside the shard) into a clean exit 1, not a traceback."""
+    import argparse
+
+    from womblex.cli.ground_truth import cmd_ground_truth
+
+    shard_dir = _write_shard(tmp_path, [para(0, "raw verbatim")])
+    out = tmp_path / "gt"
+    rc = cmd_ground_truth(argparse.Namespace(
+        shards=shard_dir, out=out,
+        config=_preset_yaml(tmp_path, text_source="spellfix"),
+    ))
+    assert rc == 1
+    assert not list(out.glob(f"*{BASELINE_SUFFIX}"))
 
 
 def test_cli_rejects_a_missing_shard_dir_or_config(tmp_path) -> None:
