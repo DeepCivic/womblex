@@ -71,6 +71,7 @@ src/womblex/
 │   ├── segmenter.py       # Element stream → budgeted, page-bounded ground-truth segments
 │   ├── renderer.py        # Segment element run → reviewer-facing markdown (narrative + tables + forms, interleaved in element order); RENDERER_VERSION + baseline_digest
 │   ├── ground_truth.py    # build_ground_truth() over a shard dir — segment → render → .gt.md baseline + .meta.json sidecar (identity from manifest, derivation from footer)
+│   ├── ground_truth_roundtrip.py  # Reverse of the renderer — corrected .gt.md → element-keyed corrections (split_rendered / apply_corrections)
 │   ├── money.py, money_numbers.py, money_words.py, money_vocab.py, money_columns.py, money_stage.py
 │   │                       # Money recognition: patterns, number/currency resolution, worded amounts,
 │   │                       # vocab tables, column classification, per-stage driver — see money-extraction.md
