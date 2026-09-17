@@ -126,17 +126,18 @@ def _correct(elem: Element, block: str) -> Element:
 def _parse_grid(block: str) -> tuple[list[str], list[list[str]]]:
     """Split a GFM table block back into ``(headers, rows)``.
 
-    The inverse of :func:`~womblex.process.chunker.table_to_markdown`: the
-    dash separator row marks the header above it, everything below is data.
-    Cells are ``|``-split and stripped, matching the renderer's un-escaped,
-    space-padded output; a block with no separator row is all data.
+    The inverse of :func:`~womblex.process.chunker.table_to_markdown`, which
+    always emits the header on row 0 and the dash separator on row 1: so row
+    0 is headers, row 1 is discarded and everything below is data. Checked at
+    that fixed position rather than searched for, so a header cell that is
+    itself all dashes is not mistaken for the separator. Cells are ``|``-split
+    and stripped, matching the renderer's un-escaped, space-padded output; a
+    block missing the separator row (a degenerate edit) is all data.
     """
     grid = [_split_row(line) for line in block.split("\n") if line.strip()]
-    sep = next((i for i, row in enumerate(grid) if _is_separator(row)), None)
-    if sep is None:
-        return [], grid
-    headers = grid[sep - 1] if sep > 0 else []
-    return headers, grid[sep + 1 :]
+    if len(grid) >= 2 and _is_separator(grid[1]):
+        return grid[0], grid[2:]
+    return [], grid
 
 
 def _split_row(line: str) -> list[str]:

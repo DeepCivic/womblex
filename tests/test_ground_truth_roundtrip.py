@@ -100,6 +100,33 @@ def test_table_cell_correction_keyed_to_parent_and_position() -> None:
     assert _cell(corrected, 0, 0) == "r0c0"
 
 
+def test_header_row_of_dashes_is_not_mistaken_for_the_separator() -> None:
+    # The separator is at the fixed row-1 position, so a header cell that is
+    # itself dashes round-trips as content rather than being discarded.
+    elements = [
+        Element(
+            order=0, kind="table", extractor="test", page=0,
+            cells=[
+                Cell(row=0, col=0, value="---"), Cell(row=0, col=1, value="note"),
+                Cell(row=1, col=0, value="a"), Cell(row=1, col=1, value="b"),
+            ],
+            header_rows=[0],
+        )
+    ]
+    baseline = render_elements(elements)
+    corrected = apply_corrections(elements, baseline)
+    assert _cell(corrected[0], 0, 0) == "---"
+    assert _cell(corrected[0], 1, 0) == "a"
+    assert render_elements(corrected) == baseline
+
+
+def test_header_text_correction_round_trips() -> None:
+    elements = [table(0)]
+    edited = render_elements(elements).replace("r0c1", "Corrected Header")
+    corrected = apply_corrections(elements, edited)[0]
+    assert _cell(corrected, 0, 1) == "Corrected Header"
+
+
 def test_form_field_value_correction_preserves_type() -> None:
     elements = [
         Element(
