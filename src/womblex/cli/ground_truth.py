@@ -52,10 +52,17 @@ def cmd_ground_truth(args: argparse.Namespace) -> int:
         return 1
 
     config = load_config(args.config)
-    result = build_ground_truth(
-        shard_dir, Path(args.out), config.segmentation,
-        text_source=config.processing.text_source,
-    )
+    try:
+        result = build_ground_truth(
+            shard_dir, Path(args.out), config.segmentation,
+            text_source=config.processing.text_source,
+        )
+    except FileNotFoundError as exc:
+        # A declared text_source overlay is missing beside the shard: the render
+        # path fails loudly rather than baselining verbatim (U7). Report it as an
+        # operational error, not a traceback.
+        logger.error("ground-truth: %s", exc)
+        return 1
     logger.info(
         "ground-truth: %d documents, %d units (%d oversize) -> %s",
         result.documents, result.units_written, result.oversize_units, args.out,

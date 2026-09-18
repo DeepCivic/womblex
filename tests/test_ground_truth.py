@@ -85,7 +85,7 @@ def test_writes_one_baseline_and_one_sidecar_per_segment(tmp_path: Path) -> None
     shard_dir = _write_shard(tmp_path, [para(i, " ".join(["w"] * 4)) for i in range(10)])
     out = tmp_path / "gt"
 
-    result = build_ground_truth(shard_dir, out, SegmentationConfig(token_budget=10), count_fn=words)
+    result = build_ground_truth(shard_dir, out, SegmentationConfig(token_budget=10), text_source="elements", count_fn=words)
 
     baselines = sorted(out.glob(f"*{BASELINE_SUFFIX}"))
     sidecars = sorted(out.glob(f"*{SIDECAR_SUFFIX}"))
@@ -98,7 +98,7 @@ def test_writes_one_baseline_and_one_sidecar_per_segment(tmp_path: Path) -> None
 def test_identity_is_read_from_the_manifest(tmp_path: Path) -> None:
     shard_dir = _write_shard(tmp_path, [para(0, "only one segment")])
     out = tmp_path / "gt"
-    build_ground_truth(shard_dir, out, SegmentationConfig(), count_fn=words)
+    build_ground_truth(shard_dir, out, SegmentationConfig(), text_source="elements", count_fn=words)
 
     row = read_manifest(shard_dir / "batch-0001.parquet").to_pylist()[0]
     identity = _sidecars(out)[0]["identity"]
@@ -112,7 +112,7 @@ def test_identity_is_read_from_the_manifest(tmp_path: Path) -> None:
 def test_element_ranges_tile_the_document(tmp_path: Path) -> None:
     shard_dir = _write_shard(tmp_path, [para(i, " ".join(["w"] * 4)) for i in range(6)])
     out = tmp_path / "gt"
-    build_ground_truth(shard_dir, out, SegmentationConfig(token_budget=10), count_fn=words)
+    build_ground_truth(shard_dir, out, SegmentationConfig(token_budget=10), text_source="elements", count_fn=words)
 
     ranges = sorted(tuple(s["identity"]["element_range"]) for s in _sidecars(out))
     assert ranges[0][0] == 0
@@ -124,7 +124,7 @@ def test_element_ranges_tile_the_document(tmp_path: Path) -> None:
 def test_derivation_comes_from_the_footer_and_the_renderer(tmp_path: Path) -> None:
     shard_dir = _write_shard(tmp_path, [para(0, "alpha beta gamma")], preset="collection-gt")
     out = tmp_path / "gt"
-    build_ground_truth(shard_dir, out, SegmentationConfig(), count_fn=words)
+    build_ground_truth(shard_dir, out, SegmentationConfig(), text_source="elements", count_fn=words)
 
     sidecar = _sidecars(out)[0]
     derivation = sidecar["derivation"]
@@ -146,7 +146,7 @@ def test_derivation_comes_from_the_footer_and_the_renderer(tmp_path: Path) -> No
 def test_unstamped_shard_leaves_derivation_facts_unfilled(tmp_path: Path) -> None:
     shard_dir = _write_shard(tmp_path, [para(0, "no run stamp here")], stamp=False)
     out = tmp_path / "gt"
-    build_ground_truth(shard_dir, out, SegmentationConfig(), count_fn=words)
+    build_ground_truth(shard_dir, out, SegmentationConfig(), text_source="elements", count_fn=words)
 
     derivation = _sidecars(out)[0]["derivation"]
     assert derivation["run_id"] == UNFILLED
@@ -162,7 +162,7 @@ def test_preset_falls_back_to_the_sentinel_when_the_shard_names_none(tmp_path: P
     # dataset name: preset_digest is present, preset is unfilled.
     shard_dir = _write_shard(tmp_path, [para(0, "stamped but preset-less")], preset="")
     out = tmp_path / "gt"
-    build_ground_truth(shard_dir, out, SegmentationConfig(), count_fn=words)
+    build_ground_truth(shard_dir, out, SegmentationConfig(), text_source="elements", count_fn=words)
 
     derivation = _sidecars(out)[0]["derivation"]
     assert derivation["preset_digest"] == _DIGEST
@@ -172,14 +172,14 @@ def test_preset_falls_back_to_the_sentinel_when_the_shard_names_none(tmp_path: P
 def test_page_range_is_the_segment_range_when_paged(tmp_path: Path) -> None:
     shard_dir = _write_shard(tmp_path, [para(0, "a", page=3), para(1, "b", page=4)])
     out = tmp_path / "gt"
-    build_ground_truth(shard_dir, out, SegmentationConfig(token_budget=1000), count_fn=words)
+    build_ground_truth(shard_dir, out, SegmentationConfig(token_budget=1000), text_source="elements", count_fn=words)
     assert _sidecars(out)[0]["identity"]["page_range"] == [3, 5]
 
 
 def test_page_range_is_null_for_a_source_with_no_pages(tmp_path: Path) -> None:
     shard_dir = _write_shard(tmp_path, [para(i, "a", page=None) for i in range(2)])
     out = tmp_path / "gt"
-    build_ground_truth(shard_dir, out, SegmentationConfig(), count_fn=words)
+    build_ground_truth(shard_dir, out, SegmentationConfig(), text_source="elements", count_fn=words)
     assert _sidecars(out)[0]["identity"]["page_range"] is None
 
 
@@ -192,7 +192,7 @@ def test_page_less_segment_of_a_paged_source_takes_the_sentinel(tmp_path: Path) 
     elements = [para(0, "a", page=0), para(1, "b", page=0), tbl]
     shard_dir = _write_shard(tmp_path, elements)
     out = tmp_path / "gt"
-    build_ground_truth(shard_dir, out, SegmentationConfig(token_budget=4), count_fn=words)
+    build_ground_truth(shard_dir, out, SegmentationConfig(token_budget=4), text_source="elements", count_fn=words)
 
     ranges = {tuple(s["identity"]["element_range"]): s["identity"]["page_range"]
               for s in _sidecars(out)}
@@ -209,7 +209,7 @@ def test_form_fields_are_restored_into_the_baseline(tmp_path: Path) -> None:
     )
     shard_dir = _write_shard(tmp_path, [para(0, "cover"), form])
     out = tmp_path / "gt"
-    build_ground_truth(shard_dir, out, SegmentationConfig(token_budget=1000), count_fn=words)
+    build_ground_truth(shard_dir, out, SegmentationConfig(token_budget=1000), text_source="elements", count_fn=words)
 
     md = "\n".join(p.read_text(encoding="utf-8") for p in out.glob(f"*{BASELINE_SUFFIX}"))
     # `_load_elements` drops form fields; the producer must stitch them back.
@@ -234,11 +234,28 @@ def test_normalised_overlay_is_rendered_and_recorded(tmp_path: Path) -> None:
     assert _sidecars(out)[0]["derivation"]["text_source"] == "normalised"
 
 
+def test_declared_overlay_missing_fails_loudly(tmp_path: Path) -> None:
+    """U7: the render path renders the declared text layer or fails — never a
+    silent verbatim fallback. A declared ``spellfix`` source with no
+    ``*.spellfix_text.parquet`` beside the shard raises rather than baselining
+    the raw element text."""
+    import pytest
+
+    shard_dir = _write_shard(tmp_path, [para(0, "raw verbatim")])
+    out = tmp_path / "gt"
+
+    with pytest.raises(FileNotFoundError, match="spellfix"):
+        build_ground_truth(
+            shard_dir, out, SegmentationConfig(), text_source="spellfix", count_fn=words
+        )
+    assert not list(out.glob(f"*{BASELINE_SUFFIX}"))
+
+
 def test_document_without_provenance_is_skipped_not_fatal(tmp_path: Path) -> None:
     shard_dir = _write_shard(tmp_path, [para(0, "text")], provenance=False)
     out = tmp_path / "gt"
 
-    result = build_ground_truth(shard_dir, out, SegmentationConfig(), count_fn=words)
+    result = build_ground_truth(shard_dir, out, SegmentationConfig(), text_source="elements", count_fn=words)
 
     # Counted as a document, but its identity is unfillable so no unit is written.
     assert result.documents == 1
@@ -256,8 +273,8 @@ def test_determinism_by_recorded_inputs(tmp_path: Path) -> None:
     )
     a = tmp_path / "gt-a"
     b = tmp_path / "gt-b"
-    build_ground_truth(shard_dir, a, SegmentationConfig(token_budget=12), count_fn=words)
-    build_ground_truth(shard_dir, b, SegmentationConfig(token_budget=12), count_fn=words)
+    build_ground_truth(shard_dir, a, SegmentationConfig(token_budget=12), text_source="elements", count_fn=words)
+    build_ground_truth(shard_dir, b, SegmentationConfig(token_budget=12), text_source="elements", count_fn=words)
 
     names_a = sorted(p.name for p in a.iterdir())
     assert names_a == sorted(p.name for p in b.iterdir())
@@ -273,13 +290,13 @@ def test_the_helper_transforms_no_text(tmp_path: Path) -> None:
     verbatim = "Total  amount:  <REDACTED>  paid"
     shard_dir = _write_shard(tmp_path, [para(0, verbatim)])
     out = tmp_path / "gt"
-    build_ground_truth(shard_dir, out, SegmentationConfig(), count_fn=words)
+    build_ground_truth(shard_dir, out, SegmentationConfig(), text_source="elements", count_fn=words)
 
     baseline = min(out.glob(f"*{BASELINE_SUFFIX}")).read_text(encoding="utf-8")
     assert verbatim in baseline
 
 
-def _preset_yaml(tmp_path: Path, **seg) -> Path:
+def _preset_yaml(tmp_path: Path, *, text_source: str = "elements", **seg) -> Path:
     import yaml
 
     path = tmp_path / "preset.yaml"
@@ -292,7 +309,7 @@ def _preset_yaml(tmp_path: Path, **seg) -> Path:
                 "checkpoint_dir": str(tmp_path / "ckpt"),
             },
             "segmentation": {"token_budget": 1234, "page_ceiling": 1, **seg},
-            "processing": {"text_source": "elements"},
+            "processing": {"text_source": text_source},
         }),
         encoding="utf-8",
     )
@@ -325,6 +342,23 @@ def test_cli_loads_the_preset_and_hands_the_helper_its_settings(tmp_path, monkey
     ))
     assert rc == 0
     assert seen == {"token_budget": 1234, "text_source": "elements"}
+
+
+def test_cli_reports_a_missing_declared_overlay_as_exit_1(tmp_path) -> None:
+    """The CLI turns the render path's loud failure (a declared overlay missing
+    beside the shard) into a clean exit 1, not a traceback."""
+    import argparse
+
+    from womblex.cli.ground_truth import cmd_ground_truth
+
+    shard_dir = _write_shard(tmp_path, [para(0, "raw verbatim")])
+    out = tmp_path / "gt"
+    rc = cmd_ground_truth(argparse.Namespace(
+        shards=shard_dir, out=out,
+        config=_preset_yaml(tmp_path, text_source="spellfix"),
+    ))
+    assert rc == 1
+    assert not list(out.glob(f"*{BASELINE_SUFFIX}"))
 
 
 def test_cli_rejects_a_missing_shard_dir_or_config(tmp_path) -> None:

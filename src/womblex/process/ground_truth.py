@@ -76,10 +76,16 @@ def build_ground_truth(
     output_dir: Path,
     config: SegmentationConfig,
     *,
-    text_source: str = "elements",
+    text_source: str,
     count_fn: CountFn | None = None,
 ) -> GroundTruthResult:
     """Segment, render and stamp every document in *shard_dir* into *output_dir*.
+
+    ``text_source`` is required — the render path declares which text layer it
+    renders (``'elements'`` for verbatim, or a cleaning overlay) rather than
+    assuming a default. A declared non-``'elements'`` overlay that is missing
+    fails loudly (:func:`load_overlay` with ``required=True``); the renderer
+    never silently falls back to verbatim under a declared layer.
 
     ``count_fn`` maps texts to token counts for the segmenter's budget,
     defaulting to the offline kanon-2 :class:`TokenCounter` (tests pass a plain
@@ -105,7 +111,7 @@ def build_ground_truth(
         identity = _identity_by_hash(base)
         stamp = _footer_stamp(base)
         elements_by_hash = _load_full_elements(base)
-        overrides = load_overlay(base, text_source)
+        overrides = load_overlay(base, text_source, required=True)
 
         for source_hash, elements in elements_by_hash.items():
             documents += 1

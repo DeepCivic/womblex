@@ -870,8 +870,12 @@ resolved by `process/text_overlay.py` and applied before reassembly at *both*
 sites (`chunk_stage`, `enrich_stage`). It is deliberately one knob, not per-stage:
 divergent layers would desync the Kanon-2 mention↔chunk offset mapping. Embeddings
 and PII then inherit the repaired text for free (chunks derive from the same
-overlaid elements). A missing overlay falls back to verbatim, so stage *ordering*
-is the only requirement, not a hard dependency.
+overlaid elements). At these transform sites a missing overlay falls back to
+verbatim, so stage *ordering* is the only requirement, not a hard dependency.
+The fallback is a transform-stage convenience, not universal: the render path
+(`build_ground_truth`) resolves the same setting with `load_overlay(...,
+required=True)`, so a declared non-`elements` overlay that is missing fails
+loudly rather than baselining verbatim text under a layer it did not apply.
 - **Inline-per-span source redactions (#C).** Page-prefix `<REDACTED>` is in
   place; inline-per-span placement needs bbox-to-text character mapping (raster
   path now has per-word bboxes; native path needs a text-to-bbox map).
