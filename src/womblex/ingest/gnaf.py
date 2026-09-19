@@ -1,7 +1,11 @@
 """G-NAF PSV → Parquet ingest.
 
-Reads headerless pipe-delimited G-NAF files and writes one Parquet file per
-input PSV, preserving exact relational structure with zero semantic mutation.
+Reads pipe-delimited G-NAF files and writes one Parquet file per input PSV,
+preserving exact relational structure with zero semantic mutation. The G-NAF
+distribution ships each PSV with an uppercase header row naming its columns;
+that row is detected and skipped so it never leaks in as a data row, while a
+headerless file is read as-is. Column names always come from the static
+schema, not the header.
 
 Designed for the national G-NAF distribution (all states, all table types).
 Authority Code and Standard tables are written as separate Parquet files.
@@ -52,6 +56,25 @@ def _parse_filename(stem: str) -> tuple[str | None, str | None]:
     return None, None
 
 
+def _has_header_row(psv_path: Path, columns: list[str]) -> bool:
+    """True if the file's first line is a header row naming the schema columns.
+
+    G-NAF Standard and Authority Code PSVs carry an uppercase header row; a
+    headerless file does not. Compared case-insensitively with any leading BOM
+    stripped, so the header is skipped only when it is genuinely present and a
+    real first data row is never mistaken for one.
+    """
+    try:
+        with psv_path.open("r", encoding="utf-8-sig", newline="") as fh:
+            first = fh.readline()
+    except (OSError, UnicodeDecodeError):
+        return False
+    if not first:
+        return False
+    fields = [f.strip() for f in first.rstrip("\r\n").split("|")]
+    return [f.lower() for f in fields] == [c.lower() for c in columns]
+
+
 def ingest_psv(
     psv_path: Path,
     output_dir: Path,
@@ -81,9 +104,12 @@ def ingest_psv(
         return None
 
     # Read with pyarrow.csv — streamed, constant memory, all columns as strings
-    # (zero semantic mutation: no type coercion, no null inference).
+    # (zero semantic mutation: no type coercion, no null inference). The G-NAF
+    # header row, when present, is skipped so it never lands as a data row;
+    # column names come from the schema regardless.
     read_opts = pcsv.ReadOptions(
         column_names=columns,
+        skip_rows=1 if _has_header_row(psv_path, columns) else 0,
         block_size=1 << 20,  # 1 MB read blocks
     )
     parse_opts = pcsv.ParseOptions(delimiter="|")
