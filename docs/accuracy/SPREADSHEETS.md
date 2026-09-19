@@ -16,10 +16,11 @@ The approved-providers `_transcript.txt` is retired. The census classed it as un
 
 ## Register ingests
 
-The standalone register ingests reformat a machine-readable source to Parquet, bypassing the NLP pipeline; each output table is scored against its source by the same four measures. G-NAF PSV is scored over the vendored ACT Standard subset — `ingest_gnaf_directory` writes one Parquet per table — with the source's uppercase header inferred and the schema's lowercase names assigned positionally. ABN bulk XML and shapefile follow.
+The standalone register ingests reformat a machine-readable source to Parquet, bypassing the NLP pipeline; each output table is scored against its source by the same four measures. G-NAF PSV is scored over the vendored ACT Standard subset — `ingest_gnaf_directory` writes one Parquet per table — with the source's uppercase header inferred and the schema's lowercase names assigned positionally. The ABN bulk extract XML subset is scored the same way, against a second, independent `ElementTree` parse of the same XML into the records schema, since XML has no tabular source to read. Shapefile follows.
 
 | Source | Sheet / Table | Rows | Cols | Structural | Data integrity | Key column | Schema |
 | :--- | :--- | ---: | ---: | :--- | ---: | :--- | :--- |
+| ABN-Bulk-Extract-fixturesubset.xml | records | 45 | 19 | pass | 1.0000 | pass (abn) | pass |
 | ACT_ADDRESS_ALIAS_psv.psv | ADDRESS_ALIAS | 20 | 7 | pass | 1.0000 | pass (address_alias_pid) | pass |
 | ACT_ADDRESS_DEFAULT_GEOCODE_psv.psv | ADDRESS_DEFAULT_GEOCODE | 20 | 7 | pass | 1.0000 | pass (address_default_geocode_pid) | pass |
 | ACT_ADDRESS_DETAIL_psv.psv | ADDRESS_DETAIL | 20 | 35 | pass | 1.0000 | pass (address_detail_pid) | pass |
