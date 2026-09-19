@@ -4,7 +4,37 @@ from __future__ import annotations
 
 import pytest
 
-from womblex.utils.metrics import cer, cer_spatial, reading_order_accuracy, spatial_sort_text, wer
+from womblex.utils.metrics import (
+    cer,
+    cer_spatial,
+    levenshtein,
+    reading_order_accuracy,
+    spatial_sort_text,
+    wer,
+)
+
+
+class TestLevenshtein:
+    def test_identical_strings_zero(self) -> None:
+        assert levenshtein("hello", "hello") == 0
+
+    def test_one_substitution(self) -> None:
+        assert levenshtein("hello", "hallo") == 1
+
+    def test_insertion_and_deletion(self) -> None:
+        assert levenshtein("cat", "cats") == 1
+        assert levenshtein("cats", "cat") == 1
+
+    def test_no_normalisation(self) -> None:
+        # Unlike cer/wer, the raw distance is over the exact bytes: case differs.
+        assert levenshtein("Hello", "hello") == 1
+
+    def test_empty(self) -> None:
+        assert levenshtein("", "") == 0
+        assert levenshtein("abc", "") == 3
+
+    def test_token_sequences(self) -> None:
+        assert levenshtein(["a", "b", "c"], ["a", "x", "c"]) == 1
 
 
 class TestCER:

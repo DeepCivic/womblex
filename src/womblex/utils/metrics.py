@@ -130,6 +130,18 @@ def _levenshtein(seq_a: list | str, seq_b: list | str) -> int:
     return prev[-1]
 
 
+def levenshtein(seq_a: list[str] | str, seq_b: list[str] | str) -> int:
+    """Levenshtein edit distance between two strings or two token sequences.
+
+    The raw integer distance CER and WER report as a ratio, exposed for callers
+    that need the count itself rather than a rate — the ground-truth scorer's
+    rubber-stamp check, where a corrected unit whose distance from its pinned
+    baseline is zero is a defect. Character-level for two strings, element-wise
+    for two lists; no normalisation, so the count is over the exact bytes.
+    """
+    return _levenshtein(seq_a, seq_b)
+
+
 def cer(reference: str, hypothesis: str, *, normalise: bool = True) -> float:
     """Character Error Rate: edit distance at character level divided by len(reference).
 
