@@ -87,6 +87,43 @@ def test_ingest_standard_psv(tmp_path: Path):
     assert meta[b"gnaf.table_name"] == b"STATE"
 
 
+def test_ingest_skips_header_row(tmp_path: Path):
+    """A G-NAF header row is detected and dropped, not read as data.
+
+    The distribution ships each PSV with an uppercase header naming its
+    columns; it must never leak in as data row 0. A leading BOM on the header
+    (as ACT_ADDRESS_SITE carries) does not defeat detection.
+    """
+    psv = tmp_path / "ACT_STATE_psv.psv"
+    _write_psv(psv, [
+        "﻿STATE_PID|DATE_CREATED|DATE_RETIRED|STATE_NAME|STATE_ABBREVIATION",
+        "8|2021-11-23||Australian Capital Territory|ACT",
+    ])
+
+    result = ingest_psv(psv, tmp_path / "out")
+    assert result is not None
+
+    table = pq.read_table(str(result))
+    assert table.num_rows == 1  # header dropped, one data row remains
+    assert table.column("state_pid").to_pylist() == ["8"]
+    assert table.column("state_abbreviation").to_pylist() == ["ACT"]
+
+
+def test_ingest_headerless_file_keeps_first_row(tmp_path: Path):
+    """A headerless PSV is read as-is — the first line is data, not a header."""
+    psv = tmp_path / "ACT_STATE_psv.psv"
+    _write_psv(psv, [
+        "8|2021-11-23||Australian Capital Territory|ACT",
+    ])
+
+    result = ingest_psv(psv, tmp_path / "out")
+    assert result is not None
+
+    table = pq.read_table(str(result))
+    assert table.num_rows == 1
+    assert table.column("state_pid").to_pylist() == ["8"]
+
+
 def test_ingest_unknown_filename_skipped(tmp_path: Path):
     """Unrecognised filename pattern returns None."""
     psv = tmp_path / "random_data.psv"
