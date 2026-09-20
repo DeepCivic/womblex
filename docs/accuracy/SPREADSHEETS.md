@@ -16,7 +16,7 @@ The approved-providers `_transcript.txt` is retired. The census classed it as un
 
 ## Register ingests
 
-The standalone register ingests reformat a machine-readable source to Parquet, bypassing the NLP pipeline; each output table is scored against its source by the same four measures. G-NAF PSV is scored over the vendored ACT Standard subset — `ingest_gnaf_directory` writes one Parquet per table — with the source's uppercase header inferred and the schema's lowercase names assigned positionally. The ABN bulk extract XML subset is scored the same way, against a second, independent `ElementTree` parse of the same XML into the records schema, since XML has no tabular source to read. Shapefile follows.
+The standalone register ingests reformat a machine-readable source to Parquet, bypassing the NLP pipeline; each output table is scored against its source by the same four measures. G-NAF PSV is scored over the vendored ACT Standard subset — `ingest_gnaf_directory` writes one Parquet per table — with the source's uppercase header inferred and the schema's lowercase names assigned positionally. The ABN bulk extract XML subset is scored the same way, against a second, independent `ElementTree` parse of the same XML into the records schema, since XML has no tabular source to read. The shapefile completes the set: its `.dbf` attribute table is scored against an independent `pyogrio` read of the source attributes, with geometry preserved but outside the tabular measures; that row is present only where the optional `geopandas` / `pyogrio` extras are installed.
 
 | Source | Sheet / Table | Rows | Cols | Structural | Data integrity | Key column | Schema |
 | :--- | :--- | ---: | ---: | :--- | ---: | :--- | :--- |
@@ -40,5 +40,6 @@ The standalone register ingests reformat a machine-readable source to Parquet, b
 | ACT_STREET_LOCALITY_ALIAS_psv.psv | STREET_LOCALITY_ALIAS | 212 | 8 | pass | 1.0000 | pass (street_locality_alias_pid) | pass |
 | ACT_STREET_LOCALITY_POINT_psv.psv | STREET_LOCALITY_POINT | 20 | 8 | pass | 1.0000 | pass (street_locality_point_pid) | pass |
 | ACT_STREET_LOCALITY_psv.psv | STREET_LOCALITY | 20 | 11 | pass | 1.0000 | pass (street_locality_pid) | pass |
+| NTD_Register_Nat.dbf | attributes | 20 | 25 | pass | 1.0000 | pass (TRIBID) | pass |
 
 Sources not materialised: 0.
