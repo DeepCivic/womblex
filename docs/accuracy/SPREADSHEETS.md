@@ -10,36 +10,14 @@ The approved-providers `_transcript.txt` is retired. The census classed it as un
 
 ## Spreadsheets
 
-| Source | Sheet / Table | Rows | Cols | Structural | Data integrity | Key column | Schema |
-| :--- | :--- | ---: | ---: | :--- | ---: | :--- | :--- |
-| Approved-providers-au-export_20260204.csv | default | 10859 | 10 | pass | 1.0000 | pass (Provider Approval Number) | pass |
+No spreadsheet scored in this environment — no source blob is materialised (`git lfs pull`).
 
 ## Register ingests
 
-The standalone register ingests reformat a machine-readable source to Parquet, bypassing the NLP pipeline; each output table is scored against its source by the same four measures. G-NAF PSV is scored over the vendored ACT Standard subset — `ingest_gnaf_directory` writes one Parquet per table — with the source's uppercase header inferred and the schema's lowercase names assigned positionally. The ABN bulk extract XML subset is scored the same way, against a second, independent `ElementTree` parse of the same XML into the records schema, since XML has no tabular source to read. The shapefile completes the set: its `.dbf` attribute table is scored against an independent `pyogrio` read of the source attributes, with geometry preserved but outside the tabular measures; that row is present only where the optional `geopandas` / `pyogrio` extras are installed.
+The standalone register ingests reformat a machine-readable source to Parquet, bypassing the NLP pipeline; each output table is scored against its source by the same four measures. G-NAF PSV is scored over the vendored ACT Standard subset — `ingest_gnaf_directory` writes one Parquet per table — with the source's uppercase header inferred and the schema's lowercase names assigned positionally. The ABN bulk extract XML subset is scored the same way, against a second, independent `ElementTree` parse of the same XML into the records schema, since XML has no tabular source to read. The shapefile completes the set: its `.dbf` attribute table is scored against a fresh `pyogrio` read of the source `.dbf` — the same reader the ingest uses, so the measures verify the GeoParquet conversion round-trips the attributes losslessly rather than re-checking the decode — with geometry preserved but outside the tabular measures; that row is present only where the optional `geopandas` / `pyogrio` extras are installed.
 
 | Source | Sheet / Table | Rows | Cols | Structural | Data integrity | Key column | Schema |
 | :--- | :--- | ---: | ---: | :--- | ---: | :--- | :--- |
-| ABN-Bulk-Extract-fixturesubset.xml | records | 45 | 19 | pass | 1.0000 | pass (abn) | pass |
-| ACT_ADDRESS_ALIAS_psv.psv | ADDRESS_ALIAS | 20 | 7 | pass | 1.0000 | pass (address_alias_pid) | pass |
-| ACT_ADDRESS_DEFAULT_GEOCODE_psv.psv | ADDRESS_DEFAULT_GEOCODE | 20 | 7 | pass | 1.0000 | pass (address_default_geocode_pid) | pass |
-| ACT_ADDRESS_DETAIL_psv.psv | ADDRESS_DETAIL | 20 | 35 | pass | 1.0000 | pass (address_detail_pid) | pass |
-| ACT_ADDRESS_FEATURE_psv.psv | ADDRESS_FEATURE | 366 | 6 | pass | 1.0000 | pass (address_feature_id) | pass |
-| ACT_ADDRESS_MESH_BLOCK_2016_psv.psv | ADDRESS_MESH_BLOCK_2016 | 20 | 6 | pass | 1.0000 | pass (address_mesh_block_2016_pid) | pass |
-| ACT_ADDRESS_MESH_BLOCK_2021_psv.psv | ADDRESS_MESH_BLOCK_2021 | 20 | 6 | pass | 1.0000 | pass (address_mesh_block_2021_pid) | pass |
-| ACT_ADDRESS_SITE_GEOCODE_psv.psv | ADDRESS_SITE_GEOCODE | 20 | 13 | pass | 1.0000 | pass (address_site_geocode_pid) | pass |
-| ACT_ADDRESS_SITE_psv.psv | ADDRESS_SITE | 20 | 5 | pass | 1.0000 | pass (address_site_pid) | pass |
-| ACT_LOCALITY_ALIAS_psv.psv | LOCALITY_ALIAS | 184 | 8 | pass | 1.0000 | pass (locality_alias_pid) | pass |
-| ACT_LOCALITY_NEIGHBOUR_psv.psv | LOCALITY_NEIGHBOUR | 846 | 5 | pass | 1.0000 | pass (locality_neighbour_pid) | pass |
-| ACT_LOCALITY_POINT_psv.psv | LOCALITY_POINT | 142 | 7 | pass | 1.0000 | pass (locality_point_pid) | pass |
-| ACT_LOCALITY_psv.psv | LOCALITY | 142 | 9 | pass | 1.0000 | pass (locality_pid) | pass |
-| ACT_MB_2016_psv.psv | MB_2016 | 20 | 4 | pass | 1.0000 | pass (mb_2016_pid) | pass |
-| ACT_MB_2021_psv.psv | MB_2021 | 20 | 4 | pass | 1.0000 | pass (mb_2021_pid) | pass |
-| ACT_PRIMARY_SECONDARY_psv.psv | PRIMARY_SECONDARY | 20 | 7 | pass | 1.0000 | pass (primary_secondary_pid) | pass |
-| ACT_STATE_psv.psv | STATE | 1 | 5 | pass | 1.0000 | pass (state_pid) | pass |
-| ACT_STREET_LOCALITY_ALIAS_psv.psv | STREET_LOCALITY_ALIAS | 212 | 8 | pass | 1.0000 | pass (street_locality_alias_pid) | pass |
-| ACT_STREET_LOCALITY_POINT_psv.psv | STREET_LOCALITY_POINT | 20 | 8 | pass | 1.0000 | pass (street_locality_point_pid) | pass |
-| ACT_STREET_LOCALITY_psv.psv | STREET_LOCALITY | 20 | 11 | pass | 1.0000 | pass (street_locality_pid) | pass |
 | NTD_Register_Nat.dbf | attributes | 20 | 25 | pass | 1.0000 | pass (TRIBID) | pass |
 
 Sources not materialised: 0.
