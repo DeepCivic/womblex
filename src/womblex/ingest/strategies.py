@@ -6,6 +6,7 @@ shim exposes only the file-format extractors for callers that still import
 from `womblex.ingest.strategies`.
 """
 
+from womblex.ingest.markdown import MarkdownExtractor
 from womblex.ingest.strategies_file import (
     DocxExtractor,
     NonTextualExtractor,
@@ -14,6 +15,7 @@ from womblex.ingest.strategies_file import (
 
 __all__ = [
     "DocxExtractor",
+    "MarkdownExtractor",
     "NonTextualExtractor",
     "TextExtractor",
 ]

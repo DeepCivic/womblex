@@ -39,6 +39,7 @@ class DocumentType(Enum):
     DOCX = "docx"                                    # Word document (may contain images)
     SPREADSHEET = "spreadsheet"                      # CSV/Excel (may have narrative rows)
     TEXT = "text"                                     # Plain text file (passthrough)
+    MARKDOWN = "markdown"                             # Markdown file (headings/lists/tables)
     
     UNKNOWN = "unknown"                              # failed detection
 
@@ -544,6 +545,28 @@ def _detect_docx(path: Path) -> DocumentProfile:
     )
 
 
+def _detect_markdown(path: Path) -> DocumentProfile:
+    """Detect Markdown file characteristics: table signal only, no OCR path."""
+    # Local import: markdown.py → extract.py → detect.py would be circular at module level.
+    from womblex.ingest.markdown import read_markdown
+
+    text = read_markdown(path)
+
+    return DocumentProfile(
+        doc_type=DocumentType.MARKDOWN,
+        page_count=1,
+        has_text_layer=True,
+        text_coverage=1.0 if text.strip() else 0.0,
+        has_images=False,
+        has_tables=_has_table_structure(text),
+        has_handwriting_signals=False,
+        ocr_confidence=None,
+        glyph_regularity=None,
+        stroke_consistency=None,
+        confidence=1.0,
+    )
+
+
 def detect_file_type(
     path: Path,
     config: DetectionConfig | None = None,
@@ -568,6 +591,8 @@ def detect_file_type(
         return _detect_docx(path)
     elif suffix in (".csv", ".xlsx", ".xls"):
         return _detect_spreadsheet(path)
+    elif suffix in (".md", ".markdown"):
+        return _detect_markdown(path)
     elif suffix == ".txt":
         return DocumentProfile(
             doc_type=DocumentType.TEXT,

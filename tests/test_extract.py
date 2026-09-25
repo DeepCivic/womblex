@@ -23,6 +23,7 @@ from womblex.ingest.extract import (
 from womblex.ingest.spreadsheet import SpreadsheetExtractor
 from womblex.ingest.strategies import (
     DocxExtractor,
+    MarkdownExtractor,
     TextExtractor,
 )
 
@@ -493,8 +494,8 @@ class TestExtractionMetadata:
 
 class TestGetExtractor:
     """`get_extractor` is the legacy path-based dispatch — SPREADSHEET, DOCX,
-    TEXT and nothing else. Everything else, images included, routes through
-    `extract_pdf_with_plan` (orchestrator) — see test_pipeline.py /
+    TEXT, MARKDOWN and nothing else. Everything else, images included, routes
+    through `extract_pdf_with_plan` (orchestrator) — see test_pipeline.py /
     test_integration.py, and test_table_reconstruction.py for the image case."""
 
     def _make_profile(self, doc_type: DocumentType) -> DocumentProfile:
@@ -530,8 +531,12 @@ class TestGetExtractor:
         ext = get_extractor(self._make_profile(DocumentType.TEXT))
         assert isinstance(ext, TextExtractor)
 
+    def test_markdown_returns_correct_extractor(self) -> None:
+        ext = get_extractor(self._make_profile(DocumentType.MARKDOWN))
+        assert isinstance(ext, MarkdownExtractor)
+
     def test_pdf_type_raises(self) -> None:
-        with pytest.raises(ValueError, match="only handles SPREADSHEET/DOCX/TEXT"):
+        with pytest.raises(ValueError, match="only handles SPREADSHEET/DOCX/TEXT/MARKDOWN"):
             get_extractor(self._make_profile(DocumentType.NATIVE_NARRATIVE))
 
 

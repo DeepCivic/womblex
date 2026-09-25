@@ -14,7 +14,7 @@ Enrichment requires an external Isaacus client.
 G-NAF PSV, geospatial SHP, and ABN bulk extract XML ingest are standalone paths (`womblex ingest-gnaf` / `ingest-geo` / `ingest-abn`) that bypass extraction entirely — see below.
 
 ```
-Raw files (PDF / DOCX / CSV / XLSX)
+Raw files (PDF / DOCX / MD / CSV / XLSX)
         │
         ▼
 ┌───────────────────┐

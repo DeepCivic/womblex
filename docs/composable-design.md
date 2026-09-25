@@ -19,7 +19,7 @@ Each input format has its own ingest path. These are not interchangeable — the
 ```
 Input Format         Function                         Output
 ──────────────────── ──────────────────────────────── ────────────────────────────
-PDF / DOCX / TXT     extract(path) → ExtractionResult  ExtractionResult (in memory)
+PDF/DOCX/TXT/MD      extract(path) → ExtractionResult  ExtractionResult (in memory)
                      extract(path) → .txt file          single-file text (CLI only)
                      extract(path) → .parquet file      Parquet (CLI or batch)
 CSV / XLSX           extract(path) → ExtractionResult  ExtractionResult (in memory)

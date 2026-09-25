@@ -8,7 +8,7 @@
 # processing.text_source below. The entity graph (enrich + the offline
 # graph-refresh mention→chunk edge rebuild), chunk
 # embeddings (the kanon-2-embedder retrieval index), monetary amounts and
-# entity links are then produced over the one run. For PDF and DOCX sources
+# entity links are then produced over the one run. For PDF, DOCX and Markdown sources
 # (narrative documents — spreadsheets are structured, not narrative, so AI
 # chunking and enrichment add nothing there).
 #
@@ -83,7 +83,7 @@ paths:
   output_root: ./data/processed
   checkpoint_dir: ./data/checkpoints
 
-# Detection defaults are fine for mixed PDF/DOCX narrative corpora.
+# Detection defaults are fine for mixed PDF/DOCX/Markdown narrative corpora.
 detection:
   min_text_coverage: 0.3
   form_signal_threshold: 0.5

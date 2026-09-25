@@ -34,6 +34,7 @@ womblex/
 │   │   ├── strategies.py        # Re-export shim — path-based (non-fitz) extractors
 │   │   ├── strategies_scanned.py # OCR primitives (_ocr_page, _layout_blocks_and_tables)
 │   │   ├── strategies_file.py   # Non-PDF extractors (DOCX, plain text, non-textual)
+│   │   ├── markdown.py          # Markdown extractor — headings/lists/tables via markdown-it-py
 │   │   ├── interfaces/
 │   │   │   └── protocols.py     # Backend protocols (OCRReader, LayoutAnalyzer, Preprocessor)
 │   │   ├── paddle_ocr.py        # PaddleOCR wrapper via rapidocr-onnxruntime + YOLOLayoutAnalyzer

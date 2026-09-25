@@ -388,7 +388,7 @@ def _build_text_blocks(page: fitz.Page) -> list[TextBlock]:
 def get_extractor(profile: DocumentProfile) -> PathExtractionStrategy:
     """Select the legacy extractor for the path-based, non-orchestrator types.
 
-    Only SPREADSHEET, DOCX and TEXT reach here — exactly the set
+    Only SPREADSHEET, DOCX, TEXT and MARKDOWN reach here — exactly the set
     ``extract_text`` routes to this function. Everything else, **IMAGE
     included**, is opened with ``fitz`` and dispatched through
     ``extract_pdf_with_plan`` (per-page profile + orchestrator): PyMuPDF
@@ -397,6 +397,7 @@ def get_extractor(profile: DocumentProfile) -> PathExtractionStrategy:
     same layout pass, table reconstruction and form extraction a scanned
     PDF page gets.
     """
+    from womblex.ingest.markdown import MarkdownExtractor
     from womblex.ingest.spreadsheet import SpreadsheetExtractor
     from womblex.ingest.strategies_file import DocxExtractor, TextExtractor
 
@@ -407,9 +408,11 @@ def get_extractor(profile: DocumentProfile) -> PathExtractionStrategy:
             return DocxExtractor()
         case DocumentType.TEXT:
             return TextExtractor()
+        case DocumentType.MARKDOWN:
+            return MarkdownExtractor()
         case _:
             raise ValueError(
-                f"get_extractor() only handles SPREADSHEET/DOCX/TEXT; got "
+                f"get_extractor() only handles SPREADSHEET/DOCX/TEXT/MARKDOWN; got "
                 f"{profile.doc_type}. Everything else routes through "
                 "extract_pdf_with_plan."
             )
@@ -444,7 +447,9 @@ def extract_text(
     # open them, so there are no pages to profile. Everything it *can* open
     # falls through to the orchestrator below — images included, since a
     # standalone image opens as a one-page document.
-    if profile.doc_type in (DocumentType.SPREADSHEET, DocumentType.DOCX, DocumentType.TEXT):
+    if profile.doc_type in (
+        DocumentType.SPREADSHEET, DocumentType.DOCX, DocumentType.TEXT, DocumentType.MARKDOWN,
+    ):
         extractor: PathExtractionStrategy = get_extractor(profile)
         logger.info(
             "strategy selected: doc=%s type=%s confidence=%.2f strategy=%s",

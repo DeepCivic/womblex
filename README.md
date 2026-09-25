@@ -41,6 +41,7 @@ Optionally outputs are prepared for semantic analysis via [Isaacus](https://isaa
 Files are in a mix of formats:
 - **PDFs** — native (selectable text), scanned (narrative, forms, tables), hybrid, or redacted
 - **Word documents** (`.docx`) — paragraphs and embedded tables
+- **Markdown** (`.md`, `.markdown`) — headings, lists, paragraphs and GFM tables
 - **Spreadsheets** (`.csv`, `.xlsx`, `.xls`) — row-level data, glossaries, key-value lookups, and narrative sheets
 
 One-size-fits-all OCR fails because each format and sub-type needs a different extraction strategy. Womblex detects the document type first, then routes to the right extractor.
@@ -184,7 +185,7 @@ womblex run --config configs/example.yaml
 # Resume from checkpoint after interruption
 womblex run --config configs/example.yaml --resume
 
-# Process individual files (PDF, DOCX, CSV, Excel)
+# Process individual files (PDF, DOCX, Markdown, CSV, Excel)
 womblex extract document.pdf -o output/
 womblex extract report.docx -o output/
 womblex extract dataset.xlsx -o output/
@@ -489,6 +490,7 @@ A doc-level summary type still surfaces in metadata.
 | Format | Extensions | Extraction Strategy |
 |--------|-----------|---------------------|
 | Word | `.docx` | python-docx (paragraphs + tables) |
+| Markdown | `.md`, `.markdown` | markdown-it-py (headings, lists, paragraphs + GFM tables) |
 | Spreadsheet | `.csv`, `.xlsx`, `.xls` | pandas cell-grained element stream with header/preamble detection |
 
 ### 2. Extraction
@@ -497,6 +499,7 @@ Each document type routes to an appropriate extractor. `extract_text()` always r
 
 - **PDFs** return a single-element list. The per-page orchestrator dispatches `_apply_native_page` or `_apply_ocr_page` based on each page's `PageProfile`. PaddleOCR returns per-region confidence scores stored in the document profile. YOLO layout analysis (DocLayNet `yolo11n_doc_layout.pt`, with COCO `yolov8n.pt` as fallback) is called on OCR pages by `_layout_blocks_and_tables` to populate `Element.kind` for the layout regions it detects; a full-page scan whose dominant region is a figure but which OCR's to substantial text is tagged `paragraph` rather than `figure` so its content reaches chunking.
 - **DOCX** returns a single-element list with paragraphs and tables interleaved in OOXML body order.
+- **Markdown** returns a single-element list with headings, list items, paragraphs and GFM tables in source order. Inline markdown syntax is kept verbatim; YAML front matter and link reference definitions are kept as verbatim paragraphs.
 - **Spreadsheets** return one `ExtractionResult` per workbook. Each sheet contributes a leading `kind='sheet_meta'` element followed by one `kind='sheet_cell'` element per non-empty cell. Export products that open with title rows or `key: value` metadata blocks above the real header (e.g. AusTender contract-notice exports) are handled: the header is detected by run-scoring (the candidate row starting the longest run of table-consistent rows below it), preamble rows land verbatim on `sheet_meta.meta["preamble"]`, and row 0 of the cell grid is always the real header. Ragged CSVs (a one-field title row above a wide header) parse rather than fail.
 
 Each result carries a `document_id` used as the primary key downstream.
@@ -592,7 +595,7 @@ console's Pipeline Composer offers the same ones by name (e.g.
 
 **`configs/default-isaacus.yaml` — the reference Isaacus pipeline**
 (`extract → normalise → enrich → chunk → build_graph → embed →
-money → link → done`, for PDF/DOCX). The text is cleaned first (normalise,
+money → link → done`, for PDF/DOCX/Markdown). The text is cleaned first (normalise,
 selected via `processing.text_source`), then the entity graph, chunk
 embeddings, monetary amounts and entity links are produced over the one run.
 `spellfix` is not in the reference shape — dictionary-gated OCR repair is a
