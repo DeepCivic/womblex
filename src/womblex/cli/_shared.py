@@ -9,7 +9,7 @@ from typing import NamedTuple
 
 logger = logging.getLogger("womblex")
 
-SUPPORTED_EXTENSIONS = {".pdf", ".csv", ".xlsx", ".xls", ".docx"}
+SUPPORTED_EXTENSIONS = {".pdf", ".csv", ".xlsx", ".xls", ".docx", ".md", ".markdown"}
 
 
 class Command(NamedTuple):

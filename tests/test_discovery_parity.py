@@ -47,7 +47,7 @@ class TestSelectSupported:
 
     def test_subdirectory_without_documents_is_not_a_refusal(self):
         got = select_supported(
-            ["a.pdf", ".git/config", "notes/readme.md", "images/logo.png"],
+            ["a.pdf", ".git/config", "notes/readme.txt", "images/logo.png"],
             location="/corpus",
         )
         assert got == ["a.pdf"]
@@ -128,7 +128,7 @@ class TestLocalAndCloudAgree:
             (["a.pdf", "b.pdf"], False),
             (["2026-08/a.pdf"], True),
             (["top.pdf", "agency/a.pdf"], True),
-            (["a.pdf", "notes/readme.md"], False),
+            (["a.pdf", "notes/readme.txt"], False),
         ],
     )
     def test_same_verdict_from_a_path_walk_and_a_key_listing(self, tmp_path, layout, nested):

@@ -8,7 +8,7 @@ callers compose them directly.
 ```
 Input File
 │
-├─ Narrative (PDF/DOCX/TXT) ──► Extract Text ──► [.txt or .parquet]
+├─ Narrative (PDF/DOCX/TXT/MD) ──► Extract Text ──► [.txt or .parquet]
 ├─ Tabular (CSV/XLSX) ────────► Transform Rows ──► [.parquet]
 ├─ Tabular (PSV/G-NAF) ──────► Standalone Ingest ──► [.parquet]
 ├─ Register (XML/ABN) ───────► Standalone Ingest ──► [.parquet]
@@ -41,6 +41,7 @@ src/womblex/
 │   ├── strategies.py          # Re-export shim — path-based (non-fitz) extractors
 │   ├── strategies_scanned.py  # OCR primitives (_ocr_page, _layout_blocks_and_tables)
 │   ├── strategies_file.py     # Non-PDF extractors (DOCX, plain text, non-textual)
+│   ├── markdown.py            # Markdown extractor — headings/lists/tables via markdown-it-py
 │   ├── interfaces/
 │   │   └── protocols.py       # Backend protocols: OCRReader, LayoutAnalyzer, Preprocessor
 │   ├── paddle_ocr.py          # PaddleOCR wrapper via rapidocr-onnxruntime (det/rec/cls)
@@ -196,12 +197,13 @@ Defensive classification: uncertain documents route to `UNKNOWN` rather than a w
 | `DOCX` | Word document |
 | `SPREADSHEET` | CSV or Excel |
 | `TEXT` | Plain text file (passthrough) |
+| `MARKDOWN` | Markdown file (headings/lists/tables) |
 | `IMAGE` | Photo / diagram — flagged for review |
 | `UNKNOWN` | Detection failed |
 
 ### 2. Ingest — Extraction
 
-`extract.py` defines the `ExtractionStrategy` and `PathExtractionStrategy` protocols, shared helpers, and the `extract_text()` dispatcher. PDFs route via the per-page orchestrator (`ingest/orchestrator.py` + `ingest/page_profile.py`); the per-doc `Native*` / `Scanned*` / `Hybrid` / `Structured` strategy classes have been removed and their bodies inlined into the orchestrator's per-page operations (`_apply_native_page`, `_apply_ocr_page`). Standalone images take the orchestrator path too — `fitz` opens one as a single-page document, so it reaches the same `_apply_ocr_page` dispatch a scanned PDF page does; `get_extractor()` is reached only by the path-based formats. OCR primitives live in `strategies_scanned.py` and the file-format extractors in `strategies_file.py` (DOCX, plain text); `strategies.py` re-exports for back-compat. `spreadsheet.py` handles CSV and Excel files.
+`extract.py` defines the `ExtractionStrategy` and `PathExtractionStrategy` protocols, shared helpers, and the `extract_text()` dispatcher. PDFs route via the per-page orchestrator (`ingest/orchestrator.py` + `ingest/page_profile.py`); the per-doc `Native*` / `Scanned*` / `Hybrid` / `Structured` strategy classes have been removed and their bodies inlined into the orchestrator's per-page operations (`_apply_native_page`, `_apply_ocr_page`). Standalone images take the orchestrator path too — `fitz` opens one as a single-page document, so it reaches the same `_apply_ocr_page` dispatch a scanned PDF page does; `get_extractor()` is reached only by the path-based formats. OCR primitives live in `strategies_scanned.py` and the file-format extractors in `strategies_file.py` (DOCX, plain text) and `markdown.py` (Markdown); `strategies.py` re-exports for back-compat. `spreadsheet.py` handles CSV and Excel files.
 
 `extract_text()` logs the strategy selection (`doc, type, confidence, strategy`) at INFO level, then always returns `list[ExtractionResult]`. PDF, DOCX, and spreadsheet paths each return a single-element list (one result per source file). The list shape is retained for call-site symmetry. Spreadsheet cells live as `kind='sheet_cell'` elements on the single result; `_classify_sheet` survives as a detection-time metadata helper but no longer routes extraction.
 

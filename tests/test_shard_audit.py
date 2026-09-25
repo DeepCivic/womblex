@@ -159,7 +159,7 @@ class TestAudit:
         src.mkdir()
         (src / "a.pdf").write_bytes(b"x")
         (src / "b.pdf").write_bytes(b"x")
-        (src / "notes.md").write_text("not counted")
+        (src / "notes.rst").write_text("not counted")
         report = audit_shard_directory(tmp_path, input_dir=src)
         assert report.source_count == 2
 
@@ -173,7 +173,7 @@ class TestAudit:
         src.mkdir()
         for name in ("a.pdf", "b.xls", "c.docx"):
             (src / name).write_bytes(b"x")
-        for name in ("readme.txt", "index.html", "notes.md"):
+        for name in ("readme.txt", "index.html", "notes.rst"):
             (src / name).write_text("not a document a run ingests")
         report = audit_shard_directory(tmp_path, input_dir=src)
         assert report.source_count == 3
