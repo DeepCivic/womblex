@@ -100,6 +100,7 @@ src/womblex/
 │   ├── provenance_output.py / run_manifest.py / register_manifest.py  # Manifest consolidation (NLP run + registers) + the run record
 │   ├── source_provenance.py  # Where a source document came from: ingest root + relpath, and their womblex.* footer keys
 │   ├── source_resolver.py  # The way back: source_hash → the source file, verified by content hash, or an explicit reason
+│   ├── egress_output.py   # source_index.parquet schema + IO for the egress bundle (source_hash → raw_key/ext/doc_id/filename/status)
 │   ├── build_info.py      # Which build is running: version + source commit (work tree / build stamp / unavailable)
 │   ├── run_stamp.py       # Which run produced a file: run id / version / commit / config digest / stage / preset (config name) / loaded models, as womblex.* footer keys
 │   ├── remote.py          # fsspec stage-in/stage-out object-storage adapter for distributed runs
