@@ -105,6 +105,7 @@ womblex/
 │   │   ├── ground_truth_output.py  # Ground-truth *.meta.json sidecar: schema, validation, unit-id, IO (JSON, not parquet)
 │   │   ├── source_provenance.py  # Ingest root + source relpath, and their womblex.* Parquet footer keys
 │   │   ├── source_resolver.py    # SourceResolver — resolve a published row's source_hash back to its source file
+│   │   ├── egress_output.py      # source_index.parquet schema + IO for the egress bundle (self-contained)
 │   │   ├── build_info.py    # BuildInfo — package version + source commit, or unavailable with a reason
 │   │   ├── run_stamp.py     # RunStamp — run id / version / commit / config digest / stage / preset (config name) / loaded models, as womblex.* footer keys
 │   │   ├── run_manifest.py  # Consolidate per-batch manifests into a run-root manifest.parquet + the run record in its footer
