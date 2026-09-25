@@ -1,9 +1,10 @@
 # Egress bundle contract — Womblex (REVIEW COPY)
 
-> **Status: REVIEW COPY — not yet implemented.** This document is a design
-> proposal for review. It describes intended changes; no code in this
-> repository yet implements them. Do not treat it as a record of shipped
-> behaviour.
+> **Status: REVIEW COPY — partially implemented.** This document is a design
+> proposal for review. Of the three merges under "Change sizing", only the
+> first (`store/egress_output.py`, the `source_index.parquet` schema and IO)
+> has landed; the bundle builder and the CLI verb are not yet implemented. Do
+> not treat the rest as a record of shipped behaviour.
 
 ## Shared context (identical across Womblex, Numbatch, Echidnet)
 

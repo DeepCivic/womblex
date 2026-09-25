@@ -90,6 +90,8 @@ EXEMPT: dict[str, str] = {
     "write_sidecar": "a ground-truth .meta.json: JSON, and the run is recorded inside "
                      "the sidecar's derivation block, not as parquet footer keys",
     "write_register_manifest": "the standalone register ingests, which bypass the pipeline",
+    "write_source_index": "an egress bundle file at run grain with no batch shard beside it; "
+                          "takes the run's stamp explicitly, covered in test_egress_output.py",
     "write_provenance_shard": "the pre-extracted records ingest, which is not a run",
     "write_corpus_manifest": "the pre-extracted records ingest, which is not a run",
     "write_entity_mentions": "whole-corpus E2E writer: no per-batch shard to inherit from",
