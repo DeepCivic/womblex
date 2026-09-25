@@ -547,10 +547,10 @@ def _detect_docx(path: Path) -> DocumentProfile:
 
 def _detect_markdown(path: Path) -> DocumentProfile:
     """Detect Markdown file characteristics: table signal only, no OCR path."""
-    try:
-        text = path.read_text(encoding="utf-8")
-    except UnicodeDecodeError:
-        text = path.read_text(encoding="latin-1")
+    # Local import: markdown.py → extract.py → detect.py would be circular at module level.
+    from womblex.ingest.markdown import read_markdown
+
+    text = read_markdown(path)
 
     return DocumentProfile(
         doc_type=DocumentType.MARKDOWN,

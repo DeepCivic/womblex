@@ -131,6 +131,48 @@ class TestMarkdownExtraction:
         assert results[0].error is None
         assert results[0].elements == []
 
+    def test_utf8_bom_does_not_hide_first_heading(self, tmp_path: Path) -> None:
+        md = tmp_path / "bom.md"
+        md.write_bytes(b"\xef\xbb\xbf# Title\r\n\r\nBody\r\n")
+        results = extract_text(md, detect_file_type(md))
+
+        assert [(e.kind, e.text) for e in results[0].elements] == [
+            ("heading", "Title"), ("paragraph", "Body"),
+        ]
+
+    def test_front_matter_kept_verbatim_not_read_as_heading(self, tmp_path: Path) -> None:
+        md = tmp_path / "fm.md"
+        md.write_text("---\ntitle: Report\n\nauthor: X\n---\n\n# Real Heading\n", encoding="utf-8")
+        results = extract_text(md, detect_file_type(md))
+
+        assert [(e.kind, e.text) for e in results[0].elements] == [
+            ("paragraph", "---\ntitle: Report\n\nauthor: X\n---"),
+            ("heading", "Real Heading"),
+        ]
+
+    def test_front_matter_at_end_of_file_without_newline(self, tmp_path: Path) -> None:
+        md = tmp_path / "fm_only.md"
+        md.write_text("---\ntitle: Only\n---", encoding="utf-8")
+        results = extract_text(md, detect_file_type(md))
+
+        assert [e.text for e in results[0].elements] == ["---\ntitle: Only\n---"]
+
+    def test_thematic_break_mid_document_is_not_front_matter(self, tmp_path: Path) -> None:
+        md = tmp_path / "rule.md"
+        md.write_text("Intro\n\n---\n\nAfter\n", encoding="utf-8")
+        results = extract_text(md, detect_file_type(md))
+
+        assert [e.text for e in results[0].elements] == ["Intro", "After"]
+
+    def test_link_reference_definitions_kept_in_place(self, tmp_path: Path) -> None:
+        md = tmp_path / "refs.md"
+        md.write_text("See [x].\n\n[x]: http://example.com\n\nTail.\n", encoding="utf-8")
+        results = extract_text(md, detect_file_type(md))
+
+        r = results[0]
+        assert [e.text for e in r.elements] == ["See [x].", "[x]: http://example.com", "Tail."]
+        assert [e.order for e in r.elements] == [0, 1, 2]
+
     def test_latin1_fallback(self, tmp_path: Path) -> None:
         md = tmp_path / "latin.md"
         md.write_bytes("# caf\xe9".encode("latin-1"))

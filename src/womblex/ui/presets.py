@@ -20,7 +20,7 @@ money → link → done``, with text cleaning first (normalise, selected via
 ``processing.text_source``), the entity graph (enrich + the
 ``graph-refresh`` mention→chunk edge rebuild), chunk embeddings (the
 kanon-2-embedder retrieval index), monetary amounts and entity links produced
-over the one run. It targets PDF and DOCX sources — the two narrative formats
+over the one run. It targets PDF, DOCX and Markdown sources — the narrative formats
 among ``SUPPORTED_EXTENSIONS`` — which is what makes AI chunking and enrichment
 meaningful (spreadsheets are structured, not narrative). The vendored demo run
 (``run-throsby-demo``, ``womblex seed-demo``) is a completed run of exactly this
@@ -120,13 +120,13 @@ _DEFAULT_ISAACUS = Preset(
         "Kanon-2 enrichment, semantic (AI) chunking, entity-graph "
         "edge rebuild (build_graph), chunk embeddings, monetary-amount "
         "annotation and entity linking — cleaning first, then graph, embeddings, "
-        "money and links over the one run. For PDF and DOCX sources. Runnable "
+        "money and links over the one run. For PDF, DOCX and Markdown sources. Runnable "
         "from the CLI as configs/default-isaacus.yaml (a per-stage sequence: "
         "normalise, enrich before chunk, then graph-refresh, embed, "
         "money, link). Linking needs a corpus reference register (set "
         "linking.reference) supplied at run time."
     ),
-    formats=(".pdf", ".docx"),
+    formats=(".pdf", ".docx", ".md", ".markdown"),
     config={
         "chunking": {
             "enabled": True,

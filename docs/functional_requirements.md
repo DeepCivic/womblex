@@ -106,7 +106,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 
 - The system generates a document-level profile capturing format, per-page visual signals, and OCR confidence.
 - PDFs and images are explicitly routed to the page-level orchestrator.
-- Path-based formats (DOCX, spreadsheets, text) are explicitly routed to their respective format extractors.
+- Path-based formats (DOCX, spreadsheets, text, Markdown) are explicitly routed to their respective format extractors.
 - Visual signals like handwriting, ruled lines, and layout regularity inform the extraction profile.
 - Spreadsheets are accurately classified per sheet by reading a sample of leading rows.
 

@@ -1031,7 +1031,7 @@ class TestComposerApi:
         names = [p["name"] for p in body["presets"]]
         assert "DEFAULT-Isaacus" in names
         preset = next(p for p in body["presets"] if p["name"] == "DEFAULT-Isaacus")
-        assert preset["formats"] == [".pdf", ".docx"]
+        assert preset["formats"] == [".pdf", ".docx", ".md", ".markdown"]
 
     def test_default_isaacus_enables_the_full_reference_shape(
         self, client: TestClient
