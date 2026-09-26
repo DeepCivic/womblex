@@ -670,7 +670,7 @@ def test_finalize_consolidates_manifest(tmp_path):
 # --- egress (local run, no Postgres) -----------------------------------------
 
 
-def test_egress_exports_local_run_to_bundle(tmp_path):
+def test_egress_exports_local_run_to_bundle(tmp_path, monkeypatch):
     """CLI wiring for `womblex egress`: a finished local run -> a bundle dir.
 
     Corpus-only (`--no-sources`) — `build_bundle`'s full source-resolution
@@ -722,6 +722,22 @@ def test_egress_exports_local_run_to_bundle(tmp_path):
     assert not (bundle / "sources").exists()
     assert not (bundle / "source_index.parquet").exists()
     assert (bundle / "egress_manifest.json").is_file()
+
+    # A run root given as `.` still defaults run_id to the directory's name.
+    monkeypatch.chdir(run_root)
+    rc = cmd_egress(argparse.Namespace(
+        run=Path("."), to=str(tmp_path / "bundle2"), run_id=None, bundle_prefix=None,
+        sources=False, source_root=None,
+    ))
+    assert rc == 0
+    assert (tmp_path / "bundle2" / "regress" / "egress_manifest.json").is_file()
+
+    # An unopenable destination is a clean exit 1, not a traceback.
+    rc = cmd_egress(argparse.Namespace(
+        run=run_root, to="nosuchscheme://x", run_id=None, bundle_prefix=None,
+        sources=False, source_root=None,
+    ))
+    assert rc == 1
 
 
 # --- JobQueue (needs Postgres) -----------------------------------------------

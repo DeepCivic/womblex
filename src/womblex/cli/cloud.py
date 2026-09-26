@@ -631,9 +631,15 @@ def cmd_egress(args: argparse.Namespace) -> int:
     if not run_root.is_dir():
         logger.error("run root is not a directory: %s", run_root)
         return 1
-    run_id = args.run_id or run_root.name
+    # abspath, not resolve(): normalises `.`/`..` (whose `.name` is empty or
+    # `..`) without following a symlinked run root to another name.
+    run_id = args.run_id or Path(os.path.abspath(run_root)).name
 
-    store = RemoteStore.from_uri(args.to)
+    try:
+        store = RemoteStore.from_uri(args.to)
+    except Exception as e:  # unknown scheme (ValueError), missing backend (ImportError), …
+        logger.error("Could not open destination %s: %s", args.to, e)
+        return 1
     try:
         result = build_bundle(
             run_root, store,
