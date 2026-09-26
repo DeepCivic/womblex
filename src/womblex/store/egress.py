@@ -3,22 +3,35 @@
 The producer half of ``docs/egress-bundle-contract.review.md``: Womblex writes
 the bundle and stops — no retention, serving, versioning, or auth.
 
-``build_bundle`` takes a finished local run (``<run_root>/documents/`` shard
-files plus its consolidated ``<run_root>/manifest.parquet``, as
+``build_bundle`` takes a finished local run (``<run_root>/documents/`` — every
+file it contains, recursively, not only its top-level ``*.parquet`` shards —
+plus its consolidated ``<run_root>/manifest.parquet``, as
 :func:`womblex.store.run_manifest.write_run_manifest` produces) and a
 destination :class:`~womblex.store.remote.RemoteStore`, and writes::
 
     <dest>/<run_id>/
-      corpus/                     # the shard files + manifest.parquet, unchanged
+      corpus/                     # documents/ mirrored recursively + manifest.parquet
       sources/<source_hash><ext>  # raw files, deduplicated by hash
       source_index.parquet        # source_hash -> raw key, ext, doc_id, filename, status
       egress_manifest.json        # bundle descriptor + per-document resolution report
 
 Resolution reuses :class:`~womblex.store.source_resolver.SourceResolver`, so
-``source_index.parquet`` carries its four-status vocabulary, non-fatal per
-document. Every write is a ``RemoteStore.upload_file`` off a local path, so a
-local directory and an object-store URI are one code path. Scoped to a local
-run, as ``SourceResolver`` is: a distributed run is staged locally first.
+``source_index.parquet`` carries its four-status vocabulary plus one more of
+this module's own: ``upload_failed``, for a source that resolved but whose
+copy to the destination raised — isolated per source so one bad upload does
+not abort the export (``source_index.parquet`` and ``egress_manifest.json``
+still get written). Every write is a ``RemoteStore.upload_file`` off a local
+path, so a local directory and an object-store URI are one code path. Scoped
+to a local run, as ``SourceResolver`` is: a distributed run is staged locally
+first.
+
+Re-exporting into a bundle folder that already has a ``sources/`` directory
+(a re-run over an updated corpus) removes any file under it that the new
+export did not just write or attempt to write — so a document dropped from
+the manifest since the last export does not linger as an orphaned raw file
+``source_index.parquet`` no longer lists. A source this export attempted but
+failed to upload is left untouched either way, since its destination content
+is of unknown provenance.
 """
 
 from __future__ import annotations
@@ -36,6 +49,7 @@ from womblex import __version__
 from womblex.store.egress_output import (
     EGRESS_STAGE,
     SOURCE_INDEX_FILENAME,
+    SOURCES_DIRNAME,
     raw_key_for,
     write_source_index,
 )
@@ -55,6 +69,11 @@ logger = logging.getLogger(__name__)
 
 CORPUS_DIRNAME = "corpus"
 EGRESS_MANIFEST_FILENAME = "egress_manifest.json"
+
+#: A source that resolved but whose copy to the destination raised. Not part
+#: of :mod:`womblex.store.source_resolver`'s vocabulary — it happens at
+#: upload time, after resolution has already succeeded.
+UPLOAD_FAILED = "upload_failed"
 
 
 @dataclass(frozen=True)
@@ -113,17 +132,23 @@ def build_bundle(
 
     # Everything that can refuse the export is checked before the first write,
     # so a refusal never leaves a half-built bundle at the destination.
-    shard_files = sorted(shard_dir.glob("*.parquet")) + [manifest_path]
-    stamp = stamp_from_footers(shard_files, EGRESS_STAGE)
+    # Recursive and not filtered to `*.parquet`: any file `documents/` holds
+    # (a nested subfolder, a non-parquet sidecar) is part of the corpus, not
+    # just its top-level shards.
+    shard_paths = sorted(p for p in shard_dir.rglob("*") if p.is_file())
+    corpus_paths = shard_paths + [manifest_path]
+    stamp = stamp_from_footers(corpus_paths, EGRESS_STAGE)
     if stamp is not None and stamp.run_id != run_id:
         raise ValueError(f"run_id {run_id!r} does not match the run's own stamp {stamp.run_id!r}")
     manifest = load_manifest(run_root)
     rows = manifest.select(["source_hash", "doc_id", "filename", "ext"]).to_pylist()
     resolver = _resolver(run_root, manifest, source_root) if include_sources else None
 
-    for path in shard_files:
-        store.upload_file(path, f"{corpus_prefix}/{path.name}")
-    logger.info("Copied %d corpus file(s) -> %s/%s", len(shard_files), store.root, corpus_prefix)
+    for path in shard_paths:
+        rel = path.relative_to(shard_dir).as_posix()
+        store.upload_file(path, f"{corpus_prefix}/{rel}")
+    store.upload_file(manifest_path, f"{corpus_prefix}/{manifest_path.name}")
+    logger.info("Copied %d corpus file(s) -> %s/%s", len(corpus_paths), store.root, corpus_prefix)
 
     sources_copied = 0
     by_status: dict[str, int] = {}
@@ -133,20 +158,41 @@ def build_bundle(
         # every such row's raw_key comes from the one file uploaded — its own
         # suffix, lowercased as the manifest's `ext` is.
         raw_keys: dict[str, str] = {}
+        # source_hash -> the key its upload attempted this export but raised
+        # on. Left alone by the stale-file cleanup below, same as `raw_keys`'
+        # values — its destination content (if any landed before the failure)
+        # is of unknown provenance, so it is neither claimed by the new index
+        # nor deleted out from under it.
+        failed_keys: dict[str, str] = {}
         index_rows: list[dict] = []
         for row in rows:
             source_hash = row["source_hash"]
             resolution = resolutions.get(source_hash)
-            status = resolution.status if resolution is not None else "not_found"
-            by_status[status] = by_status.get(status, 0) + 1
+            status: str = resolution.status if resolution is not None else "not_found"
             raw_key = None
             if resolution is not None and resolution.ok and resolution.path is not None:
-                if source_hash not in raw_keys:
-                    raw_keys[source_hash] = raw_key_for(source_hash, resolution.path.suffix.lower())
-                    store.upload_file(resolution.path, f"{prefix}/{raw_keys[source_hash]}")
-                    sources_copied += 1
-                raw_key = raw_keys[source_hash]
+                if source_hash not in raw_keys and source_hash not in failed_keys:
+                    candidate_key = raw_key_for(source_hash, resolution.path.suffix.lower())
+                    try:
+                        store.upload_file(resolution.path, f"{prefix}/{candidate_key}")
+                    except Exception:
+                        logger.warning(
+                            "failed to upload source for source_hash=%s (doc_id=%s)",
+                            source_hash, row["doc_id"], exc_info=True,
+                        )
+                        failed_keys[source_hash] = candidate_key
+                    else:
+                        raw_keys[source_hash] = candidate_key
+                        sources_copied += 1
+                if source_hash in raw_keys:
+                    raw_key = raw_keys[source_hash]
+                elif source_hash in failed_keys:
+                    status = UPLOAD_FAILED
+            by_status[status] = by_status.get(status, 0) + 1
             index_rows.append({**row, "raw_key": raw_key, "status": status})
+
+        keep = set(raw_keys.values()) | set(failed_keys.values())
+        _clean_stale_sources(store, prefix, keep=keep)
 
         with tempfile.TemporaryDirectory(prefix="womblex-egress-") as tmp:
             local_index = write_source_index(index_rows, Path(tmp), stamp=stamp)
@@ -161,9 +207,39 @@ def build_bundle(
 
     return EgressResult(
         run_id=run_id, bundle_prefix=prefix, documents=len(rows),
-        corpus_files=len(shard_files), sources_copied=sources_copied,
+        corpus_files=len(corpus_paths), sources_copied=sources_copied,
         sources_by_status=by_status,
     )
+
+
+def _clean_stale_sources(store: RemoteStore, prefix: str, *, keep: set[str]) -> None:
+    """Remove anything under this bundle's ``sources/`` that *keep* does not name.
+
+    Runs after this export's uploads, so a re-export over an updated corpus —
+    a document dropped, a hash changed — does not leave a raw file behind that
+    the fresh ``source_index.parquet`` no longer lists. *keep* already
+    includes the keys of failed uploads (see the caller), so a transient
+    upload failure never causes a previously-copied file to be deleted.
+
+    Isolated per file, like the upload loop this runs after: one delete that
+    raises (a transient backend error, an object already gone out-of-band)
+    is logged and skipped rather than aborting the export before
+    ``source_index.parquet`` / ``egress_manifest.json`` get written.
+    """
+    sources_prefix = f"{prefix}/{SOURCES_DIRNAME}"
+    existing = store.list_files(sources_prefix, recursive=True)
+    keep_full = {f"{prefix}/{k}" for k in keep}
+    stale = [rel for rel in existing if rel not in keep_full]
+    removed = 0
+    for rel in stale:
+        try:
+            store.delete(rel)
+        except Exception:
+            logger.warning("failed to remove stale source file %s", rel, exc_info=True)
+        else:
+            removed += 1
+    if removed:
+        logger.info("Removed %d stale source file(s) from a previous export", removed)
 
 
 def _resolver(
@@ -200,6 +276,7 @@ def _write_egress_manifest(
 __all__ = [
     "CORPUS_DIRNAME",
     "EGRESS_MANIFEST_FILENAME",
+    "UPLOAD_FAILED",
     "EgressResult",
     "build_bundle",
 ]

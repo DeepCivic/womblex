@@ -9,7 +9,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from womblex.store.egress import CORPUS_DIRNAME, EGRESS_MANIFEST_FILENAME, build_bundle
-from womblex.store.egress_output import SOURCE_INDEX_FILENAME, raw_key_for
+from womblex.store.egress_output import SOURCE_INDEX_FILENAME, SOURCES_DIRNAME, raw_key_for
 from womblex.store.output import ELEMENT_SCHEMA, MANIFEST_SCHEMA, _source_hash, _write_rows
 from womblex.store.remote import RemoteStore
 from womblex.store.run_manifest import write_run_manifest
@@ -272,3 +272,155 @@ def test_a_hash_mismatch_is_reported_and_not_copied(tmp_path: Path):
 
     (row,) = pq.read_table(str(dest / "run-A" / SOURCE_INDEX_FILENAME)).to_pylist()
     assert (row["status"], row["raw_key"], result.sources_copied) == ("hash_mismatch", None, 0)
+
+
+def test_documents_dir_is_mirrored_recursively_not_just_top_level_parquet(tmp_path: Path):
+    run_root, _ = _build_run(tmp_path)
+    shard_dir = run_root / "documents"
+    (shard_dir / "audit").mkdir()
+    (shard_dir / "audit" / "notes.json").write_text('{"ok": true}')
+    (shard_dir / "checkpoint.state").write_text("progress")
+    dest = tmp_path / "dest"
+
+    result = build_bundle(run_root, RemoteStore.from_uri(str(dest)), run_id="run-A")
+
+    bundle_corpus = dest / "run-A" / CORPUS_DIRNAME
+    assert (bundle_corpus / "audit" / "notes.json").read_text() == '{"ok": true}'
+    assert (bundle_corpus / "checkpoint.state").read_text() == "progress"
+    # manifest.parquet + 2 batch shards + the 2 extra files added above.
+    assert result.corpus_files == 5
+
+
+def test_a_failed_source_upload_does_not_abort_the_export(tmp_path: Path, monkeypatch):
+    run_root, _ = _build_run(tmp_path)
+    dest = tmp_path / "dest"
+    store = RemoteStore.from_uri(str(dest))
+    original_upload = store.upload_file
+
+    def flaky_upload(local_path: Path, rel: str) -> str:
+        if f"/{SOURCES_DIRNAME}/" in f"/{rel}":
+            raise OSError("simulated upload failure")
+        return original_upload(local_path, rel)
+
+    monkeypatch.setattr(store, "upload_file", flaky_upload)
+
+    result = build_bundle(run_root, store, run_id="run-A")
+
+    # The export completed: both sidecars landed despite the failed source.
+    assert (dest / "run-A" / SOURCE_INDEX_FILENAME).is_file()
+    assert (dest / "run-A" / EGRESS_MANIFEST_FILENAME).is_file()
+    assert (dest / "run-A" / CORPUS_DIRNAME / "manifest.parquet").is_file()
+
+    index = pq.read_table(str(dest / "run-A" / SOURCE_INDEX_FILENAME)).to_pylist()
+    by_doc = {r["doc_id"]: r for r in index}
+    assert by_doc["doc-1"]["status"] == "upload_failed"
+    assert by_doc["doc-1"]["raw_key"] is None
+    assert by_doc["doc-1-dup"]["status"] == "upload_failed"
+    assert result.sources_copied == 0
+    assert result.sources_by_status["upload_failed"] == 2
+
+    descriptor = json.loads((dest / "run-A" / EGRESS_MANIFEST_FILENAME).read_text())
+    assert descriptor["sources_by_status"]["upload_failed"] == 2
+
+
+def test_stale_sources_from_a_previous_export_are_removed_on_re_export(tmp_path: Path):
+    corpus_dir = tmp_path / "corpus"
+    corpus_dir.mkdir()
+    (corpus_dir / "a.pdf").write_bytes(b"%PDF-A")
+    (corpus_dir / "b.pdf").write_bytes(b"%PDF-B")
+    root = qualify_root(corpus_dir)
+    hash_a = _source_hash(str(corpus_dir / "a.pdf"))
+    hash_b = _source_hash(str(corpus_dir / "b.pdf"))
+
+    run1 = _write_run(tmp_path / "run1", [
+        _manifest_row(hash_a, "doc-a", "a.pdf", ".pdf", ingest_root=root, relpath="a.pdf"),
+        _manifest_row(hash_b, "doc-b", "b.pdf", ".pdf", ingest_root=root, relpath="b.pdf"),
+    ])
+    dest = tmp_path / "dest"
+    store = RemoteStore.from_uri(str(dest))
+    build_bundle(run1, store, run_id="run-A")
+
+    key_a = raw_key_for(hash_a, ".pdf")
+    key_b = raw_key_for(hash_b, ".pdf")
+    assert (dest / "run-A" / key_a).is_file()
+    assert (dest / "run-A" / key_b).is_file()
+
+    # The corpus moved on: b.pdf is gone, and this run only ever saw a.pdf.
+    run2 = _write_run(tmp_path / "run2", [
+        _manifest_row(hash_a, "doc-a", "a.pdf", ".pdf", ingest_root=root, relpath="a.pdf"),
+    ])
+    build_bundle(run2, store, run_id="run-A")
+
+    assert (dest / "run-A" / key_a).is_file()
+    assert not (dest / "run-A" / key_b).exists()
+
+
+def test_a_stale_delete_failure_does_not_abort_the_export(tmp_path: Path, monkeypatch):
+    corpus_dir = tmp_path / "corpus"
+    corpus_dir.mkdir()
+    (corpus_dir / "a.pdf").write_bytes(b"%PDF-A")
+    (corpus_dir / "b.pdf").write_bytes(b"%PDF-B")
+    root = qualify_root(corpus_dir)
+    hash_a = _source_hash(str(corpus_dir / "a.pdf"))
+    hash_b = _source_hash(str(corpus_dir / "b.pdf"))
+
+    run1 = _write_run(tmp_path / "run1", [
+        _manifest_row(hash_a, "doc-a", "a.pdf", ".pdf", ingest_root=root, relpath="a.pdf"),
+        _manifest_row(hash_b, "doc-b", "b.pdf", ".pdf", ingest_root=root, relpath="b.pdf"),
+    ])
+    dest = tmp_path / "dest"
+    store = RemoteStore.from_uri(str(dest))
+    build_bundle(run1, store, run_id="run-A")
+
+    key_b = raw_key_for(hash_b, ".pdf")
+    original_delete = store.delete
+
+    def flaky_delete(rel: str) -> None:
+        if rel.endswith(key_b):
+            raise OSError("simulated delete failure")
+        return original_delete(rel)
+
+    monkeypatch.setattr(store, "delete", flaky_delete)
+
+    # b.pdf dropped from the corpus, so its stale copy is targeted for
+    # cleanup — but the delete itself fails, and the export must still finish.
+    run2 = _write_run(tmp_path / "run2", [
+        _manifest_row(hash_a, "doc-a", "a.pdf", ".pdf", ingest_root=root, relpath="a.pdf"),
+    ])
+    build_bundle(run2, store, run_id="run-A")
+
+    assert (dest / "run-A" / SOURCE_INDEX_FILENAME).is_file()
+    assert (dest / "run-A" / EGRESS_MANIFEST_FILENAME).is_file()
+
+
+def test_a_failed_upload_does_not_delete_a_previously_copied_source(
+    tmp_path: Path, monkeypatch,
+):
+    corpus_dir = tmp_path / "corpus"
+    corpus_dir.mkdir()
+    (corpus_dir / "a.pdf").write_bytes(b"%PDF-A")
+    root = qualify_root(corpus_dir)
+    hash_a = _source_hash(str(corpus_dir / "a.pdf"))
+    run_root = _write_run(tmp_path / "run", [
+        _manifest_row(hash_a, "doc-a", "a.pdf", ".pdf", ingest_root=root, relpath="a.pdf"),
+    ])
+    dest = tmp_path / "dest"
+    store = RemoteStore.from_uri(str(dest))
+    build_bundle(run_root, store, run_id="run-A")
+
+    key_a = raw_key_for(hash_a, ".pdf")
+    assert (dest / "run-A" / key_a).is_file()
+
+    original_upload = store.upload_file
+
+    def flaky_upload(local_path: Path, rel: str) -> str:
+        if f"/{SOURCES_DIRNAME}/" in f"/{rel}":
+            raise OSError("simulated upload failure")
+        return original_upload(local_path, rel)
+
+    monkeypatch.setattr(store, "upload_file", flaky_upload)
+    build_bundle(run_root, store, run_id="run-A")
+
+    # The re-export's own upload failed, but the file from the first,
+    # successful export must not be treated as stale and deleted.
+    assert (dest / "run-A" / key_a).is_file()

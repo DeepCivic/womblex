@@ -95,14 +95,22 @@ hash and to populate the resolution report.
 
 Resolution is non-fatal per document. Each `source_index.parquet` row carries a
 status drawn from the existing `SourceResolver` vocabulary — `resolved`,
-`hash_mismatch`, `not_found`, `unsupported_basis` — with a null raw key where no
-file was produced. A records-ingested document (hashed over id and text, not
+`hash_mismatch`, `not_found`, `unsupported_basis` — plus one `egress.py` adds
+of its own, `upload_failed`, for a source that resolved but whose copy to the
+destination raised; each is isolated per source, so one failed upload never
+aborts the export. A records-ingested document (hashed over id and text, not
 file bytes) resolves `unsupported_basis` and has no entry under `sources/`; this
 is reported, never an error.
 
 Raw files are deduplicated by `source_hash`: two manifest rows sharing one hash
 (the same bytes ingested under two names) point at one file under `sources/`,
 and the index carries both documents against that shared key.
+
+Re-exporting into a bundle folder that already has a `sources/` directory
+removes any file under it that the fresh export neither wrote nor attempted —
+so a document dropped from the manifest since the last export does not linger
+as an orphan `source_index.parquet` no longer names. A source whose upload
+just failed is left as-is either way.
 
 ### CLI
 

@@ -5,7 +5,9 @@ One row per document in the exported run (not deduplicated by
 ``source_hash`` — two documents sharing one hash each get their own row,
 both naming the same ``raw_key``). ``status`` is drawn from
 :mod:`womblex.store.source_resolver`'s vocabulary (``resolved`` /
-``hash_mismatch`` / ``not_found`` / ``unsupported_basis``).
+``hash_mismatch`` / ``not_found`` / ``unsupported_basis``), plus
+``upload_failed`` — the bundle builder's own, for a source that resolved but
+whose copy to the destination raised.
 
 ``raw_key`` is the raw file's path relative to the bundle root
 (:func:`raw_key_for`), so a consumer opens it as written; it is null wherever
