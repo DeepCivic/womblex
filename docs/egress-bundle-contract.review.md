@@ -1,10 +1,21 @@
 # Egress bundle contract — Womblex (REVIEW COPY)
 
 > **Status: REVIEW COPY — partially implemented.** This document is a design
-> proposal for review. Of the three merges under "Change sizing", only the
-> first (`store/egress_output.py`, the `source_index.parquet` schema and IO)
-> has landed; the bundle builder and the CLI verb are not yet implemented. Do
-> not treat the rest as a record of shipped behaviour.
+> proposal for review. Of the three merges under "Change sizing", the first
+> two have landed: `store/egress_output.py` (the `source_index.parquet` schema
+> and IO) and `store/egress.py` (the bundle builder — corpus mirror, raw-source
+> resolve + copy, `source_index.parquet` + `egress_manifest.json`). The CLI
+> verb (`womblex egress`) is not yet implemented; there is no way to invoke the
+> builder from the command line yet. Once it lands with `docs/egress.md` as the
+> canonical contract, this review copy retires — do not treat it as a record of
+> shipped behaviour in the meantime.
+>
+> The two open review questions below were resolved pragmatically in the
+> builder rather than held for cross-repo sign-off: raw sources are resolved
+> via `SourceResolver` against a **local** run only (an object-store-ingested
+> run has no local corpus to resolve against — finalise and stage it locally
+> first), and the four-status `SourceResolver` vocabulary was kept as-is on
+> `source_index.parquet`. Revisit both if Numbatch/Echidnet feedback disagrees.
 
 ## Shared context (identical across Womblex, Numbatch, Echidnet)
 
