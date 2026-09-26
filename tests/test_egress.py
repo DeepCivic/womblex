@@ -355,6 +355,44 @@ def test_stale_sources_from_a_previous_export_are_removed_on_re_export(tmp_path:
     assert not (dest / "run-A" / key_b).exists()
 
 
+def test_a_stale_delete_failure_does_not_abort_the_export(tmp_path: Path, monkeypatch):
+    corpus_dir = tmp_path / "corpus"
+    corpus_dir.mkdir()
+    (corpus_dir / "a.pdf").write_bytes(b"%PDF-A")
+    (corpus_dir / "b.pdf").write_bytes(b"%PDF-B")
+    root = qualify_root(corpus_dir)
+    hash_a = _source_hash(str(corpus_dir / "a.pdf"))
+    hash_b = _source_hash(str(corpus_dir / "b.pdf"))
+
+    run1 = _write_run(tmp_path / "run1", [
+        _manifest_row(hash_a, "doc-a", "a.pdf", ".pdf", ingest_root=root, relpath="a.pdf"),
+        _manifest_row(hash_b, "doc-b", "b.pdf", ".pdf", ingest_root=root, relpath="b.pdf"),
+    ])
+    dest = tmp_path / "dest"
+    store = RemoteStore.from_uri(str(dest))
+    build_bundle(run1, store, run_id="run-A")
+
+    key_b = raw_key_for(hash_b, ".pdf")
+    original_delete = store.delete
+
+    def flaky_delete(rel: str) -> None:
+        if rel.endswith(key_b):
+            raise OSError("simulated delete failure")
+        return original_delete(rel)
+
+    monkeypatch.setattr(store, "delete", flaky_delete)
+
+    # b.pdf dropped from the corpus, so its stale copy is targeted for
+    # cleanup — but the delete itself fails, and the export must still finish.
+    run2 = _write_run(tmp_path / "run2", [
+        _manifest_row(hash_a, "doc-a", "a.pdf", ".pdf", ingest_root=root, relpath="a.pdf"),
+    ])
+    build_bundle(run2, store, run_id="run-A")
+
+    assert (dest / "run-A" / SOURCE_INDEX_FILENAME).is_file()
+    assert (dest / "run-A" / EGRESS_MANIFEST_FILENAME).is_file()
+
+
 def test_a_failed_upload_does_not_delete_a_previously_copied_source(
     tmp_path: Path, monkeypatch,
 ):

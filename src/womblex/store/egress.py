@@ -220,15 +220,26 @@ def _clean_stale_sources(store: RemoteStore, prefix: str, *, keep: set[str]) -> 
     the fresh ``source_index.parquet`` no longer lists. *keep* already
     includes the keys of failed uploads (see the caller), so a transient
     upload failure never causes a previously-copied file to be deleted.
+
+    Isolated per file, like the upload loop this runs after: one delete that
+    raises (a transient backend error, an object already gone out-of-band)
+    is logged and skipped rather than aborting the export before
+    ``source_index.parquet`` / ``egress_manifest.json`` get written.
     """
     sources_prefix = f"{prefix}/{SOURCES_DIRNAME}"
     existing = store.list_files(sources_prefix, recursive=True)
     keep_full = {f"{prefix}/{k}" for k in keep}
     stale = [rel for rel in existing if rel not in keep_full]
+    removed = 0
     for rel in stale:
-        store.delete(rel)
-    if stale:
-        logger.info("Removed %d stale source file(s) from a previous export", len(stale))
+        try:
+            store.delete(rel)
+        except Exception:
+            logger.warning("failed to remove stale source file %s", rel, exc_info=True)
+        else:
+            removed += 1
+    if removed:
+        logger.info("Removed %d stale source file(s) from a previous export", removed)
 
 
 def _resolver(
