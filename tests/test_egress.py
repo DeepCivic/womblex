@@ -292,7 +292,7 @@ def test_documents_dir_is_mirrored_recursively_not_just_top_level_parquet(tmp_pa
 
 
 def test_a_failed_source_upload_does_not_abort_the_export(tmp_path: Path, monkeypatch):
-    run_root, corpus_dir = _build_run(tmp_path)
+    run_root, _ = _build_run(tmp_path)
     dest = tmp_path / "dest"
     store = RemoteStore.from_uri(str(dest))
     original_upload = store.upload_file
