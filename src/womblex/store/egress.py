@@ -50,6 +50,7 @@ from womblex.store.egress_output import (
     raw_key_for,
     write_source_index,
 )
+from womblex.store.feedback_output import is_safe_run_id
 from womblex.store.remote import RemoteStore
 from womblex.store.run_manifest import RUN_MANIFEST_FILENAME
 from womblex.store.run_stamp import stamp_from_footers
@@ -108,6 +109,11 @@ def build_bundle(
         raise FileNotFoundError(f"{shard_dir} is missing — nothing to bundle")
 
     prefix = (bundle_prefix or run_id).strip("/")
+    if not prefix or not all(is_safe_run_id(segment) for segment in prefix.split("/")):
+        raise ValueError(
+            f"unsafe bundle destination {prefix!r} — each path segment must be a "
+            "plain name (no '..', '/', or null byte)"
+        )
     corpus_prefix = f"{prefix}/{CORPUS_DIRNAME}"
 
     shard_files = sorted(shard_dir.glob("*.parquet")) + [manifest_path]
@@ -123,7 +129,12 @@ def build_bundle(
     if include_sources:
         resolver = SourceResolver.for_run(run_root, root=source_root)
         resolutions: dict[str, Resolution] = {r.source_hash: r for r in resolver.resolve_all()}
-        uploaded: set[str] = set()
+        # Keyed by source_hash rather than recomputed per row: two documents
+        # sharing one hash can carry different `ext` values in the manifest
+        # (same bytes, differently-named copies), so the raw_key every such
+        # row gets must come from the one file actually uploaded — its own
+        # resolved path's suffix — not from whichever row's `ext` is read.
+        raw_keys: dict[str, str] = {}
         index_rows: list[dict] = []
         for row in rows:
             source_hash = row["source_hash"]
@@ -132,11 +143,11 @@ def build_bundle(
             by_status[status] = by_status.get(status, 0) + 1
             raw_key = None
             if resolution is not None and resolution.ok and resolution.path is not None:
-                raw_key = raw_key_for(source_hash, row["ext"] or "")
-                if source_hash not in uploaded:
-                    store.upload_file(resolution.path, f"{prefix}/{raw_key}")
-                    uploaded.add(source_hash)
+                if source_hash not in raw_keys:
+                    raw_keys[source_hash] = raw_key_for(source_hash, resolution.path.suffix)
+                    store.upload_file(resolution.path, f"{prefix}/{raw_keys[source_hash]}")
                     sources_copied += 1
+                raw_key = raw_keys[source_hash]
             index_rows.append({**row, "raw_key": raw_key, "status": status})
 
         stamp = stamp_from_footers(shard_files, EGRESS_STAGE)

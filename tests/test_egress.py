@@ -47,7 +47,10 @@ def _build_run(tmp_path: Path) -> tuple[Path, Path]:
     rows = [
         _manifest_row(report_hash, "doc-1", "report.pdf", ".pdf",
                       ingest_root=root, relpath="report.pdf"),
-        _manifest_row(report_hash, "doc-1-dup", "report-copy.pdf", ".pdf",
+        # Deliberately mismatched ext from doc-1's — same bytes (same hash),
+        # differently-recorded extension. The uploaded raw_key must come from
+        # the actual resolved file (.pdf), not this row's claimed ext.
+        _manifest_row(report_hash, "doc-1-dup", "report-copy.dat", ".dat",
                       ingest_root=root, relpath="report.pdf"),
         _manifest_row("missing" * 8, "doc-2", "gone.pdf", ".pdf",
                       ingest_root=root, relpath="gone.pdf"),
@@ -106,13 +109,21 @@ def test_resolved_source_is_copied_and_indexed(tmp_path: Path):
 
 def test_duplicate_hash_is_uploaded_once_but_indexed_per_document(tmp_path: Path):
     run_root, corpus_dir = _build_run(tmp_path)
-    store = RemoteStore.from_uri(str(tmp_path / "dest"))
+    dest = tmp_path / "dest"
+    store = RemoteStore.from_uri(str(dest))
 
     result = build_bundle(run_root, store, run_id="run-A")
 
-    index = pq.read_table(str(tmp_path / "dest" / "run-A" / SOURCE_INDEX_FILENAME)).to_pylist()
-    resolved_keys = {r["raw_key"] for r in index if r["status"] == "resolved"}
-    assert resolved_keys == {raw_key_for(_source_hash(str(corpus_dir / "report.pdf")), ".pdf")}
+    index = pq.read_table(str(dest / "run-A" / SOURCE_INDEX_FILENAME)).to_pylist()
+    by_doc = {r["doc_id"]: r for r in index}
+    expected_key = raw_key_for(_source_hash(str(corpus_dir / "report.pdf")), ".pdf")
+    # doc-1-dup's manifest row claims ext=".dat" (a stale/wrong record) but
+    # shares doc-1's source_hash — its raw_key must still be the key that was
+    # actually uploaded (derived from the resolved file), not a ".dat" key
+    # nothing was ever written to.
+    assert by_doc["doc-1"]["raw_key"] == expected_key
+    assert by_doc["doc-1-dup"]["raw_key"] == expected_key
+    assert (dest / "run-A" / expected_key).is_file()
     assert result.sources_copied == 1  # one upload, not two, for the shared hash
 
 
@@ -166,3 +177,23 @@ def test_bundle_prefix_overrides_the_run_id_as_the_export_folder(tmp_path: Path)
 
     assert (dest / "handoff" / "2026-09-26" / CORPUS_DIRNAME / "manifest.parquet").is_file()
     assert not (dest / "run-A").exists()
+
+
+@pytest.mark.parametrize("run_id", ["../escaped", "..", "a/../../b", "run\x00id"])
+def test_a_run_id_that_would_escape_the_store_root_is_refused(tmp_path: Path, run_id: str):
+    run_root, _ = _build_run(tmp_path)
+    store = RemoteStore.from_uri(str(tmp_path / "dest"))
+
+    with pytest.raises(ValueError, match="unsafe bundle destination"):
+        build_bundle(run_root, store, run_id=run_id)
+
+    # Nothing was written outside (or even inside) the intended destination.
+    assert not (tmp_path / "escaped").exists()
+
+
+def test_a_bundle_prefix_segment_that_would_escape_is_refused(tmp_path: Path):
+    run_root, _ = _build_run(tmp_path)
+    store = RemoteStore.from_uri(str(tmp_path / "dest"))
+
+    with pytest.raises(ValueError, match="unsafe bundle destination"):
+        build_bundle(run_root, store, run_id="run-A", bundle_prefix="handoff/../../escaped")
