@@ -667,6 +667,63 @@ def test_finalize_consolidates_manifest(tmp_path):
     assert pq.read_table(dl).num_rows == 1  # one source document
 
 
+# --- egress (local run, no Postgres) -----------------------------------------
+
+
+def test_egress_exports_local_run_to_bundle(tmp_path):
+    """CLI wiring for `womblex egress`: a finished local run -> a bundle dir.
+
+    Corpus-only (`--no-sources`) — `build_bundle`'s full source-resolution
+    behaviour is exercised in ``tests/test_egress.py``; this only checks the
+    command threads its arguments through and lands `corpus/` at the
+    destination named by the run root's own directory name.
+    """
+    import argparse
+
+    from womblex.batch import process_batch
+    from womblex.cli.cloud import cmd_egress
+    from womblex.config import (
+        ChunkingConfig,
+        DatasetConfig,
+        ExtractionConfig,
+        PathsConfig,
+        RedactionConfig,
+        WomblexConfig,
+    )
+    from womblex.store.run_manifest import write_run_manifest
+
+    csv = tmp_path / "people.csv"
+    csv.write_text("name,role\nAlice,Director\nBob,Analyst\n")
+    cfg = WomblexConfig(
+        dataset=DatasetConfig(name="egr"),
+        paths=PathsConfig(
+            input_root=tmp_path, output_root=tmp_path / "out", checkpoint_dir=tmp_path / ".ckpt"
+        ),
+        extraction=ExtractionConfig(),
+        chunking=ChunkingConfig(enabled=False),
+        redaction=RedactionConfig(enabled=False),
+    )
+
+    run_root = tmp_path / "out" / "regress"
+    shard_dir = run_root / "documents"
+    shard_dir.mkdir(parents=True)
+    process_batch([csv], cfg, batch_num=1, shard_dir=shard_dir)
+    write_run_manifest(shard_dir)
+
+    dest = tmp_path / "bundle"
+    rc = cmd_egress(argparse.Namespace(
+        run=run_root, to=str(dest), run_id=None, bundle_prefix=None,
+        sources=False, source_root=None,
+    ))
+    assert rc == 0
+
+    bundle = dest / "regress"
+    assert (bundle / "corpus" / "manifest.parquet").is_file()
+    assert not (bundle / "sources").exists()
+    assert not (bundle / "source_index.parquet").exists()
+    assert (bundle / "egress_manifest.json").is_file()
+
+
 # --- JobQueue (needs Postgres) -----------------------------------------------
 
 

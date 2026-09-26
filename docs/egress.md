@@ -1,30 +1,14 @@
-# Egress bundle contract — Womblex (REVIEW COPY)
+# Egress bundle contract — Womblex
 
-> **Status: REVIEW COPY — partially implemented.** Of the three merges under
-> "Change sizing", two have landed: `store/egress_output.py` (the
-> `source_index.parquet` schema and IO) and `store/egress.py` (the bundle
-> builder). The CLI verb (`womblex egress`) has not; once it lands with
-> `docs/egress.md` as the canonical contract, this review copy retires. Do not
-> treat it as a record of shipped behaviour.
->
-> The two open review questions below were resolved pragmatically for v1:
-> sources resolve via `SourceResolver` against a **local** run only (a run
-> ingested from an object store is refused before anything is written — stage
-> it locally first), and `source_index.parquet` keeps the four-status
-> vocabulary. Revisit both if Numbatch/Echidnet feedback disagrees.
+The one integration surface between Womblex (the producer) and its two
+downstream consumers, Numbatch and Echidnet. Womblex exports one finalised
+run plus its raw source documents to a destination as a single on-disk
+*bundle*; Numbatch reads a bundle for its data-team review panel; Echidnet
+consumes a bundle's extracted corpus with no code change.
 
-## Shared context (identical across Womblex, Numbatch, Echidnet)
+## The bundle layout
 
-<!-- BEGIN SHARED CONTEXT — keep verbatim in all three repos -->
-
-**The change.** A single on-disk *egress bundle* becomes the one integration
-surface between Womblex (the producer) and its two downstream consumers,
-Numbatch and Echidnet. Womblex gains an `egress` capability that exports one
-finalised run plus its raw source documents to a destination; Numbatch gains a
-data-team panel that reads a bundle; Echidnet consumes a bundle's extracted
-corpus with no code change.
-
-**The bundle layout** (defined once by Womblex, read by both consumers):
+Defined once by Womblex, read by both consumers:
 
 ```
 <dest>/<run_id>/
@@ -44,7 +28,7 @@ corpus with no code change.
 Everything content-addresses by `source_hash`, so raw and extracted resolve to
 each other in any consumer with no call back to the producer.
 
-**The boundaries between the repos are explicit and one-directional:**
+## Boundaries
 
 - **Womblex owns the bundle format and nothing downstream of it.** It writes
   the bundle and stops — no retention, serving, versioning, or auth. It does
@@ -67,21 +51,21 @@ each other in any consumer with no call back to the producer.
   whoever runs egress and whoever hosts the destination — it is a property of
   the bundle, not of any one consumer.
 
-<!-- END SHARED CONTEXT -->
+## What Womblex does
 
-## What changes in Womblex
+Womblex gains the producer half of the contract: an `egress` capability that
+takes one finalised **local** run and writes a bundle to any `RemoteStore`
+destination (local directory, S3, MinIO, GCS), then stops.
 
-Womblex gains the producer half of the contract: a new `egress` capability that
-takes one finalised run and writes a bundle to any `RemoteStore` destination
-(local directory, S3, MinIO, GCS), then stops.
+### Modules
 
-### New modules
-
-- `store/egress.py` — orchestrates one run into one bundle: copy `corpus/`,
-  resolve and copy raw sources, write `source_index.parquet`, write
-  `egress_manifest.json`. Reuses `RemoteStore` for all I/O,
-  `SourceResolver.resolve_all()` for local-run hash verification, and the
-  existing manifest consolidation.
+- `store/egress.py` — `build_bundle(run_root, store, *, run_id, bundle_prefix=None,
+  include_sources=True, source_root=None)` orchestrates one run into one
+  bundle: mirror `documents/` (recursively, not just the top-level `*.parquet`
+  shards) plus `manifest.parquet` under `corpus/`, resolve and copy raw sources,
+  write `source_index.parquet`, write `egress_manifest.json`. Reuses
+  `RemoteStore` for all I/O, `SourceResolver.resolve_all()` for local-run hash
+  verification, and the existing manifest consolidation.
 - `store/egress_output.py` — `source_index.parquet` schema and IO,
   self-contained in the manner of the other `store/*_output.py` modules.
 
@@ -91,7 +75,9 @@ Raw sources are copied through `RemoteStore` off each manifest row's
 `ingest_root` and `source_relpath`, so a run ingested from `file://` and one
 ingested from `s3://` are handled by one path. On a locally-ingested run,
 `SourceResolver.resolve_all()` is layered over that copy to verify bytes by
-hash and to populate the resolution report.
+hash and to populate the resolution report. **Scoped to a local run** — a run
+ingested from an object store is refused before anything is written; stage it
+locally first (`womblex finalize` then a sync-down).
 
 Resolution is non-fatal per document. Each `source_index.parquet` row carries a
 status drawn from the existing `SourceResolver` vocabulary — `resolved`,
@@ -110,42 +96,47 @@ Re-exporting into a bundle folder that already has a `sources/` directory
 removes any file under it that the fresh export neither wrote nor attempted —
 so a document dropped from the manifest since the last export does not linger
 as an orphan `source_index.parquet` no longer names. A source whose upload
-just failed is left as-is either way.
+just failed is left as-is either way, since its destination content (if any
+landed before the failure) is of unknown provenance.
 
 ### CLI
 
-A new verb beside `finalize` in `cli/cloud.py`:
-
 ```
-womblex egress <run> --to <dest> [--sources/--no-sources] [--corpus-only]
+womblex egress <run> --to <dest> [--run-id ID] [--bundle-prefix PREFIX]
+                      [--sources | --no-sources | --corpus-only]
+                      [--source-root ROOT]
 ```
 
-`finalize` consolidates a run's manifest *in place*; `egress` *exports* a run to
-a destination. `<dest>` is any `RemoteStore` URI, so a bucket for a live
-consumer and a local directory for an air-gapped handoff are the same code path.
+- `<run>` — a finished local run root (holds `documents/` and
+  `manifest.parquet`, as `womblex run` or `womblex manifest` produces).
+- `--to` — any `RemoteStore` URI: a local directory for an air-gapped handoff,
+  a bucket for a live consumer.
+- `--run-id` defaults to `<run>`'s own directory name and must agree with the
+  run's own stamp, if it has one.
+- `--bundle-prefix` defaults to `--run-id`; overriding it lets the bundle land
+  somewhere other than a directory named after the run.
+- `--sources` (default) resolves and copies raw source documents;
+  `--no-sources` / `--corpus-only` skip resolution entirely and write no
+  `sources/` or `source_index.parquet` — a corpus-only export.
+- `--source-root` overrides where raw sources resolve from (a moved corpus);
+  default is the run's own recorded ingest root.
+
+`finalize` consolidates a run's manifest *in place*; `egress` *exports* a run
+to a destination.
 
 ### Out of scope for v1
 
-Rendered page images. A consumer that wants pixels renders the raw file itself;
-the bundle carries raw plus extracted only.
+Rendered page images. A consumer that wants pixels renders the raw file
+itself; the bundle carries raw plus extracted only.
 
-### Documentation to land with the code
+## Resolved review questions
 
-`docs/egress.md` as the canonical contract, plus the module additions to
-`docs/architecture.md`, `docs/project-structure.md`, and the `CLAUDE.md` module
-table.
+Two questions were open while this contract was under review; both were
+resolved pragmatically for v1 and are settled unless Numbatch/Echidnet
+feedback disagrees:
 
-### Change sizing
-
-Over the 500-line merge cap as one change; split into sequential merges that
-each pass on their own — `egress_output` schema/IO/tests, then the bundle
-builder (both copy paths) with tests, then the CLI verb with docs.
-
-## Review questions specific to Womblex
-
-- Is copying raw sources by `(ingest_root, source_relpath)` through
-  `RemoteStore` the right primary path, with `SourceResolver` as the local-only
-  verification layer?
-- Is the `source_index.parquet` status column (reusing the four `SourceResolver`
-  statuses) the right shape for consumers, versus a leaner resolved/unresolved
-  flag?
+- Sources resolve via `SourceResolver` against a **local** run only — a run
+  ingested from an object store is refused before anything is written.
+- `source_index.parquet` keeps the four-status `SourceResolver` vocabulary
+  (plus `egress.py`'s own `upload_failed`), rather than a leaner
+  resolved/unresolved flag.
