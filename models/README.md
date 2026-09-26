@@ -2,6 +2,8 @@
 
 Pre-downloaded ML models for offline/edge deployment. Womblex resolves these
 automatically via `utils/models.py` — no manual path configuration required.
+The full set, including models bundled only in `src/womblex/_models/` and the
+hosted models, is outlined in [`docs/models.md`](../docs/models.md).
 
 ## Models
 
@@ -34,9 +36,9 @@ automatically via `utils/models.py` — no manual path configuration required.
 
 ## How path resolution works
 
-`utils/models.py` walks up from the installed package to find the `models/`
-directory (sibling of `src/`). Override with `WOMBLEX_MODELS_DIR` env var if
-your layout differs.
+`utils/models.py` searches per artefact, in order: `WOMBLEX_MODELS_DIR`, the
+bundled `src/womblex/_models/`, then this `models/` directory (sibling of
+`src/`).
 
 ```python
 from womblex.utils.models import resolve_local_model_path
@@ -50,4 +52,4 @@ path = resolve_local_model_path("yolov8n.pt")
 #   or "yolov8n.pt" if not found
 ```
 
-Both models are loaded lazily — no import cost until the relevant stage runs.
+All models are loaded lazily — no import cost until the relevant stage runs.

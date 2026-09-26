@@ -45,7 +45,7 @@ src/womblex/
 │   ├── interfaces/
 │   │   └── protocols.py       # Backend protocols: OCRReader, LayoutAnalyzer, Preprocessor
 │   ├── paddle_ocr.py          # PaddleOCR wrapper via rapidocr-onnxruntime (det/rec/cls)
-│   │                          # Also hosts YOLOLayoutAnalyzer for layout region detection (COCO yolov8n)
+│   │                          # Also hosts YOLOLayoutAnalyzer for layout region detection (DocLayNet yolo11n; COCO yolov8n fallback)
 │   ├── llm_ocr.py             # LLM/VLM OCR backends: Mistral Pixtral Large via AWS Bedrock, + local Ollama
 │   ├── spreadsheet.py         # CSV/Excel extraction — one ExtractionResult per workbook, cells as elements
 │   ├── gnaf.py                # G-NAF PSV → Parquet ingest (standalone, bypasses NLP pipeline)
@@ -111,7 +111,7 @@ src/womblex/
 ├── verify/
 │   └── engine.py          # Two-pass verification (structural + weak-signal) — defined, not wired in; see the Verify stage
 ├── utils/
-│   ├── models.py          # Local model path resolution (models/ dir + HF snapshot layout) + the load record each footer carries
+│   ├── models.py          # Local model path resolution (WOMBLEX_MODELS_DIR, _models/, models/ + HF snapshot layout) + the load record each footer carries
 │   ├── metrics.py         # CER, WER, CER-s accuracy metrics (numpy-accelerated Levenshtein + spatial sort)
 │   ├── tabular_metrics.py # Tabular extraction accuracy (structural fidelity, data integrity, key preservation)
 │   ├── checksum.py        # Shared streamed MD5 helper for the standalone register ingests
@@ -212,7 +212,7 @@ Defensive classification: uncertain documents route to `UNKNOWN` rather than a w
 
 **`SpreadsheetExtractor`** in `spreadsheet.py` was separated from `strategies.py` to keep both files under the 750-line cap. Callers import `SpreadsheetExtractor` directly from `ingest.spreadsheet`.
 
-**Layout backend** — scanned extractors use `YOLOLayoutAnalyzer` for layout region detection. The primary checkpoint is DocLayNet `yolo11n_doc_layout.pt` (11 document classes mapped via `_YOLO_DOCLAYNET_LABEL_MAP`, e.g. `Picture` → `figure`, `Section-header` → `heading`); COCO-pretrained `yolov8n.pt` (`_YOLO_COCO_LABEL_MAP`) is retained as a fallback. Layout analysis is called from `_layout_blocks_and_tables()` in `strategies_scanned.py`. When a page's YOLO regions carry no segmented text the fallback collapses the whole page's OCR onto the dominant region's kind; if that kind is non-text (`figure`) but the OCR is substantial (≥5 words) it is promoted to `paragraph` (`_ocr_region_block_type`) so full-page scans are not dropped from chunking. Backend contracts are formalised as `@runtime_checkable` protocols in `interfaces/protocols.py` (`OCRReader`, `LayoutAnalyzer`, `Preprocessor`).
+**Layout backend** — scanned extractors use `YOLOLayoutAnalyzer` for layout region detection. The primary checkpoint is DocLayNet `yolo11n_doc_layout.pt` (11 document classes mapped via `_YOLO_DOCLAYNET_LABEL_MAP`, e.g. `Picture` → `figure`, `Section-header` → `heading`); COCO-pretrained `yolov8n.pt` (`_YOLO_COCO_LABEL_MAP`) is retained as a fallback. Layout analysis is called from `_layout_blocks_and_tables()` in `strategies_scanned.py`. When a page's YOLO regions carry no segmented text the fallback collapses the whole page's OCR onto the dominant region's kind; if that kind is non-text (`figure`) but the OCR is substantial (≥5 words) it is promoted to `paragraph` (`_ocr_region_block_type`) so full-page scans are not dropped from chunking. Layout blocks carry no text and OCR text is not yet assigned to layout regions, so what reaches output is the table regions (the only place `reconstruct_table` runs), the dominant region's kind, and the redaction exclusion regions in `redact/stage.py`; other detected classes (heading, list item, caption, footer, footnote) do not reach the element stream. See [models.md](models.md). Backend contracts are formalised as `@runtime_checkable` protocols in `interfaces/protocols.py` (`OCRReader`, `LayoutAnalyzer`, `Preprocessor`).
 
 The orchestrator's OCR per-page path (`_apply_ocr_page`) drives `_ocr_page()` which:
 
@@ -363,9 +363,9 @@ Distributed (cloud) runs execute the same stage bodies via `cloud/stage_runner.p
 
 **Config-driven, not hardcoded.** Dataset-specific paths, thresholds, and hypotheses live in YAML. Core modules have no knowledge of specific datasets.
 
-**PaddleOCR via rapidocr-onnxruntime.** The `rapidocr-onnxruntime` package bundles pre-exported PaddleOCR v4 ONNX models (~15 MB wheel) — no PaddlePaddle or PyTorch framework, no separate model download. Layout analysis uses YOLOv8 (`ultralytics` + bundled `yolov8n.pt`).
+**PaddleOCR via rapidocr-onnxruntime.** `rapidocr-onnxruntime` runs PaddleOCR ONNX models with no PaddlePaddle framework. The PaddleOCR v5 mobile models bundled under `_models/paddleocr-v5/` are preferred; the v4 models inside the wheel are the fallback. Layout analysis uses YOLO via `ultralytics`: DocLayNet `yolo11n_doc_layout.pt`, with COCO `yolov8n.pt` as fallback. Every model is outlined in [models.md](models.md).
 
-**Local model resolution.** `utils/models.py` provides `resolve_local_model_path(name)` which checks a `models/` directory (sibling of `src/`) before falling back to runtime downloads. It is also the load record: a resolution that finds an artefact is noted, and `loaded_models()` digests each one over its bytes so the digest recomputes from the model files alone. A caller only probing for presence passes `record=False`. Handles the HuggingFace hub snapshot layout (`refs/main` → `snapshots/<hash>/`) and bare files (`.pt`). Override location with `WOMBLEX_MODELS_DIR`. Models loaded lazily — no import cost unless the stage actually runs.
+**Local model resolution.** `utils/models.py` provides `resolve_local_model_path(name)` which searches per artefact — `WOMBLEX_MODELS_DIR`, the bundled `_models/`, then `models/` (sibling of `src/`) — before falling back to runtime downloads. It is also the load record: a resolution that finds an artefact is noted, and `loaded_models()` digests each one over its bytes so the digest recomputes from the model files alone. A caller only probing for presence passes `record=False`. Handles the HuggingFace hub snapshot layout (`refs/main` → `snapshots/<hash>/`) and bare files (`.pt`). Models loaded lazily — no import cost unless the stage actually runs.
 
 **No external Levenshtein dependency.** `utils/metrics.py` provides CER, WER, and CER-s (spatially-sorted CER) using a numpy-accelerated Levenshtein implementation. Short strings (≤500 chars) use a pure-Python DP loop; longer strings use numpy vectorised row operations. `spatial_sort_text()` reorders words by bounding-box centroid to isolate recognition errors from reading-order errors. No rapidfuzz or other C-extension dependency.
 
