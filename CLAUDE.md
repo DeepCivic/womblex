@@ -103,7 +103,7 @@ A corpus exists to mature Womblex capability, not host custom code. Corpus-side 
 | `ingest/gnaf_schema.py` | Static, versioned column definitions for all G-NAF table types | Parse SQL at runtime |
 | `ingest/abn_bulk.py` | Standalone ABN Lookup bulk extract XML → Parquet ingest (streamed, constant memory; records + names sidecar per file; bypasses NLP pipeline) | Run redaction, chunking, PII, or enrichment; match names to documents (that's `link/`) |
 | `ingest/geospatial.py` | Standalone SHP → GeoParquet ingest (bypasses NLP pipeline) | Run redaction, chunking, PII, or enrichment |
-| `ingest/paddle_ocr.py` | Wrap RapidOCR and YOLOv8 layout analysis; record the wheel-bundled v4 models when the local v5 directory is absent (they never reach the resolver) | Implement extraction strategy logic |
+| `ingest/paddle_ocr.py` | Wrap RapidOCR and YOLO layout analysis (DocLayNet `yolo11n_doc_layout.pt`; COCO `yolov8n.pt` fallback); record the wheel-bundled v4 models when the local v5 directory is absent (they never reach the resolver) | Implement extraction strategy logic |
 | `redact/detector.py` | Detect and mask redacted regions | Know about document semantics |
 | `redact/stage.py` | Run redaction at configurable pipeline points (post_chunk, post_enrichment) | Implement detection logic |
 | `pii/cleaner.py` | Detect PII candidates: `detect_spans()` merges enrichment-graph spans (high-confidence) with the opt-in regex/cosine-context detector; `_anonymize()` applies `<ENTITY_TYPE>` tags. Graph is the primary source | Call Isaacus directly |
@@ -204,10 +204,10 @@ approval rather than quietly exceeding it.
 
 ### Dependencies
 - PyMuPDF (`fitz`) for PDF handling
-- rapidocr-onnxruntime for OCR (bundles PaddleOCR v4 ONNX det/rec/cls models, no PaddlePaddle framework)
+- rapidocr-onnxruntime for OCR (runs PaddleOCR ONNX det/rec/cls models, no PaddlePaddle framework: bundled v5 under `_models/paddleocr-v5` when present, else the wheel's v4)
 - boto3 (core dependency) for the `mistral-ocr` engine — Mistral Pixtral Large via AWS Bedrock (Converse API) — and for the `isaacus-sagemaker` HTTP client's SigV4 signing. Imported lazily at its use sites (`ingest/llm_ocr.py:_ensure_client` → `boto3.client("bedrock-runtime")`; `utils/isaacus_client.py` for the SageMaker session); nothing on the *default* extraction path touches it, which is why the whole suite runs without AWS credentials and only the VLM benchmark / live SageMaker paths skip
 - **Isaacus SDK (`isaacus`, `isaacus-sagemaker`) and boto3 are core, not extras.** Every real deployment uses enrichment/embeddings and (often) hosted OCR or SageMaker; they are tiny next to the vision/ML stack, and gating them behind extras only produced misconfiguration (a missing SDK surfaced as "no API key"). They stay dormant until configured — no key / no `ISAACUS_SAGEMAKER_ENDPOINTS` / no `mistral-ocr` engine means nothing calls out. Remaining extras are deployment-shaped: `[local]` (empty — the base install), `[cloud]` (empty — object-storage staging via fsspec + s3fs and the psycopg3 job queue are now core deps, so `s3://` and `--dsn` work on any install; the extra is retained only as a self-documenting marker and so existing `pip install womblex[cloud]` invocations keep resolving), `[ui]` (fastapi + uvicorn), `[dev]`
-- ultralytics for YOLOv8 layout analysis (bundled yolov8n.pt in `models/`)
+- ultralytics for YOLO layout analysis (DocLayNet `yolo11n_doc_layout.pt`; COCO `yolov8n.pt` fallback)
 - opencv-python-headless for image processing (binarisation, deskew)
 - semchunk for chunking
 - isaacus for analysis
@@ -215,7 +215,7 @@ approval rather than quietly exceeding it.
 - sentence-transformers for PII context validation
 - spylls (pure-Python Hunspell) for the `spellfix` OCR-repair op; bundled en_AU dict under `_models/en_AU`
 - No heavyweight ML frameworks in core (models bundled in rapidocr-onnxruntime wheel, loaded lazily)
-- Local models in `models/` are resolved automatically by `utils/models.py` — no network access required at runtime
+- Local models in `_models/` (bundled) and `models/` are resolved automatically by `utils/models.py` — no network access required at runtime. Every model is outlined in `docs/models.md`
 
 ## Common Pitfalls
 ### PyMuPDF import

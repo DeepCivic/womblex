@@ -98,7 +98,7 @@ for how to obtain it.
 
 No system-level dependencies beyond Python. All extraction backends are pure Python packages:
 - **PyMuPDF** (`fitz`) — native PDF text and structure
-- **PaddleOCR** (`rapidocr-onnxruntime`) — scanned-page OCR with layout analysis (no Tesseract or PaddlePaddle required)
+- **PaddleOCR** (`rapidocr-onnxruntime`) — scanned-page OCR (no Tesseract or PaddlePaddle required); layout regions via `ultralytics` YOLO. Every model is outlined in [docs/models.md](docs/models.md)
 - **python-docx** — Word document extraction
 - **pandas** + **openpyxl** — spreadsheet ingestion (CSV/Excel)
 
@@ -475,7 +475,7 @@ A doc-level summary type still surfaces in metadata.
 | Page profile | Operation | Notes |
 |---|---|---|
 | `has_text_layer` | Native text + tables + forms + blocks | Per-image OCR fires when the page has embedded image regions |
-| `needs_ocr` | PaddleOCR + layout blocks + form-pair line scan | YOLO layout for blocks; line-based form-pair extraction on assembled text |
+| `needs_ocr` | PaddleOCR + layout blocks + form-pair line scan | YOLO layout for table regions and the page's block kind; line-based form-pair extraction on assembled text |
 | Mixed-typed | Per-page typed/handwritten classification | Tags blocks as `typed` or `handwritten` |
 
 **Doc-level shape detection** (informs the orchestrator):
@@ -497,7 +497,7 @@ A doc-level summary type still surfaces in metadata.
 
 Each document type routes to an appropriate extractor. `extract_text()` always returns a `list[ExtractionResult]`:
 
-- **PDFs** return a single-element list. The per-page orchestrator dispatches `_apply_native_page` or `_apply_ocr_page` based on each page's `PageProfile`. PaddleOCR returns per-region confidence scores stored in the document profile. YOLO layout analysis (DocLayNet `yolo11n_doc_layout.pt`, with COCO `yolov8n.pt` as fallback) is called on OCR pages by `_layout_blocks_and_tables` to populate `Element.kind` for the layout regions it detects; a full-page scan whose dominant region is a figure but which OCR's to substantial text is tagged `paragraph` rather than `figure` so its content reaches chunking.
+- **PDFs** return a single-element list. The per-page orchestrator dispatches `_apply_native_page` or `_apply_ocr_page` based on each page's `PageProfile`. PaddleOCR returns per-region confidence scores stored in the document profile. YOLO layout analysis (DocLayNet `yolo11n_doc_layout.pt`, with COCO `yolov8n.pt` as fallback) is called on OCR pages by `_layout_blocks_and_tables`. Its table regions drive OCR table reconstruction and the dominant region's kind types the page's OCR text, which is collapsed onto one block; other detected classes do not yet reach the element stream. A full-page scan whose dominant region is a figure but which OCR's to substantial text is tagged `paragraph` rather than `figure` so its content reaches chunking.
 - **DOCX** returns a single-element list with paragraphs and tables interleaved in OOXML body order.
 - **Markdown** returns a single-element list with headings, list items, paragraphs and GFM tables in source order. Inline markdown syntax is kept verbatim; YAML front matter and link reference definitions are kept as verbatim paragraphs.
 - **Spreadsheets** return one `ExtractionResult` per workbook. Each sheet contributes a leading `kind='sheet_meta'` element followed by one `kind='sheet_cell'` element per non-empty cell. Export products that open with title rows or `key: value` metadata blocks above the real header (e.g. AusTender contract-notice exports) are handled: the header is detected by run-scoring (the candidate row starting the longest run of table-consistent rows below it), preamble rows land verbatim on `sheet_meta.meta["preamble"]`, and row 0 of the cell grid is always the real header. Ragged CSVs (a one-field title row above a wide header) parse rather than fail.
@@ -844,7 +844,7 @@ Apache 2.0
 - [Isaacus](https://isaacus.com/) for legal AI models
 - [semchunk](https://github.com/isaacus-dev/semchunk) for semantic chunking
 - [PyMuPDF](https://pymupdf.readthedocs.io/) for PDF handling
-- [RapidOCR](https://github.com/RapidAI/RapidOCR) for OCR (bundles PaddleOCR v4 ONNX models, no PaddlePaddle required)
-- [Ultralytics](https://github.com/ultralytics/ultralytics) for YOLOv8 layout analysis
+- [RapidOCR](https://github.com/RapidAI/RapidOCR) for OCR (runs PaddleOCR v5 / v4 ONNX models, no PaddlePaddle required)
+- [Ultralytics](https://github.com/ultralytics/ultralytics) for YOLO layout analysis (DocLayNet YOLO11n; COCO YOLOv8n fallback)
 - [python-docx](https://python-docx.readthedocs.io/) for Word document extraction
 - [pandas](https://pandas.pydata.org/) + [openpyxl](https://openpyxl.readthedocs.io/) for spreadsheet ingestion
