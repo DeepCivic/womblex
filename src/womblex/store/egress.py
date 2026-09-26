@@ -1,7 +1,7 @@
 """Bundle builder: export one finalised local run into an egress bundle.
 
-The producer half of ``docs/egress-bundle-contract.review.md``: Womblex writes
-the bundle and stops — no retention, serving, versioning, or auth.
+The producer half of ``docs/egress.md``: Womblex writes the bundle and
+stops — no retention, serving, versioning, or auth.
 
 ``build_bundle`` takes a finished local run (``<run_root>/documents/`` — every
 file it contains, recursively, not only its top-level ``*.parquet`` shards —

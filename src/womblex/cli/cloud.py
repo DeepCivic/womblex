@@ -578,6 +578,83 @@ def _warn_if_draining(args: argparse.Namespace, run_id: str) -> None:
                        run_id, stats["failed"])
 
 
+# --- egress ------------------------------------------------------------------
+
+
+def _register_egress(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "run", type=Path,
+        help="Finished local run root (holds `documents/` and `manifest.parquet`, "
+             "as `womblex run` or `womblex manifest` produces).",
+    )
+    p.add_argument("--to", required=True, help="Destination RemoteStore URI (a local dir, s3://, …)")
+    p.add_argument(
+        "--run-id", default=None,
+        help="Run identifier (default: the run root's directory name). Must match "
+             "the run's own stamp, if it has one.",
+    )
+    p.add_argument(
+        "--bundle-prefix", default=None,
+        help="Store-relative bundle path (default: --run-id). Lets a bundle land "
+             "somewhere other than a directory named after the run.",
+    )
+    sources = p.add_mutually_exclusive_group()
+    sources.add_argument(
+        "--sources", dest="sources", action="store_true", default=True,
+        help="Resolve and copy raw source documents (default).",
+    )
+    sources.add_argument(
+        "--no-sources", "--corpus-only", dest="sources", action="store_false",
+        help="Skip source resolution entirely — export `corpus/` only.",
+    )
+    p.add_argument(
+        "--source-root", default=None,
+        help="Override where raw sources resolve from (a moved corpus). "
+             "Default: the run's own recorded ingest root.",
+    )
+
+
+def cmd_egress(args: argparse.Namespace) -> int:
+    """Export one finished local run into an egress bundle at any destination.
+
+    The producer half of the Womblex/Numbatch/Echidnet bundle contract
+    (`docs/egress.md`): writes `<bundle>/corpus/`, resolves and copies raw
+    `<bundle>/sources/`, and writes `source_index.parquet` +
+    `egress_manifest.json`, then stops — no retention, serving, versioning, or
+    auth. Sources resolve against a *local* run only; a distributed run is
+    staged locally first (e.g. `womblex finalize` then a sync-down).
+    """
+    from womblex.store.egress import build_bundle
+    from womblex.store.remote import RemoteStore
+
+    run_root: Path = args.run
+    if not run_root.is_dir():
+        logger.error("run root is not a directory: %s", run_root)
+        return 1
+    run_id = args.run_id or run_root.name
+
+    store = RemoteStore.from_uri(args.to)
+    try:
+        result = build_bundle(
+            run_root, store,
+            run_id=run_id,
+            bundle_prefix=args.bundle_prefix,
+            include_sources=args.sources,
+            source_root=args.source_root,
+        )
+    except (FileNotFoundError, ValueError) as e:
+        logger.error("%s", e)
+        return 1
+
+    logger.info(
+        "Exported run %s -> %s/%s: %d document(s), %d corpus file(s), %d source(s) copied (%s)",
+        result.run_id, args.to, result.bundle_prefix, result.documents,
+        result.corpus_files, result.sources_copied,
+        ", ".join(f"{k}={v}" for k, v in sorted(result.sources_by_status.items())) or "no sources",
+    )
+    return 0
+
+
 COMMANDS = [
     Command("enqueue", "Plan batches into the cloud job queue", _register_enqueue, cmd_enqueue),
     Command("worker", "Process batches from the cloud job queue", _register_worker, cmd_worker),
@@ -588,4 +665,6 @@ COMMANDS = [
             _register_enqueue_stages, cmd_enqueue_stages),
     Command("run-stage", "Run a downstream shard stage against object storage",
             _register_run_stage, cmd_run_stage),
+    Command("egress", "Export one finished local run into an egress bundle",
+            _register_egress, cmd_egress),
 ]

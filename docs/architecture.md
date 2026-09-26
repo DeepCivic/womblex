@@ -102,7 +102,7 @@ src/womblex/
 │   ├── source_provenance.py  # Where a source document came from: ingest root + relpath, and their womblex.* footer keys
 │   ├── source_resolver.py  # The way back: source_hash → the source file, verified by content hash, or an explicit reason
 │   ├── egress_output.py   # source_index.parquet schema + IO for the egress bundle (source_hash → raw_key/ext/doc_id/filename/status)
-│   ├── egress.py           # Bundle builder: mirror a run's corpus/ + resolve/copy raw sources/ + write source_index.parquet + egress_manifest.json to any RemoteStore destination
+│   ├── egress.py           # Bundle builder: mirror a run's corpus/ + resolve/copy raw sources/ + write source_index.parquet + egress_manifest.json to any RemoteStore destination (see docs/egress.md; CLI verb: cli/cloud.py's `womblex egress`)
 │   ├── build_info.py      # Which build is running: version + source commit (work tree / build stamp / unavailable)
 │   ├── run_stamp.py       # Which run produced a file: run id / version / commit / config digest / stage / preset (config name) / loaded models, as womblex.* footer keys
 │   ├── remote.py          # fsspec stage-in/stage-out object-storage adapter for distributed runs
@@ -125,7 +125,7 @@ src/womblex/
 │   ├── __init__.py        # main() + ALL_COMMANDS aggregation + dispatch
 │   ├── _shared.py         # Command NamedTuple, setup_logging, select_supported/discover_files, normalise_prefix
 │   ├── pipeline.py        # run, extract, chunk subcommands
-│   ├── cloud.py           # enqueue / worker / jobs / finalize / run-stage subcommands
+│   ├── cloud.py           # enqueue / worker / jobs / finalize / run-stage / egress subcommands
 │   ├── redact.py          # redact, annotate-redactions, validate-redactions subcommands
 │   ├── link.py, embed.py, normalise.py, spellfix.py, quality.py, money.py, pii.py
 │   │                       # link, embed, normalise, spellfix, quality, money, pii subcommands
