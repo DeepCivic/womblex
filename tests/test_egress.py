@@ -41,9 +41,6 @@ def _build_run(tmp_path: Path) -> tuple[Path, Path]:
     root = qualify_root(corpus_dir)
 
     run_root = tmp_path / "run"
-    shard_dir = run_root / "documents"
-    shard_dir.mkdir(parents=True)
-
     rows = [
         _manifest_row(report_hash, "doc-1", "report.pdf", ".pdf",
                       ingest_root=root, relpath="report.pdf"),
@@ -57,11 +54,17 @@ def _build_run(tmp_path: Path) -> tuple[Path, Path]:
         _manifest_row("recid" * 8, "doc-3", "record-42.txt", ".txt",
                       ingest_root=root, relpath="record-42.txt", extraction_method="records"),
     ]
+    return _write_run(run_root, rows), corpus_dir
+
+
+def _write_run(run_root: Path, rows: list[dict]) -> Path:
+    shard_dir = run_root / "documents"
+    shard_dir.mkdir(parents=True, exist_ok=True)
     footer = _STAMP.footer_metadata()
     _write_rows([], shard_dir / "batch-0001.elements.parquet", ELEMENT_SCHEMA, metadata=footer)
     _write_rows(rows, shard_dir / "batch-0001._manifest.parquet", MANIFEST_SCHEMA, metadata=footer)
     write_run_manifest(shard_dir)
-    return run_root, corpus_dir
+    return run_root
 
 
 def test_missing_manifest_raises(tmp_path: Path):
@@ -197,3 +200,75 @@ def test_a_bundle_prefix_segment_that_would_escape_is_refused(tmp_path: Path):
 
     with pytest.raises(ValueError, match="unsafe bundle destination"):
         build_bundle(run_root, store, run_id="run-A", bundle_prefix="handoff/../../escaped")
+
+
+def _one_doc_run(tmp_path: Path, filename: str, *, ingest_root: str,
+                 source_hash: str = "h" * 64, extraction_method: str = "native") -> Path:
+    row = _manifest_row(source_hash, "doc-1", filename, Path(filename).suffix.lower(),
+                        ingest_root=ingest_root, relpath=filename,
+                        extraction_method=extraction_method)
+    return _write_run(tmp_path / "run", [row])
+
+
+def _corpus_with(tmp_path: Path, name: str, data: bytes) -> Path:
+    (tmp_path / "corpus").mkdir()
+    (tmp_path / "corpus" / name).write_bytes(data)
+    return tmp_path / "corpus"
+
+
+@pytest.mark.parametrize("ingest_root", ["s3://bucket/corpus", ""])
+def test_a_run_with_no_local_root_is_refused_before_anything_is_written(
+    tmp_path: Path, ingest_root: str,
+):
+    run_root = _one_doc_run(tmp_path, "a.pdf", ingest_root=ingest_root)
+
+    with pytest.raises(ValueError, match="root"):
+        build_bundle(run_root, RemoteStore.from_uri(str(tmp_path / "dest")), run_id="run-A")
+
+    assert not (tmp_path / "dest").exists()
+
+
+def test_a_records_only_run_exports_with_no_root_as_unsupported_basis(tmp_path: Path):
+    run_root = _one_doc_run(tmp_path, "rec-1", ingest_root="", extraction_method="records")
+    dest = tmp_path / "dest"
+
+    result = build_bundle(run_root, RemoteStore.from_uri(str(dest)), run_id="run-A")
+
+    index = pq.read_table(str(dest / "run-A" / SOURCE_INDEX_FILENAME)).to_pylist()
+    assert [(r["status"], r["raw_key"]) for r in index] == [("unsupported_basis", None)]
+    assert result.sources_by_status == {"unsupported_basis": 1}
+
+
+def test_a_run_id_that_disagrees_with_the_run_stamp_is_refused(tmp_path: Path):
+    run_root, _ = _build_run(tmp_path)
+
+    with pytest.raises(ValueError, match="does not match"):
+        build_bundle(run_root, RemoteStore.from_uri(str(tmp_path / "dest")), run_id="run-B")
+
+    assert not (tmp_path / "dest").exists()
+
+
+def test_raw_key_extension_is_lowercased_like_the_manifest_ext(tmp_path: Path):
+    corpus_dir = _corpus_with(tmp_path, "R.PDF", b"%PDF upper")
+    source_hash = _source_hash(str(corpus_dir / "R.PDF"))
+    run_root = _one_doc_run(tmp_path, "R.PDF", ingest_root=qualify_root(corpus_dir),
+                            source_hash=source_hash)
+    dest = tmp_path / "dest"
+
+    build_bundle(run_root, RemoteStore.from_uri(str(dest)), run_id="run-A")
+
+    (row,) = pq.read_table(str(dest / "run-A" / SOURCE_INDEX_FILENAME)).to_pylist()
+    assert row["ext"] == ".pdf"
+    assert row["raw_key"] == raw_key_for(source_hash, ".pdf")
+    assert (dest / "run-A" / row["raw_key"]).is_file()
+
+
+def test_a_hash_mismatch_is_reported_and_not_copied(tmp_path: Path):
+    corpus_dir = _corpus_with(tmp_path, "a.pdf", b"%PDF re-saved with different bytes")
+    run_root = _one_doc_run(tmp_path, "a.pdf", ingest_root=qualify_root(corpus_dir))
+    dest = tmp_path / "dest"
+
+    result = build_bundle(run_root, RemoteStore.from_uri(str(dest)), run_id="run-A")
+
+    (row,) = pq.read_table(str(dest / "run-A" / SOURCE_INDEX_FILENAME)).to_pylist()
+    assert (row["status"], row["raw_key"], result.sources_copied) == ("hash_mismatch", None, 0)
