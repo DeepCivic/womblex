@@ -732,6 +732,13 @@ def test_egress_exports_local_run_to_bundle(tmp_path, monkeypatch):
     assert rc == 0
     assert (tmp_path / "bundle2" / "regress" / "egress_manifest.json").is_file()
 
+    # An unopenable destination is a clean exit 1, not a traceback.
+    rc = cmd_egress(argparse.Namespace(
+        run=run_root, to="nosuchscheme://x", run_id=None, bundle_prefix=None,
+        sources=False, source_root=None,
+    ))
+    assert rc == 1
+
 
 # --- JobQueue (needs Postgres) -----------------------------------------------
 
