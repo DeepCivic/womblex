@@ -1,5 +1,8 @@
 # Extraction output
 
+Consumer-facing guarantees (contract version, sensitivity, determinism, public
+API): [contract.md](contract.md).
+
 Extraction reads a source file and produces an ordered stream of
 elements. An element is one thing a reader sees: a paragraph, a
 heading, a table, a form, an image. Spreadsheets get cell-grained
