@@ -20,7 +20,7 @@ from typing import Any
 
 CONTEXT_KEYS = ("run_id", "job_id", "stage", "source_hash")
 
-_context: ContextVar[dict[str, Any]] = ContextVar("womblex_log_context", default={})
+_context: ContextVar[dict[str, Any] | None] = ContextVar("womblex_log_context", default=None)
 
 
 @contextmanager
@@ -29,7 +29,7 @@ def log_context(**fields: Any) -> Iterator[None]:
     unknown = set(fields) - set(CONTEXT_KEYS)
     if unknown:
         raise ValueError(f"unknown log context keys: {sorted(unknown)}")
-    merged = {**_context.get(), **{k: v for k, v in fields.items() if v is not None}}
+    merged = {**(_context.get() or {}), **{k: v for k, v in fields.items() if v is not None}}
     token = _context.set(merged)
     try:
         yield
@@ -47,7 +47,7 @@ class JsonFormatter(logging.Formatter):
             "logger": record.name,
             "message": record.getMessage(),
         }
-        payload.update(_context.get())
+        payload.update(_context.get() or {})
         for key in CONTEXT_KEYS:
             value = getattr(record, key, None)
             if value is not None:
