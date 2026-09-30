@@ -691,6 +691,13 @@ key existed or by a config that declared no name.
 
 ## Deferred / backlog
 
+- **Womblex as a backend subsystem — versioned data contract + `/v1` service
+  API.** *Proposed 2026-09.* Contract version and sensitivity footer keys,
+  a `content_digest` determinism contract, a declared public Python API, an
+  owner-scoped `womblex serve` API behind static service tokens, and the
+  console reframed as an admin/debug utility. Plan and merge sequence:
+  [service-plan.md](service-plan.md).
+
 - **AI chunking (semchunk 4) — single-enrichment graph reuse.** *Shipped
   2026-06, off-by-default.* The `chunking.chunking_model` pass-through lets
   semchunk pick chunk boundaries from the Kanon-2 enricher's structure spans; it
