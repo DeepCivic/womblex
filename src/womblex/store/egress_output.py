@@ -31,6 +31,7 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from womblex.store.contract import contract_footer
 from womblex.store.run_stamp import RunStamp
 
 logger = logging.getLogger(__name__)
@@ -66,9 +67,8 @@ def write_source_index(
     """
     target = Path(bundle_dir) / SOURCE_INDEX_FILENAME
     target.parent.mkdir(parents=True, exist_ok=True)
-    schema = SOURCE_INDEX_SCHEMA
-    if stamp is not None:
-        schema = schema.with_metadata(stamp.for_stage(EGRESS_STAGE).footer_metadata())
+    footer = stamp.for_stage(EGRESS_STAGE).footer_metadata() if stamp is not None else {}
+    schema = SOURCE_INDEX_SCHEMA.with_metadata({**footer, **contract_footer(target)})
     table = pa.Table.from_pylist(rows, schema=schema)
     pq.write_table(table, str(target), compression="zstd", compression_level=3)
     logger.info("Wrote source index %s: rows=%d", target, table.num_rows)

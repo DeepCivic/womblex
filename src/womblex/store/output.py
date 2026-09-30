@@ -62,6 +62,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from womblex.ingest.extract import ExtractionResult
+from womblex.store.contract import contract_footer
 from womblex.store.run_stamp import RunStamp, sidecar_footer
 from womblex.store.source_provenance import IngestProvenance
 
@@ -380,9 +381,9 @@ def _write_rows(
     schema: pa.Schema,
     *,
     metadata: dict[bytes, bytes] | None = None,
+    role: str | None = None,
 ) -> None:
-    if metadata:
-        schema = schema.with_metadata(metadata)
+    schema = schema.with_metadata({**(metadata or {}), **contract_footer(path, role=role)})
     if rows:
         table = pa.Table.from_pylist(rows, schema=schema)
     else:

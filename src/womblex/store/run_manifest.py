@@ -47,6 +47,7 @@ import pyarrow.parquet as pq
 
 from womblex.pipeline_order import stage_rank
 from womblex.store.build_info import image_info
+from womblex.store.contract import contract_footer
 from womblex.store.output import read_manifest
 from womblex.store.run_stamp import (
     read_footer_models,
@@ -465,9 +466,8 @@ def write_run_manifest(
     """
     table = read_manifest(shard_dir)
     footer = _merged_footer(shard_dir, table, footers)
-    if footer:
-        table = table.replace_schema_metadata(footer)
     target = output_path or run_manifest_path_for(shard_dir)
+    table = table.replace_schema_metadata({**(footer or {}), **contract_footer(target, role="manifest")})
     target.parent.mkdir(parents=True, exist_ok=True)
     pq.write_table(table, str(target), compression="zstd", compression_level=3)
     logger.info("Wrote run manifest %s: docs=%d", target, table.num_rows)

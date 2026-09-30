@@ -8,6 +8,7 @@ from pathlib import Path
 import pyarrow.parquet as pq
 import pytest
 
+from womblex.store.contract import CONTRACT_VERSION
 from womblex.store.egress import CORPUS_DIRNAME, EGRESS_MANIFEST_FILENAME, build_bundle
 from womblex.store.egress_output import SOURCE_INDEX_FILENAME, SOURCES_DIRNAME, raw_key_for
 from womblex.store.output import ELEMENT_SCHEMA, MANIFEST_SCHEMA, _source_hash, _write_rows
@@ -151,6 +152,7 @@ def test_egress_manifest_reports_the_export(tmp_path: Path):
 
     descriptor = json.loads((dest / "run-A" / EGRESS_MANIFEST_FILENAME).read_text())
     assert descriptor["run_id"] == "run-A"
+    assert descriptor["contract_version"] == CONTRACT_VERSION
     assert descriptor["documents"] == 4
     assert descriptor["sources_copied"] == result.sources_copied == 1
     assert descriptor["sources_by_status"]["not_found"] == 1

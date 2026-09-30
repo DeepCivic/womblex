@@ -46,6 +46,7 @@ from pathlib import Path
 import pyarrow as pa
 
 from womblex import __version__
+from womblex.store.contract import CONTRACT_VERSION
 from womblex.store.egress_output import (
     EGRESS_STAGE,
     SOURCE_INDEX_FILENAME,
@@ -261,6 +262,7 @@ def _write_egress_manifest(
 ) -> None:
     descriptor = {
         "run_id": run_id,
+        "contract_version": CONTRACT_VERSION,
         "womblex_version": __version__,
         "created_at_iso": datetime.now(UTC).isoformat(),
         "documents": documents,

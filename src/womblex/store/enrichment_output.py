@@ -19,6 +19,7 @@ import pyarrow.parquet as pq
 
 from womblex.analyse.graph import DocumentGraph
 from womblex.analyse.models import EnrichmentResult
+from womblex.store.output import _write_rows
 from womblex.store.run_stamp import sidecar_footer
 
 logger = logging.getLogger(__name__)
@@ -251,16 +252,8 @@ def write_entity_mentions(
     for ident, enrichment, chunks in results:
         all_rows.extend(_entity_mentions_from_enrichment(ident, enrichment, chunks))
 
-    if not all_rows:
-        table = pa.table(
-            {f.name: pa.array([], type=f.type) for f in ENTITY_SCHEMA},
-            schema=ENTITY_SCHEMA,
-        )
-    else:
-        table = pa.Table.from_pylist(all_rows, schema=ENTITY_SCHEMA)
-
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    pq.write_table(table, str(output_path))
+    _write_rows(all_rows, output_path, ENTITY_SCHEMA, role="enrichment_entities")
     logger.info("Wrote %d entity mentions to %s", len(all_rows), output_path)
     return output_path
 
@@ -282,16 +275,8 @@ def write_graph_edges(
     for ident, graph in graphs:
         all_rows.extend(_graph_edges_to_rows(ident, graph))
 
-    if not all_rows:
-        table = pa.table(
-            {f.name: pa.array([], type=f.type) for f in GRAPH_EDGE_SCHEMA},
-            schema=GRAPH_EDGE_SCHEMA,
-        )
-    else:
-        table = pa.Table.from_pylist(all_rows, schema=GRAPH_EDGE_SCHEMA)
-
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    pq.write_table(table, str(output_path))
+    _write_rows(all_rows, output_path, GRAPH_EDGE_SCHEMA, role="graph_edges")
     logger.info("Wrote %d graph edges to %s", len(all_rows), output_path)
     return output_path
 
@@ -311,16 +296,8 @@ def write_enrichment_metadata(
     """
     rows = [_enrichment_meta_row(ident, enrichment) for ident, enrichment in results]
 
-    if not rows:
-        table = pa.table(
-            {f.name: pa.array([], type=f.type) for f in ENRICHMENT_META_SCHEMA},
-            schema=ENRICHMENT_META_SCHEMA,
-        )
-    else:
-        table = pa.Table.from_pylist(rows, schema=ENRICHMENT_META_SCHEMA)
-
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    pq.write_table(table, str(output_path))
+    _write_rows(rows, output_path, ENRICHMENT_META_SCHEMA, role="enrichment_meta")
     logger.info("Wrote %d enrichment metadata rows to %s", len(rows), output_path)
     return output_path
 
@@ -471,13 +448,7 @@ def _write_enrichment_rows(
     *,
     metadata: dict[bytes, bytes] | None = None,
 ) -> None:
-    if metadata:
-        schema = schema.with_metadata(metadata)
-    if rows:
-        table = pa.Table.from_pylist(rows, schema=schema)
-    else:
-        table = pa.table({f.name: pa.array([], type=f.type) for f in schema}, schema=schema)
-    pq.write_table(table, str(path), compression="zstd", compression_level=3)
+    _write_rows(rows, path, schema, metadata=metadata)
 
 
 #: The name these three sidecars gave their document identity column before
