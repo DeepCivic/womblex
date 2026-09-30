@@ -177,6 +177,7 @@ One row per source file in the batch.
 | `error` | string — empty on success |
 | `extracted_at_iso` | string |
 | `parser_version` | string |
+| `content_digest` | string (SHA-256 over ordered elements; null in shards written before the column) |
 
 All four shard files also carry the ingest root, the collection and the
 batch's relative paths in their Parquet footer key-value metadata, under

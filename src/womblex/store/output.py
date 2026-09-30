@@ -62,6 +62,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from womblex.ingest.extract import ExtractionResult
+from womblex.store.content_digest import content_digest
 from womblex.store.contract import contract_footer
 from womblex.store.run_stamp import RunStamp, sidecar_footer
 from womblex.store.source_provenance import IngestProvenance
@@ -140,6 +141,7 @@ MANIFEST_SCHEMA = pa.schema([
     ("error", pa.string()),
     ("extracted_at_iso", pa.string()),
     ("parser_version", pa.string()),
+    ("content_digest", pa.string()),
 ])
 
 # Manifest columns added after parser 2.0. Older shards back-fill on read
@@ -149,6 +151,10 @@ MANIFEST_SCHEMA = pa.schema([
 # same, which is the truth in both cases. `doc_id` keeps its own derivation
 # (from `filename`) in `_read_shard` because a better value than "" exists.
 _MANIFEST_BACKFILL: tuple[str, ...] = ("ingest_root", "source_relpath")
+
+# `content_digest` back-fills as null, not "": a shard written before it has no
+# digest to compare, which is unknown rather than an empty document's digest.
+_MANIFEST_NULL_BACKFILL: tuple[str, ...] = ("content_digest",)
 
 CHUNKS_SCHEMA = pa.schema([
     ("source_hash", pa.string()),
@@ -345,6 +351,7 @@ def write_results(
             "error": res.error or "",
             "extracted_at_iso": extracted_at,
             "parser_version": PARSER_VERSION,
+            "content_digest": content_digest(res.elements),
         })
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -490,7 +497,8 @@ def _read_shard(shard_path: Path, role: str) -> pa.Table:
     existing checkpoints can still be reconciled. It later gained
     ``ingest_root`` / ``source_relpath``, which have no derivable value — a
     shard written before them says nothing about the root it was read from —
-    so those back-fill as empty strings (``_MANIFEST_BACKFILL``).
+    so those back-fill as empty strings (``_MANIFEST_BACKFILL``); ``content_digest``
+    back-fills as null (``_MANIFEST_NULL_BACKFILL``).
     """
     schema = _SHARD_SCHEMA[role]
     raw = pq.read_table(str(shard_path))
@@ -502,14 +510,15 @@ def _read_shard(shard_path: Path, role: str) -> pa.Table:
         derived = pa.array([Path(f).stem for f in filenames], type=pa.string())
         raw = raw.append_column("doc_id", derived)
         missing.remove("doc_id")
-    backfill = _MANIFEST_BACKFILL if role == "manifest" else ()
+    backfill = _MANIFEST_BACKFILL + _MANIFEST_NULL_BACKFILL if role == "manifest" else ()
     hard = [name for name in missing if name not in backfill]
     if hard:
         raise ValueError(
             f"shard {shard_path} missing columns {hard}; schema bump without compat shim?"
         )
     for name in missing:
-        raw = raw.append_column(name, pa.array([""] * raw.num_rows, type=pa.string()))
+        fill = None if name in _MANIFEST_NULL_BACKFILL else ""
+        raw = raw.append_column(name, pa.array([fill] * raw.num_rows, type=pa.string()))
     return raw.select([f.name for f in schema]).cast(schema)
 
 

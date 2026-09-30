@@ -185,11 +185,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 - A unified run-level manifest correctly consolidates provenance, statuses, and counts for all source files.
 - A persistence verifier ensures all required shard files exist, are readable, match expected document counts, and prevent accidental overwrites.
 - `source_hash` is content-addressed (SHA-256 of the source bytes) and stable across environments and runs; logical row order within a shard is stable given the same inputs and iteration order.
-- Output is **not** byte-for-byte reproducible across runs: the manifest stamps a wall-clock `extracted_at_iso`, and Parquet writes do not pin the writer's embedded metadata (`created_by`, timestamp coercion, statistics).
-
-**TO-DO:**
-
-- **Cross-run Parquet determinism is not specified or achieved (re: the two determinism criteria above).** Hashes and logical row ordering are deterministic, but two runs over identical inputs produce different bytes because `write_results` stamps `extracted_at_iso` from wall-clock `time.gmtime()`, and `_write_rows` calls `pq.write_table(..., compression="zstd")` without pinning encoding (`store_schema`, `coerce_timestamps`) or suppressing the version-bearing `created_by` metadata (`store/output.py`; `_source_hash`; `_write_rows`). Decide whether byte-for-byte reproducibility is a requirement: if so, source the timestamp deterministically (e.g. from the run id) and pin the Parquet writer options; if not, replace the reproducibility expectation with an explicit "row order + `source_hash` are stable; file bytes are not" contract and add a test asserting the stable subset.
+- Output is **not** byte-for-byte reproducible across runs: the manifest stamps a wall-clock `extracted_at_iso`, and Parquet writes do not pin the writer's embedded metadata (`created_by`, timestamp coercion, statistics). The determinism contract is on *content*: for a given `source_hash` + `womblex.version` + `config_digest` + `womblex.models`, extraction content and row order are stable, so the manifest's `content_digest` (SHA-256 over each document's ordered elements: kind, order, text, table cells, form fields, spreadsheet cells, alt text, meta) matches. A consumer re-running later compares `content_digest`; a mismatch is explained by the stamped version, config and model digests and never blocks output. File bytes and `extracted_at_iso` are not part of the guarantee. A manifest written before the column reads `content_digest` as null.
 
 ## 9. Redaction Handling
 

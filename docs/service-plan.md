@@ -1,6 +1,6 @@
 # Womblex as a backend subsystem — plan
 
-*Status: proposed (2026-09). Sequenced as 13 merges; each lands on its own and updates this document's merge list as it ships.*
+*Status: in progress (2026-09; A1 and A2 shipped). Sequenced as 13 merges; each lands on its own and updates this document's merge list as it ships.*
 
 ## Context
 Womblex is to serve other software in two modes:
@@ -11,7 +11,7 @@ The review confirmed these gaps:
 - No contract version on any pipeline Parquet or on `egress_manifest.json`. Only the register ingests carry `schema_version`.
 - Nothing marks raw-PII files apart from masked ones.
 - No public Python API: `womblex/__init__` exports only `__version__`.
-- The FR section 8 determinism TO-DO is open.
+- The FR section 8 determinism TO-DO was open (closed by A2).
 - The only HTTP surface is an unauthenticated operator console. It has no upload path, no caller identity, and no owner on `womblex_jobs`.
 - Logging is plain stdlib text, with no metrics.
 
@@ -149,8 +149,8 @@ Add `womblex api-token --client X` to print a new token and its hash for the reg
 ## Merge order
 Each merge must be under 500 lines. Split further if needed.
 
-1. A1 contract version + sensitivity footers
-2. A2 `content_digest` + FR section 8 contract
+1. A1 contract version + sensitivity footers — **shipped (#114)**
+2. A2 `content_digest` + FR section 8 contract — **shipped**
 3. A3 + A4 contract doc + public `__all__`
 4. A5 JSON logging
 5. U1 retire the location override
