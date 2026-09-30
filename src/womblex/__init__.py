@@ -35,8 +35,8 @@ _EXPORTS: dict[str, str] = {
 }
 
 __all__ = [
-    "__version__",
     "CONTRACT_VERSION",
+    "__version__",
     "build_bundle",
     "chunk_shards",
     "embed_shards",
