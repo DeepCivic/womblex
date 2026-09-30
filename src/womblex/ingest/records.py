@@ -43,6 +43,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from womblex.ingest.elements import Element
+from womblex.store.content_digest import content_digest
 from womblex.store.output import (
     ELEMENT_SCHEMA,
     FORM_FIELDS_SCHEMA,
@@ -200,6 +201,7 @@ def _write_batch(
             "error": "",
             "extracted_at_iso": extracted_at,
             "parser_version": PARSER_VERSION,
+            "content_digest": content_digest(elements),
         })
         prov = {"source_hash": source_hash, "doc_id": doc_id}
         for pf in mapping.provenance_fields:

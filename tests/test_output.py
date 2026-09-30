@@ -334,3 +334,39 @@ def test_chunks_path_for_uses_stem(tmp_path):
     target = chunks_path_for(base)
     assert target.name == f"batch-0042{CHUNKS_SUFFIX}"
     assert target.parent == tmp_path
+
+
+def test_content_digest_is_stable_across_extractions(tmp_path):
+    """Same source, same code: equal digest and rows; bytes and timestamps may differ."""
+    if not _BUDGET_DOCX.exists():
+        pytest.skip(f"fixture not present: {_BUDGET_DOCX}")
+    manifests, elements = [], []
+    for name in ("a", "b"):
+        result = DocxExtractor().extract_path(_BUDGET_DOCX)
+        shard = tmp_path / name / "batch-0001.parquet"
+        write_results([("budget", str(_BUDGET_DOCX), result)], shard, collection_id="t")
+        manifests.append(read_manifest(shard).to_pylist()[0])
+        elements.append(read_elements(shard).to_pylist())
+    assert manifests[0]["content_digest"]
+    assert manifests[0]["content_digest"] == manifests[1]["content_digest"]
+    assert elements[0] == elements[1]
+
+
+def test_content_digest_changes_with_content():
+    from womblex.ingest.elements import Element
+    from womblex.store.content_digest import content_digest
+
+    a = Element(kind="paragraph", order=0, extractor="t", text="alpha")
+    b = Element(kind="paragraph", order=0, extractor="t", text="alpha!")
+    assert content_digest([a]) != content_digest([b])
+    assert content_digest([a]) == content_digest([Element(kind="paragraph", order=0, extractor="t", text="alpha")])
+
+
+def test_manifest_without_content_digest_reads_back_null(tmp_path):
+    shard = tmp_path / "batch-0001._manifest.parquet"
+    legacy = pa.schema([f for f in MANIFEST_SCHEMA if f.name != "content_digest"])
+    row = {f.name: ("x" if pa.types.is_string(f.type) else 0) for f in legacy}
+    pq.write_table(pa.Table.from_pylist([row], schema=legacy), str(shard))
+    from womblex.store.output import _read_shard
+
+    assert _read_shard(shard, "manifest").to_pylist()[0]["content_digest"] is None
