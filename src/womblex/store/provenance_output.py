@@ -24,6 +24,8 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from womblex.store.contract import contract_footer
+
 logger = logging.getLogger(__name__)
 
 PROVENANCE_SUFFIX = ".provenance.parquet"
@@ -57,6 +59,7 @@ def write_provenance_shard(
     schema = provenance_schema(provenance_fields)
     target = provenance_path_for(base_path)
     target.parent.mkdir(parents=True, exist_ok=True)
+    schema = schema.with_metadata(contract_footer(target))
     if rows:
         norm = [{f.name: str(r.get(f.name, "")) for f in schema} for r in rows]
         table = pa.Table.from_pylist(norm, schema=schema)
@@ -98,6 +101,8 @@ def write_corpus_manifest(shard_dir: Path, output_path: Path | None = None) -> P
     table = read_provenance(shard_dir)
     out = output_path or shard_dir.parent / "manifest.parquet"
     out.parent.mkdir(parents=True, exist_ok=True)
+    # Carries the corpus-declared provenance columns, so it is labelled as provenance.
+    table = table.replace_schema_metadata(contract_footer(out, role="provenance"))
     pq.write_table(table, str(out), compression="zstd", compression_level=3)
     logger.info("Wrote corpus manifest %s: rows=%d", out, table.num_rows)
     return out

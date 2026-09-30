@@ -38,6 +38,7 @@ import pyarrow.parquet as pq
 
 from womblex.config import RedactionConfig
 from womblex.redact.stage import build_detector, detect_redactions
+from womblex.store.output import _write_rows
 
 logger = logging.getLogger(__name__)
 
@@ -220,14 +221,8 @@ def _annotate_one_batch(
 
 def _write_redactions_parquet(rows: list[tuple[str, int]], path: Path) -> None:
     """Write the sparse sidecar parquet at *path* (writes empty file if rows is empty)."""
-    source_hashes = [r[0] for r in rows]
-    elem_orders = [r[1] for r in rows]
-    has_redaction = [True] * len(rows)
-    table = pa.table(
-        {"source_hash": source_hashes, "elem_order": elem_orders, "has_redaction": has_redaction},
-        schema=REDACTIONS_SCHEMA,
-    )
-    pq.write_table(table, path)
+    records = [{"source_hash": h, "elem_order": o, "has_redaction": True} for h, o in rows]
+    _write_rows(records, path, REDACTIONS_SCHEMA)
 
 
 # ---------------------------------------------------------------------------

@@ -22,7 +22,7 @@ Defined once by Womblex, read by both consumers:
   sources/
     <source_hash>.<ext>       # the raw file each document was extracted from
   source_index.parquet        # source_hash -> raw key, ext, doc_id, filename, status
-  egress_manifest.json        # bundle descriptor + per-document resolution report
+  egress_manifest.json        # bundle descriptor (incl. contract_version) + per-document resolution report
 ```
 
 Everything content-addresses by `source_hash`, so raw and extracted resolve to
