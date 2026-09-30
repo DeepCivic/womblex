@@ -159,7 +159,7 @@ def _supported_under(settings: UISettings, prefix: str) -> tuple[str, list[str]]
 
     ingest_uri = cast(str, settings.ingest_uri)
     location = f"{ingest_uri}/{prefix}".rstrip("/")
-    ingest_store = RemoteStore.from_uri(ingest_uri, credentials=settings.s3_credentials)
+    ingest_store = RemoteStore.from_uri(ingest_uri)
     all_keys = ingest_store.list_files(prefix, "*", recursive=True)
     # Store-relative keys: strip the prefix for the nesting check, restore after.
     scope = f"{prefix}/" if prefix else ""

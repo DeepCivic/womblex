@@ -161,20 +161,10 @@ s3fs authenticates to MinIO explicitly while SageMaker keeps the instance role.
 (`ISAACUS_SAGEMAKER_PROFILE` selects a non-default AWS profile if you need one
 for SageMaker specifically.)
 
-**Rotating the object-store key from the console.** The `WOMBLEX_S3_*` keys
-above are *defaults* — often baked into the image. When one is rotated, an
-operator can save the new pair through the Resources Console (Run store card →
-S3 credentials) rather than rebuilding the container: the console persists it to
-its settings volume (`--settings-dir` / `$WOMBLEX_UI_SETTINGS_DIR`) and uses it
-over the env from the next request, and *Test connection* confirms it reaches
-the store. The pair overrides only the console's own store reads (and its
-enqueue/preflight against the ingest store); pipeline **workers** still read
-their keys from the env at their own start-up, so a rotated key that must reach
-the fleet is still an env/redeploy change there. The saved secret never appears
-in a response body or log — the card shows only its masked last-four and
-whether it came from `saved` or `env`. Because that settings volume now holds a
-credential, treat it as sensitive (mount it as you would any secret store);
-saving nothing keeps the env defaults, and *Clear* reverts to them.
+**Rotating the object-store key.** The `WOMBLEX_S3_*` keys above are read from
+the environment at process start-up by the console, workers and CLI alike, so a
+rotated key is an env/redeploy change everywhere. The console no longer accepts
+or stores a credential; its Resources screen reports only a masked last-four.
 
 ## Quick Start
 
@@ -435,7 +425,7 @@ operator-saved — and the stage DAG rendered from the stage contracts; it can
 save the composed config as a preset and enqueue a run over the deployment's
 configured ingest location — the composer is the console's one dispatch
 surface), and a Resources console (store / ingest / queue / Isaacus connection
-checks, with editable ingest and output locations). It is a sidecar, never
+checks; ingest and output locations are deploy-time configuration, shown read-only). It is a sidecar, never
 in-process with the pipeline, and reads either a local run root or the object
 store a distributed run published to:
 

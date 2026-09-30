@@ -263,22 +263,12 @@ export async function getAudit(
 // network-free reads — each card's live check is a separate `test*` call.
 export interface StoreOptions {
 	credentials_configured: boolean;
-	// Where the S3 credentials came from: `saved` (the operator override this
-	// console persisted), `env` (the baked-in AWS_*/WOMBLEX_S3_* keys), or null
-	// when none are configured. Never the values themselves.
-	credentials_source: 'saved' | 'env' | null;
 	// The access-key id masked to its last four characters, for recognition
 	// only. Null when no credentials are configured; never the secret.
 	credentials_masked: string | null;
 	endpoint_url: string | null;
 	region: string | null;
 }
-
-// Where an effective location came from: a CLI
-// `flag`, an `env` var, or a `saved` operator override. The screen collapses
-// `flag`/`env` to one "from environment" chip and shows `saved` as "set here",
-// but the three are carried distinctly because that is what a reset restores to.
-export type LocationSource = 'flag' | 'env' | 'saved';
 
 export interface StoreCard {
 	kind: 'local' | 'remote';
@@ -288,11 +278,6 @@ export interface StoreCard {
 	// directory. Partial rather than required, so reading a field outside the
 	// `kind === 'remote'` guard is a type error rather than a runtime undefined.
 	options: Partial<StoreOptions>;
-	source: LocationSource;
-	// Whether this console has a writable settings dir — the one thing that
-	// makes the location editable at all.
-	// False in both modes when no `--settings-dir` was configured.
-	editable: boolean;
 }
 
 // The ingest card. Unlike the store, ingest is optional, so `configured` is
@@ -303,8 +288,6 @@ export interface IngestCard {
 	uri: string | null;
 	is_object_store: boolean;
 	options: Partial<StoreOptions>;
-	source: LocationSource;
-	editable: boolean;
 }
 
 export interface QueueCard {
@@ -362,67 +345,6 @@ export async function testIngest(fetchImpl: typeof fetch = fetch): Promise<Reach
 	const resp = await fetchImpl('/api/resources/test/ingest', { method: 'POST' });
 	if (!resp.ok) throw new Error(await errorDetail(resp, 'POST /api/resources/test/ingest'));
 	return (await resp.json()) as ReachabilityResult;
-}
-
-// Save / update / clear the operator's ingest and output location override.
-// A full replace (PUT): each location field
-// is a new value or `null` ("reset to the flag/env default"), so a caller
-// keeping a field must resubmit its current value.
-//
-// The S3 credential pair is the exception — the console masks the saved secret
-// in every response, so the frontend cannot resubmit one it can no longer read.
-// Omit both fields to *keep* the saved override; pass both to set a new pair;
-// set `clear_credentials` to remove it and revert to the env keys. A half-set
-// pair is refused (400).
-export interface SaveLocationsRequest {
-	ingest_uri?: string | null;
-	store_uri?: string | null;
-	s3_access_key_id?: string | null;
-	s3_secret_access_key?: string | null;
-	clear_credentials?: boolean;
-}
-
-// The refreshed cards plus the reachability verdicts the save re-ran — so the
-// screen re-renders the provenance chips and the "reachable?" state in one
-// round trip. Reachability is *reported, not required*: naming a bucket ahead
-// of provisioning it is a normal save.
-export interface SaveLocationsResult {
-	ingest: IngestCard;
-	store: StoreCard;
-	ingest_test: ReachabilityResult;
-	store_test: ReachabilityResult;
-}
-
-/**
- * A location edit the console refused. `status` is the HTTP code so the screen
- * tells the failure shapes apart without parsing the message: 409 (no writable
- * settings dir — editing is disabled on this console), 400 (a malformed URI, or
- * an ingest/output pair that would overlap). Mirrors `ui/routes/resources.py`'s
- * guard and `ValueError` paths.
- */
-export class LocationsRefused extends Error {
-	status: number;
-	constructor(status: number, detail: string) {
-		super(detail);
-		this.name = 'LocationsRefused';
-		this.status = status;
-	}
-}
-
-export async function saveLocations(
-	req: SaveLocationsRequest,
-	fetchImpl: typeof fetch = fetch
-): Promise<SaveLocationsResult> {
-	const resp = await fetchImpl('/api/resources/locations', {
-		method: 'PUT',
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify(req)
-	});
-	if (!resp.ok) {
-		const detail = ((await resp.json().catch(() => ({}))) as { detail?: unknown }).detail;
-		throw new LocationsRefused(resp.status, detailToMessage(detail, resp.status));
-	}
-	return (await resp.json()) as SaveLocationsResult;
 }
 
 // Fleet + queue-depth state, from the same `JobQueue` views the Dashboard

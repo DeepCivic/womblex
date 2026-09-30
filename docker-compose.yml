@@ -287,25 +287,16 @@ services:
       # The console runs the other image, so it names that one rather than
       # inheriting the pipeline's reference from the anchor.
       WOMBLEX_IMAGE_REF: ${WOMBLEX_CONSOLE_IMAGE:-ghcr.io/deepcivic/womblex-console:latest}
-      # Where an operator-saved ingest/output override lives
-      # — its own writable mount, since the override file is what
-      # *names* the store and so cannot live inside it.
-      WOMBLEX_UI_SETTINGS_DIR: /settings
     ports:
       - "8080:8080"
     # The console reads artefacts and writes nothing to its own image: run
     # requests land in the store, feedback and presets on the store's own
-    # prefixes. The two exceptions get explicit mounts — the settings volume
-    # below (an operator-saved location/credential override cannot live inside
-    # the store it names) and a tmpfs for /tmp, where a store-backed read
-    # stages the parquet it is about to open.
+    # prefixes. The one exception is a tmpfs for /tmp, where a store-backed
+    # read stages the parquet it is about to open.
     read_only: true
     tmpfs:
       - /tmp
-    volumes:
-      - ui-settings:/settings
 
 volumes:
   pgdata:
   miniodata:
-  ui-settings:

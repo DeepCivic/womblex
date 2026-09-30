@@ -6,7 +6,6 @@ fixtures, since every case builds its own ``TestClient`` directly.
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -17,7 +16,6 @@ from fastapi.testclient import TestClient
 from womblex.ui import resources
 from womblex.ui.app import create_app
 from womblex.ui.deps import resolve_settings
-from womblex.ui.settings_store import SavedLocations, read_saved_locations, write_saved_locations
 
 
 class TestResourcesApi:
@@ -32,7 +30,6 @@ class TestResourcesApi:
         card = client.get("/api/resources").json()["store"]
         assert card == {
             "kind": "local", "uri": str(tmp_path), "is_object_store": False, "options": {},
-            "source": "flag", "editable": False,
         }
 
     def test_store_card_remote_flags_object_store(self, tmp_path: Path) -> None:
@@ -74,11 +71,10 @@ class TestResourcesApi:
         assert options["endpoint_url"] == "http://minio:9000"
         assert options["region"] == "ap-southeast-2"
 
-    def test_store_card_reports_credential_source_env(
+    def test_store_card_masks_env_credentials(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Env-supplied keys report ``credentials_source == 'env'`` and a masked
-        tail, never the raw value."""
+        """Env-supplied keys report a masked tail, never the raw value."""
         monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIAEXAMPLE1234")
         monkeypatch.setenv(
             "AWS_SECRET_ACCESS_KEY", "super-secret-value"  # pragma: allowlist secret
@@ -86,10 +82,9 @@ class TestResourcesApi:
         client = TestClient(create_app(store_uri=f"s3://{tmp_path}/bucket"))
         options = client.get("/api/resources").json()["store"]["options"]
         assert options["credentials_configured"] is True
-        assert options["credentials_source"] == "env"
         assert options["credentials_masked"].endswith("1234")
 
-    def test_store_card_reports_no_credential_source_when_unset(
+    def test_store_card_reports_no_credentials_when_unset(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
@@ -97,7 +92,6 @@ class TestResourcesApi:
         client = TestClient(create_app(store_uri=f"s3://{tmp_path}/bucket"))
         options = client.get("/api/resources").json()["store"]["options"]
         assert options["credentials_configured"] is False
-        assert options["credentials_source"] is None
         assert options["credentials_masked"] is None
 
     def test_ingest_card_unconfigured(self, tmp_path: Path) -> None:
@@ -105,7 +99,6 @@ class TestResourcesApi:
         card = client.get("/api/resources").json()["ingest"]
         assert card == {
             "configured": False, "uri": None, "is_object_store": False, "options": {},
-            "source": "flag", "editable": False,
         }
 
     def test_ingest_card_configured_local(self, tmp_path: Path) -> None:
@@ -119,7 +112,6 @@ class TestResourcesApi:
         assert card["uri"] == str(ingest_root)
         assert card["is_object_store"] is False
         assert card["options"]["credentials_configured"] is False
-        assert card["options"]["credentials_source"] is None
 
     def test_test_ingest_not_configured(self, tmp_path: Path) -> None:
         client = TestClient(create_app(output_root=tmp_path))
@@ -335,62 +327,10 @@ class TestResourcesApi:
         assert remote.post("/api/resources/test/store").json()["reachable"] is True
 
 
-class TestSettingsStore:
-    """``ui/settings_store.py`` — the saved-override file's shape."""
+class TestLocationResolution:
+    """Locations are deploy-time config: flag, else env."""
 
-    def test_read_missing_file_returns_empty(self, tmp_path: Path) -> None:
-        assert read_saved_locations(tmp_path) == SavedLocations()
-
-    def test_write_then_read_round_trips(self, tmp_path: Path) -> None:
-        saved = SavedLocations(ingest_uri="s3://a/inbox", store_uri="s3://a")
-        write_saved_locations(tmp_path, saved)
-        assert read_saved_locations(tmp_path) == saved
-
-    def test_write_omits_unset_keys(self, tmp_path: Path) -> None:
-        write_saved_locations(tmp_path, SavedLocations(ingest_uri="s3://a/inbox"))
-        raw = json.loads((tmp_path / "locations.json").read_text())
-        assert raw == {"ingest_uri": "s3://a/inbox"}
-
-    def test_write_creates_missing_settings_dir(self, tmp_path: Path) -> None:
-        target = tmp_path / "nested" / "settings"
-        write_saved_locations(target, SavedLocations(store_uri="s3://a"))
-        assert (target / "locations.json").is_file()
-
-    def test_read_corrupt_file_returns_empty_rather_than_raising(self, tmp_path: Path) -> None:
-        (tmp_path / "locations.json").write_text("not json")
-        assert read_saved_locations(tmp_path) == SavedLocations()
-
-    def test_read_non_object_json_returns_empty(self, tmp_path: Path) -> None:
-        (tmp_path / "locations.json").write_text("[1, 2, 3]")
-        assert read_saved_locations(tmp_path) == SavedLocations()
-
-    def test_read_ignores_unknown_keys_rather_than_rejecting_the_file(self, tmp_path: Path) -> None:
-        (tmp_path / "locations.json").write_text(
-            json.dumps({"ingest_uri": "s3://a/inbox", "future_field": "x"})
-        )
-        assert read_saved_locations(tmp_path) == SavedLocations(ingest_uri="s3://a/inbox")
-
-    def test_credentials_round_trip(self, tmp_path: Path) -> None:
-        saved = SavedLocations(
-            store_uri="s3://a",
-            s3_access_key_id="AKIA1",
-            s3_secret_access_key="shh",  # pragma: allowlist secret
-        )
-        write_saved_locations(tmp_path, saved)
-        assert read_saved_locations(tmp_path) == saved
-        assert read_saved_locations(tmp_path).s3_credentials() == ("AKIA1", "shh")
-
-    def test_s3_credentials_needs_both_halves(self) -> None:
-        assert SavedLocations(s3_access_key_id="AKIA1").s3_credentials() is None
-        assert SavedLocations(s3_secret_access_key="shh").s3_credentials() is None  # pragma: allowlist secret
-        assert SavedLocations().s3_credentials() is None
-
-
-class TestLocationOverlayPrecedence:
-    """flag < env < saved — ``resolve_settings``
-    resolves flag/env; the saved override is layered on top per request."""
-
-    def test_flag_wins_with_no_env_or_saved(
+    def test_flag_wins_over_env(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.delenv("WOMBLEX_INGEST_URI", raising=False)
@@ -401,308 +341,3 @@ class TestLocationOverlayPrecedence:
         monkeypatch.setenv("WOMBLEX_INGEST_URI", "s3://env/inbox")
         settings = resolve_settings(None, str(tmp_path / "store"))
         assert settings.ingest_uri == "s3://env/inbox"
-
-    def test_saved_overrides_flag_and_env_through_get_settings(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        pytest.importorskip("fsspec")
-        monkeypatch.setenv("WOMBLEX_INGEST_URI", "s3://env/inbox")
-        settings_dir = tmp_path / "settings"
-        write_saved_locations(settings_dir, SavedLocations(ingest_uri="s3://saved/inbox"))
-        client = TestClient(create_app(
-            store_uri=str(tmp_path / "store"), ingest_uri="s3://flag/inbox", settings_dir=settings_dir,
-        ))
-        card = client.get("/api/resources").json()["ingest"]
-        assert card["uri"] == "s3://saved/inbox"
-        assert card["source"] == "saved"
-
-    def test_ingest_card_reports_env_source(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """``create_app`` never reads env itself (``resolve_settings`` does,
-        before construction) — this simulates that already-resolved value and
-        checks the card attributes it to the env var it matches."""
-        pytest.importorskip("fsspec")
-        monkeypatch.setenv("WOMBLEX_INGEST_URI", "s3://env/inbox")
-        client = TestClient(create_app(store_uri=str(tmp_path / "store"), ingest_uri="s3://env/inbox"))
-        card = client.get("/api/resources").json()["ingest"]
-        assert card["source"] == "env"
-
-    def test_resolve_settings_validates_a_saved_override_at_start_up(
-        self, tmp_path: Path,
-    ) -> None:
-        """A saved override that would overlap the store fails here too —
-        the same guarantee a bad flag/env pair already has."""
-        pytest.importorskip("fsspec")
-        store = tmp_path / "store"
-        settings_dir = tmp_path / "settings"
-        write_saved_locations(settings_dir, SavedLocations(ingest_uri=str(store)))
-        with pytest.raises(ValueError):
-            resolve_settings(None, str(store), settings_dir=settings_dir)
-
-
-class TestEditableLocations:
-    """``PUT /api/resources/locations``."""
-
-    def test_cards_report_not_editable_without_a_settings_dir(self, tmp_path: Path) -> None:
-        client = TestClient(create_app(output_root=tmp_path))
-        body = client.get("/api/resources").json()
-        assert body["store"]["editable"] is False
-        assert body["ingest"]["editable"] is False
-
-    def test_cards_report_editable_with_a_settings_dir(self, tmp_path: Path) -> None:
-        client = TestClient(create_app(output_root=tmp_path, settings_dir=tmp_path / "settings"))
-        body = client.get("/api/resources").json()
-        assert body["store"]["editable"] is True
-        assert body["ingest"]["editable"] is True
-
-    def test_put_locations_409_without_settings_dir(self, tmp_path: Path) -> None:
-        client = TestClient(create_app(output_root=tmp_path))
-        resp = client.put("/api/resources/locations", json={"ingest_uri": None, "store_uri": None})
-        assert resp.status_code == 409
-
-    def test_saved_store_location_switches_out_of_output_root_mode(self, tmp_path: Path) -> None:
-        """The XOR invariant survives a saved output location — ``store_uri``
-        wins and ``output_root`` clears, matching a fresh ``--store`` deploy."""
-        pytest.importorskip("fsspec")
-        settings_dir = tmp_path / "settings"
-        new_store = tmp_path / "new-store"
-        client = TestClient(create_app(output_root=tmp_path / "root", settings_dir=settings_dir))
-        resp = client.put("/api/resources/locations", json={"store_uri": str(new_store)})
-        assert resp.status_code == 200
-        card = client.get("/api/resources").json()["store"]
-        assert card == {
-            "kind": "remote", "uri": str(new_store), "is_object_store": False,
-            "options": {
-                "credentials_configured": False, "credentials_source": None,
-                "credentials_masked": None, "endpoint_url": None, "region": None,
-            },
-            "source": "saved", "editable": True,
-        }
-
-    def test_edit_takes_effect_on_the_very_next_request_without_a_restart(
-        self, tmp_path: Path,
-    ) -> None:
-        pytest.importorskip("fsspec")
-        settings_dir = tmp_path / "settings"
-        client = TestClient(create_app(store_uri=str(tmp_path / "store"), settings_dir=settings_dir))
-        before = client.get("/api/resources").json()["ingest"]
-        assert before["configured"] is False
-
-        new_ingest = tmp_path / "inbox"
-        resp = client.put("/api/resources/locations", json={"ingest_uri": str(new_ingest)})
-        assert resp.status_code == 200
-
-        after = client.get("/api/resources").json()["ingest"]
-        assert after["configured"] is True
-        assert after["uri"] == str(new_ingest)
-        assert after["source"] == "saved"
-
-    def test_reset_to_default_clears_the_override(self, tmp_path: Path) -> None:
-        pytest.importorskip("fsspec")
-        settings_dir = tmp_path / "settings"
-        root = tmp_path / "root"
-        client = TestClient(create_app(output_root=root, settings_dir=settings_dir))
-        client.put("/api/resources/locations", json={"store_uri": str(tmp_path / "override")})
-        assert client.get("/api/resources").json()["store"]["kind"] == "remote"
-
-        resp = client.put("/api/resources/locations", json={"store_uri": None})
-        assert resp.status_code == 200
-
-        card = client.get("/api/resources").json()["store"]
-        assert card["kind"] == "local"
-        assert card["uri"] == str(root)
-        assert card["source"] == "flag"
-        assert read_saved_locations(settings_dir).store_uri is None
-
-    def test_overlap_rejected_on_save_and_nothing_is_written(self, tmp_path: Path) -> None:
-        pytest.importorskip("fsspec")
-        store = tmp_path / "store"
-        settings_dir = tmp_path / "settings"
-        client = TestClient(create_app(store_uri=str(store), settings_dir=settings_dir))
-        resp = client.put("/api/resources/locations", json={"ingest_uri": str(store)})
-        assert resp.status_code == 400
-        assert str(store) in resp.json()["detail"]
-        assert read_saved_locations(settings_dir).ingest_uri is None
-
-    def test_overlap_check_uses_the_field_not_being_changed_too(self, tmp_path: Path) -> None:
-        """Saving only the ingest field is validated against the *current*
-        effective store, not just the two values in this one request."""
-        pytest.importorskip("fsspec")
-        store = tmp_path / "store"
-        settings_dir = tmp_path / "settings"
-        client = TestClient(create_app(store_uri=str(store), settings_dir=settings_dir))
-        resp = client.put("/api/resources/locations", json={"ingest_uri": str(store / "runs")})
-        assert resp.status_code == 400
-
-    def test_put_locations_response_shape(self, tmp_path: Path) -> None:
-        pytest.importorskip("fsspec")
-        settings_dir = tmp_path / "settings"
-        client = TestClient(create_app(store_uri=str(tmp_path / "store"), settings_dir=settings_dir))
-        resp = client.put(
-            "/api/resources/locations", json={"ingest_uri": str(tmp_path / "inbox")},
-        )
-        assert resp.status_code == 200
-        body = resp.json()
-        assert set(body) == {"ingest", "store", "ingest_test", "store_test"}
-        assert body["ingest"]["uri"] == str(tmp_path / "inbox")
-        assert body["ingest_test"]["reachable"] is True
-        assert body["store_test"]["reachable"] is True
-
-    def test_put_locations_400_on_a_uri_no_store_can_open(self, tmp_path: Path) -> None:
-        """`s3:/bucket` (one slash) parses as a *relative local path*, so
-        without an explicit check it saves cleanly and then quietly writes
-        documents into a folder named `s3:`."""
-        pytest.importorskip("fsspec")
-        settings_dir = tmp_path / "settings"
-        client = TestClient(create_app(
-            store_uri=str(tmp_path / "store"), settings_dir=settings_dir,
-        ))
-        for bad in ("s3:/womblex/inbox", "S3://womblex/inbox", "ftp://host/inbox", "s3://"):
-            resp = client.put("/api/resources/locations", json={"ingest_uri": bad})
-            assert resp.status_code == 400, bad
-        assert read_saved_locations(settings_dir).ingest_uri is None
-
-    def test_ingest_inside_a_local_output_root_is_refused(self, tmp_path: Path) -> None:
-        """`output_root` mode has no `runs/` prefix of its own — the tree *is*
-        the output — so an ingest nested in it overlaps just the same."""
-        pytest.importorskip("fsspec")
-        root = tmp_path / "root"
-        settings_dir = tmp_path / "settings"
-        client = TestClient(create_app(output_root=root, settings_dir=settings_dir))
-        resp = client.put("/api/resources/locations", json={"ingest_uri": str(root / "inbox")})
-        assert resp.status_code == 400
-        assert read_saved_locations(settings_dir).ingest_uri is None
-
-    def test_a_saved_override_that_stops_validating_degrades_to_defaults(
-        self, tmp_path: Path,
-    ) -> None:
-        """The override file is operator-editable and outlives the flags it was
-        saved against. One that no longer validates must fall back to the
-        flag/env defaults, not 500 every request until someone reaches the
-        volume — the same skip-and-continue an unparseable file already gets.
-        """
-        pytest.importorskip("fsspec")
-        store = tmp_path / "store"
-        settings_dir = tmp_path / "settings"
-        client = TestClient(create_app(
-            store_uri=str(store), settings_dir=settings_dir, ingest_uri=str(tmp_path / "inbox"),
-        ))
-        # Written behind the API, as a hand-edit or a changed --store would be.
-        write_saved_locations(settings_dir, SavedLocations(ingest_uri=str(store / "runs")))
-        resp = client.get("/api/resources")
-        assert resp.status_code == 200
-        assert resp.json()["ingest"]["uri"] == str(tmp_path / "inbox")
-
-
-class TestCredentialOverride:
-    """Operator-saved S3 credentials override the baked-in env keys (issue 3).
-
-    The console is a connection *manager*, not read-only: an engineer adds a
-    rotated key through the Resources Console and the system uses it moving
-    forward, without a container rebuild. The pair is persisted to the
-    settings volume, masked in every response, and folded into the console's
-    own store opens by :func:`apply_saved_locations`.
-    """
-
-    def test_apply_saved_locations_layers_credentials(self, tmp_path: Path) -> None:
-        from womblex.ui.deps import UISettings, apply_saved_locations
-
-        base = UISettings(output_root=None, store_uri="s3://bucket")
-        assert base.s3_credentials is None
-        layered = apply_saved_locations(
-            base,
-            SavedLocations(
-                s3_access_key_id="AKIA1",
-                s3_secret_access_key="shh",  # pragma: allowlist secret
-            ),
-        )
-        assert layered.s3_credentials == ("AKIA1", "shh")
-
-    def test_apply_saved_locations_keeps_base_credentials_when_none_saved(
-        self, tmp_path: Path,
-    ) -> None:
-        from womblex.ui.deps import UISettings, apply_saved_locations
-
-        base = UISettings(
-            output_root=None, store_uri="s3://bucket", s3_credentials=("base-k", "base-s"),
-        )
-        layered = apply_saved_locations(base, SavedLocations(ingest_uri="s3://bucket/inbox"))
-        assert layered.s3_credentials == ("base-k", "base-s")
-
-    def test_save_credentials_persists_and_masks(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A saved pair is written to the volume, but the response only ever
-        carries the masked tail and its source — never the raw secret.
-
-        The store is an ``s3://`` URI because the credential summary reports
-        the options ``storage_options_from_env`` would actually pass, and it
-        passes none for any other scheme — a saved key against a local store
-        configures nothing, and the card says so. The endpoint is pinned at a
-        closed local port so the reachability probe in the save response fails
-        immediately instead of dialling AWS; reachability is reported, not
-        required, so a refused connection does not affect the save.
-        """
-        pytest.importorskip("fsspec")
-        monkeypatch.setenv("WOMBLEX_S3_ENDPOINT", "http://127.0.0.1:1")
-        settings_dir = tmp_path / "settings"
-        client = TestClient(create_app(
-            store_uri=f"s3://{tmp_path}/bucket", settings_dir=settings_dir,
-        ))
-        resp = client.put("/api/resources/locations", json={
-            "s3_access_key_id": "AKIAROTATED9999",
-            "s3_secret_access_key": "top-secret-rotated",  # pragma: allowlist secret
-        })
-        assert resp.status_code == 200
-        assert "top-secret-rotated" not in resp.text
-        assert "AKIAROTATED9999" not in resp.text
-        options = resp.json()["store"]["options"]
-        assert options["credentials_configured"] is True
-        assert options["credentials_source"] == "saved"
-        assert options["credentials_masked"].endswith("9999")
-        # Persisted for the next process / request.
-        saved = read_saved_locations(settings_dir)
-        assert saved.s3_credentials() == ("AKIAROTATED9999", "top-secret-rotated")
-
-    def test_save_credentials_preserves_them_when_a_later_save_omits_them(
-        self, tmp_path: Path,
-    ) -> None:
-        """The masked response cannot carry the secret back, so a save that
-        edits only a location must not silently wipe the saved credentials."""
-        pytest.importorskip("fsspec")
-        settings_dir = tmp_path / "settings"
-        client = TestClient(create_app(
-            store_uri=str(tmp_path / "store"), settings_dir=settings_dir,
-        ))
-        client.put("/api/resources/locations", json={
-            "s3_access_key_id": "AKIA1",
-            "s3_secret_access_key": "shh",  # pragma: allowlist secret
-        })
-        # A later save that only touches the ingest location omits the creds.
-        client.put("/api/resources/locations", json={"ingest_uri": str(tmp_path / "inbox")})
-        assert read_saved_locations(settings_dir).s3_credentials() == ("AKIA1", "shh")
-
-    def test_clear_credentials_reverts_to_env(self, tmp_path: Path) -> None:
-        pytest.importorskip("fsspec")
-        settings_dir = tmp_path / "settings"
-        client = TestClient(create_app(
-            store_uri=str(tmp_path / "store"), settings_dir=settings_dir,
-        ))
-        client.put("/api/resources/locations", json={
-            "s3_access_key_id": "AKIA1",
-            "s3_secret_access_key": "shh",  # pragma: allowlist secret
-        })
-        resp = client.put("/api/resources/locations", json={"clear_credentials": True})
-        assert resp.status_code == 200
-        assert read_saved_locations(settings_dir).s3_credentials() is None
-
-    def test_half_set_credential_pair_is_refused(self, tmp_path: Path) -> None:
-        pytest.importorskip("fsspec")
-        settings_dir = tmp_path / "settings"
-        client = TestClient(create_app(
-            store_uri=str(tmp_path / "store"), settings_dir=settings_dir,
-        ))
-        resp = client.put("/api/resources/locations", json={"s3_access_key_id": "AKIA1"})
-        assert resp.status_code == 400
-        assert read_saved_locations(settings_dir).s3_credentials() is None

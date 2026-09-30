@@ -31,7 +31,6 @@ def create_app(
     db_dsn: str | None = None,
     presets_dir: Path | None = None,
     ingest_uri: str | None = None,
-    settings_dir: Path | None = None,
     spa_dir: Path | None = DEFAULT_SPA_DIR,
 ) -> FastAPI:
     """Build the console app, bound to one run source for its lifetime.
@@ -58,12 +57,6 @@ def create_app(
     Omitted, the Execution Controls cannot dispatch. Raises ``ValueError``
     when it is not disjoint from ``store_uri``'s effective ``runs/`` output.
 
-    ``settings_dir`` holds an operator-saved location override. Stored on
-    ``app.state`` as given — the *pre-overlay* base — so
-    :func:`~womblex.ui.deps.get_settings` can apply the live override per
-    request. Omitted, the location cards are read-only, exactly like preset
-    saving without ``--presets-dir``.
-
     ``spa_dir`` is mounted only if it exists — a bare ``womblex[ui]`` install
     with no SvelteKit build alongside it still serves the read API, just
     without the frontend.
@@ -71,7 +64,7 @@ def create_app(
     settings = UISettings(
         output_root=output_root, store_uri=store_uri,
         feedback_dir=feedback_dir, db_dsn=db_dsn,
-        presets_dir=presets_dir, ingest_uri=ingest_uri, settings_dir=settings_dir,
+        presets_dir=presets_dir, ingest_uri=ingest_uri,
     )
     app = FastAPI(title="Womblex Console")
     app.state.settings = settings

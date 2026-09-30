@@ -42,7 +42,7 @@
 # ------------
 # `environment:` is map-form on purpose. Compose merges maps key-by-key, so the
 # keys pinned here override just those keys and every other inherited variable
-# (AWS_REGION, ISAACUS_API_KEY, WOMBLEX_UI_SETTINGS_DIR, ...) is preserved.
+# (AWS_REGION, ISAACUS_API_KEY, ...) is preserved.
 # `depends_on:` re-states the bundled backends the base already declares, but
 # as hard local dependencies with the same health/completion conditions —
 # locally the backends are always started, so a consumer should wait for them,

@@ -1,6 +1,6 @@
 # Womblex as a backend subsystem — plan
 
-*Status: in progress (2026-09; A1, A2, A3+A4 and A5 shipped). Sequenced as 13 merges; each lands on its own and updates this document's merge list as it ships.*
+*Status: in progress (2026-09; A1–A5 and U1 shipped). Sequenced as 13 merges; each lands on its own and updates this document's merge list as it ships.*
 
 ## Context
 Womblex is to serve other software in two modes:
@@ -153,7 +153,7 @@ Each merge must be under 500 lines. Split further if needed.
 2. A2 `content_digest` + FR section 8 contract — **shipped**
 3. A3 + A4 contract doc + public `__all__` — **shipped**
 4. A5 JSON logging — **shipped**
-5. U1 retire the location override
+5. U1 retire the location override — **shipped**
 6. U2 retire the feedback action
 7. B1 extract `cloud/dispatch.py`
 8. B2 queue `owner` column + migration
