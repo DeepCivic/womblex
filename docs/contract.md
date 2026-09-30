@@ -33,12 +33,14 @@ the single source). An unknown role reads as `raw`.
 | `normalised_text`, `spellfix_text`, `spellfix_corrections` | `(source_hash, elem_order)` | raw |
 | `chunks` | `(source_hash, chunk_index)`; table chunks anchor on `elem_order` | raw |
 | `embeddings`, `chunk_quality` | `(source_hash, chunk_index)` | none |
-| `enrichment_entities`, `graph_edges`, `enrichment_doc` | `(source_hash, entity_id)`; entities carry `chunk_index` | raw |
+| `enrichment_entities` | `(source_hash, entity_id)`; carries `chunk_index` to `chunks` | raw |
+| `graph_edges` | `source_hash` + `source_id` / `target_id` to `enrichment_entities.entity_id` | raw |
+| `enrichment_doc` | `source_hash` (one row per document) | raw |
 | `enrichment_meta` | `source_hash` | none |
-| `entity_links` | `(source_hash, entity_id)` | raw |
-| `pii_spans` | `(source_hash, chunk_index)` | raw |
+| `entity_links` | `(source_hash, mention_start, mention_end)` to `enrichment_entities`; its `entity_id` is the reference-register id | raw |
+| `pii_spans` | `(source_hash, chunk_index)`; `entity_id` to `enrichment_entities` | raw |
 | `clean_text` | `(source_hash, chunk_index)` | masked |
-| `money_spans`, `money_columns` | `source_hash` plus the locus anchor (`elem_order` / `parent_elem_order`) | none |
+| `money_spans`, `money_columns` | `source_hash` plus the locus anchor (`start_char` / `elem_order` / `parent_elem_order`) | none |
 | `redactions`, `source_index` | `source_hash` | none |
 | `provenance` | `source_hash` | raw |
 
