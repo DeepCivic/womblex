@@ -85,6 +85,10 @@ ALL_COMMANDS = [
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="womblex", description="Document extraction pipeline")
     parser.add_argument("-v", "--verbose", action="store_true", help="Debug logging")
+    parser.add_argument(
+        "--log-format", choices=("text", "json"), default=None,
+        help="Log format (default: $WOMBLEX_LOG_FORMAT, else text); json emits one object per line",
+    )
     sub = parser.add_subparsers(dest="command")
 
     dispatch = {}
@@ -94,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
         dispatch[cmd.name] = cmd.handler
 
     args = parser.parse_args(argv)
-    setup_logging(args.verbose)
+    setup_logging(args.verbose, args.log_format)
 
     if args.command in dispatch:
         return dispatch[args.command](args)

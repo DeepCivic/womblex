@@ -1,6 +1,6 @@
 # Womblex as a backend subsystem — plan
 
-*Status: in progress (2026-09; A1, A2 and A3+A4 shipped). Sequenced as 13 merges; each lands on its own and updates this document's merge list as it ships.*
+*Status: in progress (2026-09; A1, A2, A3+A4 and A5 shipped). Sequenced as 13 merges; each lands on its own and updates this document's merge list as it ships.*
 
 ## Context
 Womblex is to serve other software in two modes:
@@ -73,7 +73,7 @@ Cross-link it from `docs/egress.md` and `docs/extraction.md`.
 - Add a deprecation policy section to `docs/contract.md`: one minor release with a warning before removal. Add a CHANGELOG note.
 
 ### A5. Structured logging
-`cli/_shared.setup_logging` gains `--log-format json` (and env `WOMBLEX_LOG_FORMAT`):
+`cli/_shared.setup_logging` gains `--log-format json` (and env `WOMBLEX_LOG_FORMAT`). Shipped as a top-level `womblex --log-format` flag; the worker and `womblex run` attach context via `utils/log_format.log_context`:
 - It uses a stdlib-only JSON formatter, with no new dependency.
 - It carries `run_id`, `job_id`, `stage` and `source_hash` through `extra=`.
 - The worker (`cloud/worker.py`) and `capture_batch_log` (`utils/run_log.py`) pass that context.
@@ -152,7 +152,7 @@ Each merge must be under 500 lines. Split further if needed.
 1. A1 contract version + sensitivity footers — **shipped (#114)**
 2. A2 `content_digest` + FR section 8 contract — **shipped**
 3. A3 + A4 contract doc + public `__all__` — **shipped**
-4. A5 JSON logging
+4. A5 JSON logging — **shipped**
 5. U1 retire the location override
 6. U2 retire the feedback action
 7. B1 extract `cloud/dispatch.py`

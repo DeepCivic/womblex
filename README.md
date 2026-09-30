@@ -278,6 +278,9 @@ womblex worker --store s3://womblex --ingest s3://womblex/inbox \
     --config configs/example.yaml \
     --stale-timeout 900            # requeue batches orphaned by crashed workers
 
+#    For log aggregation, put `--log-format json` before the subcommand (or set
+#    WOMBLEX_LOG_FORMAT=json): one JSON object per line with run_id/job_id/stage.
+
 # 3. Watch progress.
 womblex jobs --run-id <run_id>     # pending/running/done/failed counts
 
