@@ -73,7 +73,7 @@ Cross-link it from `docs/egress.md` and `docs/extraction.md`.
 - Add a deprecation policy section to `docs/contract.md`: one minor release with a warning before removal. Add a CHANGELOG note.
 
 ### A5. Structured logging
-`cli/_shared.setup_logging` gains (shipped as a top-level `womblex --log-format` flag; the worker and `womblex run` attach context via `utils/log_format.log_context`) `--log-format json` (and env `WOMBLEX_LOG_FORMAT`):
+`cli/_shared.setup_logging` gains `--log-format json` (and env `WOMBLEX_LOG_FORMAT`). Shipped as a top-level `womblex --log-format` flag; the worker and `womblex run` attach context via `utils/log_format.log_context`:
 - It uses a stdlib-only JSON formatter, with no new dependency.
 - It carries `run_id`, `job_id`, `stage` and `source_hash` through `extra=`.
 - The worker (`cloud/worker.py`) and `capture_batch_log` (`utils/run_log.py`) pass that context.
