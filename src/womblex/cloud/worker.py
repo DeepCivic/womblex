@@ -29,6 +29,7 @@ from womblex.config import WomblexConfig
 from womblex.store.remote import RemoteStore, same_location
 from womblex.store.run_stamp import RunStamp
 from womblex.store.source_provenance import IngestProvenance
+from womblex.utils.log_format import log_context
 from womblex.utils.run_log import capture_batch_log
 
 logger = logging.getLogger(__name__)
@@ -110,7 +111,8 @@ def _process_job(
         root = Path(tmp)
         log_path = root / f"{_log_name(job)}.log"
         try:
-            with capture_batch_log(log_path):
+            with log_context(run_id=job.run_id, job_id=job.id, stage=job.stage), \
+                    capture_batch_log(log_path):
                 if job.kind == "stage":
                     _run_stage(job, config, store)
                 else:

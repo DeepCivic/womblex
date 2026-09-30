@@ -144,6 +144,7 @@ womblex/
 │       ├── models.py        # Local model path resolution (models/ dir, HF snapshot layout) + load record with byte digests
 │       ├── checksum.py      # Shared streamed MD5 helper for the standalone register ingests
 │       ├── isaacus_client.py # Build the Isaacus SDK client (hosted API or private SageMaker)
+│       ├── log_format.py    # JsonFormatter + log_context for --log-format json (run_id/job_id/stage/source_hash)
 │       ├── token_packer.py  # TokenCounter, pack_by_tokens, split_on_boundaries for token-budgeted API batching
 │       └── availability.py  # isaacus_available() gates API stages (enrich/embed, AI chunking); tokenizer_available() gates offline token chunking on the vendored tokeniser
 ├── tests/

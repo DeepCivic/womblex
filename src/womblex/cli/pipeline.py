@@ -53,6 +53,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     from womblex.store.run_stamp import RunStamp
     from womblex.store.shard_audit import reconcile_checkpoint_with_shards
     from womblex.store.source_provenance import IngestProvenance
+    from womblex.utils.log_format import log_context
     from womblex.utils.run_log import capture_batch_log
 
     config = load_config(args.config)
@@ -199,7 +200,8 @@ def cmd_run(args: argparse.Namespace) -> int:
             batch_num, len(batch_files), i + 1, min(i + batch_size, total_files), total_files,
         )
 
-        with capture_batch_log(logs_dir / f"batch-{batch_num:04d}.log"):
+        with log_context(run_id=run_id, stage="extract"), \
+                capture_batch_log(logs_dir / f"batch-{batch_num:04d}.log"):
             outcome = process_batch(
                 batch_files, config, batch_num=batch_num, shard_dir=shard_dir,
                 provenance=provenance, stamp=stamp,

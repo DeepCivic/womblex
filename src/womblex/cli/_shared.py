@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path, PurePosixPath
 from typing import NamedTuple
@@ -21,8 +22,22 @@ class Command(NamedTuple):
     handler: Callable[[argparse.Namespace], int]
 
 
-def setup_logging(verbose: bool = False) -> None:
+LOG_FORMATS = ("text", "json")
+
+
+def setup_logging(verbose: bool = False, log_format: str | None = None) -> None:
+    """Configure logging; *log_format* falls back to ``WOMBLEX_LOG_FORMAT``, then text."""
+    fmt = (log_format or os.environ.get("WOMBLEX_LOG_FORMAT") or "text").lower()
+    if fmt not in LOG_FORMATS:
+        raise ValueError(f"unknown log format {fmt!r}; expected one of {LOG_FORMATS}")
     level = logging.DEBUG if verbose else logging.INFO
+    if fmt == "json":
+        from womblex.utils.log_format import JsonFormatter
+
+        handler = logging.StreamHandler()
+        handler.setFormatter(JsonFormatter())
+        logging.basicConfig(level=level, handlers=[handler], force=True)
+        return
     logging.basicConfig(
         level=level,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",

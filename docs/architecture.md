@@ -119,6 +119,7 @@ src/womblex/
 │   ├── tabular_metrics.py # Tabular extraction accuracy (structural fidelity, data integrity, key preservation)
 │   ├── checksum.py        # Shared streamed MD5 helper for the standalone register ingests
 │   ├── isaacus_client.py  # Build the Isaacus SDK client (hosted API or private SageMaker)
+│   ├── log_format.py      # JSON-lines log formatter + log_context (--log-format json)
 │   └── token_packer.py    # Token-budgeted batching for enrichment API calls
 ├── profile/               # Column schema inference (womblex profile subcommand)
 ├── score.py               # Labels-vs-parquet CER scoring (womblex score subcommand)
