@@ -314,7 +314,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 
 - The console binds to exactly one run source at construction (local output root or store URI) so no endpoint can be steered to read an unmounted directory.
 - A persistent top bar (global search, run selector, execution controls) and a side-nav rail route between the Dashboard, Corpus Inspector, Semantic Chunk Inspector, Pipeline Composer, and Resources Console.
-- The console is a reader over persisted artefacts and never edits a stage output; its only writable surfaces are dispatch, location/preset saving, and the report action.
+- The console is a reader over persisted artefacts and never edits a stage output; its only writable surfaces are dispatch and preset saving.
 - Dispatch requires a store, an ingest location, and a job queue to be configured; a console missing any of these still serves the full inspection surface (it simply cannot enqueue work).
 - A bare install with no SvelteKit build still serves the read API; the SPA is mounted only when a build exists alongside it.
 
@@ -395,23 +395,21 @@ the adjacent concerns and should be consulted rather than duplicated here:
 - Enqueuing an extraction run and dispatching downstream stages call the same enabled-stage gate and queue-enqueue paths as the equivalent CLI commands, and dispatch is idempotent per `(run_id, stage)`.
 - Which downstream stages run is decided server-side (never re-derived in the frontend); the result panel reports what was dispatched in claim order, and irreversible or run-scoped stages (PII, quality) remain undispatchable.
 
-## 20. Resources Console — Connections and Reporting
+## 20. Resources Console — Connections
 
 **As** a user,
-**I want** connection cards for the store, ingest, queue, and enrichment service with reachability tests and a credential-safe reporting action,
-**so that** I can confirm the environment is wired correctly and flag bad records without exposing secrets.
+**I want** connection cards for the store, ingest, queue, and enrichment service with reachability tests,
+**so that** I can confirm the environment is wired correctly without exposing secrets.
 
 **Given** the deployment's configured store, ingest, queue, and Isaacus connections
-**When** the operator opens the Resources Console or files a report on a record
-**Then** each connection is shown as a credential-masked card with a live "Test" action, and a report appends a note to an append-only feedback log.
+**When** the operator opens the Resources Console
+**Then** each connection is shown as a credential-masked card with a live "Test" action.
 
 **Acceptance criteria:**
 
 - Four connection cards (store, ingest, queue, Isaacus) render deployment configuration, not any single run's artefacts.
 - Connection strings are shown with secrets masked (never rendered in full in the DOM or a copy buffer), and each card offers a live reachability test.
 - The store and ingest locations are deploy-time configuration (flags / env) and are shown read-only, as are the queue and Isaacus cards; an empty worker fleet is a normal resting state rather than an error.
-- The report action files a reviewer's note plus the record to an append-only feedback log stored as a sibling of the runs, never inside one, confirmed by a toast rather than a modal.
-- Reporting a record leaves its appearance unchanged — a report is an observation, not a state change.
 
 ## 21. Console Design System and Accessibility
 

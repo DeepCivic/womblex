@@ -88,7 +88,7 @@ cloud = []
 # Console sidecar - pip install womblex[ui]
 # `womblex ui` serves an API over the artefacts the pipeline writes and lets an
 # operator act on the deployment (the Pipeline Composer dispatches runs into
-# the queue; feedback/presets are filed into the store). fastapi + uvicorn and
+# the queue; presets are filed into the store). fastapi + uvicorn and
 # nothing else: the console adds no pipeline logic, so it stays as CPU-light as
 # the worker it sits beside. Reading a *distributed* run's object storage needs
 # fsspec + s3fs, which are now core — so a bare `womblex[ui]` console reads an

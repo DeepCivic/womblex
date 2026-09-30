@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from womblex.ui.deps import UISettings
-from womblex.ui.routes import composer, dashboard, execute, feedback, resources, runs
+from womblex.ui.routes import composer, dashboard, execute, resources, runs
 
 # `ui/` is not vendored into the wheel — only Dockerfile.ui's builder stage
 # produces this directory, at the container's WORKDIR. Resolved from cwd
@@ -27,7 +27,6 @@ def create_app(
     *,
     output_root: Path | None = None,
     store_uri: str | None = None,
-    feedback_dir: Path | None = None,
     db_dsn: str | None = None,
     presets_dir: Path | None = None,
     ingest_uri: str | None = None,
@@ -40,10 +39,6 @@ def create_app(
     ``ValueError`` otherwise. Binding at construction rather than per request
     is what keeps the run source out of the URL space — no endpoint can be
     talked into reading a directory the operator did not mount.
-
-    ``feedback_dir`` overrides where local-mode report-action files land
-    (default ``<output_root>/feedback``); see ``UISettings``. Ignored in
-    remote mode, which always uses the store's own ``feedback/`` prefix.
 
     ``db_dsn`` is the optional job queue the Dashboard reads. Omitted means
     no queue, which is a normal local deployment — the dashboard falls back
@@ -63,13 +58,12 @@ def create_app(
     """
     settings = UISettings(
         output_root=output_root, store_uri=store_uri,
-        feedback_dir=feedback_dir, db_dsn=db_dsn,
+        db_dsn=db_dsn,
         presets_dir=presets_dir, ingest_uri=ingest_uri,
     )
     app = FastAPI(title="Womblex Console")
     app.state.settings = settings
     app.include_router(runs.router)
-    app.include_router(feedback.router)
     app.include_router(dashboard.router)
     app.include_router(composer.router)
     app.include_router(resources.router)

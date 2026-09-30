@@ -4,11 +4,11 @@ config validation (docs/ui-plan.md merge 9).
 The read surface (`graph`, `schema`, `validate`, `yaml`, `GET /presets`) touches
 no run and no filesystem — it builds a `WomblexConfig` in memory. Saving a
 preset is the one write: `POST`/`DELETE /presets` file one JSON per preset —
-under the store's own `presets/` prefix in remote mode (a sibling of `runs/`
-and `feedback/`, so no writable mount), or a local `presets_dir`. They refuse
+under the store's own `presets/` prefix in remote mode (a sibling of `runs/`,
+so no writable mount), or a local `presets_dir`. They refuse
 with 409 where the console cannot write (local mode with no presets dir), like
 the Execution Controls without a queue. `readers` owns the local-vs-store
-split, as it does for feedback.
+split.
 """
 from __future__ import annotations
 
@@ -78,7 +78,7 @@ def post_preset(
     """Save *body* as a named preset (docs/ui-plan.md merge 9).
 
     Remote mode writes to the store's own ``presets/`` prefix (a sibling of
-    ``runs/`` and ``feedback/``), so a store-backed console always saves and
+    ``runs/``), so a store-backed console always saves and
     needs no writable mount. Local mode needs a writable ``presets_dir``:
     409 when none is configured (wire up `--presets-dir` /
     `$WOMBLEX_UI_PRESETS_DIR`). 400 on an unsafe name or a config that would

@@ -258,7 +258,7 @@ services:
   # workers publish to (the shared cloud-env anchor supplies WOMBLEX_STORE_URI,
   # the run source the CLI resolves when neither --output-root nor --store is
   # passed) AND acts on the deployment — the Pipeline Composer dispatches runs
-  # into the queue, and it files feedback/presets into the store.
+  # into the queue, and it files presets into the store.
   #
   # Depends on postgres AND minio being *healthy*, not just createbuckets: the
   # console advertises WOMBLEX_DB_DSN (the queue the Dashboard and Execution
@@ -290,8 +290,8 @@ services:
     ports:
       - "8080:8080"
     # The console reads artefacts and writes nothing to its own image: run
-    # requests land in the store, feedback and presets on the store's own
-    # prefixes. The one exception is a tmpfs for /tmp, where a store-backed
+    # requests land in the store, presets on the store's own
+    # prefix. The one exception is a tmpfs for /tmp, where a store-backed
     # read stages the parquet it is about to open.
     read_only: true
     tmpfs:

@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, cast
 from womblex.cloud.stage_contracts import STAGE_CONTRACTS
 from womblex.pipeline_order import sort_by_pipeline
 from womblex.store.checkpoint import CHECKPOINT_GLOB, CheckpointProgress, read_checkpoints
-from womblex.store.feedback_output import is_safe_run_id
+from womblex.store.retention import is_safe_run_id
 from womblex.ui.deps import UISettings
 
 if TYPE_CHECKING:

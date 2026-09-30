@@ -54,8 +54,8 @@ from womblex.store.egress_output import (
     raw_key_for,
     write_source_index,
 )
-from womblex.store.feedback_output import is_safe_run_id
 from womblex.store.remote import RemoteStore
+from womblex.store.retention import is_safe_run_id
 from womblex.store.run_manifest import RUN_MANIFEST_FILENAME
 from womblex.store.run_stamp import stamp_from_footers
 from womblex.store.source_resolver import (

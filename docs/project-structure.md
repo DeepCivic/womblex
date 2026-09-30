@@ -102,7 +102,6 @@ womblex/
 │   │   ├── quality_output.py     # *.chunk_quality.parquet schema + IO
 │   │   ├── money_output.py  # *.money_spans.parquet (decimal128 values) + *.money_columns.parquet schemas + IO
 │   │   ├── provenance_output.py  # *.provenance.parquet sidecar + manifest for pre-extracted-record corpora
-│   │   ├── feedback_output.py    # One-file-per-report console feedback records (JSON, not parquet)
 │   │   ├── ground_truth_output.py  # Ground-truth *.meta.json sidecar: schema, validation, unit-id, IO (JSON, not parquet)
 │   │   ├── source_provenance.py  # Ingest root + source relpath, and their womblex.* Parquet footer keys
 │   │   ├── source_resolver.py    # SourceResolver — resolve a published row's source_hash back to its source file
@@ -115,7 +114,7 @@ womblex/
 │   │   ├── run_manifest.py  # Consolidate per-batch manifests into a run-root manifest.parquet + the run record in its footer
 │   │   ├── register_manifest.py  # Manifest for standalone register ingests (G-NAF/ABN/geospatial)
 │   │   ├── remote.py        # fsspec stage-in/stage-out object-storage adapter for distributed runs
-│   │   ├── retention.py     # run_id-based retention policy + describe_run() (doc count, stages, timestamps)
+│   │   ├── retention.py     # run_id-based retention policy + describe_run() (doc count, stages, timestamps) + is_safe_run_id (run-root join containment)
 │   │   └── checkpoint.py    # Per-stage CheckpointManager
 │   ├── cloud/                  # Distributed run support — `womblex-cloud` counterpart to local `womblex run`
 │   │   ├── queue.py            # JobQueue — Postgres FOR UPDATE SKIP LOCKED batch queue
@@ -124,8 +123,8 @@ womblex/
 │   │   └── stage_runner.py     # Execute a contract against an object store
 │   ├── ui/                     # Console sidecar (`womblex ui`) — FastAPI over pipeline artefacts; reads runs, never writes to one
 │   │   ├── app.py              # create_app() — binds one run source for the app's lifetime
-│   │   ├── deps.py             # UISettings — local output_root vs store-backed (+ optional queue/feedback/presets dirs), resolved from args/env
-│   │   ├── readers.py          # Thin pyarrow readers + feedback/preset writers, local and store-backed, over the same store/ modules
+│   │   ├── deps.py             # UISettings — local output_root vs store-backed (+ optional queue/presets dirs), resolved from args/env
+│   │   ├── readers.py          # Thin pyarrow readers + preset writers, local and store-backed, over the same store/ modules
 │   │   ├── dashboard.py        # Queue + per-stage checkpoint views for GET /api/dashboard
 │   │   ├── composer.py         # Stage-graph, config JSON Schema, validate + YAML render for the Pipeline Composer
 │   │   ├── presets.py          # Named pipeline presets — built-in (DEFAULT-Isaacus) + operator-saved (format: filename/bytes/parse)
@@ -133,7 +132,6 @@ womblex/
 │   │   ├── resources.py        # Store / queue / Isaacus connection cards + live test actions
 │   │   └── routes/
 │   │       ├── runs.py         # /api/runs — manifest, stage-presence, audit, chunk detail
-│   │       ├── feedback.py     # POST /api/runs/{run_id}/feedback — the report action (writes a feedback/ sibling)
 │   │       ├── dashboard.py    # GET /api/dashboard — queue state + per-stage progress
 │   │       ├── composer.py     # /api/composer — graph, schema, validate, yaml, GET/POST/DELETE presets (presets/ sibling)
 │   │       ├── resources.py    # /api/resources — connection cards + test/store, test/queue
