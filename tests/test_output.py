@@ -362,6 +362,22 @@ def test_content_digest_changes_with_content():
     assert content_digest([a]) == content_digest([Element(kind="paragraph", order=0, extractor="t", text="alpha")])
 
 
+def test_content_digest_covers_sheet_cells_and_meta():
+    from womblex.ingest.elements import Element
+    from womblex.store.content_digest import content_digest
+
+    def cell(value: str) -> Element:
+        return Element(kind="sheet_cell", order=0, extractor="xlsx", sheet="S", row=1, col=0, value=value)
+
+    assert content_digest([cell("100")]) != content_digest([cell("999")])
+    m1 = Element(kind="sheet_meta", order=0, extractor="xlsx", sheet="S", meta={"preamble": "a"})
+    m2 = Element(kind="sheet_meta", order=0, extractor="xlsx", sheet="S", meta={"preamble": "b"})
+    assert content_digest([m1]) != content_digest([m2])
+    t1 = Element(kind="table", order=0, extractor="t", cells=[], header_rows=[0])
+    t2 = Element(kind="table", order=0, extractor="t", cells=[], header_rows=[1])
+    assert content_digest([t1]) != content_digest([t2])
+
+
 def test_manifest_without_content_digest_reads_back_null(tmp_path):
     shard = tmp_path / "batch-0001._manifest.parquet"
     legacy = pa.schema([f for f in MANIFEST_SCHEMA if f.name != "content_digest"])

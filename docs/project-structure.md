@@ -110,7 +110,7 @@ womblex/
 │   │   ├── egress.py             # build_bundle() — export one finished local run's corpus + resolved raw sources to any RemoteStore destination (contract: docs/egress.md)
 │   │   ├── build_info.py    # BuildInfo — package version + source commit, or unavailable with a reason
 │   │   ├── run_stamp.py     # RunStamp — run id / version / commit / config digest / stage / preset (config name) / loaded models, as womblex.* footer keys
-│   │   ├── content_digest.py # content_digest(elements): the manifest's determinism handle (kind / order / text / cells / fields)
+│   │   ├── content_digest.py # content_digest(elements): the manifest's determinism handle (kind / order / text / cells / fields / sheet cells / meta)
 │   │   ├── contract.py      # womblex.contract_version + womblex.sensitivity (raw / masked / none) footer keys, on every pipeline Parquet
 │   │   ├── run_manifest.py  # Consolidate per-batch manifests into a run-root manifest.parquet + the run record in its footer
 │   │   ├── register_manifest.py  # Manifest for standalone register ingests (G-NAF/ABN/geospatial)
