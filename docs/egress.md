@@ -6,6 +6,9 @@ run plus its raw source documents to a destination as a single on-disk
 *bundle*; Numbatch reads a bundle for its data-team review panel; Echidnet
 consumes a bundle's extracted corpus with no code change.
 
+The per-file contract version, sensitivity labels and join keys are in
+[contract.md](contract.md).
+
 ## The bundle layout
 
 Defined once by Womblex, read by both consumers:

@@ -1,0 +1,56 @@
+"""The declared public Python API: pinned names, lazy, all resolvable."""
+
+from __future__ import annotations
+
+import subprocess
+import sys
+
+import pytest
+
+import womblex
+
+PINNED = [
+    "CONTRACT_VERSION",
+    "__version__",
+    "build_bundle",
+    "chunk_shards",
+    "embed_shards",
+    "enrich_shards",
+    "extract_text",
+    "link_shards",
+    "money_shards",
+    "normalise_shards",
+    "pii_shards",
+    "quality_shards",
+    "read_results",
+    "run_chunking",
+    "run_enrichment",
+    "run_extraction",
+    "run_pii_cleaning",
+    "run_redaction",
+    "spellfix_shards",
+    "write_run_manifest",
+]
+
+
+def test_all_is_pinned() -> None:
+    assert sorted(womblex.__all__) == PINNED
+
+
+@pytest.mark.parametrize("name", PINNED)
+def test_every_exported_name_resolves(name: str) -> None:
+    assert getattr(womblex, name) is not None
+
+
+def test_unknown_attribute_raises() -> None:
+    with pytest.raises(AttributeError):
+        womblex.not_a_thing  # noqa: B018
+
+
+def test_import_does_not_load_the_heavy_modules() -> None:
+    code = "import sys, womblex; sys.exit(int('fitz' in sys.modules or 'pyarrow' in sys.modules))"
+    assert subprocess.run([sys.executable, "-c", code], check=False).returncode == 0
+
+
+def test_all_matches_the_lazy_export_table() -> None:
+    assert sorted(womblex.__all__) == sorted(["__version__", *womblex._EXPORTS])

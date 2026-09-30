@@ -1,6 +1,6 @@
 # Womblex as a backend subsystem — plan
 
-*Status: in progress (2026-09; A1 and A2 shipped). Sequenced as 13 merges; each lands on its own and updates this document's merge list as it ships.*
+*Status: in progress (2026-09; A1, A2 and A3+A4 shipped). Sequenced as 13 merges; each lands on its own and updates this document's merge list as it ships.*
 
 ## Context
 Womblex is to serve other software in two modes:
@@ -66,7 +66,7 @@ Cross-link it from `docs/egress.md` and `docs/extraction.md`.
   - `extract_text`;
   - the `operations.run_*` functions;
   - the `*_shards` stage functions;
-  - `build_bundle`, `write_run_manifest`, `read_results`;
+  - `build_bundle`, `write_run_manifest`, `read_results` (an existing alias of `read_elements`);
   - `CONTRACT_VERSION`.
   Use lazy imports so `import womblex` stays cheap.
 - Add a test pinning `__all__`.
@@ -151,7 +151,7 @@ Each merge must be under 500 lines. Split further if needed.
 
 1. A1 contract version + sensitivity footers — **shipped (#114)**
 2. A2 `content_digest` + FR section 8 contract — **shipped**
-3. A3 + A4 contract doc + public `__all__`
+3. A3 + A4 contract doc + public `__all__` — **shipped**
 4. A5 JSON logging
 5. U1 retire the location override
 6. U2 retire the feedback action
