@@ -8,22 +8,13 @@ variable ``womblex-cloud`` already reads.
 """
 from __future__ import annotations
 
-import logging
 import os
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
 
 from fastapi import Request
 
 from womblex.store.remote import assert_disjoint_locations
-from womblex.ui.settings_store import SavedLocations, locations_path, read_saved_locations
-
-logger = logging.getLogger(__name__)
-
-#: Sentinel for "no mtime checked yet" — distinct from ``None`` (the file is
-#: absent) so the very first request always rebuilds the overlay once.
-_UNSET = object()
 
 
 @dataclass(frozen=True)
@@ -58,12 +49,6 @@ class UISettings:
     cannot dispatch; everything read-only still serves. When both are set they
     must be disjoint of the output store's effective ``runs/`` prefix,
     enforced here at construction.
-
-    ``settings_dir`` holds an operator-saved location override — one
-    ``locations.json``, mirroring ``presets_dir``. ``None`` keeps the
-    Resources Console's location cards read-only. Unlike ``presets_dir``
-    there is no remote-mode fallback: the override file is what *names* the
-    store, so it cannot live inside it.
     """
 
     output_root: Path | None
@@ -72,8 +57,6 @@ class UISettings:
     db_dsn: str | None = None
     presets_dir: Path | None = None
     ingest_uri: str | None = None
-    settings_dir: Path | None = None
-    s3_credentials: tuple[str, str] | None = None
 
     def __post_init__(self) -> None:
         if bool(self.output_root) == bool(self.store_uri):
@@ -95,37 +78,6 @@ class UISettings:
         """
         return self.is_remote or self.presets_dir is not None
 
-    @property
-    def settings_writable(self) -> bool:
-        """Whether this deployment can save an ingest/output location override.
-
-        Needs a configured ``settings_dir`` in *either* mode — remote or
-        local — since the override is what names the store itself.
-        """
-        return self.settings_dir is not None
-
-
-def apply_saved_locations(base: UISettings, saved: SavedLocations) -> UISettings:
-    """*base* with a saved ingest/output override layered on top.
-
-    A saved ``store_uri`` clears ``output_root``, keeping the XOR invariant.
-    Going through ``dataclasses.replace`` re-runs ``__post_init__``, so
-    disjointness is revalidated against the *effective* pair rather than the
-    flag/env values alone. A saved S3 credential pair (both key and secret)
-    layers on too, so the console's own store reads use it over the env.
-    """
-    output_root = base.output_root
-    store_uri = base.store_uri
-    if saved.store_uri:
-        store_uri = saved.store_uri
-        output_root = None
-    ingest_uri = saved.ingest_uri or base.ingest_uri
-    s3_credentials = saved.s3_credentials() or base.s3_credentials
-    return replace(
-        base, output_root=output_root, store_uri=store_uri, ingest_uri=ingest_uri,
-        s3_credentials=s3_credentials,
-    )
-
 
 def resolve_settings(
     output_root: Path | None,
@@ -135,7 +87,6 @@ def resolve_settings(
     db_dsn: str | None = None,
     presets_dir: Path | None = None,
     ingest_uri: str | None = None,
-    settings_dir: Path | None = None,
 ) -> UISettings:
     """Resolve settings from explicit arguments, falling back to env vars.
 
@@ -159,12 +110,6 @@ def resolve_settings(
     variable ``womblex enqueue``/``worker`` read. Absent means no ingest is
     configured. When resolved alongside a store, ``UISettings`` itself checks
     the two are disjoint and raises ``ValueError`` naming both.
-
-    ``$WOMBLEX_UI_SETTINGS_DIR`` is the env fallback for ``settings_dir``.
-    A saved override is validated here — a bad one fails at start-up, naming
-    the file to delete — but the settings returned are the *pre-overlay*
-    base; :func:`get_settings` applies the live override per request, which
-    is what lets an edit take effect with no restart.
     """
     root = output_root
     if root is None and "WOMBLEX_UI_OUTPUT_ROOT" in os.environ:
@@ -185,64 +130,13 @@ def resolve_settings(
     if presets is None and "WOMBLEX_UI_PRESETS_DIR" in os.environ:
         presets = Path(os.environ["WOMBLEX_UI_PRESETS_DIR"])
     ingest = ingest_uri or os.environ.get("WOMBLEX_INGEST_URI")
-    settings = settings_dir
-    if settings is None and "WOMBLEX_UI_SETTINGS_DIR" in os.environ:
-        settings = Path(os.environ["WOMBLEX_UI_SETTINGS_DIR"])
-    base = UISettings(
+    return UISettings(
         output_root=root, store_uri=store,
         feedback_dir=fb_dir, db_dsn=dsn, presets_dir=presets, ingest_uri=ingest,
-        settings_dir=settings,
     )
-    if settings is not None:
-        try:
-            apply_saved_locations(base, read_saved_locations(settings))
-        except ValueError as e:
-            raise ValueError(
-                f"{e} — this came from the saved override at "
-                f"{locations_path(settings)}; delete that file to reset to the "
-                "flag/env defaults."
-            ) from e
-    return base
 
 
 def get_settings(request: Request) -> UISettings:
-    """FastAPI dependency: this deployment's settings, re-resolved per request.
-
-    ``app.state.settings`` holds the base (flags + env). When a settings dir
-    is configured the override file's mtime is checked and the overlay
-    rebuilt only when it changed, so an edit takes effect on the next request
-    at the cost of one ``stat()`` on every other.
-    """
-    base: UISettings = request.app.state.settings
-    if base.settings_dir is None:
-        return base
-    state = request.app.state
-    path = locations_path(base.settings_dir)
-    try:
-        mtime: float | None = path.stat().st_mtime
-    except OSError:
-        mtime = None
-    if getattr(state, "_locations_mtime", _UNSET) != mtime:
-        saved = read_saved_locations(base.settings_dir)
-        try:
-            state._resolved_settings = apply_saved_locations(base, saved)
-        except ValueError as e:
-            # Same skip-and-continue as an unparseable file: an override that
-            # no longer validates (the flags it was saved against changed, or
-            # it was hand-edited) must degrade to the flag/env defaults, not
-            # 500 every request until someone deletes it off the volume.
-            logger.warning("deps: saved locations at %s rejected, serving defaults: %s", path, e)
-            state._resolved_settings = base
-        state._locations_mtime = mtime
-    return cast(UISettings, state._resolved_settings)
-
-
-def get_base_settings(request: Request) -> UISettings:
-    """FastAPI dependency: the flags/env settings this process started with.
-
-    The fallback a cleared location resets *to*, and what
-    ``resources.save_locations`` validates a new override against. Every
-    other route wants :func:`get_settings`.
-    """
+    """FastAPI dependency: this deployment's settings (flags + env at start-up)."""
     settings: UISettings = request.app.state.settings
     return settings

@@ -33,15 +33,9 @@ from typing import cast
 from urllib.parse import urlsplit, urlunsplit
 
 from womblex.config import EmbeddingConfig, EnrichmentConfig
-from womblex.store.remote import (
-    assert_disjoint_locations,
-    is_remote_uri,
-    storage_options_from_env,
-    validate_location_uri,
-)
+from womblex.store.remote import is_remote_uri, storage_options_from_env
 from womblex.ui import dashboard
-from womblex.ui.deps import UISettings, apply_saved_locations
-from womblex.ui.settings_store import SavedLocations, read_saved_locations, write_saved_locations
+from womblex.ui.deps import UISettings
 from womblex.utils.isaacus_client import (
     API_KEY_ENV,
     endpoints_from_env,
@@ -113,90 +107,39 @@ def _mask_dsn(dsn: str | None) -> str | None:
     return _KEYWORD_PASSWORD_RE.sub(r"\1***", dsn)
 
 
-def _store_options_summary(uri: str, credentials: tuple[str, str] | None = None) -> dict:
+def _store_options_summary(uri: str) -> dict:
     """AWS options `storage_options_from_env` would pass — presence, not values.
 
-    *credentials*, when given, is the operator-saved S3 override; it is folded
-    in the same way :func:`storage_options_from_env` folds it, so the card
-    reports ``credentials_configured`` true for a console whose keys come from
-    the saved override rather than the env. The values themselves never leave
-    this function — only whether a key/secret pair is present, where it came
-    from (``"saved"`` when the override supplied it, else ``"env"``), and the
-    access-key id masked to its last four characters for recognition.
+    The values themselves never leave this function — only whether a
+    key/secret pair is present and the access-key id masked to its last four
+    characters for recognition.
     """
-    opts = storage_options_from_env(uri, credentials=credentials)
+    opts = storage_options_from_env(uri)
     client_kwargs = opts.get("client_kwargs", {})
     configured = bool(opts.get("key") and opts.get("secret"))
     return {
         "credentials_configured": configured,
-        "credentials_source": (
-            "saved" if (credentials is not None and configured) else ("env" if configured else None)
-        ),
         "credentials_masked": _mask_secret(opts.get("key")) if configured else None,
         "endpoint_url": client_kwargs.get("endpoint_url"),
         "region": client_kwargs.get("region_name"),
     }
 
 
-def _location_source(configured_uri: str | None, saved_uri: str | None, env_uri: str | None) -> str:
-    """Where an effective location came from: saved override, env, or flag.
-
-    Checked highest-precedence first (flag < env < saved), so a saved value
-    matching the env default still reports ``"saved"`` — that is the source
-    an edit would update.
-    """
-    if configured_uri is None:
-        return "flag"
-    if saved_uri is not None and saved_uri == configured_uri:
-        return "saved"
-    if env_uri is not None and env_uri == configured_uri:
-        return "env"
-    return "flag"
-
-
-def _ingest_source(settings: UISettings) -> str:
-    saved = read_saved_locations(settings.settings_dir).ingest_uri if settings.settings_dir else None
-    return _location_source(settings.ingest_uri, saved, os.environ.get("WOMBLEX_INGEST_URI"))
-
-
-def _store_source(settings: UISettings) -> str:
-    """Where the effective output location came from.
-
-    ``output_root`` mode (the legacy local read-only tree) has no override
-    path at all — it can only come from ``--output-root`` /
-    ``$WOMBLEX_UI_OUTPUT_ROOT`` — so it is always reported as ``"flag"``.
-    """
-    if not settings.is_remote:
-        return "flag"
-    saved = read_saved_locations(settings.settings_dir).store_uri if settings.settings_dir else None
-    return _location_source(settings.store_uri, saved, os.environ.get("WOMBLEX_STORE_URI"))
-
-
 def get_store_card(settings: UISettings) -> dict:
-    """Where runs are read from, and how.
-
-    ``editable`` is just "this deployment has a writable settings dir" — true
-    in both branches, since saving a location is what switches a local
-    deployment into ``store_uri`` mode.
-    """
-    editable = settings.settings_writable
+    """Where runs are read from, and how."""
     if settings.is_remote:
         uri = cast(str, settings.store_uri)
         return {
             "kind": "remote",
             "uri": uri,
             "is_object_store": is_remote_uri(uri),
-            "options": _store_options_summary(uri, settings.s3_credentials),
-            "source": _store_source(settings),
-            "editable": editable,
+            "options": _store_options_summary(uri),
         }
     return {
         "kind": "local",
         "uri": str(cast(Path, settings.output_root)),
         "is_object_store": False,
         "options": {},
-        "source": "flag",
-        "editable": editable,
     }
 
 
@@ -235,20 +178,14 @@ def get_ingest_card(settings: UISettings) -> dict:
     Unlike the store card, ingest is optional, so ``configured`` is the
     first thing the card reports rather than assuming one of two shapes.
     """
-    editable = settings.settings_writable
     if not settings.ingest_uri:
-        return {
-            "configured": False, "uri": None, "is_object_store": False, "options": {},
-            "source": "flag", "editable": editable,
-        }
+        return {"configured": False, "uri": None, "is_object_store": False, "options": {}}
     uri = settings.ingest_uri
     return {
         "configured": True,
         "uri": uri,
         "is_object_store": is_remote_uri(uri),
-        "options": _store_options_summary(uri, settings.s3_credentials),
-        "source": _ingest_source(settings),
-        "editable": editable,
+        "options": _store_options_summary(uri),
     }
 
 
@@ -284,7 +221,7 @@ def test_store(settings: UISettings) -> dict:
     try:
         from womblex.store.remote import RemoteStore
 
-        RemoteStore.from_uri(uri, credentials=settings.s3_credentials).list_dirs("runs")
+        RemoteStore.from_uri(uri).list_dirs("runs")
     except Exception as e:
         logger.warning("resources: store unreachable: %s", e)
         return {"reachable": False, "error": str(e)}
@@ -303,7 +240,7 @@ def test_ingest(settings: UISettings) -> dict:
     try:
         from womblex.store.remote import RemoteStore
 
-        RemoteStore.from_uri(uri, credentials=settings.s3_credentials).list_files("", "*")
+        RemoteStore.from_uri(uri).list_files("", "*")
     except Exception as e:
         logger.warning("resources: ingest unreachable: %s", e)
         return {"reachable": False, "error": str(e)}
@@ -325,95 +262,3 @@ def test_queue(
         job_limit=job_limit,
     )
     return {"reachable": queue is not None, "error": error, "queue": queue}
-
-
-def save_locations(
-    base: UISettings,
-    *,
-    ingest_uri: str | None,
-    store_uri: str | None,
-    s3_access_key_id: str | None = None,
-    s3_secret_access_key: str | None = None,
-    clear_credentials: bool = False,
-) -> dict:
-    """Persist an ingest/output override and return the refreshed cards.
-
-    *base* is the pre-overlay settings (:func:`~womblex.ui.deps.get_base_settings`),
-    so a cleared field (``None``) falls back to the flag/env default rather
-    than to whatever was previously saved. A full replace (``PUT``), not a
-    merge — a caller keeping one field must resubmit its current value.
-
-    The S3 credential pair is the one exception to "full replace": the console
-    masks the saved secret in every response, so the frontend cannot resubmit
-    a secret it can no longer read. A save that omits both credential fields
-    therefore *keeps* whatever was saved (preserve-on-omit); passing both sets
-    a new pair; ``clear_credentials`` removes it and reverts to the env keys.
-    A half-set pair (one field only) is refused rather than half-stored.
-
-    Raises ``ValueError`` (→ 400) on a location a store cannot open, on a
-    pair that would overlap once effective, or on a half-set credential pair.
-    Reachability is *reported*, not required: naming a bucket ahead of
-    provisioning it is normal.
-    """
-    for value in (ingest_uri, store_uri):
-        if value is not None:
-            validate_location_uri(value)
-
-    effective_ingest = ingest_uri or base.ingest_uri
-    effective_store = store_uri or base.store_uri
-    if effective_ingest and effective_store:
-        assert_disjoint_locations(effective_ingest, effective_store)
-    elif effective_ingest and base.output_root is not None:
-        # Legacy output_root mode has no `runs/` prefix of its own, so the
-        # tree itself is the output — an ingest inside it still overlaps.
-        assert_disjoint_locations(effective_ingest, str(base.output_root), runs_prefix="")
-
-    settings_dir = cast(Path, base.settings_dir)
-    key, secret = _resolve_saved_credentials(
-        settings_dir,
-        s3_access_key_id=s3_access_key_id,
-        s3_secret_access_key=s3_secret_access_key,
-        clear_credentials=clear_credentials,
-    )
-    saved = SavedLocations(
-        ingest_uri=ingest_uri, store_uri=store_uri,
-        s3_access_key_id=key, s3_secret_access_key=secret,
-    )
-    write_saved_locations(settings_dir, saved)
-
-    refreshed = apply_saved_locations(base, saved)
-    return {
-        "ingest": get_ingest_card(refreshed),
-        "store": get_store_card(refreshed),
-        "ingest_test": test_ingest(refreshed),
-        "store_test": test_store(refreshed),
-    }
-
-
-def _resolve_saved_credentials(
-    settings_dir: Path,
-    *,
-    s3_access_key_id: str | None,
-    s3_secret_access_key: str | None,
-    clear_credentials: bool,
-) -> tuple[str | None, str | None]:
-    """The ``(key, secret)`` to persist, given the request and what was saved.
-
-    ``clear_credentials`` wins — both fields drop to ``None`` and the store
-    reverts to the env keys. A submitted pair (both fields) replaces the saved
-    one. Neither given keeps the saved pair intact (preserve-on-omit), because
-    the masked response the operator edited never carried the real secret back.
-    A half-set pair is a caller error, not a silent half-store.
-    """
-    if clear_credentials:
-        return None, None
-    if s3_access_key_id and s3_secret_access_key:
-        return s3_access_key_id, s3_secret_access_key
-    if s3_access_key_id or s3_secret_access_key:
-        raise ValueError(
-            "both s3_access_key_id and s3_secret_access_key are required to set a "
-            "credential override (pass neither to keep the saved pair, or "
-            "clear_credentials to remove it)"
-        )
-    previous = read_saved_locations(settings_dir)
-    return previous.s3_access_key_id, previous.s3_secret_access_key

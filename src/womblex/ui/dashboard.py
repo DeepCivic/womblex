@@ -211,9 +211,7 @@ def _stage_progress(settings: UISettings, run_id: str) -> list[dict]:
     if not is_safe_run_id(run_id):
         return []
     if settings.is_remote:
-        found = _remote_checkpoints(
-            cast(str, settings.store_uri), run_id, settings.s3_credentials
-        )
+        found = _remote_checkpoints(cast(str, settings.store_uri), run_id)
     else:
         run_dir = cast(Path, settings.output_root) / run_id
         found = {
@@ -227,9 +225,7 @@ def _stage_progress(settings: UISettings, run_id: str) -> list[dict]:
     ]
 
 
-def _remote_checkpoints(
-    store_uri: str, run_id: str, credentials: tuple[str, str] | None = None
-) -> dict[str, list[CheckpointProgress]]:
+def _remote_checkpoints(store_uri: str, run_id: str) -> dict[str, list[CheckpointProgress]]:
     """Stage each run's checkpoint JSONs into a temp dir and read them locally.
 
     Checkpoints are a few KB apiece, so this stays the same
@@ -238,7 +234,7 @@ def _remote_checkpoints(
     """
     from womblex.store.remote import RemoteStore
 
-    store: RemoteStore = RemoteStore.from_uri(store_uri, credentials=credentials)
+    store: RemoteStore = RemoteStore.from_uri(store_uri)
     if run_id not in store.list_dirs("runs"):
         return {}
     found: dict[str, list[CheckpointProgress]] = {}

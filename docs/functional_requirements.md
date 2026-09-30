@@ -409,7 +409,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 
 - Four connection cards (store, ingest, queue, Isaacus) render deployment configuration, not any single run's artefacts.
 - Connection strings are shown with secrets masked (never rendered in full in the DOM or a copy buffer), and each card offers a live reachability test.
-- The store and ingest locations are editable when a settings directory is configured; the queue and Isaacus cards stay read-only, and an empty worker fleet is a normal resting state rather than an error.
+- The store and ingest locations are deploy-time configuration (flags / env) and are shown read-only, as are the queue and Isaacus cards; an empty worker fleet is a normal resting state rather than an error.
 - The report action files a reviewer's note plus the record to an append-only feedback log stored as a sibling of the runs, never inside one, confirmed by a toast rather than a modal.
 - Reporting a record leaves its appearance unchanged — a report is an observation, not a state change.
 

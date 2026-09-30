@@ -7,18 +7,14 @@ separate ``POST /test/*`` action, matching the plan's "test actions" and
 letting a slow or dead connection block only the card the operator clicked,
 not the page load.
 
-``PUT /locations`` is the one write here: save, update or clear the operator
-override for the ingest/output cards. Guarded like dispatch is — 409 with no
-``--settings-dir`` — since editing where documents come from and shards land
-is dispatch-adjacent, not a pure read.
+Locations are deploy-time configuration (flags / env); nothing here writes them.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, Query
 
 from womblex.ui import dashboard, resources
-from womblex.ui.deps import UISettings, get_base_settings, get_settings
+from womblex.ui.deps import UISettings, get_settings
 
 router = APIRouter(prefix="/api/resources", tags=["resources"])
 
@@ -52,55 +48,3 @@ def post_test_queue(
     return resources.test_queue(
         settings, stale_after=stale_after, window_seconds=window_seconds, job_limit=job_limit,
     )
-
-
-class SaveLocationsRequest(BaseModel):
-    """The location-edit form — a full replace of the saved override.
-
-    Each location field is either a new location or ``null`` ("reset to the
-    flag/env default"). A ``PUT`` replaces the *whole* location override, so a
-    caller keeping a field must resubmit it.
-
-    The S3 credential pair is the exception, because the console masks the
-    saved secret in every response and the frontend cannot resubmit a secret
-    it can no longer read. Both fields omitted (the default) *keeps* whatever
-    credential override was saved; passing both sets a new pair;
-    ``clear_credentials`` removes it and reverts to the env keys. A half-set
-    pair is refused (400).
-    """
-
-    ingest_uri: str | None = None
-    store_uri: str | None = None
-    s3_access_key_id: str | None = None
-    s3_secret_access_key: str | None = None
-    clear_credentials: bool = False
-
-
-@router.put("/locations")
-def put_locations(
-    body: SaveLocationsRequest,
-    base: UISettings = Depends(get_base_settings),  # noqa: B008
-) -> dict:
-    """Save / update / clear the ingest and output location override.
-
-    409 when no ``--settings-dir`` (or ``$WOMBLEX_UI_SETTINGS_DIR``) is
-    configured, 400 on an overlapping ingest/output pair or a location
-    ``RemoteStore`` cannot open.
-    """
-    if not base.settings_writable:
-        raise HTTPException(
-            status_code=409,
-            detail="This console has no settings dir configured; location edits are "
-                   "disabled. Set --settings-dir (or $WOMBLEX_UI_SETTINGS_DIR) to edit them.",
-        )
-    try:
-        return resources.save_locations(
-            base,
-            ingest_uri=body.ingest_uri,
-            store_uri=body.store_uri,
-            s3_access_key_id=body.s3_access_key_id,
-            s3_secret_access_key=body.s3_secret_access_key,
-            clear_credentials=body.clear_credentials,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e

@@ -54,13 +54,6 @@ def _register_ui(p: argparse.ArgumentParser) -> None:
              "output. Without one, the Execution Controls can configure and "
              "audit but not dispatch.",
     )
-    p.add_argument(
-        "--settings-dir", type=Path, default=None,
-        help="Writable dir an operator-saved ingest/output location override "
-             "lives in (or $WOMBLEX_UI_SETTINGS_DIR). Without one, the "
-             "Resources Console's location cards are read-only and explain "
-             "the flag.",
-    )
 
 
 def cmd_ui(args: argparse.Namespace) -> int:
@@ -79,7 +72,7 @@ def cmd_ui(args: argparse.Namespace) -> int:
             args.output_root, args.store,
             feedback_dir=args.feedback_dir,
             db_dsn=args.dsn, presets_dir=args.presets_dir,
-            ingest_uri=args.ingest, settings_dir=args.settings_dir,
+            ingest_uri=args.ingest,
         )
     except ValueError as e:
         logger.error("%s", e)
@@ -92,7 +85,6 @@ def cmd_ui(args: argparse.Namespace) -> int:
         db_dsn=settings.db_dsn,
         presets_dir=settings.presets_dir,
         ingest_uri=settings.ingest_uri,
-        settings_dir=settings.settings_dir,
     )
     source = settings.store_uri or settings.output_root
     logger.info("womblex ui: serving %s on %s:%d", source, args.host, args.port)
