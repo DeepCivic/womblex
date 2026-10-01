@@ -208,6 +208,17 @@ def test_submit_without_an_ingest_location_is_503(tmp_path, monkeypatch):
     assert resp.status_code == 503
 
 
+def test_submit_with_the_queue_down_is_503(client, monkeypatch):
+    import psycopg
+
+    def refuse(*_a, **_kw):
+        raise psycopg.OperationalError("connection refused")
+
+    monkeypatch.setattr(queue_mod, "JobQueue", refuse)
+    resp = client.post("/v1/runs", headers=auth("ta"), json={"input_prefix": "alice/up1"})
+    assert resp.status_code == 503 and resp.json()["detail"] == "job queue unreachable"
+
+
 def test_files_list_keys_with_their_contract_footer(client, tmp_path):
     import pyarrow as pa
     import pyarrow.parquet as pq

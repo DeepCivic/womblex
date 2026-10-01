@@ -20,6 +20,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import cast
 
+import psycopg
 from fastapi import Depends, FastAPI, HTTPException, Response
 
 from womblex.api.auth import Caller, ClientRegistry, caller_dependency, require_scope
@@ -153,20 +154,31 @@ def create_api_app(
             if preset is None:
                 raise HTTPException(status_code=400, detail=f"unknown preset: {body.preset}")
             config = preset.config
+        run_id = mint_run_id()
+        written = False
         try:
             stages = dispatch.downstream_stages(settings, config) if config is not None else ()
             run = dispatch.enqueue_extraction(
-                settings, input_prefix=prefix, run_id=mint_run_id(),
+                settings, input_prefix=prefix, run_id=run_id,
                 batch_size=body.batch_size, owner=caller.owner,
             )
+            written = True
             if stages:
                 dispatch.enqueue_downstream_stages(
-                    settings, run_id=run.run_id, config=cast(dict, config), owner=caller.owner,
+                    settings, run_id=run_id, config=cast(dict, config), owner=caller.owner,
                 )
         except dispatch.ExecutionDisabled as e:
             raise HTTPException(status_code=503, detail=e.detail) from e
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
+        except psycopg.Error as e:
+            # Batch rows already committed are not rolled back: name the run so
+            # an operator can find it (or a caller can re-list it) after the outage.
+            logger.warning(
+                "api submit: queue unreachable: run_id=%s batches_written=%s: %s",
+                run_id, written, e,
+            )
+            raise HTTPException(status_code=503, detail="job queue unreachable") from e
         logger.info("api submit: run_id=%s owner=%s stages=%s", run.run_id, caller.owner, stages)
         return RunSubmitted(
             run_id=run.run_id, document_count=run.document_count,
