@@ -1,4 +1,4 @@
-"""``womblex serve``: the `/v1` service API (service plan B4a).
+"""``womblex serve``: the `/v1` service API (`docs/service-api.md`).
 
 Binds to loopback by default; exposing it is an explicit ``--host`` choice,
 and it is a private-network service either way. It refuses to start without a

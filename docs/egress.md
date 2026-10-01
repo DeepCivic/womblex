@@ -56,9 +56,9 @@ each other in any consumer with no call back to the producer.
 
 ## What Womblex does
 
-Womblex gains the producer half of the contract: an `egress` capability that
-takes one finalised **local** run and writes a bundle to any `RemoteStore`
-destination (local directory, S3, MinIO, GCS), then stops.
+Womblex implements the producer half of the contract: `egress` takes one
+finalised **local** run and writes a bundle to any `RemoteStore` destination
+(local directory, S3, MinIO, GCS), then stops.
 
 ### Modules
 
@@ -127,19 +127,15 @@ womblex egress <run> --to <dest> [--run-id ID] [--bundle-prefix PREFIX]
 `finalize` consolidates a run's manifest *in place*; `egress` *exports* a run
 to a destination.
 
-### Out of scope for v1
+### Out of scope
 
 Rendered page images. A consumer that wants pixels renders the raw file
 itself; the bundle carries raw plus extracted only.
 
-## Resolved review questions
+## Limitations
 
-Two questions were open while this contract was under review; both were
-resolved pragmatically for v1 and are settled unless Numbatch/Echidnet
-feedback disagrees:
-
-- Sources resolve via `SourceResolver` against a **local** run only — a run
-  ingested from an object store is refused before anything is written.
-- `source_index.parquet` keeps the four-status `SourceResolver` vocabulary
-  (plus `egress.py`'s own `upload_failed`), rather than a leaner
-  resolved/unresolved flag.
+- Sources resolve against a **local** run only. A run ingested from an object
+  store is refused before anything is written; stage it locally first.
+- `source_index.parquet` carries the four-status `SourceResolver` vocabulary
+  plus `upload_failed`, not a resolved/unresolved flag. A consumer that wants
+  the binary view treats every status but `resolved` as unresolved.

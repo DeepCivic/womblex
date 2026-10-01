@@ -1,4 +1,4 @@
-"""Queue dispatch shared by the console and the service API (service plan B1).
+"""Queue dispatch shared by the console and the service API (`docs/service-api.md`).
 
 The two write actions that put work on the queue — plan an extraction run
 (:func:`enqueue_extraction`) and dispatch a run's downstream stages

@@ -1,4 +1,4 @@
-"""FastAPI app factory for the `/v1` service API (service plan B4a).
+"""FastAPI app factory for the `/v1` service API (`docs/service-api.md`).
 
 Separate from the console: it binds one shared store and queue for its
 lifetime, authenticates every `/v1` route with a service token
