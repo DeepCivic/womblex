@@ -23,6 +23,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+from womblex.cloud.dispatch import QUEUE_CONNECT_TIMEOUT
 from womblex.cloud.stage_contracts import STAGE_CONTRACTS
 from womblex.pipeline_order import sort_by_pipeline
 from womblex.store.checkpoint import CHECKPOINT_GLOB, CheckpointProgress, read_checkpoints
@@ -41,11 +42,6 @@ DEFAULT_STALE_AFTER = 900.0
 
 #: Default trailing window for the throughput tile, in seconds.
 DEFAULT_THROUGHPUT_WINDOW = 3600.0
-
-#: Seconds to wait for the queue connection before reporting it unreachable.
-#: The dashboard is polled, so an unbounded connect to a routable-but-dead
-#: host would pin a request thread per poll until the OS gave up.
-QUEUE_CONNECT_TIMEOUT = 5.0
 
 #: Stage name -> the dot-directory its checkpoint lands in, taken from the
 #: contracts rather than re-typed here so a renamed directory cannot drift.
