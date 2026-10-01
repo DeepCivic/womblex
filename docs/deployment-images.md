@@ -155,7 +155,9 @@ by default and refuses to start with no registry unless `--insecure-no-auth`
 the registry file named by `WOMBLEX_API_CLIENTS_FILE` (default
 `./clients.yaml`) mounted read-only at `$WOMBLEX_API_CLIENTS`.
 Without `--ingest` (or `$WOMBLEX_INGEST_URI`) the reads serve and
-`POST /v1/runs` answers 503. A non-admin client may only submit an
+`POST /v1/runs` and `POST /v1/uploads` answer 503. Uploads land under
+`<client_id>/<upload_id>/` of the ingest location, capped per request by
+`--max-upload-mb` (default 256). A non-admin client may only submit an
 `input_prefix` under its own `<client_id>/` folder of the ingest location.
 
 ## What re-checks this
