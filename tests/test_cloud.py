@@ -1282,3 +1282,93 @@ def test_a_prefix_scoping_to_nothing_is_not_a_licence_to_list_the_whole_store(
     _CapturingQueue.keys = None
     assert cloud.cmd_enqueue(_enqueue_args(tmp_path, "./", ingest=False)) == 1
     assert _CapturingQueue.keys is None
+
+
+# --- run ownership (needs Postgres) ------------------------------------------
+
+
+def test_enqueue_refuses_a_run_owned_by_someone_else(queue):
+    from womblex.cloud.queue import JobSpec, RunOwnedError
+
+    q, run_id = queue
+
+    def spec(n: int) -> JobSpec:
+        return JobSpec(batch_num=n, input_keys=["a.pdf"], shard_prefix="p")
+
+    assert q.enqueue(run_id, [spec(1)], owner="alice") == 1
+    with pytest.raises(RunOwnedError):
+        q.enqueue(run_id, [spec(2)], owner="bob")
+    with pytest.raises(RunOwnedError):
+        q.enqueue_stages(run_id, ["chunk"], "p", owner="bob")
+    assert q.enqueue(run_id, [spec(2)], owner="alice") == 1  # the owner resumes freely
+
+
+def test_an_unowned_run_is_refused_to_a_named_owner(queue):
+    from womblex.cloud.queue import JobSpec, RunOwnedError
+
+    q, run_id = queue
+    q.enqueue(run_id, [JobSpec(batch_num=1, input_keys=["a"], shard_prefix="p")])
+    with pytest.raises(RunOwnedError):
+        q.enqueue(run_id, [JobSpec(batch_num=2, input_keys=["b"], shard_prefix="p")],
+                  owner="alice")
+
+
+def test_an_unscoped_enqueue_inherits_the_runs_owner(queue):
+    from womblex.cloud.queue import JobSpec
+
+    q, run_id = queue
+    q.enqueue(run_id, [JobSpec(batch_num=1, input_keys=["a"], shard_prefix="p")], owner="alice")
+    q.enqueue_stages(run_id, ["chunk"], "p")  # admin dispatch, no owner named
+    assert {r.run_id: r.owner for r in q.runs()}[run_id] == "alice"
+    assert q.stats(run_id, owner="alice") == {"pending": 2}
+
+
+def test_views_are_scoped_by_owner(queue):
+    from womblex.cloud.queue import JobSpec
+
+    q, run_id = queue
+    q.enqueue(run_id, [JobSpec(batch_num=1, input_keys=["a"], shard_prefix="p")], owner="alice")
+    job = q.claim("w1", run_id)
+    assert job is not None
+
+    assert q.stats(run_id, owner="alice") == {"running": 1}
+    assert q.stats(run_id, owner="bob") == {}
+    assert len(q.list_jobs(run_id, owner="alice")) == 1
+    assert q.list_jobs(run_id, owner="bob") == []
+    assert [w.worker_id for w in q.workers(run_id, owner="alice")] == ["w1"]
+    assert q.workers(run_id, owner="bob") == []
+    assert q.stale_jobs(-1.0, run_id, owner="bob") == []
+    q.complete(job.id)
+    assert q.throughput(run_id, owner="alice").completed == 1
+    assert q.throughput(run_id, owner="bob").completed == 0
+
+
+def test_runs_rolls_up_status_per_run(queue):
+    from womblex.cloud.queue import JobSpec
+
+    q, run_id = queue
+    q.enqueue(run_id, [
+        JobSpec(batch_num=1, input_keys=["a"], shard_prefix="p"),
+        JobSpec(batch_num=2, input_keys=["b"], shard_prefix="p"),
+    ], owner="alice")
+    job = q.claim("w1", run_id)
+    assert job is not None
+    q.complete(job.id)
+
+    (summary,) = [r for r in q.runs(owner="alice") if r.run_id == run_id]
+    assert summary.owner == "alice"
+    assert summary.counts == {"done": 1, "pending": 1}
+    assert summary.total == 2
+    assert not [r for r in q.runs(owner="bob") if r.run_id == run_id]
+
+
+def test_ensure_schema_migrates_a_table_without_owner(queue):
+    q, _ = queue
+    with q.conn.transaction():
+        q.conn.execute("DROP INDEX IF EXISTS womblex_jobs_owner_idx")
+        q.conn.execute("ALTER TABLE womblex_jobs DROP COLUMN owner")
+    q.ensure_schema()
+    cols = {r[0] for r in q.conn.execute(
+        "SELECT column_name FROM information_schema.columns WHERE table_name='womblex_jobs'"
+    ).fetchall()}
+    assert "owner" in cols

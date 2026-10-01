@@ -29,6 +29,7 @@ Usage:
     womblex ingest-geo           <input> -o output/geo
     womblex ingest-abn           <input> -o output/abn
     womblex ui                   [--output-root DIR | --store URI] [--port 8080]
+    womblex api-token            --client NAME [--scope SCOPE ...]
     womblex seed-demo            [--output-root DIR | --store URI]
 """
 from __future__ import annotations
@@ -38,6 +39,7 @@ import logging
 import sys
 
 from womblex.cli import (
+    api_token,
     cloud,
     demo,
     embed,
@@ -78,6 +80,7 @@ ALL_COMMANDS = [
     *profile.COMMANDS,
     *verify.COMMANDS,
     *ui.COMMANDS,
+    *api_token.COMMANDS,
     *demo.COMMANDS,
 ]
 

@@ -117,11 +117,13 @@ womblex/
 │   │   ├── retention.py     # run_id-based retention policy + describe_run() (doc count, stages, timestamps) + is_safe_run_id (run-root join containment)
 │   │   └── checkpoint.py    # Per-stage CheckpointManager
 │   ├── cloud/                  # Distributed run support — `womblex-cloud` counterpart to local `womblex run`
-│   │   ├── queue.py            # JobQueue — Postgres FOR UPDATE SKIP LOCKED batch queue
+│   │   ├── queue.py            # JobQueue — Postgres FOR UPDATE SKIP LOCKED batch queue; run `owner` scoping
 │   │   ├── dispatch.py         # enqueue_extraction / enqueue_downstream_stages + guard — shared by the console and the service API
 │   │   ├── worker.py           # run_worker() — claim/stage/process/publish loop
 │   │   ├── stage_contracts.py  # Declarative StageContract per downstream stage (inputs/outputs/scope)
 │   │   └── stage_runner.py     # Execute a contract against an object store
+│   ├── api/                    # Service API (`womblex serve`)
+│   │   └── auth.py             # Service-token auth: client registry (WOMBLEX_API_CLIENTS), Caller + scopes, FastAPI dependencies
 │   ├── ui/                     # Console sidecar (`womblex ui`) — FastAPI over pipeline artefacts; reads runs, never writes to one
 │   │   ├── app.py              # create_app() — binds one run source for the app's lifetime
 │   │   ├── deps.py             # UISettings — local output_root vs store-backed (+ optional queue/presets dirs), resolved from args/env
