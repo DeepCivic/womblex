@@ -77,3 +77,13 @@ class RunFile(BaseModel):
 class RunFiles(BaseModel):
     run_id: str
     files: list[RunFile]
+
+
+class DocumentText(BaseModel):
+    """One document's text in one layer; ``rows`` carry that layer's columns."""
+
+    run_id: str
+    source_hash: str
+    layer: Literal["masked", "chunks", "elements"]
+    sensitivity: Literal["raw", "masked", "none"]
+    rows: list[dict[str, Any]]
