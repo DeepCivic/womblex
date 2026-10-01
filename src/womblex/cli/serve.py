@@ -41,7 +41,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
         from womblex.api.app import create_api_app
     except ImportError:
-        logger.error("`womblex serve` requires the 'ui' extra. Install with: pip install womblex[ui]")
+        logger.error("`womblex serve` requires the 'api' extra. Install with: pip install womblex[api]")
         return 1
 
     from womblex.api.auth import REGISTRY_ENV, RegistryError, registry_from_env

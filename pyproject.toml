@@ -98,6 +98,18 @@ ui = [
     "uvicorn>=0.30",
 ]
 
+# Service API - pip install womblex[api]
+# `womblex serve`, the `/v1` API integrations use. fastapi + uvicorn, as for
+# the console, plus python-multipart for `POST /v1/uploads` (FastAPI's form
+# parsing). Kept apart from [ui] so the console does not carry an upload
+# parser it never uses. The pipeline image installs it, so the `api` compose
+# service runs on the same image as the workers.
+api = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "python-multipart>=0.0.9",
+]
+
 # Development tools - pip install womblex[dev]
 dev = [
     "pytest>=8.0",
@@ -115,7 +127,7 @@ dev = [
 ]
 
 # Full install - pip install womblex[all]
-all = ["womblex[cloud,ui,dev]"]  # [local] is empty; isaacus + Bedrock OCR + AWS SDK are core
+all = ["womblex[cloud,ui,api,dev]"]  # [local] is empty; isaacus + Bedrock OCR + AWS SDK are core
 
 [project.urls]
 Homepage = "https://github.com/DeepCivic/womblex"

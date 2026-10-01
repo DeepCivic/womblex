@@ -32,15 +32,15 @@ fails a test rather than quietly joining the stack:
 | | Count |
 |---|---|
 | Compose files | 2 |
-| Services in `docker-compose.yml` | 8 |
-| Services in `docker-compose.local.override.yml` | 5 |
+| Services in `docker-compose.yml` | 9 |
+| Services in `docker-compose.local.override.yml` | 6 |
 | Of the base file: build from source | 0 |
 | Of the base file: reference a third-party image | 3 |
-| Of the base file: reference an image of this project | 5 |
-| Of the override: build from source | 5 |
+| Of the base file: reference an image of this project | 6 |
+| Of the override: build from source | 6 |
 
-The override introduces no service of its own — all five of its entries adjust
-the same five services the base file already declares, and now carry the
+The override introduces no service of its own — all six of its entries adjust
+the same six services the base file already declares, and now carry the
 `build:` blocks that used to sit in the base file.
 
 ## The enumeration
@@ -51,7 +51,7 @@ the same five services the base file already declares, and now carry the
 that does neither and inherits the base file's verdict.
 
 **Published and built are separated by which files you pass, not by editing
-one.** The base file names a published image for all five services; the local
+one.** The base file names a published image for all six services; the local
 override carries their `build:` blocks. Compose builds whenever a `build:` key
 is present, so the two cannot coexist in one file — which is why the blocks
 moved rather than being paired with an `image:` key:
@@ -77,6 +77,7 @@ enumerated like any other.
 | `worker` | base | published | `${WOMBLEX_PIPELINE_IMAGE:-ghcr.io/deepcivic/womblex:latest}` | — | Published — pipeline image |
 | `seed-demo` | base | published | `${WOMBLEX_PIPELINE_IMAGE:-ghcr.io/deepcivic/womblex:latest}` | `seed` | Published — pipeline image |
 | `ui` | base | published | `${WOMBLEX_CONSOLE_IMAGE:-ghcr.io/deepcivic/womblex-console:latest}` | — | Published — console image |
+| `api` | base | published | `${WOMBLEX_PIPELINE_IMAGE:-ghcr.io/deepcivic/womblex:latest}` | `api` | Published — pipeline image |
 | `postgres` | base | image | `postgres:16` | `local` | Third party — tag pinned to a major series, moving within it |
 | `minio` | base | image | `minio/minio` | `local` | Third party — tag unpinned |
 | `createbuckets` | base | image | `minio/mc` | `local` | Third party — tag unpinned |
@@ -85,15 +86,16 @@ enumerated like any other.
 | `worker` | override | build | `Dockerfile` | — | Built locally — the development path |
 | `seed-demo` | override | build | `Dockerfile` | — | Built locally — the development path |
 | `ui` | override | build | `Dockerfile.ui` | — | Built locally — the development path |
+| `api` | override | build | `Dockerfile` | — | Built locally — the development path |
 
-## Why the five collapse to two images
+## Why the six collapse to two images
 
-All five build-from-source services carry the same verdict, and that is not five
-decisions that happened to agree. Four of them — `init`, `womblex`, `worker` and
-`seed-demo` — build the identical `Dockerfile`, differing only in the command
-they run and, for two of them, a `./configs` mount. Nothing that distinguishes
-them is part of the image, so they are one artefact with four entry points;
-building them separately would produce four copies of the same bytes. The console is the
+All six build-from-source services carry the same verdict, and that is not six
+decisions that happened to agree. Five of them — `init`, `womblex`, `worker`,
+`seed-demo` and `api` — build the identical `Dockerfile`, differing only in the command
+they run and their mounts (`./configs` for two, the client registry for `api`). Nothing that distinguishes
+them is part of the image, so they are one artefact with five entry points;
+building them separately would produce five copies of the same bytes. The console is the
 second image because `Dockerfile.ui` carries a Node build stage the pipeline has
 no reason to hold.
 
@@ -101,7 +103,7 @@ The demo seeder is the one that could reasonably have gone the other way: it
 exists to publish a sample corpus and a deployment that never seeds does not
 need it. It is published anyway because it shares the pipeline image rather than
 adding one — declining to publish it would not save a build, it would only make
-one of four commands on the same image unavailable.
+one of five commands on the same image unavailable.
 
 ## The third-party finding, recorded not fixed
 
@@ -147,7 +149,11 @@ replacing an entry's hash and redeploying.
 
 `womblex serve --store <uri> --dsn <dsn> --ingest <uri>` binds loopback:8081
 by default and refuses to start with no registry unless `--insecure-no-auth`
-(development only: every request is an admin). It needs the `ui` extra.
+(development only: every request is an admin). It needs the `api` extra
+(fastapi, uvicorn, python-multipart), which the pipeline image installs. The
+`api` compose service (profile `api`, port 8081) runs it on that image with
+the registry file named by `WOMBLEX_API_CLIENTS_FILE` (default
+`./clients.yaml`) mounted read-only at `$WOMBLEX_API_CLIENTS`.
 Without `--ingest` (or `$WOMBLEX_INGEST_URI`) the reads serve and
 `POST /v1/runs` answers 503. A non-admin client may only submit an
 `input_prefix` under its own `<client_id>/` folder of the ingest location.

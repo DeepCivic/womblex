@@ -6,8 +6,10 @@
 # either a local dir or an `s3://` store with no extra install. Isaacus
 # enrichment/embeddings and the Bedrock VLM OCR engine are core too — just a
 # key / `ISAACUS_SAGEMAKER_ENDPOINTS` / an OCR engine choice at runtime. The
-# only remaining extras are `[ui]` (the console) and `[dev]` (test/lint);
-# override at build time, e.g. --build-arg EXTRAS="ui".
+# image installs `[api]` (the `womblex serve` service API), so the `api`
+# compose service runs on the same image as the workers. The other extras are
+# `[ui]` (the console, its own image) and `[dev]` (test/lint); override at
+# build time, e.g. --build-arg EXTRAS="api,dev".
 FROM python:3.11-slim AS base
 
 ENV PYTHONUNBUFFERED=1 \
@@ -27,9 +29,9 @@ RUN apt-get update \
 WORKDIR /app
 COPY . /app
 
-# `.` installs the core deps (S3 + queue included); no extra needed for a
-# worker. Override to add the console/dev tools, e.g. --build-arg EXTRAS="ui".
-ARG EXTRAS=""
+# `.` installs the core deps (S3 + queue included); a worker needs nothing
+# more. `[api]` is fastapi + uvicorn + python-multipart, for `womblex serve`.
+ARG EXTRAS="api"
 # Upgrade pip first: the stock pip on python:3.11-slim is old enough that its
 # resolver stalls/fails on the boto stack (s3fs -> aiobotocore pins a narrow
 # botocore range that must co-resolve with boto3's own botocore pin). The

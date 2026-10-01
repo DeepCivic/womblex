@@ -33,7 +33,7 @@
 # cloud, this override is never passed there.
 #
 # IT ALSO CARRIES THE BUILDS. The base file names published images and builds
-# nothing, so this file holds the `build:` blocks for all five services — which
+# nothing, so this file holds the `build:` blocks for all six services — which
 # makes passing it the one declared switch between running the published
 # artefact and building from the working tree. Compose builds whenever a
 # `build:` key is present, so the two could not have lived in one file.
@@ -133,6 +133,23 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+        required: true
+      minio:
+        condition: service_healthy
+        required: true
+      createbuckets:
+        condition: service_completed_successfully
+        required: true
+    environment:
+      <<: *local-env
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      init:
+        condition: service_completed_successfully
         required: true
       minio:
         condition: service_healthy
