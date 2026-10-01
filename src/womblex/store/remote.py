@@ -279,6 +279,12 @@ class RemoteStore:
         prefix = self.root + "/"
         return [m.removeprefix(prefix) for m in matches if m != self.root]
 
+    def find(self, rel: str) -> list[str]:
+        """Every object key under *rel*, recursively and store-relative — no pseudo-directories."""
+        prefix = self.root + "/"
+        found: list[str] = self.fs.find(self._full(rel))  # type: ignore[attr-defined]
+        return [m.removeprefix(prefix) for m in found]
+
     def list_dirs(self, rel: str) -> list[str]:
         """List immediate child directory names under *rel* (name only, not full path).
 

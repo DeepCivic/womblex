@@ -1228,7 +1228,7 @@ class _FakeQueue:
     def ensure_schema(self) -> None:
         self.schema_ensured = True
 
-    def enqueue(self, run_id: str, specs: list) -> int:
+    def enqueue(self, run_id: str, specs: list, *, owner: str | None = None) -> int:
         self.enqueued = (run_id, specs)
         return len(specs)
 

@@ -186,6 +186,7 @@ def enqueue_extraction(
     run_id: str | None = None,
     batch_size: int = 50,
     max_attempts: int = 3,
+    owner: str | None = None,
 ) -> EnqueueResult:
     """Plan an extraction run into the queue — the "configure-and-run" action.
 
@@ -197,6 +198,9 @@ def enqueue_extraction(
     *input_prefix* is ingest-relative and goes through the listing
     :func:`ingest_preflight` previews, so a prefix the operator saw a count for
     enqueues that count.
+
+    *owner* is the service caller the run belongs to (``None`` for the CLI
+    and console); see :meth:`JobQueue.enqueue`.
 
     Raises :class:`ExecutionDisabled` when the console cannot dispatch (the
     route maps it to 409) and ``ValueError`` on bad input (→ 400) — an unsafe
@@ -231,7 +235,7 @@ def enqueue_extraction(
 
     with JobQueue(cast(str, settings.db_dsn), connect_timeout=QUEUE_CONNECT_TIMEOUT) as queue:
         queue.ensure_schema()
-        newly = queue.enqueue(resolved_run_id, specs)
+        newly = queue.enqueue(resolved_run_id, specs, owner=owner)
 
     logger.info(
         "console enqueue: run_id=%s, %d doc(s) -> %d batch(es), %d newly enqueued",
@@ -244,6 +248,32 @@ def enqueue_extraction(
         newly_enqueued=newly,
         shard_prefix=shard_prefix,
     )
+
+
+def downstream_stages(settings: UISettings, config: dict) -> tuple[str, ...]:
+    """The downstream stages *config* enables, in `PIPELINE_ORDER` — the shared gate.
+
+    Validates *config* before anything is written, so a caller that enqueues
+    extraction and stages together can refuse a bad config with no row on the
+    queue. Raises ``pydantic.ValidationError`` on a config that would not load;
+    an empty result is the caller's to judge.
+    """
+    from womblex.config import WomblexConfig
+    from womblex.pipeline_order import enabled_downstream_stages
+    from womblex.ui.composer import deployment_paths
+
+    # Built through the same `WomblexConfig(**{**raw, "paths": …})` construction
+    # the composer validates and renders YAML with, so the stage list dispatched
+    # is the one the config *as the CLI would load it* asks for — defaults and
+    # coercions applied, not whatever the browser happened to send.
+    #
+    # `dataset` is filled in only when absent, the way `cli.cloud._runner_config`
+    # does: `WomblexConfig` requires it but no stage gate reads it (stages run
+    # over a shard prefix, not a dataset), so a config posted without one is a
+    # dispatchable config, not an invalid one.
+    paths, _ = deployment_paths(settings)
+    raw = {"dataset": {"name": "console"}, **config, "paths": paths}
+    return enabled_downstream_stages(WomblexConfig(**raw))
 
 
 @dataclass(frozen=True)
@@ -281,6 +311,7 @@ def enqueue_downstream_stages(
     run_id: str,
     config: dict,
     max_attempts: int = 3,
+    owner: str | None = None,
 ) -> StageDispatchResult:
     """Dispatch *run_id*'s downstream stages — the console's second write action.
 
@@ -297,6 +328,8 @@ def enqueue_downstream_stages(
     budget on enrich and embed either. The operator enqueues, watches it drain,
     looks at it, then presses this.
 
+    *owner* is checked against the run's owner as in :meth:`JobQueue.enqueue_stages`.
+
     ``pii`` and ``quality`` are never dispatched — that bound lives in
     ``DOWNSTREAM_STAGES``, not here, so the console cannot widen it. Both stay
     reachable through ``womblex run-stage``.
@@ -311,22 +344,8 @@ def enqueue_downstream_stages(
         raise ValueError(f"unsafe run_id: {run_id!r}")
 
     from womblex.cloud.queue import JobQueue
-    from womblex.config import WomblexConfig
-    from womblex.pipeline_order import enabled_downstream_stages
-    from womblex.ui.composer import deployment_paths
 
-    # Built through the same `WomblexConfig(**{**raw, "paths": …})` construction
-    # the composer validates and renders YAML with, so the stage list dispatched
-    # is the one the config *as the CLI would load it* asks for — defaults and
-    # coercions applied, not whatever the browser happened to send.
-    #
-    # `dataset` is filled in only when absent, the way `cli.cloud._runner_config`
-    # does: `WomblexConfig` requires it but no stage gate reads it (stages run
-    # over a shard prefix, not a dataset), so a config posted without one is a
-    # dispatchable config, not an invalid one.
-    paths, _ = deployment_paths(settings)
-    raw = {"dataset": {"name": "console"}, **config, "paths": paths}
-    stages = enabled_downstream_stages(WomblexConfig(**raw))
+    stages = downstream_stages(settings, config)
     if not stages:
         raise ValueError(
             "This config enables no downstream stages — nothing to dispatch. Turn on "
@@ -337,7 +356,7 @@ def enqueue_downstream_stages(
     with JobQueue(cast(str, settings.db_dsn), connect_timeout=QUEUE_CONNECT_TIMEOUT) as queue:
         queue.ensure_schema()
         newly = queue.enqueue_stages(
-            run_id, list(stages), shard_prefix, max_attempts=max_attempts,
+            run_id, list(stages), shard_prefix, max_attempts=max_attempts, owner=owner,
         )
 
     logger.info(

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 
 class Health(BaseModel):
@@ -41,3 +41,39 @@ class RunMetrics(BaseModel):
     stats: dict[str, int]
     workers: list[dict[str, Any]]
     throughput: dict[str, Any]
+
+
+class RunRequest(BaseModel):
+    """A run submission. ``preset`` or ``config`` picks the downstream stages; neither is extraction only."""
+
+    input_prefix: str
+    preset: str | None = None
+    config: dict[str, Any] | None = None
+    batch_size: int = Field(default=50, ge=1)
+
+    @model_validator(mode="after")
+    def _one_config_source(self) -> RunRequest:
+        if self.preset is not None and self.config is not None:
+            raise ValueError("give preset or config, not both")
+        return self
+
+
+class RunSubmitted(BaseModel):
+    run_id: str
+    document_count: int
+    batch_count: int
+    stages: list[str]
+
+
+class RunFile(BaseModel):
+    """One object under the run. Contract keys are null for a non-Parquet or pre-contract file."""
+
+    key: str
+    rows: int | None = None
+    contract_version: str | None = None
+    sensitivity: str | None = None
+
+
+class RunFiles(BaseModel):
+    run_id: str
+    files: list[RunFile]

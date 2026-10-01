@@ -118,12 +118,12 @@ womblex/
 │   │   └── checkpoint.py    # Per-stage CheckpointManager
 │   ├── cloud/                  # Distributed run support — `womblex-cloud` counterpart to local `womblex run`
 │   │   ├── queue.py            # JobQueue — Postgres FOR UPDATE SKIP LOCKED batch queue; run `owner` scoping
-│   │   ├── dispatch.py         # enqueue_extraction / enqueue_downstream_stages + guard — shared by the console and the service API
+│   │   ├── dispatch.py         # enqueue_extraction / enqueue_downstream_stages (owner=), downstream_stages gate + guard — shared by the console and the service API
 │   │   ├── worker.py           # run_worker() — claim/stage/process/publish loop
 │   │   ├── stage_contracts.py  # Declarative StageContract per downstream stage (inputs/outputs/scope)
 │   │   └── stage_runner.py     # Execute a contract against an object store
 │   ├── api/                    # Service API (`womblex serve`)
-│   │   ├── app.py              # create_api_app() — `/v1` health/ready, run list/detail, manifest, metrics; owner-scoped
+│   │   ├── app.py              # create_api_app() — `/v1` health/ready, run submit, list/detail, manifest, files, metrics; owner-scoped
 │   │   ├── auth.py             # Service-token auth: client registry (WOMBLEX_API_CLIENTS), Caller + scopes, FastAPI dependencies
 │   │   └── models.py           # Pydantic response models — the OpenAPI surface
 │   ├── ui/                     # Console sidecar (`womblex ui`) — FastAPI over pipeline artefacts; reads runs, never writes to one

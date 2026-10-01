@@ -1,6 +1,6 @@
 # Womblex as a backend subsystem — plan
 
-*Status: in progress (2026-09; A1–A5, U1, U2, B1, B2, B3 and B4a-1 shipped). Sequenced as 13 merges; each lands on its own and updates this document's merge list as it ships.*
+*Status: in progress (2026-10; A1–A5, U1, U2, B1, B2, B3, B4a-1 and B4a-2 shipped). Sequenced as 13 merges; each lands on its own and updates this document's merge list as it ships.*
 
 ## Context
 Womblex is to serve other software in two modes:
@@ -108,7 +108,9 @@ New `api/auth.py`:
 Add `womblex api-token --client X` to print a new token and its hash for the registry. Document the registry in `docs/deployment-images.md` as private-network only.
 
 ### B4. `womblex serve` — `/v1` API
-*B4a split in two to stay under the cap. B4a-1 shipped: `womblex serve`, health/ready, and the owner-scoped reads (run list, detail, manifest, metrics). Runs are known to the queue, so CLI- and console-submitted runs (no owner) are visible to `admin` only. B4a-2 remains: `POST /v1/runs` and `/files`. For B4a-2: `enqueue_extraction` and `enqueue_downstream_stages` need `owner=`; the run id is minted server-side; a non-admin caller's `input_prefix` is confined under its own client id; and a shared stage-list gate in `cloud/dispatch.py` should reject a bad config before any row is written. The OpenAPI pin is a test over the operation and model surface, not a snapshot file.*
+*B4a split in two to stay under the cap. B4a-1 shipped: `womblex serve`, health/ready, and the owner-scoped reads (run list, detail, manifest, metrics). Runs are known to the queue, so CLI- and console-submitted runs (no owner) are visible to `admin` only. The OpenAPI pin is a test over the operation and model surface, not a snapshot file.*
+
+*B4a-2 shipped: `POST /v1/runs` and `/files`. `enqueue_extraction` and `enqueue_downstream_stages` take `owner=`. The run id is minted server-side as the timestamp id plus a random suffix, so two submissions in one second stay distinct. A non-admin caller's `input_prefix` must be its `<client_id>` folder or sit under it (403 otherwise); an admin's run has no owner. `cloud/dispatch.downstream_stages` validates the `preset` or `config` before any row is written (400). A config enabling no stage is an extraction-only run. The config only selects stages: workers run them under their own config, as with `womblex enqueue-stages`. `serve` takes `--ingest`; without it, submission answers 503. `/files` lists objects (via `RemoteStore.find`) with row count and the A1 footer keys, which are null for non-Parquet or pre-contract files. A prefix with documents in nested folders is refused as for every run, so B4b's upload response should name the `<client_id>/<upload_id>` folder as the `input_prefix`.*
 
 - New `api/app.py` `create_api_app(...)`. It reuses `UISettings` binding from `ui/deps.py`, `RemoteStore` and `cloud/dispatch.py`.
 - New `cli/serve.py`. It binds to loopback by default.
@@ -166,7 +168,7 @@ Each merge must be under 500 lines. Split further if needed.
 9. B3 service-token auth + `api-token` verb — **shipped**
 10. B5 dependency extra — waits on your approval
 11. B4a-1 `serve` app: health/ready, run list/detail, manifest, metrics — **shipped**
-12. B4a-2 `POST /v1/runs` (owner threaded through dispatch) and `/files`
+12. B4a-2 `POST /v1/runs` (owner threaded through dispatch) and `/files` — **shipped**
 13. B4b uploads + document text endpoints with sensitivity gating
 14. U3 docs reframe, plus architecture and project-structure updates
 
