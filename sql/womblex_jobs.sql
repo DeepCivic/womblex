@@ -6,12 +6,15 @@
 -- offset past every real batch, so `UNIQUE (run_id, batch_num)` gives one row
 -- per (run, stage) and `ORDER BY batch_num` drains extraction first.
 --
+-- `owner` names the service caller that submitted the run (null for CLI- and
+-- console-submitted runs); a run's rows all carry the same owner.
+--
 -- Womblex is a well-behaved tenant: it creates and only ever touches
--- `womblex_jobs` (and its one index). There are no DROP/TRUNCATE, no
+-- `womblex_jobs` (and its indexes). There are no DROP/TRUNCATE, no
 -- CREATE DATABASE/SCHEMA, and no search_path changes anywhere in the code —
 -- every statement is scoped to this table. So Womblex can share a database
 -- with another system (its tables coexisting alongside, e.g., `redline_*`
--- tables) provided the name `womblex_jobs` / `womblex_jobs_claim_idx` does
+-- tables) provided the name `womblex_jobs` / `womblex_jobs_*_idx` does
 -- not collide with a table the other system owns.
 --
 -- Applying this file is the DBA-reviewable way to provision the table in a
@@ -38,6 +41,7 @@ CREATE TABLE IF NOT EXISTS womblex_jobs (
     input_keys    JSONB       NOT NULL,
     shard_prefix  TEXT        NOT NULL,
     ingest_root   TEXT,
+    owner         TEXT,
     attempts      INTEGER     NOT NULL DEFAULT 0,
     max_attempts  INTEGER     NOT NULL DEFAULT 3,
     locked_by     TEXT,
@@ -50,5 +54,8 @@ CREATE TABLE IF NOT EXISTS womblex_jobs (
 ALTER TABLE womblex_jobs ADD COLUMN IF NOT EXISTS ingest_root TEXT;
 ALTER TABLE womblex_jobs ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'batch';
 ALTER TABLE womblex_jobs ADD COLUMN IF NOT EXISTS stage TEXT;
+ALTER TABLE womblex_jobs ADD COLUMN IF NOT EXISTS owner TEXT;
 CREATE INDEX IF NOT EXISTS womblex_jobs_claim_idx
     ON womblex_jobs (status, batch_num);
+CREATE INDEX IF NOT EXISTS womblex_jobs_owner_idx
+    ON womblex_jobs (owner, run_id);

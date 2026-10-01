@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS womblex_jobs (
     input_keys    JSONB       NOT NULL,
     shard_prefix  TEXT        NOT NULL,
     ingest_root   TEXT,
+    owner         TEXT,
     attempts      INTEGER     NOT NULL DEFAULT 0,
     max_attempts  INTEGER     NOT NULL DEFAULT 3,
     locked_by     TEXT,
@@ -56,8 +57,11 @@ CREATE TABLE IF NOT EXISTS womblex_jobs (
 ALTER TABLE womblex_jobs ADD COLUMN IF NOT EXISTS ingest_root TEXT;
 ALTER TABLE womblex_jobs ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'batch';
 ALTER TABLE womblex_jobs ADD COLUMN IF NOT EXISTS stage TEXT;
+ALTER TABLE womblex_jobs ADD COLUMN IF NOT EXISTS owner TEXT;
 CREATE INDEX IF NOT EXISTS womblex_jobs_claim_idx
     ON womblex_jobs (status, batch_num);
+CREATE INDEX IF NOT EXISTS womblex_jobs_owner_idx
+    ON womblex_jobs (owner, run_id);
 """
 
 # Literal queries (no f-string interpolation) — the only varying part is the
@@ -90,21 +94,33 @@ _CLAIM_RUN = (
     f"SELECT {_CLAIM_COLS} FROM womblex_jobs "
     f"WHERE {_CLAIMABLE} AND run_id = %s {_CLAIM_TAIL}"
 )
-_STATS_ALL = "SELECT status, count(*) FROM womblex_jobs GROUP BY status"
-_STATS_RUN = "SELECT status, count(*) FROM womblex_jobs WHERE run_id = %s GROUP BY status"
-
 # The read-only queries behind the console dashboard.
 # Their optional run filter is expressed as `(%s::text IS NULL OR ...)` rather
 # than a second spelled-out variant: the parameter carries the value, so each
 # query stays one literal string no matter how the caller scopes it. The cast
 # is what lets Postgres type an untyped NULL parameter.
 _RUN_FILTER = "(%s::text IS NULL OR run_id = %s::text)"
+# An owner filter narrows to one caller's runs; no owner means unscoped (admin).
+# A row with a null owner (CLI or console submitted) never matches a named
+# owner, so it is visible to the unscoped reader only.
+_OWNER_FILTER = "(%s::text IS NULL OR owner = %s::text)"
+_STATS = (
+    "SELECT status, count(*) FROM womblex_jobs "
+    f"WHERE {_RUN_FILTER} AND {_OWNER_FILTER} GROUP BY status"
+)
+_RUNS = (
+    "SELECT run_id, max(owner), status, count(*), min(created_at), max(updated_at) "
+    f"FROM womblex_jobs WHERE {_OWNER_FILTER} GROUP BY run_id, status"
+)
+# The run's owner is whatever its existing rows carry; a new row inherits it
+# unless the caller names one, so a run never ends up with mixed ownership.
+_RUN_OWNER = "SELECT owner FROM womblex_jobs WHERE run_id = %s LIMIT 1"
 _JOB_COLS = (
     "id, run_id, batch_num, status, attempts, max_attempts, "
     "locked_by, locked_at, error, created_at, updated_at, kind, stage"
 )
 _LIST_JOBS = (
-    f"SELECT {_JOB_COLS} FROM womblex_jobs WHERE {_RUN_FILTER} "
+    f"SELECT {_JOB_COLS} FROM womblex_jobs WHERE {_RUN_FILTER} AND {_OWNER_FILTER} "
     f"AND (%s::text IS NULL OR status = %s::text) "
     f"ORDER BY updated_at DESC, batch_num DESC LIMIT %s"
 )
@@ -113,17 +129,18 @@ _LIST_JOBS = (
 _STALE_JOBS = (
     f"SELECT {_JOB_COLS} FROM womblex_jobs "
     f"WHERE status = 'running' AND locked_at < now() - make_interval(secs => %s) "
-    f"AND {_RUN_FILTER} ORDER BY locked_at"
+    f"AND {_RUN_FILTER} AND {_OWNER_FILTER} ORDER BY locked_at"
 )
 _WORKERS = (
     "SELECT locked_by, count(*), min(locked_at), max(locked_at) FROM womblex_jobs "
     f"WHERE status = 'running' AND locked_by IS NOT NULL AND {_RUN_FILTER} "
+    f"AND {_OWNER_FILTER} "
     "GROUP BY locked_by ORDER BY locked_by"
 )
 _THROUGHPUT = (
     "SELECT count(*), max(updated_at) FROM womblex_jobs "
     "WHERE status = 'done' AND updated_at >= now() - make_interval(secs => %s) "
-    f"AND {_RUN_FILTER}"
+    f"AND {_RUN_FILTER} AND {_OWNER_FILTER}"
 )
 
 
@@ -195,6 +212,25 @@ class JobRow:
     updated_at: str | None
     kind: str = "batch"
     stage: str | None = None
+
+
+@dataclass(frozen=True)
+class RunSummary:
+    """One run's rows rolled up by status — the run list's grain."""
+
+    run_id: str
+    owner: str | None
+    counts: dict[str, int]
+    created_at: str | None
+    updated_at: str | None
+
+    @property
+    def total(self) -> int:
+        return sum(self.counts.values())
+
+
+class RunOwnedError(Exception):
+    """A run id is already owned by a different owner."""
 
 
 @dataclass(frozen=True)
@@ -273,26 +309,47 @@ class JobQueue:
             self.conn.execute(_SCHEMA)
         logger.info("womblex_jobs schema ready")
 
-    def enqueue(self, run_id: str, jobs: list[JobSpec]) -> int:
+    def _claim_run_owner(self, run_id: str, owner: str | None) -> str | None:
+        """Resolve the owner new rows of *run_id* carry; refuse a different owner.
+
+        Must run inside the enqueue transaction. The advisory lock serialises
+        two submitters racing to create the same run, so the first one names
+        its owner and the second is refused rather than interleaving rows.
+        An unscoped caller (``owner=None``: the CLI, the console) is not
+        checked and inherits the run's existing owner.
+        """
+        self.conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (run_id,))
+        row = self.conn.execute(_RUN_OWNER, (run_id,)).fetchone()
+        if row is None:
+            return owner
+        if owner is not None and row[0] != owner:
+            raise RunOwnedError(f"run {run_id!r} is owned by another owner")
+        return owner if owner is not None else row[0]
+
+    def enqueue(self, run_id: str, jobs: list[JobSpec], *, owner: str | None = None) -> int:
         """Insert *jobs* for *run_id*; idempotent on ``(run_id, batch_num)``.
 
         Returns the number of rows actually inserted (existing batches are
-        skipped, so re-running ``enqueue`` to resume is safe).
+        skipped, so re-running ``enqueue`` to resume is safe). Raises
+        :class:`RunOwnedError` if *owner* is named and the run already belongs
+        to someone else, including a run with no owner.
         """
         from psycopg.types.json import Json
 
         inserted = 0
         with self.conn.transaction():
+            row_owner = self._claim_run_owner(run_id, owner)
             for spec in jobs:
                 cur = self.conn.execute(
                     """
                     INSERT INTO womblex_jobs
-                        (run_id, batch_num, input_keys, shard_prefix, ingest_root, max_attempts)
-                    VALUES (%s, %s, %s, %s, %s, %s)
+                        (run_id, batch_num, input_keys, shard_prefix, ingest_root,
+                         max_attempts, owner)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (run_id, batch_num) DO NOTHING
                     """,
                     (run_id, spec.batch_num, Json(spec.input_keys),
-                     spec.shard_prefix, spec.ingest_root, spec.max_attempts),
+                     spec.shard_prefix, spec.ingest_root, spec.max_attempts, row_owner),
                 )
                 inserted += cur.rowcount
         logger.info("Enqueued %d new job(s) for run %s (of %d submitted)",
@@ -300,7 +357,8 @@ class JobQueue:
         return inserted
 
     def enqueue_stages(
-        self, run_id: str, stages: list[str], shard_prefix: str, *, max_attempts: int = 3,
+        self, run_id: str, stages: list[str], shard_prefix: str, *,
+        max_attempts: int = 3, owner: str | None = None,
     ) -> int:
         """Insert one stage row per name in *stages*; idempotent per stage.
 
@@ -314,6 +372,7 @@ class JobQueue:
         for this run is skipped, so pressing "run downstream stages" twice does
         not re-run what finished — the same resume-by-re-enqueue property batch
         rows have, and the stage runner is itself idempotent underneath it.
+        *owner* is checked as in :meth:`enqueue`.
         """
         from psycopg.types.json import Json
 
@@ -321,16 +380,18 @@ class JobQueue:
 
         inserted = 0
         with self.conn.transaction():
+            row_owner = self._claim_run_owner(run_id, owner)
             for stage in stages:
                 cur = self.conn.execute(
                     """
                     INSERT INTO womblex_jobs
-                        (run_id, batch_num, kind, stage, input_keys, shard_prefix, max_attempts)
-                    VALUES (%s, %s, 'stage', %s, %s, %s, %s)
+                        (run_id, batch_num, kind, stage, input_keys, shard_prefix,
+                         max_attempts, owner)
+                    VALUES (%s, %s, 'stage', %s, %s, %s, %s, %s)
                     ON CONFLICT (run_id, batch_num) DO NOTHING
                     """,
                     (run_id, STAGE_SEQ_BASE + stage_rank(stage), stage, Json([]),
-                     shard_prefix, max_attempts),
+                     shard_prefix, max_attempts, row_owner),
                 )
                 inserted += cur.rowcount
         logger.info("Enqueued %d new stage job(s) for run %s (of %d submitted)",
@@ -429,26 +490,45 @@ class JobQueue:
             logger.warning("Requeued %d stale job(s) (locked > %.0fs)", n, older_than_seconds)
         return n
 
-    def stats(self, run_id: str | None = None) -> dict[str, int]:
-        """Count jobs by status (optionally for one run)."""
-        sql = _STATS_RUN if run_id else _STATS_ALL
-        params: tuple = (run_id,) if run_id else ()
-        rows = self.conn.execute(sql, params).fetchall()
+    def stats(self, run_id: str | None = None, *, owner: str | None = None) -> dict[str, int]:
+        """Count jobs by status (optionally for one run, one owner)."""
+        rows = self.conn.execute(_STATS, (run_id, run_id, owner, owner)).fetchall()
         return {status: count for status, count in rows}
+
+    def runs(self, owner: str | None = None, *, limit: int = 100) -> list[RunSummary]:
+        """Runs with their jobs rolled up by status, latest activity first.
+
+        *owner* narrows to one caller's runs; ``None`` lists every run,
+        including CLI- and console-submitted ones that have no owner.
+        """
+        rows = self.conn.execute(_RUNS, (owner, owner)).fetchall()
+        by_run: dict[str, RunSummary] = {}
+        for run_id, run_owner, status, count, created, updated in rows:
+            prior = by_run.get(run_id)
+            counts = {**prior.counts, status: count} if prior else {status: count}
+            created_iso, updated_iso = _iso(created), _iso(updated)
+            if prior:
+                created_iso = min(filter(None, (prior.created_at, created_iso)), default=None)
+                updated_iso = max(filter(None, (prior.updated_at, updated_iso)), default=None)
+            by_run[run_id] = RunSummary(run_id, run_owner, counts, created_iso, updated_iso)
+        ranked = sorted(by_run.values(), key=lambda r: r.updated_at or "", reverse=True)
+        return ranked[:limit]
 
     # --- read-only views (the console dashboard) -----------------------------
 
     def list_jobs(
         self, run_id: str | None = None, *, status: str | None = None, limit: int = 200,
+        owner: str | None = None,
     ) -> list[JobRow]:
         """Recent jobs, newest activity first, optionally scoped by run and status."""
         rows = self.conn.execute(
-            _LIST_JOBS, (run_id, run_id, status, status, limit)
+            _LIST_JOBS, (run_id, run_id, owner, owner, status, status, limit)
         ).fetchall()
         return [_job_row(r) for r in rows]
 
     def stale_jobs(
-        self, older_than_seconds: float, run_id: str | None = None,
+        self, older_than_seconds: float, run_id: str | None = None, *,
+        owner: str | None = None,
     ) -> list[JobRow]:
         """``running`` jobs locked longer than the threshold, oldest lock first.
 
@@ -456,13 +536,15 @@ class JobQueue:
         recovery. A worker requeues these; the console only names them.
         """
         rows = self.conn.execute(
-            _STALE_JOBS, (older_than_seconds, run_id, run_id)
+            _STALE_JOBS, (older_than_seconds, run_id, run_id, owner, owner)
         ).fetchall()
         return [_job_row(r) for r in rows]
 
-    def workers(self, run_id: str | None = None) -> list[WorkerState]:
+    def workers(
+        self, run_id: str | None = None, *, owner: str | None = None,
+    ) -> list[WorkerState]:
         """Which workers hold which batches right now — the fleet view."""
-        rows = self.conn.execute(_WORKERS, (run_id, run_id)).fetchall()
+        rows = self.conn.execute(_WORKERS, (run_id, run_id, owner, owner)).fetchall()
         return [
             WorkerState(
                 worker_id=worker_id, running=running,
@@ -473,6 +555,7 @@ class JobQueue:
 
     def throughput(
         self, run_id: str | None = None, *, window_seconds: float = 3600.0,
+        owner: str | None = None,
     ) -> Throughput:
         """Batches completed in the trailing window, as a rate.
 
@@ -481,7 +564,7 @@ class JobQueue:
         final transition leaves the row ``done``.
         """
         row = self.conn.execute(
-            _THROUGHPUT, (window_seconds, run_id, run_id)
+            _THROUGHPUT, (window_seconds, run_id, run_id, owner, owner)
         ).fetchone()
         completed = int(row[0]) if row else 0
         return Throughput(
@@ -512,6 +595,8 @@ __all__ = [
     "JobQueue",
     "JobRow",
     "JobSpec",
+    "RunOwnedError",
+    "RunSummary",
     "Throughput",
     "WorkerState",
     "utcnow",
