@@ -189,6 +189,9 @@ the adjacent concerns and should be consulted rather than duplicated here:
 - A persistence verifier ensures all required shard files exist, are readable, match expected document counts, and prevent accidental overwrites.
 - `source_hash` is content-addressed (SHA-256 of the source bytes) and stable across environments and runs; logical row order within a shard is stable given the same inputs and iteration order.
 - Output is **not** byte-for-byte reproducible across runs: the manifest stamps a wall-clock `extracted_at_iso`, and Parquet writes do not pin the writer's embedded metadata (`created_by`, timestamp coercion, statistics). The determinism contract is on *content*: for a given `source_hash` + `womblex.version` + `config_digest` + `womblex.models`, extraction content and row order are stable, so the manifest's `content_digest` (SHA-256 over each document's ordered elements: kind, order, text, table cells, form fields, spreadsheet cells, alt text, meta) matches. A consumer re-running later compares `content_digest`; a mismatch is explained by the stamped version, config and model digests and never blocks output. File bytes and `extracted_at_iso` are not part of the guarantee. A manifest written before the column reads `content_digest` as null.
+- Every pipeline Parquet carries a `womblex.contract_version` footer key (versioned apart from the package) and a `womblex.sensitivity` key of `raw`, `masked`, or `none` by file role; an unknown role reads as `raw`. `egress_manifest.json` carries the contract version too. An additive column is a minor bump with reader back-fill; a rename or removal is a major bump with a reader shim. A file with no contract key reads as `1.0`-compatible.
+- Only files whose footer says `masked` or `none` are safe to hand onward; anything `raw`, or with no sensitivity key, stays inside the trust boundary.
+- `womblex.__all__` declares the stable Python API, pinned by a test, and resolves lazily so `import womblex` does not load the extraction stack. A name in it is removed or changed incompatibly only after one minor release emitting a `DeprecationWarning` that names the replacement.
 
 ## 9. Redaction Handling
 
@@ -302,6 +305,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 - Resuming an interrupted run automatically reconciles checkpoints and skips already-completed documents.
 - Individual document errors are isolated, recorded in the manifest, and do not crash the wider batch.
 - CLI commands allow stages to be dispatched independently, with idempotent queueing ensuring dependent stages sequence properly.
+- Logs can be emitted as JSON lines (`womblex --log-format json` or `WOMBLEX_LOG_FORMAT=json`) with no added dependency; worker and batch records carry `run_id`, `job_id`, `stage`, and `source_hash` where known, and the default text format is unchanged.
 
 ## 15. Web Console Shell, Navigation, and Deployment Modes
 
