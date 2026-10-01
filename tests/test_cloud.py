@@ -1291,7 +1291,10 @@ def test_enqueue_refuses_a_run_owned_by_someone_else(queue):
     from womblex.cloud.queue import JobSpec, RunOwnedError
 
     q, run_id = queue
-    spec = lambda n: JobSpec(batch_num=n, input_keys=["a.pdf"], shard_prefix="p")  # noqa: E731
+
+    def spec(n: int) -> JobSpec:
+        return JobSpec(batch_num=n, input_keys=["a.pdf"], shard_prefix="p")
+
     assert q.enqueue(run_id, [spec(1)], owner="alice") == 1
     with pytest.raises(RunOwnedError):
         q.enqueue(run_id, [spec(2)], owner="bob")
@@ -1360,7 +1363,7 @@ def test_runs_rolls_up_status_per_run(queue):
 
 
 def test_ensure_schema_migrates_a_table_without_owner(queue):
-    q, run_id = queue
+    q, _ = queue
     with q.conn.transaction():
         q.conn.execute("DROP INDEX IF EXISTS womblex_jobs_owner_idx")
         q.conn.execute("ALTER TABLE womblex_jobs DROP COLUMN owner")
