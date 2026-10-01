@@ -24,7 +24,11 @@ def _register_serve(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--ingest", default=None,
         help="Base URI callers' documents are enqueued from (or $WOMBLEX_INGEST_URI). "
-             "Without one, POST /v1/runs answers 503.",
+             "Without one, POST /v1/runs and /v1/uploads answer 503.",
+    )
+    p.add_argument(
+        "--max-upload-mb", type=int, default=256,
+        help="Largest POST /v1/uploads request, in MiB. Default: 256.",
     )
     p.add_argument("--host", default="127.0.0.1", help="Bind address. Default: 127.0.0.1.")
     p.add_argument("--port", type=int, default=8081, help="Bind port. Default: 8081.")
@@ -41,7 +45,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
         from womblex.api.app import create_api_app
     except ImportError:
-        logger.error("`womblex serve` requires the 'ui' extra. Install with: pip install womblex[ui]")
+        logger.error("`womblex serve` requires the 'api' extra. Install with: pip install womblex[api]")
         return 1
 
     from womblex.api.auth import REGISTRY_ENV, RegistryError, registry_from_env
@@ -68,6 +72,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
     try:
         app = create_api_app(
             store_uri=store, db_dsn=dsn, registry=registry, ingest_uri=ingest,
+            max_upload_bytes=args.max_upload_mb * 1024 * 1024,
         )
     except ValueError as e:
         logger.error("%s", e)

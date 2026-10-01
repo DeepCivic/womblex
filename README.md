@@ -418,8 +418,8 @@ requirement. Womblex does not read or write a vector column.
 
 Software that integrates with Womblex submits and reads work through
 `womblex serve`, the `/v1` service API: authenticated with static service
-tokens, owner-scoped (a client sees only its own runs; `admin` sees all), and needing the `ui`
-extra. It can submit a run over an ingest prefix, poll its status, list its
+tokens, owner-scoped (a client sees only its own runs; `admin` sees all), and needing the `api`
+extra (`docker compose --profile api up -d api` runs it on the pipeline image). It can upload documents, submit a run over the upload's prefix, poll its status, list its
 files with their contract version and sensitivity, and read one document's
 masked text (raw layers need the `read_raw` scope). Consumers that read the
 Parquet directly follow [`docs/contract.md`](docs/contract.md). The client

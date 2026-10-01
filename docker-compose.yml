@@ -27,6 +27,8 @@
 #     docker compose run --rm womblex finalize --run-id <run_id>
 #     # optional console over the same bucket, at :8080:
 #     docker compose up -d ui
+#     # optional /v1 service API at :8081 (needs a client registry file):
+#     WOMBLEX_API_CLIENTS_FILE=./clients.yaml docker compose --profile api up -d api
 #
 #   CLOUD — set the three connection vars (+ S3 creds) to external services and
 #   DO NOT start the bundled backends. `init`/`worker`/`ui` do not wait on
@@ -65,8 +67,8 @@
 # Inputs and outputs share the s3://womblex bucket, on disjoint prefixes:
 # source documents live under inbox/, shards land at runs/<run_id>/documents/.
 #
-# Two images, one stack: the pipeline/worker services run the image built from
-# the plain `Dockerfile`; the `ui` console runs the one from `Dockerfile.ui`
+# Two images, one stack: the pipeline/worker/api services run the image built
+# from the plain `Dockerfile`; the `ui` console runs the one from `Dockerfile.ui`
 # (adds a Node stage for the SPA).
 #
 # PUBLISHED OR BUILT — decided by which files you pass, not by editing one.
@@ -88,7 +90,7 @@
 # mechanical edit for a cloud deployment and commit it to your fork:
 #   1. delete the `postgres`, `minio` and `createbuckets` services, AND
 #   2. delete every `depends_on:` block that names them (in `init`, `worker`,
-#      `womblex`, `seed-demo`, `ui`).
+#      `womblex`, `seed-demo`, `ui`, `api`).
 # Nothing else changes — the env vars still point every service at the
 # external Postgres + S3. (The local stack is unaffected; it needs 2.20.0
 # only if you keep the `required: false` keys, which are harmless there.)
@@ -296,6 +298,39 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+
+  # Opt-in: the `/v1` service API (`womblex serve`), at :8081. Integrations
+  # submit and read work here; the console above is the admin utility. Runs on
+  # the pipeline image (it installs the `[api]` extra) and reads the same
+  # store, queue and ingest location the workers use. The client registry is
+  # mounted read-only from WOMBLEX_API_CLIENTS_FILE; serve refuses to start
+  # without one. Private-network only — see docs/deployment-images.md.
+  #   womblex api-token --client <id> --scope submit --scope read  # add to the registry
+  #   WOMBLEX_API_CLIENTS_FILE=./clients.yaml docker compose --profile api up -d api
+  api:
+    image: ${WOMBLEX_PIPELINE_IMAGE:-ghcr.io/deepcivic/womblex:latest}
+    depends_on:
+      init:
+        condition: service_completed_successfully
+        required: false
+      minio:
+        condition: service_healthy
+        required: false
+      createbuckets:
+        condition: service_completed_successfully
+        required: false
+    environment:
+      <<: *cloud-env
+      WOMBLEX_API_CLIENTS: /run/womblex/clients.yaml
+    volumes:
+      - ${WOMBLEX_API_CLIENTS_FILE:-./clients.yaml}:/run/womblex/clients.yaml:ro
+    command: ["serve", "--host", "0.0.0.0", "--port", "8081"]
+    ports:
+      - "8081:8081"
+    read_only: true
+    tmpfs:
+      - /tmp
+    profiles: ["api"]
 
 volumes:
   pgdata:

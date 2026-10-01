@@ -6,6 +6,10 @@ lifetime, authenticates every `/v1` route with a service token
 a run another client owns is a 404, and ``admin`` sees all. A run is known by
 the queue, so the CLI- and console-submitted runs (no owner) are admin-only.
 
+Uploads (``POST /v1/uploads``) store documents under the caller's own
+``<client_id>/<upload_id>/`` folder of the ingest location, which is the
+``input_prefix`` a submission then names.
+
 Submission writes queue rows only, through the console's dispatch
 (:mod:`womblex.cloud.dispatch`): the run id is minted here, a non-admin
 caller's ``input_prefix`` must sit under its own client id, and the config is
@@ -18,10 +22,11 @@ import logging
 import secrets
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import PurePosixPath
 from typing import Literal, cast
 
 import psycopg
-from fastapi import Depends, FastAPI, HTTPException, Response
+from fastapi import Depends, FastAPI, HTTPException, Response, UploadFile
 
 from womblex.api import readers
 from womblex.api.auth import Caller, ClientRegistry, caller_dependency, require_scope
@@ -37,8 +42,9 @@ from womblex.api.models import (
     RunRequest,
     RunStatus,
     RunSubmitted,
+    UploadAccepted,
 )
-from womblex.cli._shared import normalise_prefix
+from womblex.cli._shared import SUPPORTED_EXTENSIONS, normalise_prefix, select_supported
 from womblex.cloud import dispatch
 from womblex.cloud.dispatch import QUEUE_CONNECT_TIMEOUT
 from womblex.cloud.queue import JobQueue, RunSummary
@@ -53,6 +59,9 @@ logger = logging.getLogger(__name__)
 
 #: How many runs one caller's listing returns.
 RUN_LIMIT = 1000
+
+#: The default cap on one upload request's total size.
+MAX_UPLOAD_BYTES = 256 * 1024 * 1024
 
 
 def run_state(counts: dict[str, int]) -> str:
@@ -85,6 +94,37 @@ def confine_prefix(caller: Caller, input_prefix: str) -> str:
     return prefix
 
 
+def upload_names(files: list[UploadFile]) -> list[str]:
+    """Each upload's bare file name; 400 if one is unusable, repeated or unsupported.
+
+    Only the final path segment is kept, so a client-side path cannot place a
+    file outside the upload folder or nest it where a run would refuse it.
+    """
+    names = []
+    for f in files:
+        name = PurePosixPath((f.filename or "").replace("\\", "/")).name
+        if name in ("", ".", "..") or "\x00" in name:
+            raise HTTPException(status_code=400, detail=f"unusable file name: {f.filename!r}")
+        names.append(name)
+    if len(set(names)) != len(names):
+        raise HTTPException(status_code=400, detail="file names must be unique within an upload")
+    unsupported = sorted(set(names) - set(select_supported(names, location="upload")))
+    if unsupported:
+        raise HTTPException(
+            status_code=400,
+            detail=f"unsupported file type: {unsupported}; supported: {sorted(SUPPORTED_EXTENSIONS)}",
+        )
+    return names
+
+
+def upload_size(f: UploadFile) -> int:
+    """The spooled upload's size in bytes, measured rather than taken from a header."""
+    f.file.seek(0, 2)
+    size = f.file.tell()
+    f.file.seek(0)
+    return size
+
+
 def _status(run: RunSummary) -> RunStatus:
     return RunStatus(
         run_id=run.run_id, state=run_state(run.counts), counts=run.counts,  # type: ignore[arg-type]
@@ -98,12 +138,13 @@ def create_api_app(
     db_dsn: str,
     registry: ClientRegistry | None,
     ingest_uri: str | None = None,
+    max_upload_bytes: int = MAX_UPLOAD_BYTES,
 ) -> FastAPI:
     """Build the API, bound to one store and queue for its lifetime.
 
     ``registry=None`` is the ``--insecure-no-auth`` development mode; the
     ``serve`` command, not this factory, refuses an empty registry. Without
-    *ingest_uri* the reads serve and submission answers 503.
+    *ingest_uri* the reads serve and submission and uploads answer 503.
     """
     settings = UISettings(
         output_root=None, store_uri=store_uri, db_dsn=db_dsn, ingest_uri=ingest_uri,
@@ -186,6 +227,30 @@ def create_api_app(
             run_id=run.run_id, document_count=run.document_count,
             batch_count=run.batch_count, stages=list(stages),
         )
+
+    @app.post("/v1/uploads", response_model=UploadAccepted, status_code=201, tags=["uploads"])
+    def upload(files: list[UploadFile], caller: Caller = Depends(can_submit)) -> UploadAccepted:  # noqa: B008
+        if not ingest_uri:
+            raise HTTPException(status_code=503, detail="no ingest location configured")
+        names = upload_names(files)
+        total = sum(upload_size(f) for f in files)
+        if total > max_upload_bytes:
+            raise HTTPException(
+                status_code=413, detail=f"upload is {total} bytes; the limit is {max_upload_bytes}",
+            )
+        if "/" in caller.client_id or confine_prefix(caller, caller.client_id) != caller.client_id:
+            raise HTTPException(status_code=400, detail="client id is not usable as a folder name")
+        upload_id = mint_run_id()
+        prefix = f"{caller.client_id}/{upload_id}"
+        try:
+            store = RemoteStore.from_uri(ingest_uri)
+            for name, f in zip(names, files, strict=True):
+                store.write_stream(f.file, f"{prefix}/{name}")
+        except Exception as e:
+            logger.warning("api upload: ingest unreachable: upload_id=%s: %s", upload_id, e)
+            raise HTTPException(status_code=503, detail=f"ingest location unreachable: {e}") from e
+        logger.info("api upload: %s files=%d bytes=%d", prefix, len(names), total)
+        return UploadAccepted(upload_id=upload_id, input_prefix=prefix, files=names, bytes=total)
 
     @app.get("/v1/runs/{run_id}", response_model=RunStatus, tags=["runs"])
     def get_run(run_id: str, caller: Caller = Depends(can_read)) -> RunStatus:  # noqa: B008

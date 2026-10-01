@@ -1,6 +1,6 @@
 # Womblex as a backend subsystem — plan
 
-*Status: in progress (2026-10; A1–A5, U1, U2, B1, B2, B3, B4a-1, B4a-2, B4b-1 and U3 shipped). Sequenced as 13 merges; each lands on its own and updates this document's merge list as it ships.*
+*Status: in progress (2026-10; A1–A5, U1, U2, B1, B2, B3, B4a-1, B4a-2, B4b-1, U3, B5 and B4b-2 shipped; the plan is complete). Sequenced as 13 merges; each lands on its own and updates this document's merge list as it ships.*
 
 ## Context
 Womblex is to serve other software in two modes:
@@ -115,6 +115,8 @@ Add `womblex api-token --client X` to print a new token and its hash for the reg
 
 *B4b-1 shipped: `GET /v1/runs/{id}/documents/{hash}/text?layer=masked|chunks|elements`, in the new `api/readers.py`. `masked` (the `clean_text` sidecar) is the default and needs `read`; `chunks` and `elements` are gated by the layer's contract sensitivity and need `read_raw` (`admin` implies it). A document with no rows in the layer, or an unknown run, is a 404. Uploads (B4b-2) are split off because multipart parsing needs `python-multipart`, a dependency change that waits on B5's approval.*
 
+*B4b-2 shipped: `POST /v1/uploads` (`submit`) takes multipart `files`, keeps each file's bare name, and refuses (400, nothing written) an unusable, repeated or unsupported name, judged by `select_supported`. A request over `--max-upload-mb` (default 256) is 413. Files are copied to `<ingest>/<client_id>/<upload_id>/` via the new `RemoteStore.write_stream`, and the response names that folder as the `input_prefix` for `POST /v1/runs`. Without an ingest location it answers 503.*
+
 - New `api/app.py` `create_api_app(...)`. It reuses `UISettings` binding from `ui/deps.py`, `RemoteStore` and `cloud/dispatch.py`.
 - New `cli/serve.py`. It binds to loopback by default.
 - Pydantic response models give a generated OpenAPI spec. A snapshot test pins `openapi.json`, so breaking API changes are visible in review.
@@ -134,6 +136,8 @@ Add `womblex api-token --client X` to print a new token and its hash for the reg
 - Out of scope for v1: callbacks and webhooks (consumers poll), cancellation, per-client quotas.
 
 ### B5. Packaging + deploy
+*Shipped: a new `[api]` extra (fastapi, uvicorn, python-multipart), kept apart from `[ui]`. The pipeline `Dockerfile` installs it by default, so the `api` compose service (profile `api`, port 8081) runs on the worker image with the registry mounted read-only from `WOMBLEX_API_CLIENTS_FILE`. `womblex serve` names the `api` extra when it is missing.*
+
 - The API needs fastapi, uvicorn and python-multipart. Either reuse the `[ui]` extra or add an `[api]` extra. **This is a `pyproject.toml` change and needs your approval.** python-multipart is a new dependency.
 - Add an `api` service to `docker-compose.yml`, on the same image as the workers, with the registry mounted read-only.
 
@@ -169,11 +173,11 @@ Each merge must be under 500 lines. Split further if needed.
 7. B1 extract `cloud/dispatch.py` — **shipped**
 8. B2 queue `owner` column + migration — **shipped**
 9. B3 service-token auth + `api-token` verb — **shipped**
-10. B5 dependency extra — waits on your approval
+10. B5 dependency extra and `api` compose service — **shipped**
 11. B4a-1 `serve` app: health/ready, run list/detail, manifest, metrics — **shipped**
 12. B4a-2 `POST /v1/runs` (owner threaded through dispatch) and `/files` — **shipped**
 13. B4b-1 document text endpoint with sensitivity gating — **shipped**
-    B4b-2 `POST /v1/uploads` — waits on B5 (needs `python-multipart`)
+    B4b-2 `POST /v1/uploads` — **shipped**
 14. U3 docs reframe, plus architecture and project-structure updates — **shipped**
 
 ## Verification

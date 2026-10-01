@@ -19,9 +19,10 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import BinaryIO, cast
 
 logger = logging.getLogger(__name__)
 
@@ -313,6 +314,14 @@ class RemoteStore:
         parent = full.rsplit("/", 1)[0]
         self.fs.makedirs(parent, exist_ok=True)  # type: ignore[attr-defined]
         self.fs.put_file(str(local_path), full)  # type: ignore[attr-defined]
+        return rel
+
+    def write_stream(self, fileobj: BinaryIO, rel: str) -> str:
+        """Copy *fileobj* to *rel* without staging it on local disk first."""
+        full = self._full(rel)
+        self.fs.makedirs(full.rsplit("/", 1)[0], exist_ok=True)  # type: ignore[attr-defined]
+        with self.fs.open(full, "wb") as out:  # type: ignore[attr-defined]
+            shutil.copyfileobj(fileobj, out)
         return rel
 
     def move(self, src_rel: str, dst_rel: str) -> str:
