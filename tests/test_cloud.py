@@ -1360,6 +1360,8 @@ def test_runs_rolls_up_status_per_run(queue):
     assert summary.counts == {"done": 1, "pending": 1}
     assert summary.total == 2
     assert not [r for r in q.runs(owner="bob") if r.run_id == run_id]
+    assert [r.run_id for r in q.runs(run_id=run_id)] == [run_id]
+    assert q.runs(owner="bob", run_id=run_id) == []
 
 
 def test_ensure_schema_migrates_a_table_without_owner(queue):

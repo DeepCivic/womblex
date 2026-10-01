@@ -110,7 +110,7 @@ _STATS = (
 )
 _RUNS = (
     "SELECT run_id, max(owner), status, count(*), min(created_at), max(updated_at) "
-    f"FROM womblex_jobs WHERE {_OWNER_FILTER} GROUP BY run_id, status"
+    f"FROM womblex_jobs WHERE {_RUN_FILTER} AND {_OWNER_FILTER} GROUP BY run_id, status"
 )
 # The run's owner is whatever its existing rows carry; a new row inherits it
 # unless the caller names one, so a run never ends up with mixed ownership.
@@ -495,22 +495,25 @@ class JobQueue:
         rows = self.conn.execute(_STATS, (run_id, run_id, owner, owner)).fetchall()
         return {status: count for status, count in rows}
 
-    def runs(self, owner: str | None = None, *, limit: int = 100) -> list[RunSummary]:
+    def runs(
+        self, owner: str | None = None, *, run_id: str | None = None, limit: int = 100,
+    ) -> list[RunSummary]:
         """Runs with their jobs rolled up by status, latest activity first.
 
         *owner* narrows to one caller's runs; ``None`` lists every run,
         including CLI- and console-submitted ones that have no owner.
+        *run_id* narrows to that one run.
         """
-        rows = self.conn.execute(_RUNS, (owner, owner)).fetchall()
+        rows = self.conn.execute(_RUNS, (run_id, run_id, owner, owner)).fetchall()
         by_run: dict[str, RunSummary] = {}
-        for run_id, run_owner, status, count, created, updated in rows:
-            prior = by_run.get(run_id)
+        for rid, run_owner, status, count, created, updated in rows:
+            prior = by_run.get(rid)
             counts = {**prior.counts, status: count} if prior else {status: count}
             created_iso, updated_iso = _iso(created), _iso(updated)
             if prior:
                 created_iso = min(filter(None, (prior.created_at, created_iso)), default=None)
                 updated_iso = max(filter(None, (prior.updated_at, updated_iso)), default=None)
-            by_run[run_id] = RunSummary(run_id, run_owner, counts, created_iso, updated_iso)
+            by_run[rid] = RunSummary(rid, run_owner, counts, created_iso, updated_iso)
         ranked = sorted(by_run.values(), key=lambda r: r.updated_at or "", reverse=True)
         return ranked[:limit]
 

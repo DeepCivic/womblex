@@ -1,6 +1,6 @@
 # Womblex as a backend subsystem — plan
 
-*Status: in progress (2026-09; A1–A5, U1, U2, B1, B2 and B3 shipped). Sequenced as 13 merges; each lands on its own and updates this document's merge list as it ships.*
+*Status: in progress (2026-09; A1–A5, U1, U2, B1, B2, B3 and B4a-1 shipped). Sequenced as 13 merges; each lands on its own and updates this document's merge list as it ships.*
 
 ## Context
 Womblex is to serve other software in two modes:
@@ -108,6 +108,8 @@ New `api/auth.py`:
 Add `womblex api-token --client X` to print a new token and its hash for the registry. Document the registry in `docs/deployment-images.md` as private-network only.
 
 ### B4. `womblex serve` — `/v1` API
+*B4a split in two to stay under the cap. B4a-1 shipped: `womblex serve`, health/ready, and the owner-scoped reads (run list, detail, manifest, metrics). Runs are known to the queue, so CLI- and console-submitted runs (no owner) are visible to `admin` only. B4a-2 remains: `POST /v1/runs` and `/files`. For B4a-2: `enqueue_extraction` and `enqueue_downstream_stages` need `owner=`; the run id is minted server-side; a non-admin caller's `input_prefix` is confined under its own client id; and a shared stage-list gate in `cloud/dispatch.py` should reject a bad config before any row is written. The OpenAPI pin is a test over the operation and model surface, not a snapshot file.*
+
 - New `api/app.py` `create_api_app(...)`. It reuses `UISettings` binding from `ui/deps.py`, `RemoteStore` and `cloud/dispatch.py`.
 - New `cli/serve.py`. It binds to loopback by default.
 - Pydantic response models give a generated OpenAPI spec. A snapshot test pins `openapi.json`, so breaking API changes are visible in review.
@@ -163,9 +165,10 @@ Each merge must be under 500 lines. Split further if needed.
 8. B2 queue `owner` column + migration — **shipped**
 9. B3 service-token auth + `api-token` verb — **shipped**
 10. B5 dependency extra — waits on your approval
-11. B4a `serve` app: health/ready, runs, manifest, files, metrics
-12. B4b uploads + document text endpoints with sensitivity gating
-13. U3 docs reframe, plus architecture and project-structure updates
+11. B4a-1 `serve` app: health/ready, run list/detail, manifest, metrics — **shipped**
+12. B4a-2 `POST /v1/runs` (owner threaded through dispatch) and `/files`
+13. B4b uploads + document text endpoints with sensitivity gating
+14. U3 docs reframe, plus architecture and project-structure updates
 
 ## Verification
 - Each merge: `uv run ruff check src/ tests/`, `uv run mypy src/`, `uv run python -m pytest tests/ -v -m "not slow and not benchmark"`, plus `git diff --stat` against the merge base, which must be under 500 lines.

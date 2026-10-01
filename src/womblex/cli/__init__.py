@@ -29,6 +29,7 @@ Usage:
     womblex ingest-geo           <input> -o output/geo
     womblex ingest-abn           <input> -o output/abn
     womblex ui                   [--output-root DIR | --store URI] [--port 8080]
+    womblex serve                [--store URI --dsn DSN] [--port 8081]
     womblex api-token            --client NAME [--scope SCOPE ...]
     womblex seed-demo            [--output-root DIR | --store URI]
 """
@@ -54,6 +55,7 @@ from womblex.cli import (
     quality,
     redact,
     score,
+    serve,
     spellfix,
     ui,
     verify,
@@ -81,6 +83,7 @@ ALL_COMMANDS = [
     *verify.COMMANDS,
     *ui.COMMANDS,
     *api_token.COMMANDS,
+    *serve.COMMANDS,
     *demo.COMMANDS,
 ]
 
