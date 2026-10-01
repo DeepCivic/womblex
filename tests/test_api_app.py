@@ -240,6 +240,44 @@ def test_files_list_keys_with_their_contract_footer(client, tmp_path):
     assert client.get("/v1/runs/run-b/files", headers=auth("ta")).status_code == 404
 
 
+def _write_text_layers(tmp_path: Path) -> None:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    docs = tmp_path / "store" / "runs" / "run-a" / "documents"
+    docs.mkdir(parents=True, exist_ok=True)
+    pq.write_table(pa.table({
+        "source_hash": ["h", "h", "other"], "chunk_index": [1, 0, 0],
+        "content_type": ["narrative"] * 3, "text": ["<PERSON_1> b", "a", "z"],
+        "n_masked": [1, 0, 0],
+    }), docs / "batch-0001.clean_text.parquet")
+    pq.write_table(pa.table({
+        "source_hash": ["h"], "elem_order": [0], "kind": ["paragraph"], "page": [1],
+        "text": ["Jane b"],
+    }), docs / "batch-0001.elements.parquet")
+
+
+def test_document_text_defaults_to_the_masked_layer_in_order(client, tmp_path):
+    _write_text_layers(tmp_path)
+    body = client.get("/v1/runs/run-a/documents/h/text", headers=auth("ta")).json()
+    assert body["layer"] == "masked" and body["sensitivity"] == "masked"
+    assert [r["text"] for r in body["rows"]] == ["a", "<PERSON_1> b"]
+
+
+def test_raw_layers_need_read_raw(client, tmp_path):
+    _write_text_layers(tmp_path)
+    path = "/v1/runs/run-a/documents/h/text?layer=elements"
+    assert client.get(path, headers=auth("ta")).status_code == 403
+    body = client.get(path, headers=auth("to")).json()
+    assert body["sensitivity"] == "raw" and body["rows"][0]["text"] == "Jane b"
+
+
+def test_document_text_is_404_for_an_unknown_document_or_run(client, tmp_path):
+    _write_text_layers(tmp_path)
+    assert client.get("/v1/runs/run-a/documents/nope/text", headers=auth("ta")).status_code == 404
+    assert client.get("/v1/runs/run-b/documents/h/text", headers=auth("ta")).status_code == 404
+
+
 def _surface(spec: dict) -> dict:
     """Each operation's success status + response model, and each model's fields."""
     ops = {}
@@ -265,11 +303,13 @@ def test_openapi_surface_is_pinned(client):
             "GET /v1/runs": "200 RunList",
             "POST /v1/runs": "201 RunSubmitted",
             "GET /v1/runs/{run_id}": "200 RunStatus",
+            "GET /v1/runs/{run_id}/documents/{source_hash}/text": "200 DocumentText",
             "GET /v1/runs/{run_id}/files": "200 RunFiles",
             "GET /v1/runs/{run_id}/manifest": "200 RunManifest",
             "GET /v1/runs/{run_id}/metrics": "200 RunMetrics",
         },
         "models": {
+            "DocumentText": ["layer", "rows", "run_id", "sensitivity", "source_hash"],
             "Health": ["status"],
             "Ready": ["queue", "ready", "store"],
             "RunFile": ["contract_version", "key", "rows", "sensitivity"],

@@ -18,13 +18,15 @@ import logging
 import secrets
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import cast
+from typing import Literal, cast
 
 import psycopg
 from fastapi import Depends, FastAPI, HTTPException, Response
 
+from womblex.api import readers
 from womblex.api.auth import Caller, ClientRegistry, caller_dependency, require_scope
 from womblex.api.models import (
+    DocumentText,
     Health,
     Ready,
     RunFile,
@@ -217,6 +219,32 @@ def create_api_app(
                 entry = RunFile(key=key, rows=footer[1], **read_footer_contract(footer[0]))
             files.append(entry)
         return RunFiles(run_id=run_id, files=files)
+
+    @app.get(
+        "/v1/runs/{run_id}/documents/{source_hash}/text", response_model=DocumentText, tags=["runs"],
+    )
+    def get_document_text(
+        run_id: str, source_hash: str,
+        layer: Literal["masked", "chunks", "elements"] = "masked",
+        caller: Caller = Depends(can_read),  # noqa: B008
+    ) -> DocumentText:
+        spec = readers.LAYERS[layer]
+        if spec.sensitivity == "raw" and not caller.has("read_raw"):
+            raise HTTPException(status_code=403, detail="requires the 'read_raw' scope")
+        with queue() as q:
+            find_run(q, caller, run_id)
+        try:
+            rows = readers.document_rows(store_uri, run_id, source_hash, spec)
+        except Exception as e:
+            raise HTTPException(status_code=503, detail=f"run store unreachable: {e}") from e
+        if not rows:
+            raise HTTPException(
+                status_code=404, detail=f"no {layer} text for document {source_hash} in {run_id}",
+            )
+        return DocumentText(
+            run_id=run_id, source_hash=source_hash, layer=layer,
+            sensitivity=spec.sensitivity, rows=rows,
+        )
 
     @app.get("/v1/runs/{run_id}/metrics", response_model=RunMetrics, tags=["runs"])
     def get_metrics(run_id: str, caller: Caller = Depends(can_read)) -> RunMetrics:  # noqa: B008
