@@ -127,7 +127,7 @@ whoever pulled first and broken for whoever pulls now.
 
 ## The API client registry
 
-The service API (`womblex serve`, landing in a later merge) authenticates callers
+The service API (`womblex serve`) authenticates callers
 with static bearer tokens. The server holds only each token's SHA-256, in a YAML
 registry named by `WOMBLEX_API_CLIENTS`, which a deployment mounts read-only:
 
@@ -144,6 +144,10 @@ private-network authentication for a trusted-subsystem deployment: there is no
 TLS termination, rate limiting or token expiry in the application, so the API
 must sit behind the network boundary and not be exposed publicly. Rotate by
 replacing an entry's hash and redeploying.
+
+`womblex serve --store <uri> --dsn <dsn>` binds loopback:8081
+by default and refuses to start with no registry unless `--insecure-no-auth`
+(development only: every request is an admin). It needs the `ui` extra.
 
 ## What re-checks this
 

@@ -110,7 +110,7 @@ src/womblex/
 │   ├── remote.py          # fsspec stage-in/stage-out object-storage adapter for distributed runs
 │   ├── retention.py       # run_id-based retention policy
 │   └── checkpoint.py      # JSON-based checkpoint manager for resumable batch runs
-├── api/                   # Service API: auth.py (service-token registry, Caller + scopes; `womblex api-token`)
+├── api/                   # Service API (`womblex serve`): app.py (`/v1` routes, owner-scoped), auth.py (service-token registry, Caller + scopes; `womblex api-token`), models.py (OpenAPI models)
 ├── cloud/                 # Distributed run support (queue.py, dispatch.py, worker.py, stage_contracts.py, stage_runner.py)
 ├── verify/
 │   └── engine.py          # Two-pass verification (structural + weak-signal) — defined, not wired in; see the Verify stage

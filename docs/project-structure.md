@@ -123,7 +123,9 @@ womblex/
 │   │   ├── stage_contracts.py  # Declarative StageContract per downstream stage (inputs/outputs/scope)
 │   │   └── stage_runner.py     # Execute a contract against an object store
 │   ├── api/                    # Service API (`womblex serve`)
-│   │   └── auth.py             # Service-token auth: client registry (WOMBLEX_API_CLIENTS), Caller + scopes, FastAPI dependencies
+│   │   ├── app.py              # create_api_app() — `/v1` health/ready, run list/detail, manifest, metrics; owner-scoped
+│   │   ├── auth.py             # Service-token auth: client registry (WOMBLEX_API_CLIENTS), Caller + scopes, FastAPI dependencies
+│   │   └── models.py           # Pydantic response models — the OpenAPI surface
 │   ├── ui/                     # Console sidecar (`womblex ui`) — FastAPI over pipeline artefacts; reads runs, never writes to one
 │   │   ├── app.py              # create_app() — binds one run source for the app's lifetime
 │   │   ├── deps.py             # UISettings — local output_root vs store-backed (+ optional queue/presets dirs), resolved from args/env
