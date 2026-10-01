@@ -302,9 +302,9 @@ the adjacent concerns and should be consulted rather than duplicated here:
 
 ## 15. Web Console Shell, Navigation, and Deployment Modes
 
-**As** a user,
-**I want** an optional web console that reads the artefacts the pipeline already writes,
-**so that** I can navigate every run domain in one place without a separate tool or a live pipeline connection.
+**As** a developer or administrator,
+**I want** an optional admin and debugging console that reads the artefacts the pipeline already writes,
+**so that** I can inspect and debug every run domain in one place without a separate tool or a live pipeline connection.
 
 **Given** a `womblex[ui]` install bound to a single run source (a local output root or an object-store URI)
 **When** the operator launches the console and opens it in a browser
@@ -312,6 +312,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 
 **Acceptance criteria:**
 
+- The console is an admin and debugging utility, not an integration surface: other software submits and reads work through the authenticated, owner-scoped `womblex serve` `/v1` API or reads the on-disk contract ([`docs/contract.md`](contract.md)). The console has no authentication and binds to loopback unless told otherwise.
 - The console binds to exactly one run source at construction (local output root or store URI) so no endpoint can be steered to read an unmounted directory.
 - A persistent top bar (global search, run selector, execution controls) and a side-nav rail route between the Dashboard, Corpus Inspector, Semantic Chunk Inspector, Pipeline Composer, and Resources Console.
 - The console is a reader over persisted artefacts and never edits a stage output; its only writable surfaces are dispatch and preset saving.
@@ -320,9 +321,9 @@ the adjacent concerns and should be consulted rather than duplicated here:
 
 ## 16. Dashboard — Queue and Stage Progress
 
-**As** a user,
+**As** an administrator,
 **I want** a run-scoped dashboard of queue state and per-stage progress,
-**so that** I can monitor throughput and spot stalled jobs without touching the queue.
+**so that** I can monitor throughput and spot stalled jobs while operating or debugging a run, without touching the queue.
 
 **Given** a selected run, with an optional job queue and the run's own per-stage checkpoints
 **When** the operator opens the Dashboard
@@ -339,9 +340,9 @@ the adjacent concerns and should be consulted rather than duplicated here:
 
 ## 17. Corpus Inspector — Document Grid and Integrity Audit
 
-**As** a user,
+**As** a developer or administrator,
 **I want** a dense, virtualised document grid with checkpoint and shard-integrity views,
-**so that** I can inspect thousands of documents and confirm the run's outputs are complete and readable.
+**so that** I can inspect thousands of documents and confirm a run's outputs are complete and readable when debugging it.
 
 **Given** a selected run's manifest and shard directories
 **When** the operator opens the Corpus Inspector
@@ -361,9 +362,9 @@ the adjacent concerns and should be consulted rather than duplicated here:
 
 ## 18. Semantic Chunk Inspector — Chunk, Entity, PII, and Money Overlays
 
-**As** a user,
+**As** a developer,
 **I want** to read a document's chunks with entity, PII, and money overlays rendered inline,
-**so that** I can verify chunking quality and confirm sensitive spans are masked correctly.
+**so that** I can debug chunking quality and confirm sensitive spans are masked correctly.
 
 **Given** a document chosen from the run's manifest
 **When** the operator opens the Semantic Chunk Inspector for that document
@@ -379,8 +380,8 @@ the adjacent concerns and should be consulted rather than duplicated here:
 
 ## 19. Pipeline Composer — Configuration, Validation, and Dispatch
 
-**As** a user,
-**I want** to compose and validate a pipeline configuration visually and dispatch a run from it,
+**As** a developer or administrator,
+**I want** to compose and validate a pipeline configuration visually and dispatch an admin run from it,
 **so that** I can author correct configs and enqueue work without hand-editing YAML or re-implementing guardrails.
 
 **Given** the served stage graph and the `WomblexConfig` JSON Schema
@@ -394,12 +395,13 @@ the adjacent concerns and should be consulted rather than duplicated here:
 - Named presets are offered as starting points; operator-authored presets can be saved when a presets directory is configured, and preset saving refuses cleanly when it is not.
 - Enqueuing an extraction run and dispatching downstream stages call the same enabled-stage gate and queue-enqueue paths as the equivalent CLI commands, and dispatch is idempotent per `(run_id, stage)`.
 - Which downstream stages run is decided server-side (never re-derived in the frontend); the result panel reports what was dispatched in claim order, and irreversible or run-scoped stages (PII, quality) remain undispatchable.
+- Runs dispatched from the console carry no owner, so through the service API they are visible to `admin` callers only.
 
 ## 20. Resources Console — Connections
 
-**As** a user,
+**As** an administrator,
 **I want** connection cards for the store, ingest, queue, and enrichment service with reachability tests,
-**so that** I can confirm the environment is wired correctly without exposing secrets.
+**so that** I can confirm a deployment is wired correctly without exposing secrets.
 
 **Given** the deployment's configured store, ingest, queue, and Isaacus connections
 **When** the operator opens the Resources Console
@@ -413,7 +415,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 
 ## 21. Console Design System and Accessibility
 
-**As** a user,
+**As** a developer or administrator,
 **I want** the console to default to a dense, dark, state-legible design that runs with no network access and meets accessibility standards,
 **so that** I can read large grids and chunk text reliably in both themes and at every density.
 

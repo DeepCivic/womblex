@@ -1,5 +1,8 @@
 """UI CLI subcommand: ``womblex ui`` (console sidecar).
 
+The console is an admin and debugging utility; integrations use
+``womblex serve``.
+
 Binds to loopback by default. The console has no authentication by design
 — it is kept undiscoverable at the network layer instead — so exposing it
 beyond localhost is an explicit ``--host`` choice the operator makes

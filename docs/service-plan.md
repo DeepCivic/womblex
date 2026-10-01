@@ -1,6 +1,6 @@
 # Womblex as a backend subsystem — plan
 
-*Status: in progress (2026-10; A1–A5, U1, U2, B1, B2, B3, B4a-1, B4a-2 and B4b-1 shipped). Sequenced as 13 merges; each lands on its own and updates this document's merge list as it ships.*
+*Status: in progress (2026-10; A1–A5, U1, U2, B1, B2, B3, B4a-1, B4a-2, B4b-1 and U3 shipped). Sequenced as 13 merges; each lands on its own and updates this document's merge list as it ships.*
 
 ## Context
 Womblex is to serve other software in two modes:
@@ -149,7 +149,7 @@ Add `womblex api-token --client X` to print a new token and its hash for the reg
   - Remove `routes/feedback.py` and `store/feedback_output.py`.
   - Remove the `X-Womblex-Reported-By` handling. (The SPA never gained report buttons, so there was nothing to remove there.) `is_safe_run_id` moved to `store/retention.py`, as other modules depend on it.
   - Update the CLAUDE.md module table and the CHANGELOG.
-- **U3. Reframe the docs:**
+- **U3. Reframe the docs:** *Shipped. FR sections 15–21 are developer/admin stories; section 15 names the console an admin and debugging utility and points integrations at `womblex serve` and `docs/contract.md`, and section 19 records that console-dispatched runs carry no owner. The README gains a Service API section. `docs/architecture.md` and `docs/project-structure.md` already listed `api/` from B4; this adds the `ui/` and `serve` / `api-token` / `ui` CLI entries.*
   - Rewrite FR sections 15–21 as developer/admin stories.
   - Add to the README and `cli/ui.py` docstring: "admin and debugging utility; integrations use `womblex serve`".
   - Update `docs/architecture.md` and `docs/project-structure.md`.
@@ -174,7 +174,7 @@ Each merge must be under 500 lines. Split further if needed.
 12. B4a-2 `POST /v1/runs` (owner threaded through dispatch) and `/files` — **shipped**
 13. B4b-1 document text endpoint with sensitivity gating — **shipped**
     B4b-2 `POST /v1/uploads` — waits on B5 (needs `python-multipart`)
-14. U3 docs reframe, plus architecture and project-structure updates
+14. U3 docs reframe, plus architecture and project-structure updates — **shipped**
 
 ## Verification
 - Each merge: `uv run ruff check src/ tests/`, `uv run mypy src/`, `uv run python -m pytest tests/ -v -m "not slow and not benchmark"`, plus `git diff --stat` against the merge base, which must be under 500 lines.
