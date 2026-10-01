@@ -8,7 +8,7 @@ module-responsibility table in [`../CLAUDE.md`](../CLAUDE.md).
 ```
 womblex/
 ├── configs/           # Dataset-specific configurations
-├── docs/              # Architecture docs, ADRs, accuracy reports, the deployment-image audit, the consumer contract (contract.md)
+├── docs/              # Architecture docs, ADRs, accuracy reports, the deployment-image audit, the consumer contract (contract.md), the service API (service-api.md), the egress bundle (egress.md)
 ├── fixtures/          # Test fixtures (separate repo, see ../THIRD_PARTY_DATA.md)
 ├── src/womblex/
 │   ├── cli/                # CLI subpackage — per-topic modules: pipeline, cloud, redact, link, embed,

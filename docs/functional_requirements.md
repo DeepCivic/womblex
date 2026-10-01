@@ -17,6 +17,9 @@ the adjacent concerns and should be consulted rather than duplicated here:
 | [`docs/composable-design.md`](composable-design.md) | The composable-operations design and stage-contract model. |
 | [`docs/dataflow.md`](dataflow.md) | End-to-end data movement, from raw input to Parquet output. |
 | [`docs/extraction.md`](extraction.md) | The extraction output schema (element streams and child rows). |
+| [`docs/contract.md`](contract.md) | The consumer contract: contract version, file sensitivity, join keys, determinism, and the public Python API. |
+| [`docs/service-api.md`](service-api.md) | The `womblex serve` `/v1` service API: deployment, authentication, ownership, and endpoints. |
+| [`docs/egress.md`](egress.md) | The egress bundle layout and its producer/consumer boundaries. |
 | [`docs/money-extraction.md`](money-extraction.md) | The canonical reference for the `money` annotation op. |
 | [`docs/heuristics_disambiguation.md`](heuristics_disambiguation.md) | CV2/NumPy heuristics used for classification and routing. |
 | [`docs/project-structure.md`](project-structure.md) | File-level map of the source tree. |
@@ -435,5 +438,52 @@ the adjacent concerns and should be consulted rather than duplicated here:
 
 - **Virtualised rows do not announce total counts (re: "virtualised rows announce total counts to assistive technology").** The `<table>`/`<th scope>`/`<caption>` half of this criterion holds (`DocumentGrid.svelte`), but the grid is not virtualised and emits no `aria-rowcount`, so there is no announced total beyond the rendered rows. This is the same gap as the Requirement 17 TO-DO, stated here as its accessibility consequence: until windowed virtualisation lands with `aria-rowcount`/`aria-rowindex`, assistive technology hears only the DOM row count. Resolve together — either implement virtualisation with the row-count announcement, or drop the "virtualised rows announce total counts" clause from both requirements.
 
----
+## 22. Service API — Submission and Retrieval
 
+**As** a developer integrating another system,
+**I want** an authenticated HTTP API to upload documents, submit runs, and read their results,
+**so that** my software can use Womblex as a backend service without shell access to the pipeline host.
+
+**Given** `womblex serve` bound to a store, a job queue, and an ingest location, with a client registry
+**When** a caller presents a service token and uploads documents, submits a run, and polls it
+**Then** the run is queued under the caller's ownership and its status, files, and text are readable only by that caller (or an admin), gated by scope and file sensitivity.
+
+**Acceptance criteria:**
+
+- Every `/v1` endpoint except `health` and `ready` requires a bearer token whose SHA-256 is in the registry; a missing or unknown token is 401, and tokens are compared in constant time.
+- Scopes are `submit`, `read`, `read_raw`, and `admin` (which implies the rest); a request outside the caller's scopes is 403.
+- The service refuses to start with an empty registry unless explicitly run with `--insecure-no-auth`, and binds to loopback by default.
+- An upload is written to `<ingest>/<client_id>/<upload_id>/` keeping only bare file names; an unusable, repeated, or unsupported name is 400 with nothing written, an over-limit request is 413, and the response names the folder to submit as `input_prefix`.
+- A non-admin caller can submit runs only over its own `<client_id>/` tree (403 otherwise); the run id is minted server-side and unique across concurrent submissions.
+- A submitted `preset` or `config` is validated before any queue row is written (400 on failure) and selects downstream stages only; a config enabling none is an extraction-only run.
+- A run belongs to the client that submitted it: another client's run is 404, an admin sees all runs, and runs dispatched from the CLI or console carry no owner and are visible to admins only. A run never has mixed ownership.
+- Document text defaults to the masked layer; raw layers (`chunks`, `elements`) require `read_raw`, decided by the layer's contract sensitivity.
+- Run file listings report each file's row count, `contract_version`, and `sensitivity`, so a caller can fetch Parquet directly under the data contract.
+- `ready` reports store and queue reachability and answers 503 when either is down; an unreachable queue, store, or ingest location on any other endpoint is 503, not 500.
+- The OpenAPI surface is pinned by a test so breaking changes are visible in review.
+
+## 23. Egress Bundle — Export to Downstream Consumers
+
+**As** an operator handing a run to another system,
+**I want** one finished run exported with its raw source documents as a self-describing bundle,
+**so that** consumers can review and reuse the extracted corpus alongside its sources without calling back into Womblex.
+
+**Given** a finished local run root (holding `documents/` and `manifest.parquet`)
+**When** the operator runs `womblex egress <run> --to <dest>`
+**Then** a bundle is written under `<dest>/<bundle_prefix>/` holding the unchanged corpus, deduplicated raw sources, a source index, and a descriptor, and Womblex stops.
+
+**Acceptance criteria:**
+
+- The destination may be any `RemoteStore` URI (local directory, S3, MinIO, GCS) through one code path.
+- `corpus/` mirrors the run's shard directory recursively, including every downstream sidecar, plus the consolidated `manifest.parquet`, unchanged.
+- Raw sources are written to `sources/<source_hash><ext>`, deduplicated by hash; two documents sharing a hash point at one file.
+- `source_index.parquet` has one row per document with `source_hash`, `doc_id`, `filename`, `ext`, `raw_key`, and a status of `resolved`, `hash_mismatch`, `not_found`, `unsupported_basis`, or `upload_failed`; `raw_key` is null wherever no file was produced.
+- Source resolution is non-fatal per document: a missing, mismatched, records-ingested, or failed-upload source is reported in the index and in `egress_manifest.json`, never aborting the export.
+- `egress_manifest.json` carries the contract version and a per-document resolution report.
+- A corpus-only export (`--no-sources` / `--corpus-only`) skips resolution and writes no `sources/` or `source_index.parquet`.
+- `--source-root` resolves sources from a moved corpus; `--run-id` defaults to the run root's directory name and must agree with the run's own stamp, if it has one.
+- Re-exporting into an existing bundle removes source files the fresh export neither wrote nor attempted, and leaves a source whose upload failed untouched.
+- A run ingested from an object store is refused before anything is written.
+- Womblex writes the bundle and nothing downstream of it: no retention, serving, or write-back of consumer corrections.
+
+---

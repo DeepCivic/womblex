@@ -596,6 +596,27 @@ ground-truth concern: no stage branches on it, so the pipeline keeps no
 ground-truth mode. It falls back to the sentinel for a shard stamped before the
 key existed or by a config that declared no name.
 
+### Womblex as a backend subsystem — data contract plus an owner-scoped service
+
+Womblex serves other software two ways: a versioned on-disk contract
+([contract.md](contract.md)) and a callable `/v1` API
+([service-api.md](service-api.md)).
+
+- **A separate `womblex serve` app, not an extended console.** The console
+  stays an unauthenticated admin/debug utility; its location-override `PUT` and
+  report/feedback action were retired so it holds no writable state beyond
+  dispatch and presets.
+- **Static service tokens.** This is a trusted-subsystem deployment on a
+  private network, not a public cloud service, so a hashed YAML registry is
+  enough; no identity provider.
+- **Runs are owner-scoped in the queue.** Ownership lives on `womblex_jobs`,
+  the existing source of truth for what runs exist, rather than a new store.
+- **Determinism is an accuracy target, not a blocker.** The contract
+  guarantees *content* stability (`content_digest`) for the same version,
+  config and models, not file bytes. Drift is detectable, not prevented.
+- **Consumers poll.** Callbacks, cancellation and per-client quotas were left
+  out of v1.
+
 ## Rejected approaches / dead-ends
 
 - **OCR-side table-detection relaxation — do not retry without a new
@@ -690,13 +711,6 @@ key existed or by a config that declared no name.
     (13.72:1 dark / 17.46:1 light).
 
 ## Deferred / backlog
-
-- **Womblex as a backend subsystem — versioned data contract + `/v1` service
-  API.** *Proposed 2026-09.* Contract version and sensitivity footer keys,
-  a `content_digest` determinism contract, a declared public Python API, an
-  owner-scoped `womblex serve` API behind static service tokens, and the
-  console reframed as an admin/debug utility. Plan and merge sequence:
-  [service-plan.md](service-plan.md).
 
 - **AI chunking (semchunk 4) — single-enrichment graph reuse.** *Shipped
   2026-06, off-by-default.* The `chunking.chunking_model` pass-through lets

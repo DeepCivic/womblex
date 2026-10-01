@@ -1,4 +1,4 @@
-"""Document text reads for the `/v1` API (service plan B4b).
+"""Document text reads for the `/v1` API (`docs/service-api.md`).
 
 One document's text out of the run's shards, by layer. A layer's sensitivity is
 the one its file role carries (:mod:`womblex.store.contract`), so the gate is
