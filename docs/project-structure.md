@@ -118,6 +118,7 @@ womblex/
 │   │   └── checkpoint.py    # Per-stage CheckpointManager
 │   ├── cloud/                  # Distributed run support — `womblex-cloud` counterpart to local `womblex run`
 │   │   ├── queue.py            # JobQueue — Postgres FOR UPDATE SKIP LOCKED batch queue
+│   │   ├── dispatch.py         # enqueue_extraction / enqueue_downstream_stages + guard — shared by the console and the service API
 │   │   ├── worker.py           # run_worker() — claim/stage/process/publish loop
 │   │   ├── stage_contracts.py  # Declarative StageContract per downstream stage (inputs/outputs/scope)
 │   │   └── stage_runner.py     # Execute a contract against an object store

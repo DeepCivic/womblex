@@ -201,3 +201,22 @@ class TestStageDispatchPlan:
         )
         assert resp.status_code == 400
         assert isinstance(resp.json()["detail"], list)
+
+
+def test_dispatch_bounds_the_queue_connect(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A dead DSN must fail the press, not hang the request thread."""
+    seen: dict[str, object] = {}
+
+    class _Capturing(_FakeQueue):
+        def __init__(self, dsn: str, **kw: object) -> None:
+            seen.update(kw)
+            super().__init__(dsn, **kw)
+
+    monkeypatch.setattr("womblex.cloud.queue.JobQueue", _Capturing)
+    resp = _client(tmp_path).post(
+        "/api/execute/stages", json={"run_id": "run-1", "config": _CONFIG},
+    )
+    assert resp.status_code == 200
+    assert seen == {"connect_timeout": 5.0}

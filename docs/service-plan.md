@@ -1,6 +1,6 @@
 # Womblex as a backend subsystem — plan
 
-*Status: in progress (2026-09; A1–A5, U1 and U2 shipped). Sequenced as 13 merges; each lands on its own and updates this document's merge list as it ships.*
+*Status: in progress (2026-09; A1–A5, U1, U2 and B1 shipped). Sequenced as 13 merges; each lands on its own and updates this document's merge list as it ships.*
 
 ## Context
 Womblex is to serve other software in two modes:
@@ -83,7 +83,7 @@ Cross-link it from `docs/egress.md` and `docs/extraction.md`.
 ## Track B — service API
 
 ### B1. Extract shared dispatch (mechanical)
-Move `enqueue_extraction` and `enqueue_downstream_stages`, with their guard and result dataclasses, from `ui/execute.py` to a new `cloud/dispatch.py`. `ui/execute.py` keeps thin re-imports, so there is no behaviour change and existing UI tests pass unchanged. It also adds `connect_timeout`, matching the dashboard's `QUEUE_CONNECT_TIMEOUT`.
+Move `enqueue_extraction` and `enqueue_downstream_stages`, with their guard and result dataclasses, from `ui/execute.py` to a new `cloud/dispatch.py`. `ui/execute.py` keeps thin re-imports, so there is no behaviour change and existing UI tests pass unchanged. It also adds `connect_timeout`, matching the dashboard's `QUEUE_CONNECT_TIMEOUT`, which now lives in `cloud/dispatch.py` and is imported by the dashboard.
 
 ### B2. Run ownership in the queue
 - `sql/womblex_jobs.sql` and `_SCHEMA` in `cloud/queue.py` gain a nullable `owner text` column and an index on `(owner, run_id)`. `ensure_schema` applies `ALTER TABLE … ADD COLUMN IF NOT EXISTS`, so existing queues migrate in place.
@@ -155,7 +155,7 @@ Each merge must be under 500 lines. Split further if needed.
 4. A5 JSON logging — **shipped**
 5. U1 retire the location override — **shipped**
 6. U2 retire the feedback action — **shipped**
-7. B1 extract `cloud/dispatch.py`
+7. B1 extract `cloud/dispatch.py` — **shipped**
 8. B2 queue `owner` column + migration
 9. B3 service-token auth + `api-token` verb
 10. B5 dependency extra — waits on your approval
