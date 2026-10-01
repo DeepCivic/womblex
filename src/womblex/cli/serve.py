@@ -21,6 +21,11 @@ def _register_serve(p: argparse.ArgumentParser) -> None:
         "--dsn", default=None,
         help="Postgres DSN for the job queue (or $WOMBLEX_DB_DSN / $DATABASE_URL).",
     )
+    p.add_argument(
+        "--ingest", default=None,
+        help="Base URI callers' documents are enqueued from (or $WOMBLEX_INGEST_URI). "
+             "Without one, POST /v1/runs answers 503.",
+    )
     p.add_argument("--host", default="127.0.0.1", help="Bind address. Default: 127.0.0.1.")
     p.add_argument("--port", type=int, default=8081, help="Bind port. Default: 8081.")
     p.add_argument(
@@ -46,6 +51,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
     if not store or not dsn:
         logger.error("serve needs a store and a queue: --store/$WOMBLEX_STORE_URI and --dsn/$WOMBLEX_DB_DSN")
         return 1
+    ingest = args.ingest or os.environ.get("WOMBLEX_INGEST_URI")
     try:
         loaded = registry_from_env()
     except RegistryError as e:
@@ -61,7 +67,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
     try:
         app = create_api_app(
-            store_uri=store, db_dsn=dsn, registry=registry,
+            store_uri=store, db_dsn=dsn, registry=registry, ingest_uri=ingest,
         )
     except ValueError as e:
         logger.error("%s", e)

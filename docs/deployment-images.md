@@ -145,9 +145,12 @@ TLS termination, rate limiting or token expiry in the application, so the API
 must sit behind the network boundary and not be exposed publicly. Rotate by
 replacing an entry's hash and redeploying.
 
-`womblex serve --store <uri> --dsn <dsn>` binds loopback:8081
+`womblex serve --store <uri> --dsn <dsn> --ingest <uri>` binds loopback:8081
 by default and refuses to start with no registry unless `--insecure-no-auth`
 (development only: every request is an admin). It needs the `ui` extra.
+Without `--ingest` (or `$WOMBLEX_INGEST_URI`) the reads serve and
+`POST /v1/runs` answers 503. A non-admin client may only submit an
+`input_prefix` under its own `<client_id>/` folder of the ingest location.
 
 ## What re-checks this
 

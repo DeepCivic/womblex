@@ -45,6 +45,7 @@ class _FakeQueue:
 
     def enqueue_stages(
         self, run_id: str, stages: list[str], shard_prefix: str, *, max_attempts: int = 3,
+        owner: str | None = None,
     ) -> int:
         self.staged = (run_id, stages, shard_prefix, max_attempts)
         return len(stages)
