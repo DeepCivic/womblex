@@ -31,8 +31,11 @@ class FakeQueue:
     def __exit__(self, *exc: object) -> None:
         pass
 
-    def runs(self, owner=None, *, limit=100):
-        return [r for r in RUNS.values() if owner is None or r.owner == owner]
+    def runs(self, owner=None, *, run_id=None, limit=100):
+        return [
+            r for r in RUNS.values()
+            if (owner is None or r.owner == owner) and run_id in (None, r.run_id)
+        ][:limit]
 
     def stats(self, run_id=None, *, owner=None):
         return {"done": 2}

@@ -31,7 +31,7 @@ from womblex.ui.deps import UISettings
 
 logger = logging.getLogger(__name__)
 
-#: How many runs one caller's listing and lookups consider.
+#: How many runs one caller's listing returns.
 RUN_LIMIT = 1000
 
 
@@ -78,9 +78,9 @@ def create_api_app(
             yield q
 
     def find_run(q: JobQueue, caller: Caller, run_id: str) -> RunSummary:
-        for run in q.runs(caller.owner, limit=RUN_LIMIT):
-            if run.run_id == run_id:
-                return run
+        found = q.runs(caller.owner, run_id=run_id, limit=1)
+        if found:
+            return found[0]
         raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
 
     @app.get("/v1/health", response_model=Health, tags=["ops"])
