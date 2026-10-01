@@ -278,6 +278,55 @@ def test_document_text_is_404_for_an_unknown_document_or_run(client, tmp_path):
     assert client.get("/v1/runs/run-b/documents/h/text", headers=auth("ta")).status_code == 404
 
 
+def _upload(client, files, token="ta"):
+    return client.post("/v1/uploads", headers=auth(token), files=[("files", f) for f in files])
+
+
+def test_upload_lands_in_the_callers_folder_and_runs(client, tmp_path):
+    resp = _upload(client, [("a.pdf", b"%PDF-1.4"), ("../../b.docx", b"PK")])
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["input_prefix"] == f"alice/{body['upload_id']}"
+    assert body["files"] == ["a.pdf", "b.docx"] and body["bytes"] == 10
+    folder = tmp_path / "ingest" / body["input_prefix"]
+    assert sorted(p.name for p in folder.iterdir()) == ["a.pdf", "b.docx"]
+    assert (folder / "a.pdf").read_bytes() == b"%PDF-1.4"
+    run = client.post("/v1/runs", headers=auth("ta"), json={"input_prefix": body["input_prefix"]})
+    assert run.status_code == 201 and run.json()["document_count"] == 2
+
+
+@pytest.mark.parametrize("files", [
+    [("a.exe", b"x")],
+    [("a.pdf", b"x"), ("dir/a.pdf", b"y")],
+    [("..", b"x")],
+])
+def test_a_bad_upload_is_400_and_writes_nothing(client, tmp_path, files):
+    before = sorted((tmp_path / "ingest").rglob("*"))
+    assert _upload(client, files).status_code == 400
+    assert sorted((tmp_path / "ingest").rglob("*")) == before
+
+
+def test_upload_needs_the_submit_scope(client):
+    assert _upload(client, [("a.pdf", b"x")], token="tb").status_code == 403
+
+
+def test_upload_over_the_cap_is_413(tmp_path, monkeypatch):
+    registry = parse_registry({"clients": [
+        {"client_id": "alice", "token_sha256": hash_token("ta"), "scopes": ["submit"]},
+    ]})
+    app = create_api_app(
+        store_uri=str(tmp_path / "store"), db_dsn="postgresql://x/y", registry=registry,
+        ingest_uri=str(tmp_path / "ingest"), max_upload_bytes=4,
+    )
+    assert _upload(TestClient(app), [("a.pdf", b"12345")]).status_code == 413
+    assert not (tmp_path / "ingest").exists()
+
+
+def test_upload_without_an_ingest_location_is_503(tmp_path):
+    app = create_api_app(store_uri=str(tmp_path), db_dsn="postgresql://x/y", registry=None)
+    assert _upload(TestClient(app), [("a.pdf", b"x")]).status_code == 503
+
+
 def _surface(spec: dict) -> dict:
     """Each operation's success status + response model, and each model's fields."""
     ops = {}
@@ -307,6 +356,7 @@ def test_openapi_surface_is_pinned(client):
             "GET /v1/runs/{run_id}/files": "200 RunFiles",
             "GET /v1/runs/{run_id}/manifest": "200 RunManifest",
             "GET /v1/runs/{run_id}/metrics": "200 RunMetrics",
+            "POST /v1/uploads": "201 UploadAccepted",
         },
         "models": {
             "DocumentText": ["layer", "rows", "run_id", "sensitivity", "source_hash"],
@@ -320,5 +370,7 @@ def test_openapi_surface_is_pinned(client):
             "RunRequest": ["batch_size", "config", "input_prefix", "preset"],
             "RunStatus": ["counts", "created_at", "run_id", "state", "total", "updated_at"],
             "RunSubmitted": ["batch_count", "document_count", "run_id", "stages"],
+            "UploadAccepted": ["bytes", "files", "input_prefix", "upload_id"],
+            "Body_upload_v1_uploads_post": ["files"],
         },
     }

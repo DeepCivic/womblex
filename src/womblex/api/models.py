@@ -87,3 +87,12 @@ class DocumentText(BaseModel):
     layer: Literal["masked", "chunks", "elements"]
     sensitivity: Literal["raw", "masked", "none"]
     rows: list[dict[str, Any]]
+
+
+class UploadAccepted(BaseModel):
+    """Stored documents; ``input_prefix`` is what ``POST /v1/runs`` takes to run them."""
+
+    upload_id: str
+    input_prefix: str
+    files: list[str]
+    bytes: int
