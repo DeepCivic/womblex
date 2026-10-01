@@ -111,6 +111,7 @@ src/womblex/
 │   ├── retention.py       # run_id-based retention policy
 │   └── checkpoint.py      # JSON-based checkpoint manager for resumable batch runs
 ├── api/                   # Service API (`womblex serve`): app.py (`/v1` routes: run submit, reads, `/files`, document text; owner-scoped), readers.py (document text by layer, sensitivity-gated), auth.py (service-token registry, Caller + scopes; `womblex api-token`), models.py (OpenAPI models)
+├── ui/                    # Admin and debugging console (`womblex ui`): reads run artefacts, dispatches admin runs; no auth, loopback by default — integrations use api/
 ├── cloud/                 # Distributed run support (queue.py, dispatch.py, worker.py, stage_contracts.py, stage_runner.py)
 ├── verify/
 │   └── engine.py          # Two-pass verification (structural + weak-signal) — defined, not wired in; see the Verify stage
@@ -130,6 +131,8 @@ src/womblex/
 │   ├── _shared.py         # Command NamedTuple, setup_logging, select_supported/discover_files, normalise_prefix
 │   ├── pipeline.py        # run, extract, chunk subcommands
 │   ├── cloud.py           # enqueue / worker / jobs / finalize / run-stage / egress subcommands
+│   ├── serve.py, api_token.py  # serve (the `/v1` service API) and api-token subcommands
+│   ├── ui.py              # ui subcommand (admin and debugging console)
 │   ├── redact.py          # redact, annotate-redactions, validate-redactions subcommands
 │   ├── link.py, embed.py, normalise.py, spellfix.py, quality.py, money.py, pii.py
 │   │                       # link, embed, normalise, spellfix, quality, money, pii subcommands

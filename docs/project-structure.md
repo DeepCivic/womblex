@@ -12,7 +12,8 @@ womblex/
 ├── fixtures/          # Test fixtures (separate repo, see ../THIRD_PARTY_DATA.md)
 ├── src/womblex/
 │   ├── cli/                # CLI subpackage — per-topic modules: pipeline, cloud, redact, link, embed,
-│   │                       #   normalise, spellfix, quality, money, pii, ingest, score, ground_truth, profile, verify, ui
+│   │                       #   normalise, spellfix, quality, money, pii, ingest, score, ground_truth, profile, verify,
+│   │                       #   serve + api_token (service API), ui (admin console)
 │   ├── config.py           # Pydantic config models
 │   ├── batch.py            # process_batch() — shared per-batch pipeline body (extract → optional redaction detection; extraction only)
 │   ├── operations/         # Independent operations, one module each: extract, redact, chunk, pii, enrich
@@ -127,7 +128,7 @@ womblex/
 │   │   ├── readers.py          # Document text rows by layer (masked / chunks / elements), read in place with a source_hash filter
 │   │   ├── auth.py             # Service-token auth: client registry (WOMBLEX_API_CLIENTS), Caller + scopes, FastAPI dependencies
 │   │   └── models.py           # Pydantic response models — the OpenAPI surface
-│   ├── ui/                     # Console sidecar (`womblex ui`) — FastAPI over pipeline artefacts; reads runs, never writes to one
+│   ├── ui/                     # Admin and debugging console (`womblex ui`) — FastAPI over pipeline artefacts; reads runs, never writes to one. Integrations use api/
 │   │   ├── app.py              # create_app() — binds one run source for the app's lifetime
 │   │   ├── deps.py             # UISettings — local output_root vs store-backed (+ optional queue/presets dirs), resolved from args/env
 │   │   ├── readers.py          # Thin pyarrow readers + preset writers, local and store-backed, over the same store/ modules

@@ -401,7 +401,7 @@ docker compose run --rm init
 # 3. Enqueue and scale workers exactly as local — no bundled backend started.
 docker compose run --rm womblex enqueue --config configs/example.yaml
 docker compose up --scale worker=4 worker
-docker compose up -d ui                              # optional console, :8080
+docker compose up -d ui                              # optional admin console, :8080
 ```
 
 **Womblex owns exactly one table (`womblex_jobs`) and writes no vectors.** It
@@ -414,9 +414,27 @@ prefix), **not** written to Postgres — so `pgvector` is a property of the
 shared database for *other* consumers of those embeddings, never a Womblex
 requirement. Womblex does not read or write a vector column.
 
-### Console (optional)
+### Service API
 
-`womblex ui` serves a web console over artefacts a run has already
+Software that integrates with Womblex submits and reads work through
+`womblex serve`, the `/v1` service API: authenticated with static service
+tokens, owner-scoped (a client sees only its own runs; `admin` sees all), and needing the `ui`
+extra. It can submit a run over an ingest prefix, poll its status, list its
+files with their contract version and sensitivity, and read one document's
+masked text (raw layers need the `read_raw` scope). Consumers that read the
+Parquet directly follow [`docs/contract.md`](docs/contract.md). The client
+registry and the flags are in
+[`docs/deployment-images.md`](docs/deployment-images.md).
+
+```bash
+womblex api-token --client redline --scope submit --scope read   # mint a token + its registry entry
+WOMBLEX_API_CLIENTS=clients.yaml womblex serve --store <uri> --dsn <dsn> --ingest <uri>   # :8081
+```
+
+### Console (optional admin and debugging utility)
+
+`womblex ui` is an admin and debugging utility, not an integration surface;
+integrations use `womblex serve`. It serves a web console over artefacts a run has already
 written — a run selector and documents table, a Dashboard (queue state and
 per-stage checkpoint progress), Corpus and Chunk inspectors (a document's
 chunks with their entity / PII / money overlays), a Pipeline Composer (build a
