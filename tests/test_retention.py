@@ -15,6 +15,7 @@ from womblex.store.retention import (
     apply_retention,
     describe_run,
     generate_run_id,
+    is_safe_run_id,
     list_runs,
     most_recent_run,
 )
@@ -317,3 +318,10 @@ class TestDescribeRun:
         (shard_dir / "batch-0001.chunks.parquet").write_bytes(b"stub")
         (shard_dir / "batch-0001.money_spans.parquet").write_bytes(b"stub")
         assert describe_run(tmp_path / "run-a").stages == ("extract", "chunk", "money")
+
+
+def test_is_safe_run_id_admits_only_a_single_path_segment() -> None:
+    """The root/run_id join is where containment is enforced."""
+    assert is_safe_run_id("run-20260101T000000Z")
+    for run_id in ["../escape", "a/b", "a\\b", "..", ".", "", "/abs", "a\x00b"]:
+        assert not is_safe_run_id(run_id)

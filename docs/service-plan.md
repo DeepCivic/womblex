@@ -1,6 +1,6 @@
 # Womblex as a backend subsystem — plan
 
-*Status: in progress (2026-09; A1–A5 and U1 shipped). Sequenced as 13 merges; each lands on its own and updates this document's merge list as it ships.*
+*Status: in progress (2026-09; A1–A5, U1 and U2 shipped). Sequenced as 13 merges; each lands on its own and updates this document's merge list as it ships.*
 
 ## Context
 Womblex is to serve other software in two modes:
@@ -136,7 +136,7 @@ Add `womblex api-token --client X` to print a new token and its hash for the reg
   - Locations become deploy-time config only.
 - **U2. Retire the report/feedback action:**
   - Remove `routes/feedback.py` and `store/feedback_output.py`.
-  - Remove the `X-Womblex-Reported-By` handling and the SPA report buttons.
+  - Remove the `X-Womblex-Reported-By` handling. (The SPA never gained report buttons, so there was nothing to remove there.) `is_safe_run_id` moved to `store/retention.py`, as other modules depend on it.
   - Update the CLAUDE.md module table and the CHANGELOG.
 - **U3. Reframe the docs:**
   - Rewrite FR sections 15–21 as developer/admin stories.
@@ -154,7 +154,7 @@ Each merge must be under 500 lines. Split further if needed.
 3. A3 + A4 contract doc + public `__all__` — **shipped**
 4. A5 JSON logging — **shipped**
 5. U1 retire the location override — **shipped**
-6. U2 retire the feedback action
+6. U2 retire the feedback action — **shipped**
 7. B1 extract `cloud/dispatch.py`
 8. B2 queue `owner` column + migration
 9. B3 service-token auth + `api-token` verb

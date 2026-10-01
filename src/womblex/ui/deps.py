@@ -27,19 +27,11 @@ class UISettings:
     otherwise, and a deployment with no queue falls back to the per-stage
     checkpoints inside the run itself.
 
-    ``feedback_dir`` is local-mode only — the report action's writable
-    surface. ``None`` means the default ``<output_root>/feedback``; an
-    explicit value is the escape hatch for a
-    deployment that mounts ``output_root`` read-only and needs feedback to
-    land somewhere else entirely. Remote mode has no equivalent field: it
-    always writes under the store's own ``feedback/`` prefix, a sibling of
-    ``runs/`` in the same bucket.
-
     ``presets_dir`` is where the Pipeline Composer *saves* operator-authored
     presets (docs/ui-plan.md merge 9) — one JSON file per preset. It applies
-    to *local* mode only, and mirrors ``feedback_dir``: remote mode has no
+    to *local* mode only, it is local-mode only: remote mode has no
     equivalent field because it always writes presets under the store's own
-    ``presets/`` prefix, a sibling of ``runs/`` and ``feedback/`` in the same
+    ``presets/`` prefix, a sibling of ``runs/`` in the same
     bucket — so a store-backed console needs no writable mount to save presets.
     In local mode, ``None`` disables saving: the built-in presets still serve,
     but ``POST /api/composer/presets`` refuses with 409.
@@ -53,7 +45,6 @@ class UISettings:
 
     output_root: Path | None
     store_uri: str | None
-    feedback_dir: Path | None = None
     db_dsn: str | None = None
     presets_dir: Path | None = None
     ingest_uri: str | None = None
@@ -72,8 +63,7 @@ class UISettings:
     def presets_writable(self) -> bool:
         """Whether this deployment can save presets at all.
 
-        Remote mode always can (it writes to the store's ``presets/`` prefix,
-        like feedback); local mode can only when a writable ``presets_dir`` was
+        Remote mode always can (it writes to the store's ``presets/`` prefix); local mode can only when a writable ``presets_dir`` was
         configured. The composer's save/delete routes 409 when this is false.
         """
         return self.is_remote or self.presets_dir is not None
@@ -83,7 +73,6 @@ def resolve_settings(
     output_root: Path | None,
     store_uri: str | None,
     *,
-    feedback_dir: Path | None = None,
     db_dsn: str | None = None,
     presets_dir: Path | None = None,
     ingest_uri: str | None = None,
@@ -94,10 +83,7 @@ def resolve_settings(
     ``$WOMBLEX_STORE_URI`` names an object store. Raises ``ValueError`` when
     both or neither resolve — the console reads exactly one run source, and
     silently preferring one over the other would hide a misconfigured
-    deployment behind an empty run list. ``$WOMBLEX_UI_FEEDBACK_DIR`` is the
-    env fallback for ``feedback_dir``, read only when the explicit argument
-    is absent.
-
+    deployment behind an empty run list.
     ``$WOMBLEX_UI_PRESETS_DIR`` is the env fallback for ``presets_dir`` — the
     directory the composer saves operator-authored presets into. Absent means
     saving is disabled (built-in presets still serve).
@@ -115,9 +101,6 @@ def resolve_settings(
     if root is None and "WOMBLEX_UI_OUTPUT_ROOT" in os.environ:
         root = Path(os.environ["WOMBLEX_UI_OUTPUT_ROOT"])
     store = store_uri or os.environ.get("WOMBLEX_STORE_URI")
-    fb_dir = feedback_dir
-    if fb_dir is None and "WOMBLEX_UI_FEEDBACK_DIR" in os.environ:
-        fb_dir = Path(os.environ["WOMBLEX_UI_FEEDBACK_DIR"])
     if root and store:
         raise ValueError("pass only one of --output-root / --store (or their env vars)")
     if not root and not store:
@@ -132,7 +115,7 @@ def resolve_settings(
     ingest = ingest_uri or os.environ.get("WOMBLEX_INGEST_URI")
     return UISettings(
         output_root=root, store_uri=store,
-        feedback_dir=fb_dir, db_dsn=dsn, presets_dir=presets, ingest_uri=ingest,
+        db_dsn=dsn, presets_dir=presets, ingest_uri=ingest,
     )
 
 

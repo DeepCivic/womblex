@@ -21,12 +21,6 @@ from womblex.store.enrichment_output import (
     ENTITY_SCHEMA,
     LEGACY_HASH_COLUMN,
 )
-from womblex.store.feedback_output import (
-    FEEDBACK_DIRNAME,
-    build_feedback_record,
-    is_safe_run_id,
-    write_feedback_record,
-)
 from womblex.store.money_output import MONEY_SPANS_SCHEMA, MONEY_SPANS_SUFFIX
 from womblex.store.output import (
     _SHARD_SUFFIX,
@@ -228,66 +222,17 @@ def _log_entry(name: str, size: int, mtime: float) -> dict:
     }
 
 
-def write_feedback(
-    settings: UISettings,
-    run_id: str,
-    *,
-    record_type: str,
-    source_hash: str,
-    chunk_index: int | None,
-    row: dict,
-    note: str,
-    reported_by: str | None,
-) -> dict | None:
-    """Write one report-action file for run_id; None if the run doesn't exist.
-
-    Local and remote both land at a ``feedback/<run_id>/`` sibling of the
-    run directories, never inside one — see
-    :mod:`womblex.store.feedback_output`'s module docstring for why. The
-    two branches differ only in where that sibling sits: locally it nests
-    under ``output_root`` (a plain directory, not a run-id one, so
-    retention's ``run-*`` purge never touches it); remotely it is the
-    store's own ``feedback/`` prefix, parallel to ``runs/``.
-
-    A run_id that is not a single path segment is refused here as
-    "no such run", so a caller reaching this function directly gets the
-    same answer the HTTP route's own path matching already produces.
-    """
-    if not is_safe_run_id(run_id):
-        return None
-    record = build_feedback_record(
-        run_id=run_id, record_type=record_type, source_hash=source_hash,
-        chunk_index=chunk_index, row=row, note=note, reported_by=reported_by,
-    )
-    if settings.is_remote:
-        store = _open_store(cast(str, settings.store_uri))
-        if run_id not in store.list_dirs("runs"):
-            return None
-        # Serialise via the same writer the local branch uses, then publish —
-        # one definition of a report's filename and bytes for both branches.
-        with tempfile.TemporaryDirectory(prefix="womblex-ui-") as tmp:
-            written = write_feedback_record(Path(tmp), run_id, record)
-            store.upload_file(written, f"{FEEDBACK_DIRNAME}/{run_id}/{written.name}")
-        return record
-    run_dir = cast(Path, settings.output_root) / run_id
-    if not run_dir.is_dir():
-        return None
-    feedback_root = settings.feedback_dir or cast(Path, settings.output_root) / FEEDBACK_DIRNAME
-    write_feedback_record(feedback_root, run_id, record)
-    return record
-
-
 # ---------------------------------------------------------------------------
 # Operator-saved presets (docs/ui-plan.md merge 9)
 # ---------------------------------------------------------------------------
 #
-# Presets get the same local-vs-store treatment feedback does, for the same
-# reason: a store-backed (compose) console mounts its run source read-only, so
+# Presets get the same local-vs-store treatment as other console
+# state, for the same reason: a store-backed (compose) console mounts its run source read-only, so
 # saving to a local ``presets_dir`` would 409 there. The store branch writes /
 # lists / deletes under the store's own ``presets/`` prefix (a sibling of
-# ``runs/`` and ``feedback/``), and the container needs no writable mount.
+# ``runs/``), and the container needs no writable mount.
 # ``womblex.ui.presets`` owns the *format* (filename, bytes, parsing); these
-# functions own *where* it sits, exactly the split ``write_feedback`` keeps.
+# functions own *where* it sits, the same split the rest of this module keeps.
 
 
 def list_all_presets(settings: UISettings) -> list[dict]:

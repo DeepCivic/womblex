@@ -38,8 +38,7 @@ from dataclasses import dataclass
 from typing import cast
 
 from womblex.cli._shared import NestedCorpusError, normalise_prefix, select_supported
-from womblex.store.feedback_output import is_safe_run_id
-from womblex.store.retention import generate_run_id
+from womblex.store.retention import generate_run_id, is_safe_run_id
 from womblex.ui.deps import UISettings
 
 logger = logging.getLogger(__name__)

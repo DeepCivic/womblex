@@ -166,23 +166,22 @@ def get_preset(name: str) -> Preset | None:
 #
 # Besides the built-ins above (code), an operator can *save* a composed config
 # as a named starting point of their own. Each lands as one JSON file — one file
-# per record, like ``store.feedback_output``, so two saves can't lose each
-# other. *Where* that file sits is ``womblex.ui.readers``' call, not this
+# per record, so two saves can't lose each other. *Where* that file sits is ``womblex.ui.readers``' call, not this
 # module's: locally under a writable ``presets_dir``, remotely under the store's
-# own ``presets/`` prefix (a sibling of ``runs/`` and ``feedback/``), so a
+# own ``presets/`` prefix (a sibling of ``runs/``), so a
 # store-backed console needs no writable mount. This module owns only the
 # *format* — the filename, the record bytes, and parsing one file back into a
-# :class:`Preset` — exactly the split ``feedback_output`` keeps.
+# :class:`Preset`.
 
 #: The store prefix operator-saved presets live under in remote mode — a
-#: sibling of ``runs/`` and ``feedback/`` in the same bucket, so the container
+#: sibling of ``runs/`` in the same bucket, so the container
 #: stays ``read_only`` (docs/ui-plan.md merge 9).
 PRESETS_DIRNAME = "presets"
 
 _PRESET_SUFFIX = ".preset.json"
 
 #: A preset name becomes a filename, so it is constrained like a run id
-#: (``feedback_output.is_safe_run_id``): letters, digits, dot, dash, underscore,
+#: (``retention.is_safe_run_id``): letters, digits, dot, dash, underscore,
 #: no leading dot — enough for ``My-Run_v2`` without admitting ``..`` or a
 #: separator.
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -191,7 +190,7 @@ _SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 def is_safe_preset_name(name: str) -> bool:
     """True if *name* is a single, filesystem-safe token (it becomes a filename).
 
-    Refused rather than sanitised, like ``feedback_output.is_safe_run_id``: a
+    Refused rather than sanitised, like ``retention.is_safe_run_id``: a
     ``..``, separator or leading dot could climb out of the ``presets_dir``
     join or hide the file.
     """
@@ -218,7 +217,7 @@ def _validate_overlay(config: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Format: filename, record bytes, and parsing one file back into a Preset.
 # `readers.py` owns *where* these files sit (local dir vs. store prefix); this
-# module owns *what* one is, exactly the split `feedback_output` keeps.
+# module owns *what* one is, the same split as the rest of the console.
 # ---------------------------------------------------------------------------
 
 

@@ -104,7 +104,7 @@ def select_supported(relpaths: Iterable[str], *, location: str) -> list[str]:
 
 
 # An ingest-relative prefix becomes a path segment joined onto the ingest root,
-# the way a run id is joined onto the feedback root. ``RemoteStore`` strips
+# the way a run id is joined onto a run root. ``RemoteStore`` strips
 # leading and trailing slashes but does not resolve ``..``, so a climbing prefix
 # lists — and enqueues — outside the location the deployment configured.
 # Refused rather than sanitised, on the same footing as ``is_safe_run_id``: a

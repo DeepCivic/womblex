@@ -7,7 +7,7 @@ corrected, and what a human asserted. This module owns that on-disk shape:
 field names, types, the ``unfilled`` sentinel, the enumerations, unit-id
 derivation, and read / write. It does *not* classify a unit's census status
 or validate a whole tree — that is the benchmark's concern, built against
-this schema. Self-contained like :mod:`womblex.store.feedback_output` — no
+this schema. Self-contained like :mod:`womblex.store.pii_output` — no
 pyarrow, just JSON — because a reviewer hand-edits it as often as a tool
 writes it.
 

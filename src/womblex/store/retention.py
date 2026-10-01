@@ -70,6 +70,22 @@ STAGE_SUFFIXES: dict[str, str] = sort_by_pipeline({
 })
 
 
+# A run id becomes a path segment under a run root. Anything that can re-root
+# or climb out of that join is refused rather than sanitised: real run ids are
+# single segments (``generate_run_id`` emits ``run-YYYYMMDDTHHMMSSZ``), so
+# there is nothing legitimate to rewrite.
+_UNSAFE_IN_RUN_ID = ("/", "\\", "\x00")
+
+
+def is_safe_run_id(run_id: str) -> bool:
+    """True if *run_id* is a single path segment safe to join onto a root."""
+    return (
+        bool(run_id)
+        and run_id not in {".", ".."}
+        and not any(c in run_id for c in _UNSAFE_IN_RUN_ID)
+    )
+
+
 def generate_run_id() -> str:
     """Generate a sortable, filesystem-safe run id from current UTC time.
 

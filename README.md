@@ -441,16 +441,12 @@ It adds no pipeline logic. Wire a `--store`, a
 `--dsn` and an `--ingest` location and the Pipeline Composer can plan a run into
 the queue (workers do the work; the console runs no scheduler); a console with
 no store or queue configured still reads and inspects runs. Its writable surfaces are
-deliberately narrow. The report action (`POST /api/runs/{run_id}/feedback`)
-files a reviewer's note about a record as a single JSON file under a
-`feedback/` location that is always a *sibling* of the runs, never inside one
-— so re-running a stage or purging a run neither disturbs accumulated feedback
-nor is disturbed by it. The Pipeline Composer's saved presets work the same
-way: locally they need a writable `--presets-dir` (or `$WOMBLEX_UI_PRESETS_DIR`;
+deliberately narrow. The Pipeline Composer's saved presets are filed as one JSON
+file each, always a *sibling* of the runs, never inside one: locally they need a writable `--presets-dir` (or `$WOMBLEX_UI_PRESETS_DIR`;
 without one the built-in presets still serve but saving is disabled), and in
 store-backed mode they land under the object store's own `presets/` prefix,
-alongside `feedback/` — so the compose service writes both feedback and presets
-to the object store, needing no writable mount for them. There is
+so the compose service writes presets to the object store, needing no
+writable mount for them. There is
 no authentication, so it binds to loopback unless `--host` says otherwise; put
 your own control in front of anything wider.
 

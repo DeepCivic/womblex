@@ -30,12 +30,6 @@ def _register_ui(p: argparse.ArgumentParser) -> None:
     p.add_argument("--host", default="127.0.0.1", help="Bind address. Default: 127.0.0.1.")
     p.add_argument("--port", type=int, default=8080, help="Bind port. Default: 8080.")
     p.add_argument(
-        "--feedback-dir", type=Path, default=None,
-        help="Local mode only: writable dir for report-action files "
-             "(or $WOMBLEX_UI_FEEDBACK_DIR). Defaults to <output-root>/feedback. "
-             "Remote mode always writes under the store's own feedback/ prefix.",
-    )
-    p.add_argument(
         "--dsn", default=None,
         help="Postgres DSN for the job queue the dashboard reads "
              "(or $WOMBLEX_DB_DSN / $DATABASE_URL). Optional: without one the "
@@ -70,7 +64,6 @@ def cmd_ui(args: argparse.Namespace) -> int:
     try:
         settings = resolve_settings(
             args.output_root, args.store,
-            feedback_dir=args.feedback_dir,
             db_dsn=args.dsn, presets_dir=args.presets_dir,
             ingest_uri=args.ingest,
         )
@@ -81,7 +74,6 @@ def cmd_ui(args: argparse.Namespace) -> int:
     app = create_app(
         output_root=settings.output_root,
         store_uri=settings.store_uri,
-        feedback_dir=settings.feedback_dir,
         db_dsn=settings.db_dsn,
         presets_dir=settings.presets_dir,
         ingest_uri=settings.ingest_uri,
