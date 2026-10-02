@@ -27,9 +27,11 @@ jobs:
         # for), so it's always installed and the enrich/graph/query/embed
         # suites' `importorskip("isaacus")` never skips wholesale. The tests
         # that need a live endpoint still skip on the missing ISAACUS_API_KEY.
+        # [api] brings python-multipart: `create_api_app` registers the
+        # multipart `POST /v1/uploads` route, so every API test needs it.
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev,cloud,ui]"
+          pip install -e ".[dev,cloud,ui,api]"
 
       - name: Lint (ruff)
         run: ruff check src/ tests/
