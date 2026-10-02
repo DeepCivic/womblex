@@ -312,8 +312,9 @@ run via `uv run` (not bare `pytest`) to keep the project venv active:
 ```bash
 # One-time. `--extra ui` is not optional for a full run: without fastapi,
 # `test_demo_corpus.py` and the UI tests fail *collection* rather than skipping,
-# which aborts the whole run.
-uv sync --extra dev --extra ui
+# which aborts the whole run. `--extra api` brings python-multipart, without
+# which every `test_api_app.py` test errors building the upload route.
+uv sync --extra dev --extra ui --extra api
 
 # Default run. NOTE: there is NO addopts filter — this runs the WHOLE suite,
 # including the OCR-fixture (`slow`) and VLM (`benchmark`) tests. On a bare
