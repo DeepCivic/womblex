@@ -4,9 +4,8 @@ Uses the ``rapidocr-onnxruntime`` package which bundles pre-exported
 PaddleOCR v4 ONNX models (det + rec + cls).  No separate model download
 required — models ship with the pip package (~15 MB wheel).
 
-Layout analysis uses YOLOv8 via ``ultralytics`` with the bundled
-``models/yolov8n.pt`` weight file.  COCO class names are mapped to
-document block types via ``_YOLO_COCO_LABEL_MAP``.
+Layout analysis is ``ingest/layout_onnx.py`` (PP-DocLayout-M). The YOLO
+analyzer below is retained until the dependency-scoped removal merge.
 """
 
 from __future__ import annotations
@@ -18,6 +17,7 @@ from typing import TYPE_CHECKING, ClassVar
 import numpy as np
 
 from womblex.ingest.interfaces.protocols import (
+    LayoutAnalyzer,
     LayoutRegionResult,
     OCRPageResult,
     OCRRegionResult,
@@ -412,7 +412,7 @@ class YOLOLayoutAnalyzer:
 # ------------------------------------------------------------------
 
 _paddle_readers: dict[str, PaddleOCRReader] = {}
-_layout_analyzer: YOLOLayoutAnalyzer | None = None
+_layout_analyzer: LayoutAnalyzer | None = None
 
 
 def get_paddle_reader(lang: str = "eng", use_int8: bool = True) -> PaddleOCRReader:
@@ -486,11 +486,13 @@ def get_ocr_reader(
     raise ValueError(f"unhandled engine after alias resolution: {canonical!r}")
 
 
-def get_layout_analyzer() -> YOLOLayoutAnalyzer:
-    """Return a cached YOLOv8 layout analyzer."""
+def get_layout_analyzer() -> LayoutAnalyzer:
+    """Return a cached PP-DocLayout-M layout analyzer."""
     global _layout_analyzer
     if _layout_analyzer is None:
-        _layout_analyzer = YOLOLayoutAnalyzer()
+        from womblex.ingest.layout_onnx import PPDocLayoutAnalyzer
+
+        _layout_analyzer = PPDocLayoutAnalyzer()
     return _layout_analyzer
 
 
