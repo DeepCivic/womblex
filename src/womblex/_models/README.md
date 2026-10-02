@@ -14,6 +14,13 @@ what every model (local and hosted) does in the pipeline.
 - **Size:** ~21 MB
 - **Used by:** `ingest/paddle_ocr.py` (`PaddleOCRReader`) — run by `rapidocr-onnxruntime`, no PaddlePaddle framework. When any file is missing, the reader falls back to the v4 models inside the `rapidocr-onnxruntime` wheel
 
+### pp-doclayout-m/
+
+- **Type:** PP-DocLayout-M layout detector (ONNX) + the model's `inference.yml` (labels, preprocessing)
+- **Source:** [PaddlePaddle/PP-DocLayout-M](https://huggingface.co/PaddlePaddle/PP-DocLayout-M) (HF), Apache-2.0; exported with `paddle2onnx` 2.1.0, opset 14. Digests in `docs/models.md`
+- **Size:** ~23 MB
+- **Used by:** `ingest/layout_onnx.py` (`PPDocLayoutAnalyzer`) — layout backend; also `redact/stage.py` for raster-fallback exclusion regions. Not in package-data, like the YOLO weights; resolved via `WOMBLEX_MODELS_DIR` or an editable install
+
 ### yolo11n_doc_layout.pt
 
 - **Type:** YOLO11 nano object-detection weights (DocLayNet-finetuned, 11 classes)
