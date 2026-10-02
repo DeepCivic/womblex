@@ -712,6 +712,14 @@ Womblex serves other software two ways: a versioned on-disk contract
 
 ## Deferred / backlog
 
+- **Permissive dependencies — remove `ultralytics` and PyMuPDF.** *Proposed
+  2026-10.* Both are AGPL-3.0 with a commercial licence as the only
+  alternative. YOLO layout is replaced by an Apache-2.0 PP-DocLayout ONNX
+  model on `onnxruntime`; PyMuPDF goes behind a womblex-owned `ingest/pdf/`
+  seam and is replaced by pypdfium2 + pdfplumber once a backend-diff harness
+  clears the parity gates. Plan and merge sequence:
+  [permissive-deps-plan.md](permissive-deps-plan.md).
+
 - **AI chunking (semchunk 4) — single-enrichment graph reuse.** *Shipped
   2026-06, off-by-default.* The `chunking.chunking_model` pass-through lets
   semchunk pick chunk boundaries from the Kanon-2 enricher's structure spans; it
