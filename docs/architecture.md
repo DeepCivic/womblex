@@ -142,7 +142,7 @@ src/womblex/
 │   ├── ground_truth.py    # ground-truth subcommand (segment + render a shard dir into baselines + sidecars)
 │   ├── profile.py         # profile subcommand
 │   └── verify.py          # verify-shards subcommand
-├── config.py              # Pydantic config models and YAML loader
+├── config/                # Pydantic config models + YAML loader (__init__); process-stage models in process.py
 └── operations/            # Independent operations (extract/redact/chunk/pii/enrich, one module each,
                            # plus models.py / persist.py shared helpers) — callers compose directly
 ```
@@ -501,7 +501,7 @@ This keeps the composable design intact — callers still compose operations dir
 
 #### Configuration
 
-Extend `ChunkingConfig` in `config.py`:
+Extend `ChunkingConfig` in `womblex.config`:
 
 ```python
 class ChunkingConfig(BaseModel):

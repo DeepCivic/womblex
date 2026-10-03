@@ -403,7 +403,7 @@ For new shapes that fit within the existing native/OCR dispatch:
 4. Wire into `orchestrator.extract_with_plan()` behind the qualifier so
    it only runs on candidates
 5. Add config under `extraction.native` (or `extraction.ocr`) with a
-   nested `BaseModel` in `config.py`; thread through `operations.py`
+   nested `BaseModel` in `config/__init__.py`; thread through `operations.py`
    into `extract_text()` → `extract_pdf_with_plan()`
 
 ### Adding a new non-PDF document type

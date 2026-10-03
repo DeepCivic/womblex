@@ -14,7 +14,7 @@ womblex/
 │   ├── cli/                # CLI subpackage — per-topic modules: pipeline, cloud, redact, link, embed,
 │   │                       #   normalise, spellfix, quality, money, pii, ingest, score, ground_truth, profile, verify,
 │   │                       #   serve + api_token (service API), ui (admin console)
-│   ├── config.py           # Pydantic config models
+│   ├── config/             # Pydantic config models (__init__: loader + WomblexConfig; process.py: process-stage models)
 │   ├── batch.py            # process_batch() — shared per-batch pipeline body (extract → optional redaction detection; extraction only)
 │   ├── operations/         # Independent operations, one module each: extract, redact, chunk, pii, enrich
 │   │   ├── models.py       # DocumentResult / BatchResult dataclasses + PreconditionError
