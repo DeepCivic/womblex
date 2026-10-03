@@ -5,12 +5,16 @@ registry landed, so they record that the registry changed no default output.
 
 A change here means the default model group, or the extraction it drives, has
 changed output: regenerate the digests deliberately, never to get green.
+
+PDF digests also depend on the PyMuPDF version, so the PDF cases run only under
+the version they were recorded with (the one ``uv.lock`` pins).
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
+import fitz
 import pytest
 
 from womblex.ingest.detect import detect_file_type
@@ -18,6 +22,8 @@ from womblex.ingest.extract import extract_text
 from womblex.store.content_digest import content_digest
 
 _COLLECTION = Path(__file__).resolve().parent.parent / "fixtures" / "fixtures" / "womblex-collection"
+
+_PDF_PINNED_UNDER = "1.27.2.2"
 
 _PINNED = {
     "_documents/Auditor-General_Report_2020-21_19_transcript-First-30-Pages.txt":
@@ -46,5 +52,7 @@ def test_default_content_digest_is_pinned(rel: str) -> None:
     path = _COLLECTION / rel
     if not path.exists():
         pytest.skip(f"fixture not present: {path}")
+    if path.suffix == ".pdf" and fitz.VersionBind != _PDF_PINNED_UNDER:
+        pytest.skip(f"PDF digests pinned under PyMuPDF {_PDF_PINNED_UNDER}, found {fitz.VersionBind}")
     results = extract_text(path, detect_file_type(path))
     assert content_digest(results[0].elements) == _PINNED[rel]
