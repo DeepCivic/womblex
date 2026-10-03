@@ -328,3 +328,17 @@ class TestPreset:
         meta = stamp.footer_metadata()
         assert PRESET_KEY.encode() not in meta
         assert "preset" not in read_footer_stamp(meta)
+
+
+def test_the_models_check_level_is_not_part_of_the_config_digest() -> None:
+    from womblex.config import WomblexConfig
+    from womblex.store.run_stamp import config_digest
+
+    paths = {"input_root": "/i", "output_root": "/o", "checkpoint_dir": "/c"}
+
+    def digest(level: str) -> str:
+        return config_digest(WomblexConfig(
+            dataset={"name": "t"}, paths=paths, processing={"models_check": level},
+        ))
+
+    assert digest("smoke") == digest("off")

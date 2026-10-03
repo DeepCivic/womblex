@@ -387,3 +387,10 @@ class TestProcessingConfigRetention:
         assert cfg.retention.policy == "keep_all"
         assert cfg.retention.keep == 5
 
+
+def test_models_check_defaults_to_load() -> None:
+    cfg = WomblexConfig(
+        dataset={"name": "t"},
+        paths={"input_root": "/i", "output_root": "/o", "checkpoint_dir": "/c"},
+    )
+    assert cfg.processing.models_check == "load"

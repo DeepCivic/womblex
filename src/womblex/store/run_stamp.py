@@ -83,8 +83,11 @@ MODELS_KEY = f"{NAMESPACE}.models"
 PRESET_KEY = f"{NAMESPACE}.preset"
 
 # Excluded from the digest: see the module docstring. `paths` is deployment
-# location and `dataset.run_id` is the run's own identity, already a key.
-_DIGEST_EXCLUDE: dict = {"paths": True, "dataset": {"run_id"}}
+# location and `dataset.run_id` is the run's own identity, already a key;
+# `processing.models_check` is how much to verify, not what is produced.
+_DIGEST_EXCLUDE: dict = {
+    "paths": True, "dataset": {"run_id"}, "processing": {"models_check"},
+}
 
 # The siblings a downstream sidecar prefers to inherit its run from, in order.
 # Spelled out rather than imported from `store/output.py`, which imports this

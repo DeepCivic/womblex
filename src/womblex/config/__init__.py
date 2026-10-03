@@ -3,7 +3,7 @@
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -457,6 +457,15 @@ class ProcessingConfig(BaseModel):
     checkpoint_every: int = Field(default=100, ge=1)
 
     retention: RetentionConfig = RetentionConfig()
+
+    models_check: Literal["off", "load", "smoke"] = Field(
+        default="load",
+        description="Check the configured models before any document is processed: "
+                    "'off'; 'load' (resolve and load each model); 'smoke' (also run "
+                    "one inference on a small built-in input). A failure stops the "
+                    "run, or makes a worker refuse the jobs that need the model. "
+                    "Deployment, not output: excluded from the config digest.",
+    )
 
     text_source: str = Field(
         default="elements",

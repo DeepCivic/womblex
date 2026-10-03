@@ -142,6 +142,8 @@ class PaddleOCRReader:
         self.lang = lang
         self.use_int8 = use_int8
         self._engine: RapidOCR | None = None
+        # Which model set loaded, once it has; read by the pre-run model check.
+        self.model_variant: str | None = None
 
     def _resolve_v5_paths(self) -> dict[str, str] | None:
         from womblex.utils.models import resolve_local_model_path
@@ -184,6 +186,7 @@ class PaddleOCRReader:
                 rec_keys_path=v5["dict"],
                 **thread_opts,
             )
+            self.model_variant = "paddleocr-v5"
             logger.info(
                 "RapidOCR (PaddleOCR v5 mobile) loaded for lang=%s (threads=%d)",
                 self.lang, n,
@@ -194,6 +197,7 @@ class PaddleOCRReader:
             # resolver never sees them. Record them here or the run record
             # shows no OCR model for a run that OCR'd.
             _record_bundled_v4()
+            self.model_variant = "rapidocr-bundled-v4"
             logger.info(
                 "RapidOCR (PaddleOCR v4 bundled) loaded for lang=%s (threads=%d)",
                 self.lang, n,
