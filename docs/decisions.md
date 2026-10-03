@@ -712,6 +712,14 @@ Womblex serves other software two ways: a versioned on-disk contract
 
 ## Deferred / backlog
 
+- **Model plugins: swappable models without a schema change.** *Proposed
+  2026-10.* An entry-point registry for the OCR, layout, tokeniser, PII
+  context and spellfix slots, with a packaged CPU baseline as the default and
+  a pre-run check instead of runtime fallback. Slots that need a schema change
+  (enrichment, AI chunking, graph PII, linking, embedding) are listed but out
+  of scope. Requirements: Outstanding O1 to O3 in
+  [functional_requirements.md](functional_requirements.md).
+
 - **Permissive dependencies — remove `ultralytics` and PyMuPDF.** *Proposed
   2026-10.* Both are AGPL-3.0 with a commercial licence as the only
   alternative. YOLO layout is replaced by an Apache-2.0 PP-DocLayout ONNX
