@@ -1,5 +1,8 @@
 """With no plugin configured, ``content_digest`` on vendored fixtures is pinned.
 
+The pinned values were verified identical on the commit before the model
+registry landed, so they record that the registry changed no default output.
+
 A change here means the default model group, or the extraction it drives, has
 changed output: regenerate the digests deliberately, never to get green.
 """
@@ -25,6 +28,8 @@ _PINNED = {
         "068a1e6cc72e6b25558163c8cf3a2ee9640ee128575303f508b78dbd19c22215",
     "_spreadsheets/mso-statistics-sept-qtr-2025.xlsx":
         "75c55d96b43f33967745ca61c911eec767a7d43659c982e8d5fa1e3065b16f0b",
+    "_documents/00768-213A-270825-Throsby-Out-of-School-Care-Administrative-Decision-Other-Notice-and-Direction_Redacted.pdf":
+        "0753b31f3c251e00bc900fb3c505d05f41e1c7e81b5d6b2e7d039f9b1c6b099f",
     "_documents/Auditor-General_Report_2020-21_19-First-30-Pages.pdf":
         "45089a415a82caf3ba534a90d5727f6d6a79013be48d2333d0795dd4dce101ce",
 }
