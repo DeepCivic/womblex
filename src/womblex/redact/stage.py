@@ -72,6 +72,8 @@ def detect_redactions(
     detector: RedactionDetector,
     dpi: int = 150,
     use_layout_filter: bool = True,
+    layout_model: str = "pp-doclayout-m",
+    layout_options: dict | None = None,
 ) -> RedactionReport:
     """Detect redacted regions per page; prefer vector ops, fall back to raster.
 
@@ -81,12 +83,12 @@ def detect_redactions(
       (matches native-PDF vector-drawn redactions; no area threshold).
     - If none found, rasterise the page at *dpi* and run the CV2 contour
       detector (handles raster overlays and scanned pages). When
-      *use_layout_filter* is true, run YOLO layout analysis on the rasterised
+      *use_layout_filter* is true, run layout analysis on the rasterised
       image and pass figure/chart/form-background regions as exclusion zones
       to the contour detector — suppresses raster false positives on dark
       form-field backgrounds and embedded chart regions (02737-class
-      scanned_mixed CRM forms). The filter is best-effort: if ``ultralytics``
-      isn't installed or layout analysis fails, detection falls back to the
+      scanned_mixed CRM forms). The filter is best-effort: if the layout model
+      is missing or layout analysis fails, detection falls back to the
       raw raster pass with no exclusion.
 
     Bboxes are returned in pixel coordinates at *dpi* regardless of which
@@ -97,14 +99,24 @@ def detect_redactions(
         page_count: Number of pages to scan (from extraction metadata).
         detector: Configured RedactionDetector instance.
         dpi: Resolution for page rendering / coord scaling.
-        use_layout_filter: Run YOLO layout analysis on raster-fallback pages
+        use_layout_filter: Run layout analysis on raster-fallback pages
             and drop contour hits inside figure / chart / form-background
             regions. Best-effort; falls back to raw raster pass on error.
+        layout_model: Registered layout analyser for the filter.
+        layout_options: Passed unchanged to the layout model's factory.
 
     Returns:
         RedactionReport with per-page detection results.
     """
     import fitz
+
+    if use_layout_filter:
+        # A config error (unknown model name) must surface, not read as a
+        # missing model and drop the filter silently.
+        import womblex.ingest.paddle_ocr  # noqa: F401  (registers the built-in)
+        from womblex.utils.model_registry import SLOT_LAYOUT, resolve
+
+        resolve(SLOT_LAYOUT, layout_model)
 
     report = RedactionReport()
     try:
@@ -123,7 +135,10 @@ def detect_redactions(
             img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(
                 pix.height, pix.width, pix.n
             )
-            exclude_rects = _layout_exclude_rects(img) if use_layout_filter else None
+            exclude_rects = (
+                _layout_exclude_rects(img, layout_model, layout_options)
+                if use_layout_filter else None
+            )
             raster_redactions = detector.detect(
                 img, page=page_num, exclude_rects=exclude_rects,
             )
@@ -138,19 +153,31 @@ def detect_redactions(
 
 def _layout_exclude_rects(
     img: np.ndarray,
+    layout_model: str = "pp-doclayout-m",
+    layout_options: dict | None = None,
 ) -> list[tuple[int, int, int, int]] | None:
-    """Return figure/chart/form-background bboxes from YOLO layout analysis.
+    """Return figure/chart/form-background bboxes from layout analysis.
 
-    Best-effort: returns ``None`` on any failure (missing ultralytics, model
-    weights absent, inference error). Caller treats ``None`` and ``[]``
-    interchangeably — both mean "no exclusion".
+    Best-effort: returns ``None`` on any failure (model weights absent,
+    inference error, non-conforming output). Caller treats ``None`` and
+    ``[]`` interchangeably — both mean "no exclusion".
     """
+    from womblex.ingest.interfaces.protocols import check_layout_regions
+
     try:
         from womblex.ingest.paddle_ocr import get_layout_analyzer
-        analyzer = get_layout_analyzer()
+        analyzer = get_layout_analyzer(layout_model, **(layout_options or {}))
         regions = analyzer.analyze(img)
     except Exception as e:
         logger.debug("layout filter unavailable; falling back to raw raster: %s", e)
+        return None
+    try:
+        check_layout_regions(regions)
+    except ValueError:
+        logger.warning(
+            "layout model %r is non-conforming; no layout filter on this page",
+            layout_model, exc_info=True,
+        )
         return None
 
     rects: list[tuple[int, int, int, int]] = []

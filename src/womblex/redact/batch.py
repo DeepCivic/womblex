@@ -136,6 +136,8 @@ def annotate_redactions_for_shards(
             dpi=config.dpi,
             summary=summary,
             use_layout_filter=config.use_layout_filter,
+            layout_model=config.layout_model,
+            layout_options=config.layout_options,
         )
 
         out_path = output_dir / f"{batch_stem}.redactions.parquet"
@@ -167,6 +169,8 @@ def _annotate_one_batch(
     dpi: int,
     summary: dict[str, int],
     use_layout_filter: bool = True,
+    layout_model: str = "pp-doclayout-m",
+    layout_options: dict | None = None,
 ) -> list[tuple[str, int]]:
     """Process a single batch; mutate *summary* and return ``[(source_hash, elem_order), ...]``."""
     manifest_tbl = pq.read_table(manifest_path, columns=["source_hash", "filename"])
@@ -206,6 +210,7 @@ def _annotate_one_batch(
         report = detect_redactions(
             pdf_path, page_count, detector, dpi=dpi,
             use_layout_filter=use_layout_filter,
+            layout_model=layout_model, layout_options=layout_options,
         )
         summary[source_hash] = report.total
         if not report.total:
@@ -288,6 +293,8 @@ def validate_redactions_against_labels(
         report = detect_redactions(
             pdf_path, n_pages, detector, dpi=config.dpi,
             use_layout_filter=config.use_layout_filter,
+            layout_model=config.layout_model,
+            layout_options=config.layout_options,
         )
 
         per_page_bboxes: dict[int, list[tuple[int, int, int, int]]] = {

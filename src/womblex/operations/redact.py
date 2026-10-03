@@ -57,6 +57,8 @@ def run_redaction(
             detector,
             dpi=config.redaction.dpi,
             use_layout_filter=config.redaction.use_layout_filter,
+            layout_model=config.redaction.layout_model,
+            layout_options=config.redaction.layout_options,
         )
 
         if not report.total:

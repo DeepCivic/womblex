@@ -27,15 +27,17 @@ from womblex.ingest.extract import (
     _ocr_text_block,
     _pixmap_to_array,
 )
-from womblex.ingest.interfaces.protocols import OCRRegionResult
+from womblex.ingest.interfaces.protocols import OCRRegionResult, check_layout_regions
 from womblex.ingest.ocr_tables import reconstruct_table, regions_in_rect, span_from_region
 from womblex.ingest.paddle_ocr import (
+    DEFAULT_LAYOUT_MODEL,
     get_layout_analyzer,
     get_ocr_reader,
     is_llm_engine,
     preprocess_for_ocr,
 )
 from womblex.ingest.table_grid import Span, cluster_x_centroids, rows_from_spans
+from womblex.utils.model_registry import SLOT_LAYOUT, resolve
 
 logger = logging.getLogger(__name__)
 
@@ -358,8 +360,10 @@ def _layout_blocks_and_tables(
     ocr_regions: Sequence[OCRRegionResult] | None = None,
     ocr_pix_dims: tuple[int, int] | None = None,
     page_deskewed: bool = False,
+    layout_model: str = DEFAULT_LAYOUT_MODEL,
+    layout_options: dict | None = None,
 ) -> tuple[list[TextBlock], list[TableData], list[OCRRegionResult]]:
-    """Run YOLO layout analysis on a page, returning typed TextBlocks and tables.
+    """Run layout analysis on a page, returning typed TextBlocks and tables.
 
     Falls back to a single paragraph block if the layout model is unavailable.
 
@@ -387,8 +391,11 @@ def _layout_blocks_and_tables(
     tables: list[TableData] = []
     consumed: list[OCRRegionResult] = []
 
+    # A config error (unknown model name) must surface, not read as a
+    # missing model and fall back silently.
+    resolve(SLOT_LAYOUT, layout_model)
     try:
-        analyzer = get_layout_analyzer()
+        analyzer = get_layout_analyzer(layout_model, **(layout_options or {}))
         pix = page.get_pixmap(dpi=dpi)
         img = _pixmap_to_array(pix)
 
@@ -419,6 +426,14 @@ def _layout_blocks_and_tables(
             cell_source = []
 
         regions = analyzer.analyze(img)
+        try:
+            check_layout_regions(regions)
+        except ValueError:
+            logger.warning(
+                "layout model %r is non-conforming, using full-page text: page=%d",
+                layout_model, page.number, exc_info=True,
+            )
+            raise
         if not regions:
             raise RuntimeError("no layout regions detected")
 

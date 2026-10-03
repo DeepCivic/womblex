@@ -106,7 +106,7 @@ class TestLayoutPassPlumbing:
     def _stub_analyzer(self, monkeypatch) -> None:
         monkeypatch.setattr(
             "womblex.ingest.strategies_scanned.get_layout_analyzer",
-            lambda: _StubAnalyzer([
+            lambda *_a, **_k: _StubAnalyzer([
                 LayoutRegionResult(bbox=(0, 0, 400, 400), label="Table",
                                    block_type="table", confidence=0.96),
                 LayoutRegionResult(bbox=(0, 500, 400, 700), label="Text",
@@ -209,7 +209,7 @@ class TestOcrPageScoping:
 
         def _fake_layout(
             page, dpi, text, conf,
-            ocr_regions=None, ocr_pix_dims=None, page_deskewed=False,
+            ocr_regions=None, ocr_pix_dims=None, page_deskewed=False, **_layout,
         ):
             seen["regions"] = ocr_regions
             seen["pix_dims"] = ocr_pix_dims
@@ -433,7 +433,7 @@ class TestLayoutPassReconstruction:
     def _stub_analyzer(self, monkeypatch) -> None:
         monkeypatch.setattr(
             "womblex.ingest.strategies_scanned.get_layout_analyzer",
-            lambda: _StubAnalyzer([
+            lambda *_a, **_k: _StubAnalyzer([
                 LayoutRegionResult(bbox=_TABLE_RECT, label="Table",
                                    block_type="table", confidence=0.96),
                 LayoutRegionResult(bbox=_NARRATIVE_RECT, label="Text",
@@ -533,7 +533,7 @@ class TestOrchestratorTableWiring:
     def _stub_analyzer(self, monkeypatch) -> None:
         monkeypatch.setattr(
             "womblex.ingest.strategies_scanned.get_layout_analyzer",
-            lambda: _StubAnalyzer([
+            lambda *_a, **_k: _StubAnalyzer([
                 LayoutRegionResult(bbox=_TABLE_RECT, label="Table",
                                    block_type="table", confidence=0.96),
                 LayoutRegionResult(bbox=_NARRATIVE_RECT, label="Text",
@@ -627,7 +627,7 @@ class TestReconstructedTableDownstream:
     def _stub_analyzer(self, monkeypatch) -> None:
         monkeypatch.setattr(
             "womblex.ingest.strategies_scanned.get_layout_analyzer",
-            lambda: _StubAnalyzer([
+            lambda *_a, **_k: _StubAnalyzer([
                 LayoutRegionResult(bbox=_TABLE_RECT, label="Table",
                                    block_type="table", confidence=0.96),
                 LayoutRegionResult(bbox=_NARRATIVE_RECT, label="Text",
@@ -721,7 +721,7 @@ class TestImageDocumentsRouteThroughTheOrchestrator:
         )
         monkeypatch.setattr(
             "womblex.ingest.strategies_scanned.get_layout_analyzer",
-            lambda: _StubAnalyzer([
+            lambda *_a, **_k: _StubAnalyzer([
                 LayoutRegionResult(bbox=_TABLE_RECT, label="Table",
                                    block_type="table", confidence=0.96),
                 LayoutRegionResult(bbox=_NARRATIVE_RECT, label="Text",

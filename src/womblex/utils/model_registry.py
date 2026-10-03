@@ -26,7 +26,8 @@ logger = logging.getLogger(__name__)
 
 SLOT_OCR = "ocr"
 SLOT_LAYOUT = "layout"
-SLOTS: tuple[str, ...] = (SLOT_OCR, SLOT_LAYOUT)
+SLOT_PII_CONTEXT = "pii-context"
+SLOTS: tuple[str, ...] = (SLOT_OCR, SLOT_LAYOUT, SLOT_PII_CONTEXT)
 
 ENTRY_POINT_GROUP_PREFIX = "womblex.models."
 

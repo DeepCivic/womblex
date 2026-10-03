@@ -70,6 +70,7 @@ def pii_shards(
     cleaner = PIICleaner(
         entities=config.entities,
         model=config.model,
+        model_options=config.model_options or None,
         context_similarity_threshold=config.context_similarity_threshold,
     )
     person_types = set(config.person_types)

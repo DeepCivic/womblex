@@ -427,6 +427,8 @@ def extract_text(
     engine: str = "paddleocr",
     engine_options: dict | None = None,
     spreadsheet_print: dict | None = None,
+    layout_model: str = "pp-doclayout-m",
+    layout_options: dict | None = None,
 ) -> list[ExtractionResult]:
     """Extract a document using the strategy matching its profile.
 
@@ -441,7 +443,8 @@ def extract_text(
     LLM/VLM engine: ``mistral-ocr`` for Mistral Pixtral Large via AWS
     Bedrock, ``ollama`` for a local multimodal LLM). ``engine_options``
     forwards engine-specific kwargs (e.g. ``model``, ``region``,
-    ``base_url``, ``prompt``).
+    ``base_url``, ``prompt``). ``layout_model`` / ``layout_options`` pick the
+    registered layout analyser the OCR pages use, and its options.
     """
     # The path-based formats keep the legacy strategy switch: `fitz` cannot
     # open them, so there are no pages to profile. Everything it *can* open
@@ -478,6 +481,7 @@ def extract_text(
         result = extract_pdf_with_plan(
             doc, profile,
             dpi=dpi, lang=lang, engine=engine, engine_options=engine_options,
+            layout_model=layout_model, layout_options=layout_options,
             filename=path.name, spreadsheet_print=spreadsheet_print,
         )
         elapsed = time.monotonic() - t0

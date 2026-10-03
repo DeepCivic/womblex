@@ -22,7 +22,7 @@ from womblex.ingest.interfaces.protocols import (
     OCRPageResult,
     OCRRegionResult,
 )
-from womblex.utils.model_registry import SLOT_OCR, register, resolve
+from womblex.utils.model_registry import SLOT_LAYOUT, SLOT_OCR, register, resolve
 
 if TYPE_CHECKING:
     from rapidocr_onnxruntime import RapidOCR
@@ -415,7 +415,7 @@ class YOLOLayoutAnalyzer:
 # ------------------------------------------------------------------
 
 _paddle_readers: dict[str, PaddleOCRReader] = {}
-_layout_analyzer: LayoutAnalyzer | None = None
+_layout_analyzers: dict[str, LayoutAnalyzer] = {}
 
 
 def get_paddle_reader(lang: str = "eng", use_int8: bool = True) -> PaddleOCRReader:
@@ -481,14 +481,30 @@ def get_ocr_reader(
     return resolve(SLOT_OCR, engine).factory(lang=lang, **engine_options)
 
 
-def get_layout_analyzer() -> LayoutAnalyzer:
-    """Return a cached PP-DocLayout-M layout analyzer."""
-    global _layout_analyzer
-    if _layout_analyzer is None:
-        from womblex.ingest.layout_onnx import PPDocLayoutAnalyzer
+DEFAULT_LAYOUT_MODEL = "pp-doclayout-m"
 
-        _layout_analyzer = PPDocLayoutAnalyzer()
-    return _layout_analyzer
+
+def _make_pp_doclayout(**options: object) -> LayoutAnalyzer:
+    from womblex.ingest.layout_onnx import PPDocLayoutAnalyzer
+
+    return PPDocLayoutAnalyzer(**options)  # type: ignore[arg-type]
+
+
+register(SLOT_LAYOUT, DEFAULT_LAYOUT_MODEL, _make_pp_doclayout, aliases=("pp-doclayout",))
+
+
+def get_layout_analyzer(
+    name: str = DEFAULT_LAYOUT_MODEL, **options: Any
+) -> LayoutAnalyzer:
+    """Return a cached layout analyser for the registered model *name*.
+
+    Options pass to the model's factory unchanged. An unknown name raises
+    ``ValueError`` listing the registered names.
+    """
+    key = f"{resolve(SLOT_LAYOUT, name).name}|{sorted(options.items())!r}"
+    if key not in _layout_analyzers:
+        _layout_analyzers[key] = resolve(SLOT_LAYOUT, name).factory(**options)
+    return _layout_analyzers[key]
 
 
 def preprocess_for_ocr(img: np.ndarray) -> tuple[np.ndarray, list[str]]:
