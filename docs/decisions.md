@@ -712,23 +712,30 @@ Womblex serves other software two ways: a versioned on-disk contract
 
 ## Deferred / backlog
 
-- **Model plugins: swappable models without a schema change.** *Proposed
-  2026-10.* Requirement: Outstanding O1 in
+- **Model plugins: swappable models without a schema change.** *Shipped
+  2026-10.* Requirement 24 in
   [functional_requirements.md](functional_requirements.md). Design calls:
-  - **Entry-point registry.** `womblex/plugins.py` resolves each slot from
-    the `womblex.ocr`, `womblex.layout` and `womblex.tokenizer` entry-point
-    groups via `importlib.metadata`. The built-ins register through the same
-    registry, so nothing has a special path. The first merge records here why
-    a registry is justified despite the "no strategy patterns" rule.
-  - **One baseline table.** A `BASELINE` mapping (slot to plugin name) feeds
-    the config defaults; changing the default group edits only that table.
-  - **Models by name, never path.** Plugins resolve through
+  - **Entry-point registry.** `utils/model_registry.py` maps a name to a
+    factory per slot. Packages register through the entry-point group
+    `womblex.models.<slot>`; the built-ins register through the same
+    registry, so nothing has a special path. A registry is justified despite
+    the "no strategy patterns" rule because the requirement is third-party
+    models selected by config name, which a fixed set of built-ins cannot
+    express. A name held by another model is refused, so a plugin cannot
+    shadow a built-in.
+  - **Defaults stay in config.** Each slot's default is the field default in
+    `config/`; there is no separate baseline table, so changing the default
+    group edits the config defaults and the built-in registration together.
+  - **PII context slot.** `pii.model` / `model_options` name a registered
+    encoder with `encode(texts)`; cosine scoring is numpy in `pii/cleaner.py`.
+    Changing the model means recalibrating `context_similarity_threshold`.
+  - **Models by name, never path.** Plugins resolve files through
     `utils/models.resolve_local_model_path`; a `womblex.model_roots`
-    entry-point group adds search roots.
-  - **Readers declare their output shape** (`regions` or `markdown`),
-    replacing `LLM_OCR_ENGINES` / `is_llm_engine`. The reader cache is keyed
-    by engine plus a frozen copy of its options.
-  - **Layout slot (merge 2).** `extraction.ocr.layout_model` /
+    entry-point group adds search roots, searched last so a plugin cannot
+    shadow a bundled artefact.
+  - **Readers declare their output shape** with the factory trait
+    `womblex_traits = {"markdown": True}`; `is_llm_engine` reads that trait.
+  - **Layout slot.** `extraction.ocr.layout_model` /
     `layout_options` and `redaction.layout_model` / `layout_options` name a
     registered analyser (default `pp-doclayout-m`); options pass to its
     factory unchanged. The two selections are independent because the
@@ -737,7 +744,7 @@ Womblex serves other software two ways: a versioned on-disk contract
     `check_layout_regions` (in `ingest/interfaces/protocols.py`) is the
     conformance check against `LAYOUT_BLOCK_TYPES`; a non-conforming model is
     logged and the page falls back to full-page text.
-  - **Tokeniser and spellfix-dictionary slots (merge 4).**
+  - **Tokeniser and spellfix-dictionary slots.**
     `chunking.tokenizer` / `tokenizer_options` and `spellfix.dict_name` /
     `dict_options` name registered models. A tokeniser factory returns a
     Hugging Face id or a `(str) -> int` counter; a dictionary is any object
@@ -749,8 +756,8 @@ Womblex serves other software two ways: a versioned on-disk contract
     out of scope.
   - **Profiling confidence sampling stays on PaddleOCR** (`morphology.py`),
     because its thresholds were calibrated there.
-  - **Prerequisite.** `config.py` (920 lines) is split mechanically before
-    any slot adds fields, with the moved classes named in that PR.
+  - **Prerequisite.** `config.py` was split mechanically before any slot
+    added fields. Authoring guide: [plugins.md](plugins.md).
 
 - **Permissive dependencies — remove `ultralytics` and PyMuPDF.** *Proposed
   2026-10.* Both are AGPL-3.0 with a commercial licence as the only

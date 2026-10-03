@@ -215,3 +215,34 @@ class TestDigestRecomputes:
         two.parent.mkdir()
         two.write_bytes(b"weights")
         assert digest_model_path(one) == digest_model_path(two)
+
+
+class TestPluginRoots:
+    @pytest.fixture
+    def plugin_root(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        from types import SimpleNamespace
+
+        from womblex.utils import models
+
+        root = tmp_path / "plugin-models"
+        (root / "my-model").mkdir(parents=True)
+        (root / "en_AU").mkdir()
+        eps = [
+            SimpleNamespace(name="by-path", load=lambda: str(root)),
+            SimpleNamespace(name="by-callable", load=lambda: (lambda: root)),
+            SimpleNamespace(name="broken", load=lambda: 1 / 0),
+        ]
+        monkeypatch.setattr(models, "entry_points", lambda group: eps)
+        models._plugin_roots.cache_clear()
+        yield root
+        models._plugin_roots.cache_clear()
+
+    def test_a_plugin_root_resolves_offline(self, plugin_root: Path):
+        assert resolve_local_model_path("my-model") == plugin_root / "my-model"
+
+    def test_it_is_searched_last_and_deduplicated(self, plugin_root: Path):
+        roots = model_roots()
+        assert roots[-1] == plugin_root and roots.count(plugin_root) == 1
+
+    def test_it_cannot_shadow_a_bundled_artefact(self, plugin_root: Path):
+        assert resolve_local_model_path("en_AU") == BUNDLED / "en_AU"

@@ -7,6 +7,10 @@ Roots are searched **per artefact**, in this order:
    after ``pip install womblex`` and is what makes air-gapped use viable.
 3. ``models/`` sibling of ``src/`` — backward compatibility for editable
    installs and the historical repo layout.
+4. Roots supplied by installed packages through the ``womblex.model_roots``
+   entry-point group. The entry point's value is a directory (``str`` /
+   ``Path``) or a callable returning one. They search last, so a plugin
+   supplements the roots above and cannot shadow a bundled artefact.
 
 Per artefact, not "first root wins", because the roots hold *different*
 artefacts. A container image mounts the large ones (layout, embedding, OCR)
@@ -45,6 +49,7 @@ import logging
 import os
 from dataclasses import dataclass
 from functools import cache
+from importlib.metadata import entry_points
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -65,6 +70,22 @@ def _repo_models_dir() -> Path | None:
     return None
 
 
+MODEL_ROOTS_GROUP = "womblex.model_roots"
+
+
+@cache
+def _plugin_roots() -> tuple[Path, ...]:
+    """Directories installed packages offer, read once per process."""
+    roots: list[Path] = []
+    for ep in entry_points(group=MODEL_ROOTS_GROUP):
+        try:
+            value = ep.load()
+            roots.append(Path(value() if callable(value) else value))
+        except Exception:
+            logger.exception("model root plugin %s failed to load", ep.name)
+    return tuple(roots)
+
+
 def model_roots() -> tuple[Path, ...]:
     """Every existing models root, in resolution order.
 
@@ -81,6 +102,8 @@ def model_roots() -> tuple[Path, ...]:
     add(Path(env_override) if env_override else None)
     add(Path(__file__).resolve().parent.parent / "_models")
     add(_repo_models_dir())
+    for plugin_root in _plugin_roots():
+        add(plugin_root)
     return tuple(roots)
 
 
