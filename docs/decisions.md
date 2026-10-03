@@ -713,7 +713,7 @@ Womblex serves other software two ways: a versioned on-disk contract
 ## Deferred / backlog
 
 - **Model plugins: swappable models without a schema change.** *Proposed
-  2026-10.* Requirements: Outstanding O1 to O3 in
+  2026-10.* Requirement: Outstanding O1 in
   [functional_requirements.md](functional_requirements.md). Design calls:
   - **Entry-point registry.** `womblex/plugins.py` resolves each slot from
     the `womblex.ocr`, `womblex.layout` and `womblex.tokenizer` entry-point
@@ -724,21 +724,14 @@ Womblex serves other software two ways: a versioned on-disk contract
     the config defaults; changing the default group edits only that table.
   - **Models by name, never path.** Plugins resolve through
     `utils/models.resolve_local_model_path`; a `womblex.model_roots`
-    entry-point group adds search roots, so the packaging choice later
-    changes package data, not plugin code.
+    entry-point group adds search roots.
   - **Readers declare their output shape** (`regions` or `markdown`),
     replacing `LLM_OCR_ENGINES` / `is_llm_engine`. The reader cache is keyed
     by engine plus a frozen copy of its options.
   - **Profiling confidence sampling stays on PaddleOCR** (`morphology.py`),
     because its thresholds were calibrated there.
-  - **Provenance in footers.** A `womblex.plugins` key (slot, name,
-    distribution, version); plugin weights report through
-    `record_loaded_path`.
   - **Prerequisite.** `config.py` (920 lines) is split mechanically before
     any slot adds fields, with the moved classes named in that PR.
-  - **Open.** Where the baseline is packaged (wheel, separate models
-    package, or image only; wheel package data needs approval), and whether
-    the additive footer key bumps `CONTRACT_VERSION` to 1.1.
 
 - **Permissive dependencies — remove `ultralytics` and PyMuPDF.** *Proposed
   2026-10.* Both are AGPL-3.0 with a commercial licence as the only

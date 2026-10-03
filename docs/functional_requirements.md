@@ -517,13 +517,11 @@ Requirements not yet met. Each entry is written in the same form as the numbered
 - The layout model applies to redaction detection as well as extraction.
 - Changing the PII context model is supported. The docs state that `context_similarity_threshold` must be recalibrated when it changes.
 - With no plugin configured, `content_digest` is unchanged on every vendored fixture.
-- A config submitted to the `/v1` service API cannot reach outside the operator's allowances: options and model ids that would download a model, enable remote code, or point at a network endpoint are refused at submit unless the operator has allowed them.
-- The worker and console container images can be built with plugin packages installed, and those packages' models resolve with no further setup.
-- A plugin authoring guide documents each slot's interface, how a package registers a model, the pre-run check (O2), and what a plugin must report for provenance (O3), with a minimal example.
+- A plugin authoring guide documents each slot's interface and how a package registers a model, with a minimal example.
 
 **Depends on:** layout swapping needs YOLO removed first (L2 in [`permissive-deps-plan.md`](permissive-deps-plan.md)).
 
-**Out of scope:** slots that need a Parquet schema change, each needing its own requirement: the enrichment provider, AI chunking with a non-Isaacus model, graph-driven PII detection, link-stage candidates, `graph_refresh`, the enrichment token-budget tokeniser, per-page or per-element OCR engine recording, and the embedder provider (including any CPU embedding baseline).
+**Out of scope:** the pre-run model check (O2), model provenance (O3), `/v1` submission controls (a submitted config only selects stages; workers run under the operator's config), container-image packaging of plugins, and slots that need a Parquet schema change, each needing its own requirement: the enrichment provider, AI chunking with a non-Isaacus model, graph-driven PII detection, link-stage candidates, `graph_refresh`, the enrichment token-budget tokeniser, per-page or per-element OCR engine recording, and the embedder provider (including any CPU embedding baseline).
 
 ### O2. Pre-Run Model Check
 
