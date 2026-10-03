@@ -110,6 +110,14 @@ def detect_redactions(
     """
     import fitz
 
+    if use_layout_filter:
+        # A config error (unknown model name) must surface, not read as a
+        # missing model and drop the filter silently.
+        import womblex.ingest.paddle_ocr  # noqa: F401  (registers the built-in)
+        from womblex.utils.model_registry import SLOT_LAYOUT, resolve
+
+        resolve(SLOT_LAYOUT, layout_model)
+
     report = RedactionReport()
     try:
         doc = fitz.open(str(path))
@@ -151,15 +159,25 @@ def _layout_exclude_rects(
     """Return figure/chart/form-background bboxes from layout analysis.
 
     Best-effort: returns ``None`` on any failure (model weights absent,
-    unknown model name, inference error). Caller treats ``None`` and ``[]``
-    interchangeably — both mean "no exclusion".
+    inference error, non-conforming output). Caller treats ``None`` and
+    ``[]`` interchangeably — both mean "no exclusion".
     """
+    from womblex.ingest.interfaces.protocols import check_layout_regions
+
     try:
         from womblex.ingest.paddle_ocr import get_layout_analyzer
         analyzer = get_layout_analyzer(layout_model, **(layout_options or {}))
         regions = analyzer.analyze(img)
     except Exception as e:
         logger.debug("layout filter unavailable; falling back to raw raster: %s", e)
+        return None
+    try:
+        check_layout_regions(regions)
+    except ValueError:
+        logger.warning(
+            "layout model %r is non-conforming; no layout filter on this page",
+            layout_model, exc_info=True,
+        )
         return None
 
     rects: list[tuple[int, int, int, int]] = []
