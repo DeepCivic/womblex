@@ -72,6 +72,7 @@ import pyarrow.parquet as pq
 from womblex import __version__
 from womblex.store.build_info import resolve_commit
 from womblex.store.source_provenance import NAMESPACE
+from womblex.utils.model_check import footer_payload as model_check_payload
 from womblex.utils.models import loaded_models
 
 RUN_ID_KEY = f"{NAMESPACE}.run_id"
@@ -80,6 +81,7 @@ COMMIT_KEY = f"{NAMESPACE}.commit"
 CONFIG_DIGEST_KEY = f"{NAMESPACE}.config_digest"
 STAGE_KEY = f"{NAMESPACE}.stage"
 MODELS_KEY = f"{NAMESPACE}.models"
+MODEL_CHECK_KEY = f"{NAMESPACE}.model_check"
 PRESET_KEY = f"{NAMESPACE}.preset"
 
 # Excluded from the digest: see the module docstring. `paths` is deployment
@@ -212,6 +214,8 @@ class RunStamp:
         if models := loaded_models():
             payload = [{"name": m.name, "digest": m.digest} for m in models]
             meta[MODELS_KEY.encode()] = json.dumps(payload).encode()
+        if (check := model_check_payload()) is not None:
+            meta[MODEL_CHECK_KEY.encode()] = json.dumps(check, sort_keys=True).encode()
         return meta
 
 
@@ -260,6 +264,23 @@ def read_footer_models(metadata: Mapping[bytes, bytes] | None) -> list[dict[str,
         for e in entries
         if isinstance(e, dict) and "name" in e and "digest" in e
     ]
+
+
+def read_footer_model_check(metadata: Mapping[bytes, bytes] | None) -> dict | None:
+    """Decode the model-check key out of a Parquet footer.
+
+    ``None`` when the file carries none (written before the check existed, or by
+    a process that was never asked to check), and for a malformed value, for the
+    reason :func:`read_footer_models` reads one as empty.
+    """
+    raw = (metadata or {}).get(MODEL_CHECK_KEY.encode())
+    if raw is None:
+        return None
+    try:
+        payload = json.loads(raw.decode())
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
 
 
 def stamp_from_footers(paths: Iterable[Path], stage: str) -> RunStamp | None:
@@ -324,12 +345,14 @@ __all__ = [
     "COMMIT_KEY",
     "CONFIG_DIGEST_KEY",
     "MODELS_KEY",
+    "MODEL_CHECK_KEY",
     "PRESET_KEY",
     "RUN_ID_KEY",
     "STAGE_KEY",
     "VERSION_KEY",
     "RunStamp",
     "config_digest",
+    "read_footer_model_check",
     "read_footer_models",
     "read_footer_stamp",
     "sidecar_footer",

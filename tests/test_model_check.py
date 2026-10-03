@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import importlib
+from pathlib import Path
 
 import pytest
 
 from womblex.config import WomblexConfig
+from womblex.store.run_stamp import (
+    MODEL_CHECK_KEY,
+    RunStamp,
+    read_footer_model_check,
+)
 from womblex.utils import model_registry as reg
 from womblex.utils.model_check import (
     _BUILTIN_MODULES,
@@ -18,6 +24,8 @@ from womblex.utils.model_check import (
     ModelCheckError,
     check_models,
     configured_models,
+    footer_payload,
+    reset_model_check,
 )
 
 # The built-ins register at import; do it before the fixture copies the registry,
@@ -39,7 +47,9 @@ def _clean(monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setattr(
             reg, attr, {slot: dict(v) for slot, v in getattr(reg, attr).items()}
         )
+    reset_model_check()
     yield
+    reset_model_check()
 
 
 class _Dictionary:
@@ -91,6 +101,7 @@ class TestLevels:
     def test_off_checks_nothing_and_says_so(self) -> None:
         result = check_models(_config(), "off")
         assert result.checks == () and result.ok
+        assert footer_payload() == {"checks": [], "level": "off"}
 
     def test_load_builds_the_model_through_its_factory(self) -> None:
         reg.register(
@@ -158,3 +169,68 @@ class TestVariant:
         cfg = _config(redaction={"enabled": False})
         result = check_models(cfg, "smoke", scopes=(SCOPE_EXTRACT,))
         assert [c.reason for c in result.failures] == []
+
+
+class TestWhatIsRemembered:
+    def test_off_is_remembered_and_says_so(self) -> None:
+        check_models(_config(), "off")
+        assert footer_payload() == {"checks": [], "level": "off"}
+
+    def test_nothing_asked_means_nothing_to_write(self) -> None:
+        assert footer_payload() is None
+
+    def test_the_footer_carries_the_checks_and_reads_back(self) -> None:
+        reg.register(
+            reg.SLOT_SPELLFIX_DICTIONARY, "tiny", lambda **_: _Dictionary(), source="tiny-dist",
+        )
+        check_models(_dictionary_config("tiny"), "load", scopes=(SCOPE_SPELLFIX,))
+        meta = RunStamp.declare("run-1", _config(), stage="extract").footer_metadata()
+        payload = read_footer_model_check(meta)
+        assert payload is not None
+        (entry,) = payload["checks"]
+        assert (entry["slot"], entry["name"], entry["status"], entry["level"]) == (
+            "spellfix-dictionary", "tiny", "ok", "load",
+        )
+        assert MODEL_CHECK_KEY.encode() in meta
+
+    def test_an_unstamped_process_writes_no_key(self) -> None:
+        meta = RunStamp.declare("run-1", _config(), stage="extract").footer_metadata()
+        assert MODEL_CHECK_KEY.encode() not in meta
+
+    def test_a_malformed_footer_reads_as_absent(self) -> None:
+        assert read_footer_model_check({MODEL_CHECK_KEY.encode(): b"{not json"}) is None
+
+
+class TestRunStopsBeforeTheFirstDocument:
+    def test_a_failed_check_writes_nothing(self, tmp_path: Path) -> None:
+        import argparse
+
+        from womblex.cli.pipeline import cmd_run
+
+        inbox = tmp_path / "in"
+        inbox.mkdir()
+        (inbox / "a.csv").write_text("a,b\n1,2\n")
+        cfg = tmp_path / "cfg.yaml"
+        cfg.write_text(
+            f"dataset:\n  name: t\npaths:\n  input_root: {inbox}\n"
+            f"  output_root: {tmp_path / 'out'}\n  checkpoint_dir: {tmp_path / 'ckpt'}\n"
+            "extraction:\n  ocr:\n    engine: no-such-engine\n"
+            "redaction:\n  enabled: false\n"
+        )
+        args = argparse.Namespace(
+            config=cfg, resume=False, limit=None, skip=0, batch_size=None, run_id="t",
+            models_check=None,
+        )
+        assert cmd_run(args) == 1
+        assert not (tmp_path / "out").exists()
+
+    def test_the_cli_override_beats_the_config(self, tmp_path: Path) -> None:
+        import argparse
+
+        from womblex.cli._shared import apply_models_check
+
+        cfg = _config()
+        apply_models_check(cfg, argparse.Namespace(models_check="smoke"))
+        assert cfg.processing.models_check == "smoke"
+        apply_models_check(cfg, argparse.Namespace(models_check=None))
+        assert cfg.processing.models_check == "smoke"
