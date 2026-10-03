@@ -192,6 +192,23 @@ def configured_models(
     ]
 
 
+def check_registered(config: WomblexConfig) -> None:
+    """Raise ``ValueError`` unless every model *config* names is registered.
+
+    Registration only — nothing is loaded — for a host that may not carry the
+    models (the service API). The message is the registry's own, so it lists
+    the known names.
+    """
+    problems = []
+    for use in configured_models(config):
+        try:
+            resolve(use.slot, use.name)
+        except ValueError as exc:
+            problems.append(str(exc))
+    if problems:
+        raise ValueError("; ".join(problems))
+
+
 # ---------------------------------------------------------------------------
 # Loading and inference
 # ---------------------------------------------------------------------------
@@ -372,6 +389,7 @@ __all__ = [
     "ModelUse",
     "SlotCheck",
     "check_models",
+    "check_registered",
     "configured_models",
     "footer_payload",
     "reset_model_check",

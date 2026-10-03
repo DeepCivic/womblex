@@ -516,13 +516,9 @@ the adjacent concerns and should be consulted rather than duplicated here:
 - With no plugin configured, `content_digest` is unchanged on every vendored fixture.
 - [`model-plugins.md`](model-plugins.md) documents each slot's interface and how a package registers a model, with a minimal example.
 
-**Out of scope:** the pre-run model check (O2), model provenance (O3), `/v1` submission controls (a submitted config only selects stages; workers run under the operator's config), container-image packaging of plugins, and slots that need a Parquet schema change, each needing its own requirement (O2, O3 below, and the rest): the enrichment provider, AI chunking with a non-Isaacus model, graph-driven PII detection, link-stage candidates, `graph_refresh`, the enrichment token-budget tokeniser, per-page or per-element OCR engine recording, and the embedder provider (including any CPU embedding baseline).
+**Out of scope:** model provenance (O3), `/v1` submission controls (a submitted config only selects stages; workers run under the operator's config), container-image packaging of plugins, and slots that need a Parquet schema change, each needing its own requirement (25 and O3 below, and the rest): the enrichment provider, AI chunking with a non-Isaacus model, graph-driven PII detection, link-stage candidates, `graph_refresh`, the enrichment token-budget tokeniser, per-page or per-element OCR engine recording, and the embedder provider (including any CPU embedding baseline).
 
-## Outstanding
-
-Requirements not yet met. Each entry is written in the same form as the numbered requirements above. When one is fully met, it moves into the numbered list (or is deleted if it is no longer wanted) in the same PR that meets it.
-
-### O2. Pre-Run Model Check
+## 25. Pre-Run Model Check
 
 **As** an operator,
 **I want** configured models checked before any document is processed,
@@ -534,13 +530,17 @@ Requirements not yet met. Each entry is written in the same form as the numbered
 
 **Acceptance criteria:**
 
-- The check has three levels: off; load (resolve and load the models); smoke (also run one inference on a small built-in input).
-- `womblex run` checks before batch one.
-- A worker checks at startup and refuses jobs whose models fail the check, through the existing refused path.
+- The check has three levels, set by `processing.models_check` or `--models-check`: `off`; `load` (resolve and load the models, the default); `smoke` (also run one inference on a small built-in input).
+- `womblex run` checks before batch one, before any output is written.
+- A worker checks at startup and refuses jobs whose models fail the check, through the existing refused path. A job is refused only for the models it needs: a batch for the extraction models, a stage job for that stage's.
 - An API submission checks only that each named model is registered, because the API host may not carry the models.
 - Downstream stage preflight includes the model check.
 - The existing in-slot fallback (PaddleOCR v5 to the wheel's v4) stays, and the check reports which variant resolved.
 - The check result is written into the run record.
+
+## Outstanding
+
+Requirements not yet met. Each entry is written in the same form as the numbered requirements above. When one is fully met, it moves into the numbered list (or is deleted if it is no longer wanted) in the same PR that meets it.
 
 ### O3. Model Provenance
 

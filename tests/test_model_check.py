@@ -26,6 +26,7 @@ from womblex.utils.model_check import (
     ModelCheckResult,
     SlotCheck,
     check_models,
+    check_registered,
     configured_models,
     footer_payload,
     reset_model_check,
@@ -322,3 +323,33 @@ class TestStagePreflight:
 
         cfg = _config(chunking={"tokenizer": "nope"}, processing={"models_check": "off"})
         assert prepare_stage_context(STAGE_CONTRACTS["chunk"], cfg) is not None
+
+
+class TestRegistrationOnly:
+    def test_a_registered_model_is_not_loaded(self) -> None:
+        def factory(**_: object) -> object:
+            raise AssertionError("registration check must not call the factory")
+
+        reg.register(reg.SLOT_SPELLFIX_DICTIONARY, "unloaded", factory, source="x")
+        check_registered(_dictionary_config("unloaded"))
+
+    def test_an_unknown_model_lists_the_known_names(self) -> None:
+        with pytest.raises(ValueError, match="en_au"):
+            check_registered(_dictionary_config("nope"))
+
+
+class TestSubmission:
+    def test_an_unknown_model_is_rejected_before_any_row_is_written(self, tmp_path: Path) -> None:
+        from womblex.cloud import dispatch
+        from womblex.ui.deps import UISettings
+
+        settings = UISettings(output_root=tmp_path, store_uri=None)
+        with pytest.raises(ValueError, match="nope.*known"):
+            dispatch.downstream_stages(settings, {"chunking": {"tokenizer": "nope"}})
+
+    def test_registered_models_pass_without_being_loaded(self, tmp_path: Path) -> None:
+        from womblex.cloud import dispatch
+        from womblex.ui.deps import UISettings
+
+        settings = UISettings(output_root=tmp_path, store_uri=None)
+        assert isinstance(dispatch.downstream_stages(settings, {}), tuple)

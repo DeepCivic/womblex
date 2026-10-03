@@ -147,6 +147,7 @@ womblex/
 │   └── utils/
 │       ├── metrics.py       # WER/CER accuracy metrics
 │       ├── tabular_metrics.py # Tabular extraction accuracy (structural fidelity, data integrity)
+│       ├── model_check.py   # Pre-run model check: off/load/smoke per slot and scope, remembered for the footer and run record
 │       ├── model_registry.py # Named model registry per slot (OCR, layout, PII context, tokeniser, spellfix dictionary): built-in names + `womblex.models.<slot>` entry-point plugins
 │       ├── models.py        # Local model path resolution (models/ dir, HF snapshot layout) + load record with byte digests
 │       ├── checksum.py      # Shared streamed MD5 helper for the standalone register ingests

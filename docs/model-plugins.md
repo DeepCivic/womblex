@@ -55,6 +55,20 @@ non-conforming result is logged and the page falls back to full-page text.
 Run it over your model's output in your package's tests. The same model
 applies to redaction detection when named in `redaction.layout_model`.
 
+### Pre-run check
+
+Before a run (and at worker start and stage preflight), `utils/model_check.py`
+checks every model the config names, at `processing.models_check`: `load`
+(the default) builds the model through its factory; `smoke` also runs one
+inference on a built-in input. Make a lazily-built model load at check time by
+giving it a public `load()` method. To report which variant of a model resolved
+(as PaddleOCR reports v5 or the wheel's v4), set a `model_variant` string on the
+object; it appears in the check result and the run record. A `smoke` check
+needs, per slot: OCR, a non-empty reading of a rendered text line; layout,
+regions that pass `check_layout_regions`; PII context, `encode` returning
+`(1, dim)`; tokeniser, a non-empty chunking of a sentence; dictionary,
+`lookup("the")` truthy. A failure names the slot, the model and the reason.
+
 ### PII context model
 
 `pii.context_similarity_threshold` is calibrated to the default model.
