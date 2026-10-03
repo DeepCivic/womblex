@@ -179,3 +179,65 @@ def test_plugin_context_model_scores_candidates(
     match = re.search("Janine Fairburn", text)
     assert cleaner._score_context_batch(text, [match]) == pytest.approx([1.0])  # type: ignore[list-item]
     assert seen == {"dim": 4}
+
+
+# --- tokenizer and spellfix-dictionary slots -------------------------------
+
+from womblex.process.chunker import resolve_tokenizer
+from womblex.process.spellfix import repair_text
+
+
+def test_tokenizer_builtins_resolve() -> None:
+    assert resolve_tokenizer("isaacus/kanon-2-tokenizer") == "isaacus/kanon-2-tokenizer"
+    assert resolve_tokenizer("kanon-2-tokenizer") == "isaacus/kanon-2-tokenizer"
+    assert resolve_tokenizer("huggingface", {"name": "org/tok"}) == "org/tok"
+
+
+def test_tokenizer_unknown_name_lists_known_names() -> None:
+    with pytest.raises(ValueError, match="huggingface") as exc:
+        resolve_tokenizer("gpt2")
+    assert "kanon-2-tokenizer" in str(exc.value)
+
+
+def test_plugin_tokenizer_may_be_a_token_counter(
+    clean_registry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def make(**opts):
+        return lambda text: len(text.split())
+
+    ep = SimpleNamespace(name="words", load=lambda: make, dist=SimpleNamespace(name="p"))
+    monkeypatch.setattr(reg, "_loaded", set())
+    monkeypatch.setattr(
+        reg, "entry_points", lambda group: [ep] if group.endswith(".tokenizer") else []
+    )
+    assert resolve_tokenizer("words")("a b c") == 3
+
+
+def test_spellfix_builtin_dictionary_names_resolve() -> None:
+    for name in ("en_AU", "en-au", "hunspell"):
+        reg.resolve(reg.SLOT_SPELLFIX_DICTIONARY, name)
+
+
+def test_spellfix_unknown_dictionary_lists_known_names() -> None:
+    with pytest.raises(ValueError, match="en_au"):
+        repair_text("The chi1d went home.", dict_name="en_ZZ")
+
+
+def test_plugin_dictionary_receives_options(
+    clean_registry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Words:
+        def __init__(self, extra: str = "") -> None:
+            self.words = {"the", "went", "home", "child", extra}
+
+        def lookup(self, word: str) -> bool:
+            return word.lower() in self.words
+
+    ep = SimpleNamespace(name="mini", load=lambda: Words, dist=SimpleNamespace(name="p"))
+    monkeypatch.setattr(reg, "_loaded", set())
+    monkeypatch.setattr(
+        reg, "entry_points",
+        lambda group: [ep] if group.endswith(".spellfix-dictionary") else [],
+    )
+    fixed, corr = repair_text("The chi1d went home.", dict_name="mini", dict_options={"extra": "x"})
+    assert fixed == "The child went home." and len(corr) == 1

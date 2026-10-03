@@ -67,6 +67,7 @@ import semchunk
 
 from womblex.ingest.elements import TEXT_KINDS, Element
 from womblex.ingest.views import _element_to_table_data, _sheets_to_table_data
+from womblex.utils.model_registry import SLOT_TOKENIZER, register, resolve
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +121,38 @@ class ChunkInput:
     narrative: str
     page_breaks: list[tuple[int, int]] = field(default_factory=list)
     tables: list[tuple[int | None, int | None, str]] = field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Tokeniser slot
+# ---------------------------------------------------------------------------
+
+DEFAULT_TOKENIZER = "kanon-2-tokenizer"
+
+
+def _kanon_tokenizer(**_: object) -> str:
+    return "isaacus/kanon-2-tokenizer"
+
+
+def _huggingface_tokenizer(name: str, **_: object) -> str:
+    """Any Hugging Face tokeniser, named by option: ``{"name": "org/tok"}``."""
+    return name
+
+
+# A factory returns what ``create_chunker`` accepts: a Hugging Face id (or
+# vendored name) string, or a ``(str) -> int`` token counter.
+register(
+    SLOT_TOKENIZER, DEFAULT_TOKENIZER, _kanon_tokenizer,
+    aliases=("isaacus/kanon-2-tokenizer",),
+)
+register(SLOT_TOKENIZER, "huggingface", _huggingface_tokenizer, aliases=("hf",))
+
+
+def resolve_tokenizer(
+    name: str, options: Mapping[str, Any] | None = None
+) -> str | Callable[[str], int]:
+    """The registered tokeniser *name* built with *options* passed unchanged."""
+    return resolve(SLOT_TOKENIZER, name).factory(**(options or {}))  # type: ignore[no-any-return]
 
 
 # ---------------------------------------------------------------------------

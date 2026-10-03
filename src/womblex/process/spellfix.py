@@ -31,13 +31,16 @@ Australian Writing MCP; ``spylls`` is the Hunspell algorithm in pure Python.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 from spylls.hunspell import Dictionary
 
+from womblex.utils.model_registry import SLOT_SPELLFIX_DICTIONARY, register, resolve
 from womblex.utils.models import model_roots, resolve_local_model_path
 
 # OCR digit→letter glyph confusions (Tier A). Lowercase targets only — the
@@ -101,7 +104,29 @@ def _dictionary(dict_name: str) -> Dictionary:
     return Dictionary.from_files(str(base / "index"))
 
 
-def _in_dict(d: Dictionary, word: str) -> bool:
+# A dictionary is any object with ``lookup(word)`` returning truthy for a valid
+# word. Built-ins: the bundled en_AU, and ``hunspell`` for another Hunspell
+# directory under a models root, named by option: ``{"name": "en_GB"}``.
+register(
+    SLOT_SPELLFIX_DICTIONARY, "en_AU", lambda **_: _dictionary("en_AU"),
+    aliases=("en-au",),
+)
+register(
+    SLOT_SPELLFIX_DICTIONARY, "hunspell", lambda name, **_: _dictionary(name),
+)
+
+
+@lru_cache(maxsize=4)
+def _resolved_dictionary(dict_name: str, options_json: str) -> Any:
+    entry = resolve(SLOT_SPELLFIX_DICTIONARY, dict_name)
+    return entry.factory(**json.loads(options_json))
+
+
+def _options_key(options: dict | None) -> str:
+    return json.dumps(options or {}, sort_keys=True, default=str)
+
+
+def _in_dict(d: Any, word: str) -> bool:
     return bool(d.lookup(word) or d.lookup(word.lower()) or d.lookup(word.capitalize()))
 
 
@@ -113,7 +138,7 @@ def _match_case(original: str, replacement: str) -> str:
     return replacement
 
 
-def _homoglyph_candidates(lower: str, d: Dictionary) -> set[str]:
+def _homoglyph_candidates(lower: str, d: Any) -> set[str]:
     """In-dict words reachable by swapping exactly one digit for a letter."""
     out: set[str] = set()
     for i, ch in enumerate(lower):
@@ -124,7 +149,7 @@ def _homoglyph_candidates(lower: str, d: Dictionary) -> set[str]:
     return out
 
 
-def _edit1_candidates(lower: str, d: Dictionary) -> set[str]:
+def _edit1_candidates(lower: str, d: Any) -> set[str]:
     """In-dict words at Damerau-Levenshtein distance 1 over ``a-z`` (Tier B)."""
     splits = [(lower[:i], lower[i:]) for i in range(len(lower) + 1)]
     cands: set[str] = set()
@@ -141,7 +166,9 @@ def _edit1_candidates(lower: str, d: Dictionary) -> set[str]:
 
 
 @lru_cache(maxsize=100_000)
-def _correct_token(token: str, general: bool, dict_name: str) -> tuple[str, str] | None:
+def _correct_token(
+    token: str, general: bool, dict_name: str, options_json: str = "{}"
+) -> tuple[str, str] | None:
     """Return ``(corrected, method)`` for one token, or ``None`` to leave it.
 
     Caches per (token, tier, dict) so repeated tokens across a corpus are cheap.
@@ -153,7 +180,7 @@ def _correct_token(token: str, general: bool, dict_name: str) -> tuple[str, str]
     if token.isupper():  # acronyms / initialisms — never a misspelt word
         return None
 
-    d = _dictionary(dict_name)
+    d = _resolved_dictionary(dict_name, options_json)
     if _in_dict(d, token):
         return None
 
@@ -174,6 +201,7 @@ def repair_text(
     *,
     general_edits: bool = False,
     dict_name: str = "en_AU",
+    dict_options: dict | None = None,
 ) -> tuple[str, list[Correction]]:
     """Repair OCR character-confusions in ``text``; return ``(text, corrections)``.
 
@@ -185,12 +213,13 @@ def repair_text(
     if not text:
         return text, []
 
+    options_json = _options_key(dict_options)
     corrections: list[Correction] = []
     out: list[str] = []
     last = 0
     for m in _WORD_RE.finditer(text):
         token = m.group()
-        result = _correct_token(token, general_edits, dict_name)
+        result = _correct_token(token, general_edits, dict_name, options_json)
         if result is None:
             continue
         corrected, method = result

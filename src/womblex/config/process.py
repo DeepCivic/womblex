@@ -61,8 +61,12 @@ class SpellfixConfig(BaseModel):
     )
     dict_name: str = Field(
         default="en_AU",
-        description="Hunspell dictionary name resolved via utils.models "
-                    "(bundled under `_models/en_AU`).",
+        description="Registered spellfix dictionary (by name): the bundled "
+                    "en_AU, `hunspell` for another directory, or a plugin's.",
+    )
+    dict_options: dict = Field(
+        default_factory=dict,
+        description="Passed unchanged to the dictionary's factory.",
     )
 
 

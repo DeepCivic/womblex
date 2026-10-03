@@ -28,6 +28,7 @@ from womblex.store.spellfix_output import (
     write_spellfix_corrections,
     write_spellfix_text,
 )
+from womblex.utils.model_registry import SLOT_SPELLFIX_DICTIONARY, resolve
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,9 @@ def spellfix_shards(
     """Repair every batch's element text; write overlay + corrections siblings."""
     if not shard_dir.is_dir():
         raise FileNotFoundError(f"shard directory not found: {shard_dir}")
+
+    # An unknown dictionary name fails before the first document.
+    resolve(SLOT_SPELLFIX_DICTIONARY, config.dict_name)
 
     bases = _batch_bases(shard_dir)
     if not bases:
@@ -117,6 +121,7 @@ def _repair_batch(base_path: Path, config: SpellfixConfig) -> tuple[list[dict], 
                 e.text,
                 general_edits=config.general_edits,
                 dict_name=config.dict_name,
+                dict_options=config.dict_options or None,
             )
             text_rows.append({
                 "source_hash": source_hash,

@@ -374,6 +374,11 @@ class ChunkingConfig(BaseModel):
 
 
     tokenizer: str = "isaacus/kanon-2-tokenizer"
+    tokenizer_options: dict = Field(
+        default_factory=dict,
+        description="Passed unchanged to the registered tokeniser's factory, "
+                    "e.g. {name: org/tok} for the built-in huggingface one.",
+    )
 
     chunking_model: str | None = Field(
         default=None,
