@@ -41,6 +41,7 @@ from womblex.process.chunker import (
     build_chunk_input,
     chunk_batch,
     create_chunker,
+    resolve_tokenizer,
 )
 from womblex.process.text_overlay import apply_overlay, load_overlay
 from womblex.store.checkpoint import CheckpointManager
@@ -98,6 +99,11 @@ def chunk_shards(
         logger.warning("chunk_shards: no batches found in %s", shard_dir)
         return ChunkStageResult(0, 0, 0)
 
+    # Resolved first so an unknown tokeniser name is an error either way.
+    tokenizer = resolve_tokenizer(
+        chunking_config.tokenizer, chunking_config.tokenizer_options
+    )
+
     # AI chunking (chunking_model set) calls the Kanon-2 *API* at chunk time, so
     # it needs a configured deployment. Plain token chunking sizes chunks with
     # the vendored tokeniser and runs fully offline — a keyless local run must
@@ -113,7 +119,7 @@ def chunk_shards(
                 "tokeniser.", chunking_config.chunking_model, shard_dir,
             )
             return ChunkStageResult(0, 0, 0)
-    elif not tokenizer_available(chunking_config.tokenizer):
+    elif not tokenizer_available(tokenizer):
         logger.warning(
             "chunk_shards: chunk-size tokeniser %r is not resolvable locally "
             "(needs `transformers` plus a bundled copy under _models/ or "
@@ -125,7 +131,7 @@ def chunk_shards(
         return ChunkStageResult(0, 0, 0)
 
     chunker = create_chunker(
-        tokenizer=chunking_config.tokenizer,
+        tokenizer=tokenizer,
         chunk_size=chunking_config.chunk_size,
         chunking_model=chunking_config.chunking_model,
         isaacus_client=make_ai_chunking_client(chunking_config.chunking_model),

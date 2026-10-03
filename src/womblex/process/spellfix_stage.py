@@ -49,6 +49,12 @@ def spellfix_shards(
     if not shard_dir.is_dir():
         raise FileNotFoundError(f"shard directory not found: {shard_dir}")
 
+    # Built up front so an unknown name, bad options or a missing dictionary
+    # directory fail before the first document, not mid-batch.
+    from womblex.process.spellfix import load_dictionary
+
+    load_dictionary(config.dict_name, config.dict_options)
+
     bases = _batch_bases(shard_dir)
     if not bases:
         logger.warning("spellfix_shards: no batches found in %s", shard_dir)
@@ -117,6 +123,7 @@ def _repair_batch(base_path: Path, config: SpellfixConfig) -> tuple[list[dict], 
                 e.text,
                 general_edits=config.general_edits,
                 dict_name=config.dict_name,
+                dict_options=config.dict_options or None,
             )
             text_rows.append({
                 "source_hash": source_hash,

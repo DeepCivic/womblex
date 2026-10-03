@@ -7,7 +7,12 @@ from typing import TYPE_CHECKING
 
 from womblex.config import WomblexConfig
 from womblex.operations.models import DocumentResult
-from womblex.process.chunker import build_chunk_input, chunk_batch, create_chunker
+from womblex.process.chunker import (
+    build_chunk_input,
+    chunk_batch,
+    create_chunker,
+    resolve_tokenizer,
+)
 from womblex.redact.stage import annotate_chunks
 from womblex.utils.availability import isaacus_available, tokenizer_available
 from womblex.utils.isaacus_client import make_ai_chunking_client
@@ -33,6 +38,11 @@ def run_chunking(
     if not config.chunking.enabled:
         return results
 
+    # Resolved first so an unknown tokeniser name is an error either way.
+    tokenizer = resolve_tokenizer(
+        config.chunking.tokenizer, config.chunking.tokenizer_options
+    )
+
     # AI chunking calls the enricher API; plain token chunking uses the vendored
     # tokeniser and runs offline. Gate each on what it actually needs so a
     # keyless local run still chunks (mirrors process/chunk_stage.py).
@@ -46,7 +56,7 @@ def run_chunking(
                 "the local tokeniser.", config.chunking.chunking_model,
             )
             return results
-    elif not tokenizer_available(config.chunking.tokenizer):
+    elif not tokenizer_available(tokenizer):
         logger.warning(
             "run_chunking: chunk-size tokeniser %r is not resolvable locally "
             "(needs `transformers` plus a bundled copy under _models/ or "
@@ -57,7 +67,7 @@ def run_chunking(
         return results
 
     chunker = create_chunker(
-        tokenizer=config.chunking.tokenizer,
+        tokenizer=tokenizer,
         chunk_size=config.chunking.chunk_size,
         chunking_model=config.chunking.chunking_model,
         isaacus_client=make_ai_chunking_client(config.chunking.chunking_model),

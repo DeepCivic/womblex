@@ -9,6 +9,7 @@ import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from womblex.config.process import (
+    ChunkingConfig,
     MoneyColumnsConfig,
     MoneyConfig,
     NormaliseConfig,
@@ -328,123 +329,6 @@ class ExtractionConfig(BaseModel):
     native: NativeExtractionConfig = NativeExtractionConfig()
 
     ocr: OCRConfig = OCRConfig()
-
-
-
-class ChunkingConfig(BaseModel):
-
-    """Chunking configuration for semchunk.
-
-    Thin pass-through to semchunk 3.x — every field below either maps
-    directly to a semchunk parameter or is a Womblex-only integration
-    concern semchunk can't own. There are no Womblex toggles that
-    re-expose a semchunk feature under a different name.
-
-    Maps to ``semchunk.chunkerify`` (creation-time): ``tokenizer``
-    (→ ``tokenizer_or_token_counter``), ``chunk_size``, ``chunking_model``,
-    ``tokenizer_kwargs``, ``memoize``, ``cache_maxsize``,
-    ``max_token_chars``.
-
-    Maps to ``semchunk.Chunker.__call__`` (per-call): ``overlap``,
-    ``processes``, ``progress``. (``offsets`` is pinned ``True`` in the
-    adapter — Womblex always needs char offsets for page mapping.)
-
-    Womblex-only (no semchunk equivalent): ``enabled`` (stage gate),
-    ``chunk_tables`` (element-stream → markdown projection).
-
-    Default divergences from semchunk upstream, each with a corpus
-    reason: ``tokenizer="isaacus/kanon-2-tokenizer"`` matches the
-    analysis side; ``chunk_size=480`` is the Kanon-2 window (upstream
-    defaults to ``None`` = auto-derive from the tokeniser's
-    ``model_max_length``, which this field still accepts as a
-    pass-through); ``processes=1`` keeps single-thread Chromebook
-    portability.
-
-    The Kanon-2 tokeniser is free on Hugging Face (and vendored under
-    ``_models/kanon-2-tokenizer``, resolved locally by ``create_chunker``), so
-    chunk-size token counting is exact and **fully offline** — plain token
-    chunking needs no API key and runs in an air-gapped deployment (it gates
-    only on the tokeniser resolving locally,
-    ``womblex.utils.availability.tokenizer_available``). **AI chunking**
-    (``chunking_model``) does call the Isaacus API per document; that path
-    alone gates on ``womblex.utils.availability.isaacus_available``
-    (``ISAACUS_API_KEY`` or ``ISAACUS_SAGEMAKER_ENDPOINTS``) and skips when
-    absent.
-    """
-
-
-    tokenizer: str = "isaacus/kanon-2-tokenizer"
-
-    chunking_model: str | None = Field(
-        default=None,
-        description=(
-            "semchunk 4 AI-chunking model (e.g. 'kanon-2-enricher'). When set, "
-            "chunk boundaries follow the Isaacus enricher's structure spans "
-            "instead of the offline token/recursive split, calling the Isaacus "
-            "API per document at chunk time. None (default) keeps offline "
-            "token-based chunking — composable, leaving non-Kanon tokeniser "
-            "users unaffected. NOTE: enabling this alongside the separate "
-            "enrich stage enriches the same narrative twice (see "
-            "process/chunker.py module docstring)."
-        ),
-    )
-
-    tokenizer_kwargs: dict | None = Field(
-        default=None,
-        description="Extra keyword arguments forwarded to the tokeniser / token "
-                    "counter (semchunk 4 pass-through). None = no extras.",
-    )
-
-    chunk_size: int | None = Field(
-        default=480,
-        ge=1,
-        description=(
-            "Maximum tokens per chunk. None passes through to semchunk, "
-            "which derives the size from the tokeniser's model_max_length. "
-            "Defaults to 480 (the Kanon-2 window) rather than upstream's "
-            "None auto-derive — see class docstring."
-        ),
-    )
-
-    enabled: bool = Field(default=True, description="Run chunking stage")
-
-    chunk_tables: bool = Field(default=True, description="Convert tables to markdown and chunk separately")
-
-    overlap: int | float | None = Field(
-
-        default=None,
-
-        description="Boundary context sharing. <1 = proportion of chunk_size, >=1 = absolute tokens. None = no overlap.",
-
-    )
-
-    memoize: bool = Field(default=True, description="Cache token counts for repeated substrings")
-
-    cache_maxsize: int | None = Field(
-        default=None,
-        description="Upper bound on memoization cache entries. None = unbounded.",
-    )
-
-    max_token_chars: int | None = Field(
-
-        default=None,
-
-        description="Max chars per token estimate — optimises token counting for long inputs",
-
-    )
-
-    processes: int = Field(
-
-        default=1, ge=1,
-
-        description="Parallel chunking workers. Default 1 (single-threaded, suitable for Chromebook deployment).",
-
-    )
-
-    progress: bool = Field(
-        default=False,
-        description="Show a tqdm progress bar during chunking.",
-    )
 
 
 
