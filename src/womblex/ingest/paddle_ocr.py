@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 
@@ -22,6 +22,7 @@ from womblex.ingest.interfaces.protocols import (
     OCRPageResult,
     OCRRegionResult,
 )
+from womblex.utils.model_registry import SLOT_OCR, register, resolve
 
 if TYPE_CHECKING:
     from rapidocr_onnxruntime import RapidOCR
@@ -424,66 +425,56 @@ def get_paddle_reader(lang: str = "eng", use_int8: bool = True) -> PaddleOCRRead
     return _paddle_readers[key]
 
 
-# Engine name aliases — canonical name on the left, accepted aliases on the right.
-_ENGINE_ALIASES: dict[str, str] = {
-    "paddleocr": "paddleocr",
-    "paddle": "paddleocr",
-    "rapidocr": "paddleocr",
-    "mistral-ocr": "mistral-ocr",
-    "mistral": "mistral-ocr",
-    "mistralocr": "mistral-ocr",
-    "pixtral": "mistral-ocr",
-    "bedrock": "mistral-ocr",
-    "ollama": "ollama",
-    "ollama-ocr": "ollama",
-}
+def _make_paddle(lang: str = "eng", **_: object):
+    return get_paddle_reader(lang=lang)
 
-# Canonical names of the LLM/VLM engines that return page-level markdown with
-# reading order already resolved (skip preprocessing + layout sorting).
-LLM_OCR_ENGINES: frozenset[str] = frozenset({"mistral-ocr", "ollama"})
+
+def _make_mistral(model: str | None = None, region: str | None = None, **_: object):
+    from womblex.ingest.llm_ocr import get_mistral_reader
+    return get_mistral_reader(model=model, region=region)
+
+
+def _make_ollama(
+    model: str | None = None,
+    base_url: str | None = None,
+    prompt: str | None = None,
+    **_: object,
+):
+    from womblex.ingest.llm_ocr import get_ollama_reader
+    return get_ollama_reader(model=model, base_url=base_url, prompt=prompt)
+
+
+# Built-in engines. ``markdown`` marks engines whose reader returns page-level
+# markdown with reading order already resolved (skip preprocessing + layout
+# sorting); installed plugins declare the same trait on their factory.
+register(SLOT_OCR, "paddleocr", _make_paddle, aliases=("paddle", "rapidocr"))
+register(
+    SLOT_OCR, "mistral-ocr", _make_mistral, traits={"markdown": True},
+    aliases=("mistral", "mistralocr", "pixtral", "bedrock"),
+)
+register(
+    SLOT_OCR, "ollama", _make_ollama, traits={"markdown": True},
+    aliases=("ollama-ocr",),
+)
 
 
 def is_llm_engine(engine: str) -> bool:
-    """True if *engine* (name or alias) is an LLM/VLM markdown engine."""
-    return _ENGINE_ALIASES.get(engine.lower()) in LLM_OCR_ENGINES
+    """True if *engine* (name or alias) returns page markdown, not regions."""
+    return bool(resolve(SLOT_OCR, engine).traits.get("markdown"))
 
 
 def get_ocr_reader(
     engine: str = "paddleocr",
     lang: str = "eng",
-    model: str | None = None,
-    region: str | None = None,
-    base_url: str | None = None,
-    prompt: str | None = None,
+    **engine_options: Any,
 ):
-    """Return a cached OCR reader for the requested engine.
+    """Return an OCR reader for the registered *engine* name or alias.
 
-    ``engine`` accepts canonical names (``paddleocr``, ``mistral-ocr``,
-    ``ollama``) and common aliases. Engine-specific kwargs are forwarded
-    only to engines that use them (passing others is a no-op):
-
-    - ``mistral-ocr`` (Bedrock Pixtral): ``model``, ``region``.
-    - ``ollama`` (local VLM): ``model``, ``base_url``, ``prompt``.
+    ``lang`` and every engine option are passed to the engine's factory
+    unchanged; a built-in ignores options it does not use. An unknown name
+    raises ``ValueError`` listing the registered names.
     """
-    canonical = _ENGINE_ALIASES.get(engine.lower())
-    if canonical is None:
-        raise ValueError(
-            f"unknown OCR engine: {engine!r} "
-            f"(known: {sorted(set(_ENGINE_ALIASES.values()))})"
-        )
-
-    if canonical == "paddleocr":
-        return get_paddle_reader(lang=lang)
-
-    if canonical == "mistral-ocr":
-        from womblex.ingest.llm_ocr import get_mistral_reader
-        return get_mistral_reader(model=model, region=region)
-
-    if canonical == "ollama":
-        from womblex.ingest.llm_ocr import get_ollama_reader
-        return get_ollama_reader(model=model, base_url=base_url, prompt=prompt)
-
-    raise ValueError(f"unhandled engine after alias resolution: {canonical!r}")
+    return resolve(SLOT_OCR, engine).factory(lang=lang, **engine_options)
 
 
 def get_layout_analyzer() -> LayoutAnalyzer:

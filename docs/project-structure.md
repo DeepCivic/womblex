@@ -147,6 +147,7 @@ womblex/
 │   └── utils/
 │       ├── metrics.py       # WER/CER accuracy metrics
 │       ├── tabular_metrics.py # Tabular extraction accuracy (structural fidelity, data integrity)
+│       ├── model_registry.py # Named model registry per slot (OCR engine today): built-in names + `womblex.models.<slot>` entry-point plugins
 │       ├── models.py        # Local model path resolution (models/ dir, HF snapshot layout) + load record with byte digests
 │       ├── checksum.py      # Shared streamed MD5 helper for the standalone register ingests
 │       ├── isaacus_client.py # Build the Isaacus SDK client (hosted API or private SageMaker)
