@@ -28,7 +28,6 @@ from womblex.store.spellfix_output import (
     write_spellfix_corrections,
     write_spellfix_text,
 )
-from womblex.utils.model_registry import SLOT_SPELLFIX_DICTIONARY, resolve
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +49,11 @@ def spellfix_shards(
     if not shard_dir.is_dir():
         raise FileNotFoundError(f"shard directory not found: {shard_dir}")
 
-    # An unknown dictionary name fails before the first document.
-    resolve(SLOT_SPELLFIX_DICTIONARY, config.dict_name)
+    # Built up front so an unknown name, bad options or a missing dictionary
+    # directory fail before the first document, not mid-batch.
+    from womblex.process.spellfix import load_dictionary
+
+    load_dictionary(config.dict_name, config.dict_options)
 
     bases = _batch_bases(shard_dir)
     if not bases:

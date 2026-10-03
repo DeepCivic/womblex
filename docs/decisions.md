@@ -743,9 +743,11 @@ Womblex serves other software two ways: a versioned on-disk contract
     Hugging Face id or a `(str) -> int` counter; a dictionary is any object
     with `lookup(word)`. Because config names registered models only, a bare
     Hugging Face id in `chunking.tokenizer` is now an error listing the known
-    names; the built-in `huggingface` model reaches any id by option
-    (`tokenizer_options: {name: org/tok}`), and `hunspell` does the same for
-    another dictionary directory. The enrichment token-budget tokeniser stays
+    names; the built-in `huggingface` model names any id by option
+    (`tokenizer_options: {name: org/tok}`), which must still resolve locally
+    (`tokenizer_available`) or chunking is skipped, and `hunspell` does the
+    same for another dictionary directory. The dictionary is built before the
+    first document, so bad options or a missing directory fail up front. The enrichment token-budget tokeniser stays
     out of scope.
   - **Profiling confidence sampling stays on PaddleOCR** (`morphology.py`),
     because its thresholds were calibrated there.

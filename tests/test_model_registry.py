@@ -241,3 +241,12 @@ def test_plugin_dictionary_receives_options(
     )
     fixed, corr = repair_text("The chi1d went home.", dict_name="mini", dict_options={"extra": "x"})
     assert fixed == "The child went home." and len(corr) == 1
+
+
+def test_spellfix_stage_builds_dictionary_before_first_batch(tmp_path) -> None:
+    from womblex.config import SpellfixConfig
+    from womblex.process.spellfix_stage import spellfix_shards
+
+    cfg = SpellfixConfig(dict_name="hunspell", dict_options={"name": "xx_XX"})
+    with pytest.raises(FileNotFoundError, match="xx_XX"):
+        spellfix_shards(tmp_path, cfg)

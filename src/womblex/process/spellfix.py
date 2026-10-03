@@ -126,6 +126,11 @@ def _options_key(options: dict | None) -> str:
     return json.dumps(options or {}, sort_keys=True, default=str)
 
 
+def load_dictionary(dict_name: str, options: dict | None = None) -> Any:
+    """The registered dictionary *dict_name* built with *options* (cached)."""
+    return _resolved_dictionary(dict_name, _options_key(options))
+
+
 def _in_dict(d: Any, word: str) -> bool:
     return bool(d.lookup(word) or d.lookup(word.lower()) or d.lookup(word.capitalize()))
 
