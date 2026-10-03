@@ -181,6 +181,35 @@ def test_plugin_context_model_scores_candidates(
     assert seen == {"dim": 4}
 
 
+# --- redaction layout filter -----------------------------------------------
+
+from pathlib import Path
+
+import fitz
+
+from womblex.config import RedactionConfig
+from womblex.redact.stage import _layout_exclude_rects, build_detector, detect_redactions
+
+
+def test_redaction_unknown_layout_name_raises(tmp_path: Path) -> None:
+    pdf = tmp_path / "blank.pdf"
+    doc = fitz.open()
+    doc.new_page()
+    doc.save(pdf)
+    with pytest.raises(ValueError, match="pp-doclayout-m"):
+        detect_redactions(pdf, 1, build_detector(RedactionConfig()), layout_model="nope")
+
+
+def test_redaction_filter_drops_non_conforming_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    analyzer = SimpleNamespace(analyze=lambda img: [_region("textbox")])
+    monkeypatch.setattr(
+        "womblex.ingest.paddle_ocr.get_layout_analyzer", lambda *a, **k: analyzer
+    )
+    assert _layout_exclude_rects(np.zeros((10, 10, 3), dtype=np.uint8)) is None
+
+
 # --- tokenizer and spellfix-dictionary slots -------------------------------
 
 from womblex.process.chunker import resolve_tokenizer
