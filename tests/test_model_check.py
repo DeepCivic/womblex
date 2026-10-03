@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from womblex.cloud.queue import Job
 from womblex.config import WomblexConfig
 from womblex.store.run_stamp import (
     MODEL_CHECK_KEY,
@@ -22,6 +23,8 @@ from womblex.utils.model_check import (
     SCOPE_SPELLFIX,
     CheckLevel,
     ModelCheckError,
+    ModelCheckResult,
+    SlotCheck,
     check_models,
     configured_models,
     footer_payload,
@@ -201,6 +204,11 @@ class TestWhatIsRemembered:
         assert read_footer_model_check({MODEL_CHECK_KEY.encode(): b"{not json"}) is None
 
 
+def _failed(slot: str, scope: str) -> ModelCheckResult:
+    check = SlotCheck(slot, "gone", (scope,), CheckLevel.LOAD, ok=False, reason="not found")
+    return ModelCheckResult(CheckLevel.LOAD, (check,))
+
+
 class TestRunStopsBeforeTheFirstDocument:
     def test_a_failed_check_writes_nothing(self, tmp_path: Path) -> None:
         import argparse
@@ -234,3 +242,83 @@ class TestRunStopsBeforeTheFirstDocument:
         assert cfg.processing.models_check == "smoke"
         apply_models_check(cfg, argparse.Namespace(models_check=None))
         assert cfg.processing.models_check == "smoke"
+
+
+
+class TestWorkerRefusal:
+    def test_a_job_is_refused_only_for_the_models_it_needs(self) -> None:
+        from womblex.cloud.worker import _model_refusal
+
+        batch = Job(1, "r", 1, ["a.pdf"], "p", 1)
+        chunk = Job(2, "r", 0, [], "p", 1, kind="stage", stage="chunk")
+        money = Job(3, "r", 0, [], "p", 1, kind="stage", stage="money")
+
+        extraction_down = _failed("ocr", SCOPE_EXTRACT)
+        assert "not found" in (_model_refusal(batch, extraction_down) or "")
+        assert _model_refusal(chunk, extraction_down) is None
+
+        tokenizer_down = _failed("tokenizer", SCOPE_CHUNK)
+        assert _model_refusal(batch, tokenizer_down) is None
+        assert "tokenizer model" in (_model_refusal(chunk, tokenizer_down) or "")
+        assert _model_refusal(money, tokenizer_down) is None
+
+    def test_the_loop_releases_a_refused_job_without_running_it(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    ) -> None:
+        from womblex.cloud import worker
+
+        released: list[tuple[int, str]] = []
+
+        class FakeQueue:
+            def __init__(self, dsn: str) -> None:
+                self._jobs = [Job(7, "r", 1, ["a.pdf"], "runs/r/documents", 1)]
+
+            def claim(self, worker_id: str, run_id: str | None) -> Job | None:
+                return self._jobs.pop() if self._jobs else None
+
+            def release(self, job_id: int, error: str) -> None:
+                released.append((job_id, error))
+
+            def close(self) -> None:
+                pass
+
+        def must_not_run(*_: object, **__: object) -> None:
+            raise AssertionError("a refused job must not run")
+
+        monkeypatch.setattr(worker, "JobQueue", FakeQueue)
+        monkeypatch.setattr(worker, "check_models", lambda config: _failed("ocr", SCOPE_EXTRACT))
+        monkeypatch.setattr(worker, "_process_job", must_not_run)
+        store = tmp_path / "store"
+        store.mkdir()
+
+        completed = worker.run_worker(
+            "dsn", str(store), _config(), run_id="r", once=True, poll_interval=0,
+        )
+
+        assert completed == 0
+        assert len(released) == 1 and released[0][0] == 7
+        assert "model check failed on this worker" in released[0][1]
+
+
+class TestStagePreflight:
+    def test_a_stage_whose_model_fails_is_refused_before_it_runs(self) -> None:
+        from womblex.cloud.stage_contracts import STAGE_CONTRACTS
+        from womblex.cloud.stage_runner import StagePreconditionError, prepare_stage_context
+
+        cfg = _config(chunking={"tokenizer": "nope"})
+        with pytest.raises(StagePreconditionError, match="chunk model check failed.*nope"):
+            prepare_stage_context(STAGE_CONTRACTS["chunk"], cfg)
+
+    def test_a_stage_without_a_model_is_unaffected(self) -> None:
+        from womblex.cloud.stage_contracts import STAGE_CONTRACTS
+        from womblex.cloud.stage_runner import prepare_stage_context
+
+        cfg = _config(chunking={"tokenizer": "nope"})
+        assert prepare_stage_context(STAGE_CONTRACTS["money"], cfg) is not None
+
+    def test_off_skips_the_check(self) -> None:
+        from womblex.cloud.stage_contracts import STAGE_CONTRACTS
+        from womblex.cloud.stage_runner import prepare_stage_context
+
+        cfg = _config(chunking={"tokenizer": "nope"}, processing={"models_check": "off"})
+        assert prepare_stage_context(STAGE_CONTRACTS["chunk"], cfg) is not None
