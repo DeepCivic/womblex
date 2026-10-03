@@ -72,6 +72,11 @@ def register(
     """
     _check_slot(slot)
     canonical = _norm(name)
+    existing = _entries[slot].get(canonical)
+    if existing is not None and existing.source != source:
+        raise ValueError(
+            f"{slot} model name {canonical!r} is already registered by {existing.source!r}"
+        )
     for key in (canonical, *(_norm(a) for a in aliases)):
         owner = _aliases[slot].get(key)
         if owner is not None and owner != canonical:

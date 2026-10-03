@@ -65,10 +65,11 @@ def test_plugin_entry_point_is_selectable_by_name(
     assert reg.resolve(reg.SLOT_OCR, "my-ocr").source == "my-pkg"
 
 
+@pytest.mark.parametrize("name", ["pixtral", "paddleocr"])
 def test_plugin_cannot_shadow_a_builtin(
-    clean_registry, monkeypatch: pytest.MonkeyPatch
+    clean_registry, monkeypatch: pytest.MonkeyPatch, name: str
 ) -> None:
-    ep = SimpleNamespace(name="pixtral", load=lambda: object, dist=None)
+    ep = SimpleNamespace(name=name, load=lambda: object, dist=None)
     monkeypatch.setattr(reg, "_loaded", set())
     monkeypatch.setattr(reg, "entry_points", lambda group: [ep] if group.endswith(".ocr") else [])
-    assert reg.resolve(reg.SLOT_OCR, "pixtral").name == "mistral-ocr"
+    assert reg.resolve(reg.SLOT_OCR, name).source == "builtin"

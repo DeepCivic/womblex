@@ -27,6 +27,8 @@ from womblex.utils.model_registry import SLOT_OCR, register, resolve
 if TYPE_CHECKING:
     from rapidocr_onnxruntime import RapidOCR
 
+    from womblex.ingest.llm_ocr import MistralOCRReader, OllamaOCRReader
+
 logger = logging.getLogger(__name__)
 
 
@@ -425,11 +427,13 @@ def get_paddle_reader(lang: str = "eng", use_int8: bool = True) -> PaddleOCRRead
     return _paddle_readers[key]
 
 
-def _make_paddle(lang: str = "eng", **_: object):
+def _make_paddle(lang: str = "eng", **_: object) -> PaddleOCRReader:
     return get_paddle_reader(lang=lang)
 
 
-def _make_mistral(model: str | None = None, region: str | None = None, **_: object):
+def _make_mistral(
+    model: str | None = None, region: str | None = None, **_: object
+) -> MistralOCRReader:
     from womblex.ingest.llm_ocr import get_mistral_reader
     return get_mistral_reader(model=model, region=region)
 
@@ -439,7 +443,7 @@ def _make_ollama(
     base_url: str | None = None,
     prompt: str | None = None,
     **_: object,
-):
+) -> OllamaOCRReader:
     from womblex.ingest.llm_ocr import get_ollama_reader
     return get_ollama_reader(model=model, base_url=base_url, prompt=prompt)
 
