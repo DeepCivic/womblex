@@ -490,8 +490,6 @@ the adjacent concerns and should be consulted rather than duplicated here:
 - A run ingested from an object store is refused before anything is written.
 - Womblex writes the bundle and nothing downstream of it: no retention, serving, or write-back of consumer corrections.
 
----
-
 ## Outstanding
 
 Requirements not yet met. Each entry is written in the same form as the numbered requirements above. When one is fully met, it moves into the numbered list (or is deleted if it is no longer wanted) in the same PR that meets it.
@@ -509,27 +507,21 @@ Requirements not yet met. Each entry is written in the same form as the numbered
 **Acceptance criteria:**
 
 - Swappable slots: OCR engine, layout analyser, PII context model, chunk tokeniser, and spellfix dictionary.
-- A third-party package registers a model through entry points in its own `pyproject.toml` (`womblex.ocr`, `womblex.layout`, `womblex.tokenizer`). Installing it requires no change to Womblex's dependencies.
-- The built-in models (PaddleOCR, Mistral, Ollama, PP-DocLayout-M) register the same way as third-party ones, with their existing aliases still accepted.
-- The default model group is declared in one place. Changing which models are in it changes nothing else.
-- A plugin names its models, never file paths. Models resolve through the existing local model resolution, and an installed package can add a model search root (`womblex.model_roots`).
+- Installing a third-party model package makes its models selectable by name, with no change to Womblex's own dependencies.
+- The built-in models (PaddleOCR, Mistral, Ollama, PP-DocLayout-M) keep their existing names and aliases.
+- An installed package can supply model files, and they resolve offline the same way bundled models do.
 - A config names registered models only; an unknown name is an error that lists the known names. Import paths are refused.
 - An engine's own options pass through to it unchanged, and Womblex adds no per-library toggles.
-- An OCR model declares whether it returns regions or markdown. Womblex does not keep its own list of markdown engines.
+- An OCR model may return either regions or page markdown, and the pipeline handles each the same way it handles the built-in engines of that kind.
 - A layout model emits the Womblex `block_type` vocabulary, checked by a conformance test.
 - The layout model applies to redaction detection as well as extraction.
-- Profiling's OCR confidence sampling stays on PaddleOCR, because its thresholds were calibrated there.
 - Changing the PII context model is supported. The docs state that `context_similarity_threshold` must be recalibrated when it changes.
 - With no plugin configured, `content_digest` is unchanged on every vendored fixture.
-- A config submitted to the `/v1` service API cannot reach outside the operator's allowances: options and model ids that would download a model, enable remote code, or point at a network endpoint are refused at submit unless the operator has allowed them.
-- The worker and console container images can be built with plugin packages installed, and their model roots register automatically.
-- A plugin authoring guide documents each slot's interface, the entry-point groups, the pre-run check, and what a plugin must report for provenance, with a minimal example.
+- A plugin authoring guide documents each slot's interface and how a package registers a model, with a minimal example.
 
-**Depends on:** layout swapping assumes YOLO has been removed (L2 in [`permissive-deps-plan.md`](permissive-deps-plan.md)). YOLO is not offered as a layout plugin.
+**Depends on:** layout swapping needs YOLO removed first (L2 in [`permissive-deps-plan.md`](permissive-deps-plan.md)).
 
-**Out of scope:** slots that need a Parquet schema change, each needing its own requirement: the enrichment provider, AI chunking with a non-Isaacus model, graph-driven PII detection, link-stage candidates, `graph_refresh`, the enrichment token-budget tokeniser, per-page or per-element OCR engine recording, and the embedder provider (including any CPU embedding baseline).
-
-**Open:** where the default model group is packaged (in the wheel, a separate models package, or image only), and whether the new footer key in O3 bumps `CONTRACT_VERSION` from 1.0 to 1.1.
+**Out of scope:** the pre-run model check (O2), model provenance (O3), `/v1` submission controls (a submitted config only selects stages; workers run under the operator's config), container-image packaging of plugins, and slots that need a Parquet schema change, each needing its own requirement: the enrichment provider, AI chunking with a non-Isaacus model, graph-driven PII detection, link-stage candidates, `graph_refresh`, the enrichment token-budget tokeniser, per-page or per-element OCR engine recording, and the embedder provider (including any CPU embedding baseline).
 
 ### O2. Pre-Run Model Check
 
@@ -563,7 +555,9 @@ Requirements not yet met. Each entry is written in the same form as the numbered
 
 **Acceptance criteria:**
 
-- A `womblex.plugins` footer key records slot, name, distribution, and version. No column is added.
+- Every pipeline Parquet's footer records, per slot, the model name and the distribution and version that supplied it. No column is added.
 - Plugin model weights appear in the loaded-model record alongside the built-ins.
 - The run record no longer lists the OCR engine as unestablished.
 - Benchmark reports (womblex-benchmark) name the models that produced them, suites can run against a named model, and `docs/accuracy/` stays labelled as the default group.
+
+---

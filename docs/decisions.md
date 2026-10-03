@@ -713,12 +713,25 @@ Womblex serves other software two ways: a versioned on-disk contract
 ## Deferred / backlog
 
 - **Model plugins: swappable models without a schema change.** *Proposed
-  2026-10.* An entry-point registry for the OCR, layout, tokeniser, PII
-  context and spellfix slots, with a packaged CPU baseline as the default and
-  a pre-run check instead of runtime fallback. Slots that need a schema change
-  (enrichment, AI chunking, graph PII, linking, embedding) are listed but out
-  of scope. Requirements: Outstanding O1 to O3 in
-  [functional_requirements.md](functional_requirements.md).
+  2026-10.* Requirement: Outstanding O1 in
+  [functional_requirements.md](functional_requirements.md). Design calls:
+  - **Entry-point registry.** `womblex/plugins.py` resolves each slot from
+    the `womblex.ocr`, `womblex.layout` and `womblex.tokenizer` entry-point
+    groups via `importlib.metadata`. The built-ins register through the same
+    registry, so nothing has a special path. The first merge records here why
+    a registry is justified despite the "no strategy patterns" rule.
+  - **One baseline table.** A `BASELINE` mapping (slot to plugin name) feeds
+    the config defaults; changing the default group edits only that table.
+  - **Models by name, never path.** Plugins resolve through
+    `utils/models.resolve_local_model_path`; a `womblex.model_roots`
+    entry-point group adds search roots.
+  - **Readers declare their output shape** (`regions` or `markdown`),
+    replacing `LLM_OCR_ENGINES` / `is_llm_engine`. The reader cache is keyed
+    by engine plus a frozen copy of its options.
+  - **Profiling confidence sampling stays on PaddleOCR** (`morphology.py`),
+    because its thresholds were calibrated there.
+  - **Prerequisite.** `config.py` (920 lines) is split mechanically before
+    any slot adds fields, with the moved classes named in that PR.
 
 - **Permissive dependencies — remove `ultralytics` and PyMuPDF.** *Proposed
   2026-10.* Both are AGPL-3.0 with a commercial licence as the only
