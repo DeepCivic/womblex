@@ -153,6 +153,8 @@ def _apply_ocr_page(
     engine: str,
     engine_options: dict,
     doc_type: DocumentType,
+    layout_model: str = "pp-doclayout-m",
+    layout_options: dict | None = None,
 ) -> None:
     # Imported lazily to keep startup paths free of OCR deps.
     from womblex.ingest.strategies_scanned import (
@@ -186,6 +188,7 @@ def _apply_ocr_page(
             # A2: deskew rotated the OCR input, so the region coords no longer
             # share the layout render's frame — refuse reconstruction there.
             page_deskewed="deskew" in steps,
+            layout_model=layout_model, layout_options=layout_options,
         )
         accum.blocks.extend(page_blocks)
 
@@ -344,6 +347,8 @@ def extract_with_plan(
     lang: str = "eng",
     engine: str = "paddleocr",
     engine_options: dict | None = None,
+    layout_model: str = "pp-doclayout-m",
+    layout_options: dict | None = None,
     filename: str = "",
     spreadsheet_print: dict | None = None,
 ) -> ExtractionResult:
@@ -405,6 +410,7 @@ def extract_with_plan(
                 page, profile, accum,
                 dpi=dpi, lang=lang, engine=engine, engine_options=opts,
                 doc_type=doc_type,
+                layout_model=layout_model, layout_options=layout_options,
             )
 
         pages.append(PageResult(page_number=page.number, text=accum.text, method=accum.method))
@@ -469,6 +475,8 @@ def extract_pdf_with_plan(
     lang: str = "eng",
     engine: str = "paddleocr",
     engine_options: dict | None = None,
+    layout_model: str = "pp-doclayout-m",
+    layout_options: dict | None = None,
     filename: str = "",
     spreadsheet_print: dict | None = None,
 ) -> ExtractionResult:
@@ -489,5 +497,6 @@ def extract_pdf_with_plan(
     return extract_with_plan(
         doc, profiles, doc_type,
         dpi=dpi, lang=lang, engine=engine, engine_options=engine_options,
+        layout_model=layout_model, layout_options=layout_options,
         filename=filename, spreadsheet_print=spreadsheet_print,
     )

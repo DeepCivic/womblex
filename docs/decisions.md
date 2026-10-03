@@ -728,6 +728,15 @@ Womblex serves other software two ways: a versioned on-disk contract
   - **Readers declare their output shape** (`regions` or `markdown`),
     replacing `LLM_OCR_ENGINES` / `is_llm_engine`. The reader cache is keyed
     by engine plus a frozen copy of its options.
+  - **Layout slot (merge 2).** `extraction.ocr.layout_model` /
+    `layout_options` and `redaction.layout_model` / `layout_options` name a
+    registered analyser (default `pp-doclayout-m`); options pass to its
+    factory unchanged. The two selections are independent because the
+    standalone `redact` commands hold only `RedactionConfig`. An unknown name
+    raises before the layout pass instead of reading as a missing model.
+    `check_layout_regions` (in `ingest/interfaces/protocols.py`) is the
+    conformance check against `LAYOUT_BLOCK_TYPES`; a non-conforming model is
+    logged and the page falls back to full-page text.
   - **Profiling confidence sampling stays on PaddleOCR** (`morphology.py`),
     because its thresholds were calibrated there.
   - **Prerequisite.** `config.py` (920 lines) is split mechanically before

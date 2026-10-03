@@ -1,7 +1,7 @@
 """Backend protocols for pluggable ingest components.
 
 Each protocol defines the minimal interface a backend must satisfy.
-Concrete implementations (PaddleOCRReader, YOLOLayoutAnalyzer,
+Concrete implementations (PaddleOCRReader, PPDocLayoutAnalyzer,
 preprocess_for_ocr) already conform — these protocols formalise the
 contracts so that alternative backends (document-trained layout models,
 dedicated HTR recognisers) can be injected without changing strategy code.
@@ -82,12 +82,37 @@ class LayoutRegionResult:
     confidence: float
 
 
+#: The ``block_type`` vocabulary a layout model must emit: the element kinds
+#: a page region can become. Anything else is a conformance failure.
+LAYOUT_BLOCK_TYPES: frozenset[str] = frozenset({
+    "paragraph", "heading", "list_item", "caption", "header", "footer",
+    "footnote", "signature", "figure", "table",
+})
+
+
+def check_layout_regions(regions: list[LayoutRegionResult]) -> None:
+    """Raise ``ValueError`` unless every region speaks the womblex vocabulary
+    with a well-formed box, a confidence in [0, 1] and top-to-bottom order."""
+    for r in regions:
+        x0, y0, x1, y1 = r.bbox
+        if r.block_type not in LAYOUT_BLOCK_TYPES:
+            raise ValueError(
+                f"layout block_type {r.block_type!r} (label {r.label!r}) is not "
+                f"one of {sorted(LAYOUT_BLOCK_TYPES)}"
+            )
+        if not (x0 < x1 and y0 < y1) or not 0.0 <= r.confidence <= 1.0:
+            raise ValueError(f"malformed layout region: {r}")
+    if [r.bbox[1] for r in regions] != sorted(r.bbox[1] for r in regions):
+        raise ValueError("layout regions are not sorted top-to-bottom")
+
+
 @runtime_checkable
 class LayoutAnalyzer(Protocol):
     """Protocol for layout analysis backends.
 
     Any class with an ``analyze`` method returning LayoutRegionResult-compatible
-    objects satisfies this protocol.  YOLOLayoutAnalyzer is the default.
+    objects satisfies this protocol; ``check_layout_regions`` is the
+    conformance check. PPDocLayoutAnalyzer is the default.
     """
 
     def analyze(
