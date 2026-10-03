@@ -712,8 +712,8 @@ Womblex serves other software two ways: a versioned on-disk contract
 
 ## Deferred / backlog
 
-- **Model plugins: swappable models without a schema change.** *Proposed
-  2026-10.* Requirement: Outstanding O1 in
+- **Model plugins: swappable models without a schema change.** *Shipped
+  2026-10.* Requirement: 24 in
   [functional_requirements.md](functional_requirements.md). Design calls:
   - **Entry-point registry.** `womblex/plugins.py` resolves each slot from
     the `womblex.ocr`, `womblex.layout` and `womblex.tokenizer` entry-point

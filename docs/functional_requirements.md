@@ -20,6 +20,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 | [`docs/contract.md`](contract.md) | The consumer contract: contract version, file sensitivity, join keys, determinism, and the public Python API. |
 | [`docs/service-api.md`](service-api.md) | The `womblex serve` `/v1` service API: deployment, authentication, ownership, and endpoints. |
 | [`docs/egress.md`](egress.md) | The egress bundle layout and its producer/consumer boundaries. |
+| [`docs/model-plugins.md`](model-plugins.md) | Authoring guide for swappable models: slots, entry points, model files. |
 | [`docs/money-extraction.md`](money-extraction.md) | The canonical reference for the `money` annotation op. |
 | [`docs/heuristics_disambiguation.md`](heuristics_disambiguation.md) | CV2/NumPy heuristics used for classification and routing. |
 | [`docs/project-structure.md`](project-structure.md) | File-level map of the source tree. |
@@ -490,11 +491,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 - A run ingested from an object store is refused before anything is written.
 - Womblex writes the bundle and nothing downstream of it: no retention, serving, or write-back of consumer corrections.
 
-## Outstanding
-
-Requirements not yet met. Each entry is written in the same form as the numbered requirements above. When one is fully met, it moves into the numbered list (or is deleted if it is no longer wanted) in the same PR that meets it.
-
-### O1. Swappable Models Without a Schema Change
+## 24. Swappable Models Without a Schema Change
 
 **As** a user with my own models, local or API-backed,
 **I want** to swap the model behind a pipeline slot without forking Womblex,
@@ -517,11 +514,13 @@ Requirements not yet met. Each entry is written in the same form as the numbered
 - The layout model applies to redaction detection as well as extraction.
 - Changing the PII context model is supported. The docs state that `context_similarity_threshold` must be recalibrated when it changes.
 - With no plugin configured, `content_digest` is unchanged on every vendored fixture.
-- A plugin authoring guide documents each slot's interface and how a package registers a model, with a minimal example.
+- [`model-plugins.md`](model-plugins.md) documents each slot's interface and how a package registers a model, with a minimal example.
 
-**Depends on:** layout swapping needs YOLO removed first (L2 in [`permissive-deps-plan.md`](permissive-deps-plan.md)).
+**Out of scope:** the pre-run model check (O2), model provenance (O3), `/v1` submission controls (a submitted config only selects stages; workers run under the operator's config), container-image packaging of plugins, and slots that need a Parquet schema change, each needing its own requirement (O2, O3 below, and the rest): the enrichment provider, AI chunking with a non-Isaacus model, graph-driven PII detection, link-stage candidates, `graph_refresh`, the enrichment token-budget tokeniser, per-page or per-element OCR engine recording, and the embedder provider (including any CPU embedding baseline).
 
-**Out of scope:** the pre-run model check (O2), model provenance (O3), `/v1` submission controls (a submitted config only selects stages; workers run under the operator's config), container-image packaging of plugins, and slots that need a Parquet schema change, each needing its own requirement: the enrichment provider, AI chunking with a non-Isaacus model, graph-driven PII detection, link-stage candidates, `graph_refresh`, the enrichment token-budget tokeniser, per-page or per-element OCR engine recording, and the embedder provider (including any CPU embedding baseline).
+## Outstanding
+
+Requirements not yet met. Each entry is written in the same form as the numbered requirements above. When one is fully met, it moves into the numbered list (or is deleted if it is no longer wanted) in the same PR that meets it.
 
 ### O2. Pre-Run Model Check
 
