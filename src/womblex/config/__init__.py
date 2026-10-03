@@ -248,8 +248,17 @@ class PIIConfig(BaseModel):
 
         default="all-MiniLM-L6-v2",
 
-        description="Sentence Transformers model for context validation",
+        description=(
+            "Registered context model for candidate validation (by name). "
+            "Changing it means recalibrating context_similarity_threshold: "
+            "the 0.35 default is calibrated to all-MiniLM-L6-v2."
+        ),
 
+    )
+
+    model_options: dict = Field(
+        default_factory=dict,
+        description="Passed unchanged to the context model's factory.",
     )
 
     use_regex_backstop: bool = Field(

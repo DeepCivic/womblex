@@ -54,6 +54,7 @@ def run_pii_cleaning(
     cleaner = PIICleaner(
         entities=config.pii.entities,
         model=config.pii.model,
+        model_options=config.pii.model_options or None,
         context_similarity_threshold=config.pii.context_similarity_threshold,
     )
     point = config.pii.pipeline_point

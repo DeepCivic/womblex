@@ -77,13 +77,13 @@ def test_plugin_cannot_shadow_a_builtin(
 
 # --- layout slot -----------------------------------------------------------
 
-from womblex.ingest.interfaces.protocols import (  # noqa: E402
+from womblex.ingest.interfaces.protocols import (
     LAYOUT_BLOCK_TYPES,
     LayoutRegionResult,
     check_layout_regions,
 )
-from womblex.ingest.layout_onnx import LABEL_MAP  # noqa: E402
-from womblex.ingest.paddle_ocr import get_layout_analyzer  # noqa: E402
+from womblex.ingest.layout_onnx import LABEL_MAP
+from womblex.ingest.paddle_ocr import get_layout_analyzer
 
 
 def _region(block_type: str = "paragraph", y0: float = 0.0, conf: float = 0.9):
@@ -135,3 +135,47 @@ def test_plugin_layout_model_is_selectable_and_receives_options(
     a = get_layout_analyzer("my-layout", size=3)
     assert a.opts == {"size": 3}  # type: ignore[attr-defined]
     assert get_layout_analyzer("my-layout", size=3) is a
+
+
+# --- pii-context slot ------------------------------------------------------
+
+import numpy as np
+
+from womblex.pii.cleaner import PIICleaner
+
+
+def test_pii_context_default_and_alias_resolve() -> None:
+    entry = reg.resolve(reg.SLOT_PII_CONTEXT, "Sentence-Transformers/all-MiniLM-L6-v2")
+    assert entry.name == "all-minilm-l6-v2"
+
+
+def test_pii_context_unknown_name_fails_at_construction() -> None:
+    with pytest.raises(ValueError, match="all-minilm-l6-v2"):
+        PIICleaner(model="nope")
+
+
+def test_plugin_context_model_scores_candidates(
+    clean_registry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict = {}
+
+    class Encoder:
+        def __init__(self, **opts):
+            seen.update(opts)
+
+        def encode(self, texts):
+            # every text maps to the same direction: cosine similarity 1.0
+            return np.ones((len(texts), 4))
+
+    ep = SimpleNamespace(name="my-ctx", load=lambda: Encoder, dist=SimpleNamespace(name="p"))
+    monkeypatch.setattr(reg, "_loaded", set())
+    monkeypatch.setattr(
+        reg, "entry_points", lambda group: [ep] if group.endswith(".pii-context") else []
+    )
+    cleaner = PIICleaner(model="my-ctx", model_options={"dim": 4})
+    import re
+
+    text = "Signed by Janine Fairburn today."
+    match = re.search("Janine Fairburn", text)
+    assert cleaner._score_context_batch(text, [match]) == pytest.approx([1.0])  # type: ignore[list-item]
+    assert seen == {"dim": 4}

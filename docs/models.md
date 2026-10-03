@@ -19,7 +19,7 @@ Parquet footer, so a run's record names the models it actually loaded.
 | `yolo11n_doc_layout.pt` | YOLO11 nano, DocLayNet-finetuned, 11 classes | `ingest/paddle_ocr.py` (`YOLOLayoutAnalyzer`), via `ultralytics` | Layout regions on OCR'd pages. Primary layout model; inference at 832 px |
 | `yolov8n.pt` | YOLOv8 nano, COCO-pretrained | `ingest/paddle_ocr.py` | Layout fallback only when the DocLayNet checkpoint is missing. No document classes; keeps the code path working, not useful predictions. Inference at 640 px |
 | `kanon-2-tokenizer/` | Kanon-2 tokeniser (Hugging Face `isaacus/kanon-2-tokenizer`) | `process/chunker.py`, `utils/token_packer.py` | Local token counting: semchunk chunk sizes, and token-budgeted packing of enrichment requests and ground-truth segments. No API call |
-| `all-MiniLM-L6-v2/` | Sentence Transformer embedding model | `pii/cleaner.py` | Cosine-context check on PERSON candidates in the regex backstop. The backstop is off by default (`pii.use_regex_backstop`), so this model loads only when it is enabled |
+| `all-MiniLM-L6-v2/` | Sentence Transformer embedding model | `pii/cleaner.py` | Cosine-context check on PERSON candidates in the regex backstop. The backstop is off by default (`pii.use_regex_backstop`), so this model loads only when it is enabled. Selected by name through `pii.model` (slot `pii-context`; a plugin supplies an `encode(texts) -> embeddings` object). `context_similarity_threshold` is calibrated to this model: recalibrate it when `pii.model` changes |
 | `en_AU/` (`index.dic`, `index.aff`) | Hunspell dictionary (read with `spylls`) | `process/spellfix.py` | Dictionary gate for OCR character-confusion repair in the `spellfix` stage |
 
 ### What the layout model feeds

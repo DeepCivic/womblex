@@ -22,11 +22,11 @@ import logging
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import Any
 
-if TYPE_CHECKING:
-    import numpy as np
-    from sentence_transformers import SentenceTransformer
+import numpy as np
+
+from womblex.utils.model_registry import SLOT_PII_CONTEXT, register, resolve
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +138,43 @@ class _Candidate:
 
 
 # ---------------------------------------------------------------------------
+# Context model slot
+# ---------------------------------------------------------------------------
+
+DEFAULT_CONTEXT_MODEL = "all-MiniLM-L6-v2"
+
+
+def _unit(x: np.ndarray) -> np.ndarray:
+    """Row-normalise *x* so a dot product is cosine similarity."""
+    norms = np.linalg.norm(x, axis=1, keepdims=True)
+    return x / np.where(norms == 0, 1.0, norms)  # type: ignore[no-any-return]
+
+
+class _SentenceTransformerEncoder:
+    """Built-in context encoder: ``encode(texts) -> (n, dim)`` embeddings."""
+
+    def __init__(self, name: str = DEFAULT_CONTEXT_MODEL) -> None:
+        from sentence_transformers import SentenceTransformer
+
+        from womblex.utils.models import resolve_local_model_path
+
+        path = resolve_local_model_path(name)
+        logger.info("Loading PII context model: %s", path)
+        self._model = SentenceTransformer(str(path))
+
+    def encode(self, texts: list[str]) -> np.ndarray:
+        return self._model.encode(  # type: ignore[no-any-return]
+            texts, convert_to_numpy=True, show_progress_bar=False
+        )
+
+
+register(
+    SLOT_PII_CONTEXT, DEFAULT_CONTEXT_MODEL, _SentenceTransformerEncoder,
+    aliases=("sentence-transformers/all-MiniLM-L6-v2",),
+)
+
+
+# ---------------------------------------------------------------------------
 # PIICleaner
 # ---------------------------------------------------------------------------
 
@@ -147,7 +184,8 @@ class PIICleaner:
 
     Args:
         entities: Entity types to detect. Currently only ``PERSON`` is supported.
-        model: Sentence Transformers model identifier for context validation.
+        model: Registered context model (``encode(texts) -> embeddings``).
+        model_options: Passed unchanged to the model's factory.
         context_similarity_threshold: Cosine similarity cutoff for low-confidence
             candidates.  Candidates below this score are discarded.
     """
@@ -157,36 +195,27 @@ class PIICleaner:
     def __init__(
         self,
         entities: list[str] | None = None,
-        model: str = "all-MiniLM-L6-v2",
+        model: str = DEFAULT_CONTEXT_MODEL,
         context_similarity_threshold: float = 0.35,
+        model_options: dict | None = None,
     ) -> None:
         self._entities: set[str] = set(entities or ["PERSON"])
-        self._model_name = model
+        # Resolved eagerly so an unknown name fails here, not on first use.
+        self._model_entry = resolve(SLOT_PII_CONTEXT, model)
+        self._model_options = dict(model_options or {})
         self._threshold = context_similarity_threshold
-        self._model: SentenceTransformer | None = None
+        self._model: Any = None
         self._ref_embeddings: np.ndarray | None = None
 
     # ------------------------------------------------------------------
     # Model loading (lazy)
     # ------------------------------------------------------------------
 
-    def _load_model(self) -> SentenceTransformer:
-        """Load Sentence Transformers model on first use.
-
-        Prefers a pre-downloaded copy under ``models/`` to avoid runtime
-        network access.  Falls back to the HuggingFace hub identifier.
-        """
+    def _load_model(self) -> Any:
+        """Build the registered context model on first use."""
         if self._model is None:
-            from sentence_transformers import SentenceTransformer
-
-            from womblex.utils.models import resolve_local_model_path
-
-            model_path = resolve_local_model_path(self._model_name)
-            logger.info("Loading PII context model: %s", model_path)
-            self._model = SentenceTransformer(str(model_path))
-            self._ref_embeddings = self._model.encode(
-                _REFERENCE_CONTEXTS, convert_to_numpy=True, show_progress_bar=False
-            )
+            self._model = self._model_entry.factory(**self._model_options)
+            self._ref_embeddings = np.asarray(self._model.encode(_REFERENCE_CONTEXTS))
         return self._model
 
     # ------------------------------------------------------------------
@@ -201,8 +230,6 @@ class PIICleaner:
         self, text: str, candidates: list[re.Match]  # type: ignore[type-arg]
     ) -> list[float]:
         """Return context similarity scores for a batch of regex matches."""
-        from sentence_transformers import util
-
         contexts = []
         for m in candidates:
             ctx_start = max(0, m.start() - 100)
@@ -210,8 +237,8 @@ class PIICleaner:
             contexts.append(text[ctx_start:ctx_end])
 
         model = self._load_model()
-        embeddings = model.encode(contexts, convert_to_numpy=True, show_progress_bar=False)
-        sims = util.cos_sim(embeddings, self._ref_embeddings)  # type: ignore[arg-type]
+        embeddings = np.asarray(model.encode(contexts))
+        sims = _unit(embeddings) @ _unit(self._ref_embeddings).T  # type: ignore[arg-type]
         return [float(sims[i].max()) for i in range(len(candidates))]
 
     def _find_candidates(self, text: str) -> list[_Candidate]:

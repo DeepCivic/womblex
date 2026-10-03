@@ -36,8 +36,8 @@ from womblex.ingest.paddle_ocr import (
     is_llm_engine,
     preprocess_for_ocr,
 )
-from womblex.utils.model_registry import SLOT_LAYOUT, resolve
 from womblex.ingest.table_grid import Span, cluster_x_centroids, rows_from_spans
+from womblex.utils.model_registry import SLOT_LAYOUT, resolve
 
 logger = logging.getLogger(__name__)
 
