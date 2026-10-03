@@ -563,3 +563,10 @@ class TestModelCheck:
         record = read_run_record(write_run_manifest(_extracted(tmp_path, extraction)))
         (entry,) = record["model_check"]
         assert (entry["status"], entry["reason"]) == ("failed", "not found")
+
+    def test_footers_a_caller_supplies_carry_the_check_too(self, tmp_path, extraction):
+        """`womblex finalize` reads footers where the files live and hands them in."""
+        shards = self._checked(tmp_path, extraction)
+        table = read_manifest(shards / "batch-0001.parquet")
+        record = build_run_record(shards, table, footers=_footers(shards))
+        assert [e["slot"] for e in record["model_check"]] == ["ocr"]

@@ -9,7 +9,14 @@ import json
 import logging
 from pathlib import Path
 
-from womblex.cli._shared import Command, NestedCorpusError, discover_files
+from womblex.cli._shared import (
+    Command,
+    NestedCorpusError,
+    add_models_check_argument,
+    check_stage_models,
+    discover_files,
+)
+from womblex.utils.model_check import SCOPE_EXTRACT, SCOPE_REDACT
 
 logger = logging.getLogger("womblex")
 
@@ -50,6 +57,7 @@ def _register_redact(p: argparse.ArgumentParser) -> None:
         help="Reject candidate regions larger than this fraction of the page. --shards only.",
     )
     p.add_argument("--limit", type=int, default=None, help="Max documents to process. --config only.")
+    add_models_check_argument(p)
 
 
 def cmd_redact(args: argparse.Namespace) -> int:
@@ -80,6 +88,7 @@ def _cmd_redact_shards(args: argparse.Namespace) -> int:
         checkpoint_path=args.checkpoint,
         dpi=args.dpi,
         max_area_ratio=args.max_area_ratio,
+        args=args,
     )
 
 
@@ -90,6 +99,7 @@ def _run_redact_shards(
     checkpoint_path: Path | None,
     dpi: int,
     max_area_ratio: float,
+    args: argparse.Namespace,
 ) -> int:
     """Shared per-stage path used by ``redact --shards`` and the
     ``annotate-redactions`` back-compat alias."""
@@ -97,6 +107,8 @@ def _run_redact_shards(
     from womblex.redact.batch import annotate_redactions_for_shards
 
     config = RedactionConfig(dpi=dpi, max_area_ratio=max_area_ratio)
+    if not check_stage_models(args, (SCOPE_REDACT,), redaction=config):
+        return 1
     summary = annotate_redactions_for_shards(
         shard_dir=shard_dir,
         pdf_dir=pdf_dir,
@@ -122,6 +134,8 @@ def _cmd_redact_config(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     if not config.redaction.enabled:
         logger.warning("Redaction is disabled in config. Set redaction.enabled: true to enable.")
+        return 1
+    if not check_stage_models(args, (SCOPE_EXTRACT,), config=config):
         return 1
 
     input_root = config.paths.input_root
@@ -189,6 +203,7 @@ def _register_annotate_redactions(p: argparse.ArgumentParser) -> None:
         "--max-area-ratio", type=float, default=0.05,
         help="Reject candidate regions larger than this fraction of the page",
     )
+    add_models_check_argument(p)
 
 
 def cmd_annotate_redactions(args: argparse.Namespace) -> int:
@@ -210,6 +225,7 @@ def cmd_annotate_redactions(args: argparse.Namespace) -> int:
         checkpoint_path=args.checkpoint,
         dpi=args.dpi,
         max_area_ratio=args.max_area_ratio,
+        args=args,
     )
 
 

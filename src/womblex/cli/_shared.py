@@ -179,3 +179,28 @@ def format_eta(seconds: float) -> str:
     hours = int(seconds // 3600)
     mins = int((seconds % 3600) // 60)
     return f"{hours}h {mins}m"
+
+
+def check_stage_models(
+    args: argparse.Namespace, scopes: tuple[str, ...], *, config: object = None, **sections: object,
+) -> bool:
+    """Check the models a standalone stage command is about to use; ``False`` stops it.
+
+    *config* is the loaded ``--config`` (``None`` means stage defaults) and
+    *sections* are the stage sections the command will actually run with, which
+    may carry CLI overrides. Called before the command writes anything.
+    """
+    from womblex.config import WomblexConfig
+    from womblex.utils.model_check import check_models
+
+    base = config or WomblexConfig.model_validate({
+        "dataset": {"name": "stage"},
+        "paths": {"input_root": ".", "output_root": ".", "checkpoint_dir": "."},
+    })
+    cfg = base.model_copy(update=sections)  # type: ignore[attr-defined]
+    apply_models_check(cfg, args)
+    result = check_models(cfg, scopes=scopes)
+    if result.failures:
+        logger.error("Model check failed; nothing was processed: %s", result.message())
+        return False
+    return True

@@ -39,6 +39,7 @@ SCOPE_EXTRACT = "extract"
 SCOPE_CHUNK = "chunk"
 SCOPE_SPELLFIX = "spellfix"
 SCOPE_PII = "pii"
+SCOPE_REDACT = "redact"  # standalone `redact`: just the redaction layout model
 
 # The modules that register the built-in models at import.
 _BUILTIN_MODULES = (
@@ -144,7 +145,8 @@ def _candidates(config: WomblexConfig) -> list[tuple[str, str, str, dict[str, An
     if not _is_markdown_engine(ocr.engine):
         out.append((SCOPE_EXTRACT, SLOT_LAYOUT, ocr.layout_model, dict(ocr.layout_options)))
     if red.enabled and red.use_layout_filter:
-        out.append((SCOPE_EXTRACT, SLOT_LAYOUT, red.layout_model, dict(red.layout_options)))
+        for scope in (SCOPE_EXTRACT, SCOPE_REDACT):
+            out.append((scope, SLOT_LAYOUT, red.layout_model, dict(red.layout_options)))
     out.append((
         SCOPE_CHUNK, SLOT_TOKENIZER, config.chunking.tokenizer,
         dict(config.chunking.tokenizer_options),
@@ -382,6 +384,7 @@ __all__ = [
     "SCOPE_CHUNK",
     "SCOPE_EXTRACT",
     "SCOPE_PII",
+    "SCOPE_REDACT",
     "SCOPE_SPELLFIX",
     "CheckLevel",
     "ModelCheckError",

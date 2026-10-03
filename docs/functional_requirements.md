@@ -534,7 +534,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 - `womblex run` checks before batch one, before any output is written.
 - A worker checks at startup and refuses jobs whose models fail the check, through the existing refused path. A job is refused only for the models it needs: a batch for the extraction models, a stage job for that stage's.
 - An API submission checks only that each named model is registered, because the API host may not carry the models.
-- Downstream stage preflight includes the model check.
+- Downstream stage preflight includes the model check, including the standalone `chunk`, `pii`, `spellfix` and `redact` commands, which check before writing anything.
 - The existing in-slot fallback (PaddleOCR v5 to the wheel's v4) stays, and the check reports which variant resolved.
 - The check result is written into the run record.
 

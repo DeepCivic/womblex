@@ -12,9 +12,11 @@ from womblex.cli._shared import (
     NestedCorpusError,
     add_models_check_argument,
     apply_models_check,
+    check_stage_models,
     discover_files,
     format_eta,
 )
+from womblex.utils.model_check import SCOPE_CHUNK, SCOPE_EXTRACT
 
 logger = logging.getLogger("womblex")
 
@@ -395,6 +397,7 @@ def _register_chunk(p: argparse.ArgumentParser) -> None:
         ),
     )
     p.add_argument("--limit", type=int, default=None, help="Max documents to process (--config only)")
+    add_models_check_argument(p)
 
 
 def cmd_chunk(args: argparse.Namespace) -> int:
@@ -421,13 +424,15 @@ def _cmd_chunk_shards(args: argparse.Namespace) -> int:
         logger.error("--shards directory has no `*._manifest.parquet`: %s", shard_dir)
         return 1
 
-    if args.config is not None:
-        cfg = load_config(args.config)
-        chunking_config = cfg.chunking
-        text_source = cfg.processing.text_source
+    full = load_config(args.config) if args.config is not None else None
+    if full is not None:
+        chunking_config = full.chunking
+        text_source = full.processing.text_source
     else:
         chunking_config = ChunkingConfig()
         text_source = "elements"
+    if not check_stage_models(args, (SCOPE_CHUNK,), config=full, chunking=chunking_config):
+        return 1
 
     checkpoint_root = args.checkpoint_dir or shard_dir.parent / ".chunk-checkpoint"
     ckpt = CheckpointManager(checkpoint_root, f"{args.dataset}_chunk")
@@ -467,6 +472,8 @@ def _cmd_chunk_config(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     if not config.chunking.enabled:
         logger.warning("Chunking is disabled in config. Set chunking.enabled: true to enable.")
+        return 1
+    if not check_stage_models(args, (SCOPE_EXTRACT, SCOPE_CHUNK), config=config):
         return 1
 
     input_root = config.paths.input_root

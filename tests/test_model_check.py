@@ -353,3 +353,120 @@ class TestSubmission:
 
         settings = UISettings(output_root=tmp_path, store_uri=None)
         assert isinstance(dispatch.downstream_stages(settings, {}), tuple)
+
+
+class TestStandaloneStageCommands:
+    """`chunk`, `pii`, `spellfix` and `redact` check their models before writing anything."""
+
+    @staticmethod
+    def _run(register, command, *argv: str) -> int:
+        import argparse
+
+        parser = argparse.ArgumentParser()
+        register(parser)
+        return command(parser.parse_args(list(argv)))
+
+    @staticmethod
+    def _shards(tmp_path: Path, *names: str) -> Path:
+        shards = tmp_path / "documents"
+        shards.mkdir()
+        for name in names:
+            (shards / name).touch()
+        return shards
+
+    @staticmethod
+    def _config(tmp_path: Path, body: str) -> Path:
+        cfg = tmp_path / "cfg.yaml"
+        cfg.write_text(
+            "dataset:\n  name: t\npaths:\n  input_root: .\n  output_root: .\n"
+            f"  checkpoint_dir: .\n{body}"
+        )
+        return cfg
+
+    def test_chunk_stops_on_an_unknown_tokeniser(self, tmp_path: Path) -> None:
+        from womblex.cli.pipeline import _register_chunk, cmd_chunk
+
+        shards = self._shards(tmp_path, "batch-0001._manifest.parquet")
+        cfg = self._config(tmp_path, "chunking:\n  tokenizer: nope\n")
+        rc = self._run(_register_chunk, cmd_chunk, "--shards", str(shards), "--config", str(cfg))
+        assert rc == 1
+        assert not (tmp_path / ".chunk-checkpoint").exists()
+
+    def test_pii_stops_on_an_unknown_context_model(self, tmp_path: Path) -> None:
+        from womblex.cli.pii import _register_pii, cmd_pii
+
+        shards = self._shards(tmp_path, "batch-0001.chunks.parquet")
+        cfg = self._config(tmp_path, "pii:\n  use_regex_backstop: true\n  model: nope\n")
+        rc = self._run(_register_pii, cmd_pii, "--shards", str(shards), "--config", str(cfg))
+        assert rc == 1
+        assert not (tmp_path / ".pii-checkpoint").exists()
+
+    def test_spellfix_stops_on_an_unknown_dictionary(self, tmp_path: Path) -> None:
+        from womblex.cli.spellfix import _register_spellfix, cmd_spellfix
+
+        shards = self._shards(tmp_path, "batch-0001.elements.parquet")
+        cfg = self._config(tmp_path, "spellfix:\n  dict_name: nope\n")
+        rc = self._run(
+            _register_spellfix, cmd_spellfix, "--shards", str(shards), "--config", str(cfg),
+        )
+        assert rc == 1
+        assert not (tmp_path / ".spellfix-checkpoint").exists()
+
+    def test_redact_stops_when_the_layout_model_will_not_load(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from womblex.cli.redact import _register_redact, cmd_redact
+
+        def gone(*_: object, **__: object) -> object:
+            raise RuntimeError("layout weights gone")
+
+        monkeypatch.setattr("womblex.ingest.paddle_ocr.get_layout_analyzer", gone)
+        shards = self._shards(tmp_path, "batch-0001._manifest.parquet")
+        pdfs = tmp_path / "pdfs"
+        pdfs.mkdir()
+        rc = self._run(_register_redact, cmd_redact, "--shards", str(shards), "--pdfs", str(pdfs))
+        assert rc == 1
+        assert not list(shards.glob("*.redactions.parquet"))
+
+    def test_the_flag_switches_the_check_off(self) -> None:
+        import argparse
+
+        from womblex.cli._shared import check_stage_models
+        from womblex.config import ChunkingConfig
+
+        bad = ChunkingConfig(tokenizer="nope")
+        assert not check_stage_models(argparse.Namespace(models_check=None), (SCOPE_CHUNK,), chunking=bad)
+        assert check_stage_models(argparse.Namespace(models_check="off"), (SCOPE_CHUNK,), chunking=bad)
+
+
+class TestMarkdownEngines:
+    """An engine that returns page markdown (as Mistral and Ollama do) is smoke-tested too."""
+
+    @staticmethod
+    def _register(name: str, markdown: str | None) -> None:
+        from womblex.ingest.interfaces.protocols import OCRPageResult
+
+        class Reader:
+            def read_page(self, img: object) -> OCRPageResult:
+                return OCRPageResult(markdown=markdown, reading_order_native=True, confidence=1.0)
+
+        reg.register(reg.SLOT_OCR, name, lambda **_: Reader(), traits={"markdown": True}, source="d")
+
+    def _cfg(self, name: str) -> WomblexConfig:
+        return _config(extraction={"ocr": {"engine": name}}, redaction={"enabled": False})
+
+    def test_it_passes_when_it_reads_the_probe(self) -> None:
+        self._register("md-ok", "Womblex model check")
+        result = check_models(self._cfg("md-ok"), "smoke", scopes=(SCOPE_EXTRACT,))
+        assert [c.slot for c in result.checks] == ["ocr"] and result.ok
+
+    def test_an_engine_that_swallows_its_errors_still_fails_smoke(self) -> None:
+        # Bedrock and Ollama readers log a failed request and return empty
+        # markdown at confidence 0; that must not read as a healthy engine.
+        self._register("md-empty", None)
+        result = check_models(self._cfg("md-empty"), "smoke", scopes=(SCOPE_EXTRACT,))
+        assert "no text" in result.failures[0].reason
+
+    def test_load_alone_does_not_call_the_service(self) -> None:
+        self._register("md-empty", None)
+        assert check_models(self._cfg("md-empty"), "load", scopes=(SCOPE_EXTRACT,)).ok
