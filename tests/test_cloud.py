@@ -802,6 +802,31 @@ def test_claim_complete_and_fail(queue):
     assert q.stats(run_id).get("failed") == 1
 
 
+def test_worker_releases_a_batch_whose_extraction_models_failed_the_check(queue, tmp_path):
+    """A model this worker lacks is a refusal, not a failure: the row goes back
+    to pending with its attempts intact and the reason on it."""
+    from womblex.cloud.queue import JobSpec
+    from womblex.cloud.worker import run_worker
+
+    q, run_id = queue
+    q.enqueue(run_id, [
+        JobSpec(batch_num=1, input_keys=["a.pdf"], shard_prefix="runs/x/documents"),
+    ])
+    config = _minimal_config(tmp_path)
+    config.extraction.ocr.engine = "no-such-engine"
+    store = tmp_path / "store"
+    store.mkdir()
+
+    completed = run_worker(_dsn(), str(store), config, run_id=run_id, once=True)
+
+    assert completed == 0
+    assert q.stats(run_id) == {"pending": 1}
+    (row,) = q.list_jobs(run_id)
+    assert row.attempts == 0
+    assert "model check failed on this worker" in row.error
+    assert "no-such-engine" in row.error
+
+
 def test_worker_refuses_a_job_whose_ingest_root_mismatches(queue, tmp_path):
     """A job enqueued against one ingest root and claimed by a worker reading
     from another is refused immediately, not failed per file.

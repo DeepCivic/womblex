@@ -255,12 +255,15 @@ def downstream_stages(settings: UISettings, config: dict) -> tuple[str, ...]:
 
     Validates *config* before anything is written, so a caller that enqueues
     extraction and stages together can refuse a bad config with no row on the
-    queue. Raises ``pydantic.ValidationError`` on a config that would not load;
-    an empty result is the caller's to judge.
+    queue. Raises ``pydantic.ValidationError`` on a config that would not load,
+    and ``ValueError`` listing the known names when it names a model that is not
+    registered — registration only, since this host may not carry the models the
+    workers do. An empty result is the caller's to judge.
     """
     from womblex.config import WomblexConfig
     from womblex.pipeline_order import enabled_downstream_stages
     from womblex.ui.composer import deployment_paths
+    from womblex.utils.model_check import check_registered
 
     # Built through the same `WomblexConfig(**{**raw, "paths": …})` construction
     # the composer validates and renders YAML with, so the stage list dispatched
@@ -273,7 +276,9 @@ def downstream_stages(settings: UISettings, config: dict) -> tuple[str, ...]:
     # dispatchable config, not an invalid one.
     paths, _ = deployment_paths(settings)
     raw = {"dataset": {"name": "console"}, **config, "paths": paths}
-    return enabled_downstream_stages(WomblexConfig(**raw))
+    validated = WomblexConfig(**raw)
+    check_registered(validated)
+    return enabled_downstream_stages(validated)
 
 
 @dataclass(frozen=True)

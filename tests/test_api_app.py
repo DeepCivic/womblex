@@ -189,11 +189,20 @@ def test_config_stages_are_enqueued_with_the_owner(client):
 
 @pytest.mark.parametrize("extra", [
     {"config": {"chunking": {"chunk_size": "not-a-number"}}},
+    {"config": {"extraction": {"ocr": {"engine": "no-such-engine"}}}},
     {"preset": "no-such-preset"},
 ])
 def test_a_bad_config_writes_no_rows(client, extra):
     resp = client.post("/v1/runs", headers=auth("ta"), json={"input_prefix": "alice/up1", **extra})
     assert resp.status_code == 400 and FakeQueue.written == []
+
+
+def test_an_unregistered_model_is_refused_naming_the_known_ones(client):
+    config = {"extraction": {"ocr": {"engine": "no-such-engine"}}}
+    resp = client.post(
+        "/v1/runs", headers=auth("ta"), json={"input_prefix": "alice/up1", "config": config},
+    )
+    assert resp.status_code == 400 and "paddleocr" in resp.json()["detail"]
 
 
 def test_preset_and_config_together_are_refused(client):
