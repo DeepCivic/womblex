@@ -516,7 +516,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 - With no plugin configured, `content_digest` is unchanged on every vendored fixture.
 - [`model-plugins.md`](model-plugins.md) documents each slot's interface and how a package registers a model, with a minimal example.
 
-**Out of scope:** model provenance (O3), `/v1` submission controls (a submitted config only selects stages; workers run under the operator's config), container-image packaging of plugins, and slots that need a Parquet schema change, each needing its own requirement (25 and O3 below, and the rest): the enrichment provider, AI chunking with a non-Isaacus model, graph-driven PII detection, link-stage candidates, `graph_refresh`, the enrichment token-budget tokeniser, per-page or per-element OCR engine recording, and the embedder provider (including any CPU embedding baseline).
+**Out of scope:** model provenance (26), `/v1` submission controls (a submitted config only selects stages; workers run under the operator's config), container-image packaging of plugins, and slots that need a Parquet schema change, each needing its own requirement (25 and 26, and the rest): the enrichment provider, AI chunking with a non-Isaacus model, graph-driven PII detection, link-stage candidates, `graph_refresh`, the enrichment token-budget tokeniser, per-page or per-element OCR engine recording, and the embedder provider (including any CPU embedding baseline).
 
 ## 25. Pre-Run Model Check
 
@@ -538,11 +538,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 - The existing in-slot fallback (PaddleOCR v5 to the wheel's v4) stays, and the check reports which variant resolved.
 - The check result is written into the run record.
 
-## Outstanding
-
-Requirements not yet met. Each entry is written in the same form as the numbered requirements above. When one is fully met, it moves into the numbered list (or is deleted if it is no longer wanted) in the same PR that meets it.
-
-### O3. Model Provenance
+## 26. Model Provenance
 
 **As** a consumer of a run's output,
 **I want** to know which models produced it,
@@ -558,5 +554,11 @@ Requirements not yet met. Each entry is written in the same form as the numbered
 - Plugin model weights appear in the loaded-model record alongside the built-ins.
 - The run record no longer lists the OCR engine as unestablished.
 - Benchmark reports (womblex-benchmark) name the models that produced them, suites can run against a named model, and `docs/accuracy/` stays labelled as the default group.
+
+## Outstanding
+
+Requirements not yet met. Each entry is written in the same form as the numbered requirements above. When one is fully met, it moves into the numbered list (or is deleted if it is no longer wanted) in the same PR that meets it.
+
+None outstanding.
 
 ---
