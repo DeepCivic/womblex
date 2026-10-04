@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -35,6 +36,7 @@ from womblex.store.run_manifest import (
     write_run_manifest,
 )
 from womblex.store.run_stamp import RunStamp
+from womblex.utils import model_registry as reg
 from womblex.utils.model_check import (
     CheckLevel,
     SlotCheck,
@@ -70,9 +72,11 @@ CREDENTIAL_ENV = (
 def _clean_record():
     reset_loaded_models()
     reset_model_check()
+    reg.reset_used_entries()
     yield
     reset_loaded_models()
     reset_model_check()
+    reg.reset_used_entries()
 
 
 @pytest.fixture(scope="module")
@@ -218,6 +222,89 @@ class TestLocalModels:
         record = read_run_record(write_run_manifest(shards))
         assert record["local_models"] == []
         assert any("local models" in p for p in record["partial"])
+
+    def test_a_plugin_weight_appears_alongside_a_builtin_artefact(
+        self, tmp_path, extraction, monkeypatch: pytest.MonkeyPatch,
+    ):
+        """A plugin that loads its own bundled weights (no models root
+        involved) calls `record_loaded_path` directly, the way the built-in
+        PaddleOCR v4 fallback does, and lands in the same record (O3)."""
+        weights = tmp_path / "plugin-weights"
+        weights.mkdir()
+        (weights / "model.bin").write_bytes(b"plugin weights")
+
+        def make_reader(**opts):
+            from womblex.utils.models import record_loaded_path
+
+            record_loaded_path("my-ocr-weights", weights)
+            return object()
+
+        ep = SimpleNamespace(
+            name="my-ocr", load=lambda: make_reader,
+            dist=SimpleNamespace(name="my-pkg", version="1.0"),
+        )
+        monkeypatch.setattr(reg, "_loaded", set())
+        monkeypatch.setattr(
+            reg, "entry_points", lambda group: [ep] if group.endswith(".ocr") else [],
+        )
+
+        resolve_local_model_path("en_AU")  # a built-in artefact
+        from womblex.ingest.paddle_ocr import get_ocr_reader
+
+        get_ocr_reader(engine="my-ocr")  # the plugin's own bundled artefact
+
+        shards = _extracted(tmp_path, extraction)
+        record = read_run_record(write_run_manifest(shards))
+        names = {m["name"] for m in record["local_models"]}
+        assert names == {"en_AU", "my-ocr-weights"}
+
+
+class TestSlotModels:
+    """`slot_models`: which swappable-slot model each stage actually built,
+    by distribution and version (O3) — distinct from `local_models`, which
+    names model *artefacts* by digest.
+    """
+
+    def test_a_built_model_is_named_by_slot_distribution_and_version(
+        self, tmp_path, extraction,
+    ):
+        from womblex import __version__
+        from womblex.process.chunker import resolve_tokenizer
+
+        resolve_tokenizer("isaacus/kanon-2-tokenizer")
+        shards = _extracted(tmp_path, extraction)
+        record = read_run_record(write_run_manifest(shards))
+
+        entry = next(m for m in record["slot_models"] if m["slot"] == "tokenizer")
+        assert entry == {
+            "slot": "tokenizer", "name": "kanon-2-tokenizer",
+            "distribution": "womblex", "version": __version__, "stages": ["extract"],
+        }
+
+    def test_a_run_that_built_none_says_so_rather_than_listing_the_build(
+        self, tmp_path, extraction,
+    ):
+        shards = _extracted(tmp_path, extraction)
+        record = read_run_record(write_run_manifest(shards))
+        assert record["slot_models"] == []
+        assert any("slot models" in p for p in record["partial"])
+
+    def test_the_ocr_engine_gap_closes_once_a_slot_entry_names_one(
+        self, tmp_path, extraction,
+    ):
+        """The criterion: the run record no longer lists the OCR engine as
+        unestablished, once `slot_models` carries an `ocr` entry."""
+        shards = _extracted(tmp_path, extraction)
+        record = read_run_record(write_run_manifest(shards))
+        assert any("OCR engine is not recorded" in p for p in record["partial"])
+
+        from womblex.ingest.paddle_ocr import get_ocr_reader
+
+        get_ocr_reader(engine="mistral-ocr")
+        shards = _extracted(tmp_path, extraction)
+        record = read_run_record(write_run_manifest(shards))
+        assert not any("OCR engine is not recorded" in p for p in record["partial"])
+        assert any(m["slot"] == "ocr" for m in record["slot_models"])
 
 
 class TestCredentials:
