@@ -5,11 +5,14 @@ run loses it and a file mixed in from another run is indistinguishable from a
 native one. This stamps five facts into every pipeline Parquet's footer
 key-value metadata at the moment it is written — run id, Womblex version,
 source commit, configuration digest and the stage that wrote it — so
-attribution survives the file being moved. Two further keys ride alongside
+attribution survives the file being moved. Three further keys ride alongside
 them, each written only when it has a value: the configuration's self-declared
-name (``dataset.name``) as the run's *preset*, and the local models the writing
-process had loaded. The models key is not a field on the stamp because a stamp
-is declared before any model loads, so it is read from ``utils/models.py`` at
+name (``dataset.name``) as the run's *preset*, the local model artefacts the
+writing process had loaded (``utils/models.py``, by name and content digest),
+and the swappable-slot models it actually built (``utils/model_registry.py``,
+by slot, name, and the distribution and version that supplied it — built-in or
+plugin). Neither model key is a field on the stamp because a stamp is declared
+before any model loads or builds, so each is read from its own module at
 footer time (:meth:`RunStamp.footer_metadata`); the preset is a field, filled
 from the config at :meth:`RunStamp.declare` and carried through inheritance.
 
@@ -73,6 +76,7 @@ from womblex import __version__
 from womblex.store.build_info import resolve_commit
 from womblex.store.source_provenance import NAMESPACE
 from womblex.utils.model_check import footer_payload as model_check_payload
+from womblex.utils.model_registry import distribution_version, used_entries
 from womblex.utils.models import loaded_models
 
 RUN_ID_KEY = f"{NAMESPACE}.run_id"
@@ -82,6 +86,7 @@ CONFIG_DIGEST_KEY = f"{NAMESPACE}.config_digest"
 STAGE_KEY = f"{NAMESPACE}.stage"
 MODELS_KEY = f"{NAMESPACE}.models"
 MODEL_CHECK_KEY = f"{NAMESPACE}.model_check"
+SLOT_MODELS_KEY = f"{NAMESPACE}.slot_models"
 PRESET_KEY = f"{NAMESPACE}.preset"
 
 # Excluded from the digest: see the module docstring. `paths` is deployment
@@ -214,6 +219,15 @@ class RunStamp:
         if models := loaded_models():
             payload = [{"name": m.name, "digest": m.digest} for m in models]
             meta[MODELS_KEY.encode()] = json.dumps(payload).encode()
+        if slots := used_entries():
+            slot_payload = []
+            for entry in slots:
+                dist, version = distribution_version(entry)
+                slot_payload.append({
+                    "slot": entry.slot, "name": entry.name,
+                    "distribution": dist, "version": version,
+                })
+            meta[SLOT_MODELS_KEY.encode()] = json.dumps(slot_payload).encode()
         if (check := model_check_payload()) is not None:
             meta[MODEL_CHECK_KEY.encode()] = json.dumps(check, sort_keys=True).encode()
         return meta
@@ -263,6 +277,34 @@ def read_footer_models(metadata: Mapping[bytes, bytes] | None) -> list[dict[str,
         {"name": str(e["name"]), "digest": str(e["digest"])}
         for e in entries
         if isinstance(e, dict) and "name" in e and "digest" in e
+    ]
+
+
+_SLOT_MODEL_FIELDS = ("slot", "name", "distribution", "version")
+
+
+def read_footer_slot_models(metadata: Mapping[bytes, bytes] | None) -> list[dict[str, str]]:
+    """Decode the slot-models key out of a Parquet footer.
+
+    ``[]`` when the file carries none — written before this landed, or by a
+    process that built no swappable-slot model — for the same reason
+    :func:`read_footer_models` reads one as empty.
+    """
+    if not metadata:
+        return []
+    raw = metadata.get(SLOT_MODELS_KEY.encode())
+    if raw is None:
+        return []
+    try:
+        entries = json.loads(raw.decode())
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return []
+    if not isinstance(entries, list):
+        return []
+    return [
+        {field: str(e[field]) for field in _SLOT_MODEL_FIELDS}
+        for e in entries
+        if isinstance(e, dict) and all(field in e for field in _SLOT_MODEL_FIELDS)
     ]
 
 
@@ -348,12 +390,14 @@ __all__ = [
     "MODEL_CHECK_KEY",
     "PRESET_KEY",
     "RUN_ID_KEY",
+    "SLOT_MODELS_KEY",
     "STAGE_KEY",
     "VERSION_KEY",
     "RunStamp",
     "config_digest",
     "read_footer_model_check",
     "read_footer_models",
+    "read_footer_slot_models",
     "read_footer_stamp",
     "sidecar_footer",
     "stamp_for_sidecar",

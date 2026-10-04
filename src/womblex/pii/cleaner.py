@@ -26,7 +26,7 @@ from typing import Any
 
 import numpy as np
 
-from womblex.utils.model_registry import SLOT_PII_CONTEXT, register, resolve
+from womblex.utils.model_registry import SLOT_PII_CONTEXT, record_use, register, resolve
 
 logger = logging.getLogger(__name__)
 
@@ -215,6 +215,7 @@ class PIICleaner:
         """Build the registered context model on first use."""
         if self._model is None:
             self._model = self._model_entry.factory(**self._model_options)
+            record_use(self._model_entry)
             self._ref_embeddings = np.asarray(self._model.encode(_REFERENCE_CONTEXTS))
         return self._model
 

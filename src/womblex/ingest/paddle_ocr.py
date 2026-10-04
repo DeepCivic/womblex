@@ -22,7 +22,7 @@ from womblex.ingest.interfaces.protocols import (
     OCRPageResult,
     OCRRegionResult,
 )
-from womblex.utils.model_registry import SLOT_LAYOUT, SLOT_OCR, register, resolve
+from womblex.utils.model_registry import SLOT_LAYOUT, SLOT_OCR, record_use, register, resolve
 
 if TYPE_CHECKING:
     from rapidocr_onnxruntime import RapidOCR
@@ -482,7 +482,10 @@ def get_ocr_reader(
     unchanged; a built-in ignores options it does not use. An unknown name
     raises ``ValueError`` listing the registered names.
     """
-    return resolve(SLOT_OCR, engine).factory(lang=lang, **engine_options)
+    entry = resolve(SLOT_OCR, engine)
+    reader = entry.factory(lang=lang, **engine_options)
+    record_use(entry)
+    return reader
 
 
 DEFAULT_LAYOUT_MODEL = "pp-doclayout-m"
@@ -505,9 +508,11 @@ def get_layout_analyzer(
     Options pass to the model's factory unchanged. An unknown name raises
     ``ValueError`` listing the registered names.
     """
-    key = f"{resolve(SLOT_LAYOUT, name).name}|{sorted(options.items())!r}"
+    entry = resolve(SLOT_LAYOUT, name)
+    key = f"{entry.name}|{sorted(options.items())!r}"
     if key not in _layout_analyzers:
-        _layout_analyzers[key] = resolve(SLOT_LAYOUT, name).factory(**options)
+        _layout_analyzers[key] = entry.factory(**options)
+        record_use(entry)
     return _layout_analyzers[key]
 
 

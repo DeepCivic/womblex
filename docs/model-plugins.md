@@ -75,6 +75,25 @@ regions that pass `check_layout_regions`; PII context, `encode` returning
 Recalibrate it whenever `pii.model` changes; scores from another model are not
 comparable.
 
+## Provenance
+
+Every pipeline Parquet's footer names, per slot, the model that produced it —
+not only its name but the distribution and version that supplied it, so a
+reader can tell a built-in from a plugin and pin the plugin's own release.
+This is written automatically: `utils/model_registry.py` records a slot the
+moment its factory is actually built (not merely resolved — a config-check
+that only validates a name writes nothing), and `store/run_stamp.py` reads
+that record at footer time into the `womblex.slot_models` key, read back with
+`read_footer_slot_models`. `store/run_manifest.py` unions it into the run
+record's `slot_models`, with the stages that used each model. A plugin author
+does nothing to make this happen; it follows from the factory being called
+through the registry, which every slot already is.
+
+This is distinct from the loaded-model record below, which names model
+*artefacts* on disk by digest: an API-backed engine (Mistral via Bedrock,
+Ollama) has no artefact to digest but still used a slot, and the slot record
+is what names it.
+
 ## Supplying model files
 
 A plugin resolves its files by name through
@@ -91,6 +110,12 @@ my-pkg = "my_pkg:models_dir"
 Plugin roots are searched after `WOMBLEX_MODELS_DIR`, the bundled `_models/`
 and the repo `models/`, so a plugin cannot shadow a built-in artefact. Every
 file resolved is recorded in the run's loaded-model record with its digest.
+
+A plugin that loads its weights from inside its own package rather than
+through a models root (bundled wheel data, for instance) calls
+`utils/models.record_loaded_path(name, path)` directly so those bytes still
+reach the record — the same path the built-in PaddleOCR reader uses for its
+wheel-bundled v4 fallback.
 
 ## Minimal example
 

@@ -38,18 +38,35 @@ ENTRY_POINT_GROUP_PREFIX = "womblex.models."
 
 @dataclass(frozen=True)
 class ModelEntry:
-    """A registered model: its canonical name, factory and declared traits."""
+    """A registered model: its canonical name, factory and declared traits.
+
+    ``source`` doubles as the registration-conflict sentinel (``register``
+    refuses a name already held by a different source) and, read back through
+    :func:`distribution_version`, the distribution that supplied the model.
+    ``version`` is the plugin distribution's own version (``ep.dist.version``);
+    empty for a built-in, which is supplied by Womblex itself and so carries
+    Womblex's version instead.
+    """
 
     slot: str
     name: str
     factory: Callable[..., Any]
     source: str = "builtin"
     traits: dict[str, Any] = field(default_factory=dict)
+    version: str = ""
 
 
 _entries: dict[str, dict[str, ModelEntry]] = {slot: {} for slot in SLOTS}
 _aliases: dict[str, dict[str, str]] = {slot: {} for slot in SLOTS}
 _loaded: set[str] = set()
+
+#: Entries whose factory this process actually built, keyed by (slot, name).
+#: Resolving a name (``resolve``) is not enough to land here — a caller may
+#: only be checking registration (``model_check.check_registered``) or
+#: validating early before a real build happens later in the same call. Only
+#: the call sites that actually invoke ``entry.factory(...)`` record one,
+#: mirroring ``utils/models.record_loaded_path``'s opt-in shape.
+_used: dict[tuple[str, str], ModelEntry] = {}
 
 
 def _check_slot(slot: str) -> None:
@@ -69,6 +86,7 @@ def register(
     aliases: tuple[str, ...] = (),
     source: str = "builtin",
     traits: dict[str, Any] | None = None,
+    version: str = "",
 ) -> None:
     """Register *factory* under *name* (and *aliases*) for *slot*.
 
@@ -89,7 +107,7 @@ def register(
                 f"{slot} model name {key!r} is already registered to {owner!r}"
             )
     _entries[slot][canonical] = ModelEntry(
-        slot, canonical, factory, source, dict(traits or {})
+        slot, canonical, factory, source, dict(traits or {}), version
     )
     for key in (canonical, *(_norm(a) for a in aliases)):
         _aliases[slot][key] = canonical
@@ -107,9 +125,10 @@ def _load_plugins(slot: str) -> None:
             logger.exception("model plugin %s (%s) failed to load", ep.name, slot)
             continue
         dist = ep.dist.name if ep.dist is not None else "unknown"
+        version = getattr(ep.dist, "version", "") if ep.dist is not None else ""
         try:
             register(
-                slot, ep.name, factory, source=dist,
+                slot, ep.name, factory, source=dist, version=version,
                 traits=getattr(factory, "womblex_traits", None),
             )
         except ValueError as exc:
@@ -137,3 +156,38 @@ def resolve(slot: str, name: str) -> ModelEntry:
             f"unknown {slot} model: {name!r}{hint} (known: {known_names(slot)})"
         )
     return _entries[slot][canonical]
+
+
+def record_use(entry: ModelEntry) -> None:
+    """Note that *entry*'s factory was actually built by this process.
+
+    Called only at a real instantiation site, after the factory call
+    succeeds — never from ``resolve`` itself, which is also how a caller
+    probes whether a name is registered without building anything. First use
+    wins, matching a slot resolving to one model per process.
+    """
+    _used.setdefault((entry.slot, entry.name), entry)
+
+
+def used_entries() -> tuple[ModelEntry, ...]:
+    """Every entry this process actually built, slot- then name-sorted."""
+    return tuple(sorted(_used.values(), key=lambda e: (e.slot, e.name)))
+
+
+def distribution_version(entry: ModelEntry) -> tuple[str, str]:
+    """The distribution and version that supplied *entry*.
+
+    A built-in is supplied by Womblex itself, so it carries Womblex's own
+    version rather than the ``"builtin"`` sentinel ``source`` holds for the
+    registration-conflict check.
+    """
+    if entry.source == "builtin":
+        from womblex import __version__
+
+        return "womblex", __version__
+    return entry.source, entry.version
+
+
+def reset_used_entries() -> None:
+    """Forget what this process built. For tests."""
+    _used.clear()
