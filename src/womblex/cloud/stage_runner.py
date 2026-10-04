@@ -478,6 +478,14 @@ def prepare_stage_context(contract: StageContract, config: WomblexConfig) -> Run
         except Exception as e:
             raise StagePreconditionError(f"{contract.name} preflight failed: {e}") from e
 
+    from womblex.utils.model_check import check_models
+
+    models = check_models(config, scopes=(contract.name,))
+    if models.failures:
+        raise StagePreconditionError(
+            f"{contract.name} model check failed: {models.message()}"
+        )
+
     if contract.requires_isaacus_api(config):
         from womblex.utils.availability import isaacus_available
 

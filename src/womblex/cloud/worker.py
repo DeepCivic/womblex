@@ -30,6 +30,7 @@ from womblex.store.remote import RemoteStore, same_location
 from womblex.store.run_stamp import RunStamp
 from womblex.store.source_provenance import IngestProvenance
 from womblex.utils.log_format import log_context
+from womblex.utils.model_check import SCOPE_EXTRACT, ModelCheckResult, check_models
 from womblex.utils.run_log import capture_batch_log
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,18 @@ logger = logging.getLogger(__name__)
 
 def default_worker_id() -> str:
     return f"{socket.gethostname()}:{os.getpid()}"
+
+
+def _model_refusal(job: Job, check: ModelCheckResult) -> str | None:
+    """Why a failed model check rules this worker out for *job*, or ``None``.
+
+    Only the models the job needs count: a batch needs the extraction models, a
+    stage job needs that stage's, so a worker whose tokeniser is broken still
+    serves OCR batches.
+    """
+    scope = job.stage if job.kind == "stage" and job.stage else SCOPE_EXTRACT
+    bad = check.failures_for((scope,))
+    return f"model check failed on this worker: {check.message(bad)}" if bad else None
 
 
 def _same_ingest(a: str, b: str) -> bool:
@@ -267,6 +280,16 @@ def run_worker(
         worker_id, store_uri, worker_ingest_root, run_id or "ALL",
     )
 
+    # Before the first claim, so a model this worker lacks is known up front. A
+    # failure does not stop the worker: it refuses the jobs that need the model
+    # (below) and serves the rest, and the reason is on each refused row.
+    model_check = check_models(config)
+    if model_check.failures:
+        logger.error(
+            "worker %s: model check failed; jobs needing these models will be "
+            "refused: %s", worker_id, model_check.message(),
+        )
+
     completed = 0
     idle_since: float | None = None
     try:
@@ -290,19 +313,22 @@ def run_worker(
                         worker_id, job.id, job.label, job.attempts)
             # Stage jobs read the store, never the ingest, so the guard is
             # batch-only — `ingest_root` is NULL on a stage row regardless.
+            error = _model_refusal(job, model_check)
             if job.ingest_root and not _same_ingest(job.ingest_root, worker_ingest_root):
                 error = (
                     f"ingest root mismatch: job enqueued against "
                     f"{job.ingest_root!r}, this worker reads from "
                     f"{worker_ingest_root!r}"
                 )
+            if error is not None:
                 logger.error("job %d (%s) refused: %s", job.id, job.label, error)
                 # Released, not failed: the batch is fine, this worker is the
-                # wrong one for it. Failing here would burn the retry budget —
-                # and, since the row returns to pending, re-claim it in a tight
-                # loop until the job died. A refusal is "no work for me", so
-                # it backs off and ages towards idle_timeout like an empty
-                # claim rather than holding a mis-wired worker up forever.
+                # wrong one for it, by ingest root or by a model it lacks.
+                # Failing here would burn the retry budget and, since the row
+                # returns to pending, re-claim it in a tight loop until the job
+                # died. A refusal is "no work for me", so it backs off and ages
+                # towards idle_timeout like an empty claim rather than holding
+                # a mis-wired worker up forever.
                 queue.release(job.id, error)
                 if once:
                     break

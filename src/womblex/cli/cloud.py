@@ -24,6 +24,8 @@ from pathlib import Path
 from womblex.cli._shared import (
     Command,
     NestedCorpusError,
+    add_models_check_argument,
+    apply_models_check,
     normalise_prefix,
     select_supported,
 )
@@ -205,6 +207,7 @@ def _register_worker(p: argparse.ArgumentParser) -> None:
     p.add_argument("--idle-timeout", type=float, default=None, help="Exit after N idle seconds")
     p.add_argument("--stale-timeout", type=float, default=None,
                    help="Requeue 'running' jobs locked longer than N seconds (crash recovery)")
+    add_models_check_argument(p)
 
 
 def cmd_worker(args: argparse.Namespace) -> int:
@@ -222,6 +225,7 @@ def cmd_worker(args: argparse.Namespace) -> int:
         return 1
 
     config = load_config(args.config)
+    apply_models_check(config, args)
     completed = run_worker(
         dsn, store_uri, config,
         ingest_uri=ingest_uri,
@@ -461,6 +465,7 @@ def _register_run_stage(p: argparse.ArgumentParser) -> None:
                    help="Stage the stage's checkpoint dir in/out of the store. "
                         "Single-invocation per run — concurrent runners would clobber it.")
     p.add_argument("--dataset", default="runner", help="Checkpoint dataset name. Default: 'runner'.")
+    add_models_check_argument(p)
 
 
 def _runner_config(config_path: Path | None):  # type: ignore[no-untyped-def]
@@ -507,6 +512,7 @@ def cmd_run_stage(args: argparse.Namespace) -> int:
 
     contract = STAGE_CONTRACTS[args.stage]
     config = _runner_config(args.config)
+    apply_models_check(config, args)
 
     try:
         # Preflight, Isaacus availability and the client — shared with the

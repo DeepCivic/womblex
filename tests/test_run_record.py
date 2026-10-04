@@ -35,6 +35,12 @@ from womblex.store.run_manifest import (
     write_run_manifest,
 )
 from womblex.store.run_stamp import RunStamp
+from womblex.utils.model_check import (
+    CheckLevel,
+    SlotCheck,
+    check_models,
+    reset_model_check,
+)
 from womblex.utils.models import (
     digest_model_path,
     reset_loaded_models,
@@ -63,8 +69,10 @@ CREDENTIAL_ENV = (
 @pytest.fixture(autouse=True)
 def _clean_record():
     reset_loaded_models()
+    reset_model_check()
     yield
     reset_loaded_models()
+    reset_model_check()
 
 
 @pytest.fixture(scope="module")
@@ -497,3 +505,61 @@ class TestTheImageTheRunExecutedInside:
             gap.startswith("image digest:") and IMAGE_REF_ENV in gap
             for gap in record["partial"]
         )
+
+
+class TestModelCheck:
+    """What the pre-run check said, observed from the files like stages and models."""
+
+    @staticmethod
+    def _remember(variant="paddleocr-v5", level="load"):
+        from womblex.utils import model_check as mc
+
+        mc._STATE[("ocr", "paddleocr")] = SlotCheck(
+            "ocr", "paddleocr", ("extract",), CheckLevel(level), ok=True,
+            source="builtin", variant=variant,
+        )
+
+    @classmethod
+    def _checked(cls, tmp_path, extraction, **kw):
+        cls._remember(**kw)
+        return _extracted(tmp_path, extraction)
+
+    def test_the_checks_come_from_the_files_footers(self, tmp_path, extraction):
+        shards = self._checked(tmp_path, extraction)
+        record = read_run_record(write_run_manifest(shards))
+        (entry,) = record["model_check"]
+        assert (entry["slot"], entry["name"], entry["variant"], entry["status"]) == (
+            "ocr", "paddleocr", "paddleocr-v5", "ok",
+        )
+        assert entry["stages"] == ["extract"]
+        assert not any("model check" in gap for gap in record["partial"])
+
+    def test_two_variants_across_files_stay_two_entries(self, tmp_path, extraction):
+        shards = self._checked(tmp_path, extraction, variant="paddleocr-v5")
+        self._remember(variant="rapidocr-bundled-v4")
+        _sidecar(shards, ".chunks.parquet", pa.table({"x": [1]}), "chunk")
+        record = read_run_record(write_run_manifest(shards))
+        assert {(e["variant"], tuple(e["stages"])) for e in record["model_check"]} == {
+            ("paddleocr-v5", ("extract",)), ("rapidocr-bundled-v4", ("chunk",)),
+        }
+
+    def test_a_run_with_no_check_says_so_in_partial(self, tmp_path, extraction):
+        record = read_run_record(write_run_manifest(_extracted(tmp_path, extraction)))
+        assert record["model_check"] == []
+        assert any("model check: no file records one" in g for g in record["partial"])
+
+    def test_a_check_switched_off_is_named_as_such(self, tmp_path, extraction):
+        check_models(_config(tmp_path), "off")
+        record = read_run_record(write_run_manifest(_extracted(tmp_path, extraction)))
+        assert record["model_check"] == []
+        assert any("switched off" in g for g in record["partial"])
+
+    def test_a_failed_check_keeps_its_reason(self, tmp_path, extraction):
+        from womblex.utils import model_check as mc
+
+        mc._STATE[("tokenizer", "x")] = SlotCheck(
+            "tokenizer", "x", ("chunk",), CheckLevel.LOAD, ok=False, reason="not found",
+        )
+        record = read_run_record(write_run_manifest(_extracted(tmp_path, extraction)))
+        (entry,) = record["model_check"]
+        assert (entry["status"], entry["reason"]) == ("failed", "not found")
