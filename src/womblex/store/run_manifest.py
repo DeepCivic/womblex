@@ -50,6 +50,7 @@ from womblex.store.build_info import image_info
 from womblex.store.contract import contract_footer
 from womblex.store.output import read_manifest
 from womblex.store.run_stamp import (
+    read_footer_model_check,
     read_footer_models,
     read_footer_stamp,
     stamp_from_footers,
@@ -67,9 +68,11 @@ RUN_MANIFEST_FILENAME = "manifest.parquet"
 #: Version 2 adds ``image`` — which container image, if any, the run executed
 #: inside. Bumped rather than added silently, since telling a record that has
 #: no image block from one whose run was not containerised is exactly the
-#: distinction a reader inferring from presence would get wrong.
+#: distinction a reader inferring from presence would get wrong. Version 3 adds
+#: ``model_check``, on the same reasoning: a record with no check block is one
+#: that predates it, and must not read as a run whose models were fine.
 RUN_RECORD_KEY = f"{NAMESPACE}.run_record"
-RUN_RECORD_VERSION = 2
+RUN_RECORD_VERSION = 3
 
 #: What one observed parquet contributes: its footer key-value metadata and its
 #: row count. A caller that reads files where they live supplies these rather
@@ -220,6 +223,29 @@ def _observed_models(footers: FooterList) -> list[dict]:
     ]
 
 
+def _observed_model_checks(footers: FooterList) -> list[dict]:
+    """The pre-run model checks the run's files recorded, with the stages that carried them.
+
+    Keyed on everything a check reports, so one worker resolving PaddleOCR v5
+    and another the wheel's v4 come back as two entries — mixed models are what
+    the check exists to expose, and collapsing them would hide it.
+    """
+    stages: dict[str, set[str]] = {}
+    entries: dict[str, dict] = {}
+    for meta, _rows in footers:
+        stage = read_footer_stamp(meta).get("stage", "")
+        for check in (read_footer_model_check(meta) or {}).get("checks", []):
+            key = json.dumps(check, sort_keys=True)
+            entries[key] = check
+            stages.setdefault(key, set())
+            if stage:
+                stages[key].add(stage)
+    return [
+        {**entries[key], "stages": sorted(stages[key])}
+        for key in sorted(entries, key=lambda k: (entries[k]["slot"], entries[k]["name"], k))
+    ]
+
+
 def _called_models(shard_dir: Path) -> list[str]:
     """Isaacus models the run's embedding sidecars name as having been called."""
     seen: set[str] = set()
@@ -348,6 +374,16 @@ def _partial(
             "local models: no file records one, so either none was loaded or "
             "the run predates the record",
         )
+    if not record["model_check"]:
+        off = any(
+            (read_footer_model_check(meta) or {}).get("level") == "off" for meta, _ in footers
+        )
+        gaps.append(
+            "model check: it was switched off, so the configured models were "
+            "not verified before the run" if off else
+            "model check: no file records one, so the run predates it or no "
+            "process was asked to check",
+        )
     gaps.append(
         "external services describe the environment this record was written "
         "in, not one recorded during the run",
@@ -410,6 +446,7 @@ def build_run_record(
         },
         "stages": _observed_stages(footers),
         "local_models": _observed_models(footers),
+        "model_check": _observed_model_checks(footers),
         "services": _services(shard_dir),
         "image": image_info().as_record(),
     }

@@ -83,6 +83,16 @@ class SlotCheck:
     reason: str = ""
     seconds: float = 0.0
 
+    def to_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {
+            "slot": self.slot, "name": self.name, "scopes": list(self.scopes),
+            "level": self.level.value, "status": "ok" if self.ok else "failed",
+            "source": self.source, "variant": self.variant,
+        }
+        if self.reason:
+            out["reason"] = self.reason
+        return out
+
 
 class ModelCheckError(RuntimeError):
     """One or more configured models failed their check."""
@@ -292,6 +302,31 @@ def _check_one(use: ModelUse, level: CheckLevel) -> SlotCheck:
     )
 
 
+# ---------------------------------------------------------------------------
+# What this process checked
+# ---------------------------------------------------------------------------
+
+#: Latest check per (slot, canonical name) in this process, and whether a check
+#: was asked for and switched off. Read back at footer time, like the loaded
+#: models, because a stamp is declared before any check runs.
+_STATE: dict[tuple[str, str], SlotCheck] = {}
+_OFF_REQUESTED = False
+
+
+def footer_payload() -> dict[str, Any] | None:
+    """The JSON-able record of what this process checked; ``None`` if nothing was asked."""
+    if _STATE:
+        return {"checks": [c.to_dict() for _, c in sorted(_STATE.items())]}
+    return {"checks": [], "level": CheckLevel.OFF.value} if _OFF_REQUESTED else None
+
+
+def reset_model_check() -> None:
+    """Forget what this process checked. For tests."""
+    global _OFF_REQUESTED
+    _STATE.clear()
+    _OFF_REQUESTED = False
+
+
 def check_models(
     config: WomblexConfig,
     level: CheckLevel | str | None = None,
@@ -303,12 +338,15 @@ def check_models(
     *level* defaults to ``config.processing.models_check``. Never raises on a
     model failure; see :meth:`ModelCheckResult.raise_for_failures`.
     """
+    global _OFF_REQUESTED
     chosen = CheckLevel(level if level is not None else config.processing.models_check)
     if chosen is CheckLevel.OFF:
+        _OFF_REQUESTED = True
         return ModelCheckResult(chosen)
     checks = []
     for use in configured_models(config, scopes):
         check = _check_one(use, chosen)
+        _STATE[(check.slot, check.name)] = check
         if check.ok:
             logger.info(
                 "model check (%s): %s %r ok%s in %.1fs", chosen.value, check.slot,
@@ -335,4 +373,6 @@ __all__ = [
     "SlotCheck",
     "check_models",
     "configured_models",
+    "footer_payload",
+    "reset_model_check",
 ]

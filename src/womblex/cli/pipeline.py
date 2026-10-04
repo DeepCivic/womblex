@@ -7,7 +7,14 @@ import logging
 import time
 from pathlib import Path
 
-from womblex.cli._shared import Command, NestedCorpusError, discover_files, format_eta
+from womblex.cli._shared import (
+    Command,
+    NestedCorpusError,
+    add_models_check_argument,
+    apply_models_check,
+    discover_files,
+    format_eta,
+)
 
 logger = logging.getLogger("womblex")
 
@@ -34,6 +41,7 @@ def _register_run(p: argparse.ArgumentParser) -> None:
             "If omitted, config value or an auto-generated timestamp is used."
         ),
     )
+    add_models_check_argument(p)
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -57,6 +65,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     from womblex.utils.run_log import capture_batch_log
 
     config = load_config(args.config)
+    apply_models_check(config, args)
     logger.info("Loaded config: %s", config.dataset.name)
 
     input_root = config.paths.input_root
@@ -72,6 +81,16 @@ def cmd_run(args: argparse.Namespace) -> int:
     logger.info("Found %d documents to process", len(all_files))
     if not all_files:
         logger.error("No supported files found in %s", input_root)
+        return 1
+
+    # Before the output tree, retention or any shard exists, and for every
+    # enabled stage, not just extraction: a run whose later stages cannot load
+    # their models would spend its extraction on output nothing can finish.
+    from womblex.utils.model_check import check_models
+
+    model_check = check_models(config)
+    if bad := model_check.failures:
+        logger.error("Model check failed; no document was processed: %s", model_check.message(bad))
         return 1
 
     output_root = config.paths.output_root

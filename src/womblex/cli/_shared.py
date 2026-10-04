@@ -25,6 +25,22 @@ class Command(NamedTuple):
 LOG_FORMATS = ("text", "json")
 
 
+def add_models_check_argument(p: argparse.ArgumentParser) -> None:
+    """``--models-check``: override ``processing.models_check`` for this invocation."""
+    p.add_argument(
+        "--models-check", choices=("off", "load", "smoke"), default=None,
+        help="How far to verify the configured models before work starts "
+             "(overrides processing.models_check): off, load, or smoke "
+             "(load plus one inference on a built-in input).",
+    )
+
+
+def apply_models_check(config: object, args: argparse.Namespace) -> None:
+    """Apply a ``--models-check`` override to *config*, if one was given."""
+    if getattr(args, "models_check", None):
+        config.processing.models_check = args.models_check  # type: ignore[attr-defined]
+
+
 def setup_logging(verbose: bool = False, log_format: str | None = None) -> None:
     """Configure logging; *log_format* falls back to ``WOMBLEX_LOG_FORMAT``, then text."""
     fmt = (log_format or os.environ.get("WOMBLEX_LOG_FORMAT") or "text").lower()
