@@ -1,7 +1,7 @@
 """Pre-run model check: are the configured models usable before any document is.
 
 Each swappable slot (``utils/model_registry.py``) is checked at one of three
-levels: ``off``; ``load`` (build the model through the factory and cache the run
+levels: ``off``; ``load`` (build the model through the entry point the run
 uses); ``smoke`` (also one inference on a small built-in input). Failures are
 collected, not raised, so one message names every failing slot and the caller
 decides what stops. A model belongs to a *scope* — ``extract``, or the stage that

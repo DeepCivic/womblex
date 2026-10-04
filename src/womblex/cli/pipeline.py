@@ -87,7 +87,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     # Before the output tree, retention or any shard exists: a model that is
     # missing stops the run here rather than part-way through it.
-    from womblex.utils.model_check import SCOPE_EXTRACT, check_models
+    from womblex.utils.model_check import check_models
 
     model_check = check_models(config, scopes=(SCOPE_EXTRACT,))
     if bad := model_check.failures:
