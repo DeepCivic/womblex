@@ -83,11 +83,12 @@ def cmd_run(args: argparse.Namespace) -> int:
         logger.error("No supported files found in %s", input_root)
         return 1
 
-    # Before the output tree, retention or any shard exists: a model that is
-    # missing stops the run here rather than part-way through it.
-    from womblex.utils.model_check import SCOPE_EXTRACT, check_models
+    # Before the output tree, retention or any shard exists, and for every
+    # enabled stage, not just extraction: a run whose later stages cannot load
+    # their models would spend its extraction on output nothing can finish.
+    from womblex.utils.model_check import check_models
 
-    model_check = check_models(config, scopes=(SCOPE_EXTRACT,))
+    model_check = check_models(config)
     if bad := model_check.failures:
         logger.error("Model check failed; no document was processed: %s", model_check.message(bad))
         return 1
