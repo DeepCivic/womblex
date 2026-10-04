@@ -86,9 +86,12 @@ class Correction:
     method: str      # "homoglyph" | "edit1"
 
 
-@lru_cache(maxsize=4)
 def _dictionary(dict_name: str) -> Dictionary:
     """Load the bundled Hunspell dictionary (resolved via ``utils.models``).
+
+    Resolution runs on every call, outside the parse cache, so it is recorded
+    for the run record even when the pre-run model check (whose resolution is
+    not recorded) parsed the same dictionary first.
 
     Raises when the dictionary is not on disk. Every other caller of
     ``resolve_local_model_path`` treats a bare-string return as "not vendored,
@@ -107,7 +110,12 @@ def _dictionary(dict_name: str) -> Dictionary:
             "supplements that root rather than replacing it, so check the "
             "install rather than the override."
         )
-    return Dictionary.from_files(str(base / "index"))
+    return _parse_hunspell(str(base / "index"))
+
+
+@lru_cache(maxsize=4)
+def _parse_hunspell(stem: str) -> Dictionary:
+    return Dictionary.from_files(stem)
 
 
 # A dictionary is any object with ``lookup(word)`` returning truthy for a valid

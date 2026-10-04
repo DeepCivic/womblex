@@ -69,11 +69,7 @@ def test_bundled_dictionary_loads_under_env_override(only_env_root: Path):
     pytest.importorskip("spylls")
     from womblex.process import spellfix
 
-    spellfix._dictionary.cache_clear()
-    try:
-        assert spellfix._dictionary("en_AU").lookup("child")
-    finally:
-        spellfix._dictionary.cache_clear()
+    assert spellfix._dictionary("en_AU").lookup("child")
 
 
 def test_missing_dictionary_raises_actionable_error(only_env_root: Path):
@@ -81,12 +77,8 @@ def test_missing_dictionary_raises_actionable_error(only_env_root: Path):
     pytest.importorskip("spylls")
     from womblex.process import spellfix
 
-    spellfix._dictionary.cache_clear()
-    try:
-        with pytest.raises(FileNotFoundError, match="no models root holds"):
-            spellfix._dictionary("en_ZZ")
-    finally:
-        spellfix._dictionary.cache_clear()
+    with pytest.raises(FileNotFoundError, match="no models root holds"):
+        spellfix._dictionary("en_ZZ")
 
 
 def test_hub_snapshot_layout_still_resolves(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
