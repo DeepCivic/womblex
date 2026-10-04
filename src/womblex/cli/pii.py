@@ -15,7 +15,8 @@ import argparse
 import logging
 from pathlib import Path
 
-from womblex.cli._shared import Command
+from womblex.cli._shared import Command, add_models_check_argument, check_stage_models
+from womblex.utils.model_check import SCOPE_PII
 
 logger = logging.getLogger("womblex")
 
@@ -39,6 +40,7 @@ def _register_pii(p: argparse.ArgumentParser) -> None:
                    help="Clear pii-stage checkpoint before running (re-detect every batch).")
     p.add_argument("--no-verify-resume", action="store_true",
                    help="Skip the resume-time `*.pii_spans.parquet` integrity scan.")
+    add_models_check_argument(p)
 
 
 def cmd_pii(args: argparse.Namespace) -> int:
@@ -66,7 +68,10 @@ def cmd_pii(args: argparse.Namespace) -> int:
             "graph-driven detection): %s", shard_dir,
         )
 
-    pii_config = load_config(args.config).pii if args.config else PIIConfig()
+    full = load_config(args.config) if args.config else None
+    pii_config = full.pii if full else PIIConfig()
+    if not check_stage_models(args, (SCOPE_PII,), config=full, pii=pii_config):
+        return 1
 
     checkpoint_root = args.checkpoint_dir or shard_dir.parent / ".pii-checkpoint"
     ckpt = CheckpointManager(checkpoint_root, f"{args.dataset}_pii")

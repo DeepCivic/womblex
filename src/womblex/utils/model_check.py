@@ -1,7 +1,7 @@
 """Pre-run model check: are the configured models usable before any document is.
 
 Each swappable slot (``utils/model_registry.py``) is checked at one of three
-levels: ``off``; ``load`` (build the model through the factory and cache the run
+levels: ``off``; ``load`` (build the model through the entry point the run
 uses); ``smoke`` (also one inference on a small built-in input). Failures are
 collected, not raised, so one message names every failing slot and the caller
 decides what stops. A model belongs to a *scope* — ``extract``, or the stage that
@@ -39,6 +39,7 @@ SCOPE_EXTRACT = "extract"
 SCOPE_CHUNK = "chunk"
 SCOPE_SPELLFIX = "spellfix"
 SCOPE_PII = "pii"
+SCOPE_REDACT = "redact"  # standalone `redact`: just the redaction layout model
 
 # The modules that register the built-in models at import.
 _BUILTIN_MODULES = (
@@ -144,7 +145,8 @@ def _candidates(config: WomblexConfig) -> list[tuple[str, str, str, dict[str, An
     if not _is_markdown_engine(ocr.engine):
         out.append((SCOPE_EXTRACT, SLOT_LAYOUT, ocr.layout_model, dict(ocr.layout_options)))
     if red.enabled and red.use_layout_filter:
-        out.append((SCOPE_EXTRACT, SLOT_LAYOUT, red.layout_model, dict(red.layout_options)))
+        for scope in (SCOPE_EXTRACT, SCOPE_REDACT):
+            out.append((scope, SLOT_LAYOUT, red.layout_model, dict(red.layout_options)))
     out.append((
         SCOPE_CHUNK, SLOT_TOKENIZER, config.chunking.tokenizer,
         dict(config.chunking.tokenizer_options),
@@ -190,6 +192,23 @@ def configured_models(
         ModelUse(slot, name, options, tuple(dict.fromkeys(found)))
         for (slot, name, _), (options, found) in merged.items()
     ]
+
+
+def check_registered(config: WomblexConfig) -> None:
+    """Raise ``ValueError`` unless every model *config* names is registered.
+
+    Registration only — nothing is loaded — for a host that may not carry the
+    models (the service API). The message is the registry's own, so it lists
+    the known names.
+    """
+    problems = []
+    for use in configured_models(config):
+        try:
+            resolve(use.slot, use.name)
+        except ValueError as exc:
+            problems.append(str(exc))
+    if problems:
+        raise ValueError("; ".join(problems))
 
 
 # ---------------------------------------------------------------------------
@@ -365,6 +384,7 @@ __all__ = [
     "SCOPE_CHUNK",
     "SCOPE_EXTRACT",
     "SCOPE_PII",
+    "SCOPE_REDACT",
     "SCOPE_SPELLFIX",
     "CheckLevel",
     "ModelCheckError",
@@ -372,6 +392,7 @@ __all__ = [
     "ModelUse",
     "SlotCheck",
     "check_models",
+    "check_registered",
     "configured_models",
     "footer_payload",
     "reset_model_check",

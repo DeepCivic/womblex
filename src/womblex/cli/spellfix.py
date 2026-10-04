@@ -15,7 +15,8 @@ import argparse
 import logging
 from pathlib import Path
 
-from womblex.cli._shared import Command
+from womblex.cli._shared import Command, add_models_check_argument, check_stage_models
+from womblex.utils.model_check import SCOPE_SPELLFIX
 
 logger = logging.getLogger("womblex")
 
@@ -42,6 +43,7 @@ def _register_spellfix(p: argparse.ArgumentParser) -> None:
                    help="Checkpoint dataset name. Default: 'spellfix'.")
     p.add_argument("--no-resume", action="store_true",
                    help="Clear spellfix-stage checkpoint before running (re-repair every batch).")
+    add_models_check_argument(p)
 
 
 def cmd_spellfix(args: argparse.Namespace) -> int:
@@ -61,9 +63,12 @@ def cmd_spellfix(args: argparse.Namespace) -> int:
         )
         return 1
 
-    config = load_config(args.config).spellfix if args.config else SpellfixConfig()
+    full = load_config(args.config) if args.config else None
+    config = full.spellfix if full else SpellfixConfig()
     if args.general:
         config = config.model_copy(update={"general_edits": True})
+    if not check_stage_models(args, (SCOPE_SPELLFIX,), config=full, spellfix=config):
+        return 1
 
     checkpoint_root = args.checkpoint_dir or shard_dir.parent / ".spellfix-checkpoint"
     ckpt = CheckpointManager(checkpoint_root, f"{args.dataset}_spellfix")
