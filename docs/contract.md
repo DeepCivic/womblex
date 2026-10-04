@@ -50,10 +50,23 @@ chunks but carry no text.
 ## Determinism
 
 For a given `source_hash` + `womblex.version` + `config_digest` +
-`womblex.models`, extraction content and row order are stable, so the
-manifest's `content_digest` matches. File bytes and `extracted_at_iso` are not
-guaranteed. A mismatch is explained by the stamped version, config and model
-digests and never blocks output. Detail: [extraction.md](extraction.md).
+`womblex.models` + `womblex.slot_models`, extraction content and row order are
+stable, so the manifest's `content_digest` matches. File bytes and
+`extracted_at_iso` are not guaranteed. A mismatch is explained by the stamped
+version, config and model digests and never blocks output. Detail:
+[extraction.md](extraction.md).
+
+## Model provenance
+
+Two further footer keys name what produced a file, beyond the four-key run
+stamp: `womblex.models` names loaded local model *artefacts* by digest
+(`store/run_stamp.read_footer_models`); `womblex.slot_models` names which
+swappable-slot model (`docs/model-plugins.md`) each slot actually built, by
+slot, name, and the distribution and version that supplied it
+(`read_footer_slot_models`). Both are written only when non-empty — a process
+that loaded or built nothing writes no key — and both are additive metadata,
+so a reader that ignores them reads the file unchanged. No column is added
+for either.
 
 ## Safe to hand onward
 

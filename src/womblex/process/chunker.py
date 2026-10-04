@@ -67,7 +67,7 @@ import semchunk
 
 from womblex.ingest.elements import TEXT_KINDS, Element
 from womblex.ingest.views import _element_to_table_data, _sheets_to_table_data
-from womblex.utils.model_registry import SLOT_TOKENIZER, register, resolve
+from womblex.utils.model_registry import SLOT_TOKENIZER, record_use, register, resolve
 
 logger = logging.getLogger(__name__)
 
@@ -152,7 +152,10 @@ def resolve_tokenizer(
     name: str, options: Mapping[str, Any] | None = None
 ) -> str | Callable[[str], int]:
     """The registered tokeniser *name* built with *options* passed unchanged."""
-    return resolve(SLOT_TOKENIZER, name).factory(**(options or {}))  # type: ignore[no-any-return]
+    entry = resolve(SLOT_TOKENIZER, name)
+    result = entry.factory(**(options or {}))
+    record_use(entry)
+    return result  # type: ignore[no-any-return]
 
 
 # ---------------------------------------------------------------------------

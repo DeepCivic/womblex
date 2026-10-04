@@ -18,6 +18,7 @@ def clean_registry(monkeypatch: pytest.MonkeyPatch):
             reg, attr, {slot: dict(v) for slot, v in getattr(reg, attr).items()}
         )
     monkeypatch.setattr(reg, "_loaded", set(reg._loaded))
+    monkeypatch.setattr(reg, "_used", dict(reg._used))
 
 
 def test_builtin_names_and_aliases_keep_resolving() -> None:
@@ -289,3 +290,140 @@ def test_paddleocr_reader_names_the_model_set_it_loaded() -> None:
     assert reader.model_variant is None
     reader._ensure_loaded()
     assert reader.model_variant in {"paddleocr-v5", "rapidocr-bundled-v4"}
+
+
+# --- slot-model provenance (O3) --------------------------------------------
+
+from womblex import __version__ as _WOMBLEX_VERSION
+
+
+def test_resolve_alone_does_not_record_use(clean_registry) -> None:
+    """Validation-only callers (``check_registered``, the early redaction and
+    OCR-layout checks) must not read as though the model was built."""
+    reg.reset_used_entries()
+    reg.resolve(reg.SLOT_OCR, "paddleocr")
+    assert reg.used_entries() == ()
+
+
+def test_a_builtin_factory_call_records_womblex_as_the_distribution(
+    clean_registry,
+) -> None:
+    reg.reset_used_entries()
+    resolve_tokenizer("isaacus/kanon-2-tokenizer")
+    (entry,) = reg.used_entries()
+    assert (entry.slot, entry.name) == (reg.SLOT_TOKENIZER, "kanon-2-tokenizer")
+    assert reg.distribution_version(entry) == ("womblex", _WOMBLEX_VERSION)
+
+
+def test_a_plugin_factory_call_records_its_own_distribution_and_version(
+    clean_registry, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reg.reset_used_entries()
+
+    def make(**opts):
+        return lambda text: len(text.split())
+
+    ep = SimpleNamespace(
+        name="words", load=lambda: make,
+        dist=SimpleNamespace(name="my-pkg", version="1.2.3"),
+    )
+    monkeypatch.setattr(reg, "_loaded", set())
+    monkeypatch.setattr(
+        reg, "entry_points", lambda group: [ep] if group.endswith(".tokenizer") else []
+    )
+    resolve_tokenizer("words")
+    (entry,) = reg.used_entries()
+    assert reg.distribution_version(entry) == ("my-pkg", "1.2.3")
+
+
+def test_get_ocr_reader_records_its_entry(
+    clean_registry, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reg.reset_used_entries()
+    ep = SimpleNamespace(
+        name="my-ocr", load=lambda: (lambda lang="eng", **o: "reader"),
+        dist=SimpleNamespace(name="p", version="0.1"),
+    )
+    monkeypatch.setattr(reg, "_loaded", set())
+    monkeypatch.setattr(reg, "entry_points", lambda group: [ep] if group.endswith(".ocr") else [])
+    get_ocr_reader(engine="my-ocr")
+    assert {(e.slot, e.name) for e in reg.used_entries()} == {(reg.SLOT_OCR, "my-ocr")}
+
+
+def test_get_layout_analyzer_caches_and_records_once(
+    clean_registry, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reg.reset_used_entries()
+    calls = []
+
+    class Fake:
+        def __init__(self, **opts):
+            calls.append(opts)
+
+    ep = SimpleNamespace(
+        name="my-layout", load=lambda: Fake, dist=SimpleNamespace(name="p", version="2.0"),
+    )
+    monkeypatch.setattr(reg, "_loaded", set())
+    monkeypatch.setattr(
+        reg, "entry_points", lambda group: [ep] if group.endswith(".layout") else []
+    )
+    get_layout_analyzer("my-layout", size=1)
+    get_layout_analyzer("my-layout", size=1)
+    assert len(calls) == 1
+    assert len(reg.used_entries()) == 1
+
+
+def test_pii_cleaner_records_on_first_use_not_construction(
+    clean_registry, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reg.reset_used_entries()
+
+    class Encoder:
+        def __init__(self, **opts):
+            pass
+
+        def encode(self, texts):
+            return np.ones((len(texts), 4))
+
+    ep = SimpleNamespace(
+        name="my-ctx", load=lambda: Encoder, dist=SimpleNamespace(name="p", version="3.0"),
+    )
+    monkeypatch.setattr(reg, "_loaded", set())
+    monkeypatch.setattr(
+        reg, "entry_points", lambda group: [ep] if group.endswith(".pii-context") else []
+    )
+    cleaner = PIICleaner(model="my-ctx")
+    assert reg.used_entries() == ()  # resolved eagerly, not yet built
+    cleaner._load_model()
+    (entry,) = reg.used_entries()
+    assert reg.distribution_version(entry) == ("p", "3.0")
+
+
+def test_spellfix_dictionary_records_its_entry(
+    clean_registry, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reg.reset_used_entries()
+
+    class Words:
+        def lookup(self, word: str) -> bool:
+            return True
+
+    ep = SimpleNamespace(
+        name="mini", load=lambda: Words, dist=SimpleNamespace(name="p", version="4.0"),
+    )
+    monkeypatch.setattr(reg, "_loaded", set())
+    monkeypatch.setattr(
+        reg, "entry_points",
+        lambda group: [ep] if group.endswith(".spellfix-dictionary") else [],
+    )
+    repair_text("The chi1d went home.", dict_name="mini")
+    (entry,) = reg.used_entries()
+    assert reg.distribution_version(entry) == ("p", "4.0")
+
+
+def test_reset_used_entries_clears_the_record() -> None:
+    reg.reset_used_entries()
+    resolve_tokenizer("isaacus/kanon-2-tokenizer")
+    assert reg.used_entries() != ()
+    reg.reset_used_entries()
+    assert reg.used_entries() == ()

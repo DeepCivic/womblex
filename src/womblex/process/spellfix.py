@@ -40,7 +40,7 @@ from typing import Any
 
 from spylls.hunspell import Dictionary
 
-from womblex.utils.model_registry import SLOT_SPELLFIX_DICTIONARY, register, resolve
+from womblex.utils.model_registry import SLOT_SPELLFIX_DICTIONARY, record_use, register, resolve
 from womblex.utils.models import model_roots, resolve_local_model_path
 
 # OCR digit→letter glyph confusions (Tier A). Lowercase targets only — the
@@ -119,7 +119,9 @@ register(
 @lru_cache(maxsize=4)
 def _resolved_dictionary(dict_name: str, options_json: str) -> Any:
     entry = resolve(SLOT_SPELLFIX_DICTIONARY, dict_name)
-    return entry.factory(**json.loads(options_json))
+    result = entry.factory(**json.loads(options_json))
+    record_use(entry)
+    return result
 
 
 def _options_key(options: dict | None) -> str:
