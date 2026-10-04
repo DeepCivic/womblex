@@ -198,6 +198,20 @@ class MistralOCRReader:
             confidence=confidence,
         )
 
+    def ping(self) -> None:
+        """One-token text request: credentials, region and model access, or raise.
+
+        The pre-run model check calls this; ``read_page`` swallows request
+        errors so a single bad page does not stop a batch.
+        """
+        self._ensure_client()
+        assert self._client is not None
+        self._client.converse(  # type: ignore[attr-defined]
+            modelId=self.model_id,
+            messages=[{"role": "user", "content": [{"text": "ping"}]}],
+            inferenceConfig={"maxTokens": 1},
+        )
+
     def close(self) -> None:
         # boto3 clients hold no long-lived connection to close explicitly.
         self._client = None
@@ -309,6 +323,19 @@ class OllamaOCRReader:
             reading_order_native=True,
             confidence=confidence,
         )
+
+    def ping(self) -> None:
+        """Raise unless the server answers and has the model pulled (free, no inference)."""
+        self._ensure_client()
+        assert self._client is not None
+        resp = self._client.get(f"{self.base_url}/models")
+        resp.raise_for_status()
+        served = {m.get("id", "") for m in resp.json().get("data", [])}
+        if not served & {self.model, f"{self.model}:latest"}:
+            raise RuntimeError(
+                f"Ollama at {self.base_url} does not serve {self.model!r} "
+                f"(has: {sorted(served)}); `ollama pull {self.model}`"
+            )
 
     def close(self) -> None:
         if self._client is not None:

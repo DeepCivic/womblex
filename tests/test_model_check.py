@@ -492,3 +492,160 @@ class TestMarkdownEngines:
     def test_load_alone_does_not_call_the_service(self) -> None:
         self._register("md-empty", None)
         assert check_models(self._cfg("md-empty"), "load", scopes=(SCOPE_EXTRACT,)).ok
+
+
+# --- models behind a service: one minimal request before any document -------
+
+from types import SimpleNamespace
+
+from womblex.ingest.llm_ocr import MistralOCRReader, OllamaOCRReader
+from womblex.utils import isaacus_client
+from womblex.utils.model_check import ISAACUS, SCOPE_EMBED, SCOPE_ENRICH, isaacus_models
+
+
+class _FakeIsaacus:
+    """Records what was called; *fail* makes every request raise."""
+
+    def __init__(self, fail: str | None = None) -> None:
+        self.calls: list[tuple[str, dict]] = []
+        self.closed = False
+
+        def call(kind: str, result: object):
+            def create(**kwargs: object) -> object:
+                self.calls.append((kind, kwargs))
+                if fail:
+                    raise RuntimeError(fail)
+                return result
+            return create
+
+        self.embeddings = SimpleNamespace(create=call(
+            "embed", SimpleNamespace(embeddings=[SimpleNamespace(embedding=[0.1, 0.2])]),
+        ))
+        self.enrichments = SimpleNamespace(create=call(
+            "enrich", SimpleNamespace(results=[object()]),
+        ))
+
+    def close(self) -> None:
+        self.closed = True
+
+
+@pytest.fixture
+def fake_isaacus(monkeypatch: pytest.MonkeyPatch):
+    made: list[_FakeIsaacus] = []
+
+    def install(fail: str | None = None) -> list[_FakeIsaacus]:
+        def make(*, models: object = ()) -> _FakeIsaacus:
+            made.append(_FakeIsaacus(fail))
+            return made[-1]
+
+        monkeypatch.setattr(isaacus_client, "make_isaacus_client", make)
+        return made
+
+    return install
+
+
+_PAID = {
+    "enrichment": {"enabled": True},
+    "embedding": {"enabled": True},
+    "chunking": {"chunking_model": "kanon-2-enricher"},
+}
+
+
+class TestIsaacus:
+    def test_each_enabled_stage_names_the_model_it_calls(self) -> None:
+        uses = {u.name: u.scopes for u in isaacus_models(_config(**_PAID))}
+        # AI chunking and enrich call the same enricher: one check, both scopes.
+        assert uses == {
+            "kanon-2-enricher": (SCOPE_ENRICH, SCOPE_CHUNK),
+            "kanon-2-embedder": (SCOPE_EMBED,),
+        }
+
+    def test_nothing_is_called_when_no_stage_needs_isaacus(self) -> None:
+        # Plain chunking runs offline on the vendored tokeniser.
+        assert isaacus_models(_config()) == []
+
+    def test_the_run_check_pings_every_model_and_records_it(self, fake_isaacus) -> None:
+        made = fake_isaacus()
+        result = check_models(_config(**_PAID), "load", scopes=(SCOPE_ENRICH, SCOPE_EMBED))
+        assert result.ok
+        kinds = sorted(c.calls[0][0] for c in made)
+        assert kinds == ["embed", "enrich"]
+        embed = next(c for c in made if c.calls[0][0] == "embed")
+        assert embed.calls[0][1]["task"] == "retrieval/document"
+        assert all(c.closed for c in made)
+        assert {(c.slot, c.source) for c in result.checks} == {(ISAACUS, "isaacus-api")}
+        names = {e["name"] for e in footer_payload()["checks"]}
+        assert names == {"kanon-2-enricher", "kanon-2-embedder"}
+
+    def test_a_failure_stops_the_stage_that_needs_it_and_only_that_stage(
+        self, fake_isaacus,
+    ) -> None:
+        fake_isaacus(fail="401 invalid API key")
+        cfg = _config(enrichment={"enabled": True}, spellfix={"enabled": True})
+        result = check_models(cfg, "load", scopes=(SCOPE_ENRICH,))
+        (bad,) = result.failures
+        assert "401 invalid API key" in bad.reason
+        assert result.failures_for((SCOPE_ENRICH,)) and not result.failures_for((SCOPE_EXTRACT,))
+
+    def test_womblex_run_checks_isaacus_before_extraction(self) -> None:
+        """No scopes = every enabled stage, which is what `womblex run` asks for."""
+        cfg = _config(embedding={"enabled": True})
+        assert [(u.name, u.scopes) for u in isaacus_models(cfg)] == [
+            ("kanon-2-embedder", (SCOPE_EMBED,)),
+        ]
+
+    def test_registration_only_never_calls_the_service(self, fake_isaacus) -> None:
+        made = fake_isaacus()
+        check_registered(_config(**_PAID))
+        assert made == []
+
+
+class TestPing:
+    def test_a_registered_model_with_ping_is_pinged_at_load(self) -> None:
+        pinged: list[bool] = []
+
+        class Remote:
+            def ping(self) -> None:
+                pinged.append(True)
+                raise PermissionError("model access not granted")
+
+        reg.register(reg.SLOT_OCR, "remote-ocr", lambda **_: Remote(), source="d")
+        cfg = _config(extraction={"ocr": {"engine": "remote-ocr"}}, redaction={"enabled": False})
+        result = check_models(cfg, "load", scopes=(SCOPE_EXTRACT,))
+        (bad,) = [c for c in result.failures if c.slot == "ocr"]
+        assert pinged and "model access not granted" in bad.reason
+
+    def test_mistral_ping_is_a_one_token_request(self) -> None:
+        sent: list[dict] = []
+        reader = MistralOCRReader(model="m", region="ap-southeast-2")
+        reader._client = SimpleNamespace(converse=lambda **kw: sent.append(kw))
+        reader.ping()
+        assert sent[0]["modelId"] == "m"
+        assert sent[0]["inferenceConfig"] == {"maxTokens": 1}
+
+    def test_mistral_ping_raises_what_bedrock_raises(self) -> None:
+        def denied(**_: object) -> None:
+            raise RuntimeError("AccessDeniedException")
+
+        reader = MistralOCRReader(model="m")
+        reader._client = SimpleNamespace(converse=denied)
+        with pytest.raises(RuntimeError, match="AccessDenied"):
+            reader.ping()
+
+    @pytest.mark.parametrize("served,ok", [
+        (["llama3.2-vision:latest"], True),
+        (["llama3.2-vision"], True),
+        (["qwen2.5vl:7b"], False),
+    ])
+    def test_ollama_ping_needs_the_model_pulled(self, served: list[str], ok: bool) -> None:
+        response = SimpleNamespace(
+            raise_for_status=lambda: None,
+            json=lambda: {"data": [{"id": s} for s in served]},
+        )
+        reader = OllamaOCRReader(model="llama3.2-vision", base_url="http://h:1")
+        reader._client = SimpleNamespace(get=lambda url: response, close=lambda: None)
+        if ok:
+            reader.ping()
+        else:
+            with pytest.raises(RuntimeError, match="ollama pull"):
+                reader.ping()

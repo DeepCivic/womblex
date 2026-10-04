@@ -6,7 +6,14 @@ uses); ``smoke`` (also one inference on a small built-in input). Failures are
 collected, not raised, so one message names every failing slot and the caller
 decides what stops. A model belongs to a *scope* — ``extract``, or the stage that
 uses it — so a worker can refuse a job for a model it needs and not for one it
-does not. Isaacus is not a registry slot and is not checked here.
+does not.
+
+A model that lives behind a service has nothing to load short of calling it,
+so at ``load`` and ``smoke`` alike it gets one minimal request: each Isaacus
+model an enabled stage calls (enrich, embed, AI chunking) is sent one short
+sentence, and a registered model exposing ``ping()`` (the Bedrock and Ollama
+OCR readers) has it called. That is what stops a run that would fail at a
+paid later stage before its first document.
 """
 
 from __future__ import annotations
@@ -40,6 +47,12 @@ SCOPE_CHUNK = "chunk"
 SCOPE_SPELLFIX = "spellfix"
 SCOPE_PII = "pii"
 SCOPE_REDACT = "redact"  # standalone `redact`: just the redaction layout model
+SCOPE_ENRICH = "enrich"
+SCOPE_EMBED = "embed"
+
+#: The ``slot`` an Isaacus check is recorded under. Not a registry slot: the
+#: model is a service the config names by id, not a swappable factory.
+ISAACUS = "isaacus"
 
 # The modules that register the built-in models at import.
 _BUILTIN_MODULES = (
@@ -167,6 +180,8 @@ def _enabled_scopes(config: WomblexConfig) -> set[str]:
             (SCOPE_CHUNK, config.chunking.enabled),
             (SCOPE_SPELLFIX, config.spellfix.enabled),
             (SCOPE_PII, config.pii.enabled),
+            (SCOPE_ENRICH, config.enrichment.enabled),
+            (SCOPE_EMBED, config.embedding.enabled),
         ) if on),
     }
 
@@ -192,6 +207,26 @@ def configured_models(
         ModelUse(slot, name, options, tuple(dict.fromkeys(found)))
         for (slot, name, _), (options, found) in merged.items()
     ]
+
+
+def isaacus_models(
+    config: WomblexConfig, scopes: Iterable[str] | None = None,
+) -> list[ModelUse]:
+    """The Isaacus models *config* calls for *scopes* (every enabled stage if ``None``).
+
+    Enrich and embed call their configured model; chunk calls the enricher only
+    under AI chunking (``chunking.chunking_model``) — plain chunking is offline.
+    """
+    wanted = _enabled_scopes(config) if scopes is None else set(scopes)
+    found: dict[str, list[str]] = {}
+    for scope, model in (
+        (SCOPE_ENRICH, config.enrichment.model),
+        (SCOPE_CHUNK, config.chunking.chunking_model),
+        (SCOPE_EMBED, config.embedding.model),
+    ):
+        if model and scope in wanted:
+            found.setdefault(model, []).append(scope)
+    return [ModelUse(ISAACUS, m, {}, tuple(s)) for m, s in found.items()]
 
 
 def check_registered(config: WomblexConfig) -> None:
@@ -296,7 +331,47 @@ def _smoke(use: ModelUse, model: Any) -> None:
             raise RuntimeError(f"encode returned shape {shape}, expected (1, dim)")
 
 
+def _ping_isaacus(use: ModelUse) -> None:
+    """One minimal request to *use*'s model, through the client the stage builds."""
+    from womblex.utils.isaacus_client import make_isaacus_client
+
+    client = make_isaacus_client(models=[use.name])
+    try:
+        if SCOPE_EMBED in use.scopes:
+            resp = client.embeddings.create(
+                model=use.name, texts=[_PROBE_SENTENCE], task="retrieval/document",
+            )
+            if len(resp.embeddings) != 1 or not resp.embeddings[0].embedding:
+                raise RuntimeError("returned no embedding for the probe sentence")
+        else:
+            resp = client.enrichments.create(model=use.name, texts=[_PROBE_SENTENCE])
+            if len(resp.results) != 1:
+                raise RuntimeError("returned no enrichment for the probe sentence")
+    finally:
+        client.close()
+
+
+def _check_isaacus(use: ModelUse, level: CheckLevel) -> SlotCheck:
+    from womblex.utils.isaacus_client import sagemaker_configured
+
+    start = time.monotonic()
+    source = "isaacus-sagemaker" if sagemaker_configured() else "isaacus-api"
+    base = {"slot": use.slot, "name": use.name, "scopes": use.scopes, "level": level}
+    try:
+        _ping_isaacus(use)
+    except Exception as exc:  # the SDK, boto3 and httpx raise their own types
+        return SlotCheck(
+            **base, ok=False, source=source,  # type: ignore[arg-type]
+            reason=f"{type(exc).__name__}: {exc}", seconds=time.monotonic() - start,
+        )
+    return SlotCheck(
+        **base, ok=True, source=source, seconds=time.monotonic() - start,  # type: ignore[arg-type]
+    )
+
+
 def _check_one(use: ModelUse, level: CheckLevel) -> SlotCheck:
+    if use.slot == ISAACUS:
+        return _check_isaacus(use, level)
     start = time.monotonic()
     base = {"slot": use.slot, "name": use.name, "scopes": use.scopes, "level": level}
     try:
@@ -308,6 +383,8 @@ def _check_one(use: ModelUse, level: CheckLevel) -> SlotCheck:
     try:
         model = _load(use)
         variant = getattr(model, "model_variant", None)
+        if callable(ping := getattr(model, "ping", None)):
+            ping()  # a model behind a service: reachable, authorised, served
         if level is CheckLevel.SMOKE:
             _smoke(use, model)
     except Exception as exc:  # a plugin may raise anything
@@ -363,7 +440,7 @@ def check_models(
         _OFF_REQUESTED = True
         return ModelCheckResult(chosen)
     checks = []
-    for use in configured_models(config, scopes):
+    for use in [*configured_models(config, scopes), *isaacus_models(config, scopes)]:
         check = _check_one(use, chosen)
         _STATE[(check.slot, check.name)] = check
         if check.ok:
@@ -381,7 +458,10 @@ def check_models(
 
 
 __all__ = [
+    "ISAACUS",
     "SCOPE_CHUNK",
+    "SCOPE_EMBED",
+    "SCOPE_ENRICH",
     "SCOPE_EXTRACT",
     "SCOPE_PII",
     "SCOPE_REDACT",
@@ -395,5 +475,6 @@ __all__ = [
     "check_registered",
     "configured_models",
     "footer_payload",
+    "isaacus_models",
     "reset_model_check",
 ]
