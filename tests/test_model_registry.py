@@ -279,3 +279,13 @@ def test_spellfix_stage_builds_dictionary_before_first_batch(tmp_path) -> None:
     cfg = SpellfixConfig(dict_name="hunspell", dict_options={"name": "xx_XX"})
     with pytest.raises(FileNotFoundError, match="xx_XX"):
         spellfix_shards(tmp_path, cfg)
+
+
+def test_paddleocr_reader_names_the_model_set_it_loaded() -> None:
+    pytest.importorskip("rapidocr_onnxruntime")
+    from womblex.ingest.paddle_ocr import PaddleOCRReader
+
+    reader = PaddleOCRReader()
+    assert reader.model_variant is None
+    reader._ensure_loaded()
+    assert reader.model_variant in {"paddleocr-v5", "rapidocr-bundled-v4"}
