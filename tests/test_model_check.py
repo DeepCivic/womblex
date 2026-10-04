@@ -233,6 +233,28 @@ class TestRunStopsBeforeTheFirstDocument:
         assert cmd_run(args) == 1
         assert not (tmp_path / "out").exists()
 
+    def test_a_later_stage_model_also_stops_the_run(self, tmp_path: Path) -> None:
+        import argparse
+
+        from womblex.cli.pipeline import cmd_run
+
+        inbox = tmp_path / "in"
+        inbox.mkdir()
+        (inbox / "a.csv").write_text("a,b\n1,2\n")
+        cfg = tmp_path / "cfg.yaml"
+        cfg.write_text(
+            f"dataset:\n  name: t\npaths:\n  input_root: {inbox}\n"
+            f"  output_root: {tmp_path / 'out'}\n  checkpoint_dir: {tmp_path / 'ckpt'}\n"
+            "redaction:\n  enabled: false\n"
+            "spellfix:\n  enabled: true\n  dict_name: no-such-dictionary\n"
+        )
+        args = argparse.Namespace(
+            config=cfg, resume=False, limit=None, skip=0, batch_size=None, run_id="t",
+            models_check=None,
+        )
+        assert cmd_run(args) == 1
+        assert not (tmp_path / "out").exists()
+
     def test_the_cli_override_beats_the_config(self, tmp_path: Path) -> None:
         import argparse
 
