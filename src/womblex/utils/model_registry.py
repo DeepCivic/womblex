@@ -17,7 +17,8 @@ known names, and anything shaped like an import path is refused outright.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from importlib.metadata import entry_points
 from typing import Any
@@ -85,6 +86,9 @@ _loaded: set[str] = set()
 #: the call sites that actually invoke ``entry.factory(...)`` record one,
 #: mirroring ``utils/models.record_loaded_path``'s opt-in shape.
 _used: dict[tuple[str, str], ModelEntry] = {}
+
+#: True while :func:`suppress_use_recording` is active.
+_suppress_use = False
 
 
 def _check_slot(slot: str) -> None:
@@ -182,9 +186,37 @@ def record_use(entry: ModelEntry) -> None:
     Called only at a real instantiation site, after the factory call
     succeeds — never from ``resolve`` itself, which is also how a caller
     probes whether a name is registered without building anything. First use
-    wins, matching a slot resolving to one model per process.
+    wins, matching a slot resolving to one model per process. A no-op while
+    :func:`suppress_use_recording` is active.
     """
+    if _suppress_use:
+        return
     _used.setdefault((entry.slot, entry.name), entry)
+
+
+@contextmanager
+def suppress_use_recording() -> Iterator[None]:
+    """While active, building a model through the registry is not recorded.
+
+    The pre-run model check (``utils/model_check.py``) builds every
+    configured model to confirm it loads — that build is a probe, not the
+    run using the model, so it must not appear in ``womblex.slot_models``.
+    :func:`recording_suppressed` lets a slot's own caching wrapper
+    (``get_layout_analyzer``, ``load_dictionary``) know a build made under
+    this is not to be cached either — otherwise the run's own later build
+    would hit that cache, skip the factory call, and never be recorded.
+    """
+    global _suppress_use
+    previous, _suppress_use = _suppress_use, True
+    try:
+        yield
+    finally:
+        _suppress_use = previous
+
+
+def recording_suppressed() -> bool:
+    """True while :func:`suppress_use_recording` is active."""
+    return _suppress_use
 
 
 def used_entries() -> tuple[ModelEntry, ...]:

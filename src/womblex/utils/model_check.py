@@ -33,7 +33,9 @@ from womblex.utils.model_registry import (
     SLOT_SPELLFIX_DICTIONARY,
     SLOT_TOKENIZER,
     resolve,
+    suppress_use_recording,
 )
+from womblex.utils.models import suppress_recording
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -433,15 +435,24 @@ def check_models(
 
     *level* defaults to ``config.processing.models_check``. Never raises on a
     model failure; see :meth:`ModelCheckResult.raise_for_failures`.
+
+    Building a model here is a probe, not the run using it, so the whole pass
+    runs under both provenance-recording suppressions — otherwise a model
+    this check builds only to confirm it loads would land in the
+    ``womblex.slot_models`` / ``womblex.models`` footer keys, and the run
+    record's "OCR engine not recorded" gap would close on a run that never
+    actually OCR'd. See ``model_registry.suppress_use_recording`` and
+    ``models.suppress_recording``.
     """
     global _OFF_REQUESTED
     chosen = CheckLevel(level if level is not None else config.processing.models_check)
     if chosen is CheckLevel.OFF:
         _OFF_REQUESTED = True
         return ModelCheckResult(chosen)
-    checks = []
-    for use in [*configured_models(config, scopes), *isaacus_models(config, scopes)]:
-        check = _check_one(use, chosen)
+    uses = [*configured_models(config, scopes), *isaacus_models(config, scopes)]
+    with suppress_use_recording(), suppress_recording():
+        checks = [_check_one(use, chosen) for use in uses]
+    for check in checks:
         _STATE[(check.slot, check.name)] = check
         if check.ok:
             logger.info(
@@ -453,7 +464,6 @@ def check_models(
                 "model check (%s): %s %r FAILED: %s", chosen.value, check.slot,
                 check.name, check.reason,
             )
-        checks.append(check)
     return ModelCheckResult(chosen, tuple(checks))
 
 
