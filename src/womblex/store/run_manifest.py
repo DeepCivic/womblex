@@ -20,10 +20,14 @@ Everything in it is **observed, not declared**. The stages are read from the
 run stamps the files themselves carry, so a stage that was configured and never
 ran is absent while one that ran and produced nothing is present with no rows —
 a distinction a list taken from configuration flags cannot make. The local
-models are the union of what each file recorded loading. The documents,
-extraction methods and statuses are counted off the consolidated rows. Nothing
-is taken from a configuration file, because ``womblex manifest`` may be re-run
-long after the run and against a configuration that has since moved on.
+models are the union of what each file recorded loading, by artefact digest;
+the slot models are the union of what each file recorded building, by
+swappable slot, name, distribution and version (O3) — the two are distinct
+because an API-backed engine (Mistral, Ollama) has no artefact to digest but
+still used a slot. The documents, extraction methods and statuses are counted
+off the consolidated rows. Nothing is taken from a configuration file, because
+``womblex manifest`` may be re-run long after the run and against a
+configuration that has since moved on.
 
 What cannot be established is named rather than omitted or invented: a run
 finalised before the stamps existed produces a record whose ``partial`` list
@@ -52,6 +56,7 @@ from womblex.store.output import read_manifest
 from womblex.store.run_stamp import (
     read_footer_model_check,
     read_footer_models,
+    read_footer_slot_models,
     read_footer_stamp,
     stamp_from_footers,
 )
@@ -71,8 +76,10 @@ RUN_MANIFEST_FILENAME = "manifest.parquet"
 #: distinction a reader inferring from presence would get wrong. Version 3 adds
 #: ``model_check``, on the same reasoning: a record with no check block is one
 #: that predates it, and must not read as a run whose models were fine.
+#: Version 4 adds ``slot_models`` — which swappable-slot model each stage
+#: actually built, by distribution and version (O3) — for the same reason.
 RUN_RECORD_KEY = f"{NAMESPACE}.run_record"
-RUN_RECORD_VERSION = 3
+RUN_RECORD_VERSION = 4
 
 #: What one observed parquet contributes: its footer key-value metadata and its
 #: row count. A caller that reads files where they live supplies these rather
@@ -220,6 +227,33 @@ def _observed_models(footers: FooterList) -> list[dict]:
     return [
         {"name": name, "digest": digest, "stages": sorted(stages[(name, digest)])}
         for name, digest in sorted(stages)
+    ]
+
+
+def _observed_slot_models(footers: FooterList) -> list[dict]:
+    """The swappable-slot models the run's files recorded building, with the
+    stages that built them.
+
+    Keyed on everything a use reports (slot, name, distribution, version), so
+    a model swapped for another under the same slot part-way through a run
+    comes back as two entries rather than one silently winning — matching
+    `_observed_model_checks`. Distinct from `_observed_models`: this is which
+    *slot* built which *named* model, not which artefact file was loaded, so
+    an API-backed engine with no local artefact still appears here.
+    """
+    stages: dict[str, set[str]] = {}
+    entries: dict[str, dict] = {}
+    for meta, _rows in footers:
+        stage = read_footer_stamp(meta).get("stage", "")
+        for use in read_footer_slot_models(meta):
+            key = json.dumps(use, sort_keys=True)
+            entries[key] = use
+            stages.setdefault(key, set())
+            if stage:
+                stages[key].add(stage)
+    return [
+        {**entries[key], "stages": sorted(stages[key])}
+        for key in sorted(entries, key=lambda k: (entries[k]["slot"], entries[k]["name"], k))
     ]
 
 
@@ -374,6 +408,11 @@ def _partial(
             "local models: no file records one, so either none was loaded or "
             "the run predates the record",
         )
+    if not record["slot_models"]:
+        gaps.append(
+            "slot models: no file records one, so no swappable-slot model "
+            "was built, or the run predates the record",
+        )
     if not record["model_check"]:
         off = any(
             (read_footer_model_check(meta) or {}).get("level") == "off" for meta, _ in footers
@@ -400,10 +439,15 @@ def _partial(
         )
     else:
         gaps.append(f"image digest: {image['reason']}")
-    gaps.append(
-        "the OCR engine is not recorded on the element stream, so a VLM-OCR "
-        "service cannot be established from the shard directory",
-    )
+    if not any(m["slot"] == "ocr" for m in record["slot_models"]):
+        # Established once any file's `slot_models` names an OCR entry
+        # (O3) — no longer unconditional now that the OCR engine is
+        # recorded there, by distribution and version, whenever extraction
+        # actually ran one.
+        gaps.append(
+            "the OCR engine is not recorded on the element stream, so a VLM-OCR "
+            "service cannot be established from the shard directory",
+        )
     return gaps
 
 
@@ -446,6 +490,7 @@ def build_run_record(
         },
         "stages": _observed_stages(footers),
         "local_models": _observed_models(footers),
+        "slot_models": _observed_slot_models(footers),
         "model_check": _observed_model_checks(footers),
         "services": _services(shard_dir),
         "image": image_info().as_record(),
