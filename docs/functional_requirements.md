@@ -554,6 +554,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 - Every pipeline Parquet's footer records, per slot, the model name and the distribution and version that supplied it. No column is added.
 - Plugin model weights appear in the loaded-model record alongside the built-ins.
 - The run record no longer lists the OCR engine as unestablished.
+- A model the pre-run check builds only to confirm it loads is not recorded as used — a run whose check built the model but whose stages never actually called it shows no entry for it; only a run's own build of it does.
 - Benchmark reports (womblex-benchmark) name the models that produced them, suites can run against a named model, and `docs/accuracy/` stays labelled as the default group.
 
 ## Outstanding

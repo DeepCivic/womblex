@@ -40,7 +40,13 @@ from typing import Any
 
 from spylls.hunspell import Dictionary
 
-from womblex.utils.model_registry import SLOT_SPELLFIX_DICTIONARY, record_use, register, resolve
+from womblex.utils.model_registry import (
+    SLOT_SPELLFIX_DICTIONARY,
+    record_use,
+    recording_suppressed,
+    register,
+    resolve,
+)
 from womblex.utils.models import model_roots, resolve_local_model_path
 
 # OCR digit→letter glyph confusions (Tier A). Lowercase targets only — the
@@ -117,11 +123,25 @@ register(
 
 
 @lru_cache(maxsize=4)
-def _resolved_dictionary(dict_name: str, options_json: str) -> Any:
+def _cached_dictionary(dict_name: str, options_json: str) -> Any:
     entry = resolve(SLOT_SPELLFIX_DICTIONARY, dict_name)
     result = entry.factory(**json.loads(options_json))
     record_use(entry)
     return result
+
+
+def _resolved_dictionary(dict_name: str, options_json: str) -> Any:
+    """The registered dictionary, cached — unless recording is suppressed.
+
+    Bypasses the cache while the pre-run model check is building this to
+    verify it loads: caching it would make the run's own later build a cache
+    hit, which would skip both the factory call and ``record_use``, and the
+    dictionary would never be recorded as used.
+    """
+    if recording_suppressed():
+        entry = resolve(SLOT_SPELLFIX_DICTIONARY, dict_name)
+        return entry.factory(**json.loads(options_json))
+    return _cached_dictionary(dict_name, options_json)
 
 
 def _options_key(options: dict | None) -> str:

@@ -205,6 +205,65 @@ class TestWhatIsRemembered:
         assert read_footer_model_check({MODEL_CHECK_KEY.encode(): b"{not json"}) is None
 
 
+class TestCheckDoesNotPollute:
+    """Building a model to verify it loads is a probe, not the run using it:
+    it must not land in the `womblex.slot_models` footer key, and the run's
+    own later build of the same model must still land there. `load_dictionary`
+    caches its build (so does `get_layout_analyzer`), so without bypassing
+    that cache while the check is suppressed, the run's own build afterwards
+    would be a cache hit that skips `record_use` entirely — never recorded.
+    """
+
+    def test_a_check_built_model_is_absent_from_the_slot_models_footer(self) -> None:
+        from womblex.store.run_stamp import read_footer_slot_models
+
+        reg.register(
+            reg.SLOT_SPELLFIX_DICTIONARY, "quiet", lambda **_: _Dictionary(), source="quiet-dist",
+        )
+        cfg = _dictionary_config("quiet")
+        check_models(cfg, "load", scopes=(SCOPE_SPELLFIX,))
+        meta = RunStamp.declare("run-1", cfg, stage="spellfix").footer_metadata()
+        assert "quiet" not in {e["name"] for e in read_footer_slot_models(meta)}
+
+    def test_the_runs_own_build_afterwards_is_present_in_the_footer(self) -> None:
+        from womblex.process.spellfix import load_dictionary
+        from womblex.store.run_stamp import read_footer_slot_models
+
+        reg.register(
+            reg.SLOT_SPELLFIX_DICTIONARY, "quiet2", lambda **_: _Dictionary(), source="quiet-dist",
+        )
+        cfg = _dictionary_config("quiet2")
+        check_models(cfg, "load", scopes=(SCOPE_SPELLFIX,))
+        load_dictionary("quiet2")
+        meta = RunStamp.declare("run-1", cfg, stage="spellfix").footer_metadata()
+        assert "quiet2" in {e["name"] for e in read_footer_slot_models(meta)}
+
+    def test_a_check_built_layout_model_is_absent_from_what_this_process_used(self) -> None:
+        reg.register(reg.SLOT_OCR, "quiet-ocr", lambda **_: object(), source="quiet-dist")
+        reg.register(reg.SLOT_LAYOUT, "quiet-layout", lambda **_: object(), source="quiet-dist")
+        cfg = _config(
+            extraction={"ocr": {"engine": "quiet-ocr", "layout_model": "quiet-layout"}},
+            redaction={"enabled": False},
+        )
+        before = {e.name for e in reg.used_entries()}
+        check_models(cfg, "load", scopes=(SCOPE_EXTRACT,))
+        assert {e.name for e in reg.used_entries()} == before
+
+    def test_the_runs_own_layout_build_afterwards_is_still_recorded(self) -> None:
+        from womblex.ingest.paddle_ocr import get_layout_analyzer
+
+        reg.register(reg.SLOT_OCR, "quiet-ocr-2", lambda **_: object(), source="quiet-dist")
+        reg.register(reg.SLOT_LAYOUT, "quiet-layout-2", lambda **_: object(), source="quiet-dist")
+        cfg = _config(
+            extraction={"ocr": {"engine": "quiet-ocr-2", "layout_model": "quiet-layout-2"}},
+            redaction={"enabled": False},
+        )
+        check_models(cfg, "load", scopes=(SCOPE_EXTRACT,))
+        assert "quiet-layout-2" not in {e.name for e in reg.used_entries()}
+        get_layout_analyzer("quiet-layout-2")
+        assert "quiet-layout-2" in {e.name for e in reg.used_entries()}
+
+
 def _failed(slot: str, scope: str) -> ModelCheckResult:
     check = SlotCheck(slot, "gone", (scope,), CheckLevel.LOAD, ok=False, reason="not found")
     return ModelCheckResult(CheckLevel.LOAD, (check,))

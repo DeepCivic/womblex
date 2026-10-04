@@ -45,6 +45,8 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
@@ -204,14 +206,40 @@ class LoadedModel:
 #: depend on the order its stages happened to load models in.
 _RESOLVED: dict[str, Path] = {}
 
+#: True while :func:`suppress_recording` is active.
+_suppress_record = False
+
 
 def _record_resolved(model_name: str, path: Path) -> None:
     """Note that *model_name* resolved to *path*, for the run record.
 
     First resolution wins, matching the resolver itself: a name resolves to one
-    artefact per process, so a later call cannot change what was loaded.
+    artefact per process, so a later call cannot change what was loaded. A
+    no-op while :func:`suppress_recording` is active.
     """
+    if _suppress_record:
+        return
     _RESOLVED.setdefault(model_name, path)
+
+
+@contextmanager
+def suppress_recording() -> Iterator[None]:
+    """While active, a resolution is not recorded as loaded.
+
+    The pre-run model check resolves every configured model's local artefact
+    to confirm it is present, but that resolution is a probe, not the run
+    loading it — ``utils/model_check.py`` wraps its whole pass in this (and
+    the matching ``model_registry.suppress_use_recording``) so the check
+    itself never appears in the ``womblex.models`` footer key. Unlike that
+    sibling suppression, nothing here caches a resolution across calls, so a
+    later, unsuppressed resolution of the same name always records.
+    """
+    global _suppress_record
+    previous, _suppress_record = _suppress_record, True
+    try:
+        yield
+    finally:
+        _suppress_record = previous
 
 
 def _digest_file(digest: hashlib._Hash, path: Path) -> None:
@@ -296,4 +324,5 @@ __all__ = [
     "record_loaded_path",
     "reset_loaded_models",
     "resolve_local_model_path",
+    "suppress_recording",
 ]

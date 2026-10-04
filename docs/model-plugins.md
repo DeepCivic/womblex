@@ -86,12 +86,19 @@ not only its name but the distribution and version that supplied it, so a
 reader can tell a built-in from a plugin and pin the plugin's own release.
 This is written automatically: `utils/model_registry.py` records a slot the
 moment its factory is actually built (not merely resolved — a config-check
-that only validates a name writes nothing), and `store/run_stamp.py` reads
-that record at footer time into the `womblex.slot_models` key, read back with
-`read_footer_slot_models`. `store/run_manifest.py` unions it into the run
-record's `slot_models`, with the stages that used each model. A plugin author
-does nothing to make this happen; it follows from the factory being called
-through the registry, which every slot already is.
+that only validates a name writes nothing, and nor does the pre-run model
+check building a model only to confirm it loads: `check_models` runs under
+`suppress_use_recording`, so that build is a probe, not a use), and
+`store/run_stamp.py` reads that record at footer time into the
+`womblex.slot_models` key, read back with `read_footer_slot_models`.
+`store/run_manifest.py` unions it into the run record's `slot_models`, with
+the stages that used each model. A plugin author does nothing to make this
+happen; it follows from the factory being called through the registry, which
+every slot already is — but a plugin that caches its own built model behind
+the registry (as the built-in layout analyser and spellfix dictionary do)
+should check `recording_suppressed()` to bypass that cache during the check,
+or a real run immediately afterwards would hit the cached instance and never
+record it either.
 
 This is distinct from the loaded-model record below, which names model
 *artefacts* on disk by digest: an API-backed engine (Mistral via Bedrock,

@@ -22,7 +22,14 @@ from womblex.ingest.interfaces.protocols import (
     OCRPageResult,
     OCRRegionResult,
 )
-from womblex.utils.model_registry import SLOT_LAYOUT, SLOT_OCR, record_use, register, resolve
+from womblex.utils.model_registry import (
+    SLOT_LAYOUT,
+    SLOT_OCR,
+    record_use,
+    recording_suppressed,
+    register,
+    resolve,
+)
 
 if TYPE_CHECKING:
     from rapidocr_onnxruntime import RapidOCR
@@ -423,8 +430,18 @@ _layout_analyzers: dict[str, LayoutAnalyzer] = {}
 
 
 def get_paddle_reader(lang: str = "eng", use_int8: bool = True) -> PaddleOCRReader:
-    """Return a cached PaddleOCR reader for the given Tesseract-style lang code."""
+    """Return a cached PaddleOCR reader for the given Tesseract-style lang code.
+
+    Bypasses the cache while recording is suppressed (the pre-run model
+    check warming this to verify it loads): the warm-up triggers the
+    underlying engine's own one-time artefact record
+    (``_record_bundled_v4`` / the v5 resolver), and caching that instance
+    would make the run's own later reader a cache hit whose engine is
+    already loaded — skipping that one-time record for good.
+    """
     mapped = _LANG_MAP.get(lang, lang)
+    if recording_suppressed():
+        return PaddleOCRReader(lang=mapped, use_int8=use_int8)
     key = f"{mapped}_{use_int8}"
     if key not in _paddle_readers:
         _paddle_readers[key] = PaddleOCRReader(lang=mapped, use_int8=use_int8)
@@ -507,8 +524,17 @@ def get_layout_analyzer(
 
     Options pass to the model's factory unchanged. An unknown name raises
     ``ValueError`` listing the registered names.
+
+    While the pre-run model check is building this to verify it loads
+    (``recording_suppressed()``), the build bypasses the cache entirely —
+    caching it here would make the run's own later build a cache hit, which
+    would skip both the factory call and ``record_use``, and the model would
+    never be recorded as used.
     """
     entry = resolve(SLOT_LAYOUT, name)
+    if recording_suppressed():
+        analyzer: LayoutAnalyzer = entry.factory(**options)
+        return analyzer
     key = f"{entry.name}|{sorted(options.items())!r}"
     if key not in _layout_analyzers:
         _layout_analyzers[key] = entry.factory(**options)
