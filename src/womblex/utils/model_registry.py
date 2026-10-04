@@ -35,6 +35,24 @@ SLOTS: tuple[str, ...] = (
 
 ENTRY_POINT_GROUP_PREFIX = "womblex.models."
 
+#: The default model per slot — the group a run uses with nothing configured,
+#: and the baseline the benchmark compares a named override against. Each
+#: value is the slot's canonical registered name, matching the literal its own
+#: module declares as default (`OCRConfig.engine`, `paddle_ocr.DEFAULT_LAYOUT_MODEL`,
+#: `cleaner.DEFAULT_CONTEXT_MODEL`, `chunker.DEFAULT_TOKENIZER`,
+#: `SpellfixConfig.dict_name`). Held here rather than imported from them so the
+#: registry — the one place a slot's identity is defined — does not import
+#: ingest/pii/process modules; `tests/test_model_registry.py` keeps the two in
+#: agreement. Changing a default here is the one edit that changes the default
+#: group; it is not itself a config change, so nothing here is read by config.py.
+DEFAULT_MODELS: dict[str, str] = {
+    SLOT_OCR: "paddleocr",
+    SLOT_LAYOUT: "pp-doclayout-m",
+    SLOT_PII_CONTEXT: "all-minilm-l6-v2",
+    SLOT_TOKENIZER: "kanon-2-tokenizer",
+    SLOT_SPELLFIX_DICTIONARY: "en_au",
+}
+
 
 @dataclass(frozen=True)
 class ModelEntry:
@@ -191,3 +209,20 @@ def distribution_version(entry: ModelEntry) -> tuple[str, str]:
 def reset_used_entries() -> None:
     """Forget what this process built. For tests."""
     _used.clear()
+
+
+def is_default_group(selections: dict[str, str]) -> bool:
+    """True if *selections* (slot name -> model name, canonical or alias)
+    names :data:`DEFAULT_MODELS` for every slot given.
+
+    A selection naming a slot ``DEFAULT_MODELS`` has no entry for is never a
+    match — a slot the default group does not cover cannot be "the default"
+    for it. An unknown model name raises, the same as any other ``resolve``.
+    Used by the benchmark to label a report's model group.
+    """
+    for slot, name in selections.items():
+        if slot not in DEFAULT_MODELS:
+            return False
+        if resolve(slot, name).name != DEFAULT_MODELS[slot]:
+            return False
+    return True

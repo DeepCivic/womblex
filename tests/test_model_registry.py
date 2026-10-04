@@ -427,3 +427,48 @@ def test_reset_used_entries_clears_the_record() -> None:
     assert reg.used_entries() != ()
     reg.reset_used_entries()
     assert reg.used_entries() == ()
+
+
+# --- the default model group (O3) -------------------------------------------
+
+from womblex.config import OCRConfig, PIIConfig, SpellfixConfig
+
+
+def test_default_models_agree_with_each_slots_own_config_default() -> None:
+    """DEFAULT_MODELS is held independently of config.py (no import), so a
+    changed default in either place must not drift from the other unnoticed."""
+    from womblex.ingest import paddle_ocr
+    from womblex.pii import cleaner
+    from womblex.process import chunker
+
+    assert reg.resolve(reg.SLOT_OCR, OCRConfig().engine).name == reg.DEFAULT_MODELS[reg.SLOT_OCR]
+    assert reg.resolve(
+        reg.SLOT_LAYOUT, paddle_ocr.DEFAULT_LAYOUT_MODEL,
+    ).name == reg.DEFAULT_MODELS[reg.SLOT_LAYOUT]
+    assert reg.resolve(
+        reg.SLOT_PII_CONTEXT, PIIConfig().model,
+    ).name == reg.DEFAULT_MODELS[reg.SLOT_PII_CONTEXT]
+    assert reg.resolve(
+        reg.SLOT_TOKENIZER, chunker.DEFAULT_TOKENIZER,
+    ).name == reg.DEFAULT_MODELS[reg.SLOT_TOKENIZER]
+    assert reg.resolve(
+        reg.SLOT_SPELLFIX_DICTIONARY, SpellfixConfig().dict_name,
+    ).name == reg.DEFAULT_MODELS[reg.SLOT_SPELLFIX_DICTIONARY]
+    assert cleaner.DEFAULT_CONTEXT_MODEL == PIIConfig().model
+
+
+def test_is_default_group_true_for_the_defaults_by_name_or_alias() -> None:
+    assert reg.is_default_group({reg.SLOT_OCR: "paddleocr", reg.SLOT_TOKENIZER: "kanon-2-tokenizer"})
+    assert reg.is_default_group({reg.SLOT_OCR: "PaddleOCR"})  # alias, case-insensitive
+    assert reg.is_default_group({})  # nothing named, nothing contradicted
+
+
+def test_is_default_group_false_for_an_override() -> None:
+    assert not reg.is_default_group({reg.SLOT_OCR: "mistral-ocr"})
+
+
+def test_is_default_group_false_for_a_slot_the_default_group_does_not_cover() -> None:
+    """Short-circuits before resolving, so an unregistered slot name does not
+    need to exist for this to hold — a slot DEFAULT_MODELS does not cover
+    cannot be "the default" for it, known or not."""
+    assert not reg.is_default_group({"nonexistent-slot": "x"})

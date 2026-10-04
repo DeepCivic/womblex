@@ -715,13 +715,18 @@ Womblex serves other software two ways: a versioned on-disk contract
 - **Model plugins: swappable models without a schema change.** *Shipped
   2026-10.* Requirement: 24 in
   [functional_requirements.md](functional_requirements.md). Design calls:
-  - **Entry-point registry.** `womblex/plugins.py` resolves each slot from
-    the `womblex.ocr`, `womblex.layout` and `womblex.tokenizer` entry-point
-    groups via `importlib.metadata`. The built-ins register through the same
-    registry, so nothing has a special path. The first merge records here why
-    a registry is justified despite the "no strategy patterns" rule.
-  - **One baseline table.** A `BASELINE` mapping (slot to plugin name) feeds
-    the config defaults; changing the default group edits only that table.
+  - **Entry-point registry.** Shipped as `utils/model_registry.py`, not the
+    originally-planned `womblex/plugins.py`: it resolves each slot from one
+    `womblex.models.<slot>` entry-point group per slot (not the per-slot
+    group names first planned) via `importlib.metadata`. The built-ins
+    register through the same registry, so nothing has a special path. The
+    first merge records here why a registry is justified despite the "no
+    strategy patterns" rule.
+  - **One baseline table.** Shipped as `model_registry.DEFAULT_MODELS` (O3,
+    not part of the original four merges) rather than a module of its own:
+    changing the default group edits only that table, and `is_default_group`
+    lets a caller — the benchmark — ask whether a set of selections matches
+    it.
   - **Models by name, never path.** Plugins resolve through
     `utils/models.resolve_local_model_path`; a `womblex.model_roots`
     entry-point group adds search roots.
