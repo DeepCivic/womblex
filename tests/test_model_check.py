@@ -263,6 +263,20 @@ class TestCheckDoesNotPollute:
         get_layout_analyzer("quiet-layout-2")
         assert "quiet-layout-2" in {e.name for e in reg.used_entries()}
 
+    def test_the_runs_own_dictionary_artefact_is_still_recorded(self) -> None:
+        # The artefact (`womblex.models`) side: the bundled dictionary's parse
+        # is cached, so its resolution must not sit behind that cache.
+        pytest.importorskip("spylls")
+        from womblex.process import spellfix
+        from womblex.utils.models import loaded_models, reset_loaded_models
+
+        spellfix._cached_dictionary.cache_clear()
+        reset_loaded_models()
+        check_models(_dictionary_config("en_AU"), "load", scopes=(SCOPE_SPELLFIX,))
+        assert "en_AU" not in {m.name for m in loaded_models()}
+        spellfix.load_dictionary("en_AU")
+        assert "en_AU" in {m.name for m in loaded_models()}
+
 
 def _failed(slot: str, scope: str) -> ModelCheckResult:
     check = SlotCheck(slot, "gone", (scope,), CheckLevel.LOAD, ok=False, reason="not found")
