@@ -71,7 +71,7 @@ typed Parquet or GeoParquet directly and bypass the text stages.
   validated, so don't rely on it. The layout model can be swapped through the
   `womblex.models.layout` plugin slot. Local support returns once layout runs
   as its own stage; see
-  [docs/permissive-deps-plan.md](docs/permissive-deps-plan.md).
+  [docs/plan-permissive-deps.md](docs/plan-permissive-deps.md).
 - **Licensing is in transition.** Womblex is Apache-2.0, but PDF handling still
   depends on PyMuPDF (AGPL-3.0). The plan above replaces it with permissively
   licensed libraries.

@@ -846,14 +846,14 @@ Womblex serves other software two ways: a versioned on-disk contract
   annotations, strict config and ordering checks, file checksums, a recipe
   file with a local multi-stage runner, then destinations. No quality scoring
   and no field extraction. Plan, dependency assessment and phases:
-  [trust-and-recipes-plan.md](trust-and-recipes-plan.md).
+  [plan-trust-and-recipes.md](plan-trust-and-recipes.md).
 - **Permissive dependencies — remove `ultralytics` and PyMuPDF.** *In
   progress 2026-10; layout swap shipped (#130).* Both are AGPL-3.0 with a
   commercial licence as the only alternative. YOLO layout is replaced by an
   Apache-2.0 PP-DocLayout ONNX model on `onnxruntime`; PyMuPDF goes behind a
   womblex-owned `ingest/pdf/` seam and is replaced by pypdfium2 + pdfplumber
   once a backend-diff harness clears the parity gates. Plan and merge
-  sequence: [permissive-deps-plan.md](permissive-deps-plan.md).
+  sequence: [plan-permissive-deps.md](plan-permissive-deps.md).
   - **YOLO is retired as part of adapting womblex for cloud deployment.**
     The model registry lets any layout model be plugged into the layout
     slot and benchmarked on consumption pricing, so keeping an AGPL model
