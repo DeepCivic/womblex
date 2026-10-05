@@ -841,6 +841,12 @@ Womblex serves other software two ways: a versioned on-disk contract
   - **Prerequisite — shipped.** `config.py` (920 lines) was split
     mechanically into the `config/` package (#132).
 
+- **Trust baseline and recipes.** *Proposed 2026-10.* Maps an external
+  requirements set onto what exists: evidence anchoring for existing
+  annotations, strict config and ordering checks, file checksums, a recipe
+  file with a local multi-stage runner, then destinations. No quality scoring
+  and no field extraction. Plan, dependency assessment and phases:
+  [trust-and-recipes-plan.md](trust-and-recipes-plan.md).
 - **Permissive dependencies — remove `ultralytics` and PyMuPDF.** *In
   progress 2026-10; layout swap shipped (#130).* Both are AGPL-3.0 with a
   commercial licence as the only alternative. YOLO layout is replaced by an
