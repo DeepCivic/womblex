@@ -19,11 +19,22 @@ its own must not depend on which stages ran before — only on what is on disk.
 The extraction shard (`*.elements.parquet` + typed sidecars) is **verbatim and
 never rewritten**; every downstream mutation (chunks, enrichment, links,
 embeddings, PII spans, masked text) is a separate sibling parquet. Each
-`*-stage` CLI (`chunk`/`redact`/`enrich`/`link`/`embed`/`pii`) has an
-independent `CheckpointManager` and a resume-time integrity scan. Per-stage and
-E2E (`womblex run`) modes feed the same engines by construction.
+per-stage CLI has an independent `CheckpointManager` and a resume-time integrity
+scan (`redact` keeps its own JSON `--checkpoint`). `womblex run` is
+extraction-only since 0.5.10; downstream runs via `run-stage`/`enqueue-stages`.
 
 ## Key design decisions
+
+### Extraction routes per page; detection holds no extraction logic
+A government bundle mixes cover letter, columnar table, form and signed
+declaration in one file, so document-level routing collapses it to one strategy
+and loses the per-region structure. PDFs and standalone images are profiled per
+page (`page_profile.py`) and the orchestrator dispatches native or OCR per page;
+`DocumentType` is a summary attribute there and selects the extractor only for
+the path-based formats (SPREADSHEET, DOCX, TEXT, MARKDOWN). Files stay under the
+750-line cap by splitting along these seams (`orchestrator.py` /
+`page_profile.py` / `extract.py`, `strategies_*` behind a re-export shim, a
+per-topic `cli/` package).
 
 ### Pre-extracted corpora — an ingest that *feeds* the pipeline
 `ingest/records.py` (2026-07) exists because Womblex's stages consume
@@ -293,8 +304,9 @@ copy, which is also what makes a moved corpus re-resolve.
 
 ### Reference registers — dedicated ingests; document formats — generic
 Two pathways, chosen deliberately (2026-06). Widely-used reference registers
-with novel format quirks (G-NAF PSV, ABN bulk extract XML) get **dedicated
-standalone ingest modules** — the schema projection is irreducibly
+and formats with novel quirks (G-NAF PSV, ABN bulk extract XML, ESRI
+Shapefiles with geometry + CRS) get **dedicated standalone ingest modules**,
+their heavy dependencies (`pyogrio`, `geopandas`, `shapely`) lazy-imported — the schema projection is irreducibly
 source-specific, and a config-driven xpath/column DSL would be bigger than the
 ~100 lines of parsing it replaces. The dedicated modules share one skeleton
 (discover → per-file ingest with isolation → Parquet + provenance metadata;
@@ -303,7 +315,8 @@ yet abstracted — three copies with one shared helper; consolidate into a
 register-ingest layer if/when a fourth register lands. **Document and export
 formats (Excel/CSV) stay generic**: no filename knowledge, no per-dataset
 toggles; corpus wrinkles (AusTender preamble rows) are solved as
-general heuristics in the shared spreadsheet path.
+general heuristics in the shared spreadsheet path. Dataset-specific paths,
+thresholds and hypotheses live in `configs/*.yaml`; core modules know no dataset.
 
 ### Spreadsheet header detection — run-scoring over width-ratio
 Export products open with title rows, generated-date lines, or `key: value`
@@ -370,6 +383,35 @@ API key and no egress. Three choices behind `utils/isaacus_client.py`:
 
 Only *API* calls move; the vendored tokeniser makes offline chunking identical
 in both deployments.
+
+### Models are local, named, and checked before a run
+- **ONNX, no ML framework.** OCR is PaddleOCR's ONNX models on
+  `rapidocr-onnxruntime` with no PaddlePaddle (bundled v5 mobile preferred, the
+  wheel's v4 the fallback); layout is PP-DocLayout-M on `onnxruntime`. Metrics
+  carry no C-extension either: `utils/metrics.py` is a numpy-vectorised
+  Levenshtein (pure-Python DP at 500 chars or fewer), and CER-s spatially sorts
+  words to separate recognition errors from reading-order errors.
+- **Resolved locally, recorded by digest.** `resolve_local_model_path` searches
+  `WOMBLEX_MODELS_DIR`, `_models/`, then `models/` (HF snapshot layout and bare
+  files) before any download, loads lazily, and is the load record: digests are
+  over the bytes, so they recompute from the model files alone; a presence probe
+  passes `record=False`.
+- **Registered names only.** An unknown name raises listing the known ones,
+  import paths are refused, a plugin cannot shadow a built-in, and options pass
+  through to the factory unchanged. A slot is recorded as used only when its
+  factory is called — which is what makes an API-backed OCR engine with no
+  artefact to digest establishable from the footer.
+- **Checked before the first document** (`processing.models_check`: `off` /
+  `load` / `smoke`). A service-backed model has nothing to load, so each one an
+  enabled stage calls gets one minimal request (Isaacus models; `ping()` for
+  Bedrock / Ollama), so a paid later stage fails before the stages ahead of it
+  are paid for. The check is a probe, not use: it runs under
+  `suppress_use_recording` + `suppress_recording`, and a caching wrapper must
+  test `recording_suppressed()` to bypass its cache, or the run's real build
+  would hit the probe's instance and never record. Failures are collected per
+  scope and each caller applies its own: `run` stops before any output, a
+  worker releases (never fails) jobs of a failed scope, and the service API
+  checks registration only, since its host may not carry the models.
 
 ### Container images are built in CI and stamped with the commit they came from
 Two Dockerfiles existed that no workflow built, so a change that broke an image
@@ -467,6 +509,8 @@ There is no separate detector and **no second enrichment pass**.
   the raw chunks that feed Isaacus. Embeddings are computed on raw text and are
   treated as an internal substrate; if embeddings are ever published, re-embed
   the masked `clean_text` instead.
+- **Coverage is PERSON and ADDRESS.** ORGANISATION, URL, phone and email are
+  not detected.
 
 ### PII / redaction marker convention
 House style is **Presidio-style typed angle-bracket tags**. PII person masks are
@@ -492,9 +536,14 @@ rectangles first (native PDFs; no area threshold) and falls back to raster
 contour detection on scanned pages. Filters surfaced during validation:
 near-black RGB/CMYK fill; `min_width ≥ 3pt` (excludes narrow column
 separators); `min_height ≥ 8pt` (excludes glyph-rendering small filled rects on
-PDFs that draw text as filled-path glyphs). Raster-path layout exclusion (YOLO
-regions as exclusion zones) is best-effort and gated by
+PDFs that draw text as filled-path glyphs). Raster-path layout exclusion
+(`redaction.layout_model` regions, default `pp-doclayout-m`, as exclusion zones) is best-effort and gated by
 `RedactionConfig.use_layout_filter`.
+
+Detection runs *after* extraction, never inside it: masking within `_ocr_page()`
+misfired on form fields, chart regions and diagram fills, suppressing text it
+should keep, so extractors never call `pre_ocr_mask`. The `RedactionReport` is a
+typed field on `ExtractionResult`.
 
 ### Element-kind classification (the "K-cluster")
 The element stream classifies each block into an `ElementKind`. Key
@@ -509,10 +558,10 @@ classification decisions:
 - `header` round-trips into a real kind (was silently demoted to `paragraph`).
 - Form-pair label denylist (`Penalty`, `OFFICIAL`, `Note`, `Caution`) stops
   regulation-citation / banner text being matched as form fields.
-- Layout backend is the **DocLayNet `yolo11n_doc_layout.pt`** checkpoint (11
-  document classes), not COCO `yolov8n.pt` (0 document semantics). The COCO
-  weights remain a fallback; `YOLOLayoutAnalyzer` detects the taxonomy from the
-  loaded class names and picks the label map + per-taxonomy `imgsz`.
+- Layout backend is **PP-DocLayout-M on `onnxruntime`** (`ingest/layout_onnx.py`,
+  registered default `pp-doclayout-m`, #130). It replaced the DocLayNet
+  `yolo11n_doc_layout.pt` checkpoint (with COCO `yolov8n.pt` fallback);
+  `YOLOLayoutAnalyzer` is unregistered and is removed in L2.
 - **Full-page-scan figure trap:** the OCR dominant-region fallback in
   `_layout_blocks_and_tables` collapses a whole page's OCR onto one block using
   the largest region's kind; when that is a `Picture`, a text-bearing full-page
@@ -616,6 +665,39 @@ Womblex serves other software two ways: a versioned on-disk contract
   config and models, not file bytes. Drift is detectable, not prevented.
 - **Consumers poll.** Callbacks, cancellation and per-client quotas were left
   out of v1.
+
+### Money recognition — hand-written patterns, exact `Decimal`s
+- **No parsing library.** Evaluated `price-parser` / `money-parser`,
+  `quantulum3`, `pint`, spaCy `MONEY`, Presidio and LayoutLMv3. The price
+  parsers drop magnitude (`$2m` → 2, `$8.7 billion` → 8.7) and accounting-bracket
+  signs — e-commerce assumptions of small, unscaled, always-marked prices.
+  `quantulum3`, the closest call, is a physical-units library: it surfaces page
+  counts, percentages, years and section numbers that must be filtered away
+  (where precision is actually decided), and returns floats, from which exact
+  values cannot be recovered — it fails the thin-adapter test. `pint` models
+  physical dimensions, not currency, and is float-first. spaCy `MONEY`
+  (unvalidated) and Presidio return spans with no value, and Presidio would
+  merge money into the PII stack. LayoutLMv3 needs page images and labelled
+  data; the op's input is parquet. None addresses the real risk — deciding
+  whether a bare column of numbers is money. The hand-written surface (a
+  15-entry scale table plus the Australian pattern set) is small and stable;
+  worded amounts (`process/money_words.py`) were written in-house on the same
+  argument, as a capability decision rather than a measured recall win, with a
+  currency-word gate that declines worded headcounts.
+- **Header continuation rows fold into the header.** PDF financial tables wrap
+  a header over two rows (`Approved` / `Budget $m`) and the extractor declares
+  only the first, losing the unit and money vocabulary. `fold_header_continuation`
+  absorbs one leading body row, only when it is non-numeric text and the rest of
+  the column is numeric — a header-reading fix, not a relaxation of the no-header
+  rule.
+- **Rejected: cross-validation by re-reading sources** — a second extraction
+  path. Any reconciliation works on extracted output, compares multisets of
+  values (counts hide compensating errors), and reports pages with no text layer
+  `unverifiable`, never `mismatch`.
+- **Deferred:** bare numeric columns with no recoverable header (promoting them
+  leaks percentage columns); implicit narrative financial context (off pending a
+  precision measurement); penalty units (revisit with a legislation/contract
+  corpus).
 
 ## Rejected approaches / dead-ends
 
@@ -731,7 +813,7 @@ Womblex serves other software two ways: a versioned on-disk contract
     `utils/models.resolve_local_model_path`; a `womblex.model_roots`
     entry-point group adds search roots.
   - **Readers declare their output shape** (`regions` or `markdown`),
-    replacing `LLM_OCR_ENGINES` / `is_llm_engine`. The reader cache is keyed
+    replacing `LLM_OCR_ENGINES`; `is_llm_engine` now reads the `markdown` trait. The reader cache is keyed
     by engine plus a frozen copy of its options.
   - **Layout slot (merge 2).** `extraction.ocr.layout_model` /
     `layout_options` and `redaction.layout_model` / `layout_options` name a
@@ -756,16 +838,25 @@ Womblex serves other software two ways: a versioned on-disk contract
     out of scope.
   - **Profiling confidence sampling stays on PaddleOCR** (`morphology.py`),
     because its thresholds were calibrated there.
-  - **Prerequisite.** `config.py` (920 lines) is split mechanically before
-    any slot adds fields, with the moved classes named in that PR.
+  - **Prerequisite — shipped.** `config.py` (920 lines) was split
+    mechanically into the `config/` package (#132).
 
-- **Permissive dependencies — remove `ultralytics` and PyMuPDF.** *Proposed
-  2026-10.* Both are AGPL-3.0 with a commercial licence as the only
-  alternative. YOLO layout is replaced by an Apache-2.0 PP-DocLayout ONNX
-  model on `onnxruntime`; PyMuPDF goes behind a womblex-owned `ingest/pdf/`
-  seam and is replaced by pypdfium2 + pdfplumber once a backend-diff harness
-  clears the parity gates. Plan and merge sequence:
-  [permissive-deps-plan.md](permissive-deps-plan.md).
+- **Permissive dependencies — remove `ultralytics` and PyMuPDF.** *In
+  progress 2026-10; layout swap shipped (#130).* Both are AGPL-3.0 with a
+  commercial licence as the only alternative. YOLO layout is replaced by an
+  Apache-2.0 PP-DocLayout ONNX model on `onnxruntime`; PyMuPDF goes behind a
+  womblex-owned `ingest/pdf/` seam and is replaced by pypdfium2 + pdfplumber
+  once a backend-diff harness clears the parity gates. Plan and merge
+  sequence: [permissive-deps-plan.md](permissive-deps-plan.md).
+  - **YOLO is retired as part of adapting womblex for cloud deployment.**
+    The model registry lets any layout model be plugged into the layout
+    slot and benchmarked on consumption pricing, so keeping an AGPL model
+    in the base install buys nothing. No controlled YOLO-versus-PP-DocLayout
+    comparison was run; the last YOLO numbers are the 2026-08 accuracy
+    reports.
+  - **Layout becomes its own stage**, so a layout model can be tuned and
+    measured on its own. Until it ships, layout detection is not supported
+    for local deployment.
 
 - **AI chunking (semchunk 4) — single-enrichment graph reuse.** *Shipped
   2026-06, off-by-default.* The `chunking.chunking_model` pass-through lets
@@ -784,7 +875,7 @@ Womblex serves other software two ways: a versioned on-disk contract
   object `analyse/enrich.py` already receives as
   `response.results[i].document` and discards after `_convert_document`. When a
   Document is passed, semchunk sets `text = ilgs_doc.text` and builds its span
-  tree **from the doc, with no API call** (`semchunk.py:227,236,265`); chunk
+  tree **from the doc, with no API call** (`semchunk.py`); chunk
   offsets then index `ilgs_doc.text`. Both `enrich_shards` and `chunk_shards`
   reassemble the narrative through the *same* `reassemble_narrative` + same
   `text_source` overlay (identical by construction), and `enrich`/`chunk` are
@@ -856,7 +947,7 @@ Womblex serves other software two ways: a versioned on-disk contract
      basis the whole reuse rests on).
   2. ✅ A rehydrated `Document.model_validate_json()` satisfies semchunk's
      `isinstance(text, ILGSDocument_Runtime)` runtime check (same SDK class
-     identity, `semchunk.semchunk:227`), and semchunk chunks the rehydrated
+     identity, `semchunk.semchunk`), and semchunk chunks the rehydrated
      Document down the AI path (no API call).
   3. ⚠️ *Partially.* On a normal-sized doc, `overflow_strategy="auto"` returns
      `document.text` == full source and all mention spans index within bounds
@@ -871,6 +962,13 @@ Womblex serves other software two ways: a versioned on-disk contract
   by the byte-identity guard above. Remaining caveat: the gate-3 large-document
   residual — until a doc exceeding the enricher context window is exercised,
   treat very large inputs under `chunking_model` + reuse as unverified.
+  *Superseded:* a homegrown boundary-hints layer (enrichment spans as preferred
+  splits and no-split zones fed to semchunk) — semchunk 4 absorbed the concern.
+
+- **Local enrichment fallback.** Without Isaacus there are no graph spans, so
+  PII has only the opt-in backstop and AI chunking falls back to token splitting.
+  A config-selected local provider (spaCy / fine-tuned NER) populating
+  `EnrichmentResult` would serve both offline, at lower quality.
 
 - **Downstream text-cleaning op (#B/#D)** — *v1 shipped* as `womblex normalise
   --shards` (`process/normalise.py` transforms + `process/normalise_stage.py`
@@ -958,42 +1056,42 @@ loudly rather than baselining verbatim text under a layer it did not apply.
 - **Redact-stage checkpoint unification.** `redact` keeps its own JSON
   checkpoint rather than the `CheckpointManager` surface used by the other
   per-stage CLIs.
-- **Enrichment graph-edges sibling.** Enrichment writes entities + metadata
-  only; relationship edges are not yet persisted.
-- **E2E composition of enrich/link/pii under `womblex run`.** Per-stage CLIs are
-  the primary path; full E2E composition of the graph/PII stages is deferred.
-- **`overflow_strategy` pass-through on `EnrichmentConfig`.** Oversized
-  documents currently 400 instead of auto-chunking. Low priority — oversized
-  inputs are typically large tabular/reference data that should not be routed to
-  the enricher at all (reference data belongs on the graph/reference path).
+- **Enrichment graph-edges sibling.** *Shipped 0.2.0.* `enrich_shards` writes
+  `*.graph_edges.parquet`; `analyse/graph_refresh.py` rebuilds its chunk edges.
+- **E2E composition of enrich/link/pii under `womblex run`.** *Superseded
+  0.5.10:* `womblex run` is extraction-only by design; downstream stages run via
+  `run-stage` / `enqueue-stages`.
+- **`overflow_strategy` pass-through on `EnrichmentConfig`.** *Shipped 0.2.0.*
 - **No projection carries narrative ↔ table document order into chunks.**
   *Option (b) complete 2026-08 — anchor plus the offset map that makes it
   usable; the interleaved-projection question (option a) stays open.*
   `build_chunk_input`
-  (`chunker.py:517`) splits the element stream into two disjoint projections:
-  `reassemble_narrative` takes TEXT_KINDS only (tables skipped, `:475`) and
-  `collect_tables_from_elements` takes `kind='table'` only (`:502`).
+  (`chunker.py`) splits the element stream into two disjoint projections:
+  `reassemble_narrative` takes TEXT_KINDS only (tables skipped) and
+  `collect_tables_from_elements` takes `kind='table'` only.
   `chunk_batch` then runs two separate semchunk calls and appends all table
   chunks after all narrative chunks. A table chunk's `start_char`/`end_char`
-  index *its own markdown string*, not the narrative (`:371`), so its only
+  index *its own markdown string*, not the narrative, so its only
   positional anchor is `page_start`/`page_end` — page granularity on PDFs, and
   nothing at all on DOCX/spreadsheets, where `Element.page` is `None` by design
-  (see the nullable-page note in `store/output.py:27`). No `elem_order` link
+  (see the nullable-page note in `store/output.py`). No `elem_order` link
   recovers it: chunks join to elements by offset-range overlap, "not via
-  `elem_order`" (`store/output.py:25-27`), and table-chunk offsets are in a
+  `elem_order`" (`store/output.py`), and table-chunk offsets are in a
   different coordinate space.
 
   Worth reviewing because `elem_order` was introduced precisely to preserve
-  this: `docs/extraction.md:257-269` records that the pre-element schema made
-  "the budget-statement class of documents (narrative interleaved with tables)
-  unrepresentable", and the DOCX fixture in the suite is a portfolio budget
-  statement (`test_output.py:41`). Extraction preserves the interleaving; the
+  this: the pre-element schema (one parquet per batch, nested struct lists for
+  tables / forms / images / text_blocks) lost the on-disk order between a table
+  and the paragraph before it, making the budget-statement class of documents
+  unrepresentable, and forced spreadsheets to emit one ExtractionResult per row.
+  `elem_order` and first-class spreadsheet cells replaced it, and the DOCX fixture in the suite is a portfolio budget
+  statement (`test_output.py`). Extraction preserves the interleaving; the
   projection that feeds Isaacus discards it. Nothing is lost on disk —
   `*.elements.parquet` retains `elem_order` — so this is a projection gap, not
   data loss.
 
   Not obviously a defect: separate table chunking is deliberate (table markdown
-  chunks in token mode with no overlap, `:360`, because semantically chunking a
+  chunks in token mode with no overlap, because semantically chunking a
   markdown grid is meaningless), so folding tables into the narrative stream is
   a design change with real trade-offs. Two shapes were weighed: (a) a third
   document-order projection alongside the existing two, or (b) an `elem_order`
@@ -1063,9 +1161,9 @@ loudly rather than baselining verbatim text under a layer it did not apply.
 
 ### Modality routing — prose / tabular / register as the primary fork — *proposed (2026-06), not yet implemented*
 Extraction currently makes its coarsest cut by *format* (`extract_text` splits
-non-PDF SPREADSHEET/DOCX/TEXT vs PDF, `extract.py:449`), and the prose-vs-tabular
+non-PDF SPREADSHEET/DOCX/TEXT vs PDF, `extract.py`), and the prose-vs-tabular
 decision for a **spreadsheet trapped in a PDF** is made *late and inside* the
-per-page orchestrator (`extract_with_plan`, `orchestrator.py:384`) — gated by
+per-page orchestrator (`extract_with_plan`, `orchestrator.py`) — gated by
 `qualify_for_spreadsheet_print`, after per-page profiling, interleaved with prose
 dispatch, and threaded through element assembly as `is_spreadsheet_print` /
 `include_tables=not is_spreadsheet_print`. So the PDF orchestrator is *partly a

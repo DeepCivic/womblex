@@ -1,16 +1,11 @@
 # Composable Design
 
-This document describes Womblex's architecture for composable operations.
+Stage order, stage contracts, valid and invalid compositions, and the CLI that
+composes them.
 
-## Completed Refactor
+## Operations
 
-`pipeline.py` has been split into the `operations/` package (one module per operation — `extract.py`, `redact.py`, `chunk.py`, `pii.py`, `enrich.py` — plus two shared-helper modules, `models.py` (`DocumentResult`, `BatchResult`, `PreconditionError`) and `persist.py` (`write_batch_parquet`, `write_batch_enrichment`), re-exported from `operations/__init__.py`); the thin CLI command layer lives in `cli/pipeline.py`. `config.stages` and the old registry-driven orchestrator (`STAGE_REGISTRY`, `_resolve_stages`, `process_file`) have been removed. Operations are independent functions (`run_extraction`, `run_chunking`, …) — each takes/mutates a `list[DocumentResult]` batch gated by its own `config.<stage>.enabled` flag — that callers compose directly.
-
-A `process_batch()` was later reintroduced in `src/womblex/batch.py` (I7, cloud scale-out) — not the removed orchestrator, but a plain sequencing of the extraction-boundary operations (`run_extraction → run_redaction → write_batch_parquet`) so `womblex run` (local) and the cloud worker (`cloud/worker.py`) execute byte-identically. It is **extraction only**: chunk, PII, enrich, embed, money and the rest are downstream `run-stage` contracts, never run in-batch (redaction *detection* stays because it represents the source true-to-form, not a transform). It does not reintroduce `STAGE_REGISTRY`/`config.stages`.
-
-## Target Model
-
-There are two categories of operation: **ingest** (format-dependent, produces an output file or extraction result) and **transform** (operates on extraction/chunk output).
+There are two categories of operation: **ingest** (format-dependent, produces an output file or extraction result) and **transform** (operates on extraction/chunk output). Ingest always runs first.
 
 ### Ingest Operations
 
@@ -22,6 +17,7 @@ Input Format         Function                         Output
 PDF/DOCX/TXT/MD      extract(path) → ExtractionResult  ExtractionResult (in memory)
                      extract(path) → .txt file          single-file text (CLI only)
                      extract(path) → .parquet file      Parquet (CLI or batch)
+Standalone image     extract(path) → ExtractionResult  as a one-page PDF (orchestrator OCR path)
 CSV / XLSX           extract(path) → ExtractionResult  ExtractionResult (in memory)
                      extract(path) → .parquet file      Parquet (CLI or batch)
 PSV (G-NAF)          ingest_gnaf(dir) → .parquet files  one Parquet per PSV file
@@ -35,141 +31,137 @@ The single-file `.txt` output is a CLI convenience for single-unit extractions o
 
 ### Transform Operations
 
-Each transform is a standalone function. The only contract is: provide the right input type. The names below are shorthand for the composition pattern, not literal function names — the real entry points are `run_extraction` / `run_redaction` / `run_chunking` / `run_pii_cleaning` / `run_enrichment` in `operations/`, each operating on a `list[DocumentResult]` batch (`operations/models.py`), not a bare `ExtractionResult`.
+Transforms run in one of two forms, over the same primitives.
+
+**In-memory operations** (`operations/`) take and mutate a `list[DocumentResult]` batch (`operations/models.py`), each gated by its own `config.<stage>.enabled` flag. These are the Python API, the `--config` modes of `womblex chunk` / `womblex redact`, and — for extraction and redaction only — the body of `process_batch()`:
 
 ```
-Operation               Input                    Output                   Precondition
-─────────────────────── ──────────────────────── ──────────────────────── ────────────────────
-chunk(extraction)       ExtractionResult         list[TextChunk]          extraction exists
-redact_tag(extraction)  ExtractionResult         ExtractionResult         extraction exists (PDF only)
-pii_clean(extraction)   ExtractionResult         ExtractionResult         extraction exists
-pii_clean(chunks)       list[TextChunk]          list[TextChunk]          chunks exist
-enrich(extraction)      ExtractionResult         EnrichmentResult         extraction exists
-embed(chunks)           list[TextChunk]          list[Embedding]          chunks exist (impl: analyse/embed_stage.py, I7)
-link(enrich entities)   entity mentions          entity_links             enrichment exists (impl: link/stage.py, I7)
-build_graph(enrichment) EnrichmentResult         DocumentGraph            enrichment exists
-pii_clean(chunks, graph) list[TextChunk] + graph list[TextChunk]          graph exists
-money(elements+cells)   *.elements.parquet +     *.money_spans.parquet +   extraction Parquet exists
-                        *.table_cells.parquet    *.money_columns.parquet  (impl: process/money_stage.py)
-load_graph(parquet_dir) Parquet files            EntityMention + Edge     enrichment Parquet exists (impl: analyse/query.py's load_entity_mentions / load_graph_edges)
+Operation            Entry point            Input                      Output                          Precondition
+──────────────────── ────────────────────── ────────────────────────── ─────────────────────────────── ──────────────────────
+extract              run_extraction         paths                      DocumentResult.extraction       —
+redact               run_redaction          extraction                 redaction report + annotations  extraction exists (PDF only)
+chunk                run_chunking           extraction                 DocumentResult.chunks           extraction exists
+enrich (+ graph)     run_enrichment         extraction (+ chunks)      .enrichment + .graph            extraction exists
+pii (post_extract.)  run_pii_cleaning       extraction                 page text masked in place       extraction exists
+pii (post_chunk)     run_pii_cleaning       chunks                     chunk text masked in place      chunks exist
+pii (post_enrich.)   run_pii_cleaning       chunks + enrichment        chunk text masked in place      enrichment exists
 ```
 
-`money` is an **offline annotation op** in the mould of `quality`: API-free, no
-ordering dependency on enrich, and it **never rewrites element or chunk text**.
-It reads the extraction Parquet (`*.elements.parquet` + its `*.table_cells.parquet`
-sibling) rather than a `list[DocumentResult]` — it operates over a shard directory,
-annotating three loci (narrative offsets into the `processing.text_source` layer,
-`table_cell`, `sheet_cell`) and writing two joinable sidecars per batch, gated by
-`config.money.enabled`. The narrative locus scans the text *reassembled from the
-element stream* (`reassemble_narrative`, the same reconstruction chunking uses),
-not the `*.chunks.parquet` — chunks are **not** a money precondition. Because its
-narrative offsets index the same `processing.text_source` space enrichment
-mentions and chunks use, the spans *join* to them downstream; cell spans anchor
-to their own coordinates. See [money-extraction.md](money-extraction.md).
+**Shard stages** operate over a shard directory on disk (`*_shards()` functions), reading and writing sibling Parquet sidecars joined on `source_hash`. Each is declared as a `StageContract` in `cloud/stage_contracts.py` (`STAGE_CONTRACTS`), which the local per-stage commands, `run-stage` and the queue worker all execute. Redaction has no stage contract: detection runs in-batch (`process_batch`), and `womblex redact --shards --pdfs` is a separate annotation command that writes `*.redactions.parquet`.
 
-### Valid Compositions (examples, not exhaustive)
+| Stage | Required inputs | Conditional inputs (config-derived) | Outputs |
+|---|---|---|---|
+| `normalise` | `.elements`, `.table_cells`, `._manifest` | — | `.normalised_text` |
+| `spellfix` | `.elements`, `.table_cells`, `._manifest` | `.normalised_text` (chains on it when present) | `.spellfix_text`, `.spellfix_corrections` |
+| `enrich` | `.elements`, `._manifest` | `text_source` overlay (strict); `.chunks` (adds mention→chunk edges) | `.enrichment_entities`, `.enrichment_meta`, `.graph_edges` (+ `.enrichment_doc` when `persist_document` or `chunking_model`) |
+| `chunk` | `.elements`, `.table_cells`, `._manifest` | `text_source` overlay (strict); `.enrichment_doc` when `chunking_model` is set | `.chunks` |
+| `graph-refresh` | `.enrichment_entities`, `.graph_edges`, `.chunks`, `._manifest` | — | `.enrichment_entities`, `.graph_edges` (rewritten in place) |
+| `embed` | `.chunks`, `._manifest` | — | `.embeddings` |
+| `money` | `.elements`, `.table_cells`, `._manifest` | `text_source` overlay (strict; `money.text_source` outranks `processing.text_source`) | `.money_spans`, `.money_columns` |
+| `link` | `.enrichment_entities`, `._manifest` | — | `.entity_links` |
+| `pii` | `.chunks`, `._manifest` | `.enrichment_entities` (the primary candidate source) | `.pii_spans` (+ `.clean_text` when `write_clean_text`) |
+| `quality` | `.chunks` | — | `.chunk_quality` (run-scoped: every base in one pass) |
+
+Every suffix is `*<suffix>.parquet`. `manifest` is not a stage: `womblex finalize` (object store) and the end of `womblex run` (local) consolidate the `._manifest` shards.
+
+### Valid Compositions
+
+Stage order is a dependency DAG over the inputs above, not one fixed sequence. `PIPELINE_ORDER` (`pipeline_order.py`) declares the default full-run order — one valid topological sort:
 
 ```
-Replace the `Valid Compositions` section with this:
+extract → normalise → spellfix → enrich → chunk → graph-refresh → embed → money → link → pii → quality
+```
 
-### Stage → Valid Next Stages
+Its two non-obvious edges are config-derived, so the contracts alone cannot express them: normalise and spellfix precede enrich and chunk because `processing.text_source` makes both reassemble from their overlays, and enrich precedes chunk so AI chunking reuses the persisted Document. `DOWNSTREAM_STAGES` is the subset a dispatcher (`enqueue-stages`, the console) may queue automatically — every stage except `extract` (the batch queue itself), `pii` (irreversible masking, always a deliberate act) and `quality` (run-scoped). Both remain reachable through `run-stage`.
 
-For each stage, the listed stages are the only data-dependent stages that can immediately follow it in a valid composition. `done` is terminal.
-
-| Stage | Valid immediate next stages |
-|-------|-----------------------------|
-| `extract` (in-memory `ExtractionResult`) | `redact` (PDF only), `chunk`, `pii_clean(extraction)`, `enrich`, `money`*, `done` |
+| After | Valid immediate next stages |
+|---|---|
+| `extract` (shards) | `normalise`, `spellfix`, `enrich`, `chunk`, `money`, `done` |
 | `extract` → `.txt` | `done` |
-| `extract` → `.parquet` | `money`*, `done` |
-| `redact` | `chunk`, `pii_clean(extraction)`, `enrich`, `money`*, `done` |
-| `chunk` | `pii_clean(chunks)`, `embed`, `enrich`, `money`*, `done` |
-| `pii_clean(extraction)` | `chunk`, `enrich`, `done` |
-| `pii_clean(chunks)` | `embed`, `done` |
-| `enrich` | `build_graph`, `link`, `chunk(chunking_model)`, `money`*, `done` |
-| `link` | `build_graph` (if not already run), `money`*, `done` |
-| `build_graph` | `pii_clean(chunks, graph)` (requires chunks), `link` (independent), `money`*, `done` |
-| `embed` | `done` |
-| `pii_clean(chunks, graph)` | `embed`, `done` |
-| `money` | `done` |
-| `load_graph` | `pii_clean(chunks, graph)` (requires existing chunks), `done` |
+| `normalise` | `spellfix`, `enrich`, `chunk`, `money`, `done` |
+| `spellfix` | `enrich`, `chunk`, `money`, `done` |
+| `enrich` | `chunk` (reuses `.enrichment_doc` under `chunking_model`), `link`, `money`, `done` |
+| `chunk` | `enrich` (if not yet run), `graph-refresh` (once enriched), `embed`, `pii`, `quality`, `money`, `done` |
+| `graph-refresh` | `embed`, `link`, `pii`, `money`, `done` |
+| `embed` | `link`, `pii`, `money`, `done` |
+| `link` | `pii`, `money`, `done` |
+| `money` | any stage whose inputs exist, `done` |
+| `pii` | `quality`, `done` (terminal for the text layer) |
+| `quality` | `done` |
 | `ingest_gnaf` / `ingest_abn` / `ingest_geo` | `done` |
-
-`* money` requires the extraction Parquet sidecars (`*.elements.parquet` + `*.table_cells.parquet`). If those are not present, `money` is not a valid next stage.
 
 Notes:
 
-- `pii_clean(extraction)`, `pii_clean(chunks)`, and `pii_clean(chunks, graph)` are the three PII modes from the transform table.
-- `chunk(chunking_model)` is the AI-chunking reuse mode of `chunk`; it is valid after `enrich`.
-- `chunk → enrich` is valid because `enrich` operates on the same `DocumentResult` extraction text, not on the chunk output.
-- `link` and `build_graph` are independent after `enrich`; either order is valid.
-- Independent sidecar ops such as `money` — and `embed` once chunks exist — can be appended after any earlier stage that has already produced the required sidecar, even if not listed on every row.
-- CSV/XLSX extraction follows the `.parquet` row; the documented spreadsheet path is `extract → .parquet → money`.
-```
+- `pii` is terminal. It runs after enrich and embed, reads `*.chunks.parquet` and never rewrites it, and writes the masked layer as a separate `*.clean_text.parquet`. `embed` reads `*.chunks.parquet` too — never the masked text — so embedding before or after `pii` produces the same vectors; the order matters because masking is irreversible and nothing downstream of it should need raw text.
+- `chunk → enrich` is valid: enrich reassembles the narrative from the element stream, and present chunks only add mention→chunk edges. Running enrich first is the default because AI chunking can then reuse its Document.
+- `graph-refresh` needs both enrichment and chunks; it rebuilds mention→chunk edges after chunking, in place, and is never skipped on output existence.
+- `money` is an offline annotation: API-free, it reads only the extraction Parquet (`*.elements.parquet` + `*.table_cells.parquet`, never `*.chunks.parquet` or the graph) and never rewrites element or chunk text, so it may run anywhere after `extract` and produces byte-identical output whether run before or after `enrich` / `graph-refresh`. Its narrative offsets index the same `processing.text_source` space as enrichment mentions and chunks, so amounts join to the chunk a mention falls in by an offset overlap performed downstream, not by the money stage. Its own resumable checkpoint means re-running over a directory the earlier stages already wrote to annotates only batches without a money sidecar yet.
+- CSV/XLSX extraction follows the shard row; the documented spreadsheet path is `extract → money`.
 
-The `chunk(chunking_model)` row is the AI-chunking single-enrichment reuse seam — the same
-persisted-output-reuse shape as `load_graph → pii` (a later stage consumes an
-earlier stage's sidecar rather than recomputing). `enrich` writes the raw ILGS
-Document to `*.enrichment_doc.parquet`; `chunk` reuses it when `chunking_model`
-is set, guarded by byte-identity of `Document.text` against the reassembled
-narrative. It is an *ordering* requirement, not a hard dependency: run out of
-order or without the sidecar and `chunk` self-enriches (composable fallback,
-the same idiom the transform stages apply to a missing `text_source` overlay —
-`load_overlay` returns `None` and reassembly proceeds on verbatim text).
+The `chunk` reuse of `*.enrichment_doc.parquet` is the AI-chunking single-enrichment
+seam — a later stage consumes an earlier stage's sidecar rather than recomputing.
+`enrich` writes the raw ILGS Document to `*.enrichment_doc.parquet`; `chunk` reuses
+it when `chunking_model` is set, guarded by byte-identity of `Document.text` against
+the reassembled narrative. The reuse is an *ordering* requirement, not a hard
+dependency (the contract marks it non-strict): run out of order or without the
+sidecar and `chunk` self-enriches — as it does for a document enrich had to split,
+whose Document is never persisted.
 
-That verbatim fallback is a convenience of the transform stages (chunk /
-enrich / money), where re-running with the sidecar present refines the result;
-it is **not** universal. The render path (`build_ground_truth`) declares its
-`text_source` — no default — and calls `load_overlay(..., required=True)`: a
-declared non-`elements` overlay that is missing raises rather than baselining
+The `text_source` overlay is different. The contracts mark it **strict**, and the
+object-store runner refuses a base whose selected overlay is absent
+(`InputContractError`). The local per-stage commands do not: `load_overlay` warns
+and reassembly proceeds on verbatim text. The render path (`build_ground_truth`)
+declares its `text_source` — no default — and calls `load_overlay(..., required=True)`:
+a declared non-`elements` overlay that is missing raises rather than baselining
 verbatim text, so a ground-truth baseline is never silently produced under a
 declared cleaning layer it did not apply.
-
-The `build_graph → money` row is not a data dependency — it is two independent
-sidecars over one run. `money` reads the extraction Parquet (`*.elements.parquet`
-+ `*.table_cells.parquet`), never the graph, so it produces byte-identical output
-whether run before or after `enrich`/`build_graph`; the arrow only records that
-both land in the same shard directory. Everything joins on `source_hash`, so the
-run ends up with `*.graph_edges.parquet` **and** `*.money_spans.parquet` keyed to
-the same documents, and — because `money`'s narrative offsets index the same
-`processing.text_source` space enrichment mentions and chunks use — amounts can
-be *joined* to the chunk a mention falls in at query time. That join is an
-offset overlap performed downstream, not something the money stage does: it reads
-the element stream, never `*.chunks.parquet`, so `chunk` is not a precondition.
-In practice this is `womblex money --shards
-<run>/documents/` (or `run-stage --stage money` in the object store) run over a
-directory the earlier stages already wrote to — its own resumable checkpoint
-means re-running only annotates batches without a money sidecar yet.
 
 ### Invalid Compositions (precondition violations)
 
 ```
-chunk without extract — no input
-enrich without extract — enrichment needs full document text
-build_graph without enrich — graph needs enrichment
-pii_clean(advanced) without build_graph — advanced PII needs graph
-ingest_gnaf → chunk — G-NAF output is Parquet, not ExtractionResult
-ingest_abn → enrich — register Parquet is not ExtractionResult
-ingest_geo → pii_clean — GeoParquet is geometry, not text
+chunk / enrich / money without extract — no extraction shards to discover
+graph-refresh without enrich or chunk — needs .enrichment_entities, .graph_edges and .chunks
+embed / pii / quality without chunk — no .chunks
+link without enrich — no .enrichment_entities
+pii (post_enrichment, in memory) without enrichment — graph-driven PII needs a graph
+ingest_gnaf → chunk — G-NAF output is Parquet, not extraction shards
+ingest_abn → enrich — register Parquet is not extraction shards
+ingest_geo → pii — GeoParquet is geometry, not text
 ingest_gnaf → money — register Parquet has no *.elements.parquet / *.table_cells.parquet to scan
 extract(csv, 10k rows) → .txt — multi-unit, must use .parquet
 ```
 
 Enforcement is **pragmatic**, not blanket: a config-disabled stage passes
 through (`enabled=False` → return unchanged) and a per-document data gap in an
-otherwise-valid batch is skipped — neither is an error. Genuine *misuse* raises
-`operations.PreconditionError`. The enforced case today is graph-driven PII
-without a graph: `run_pii_cleaning(pipeline_point="post_enrichment")` when no
-completed document carries enrichment (the `pii_clean(advanced) without
-build_graph` row above). A partially-enriched batch is tolerated — un-enriched
-docs fall back per-document. The remaining rows are structural impossibilities
-(wrong output type) that fail naturally at the type boundary.
+otherwise-valid batch is skipped — neither is an error. Where misuse is caught,
+the surface depends on the path:
+
+- **In-memory operations** raise `operations.PreconditionError` for genuine
+  misuse. The enforced case is graph-driven PII without a graph:
+  `run_pii_cleaning(pipeline_point="post_enrichment")` when no completed
+  document carries enrichment. A partially-enriched batch is tolerated —
+  un-enriched docs fall back per document.
+- **Shard stages** (`cloud/stage_runner.py`): `prepare_stage_context` raises
+  `StagePreconditionError` before any base is attempted (stage preflight such as
+  `link`'s reference register, an unresolvable Isaacus deployment, or a failed
+  model check). On the object-store path, a base missing a required input raises
+  `NotReady` — logged with the producing stage and skipped, a non-zero exit only
+  when every base is blocked — and a base missing a strict conditional input
+  raises `InputContractError`, counted as failed while the other bases continue.
+- **Queue worker** (`cloud/worker.py`): a stage job whose every base is
+  `NotReady` raises `StageNotReady` and is **released** rather than failed, so a
+  stage claimed before its upstream has published does not spend a retry.
+
+The register-ingest rows are structural impossibilities: their output has no
+extraction sidecars, so shard discovery finds no batch bases.
 
 ## CLI
 
-- `womblex run --config` calls operations directly based on enabled flags in config
-- `womblex extract <file> --format txt|parquet` calls `run_extraction()` directly
-- `womblex ingest-gnaf` calls `ingest_gnaf_directory()` directly
-- `womblex ingest-geo` calls `ingest_geospatial_directory()` directly
-- `womblex ingest-abn` calls `ingest_abn_xml()` / `ingest_abn_directory()` directly
-- `womblex chunk`, `womblex redact` call individual operations directly
-- `womblex money --shards <dir>` calls `money_shards()` directly — the offline annotation op that reads the extraction Parquet and writes `*.money_spans.parquet` + `*.money_columns.parquet`
+- `womblex run --config` runs extraction only: each batch goes through `batch.process_batch` (extract → redaction detection when `redaction.enabled` → shard write), then the run manifest is consolidated. It does **not** run downstream stages; `config.<stage>.enabled` declares pipeline membership for the dispatchers, it does not make a stage run here.
+- `womblex extract <file> --format txt|parquet` calls `run_extraction()` directly.
+- `womblex chunk --shards <dir>` calls `chunk_shards()`; `womblex chunk --config` extracts and chunks through `run_extraction` / `run_chunking`.
+- `womblex redact --shards <dir> --pdfs <dir>` calls `redact.batch.annotate_redactions_for_shards()` and writes `*.redactions.parquet`; `womblex redact --config` extracts and redacts through `run_extraction` / `run_redaction`.
+- `womblex normalise`, `spellfix`, `enrich`, `graph-refresh`, `embed`, `money`, `link`, `pii` and `quality` each take `--shards <dir>` and call their stage function directly (`normalise_shards`, `spellfix_shards`, `enrich_shards`, `refresh_graph_edges`, `embed_shards`, `money_shards`, `link_shards`, `pii_shards`, `quality_shards`).
+- `womblex run-stage --stage <name>` runs one `StageContract` — over a local `--shards` directory or an object-store `--store` / `--run-id` prefix — with its preflight; ordering is the operator's.
+- `womblex enqueue-stages` writes queue rows for the run's `DOWNSTREAM_STAGES` that the config enables, in `PIPELINE_ORDER`, for the workers to claim; it runs nothing itself.
+- `womblex ingest-gnaf`, `ingest-geo` and `ingest-abn` call `ingest_gnaf_directory()`, `ingest_geospatial_directory()` and `ingest_abn_xml()` / `ingest_abn_directory()` directly.

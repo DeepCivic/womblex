@@ -1,8 +1,12 @@
 # Evaluation Metrics
 
-Evaluation metric tables mapping each process to its candidate technology and dependency status. All recommendations align with the normalisation-with-accuracy mandate and the Womblex architecture.
+The metrics each process is evaluated by, how each is applied, and its dependency status. Evaluations with no numbered section below:
 
-See `docs/accuracy/` for measured baselines per stage.
+- **Chunking** (`CHUNKING.md`) — no chunking ground truth exists, so it gates the reference-free invariants (budget, offsets, contiguity) rather than scoring accuracy.
+- **Money** (`MONEY.md`) — `find_money` against tag-labelled transcripts: narrative recall, precision and scale accuracy; table figures reported but not gated.
+- **Ground truth** (`GROUND_TRUTH.md`) — micro-averaged CER of corrected ground-truth units against their pinned baselines.
+- **Spreadsheets** (`SPREADSHEETS.md`) — spreadsheet sources scored cell-wise against themselves with the section 2 metrics.
+- **Stage sequence** (`STAGE_SEQUENCE.md`) — each text-layer overlay sequence scored against the same corrected ground-truth units over identical segment boundaries.
 
 ## 1. Text Extraction Accuracy
 
@@ -12,9 +16,9 @@ See `docs/accuracy/` for measured baselines per stage.
 
 | Metric | Implementation | Location | Ground Truth Source |
 |--------|---------------|----------|---------------------|
-| **CER** | Numpy-accelerated Levenshtein (char-level edit distance / reference length). Short strings (≤500 chars) use pure-Python DP; longer strings use numpy vectorised row operations. | `utils/metrics.py → cer()` | `_transcript.txt` sidecars (FUNSD, DocLayNet, Womblex Collection) |
+| **CER** | Normalised by default (`normalise=True`: NFC, lowercase, whitespace collapse — pass `normalise=False` for a raw comparison). Numpy-accelerated Levenshtein (char-level edit distance / reference length). Short strings (≤500 chars) use pure-Python DP; longer strings use numpy vectorised row operations. | `utils/metrics.py → cer()` | `_transcript.txt` sidecars (FUNSD, DocLayNet, Womblex Collection) |
 | **CER-s** | Spatially sorts both GT and OCR words by bounding-box centroid (top-to-bottom, left-to-right within line tolerance), then computes CER on the sorted text. Isolates recognition errors from reading-order errors. | `utils/metrics.py → cer_spatial()`, `spatial_sort_text()` | FUNSD JSON bounding boxes + transcripts |
-| **WER** | Whitespace-tokenised Levenshtein (word-level edit distance / reference word count). | `utils/metrics.py → wer()` | Same as CER |
+| **WER** | Whitespace-tokenised Levenshtein (word-level edit distance / reference word count), with the same default normalisation as CER. | `utils/metrics.py → wer()` | Same as CER |
 | **Reading Order Accuracy** | Matches GT and extracted words by bounding-box IoU, then measures what fraction of GT word pairs preserve their relative order in the extraction output (concordant pairs / total pairs). | `utils/metrics.py → reading_order_accuracy()` | FUNSD annotations, DocLayNet word sequences |
 
 ## 2. Tabular Extraction Accuracy
@@ -34,7 +38,7 @@ See `docs/accuracy/` for measured baselines per stage.
 
 **Scope:** OCR'd PDF page / image → `kind="table"` element with cells
 
-**Status:** Implemented in `ingest/ocr_tables.py` (`reconstruct_table`) over the shared `ingest/table_grid.py` binning; benchmarked in the *Table Reconstruction* section of `docs/accuracy/EXTRACTION.md`. Distinct from section 2 — Tabular Extraction Accuracy measures a *spreadsheet file* → parquet (the source is already a grid); this section measures a *table detected on a page image* being reconstructed from OCR quads, where the grid itself is inferred and can be wrong. Scope is flat, contemporary tables; hard shapes (skew, stacked spanning headers, hierarchical rows) are refused cleanly, not solved — the reconstructor returns `None` rather than a partial grid below its precision gates (`MIN_ROW_FILL_RATIO` the load-bearing one). See [decisions.md](decisions.md) “Table-cell reconstruction on OCR pages” for the mechanism and refusal rationale.
+**Status:** Implemented in `ingest/ocr_tables.py` (`reconstruct_table`) over the shared `ingest/table_grid.py` binning; benchmarked in the *Table Reconstruction* section of `docs/accuracy/EXTRACTION.md`. Distinct from section 2 — Tabular Extraction Accuracy measures a *spreadsheet file* → parquet (the source is already a grid); this section measures a *table detected on a page image* being reconstructed from OCR quads, where the grid itself is inferred and can be wrong.
 
 Measurement follows a two-stage decomposition: **detection** is the per-class `table` layout F1 (the DocLayNet layout-detection harness, reported in `docs/accuracy/EXTRACTION.md`); **reconstruction** is scored *conditioned on a correct table rect* (the GT rect is fed straight to `reconstruct_table`, no detector in the loop), so the reconstruction number tracks the grid builder alone. A blended end-to-end (detection × reconstruction) stage is deferred to a scanned-document round, once real-scan GT exists to blend against.
 
@@ -50,7 +54,7 @@ publishes its rows into `docs/accuracy/EXTRACTION.md` here.
 | **False-Table Rate** | Reconstructor run over pages with **no** GT table (non-table DocLayNet pages + FUNSD forms); any emitted table is a false positive. Makes "precision over coverage" falsifiable; calibrated `MIN_ROW_FILL_RATIO`. | `test_table_benchmark.py → TestFalseTableCohort` | Non-table fixtures (no GT needed) |
 | **GT Acceptance** | The [GT authoring spec](#table-ground-truth-authoring-spec) conformance checks on any `*_table.csv` GT (rectangular, unique headers, no BOM/trailing whitespace, `n_header_rows` consistent, plausible cell count). A GT that fails is a bug in the GT. | `test_table_benchmark.py → TestGroundTruthAcceptance` | `<fixture>_table.csv` + `.meta.json` |
 
-Not measured: **money recall** (the downstream payoff) — the benchmark has no labelled money ground truth (see [money-extraction.md](money-extraction.md)), so no honest recall can be quoted. TEDS is the noted upgrade path if the alignment metric proves too coarse.
+Table-cell money recall is not scored: a bare cell under a money header is resolved from its column, which a flattened transcript does not carry. TEDS is the noted upgrade path if the alignment metric proves too coarse.
 
 ### Table ground-truth authoring spec
 
@@ -147,7 +151,7 @@ fails these is a bug in the GT, not in extraction.
 
 **Scope:** Chunks → Entity Mentions / Knowledge Graph
 
-**Status:** Not yet implemented. No `graph.jsonl` or `fixtures/isaacus/enrichment/` ground truth exists, and there is no `docs/accuracy/ENRICHMENT.md` or `GRAPH.md` benchmark doc (`tests/test_graph.py` / `tests/test_enrich.py` are unit tests, not accuracy benchmarks). `docs/accuracy/PII_CLEANING.md` notes the Isaacus enrichment fixtures are not yet available. The table below is the proposed metric set, not a measured baseline.
+**Status:** Not yet implemented. No `graph.jsonl` or `fixtures/isaacus/enrichment/` ground truth exists, and there is no enrichment or graph accuracy report (`tests/test_graph.py` / `tests/test_enrich.py` are unit tests, not accuracy benchmarks). The table below is the proposed metric set, not a measured baseline.
 
 | Metric | Candidate Technology | Implementation Note | Ground Truth Source | Dependency Status |
 |--------|---------------------|---------------------|---------------------|-------------------|
@@ -157,18 +161,11 @@ fails these is a bug in the GT, not in extraction.
 
 ---
 
-## Dependency Landing Notes (`pyproject.toml`)
+## Dependency Notes
 
-| Library | License | Reason for Addition | Replaces / Avoids | CI / Build Notes |
-|---------|---------|---------------------|-------------------|------------------|
-| **`pyogrio`** | MIT | Fast SHP I/O engine. Used by `geopandas` as the read backend. | `fiona`, direct `GDAL` Python bindings | Ships pre-compiled GDAL wheels. |
-| **`geopandas`** | BSD-3 | GeoDataFrame for SHP → GeoParquet conversion. Writes GeoParquet via `to_parquet()`. | Manual geometry handling | Uses `pyogrio` engine + `pyarrow` for I/O. |
-| **`shapely`** | BSD-3 | Geometry validity predicates (`is_valid`). Dependency of `geopandas`. | Heavy GIS stacks | Bundles GEOS C-lib. Stable across Linux/macOS/Windows wheels. |
-| **`pandas` / `pyarrow`** | BSD-3 / Apache-2.0 | Already in core deps. Used via `.testing` and `.Schema` for tabular validation. | N/A | No new dependencies added. |
-
-## Alignment with Architecture & Mandate
-
-- **Normalisation Focus:** Metrics strictly validate structural preservation and textual fidelity. No complex spatial analytics, no graph traversal math, no embedding fusion.
-- **True to Source:** Existing `utils/metrics.py` Levenshtein + `pandas.testing` + `shapely` guarantee exact structural/geometry validation.
-- **Zero Friction:** All recommended libs are permissively licensed (MIT/BSD/Apache-2.0), ship pre-compiled wheels, and avoid C-extension install issues.
-- **Maintenance:** Validation logic lives in `utils/metrics.py` and `utils/tabular_metrics.py` (keeping under the 750-line cap via modular helpers). The system remains detection-first, config-driven, and dependency-light.
+| Library | License | Status | Use | Notes |
+|---------|---------|--------|-----|-------|
+| **`pyogrio`** | MIT | Optional — not in `pyproject.toml`; install separately | SHP read engine behind `geopandas`; CRS read via `read_info()`. | Ships pre-compiled GDAL wheels. Listed only in the mypy ignore list. |
+| **`geopandas`** | BSD-3 | Optional — not in `pyproject.toml`; install separately | GeoDataFrame for SHP → GeoParquet (`to_parquet()`). | `ingest/geospatial.py` imports it lazily and raises an install hint when absent; `test_geospatial.py` skips via `importorskip`. |
+| **`shapely`** | BSD-3 | Optional — pulled in by `geopandas` | Geometry validity predicates (`is_valid`). | Bundles GEOS. |
+| **`pandas` / `pyarrow`** | BSD-3 / Apache-2.0 | Core | Plain DataFrame comparison and `pyarrow.Schema.equals` in `utils/tabular_metrics.py`. | No new dependencies. |

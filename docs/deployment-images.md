@@ -127,6 +127,23 @@ machines throughout, because those had the image cached from an earlier pull.
 That is the failure mode in miniature: the same compose file, working for
 whoever pulled first and broken for whoever pulls now.
 
+## How an image identifies itself
+
+Both `Dockerfile` and `Dockerfile.ui` take a `SOURCE_COMMIT` build argument and
+write it into the installed package as `_build_stamp.py`, which
+`store/build_info.py` reads for the run stamp's commit. With `REQUIRE_STAMP=1`
+(the publish path) a build given no commit fails; a local build supplies none
+and reports `unavailable` with a reason. The same commit is set as the OCI
+`org.opencontainers.image.revision` label, readable with `docker inspect`.
+
+The image reference cannot be baked into the image it names, so it is handed in
+as `WOMBLEX_IMAGE_REF`. The base file's `cloud-env` anchor sets it to the
+pipeline image reference, and `ui` overrides it with the console image; the
+local override empties it, since a locally built service is not running the
+published image. `store/build_info.py` treats a process as containerised only
+when `/.dockerenv` (Docker) or `/run/.containerenv` (Podman) exists, and
+records a digest only when the reference carries one — a tag records none.
+
 ## The API client registry
 
 The service API (`womblex serve`) authenticates callers

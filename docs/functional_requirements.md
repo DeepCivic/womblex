@@ -2,33 +2,7 @@
 
 This document is the single source of truth for **what** Womblex must do, expressed
 as user stories with testable acceptance criteria. It deliberately does **not**
-cover *how* the system is built, why decisions were made, or measured accuracy —
-those concerns live in the related documents listed below.
-
-## Related documents
-
-These requirements describe intended behaviour only. The following documents own
-the adjacent concerns and should be consulted rather than duplicated here:
-
-| Document | Owns |
-|---|---|
-| [`README.md`](../README.md) | Project overview, installation, and command usage. |
-| [`docs/architecture.md`](architecture.md) | High-level system architecture and component responsibilities. |
-| [`docs/composable-design.md`](composable-design.md) | The composable-operations design and stage-contract model. |
-| [`docs/dataflow.md`](dataflow.md) | End-to-end data movement, from raw input to Parquet output. |
-| [`docs/extraction.md`](extraction.md) | The extraction output schema (element streams and child rows). |
-| [`docs/contract.md`](contract.md) | The consumer contract: contract version, file sensitivity, join keys, determinism, and the public Python API. |
-| [`docs/service-api.md`](service-api.md) | The `womblex serve` `/v1` service API: deployment, authentication, ownership, and endpoints. |
-| [`docs/egress.md`](egress.md) | The egress bundle layout and its producer/consumer boundaries. |
-| [`docs/model-plugins.md`](model-plugins.md) | Authoring guide for swappable models: slots, entry points, model files. |
-| [`docs/money-extraction.md`](money-extraction.md) | The canonical reference for the `money` annotation op. |
-| [`docs/heuristics_disambiguation.md`](heuristics_disambiguation.md) | CV2/NumPy heuristics used for classification and routing. |
-| [`docs/project-structure.md`](project-structure.md) | File-level map of the source tree. |
-| [`docs/decisions.md`](decisions.md) | Design decisions, rejected alternatives, and known limitations. |
-| [`docs/steering.md`](steering.md) | Current state and prioritisation of upcoming work. |
-| [`docs/evaluation.md`](evaluation.md) | Evaluation metrics and candidate-technology mapping. |
-| [`docs/accuracy/`](accuracy/) | Generated accuracy reports (extraction, chunking, PII, redaction). |
-| [`DESIGN.md`](../DESIGN.md) | The console design system — tokens, components, and accessibility rules. |
+cover *how* the system is built, why decisions were made, or measured accuracy.
 
 ## 1. Local Deployment Optimisation
 
@@ -46,6 +20,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 - Models are bundled or resolved from a local directory, ensuring no network access is needed at runtime.
 - The base installation includes all modules required for local text processing, OCR, chunking, and PII detection.
 - External enrichment services and cloud APIs remain dormant (no outbound calls) until explicitly configured.
+- PII detection runs locally, but its primary candidate source is the enrichment graph: a local-only run with no enrichment and the default config detects nothing. Local-only detection requires opting in to the low-precision regex/context backstop (`pii.use_regex_backstop: true`).
 - A standard CPU-only local environment can successfully execute the supported local pipeline commands.
 
 ## 2. Scale-Out and Environment-Agnostic Execution
@@ -65,7 +40,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 - Distributed run shards can be synced locally and consumed unchanged by local per-stage commands.
 - A stage can execute in-place over object storage using the exact same contract as local file execution.
 - The pipeline natively resolves standard local and cloud storage URIs.
-- Object-storage stage writes are durable by **all-or-none-per-stage publish plus idempotent overwrite**, not by an atomic multi-object write (object stores offer no such primitive). A stage verifies every declared output exists locally before uploading any (`stage_runner._publish`). A `SIDECAR` stage (`MutationMode`) then publishes straight to its live keys: its outputs are new siblings disjoint from its inputs, so a set left partial by a mid-upload transport failure never reads as complete — the runner's skip fires only when **every** declared output is already present, so the next run redoes the base and overwrites (`RemoteStore.upload_file` is a plain `put_file`; overwrite, not create-if-absent). The one `IN_PLACE` stage (`graph-refresh`) rewrites keys that already hold good bytes and is never skipped, so a straight overwrite would be destructive; it commits atomically instead — every output uploads to a temp key under `.staging` first, and only once all have landed does each move onto its live key (`stage_runner._publish_atomic` via `RemoteStore.move`, a server-side rename on S3 and a rename locally). The live keys change only in the fast move phase after the slow uploads have all succeeded, so a crash mid-upload leaves them untouched and orphans only temp objects.
+- Object-storage stage writes are all-or-none per stage: every declared output must exist before any is published; a set left partial by a failed upload never reads as complete, so the next run redoes that base and overwrites it; and a stage that rewrites outputs in place commits atomically, so an interrupted publish leaves the previous outputs intact.
 
 **TO-DO:**
 
@@ -86,15 +61,17 @@ the adjacent concerns and should be consulted rather than duplicated here:
 
 - Ingest is format-dependent and strictly precedes any transform operation.
 - Operations are independent functions that callers compose directly based on business need.
-- Stage ordering is a **partial order** (a dependency DAG), not a single fixed sequence: a stage is a valid next step whenever the sidecars it declares as required inputs are already present. Several orderings are therefore valid — e.g. after `enrich`, `link` (which needs only the enrichment entities) is immediately valid, while `graph-refresh` (the mention→chunk edge rebuild, `build_graph` in `configs/default-isaacus.yaml`) additionally requires that `chunk` has already run; `chunk` → `enrich` is valid because `enrich` reads the extraction text, not the chunk output; independent sidecar ops (`money`, and `embed` once chunks exist) may be appended after any earlier stage that produced their required sidecars.
-- Each operation enforces clear preconditions expressed as required-input edges (e.g., `chunk`/`money` require the extraction sidecars; `embed`/`pii` require chunks; `link` requires enrichment entities). The single linear `PIPELINE_ORDER` is a **presentation and default-dispatch order only** — it is one valid topological sort of the DAG, not the sole valid execution order.
+- Stage ordering is a **partial order** (a dependency DAG), not a single fixed sequence: a stage is a valid next step whenever the inputs it requires already exist. The default dispatch order is one valid topological sort of that DAG, not the sole valid execution order.
+- Each operation enforces its preconditions as required-input edges.
 - A config-disabled stage acts as a passthrough without raising an error.
-- Invalid compositions (a stage run before the sidecars it requires exist) are surfaced with a message naming the producing stage. The surface differs by failure class: a *strict* conditional input that config selected but is absent (e.g. a `processing.text_source` overlay) and a failed pre-flight both refuse **before any base is processed** (`InputContractError` / `StagePreconditionError`). A missing *required* input is handled **per base** by the runner as a `NotReady` state — logged with the producing stage and skipped — and only escalates to a non-zero exit when *every* discovered base is blocked (the still-draining-fleet case is otherwise a warning, not a failure).
-- Register ingests (`ingest_gnaf_directory` / `ingest_abn_xml` / `ingest_abn_directory` / the geo ingest) and text-only extraction (`extract` → `.txt`) are terminal — they have no valid downstream text stages (see Requirement 7).
+- A failed stage preflight (a missing reference register, an unresolvable enrichment deployment, a failed model check) refuses before any document is processed.
+- Invalid compositions (a stage run before the inputs it requires exist, or with a config-selected strict input missing) fail early, with a message naming the producing stage.
+- Register ingests and text-only extraction (`extract` → `.txt`) are terminal — they have no valid downstream text stages.
 
 **TO-DO:**
 
 - **A missing required input is not a fail-fast, before-processing error (re: "Invalid compositions … naming the producing stage").** `stage_runner.run_stage_remote` (`cloud/stage_runner.py`) resolves required inputs *per base* and raises `NotReady`, which is caught and logged as a warning; the run still exits `0` unless the count of not-ready bases equals the total discovered bases (`StageRunSummary.exit_code`). This is deliberate — a still-draining fleet must not read as a stage-ordering error — but it means a genuinely mis-ordered composition over a *partially* processed run neither raises immediately nor fails the run, and the operator only sees a per-base warning. Decide whether to (a) add an explicit up-front composition check (verify the whole DAG's required-input edges against what the store already holds before processing any base, distinguishing "upstream still draining" from "upstream will never run" via the dispatched-stage set), or (b) document the per-base `NotReady`/warning behaviour as the intended contract and soften the acceptance criterion accordingly. **Partly resolved on the queue side:** a *stage job* whose every base is blocked now raises `StageNotReady` (`cloud/worker.py`), which the worker loop **releases** instead of failing — the attempt is not consumed, so a stage claimed ahead of its upstream no longer burns its retry budget and lands terminally failed. That fixes the queue semantics; the up-front whole-DAG composition check above is still open.
+- **A missing strict overlay does not fail early, and locally does not fail at all (re: "invalid stage configurations fail early").** `_resolve_inputs` (`cloud/stage_runner.py`) raises `InputContractError` per base inside the `run_stage_remote` loop, so bases processed before the gap is reached still publish and the remaining bases continue; `run_stage_local` and the per-stage `*_shards()` commands call `load_overlay` without `required=True`, so a declared `processing.text_source` overlay that is missing yields a warning and a sidecar built from verbatim text with a zero exit. Decide whether to (a) check strict conditional inputs across every base before processing any, and pass `required=True` on the local path, or (b) document the per-base remote refusal and the local verbatim fallback as the intended contract.
 
 ## 4. File Profiling, Detection, and Routing
 
@@ -127,7 +104,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 **Acceptance criteria:**
 
 - Native document pages extract selectable text and logical structure directly.
-- Scanned pages undergo layout analysis, deskewing, and dynamic binarization prior to OCR.
+- Scanned pages undergo layout analysis, deskewing, and dynamic binarisation prior to OCR.
 - OCR processes producing an average confidence score below an acceptable threshold (e.g., 40%) raise a warning.
 - The extraction outputs distinct elements (paragraphs, headings, tables, forms, images) with logical reading order preserved.
 
@@ -151,7 +128,8 @@ the adjacent concerns and should be consulted rather than duplicated here:
 
 **TO-DO:**
 
-- **Multi-row / hierarchical headers are emitted for DOCX only; spreadsheets and the legacy table view still collapse to row 0.** `DocxExtractor` (`strategies_file.py`) now populates `header_rows` with the full leading run of `w:tblHeader`-declared rows, so a multi-row Word table header is preserved. Two producers remain single-row: spreadsheet headers are hard-coded to row 0 (`_emit_sheet`, `_sheet_rows`), so a genuine multi-row header is collapsed by pandas into one row and the extra header rows become data rows; and `table_to_element` (`views.py`) reconstructs a legacy `TableData`, whose flat `headers` list cannot carry more than one header row. No **cell-level** header-row coordinate is carried yet — `header_rows` lives on the table element, not on each `Cell`. Decide whether to (a) detect and emit multi-row headers from the spreadsheet layout too and add a per-cell header-row coordinate (a `Cell`/sidecar schema change), or (b) document single-row-header as the intended contract for the spreadsheet and legacy-view producers.
+- **Multi-row / hierarchical headers are emitted for DOCX only; spreadsheets and the legacy table view still collapse to row 0.** `DocxExtractor` (`strategies_file.py`) now populates `header_rows` with the full leading run of `w:tblHeader`-declared rows, so a multi-row Word table header is preserved. Two producers remain single-row: spreadsheet headers are hard-coded to row 0 by the producer (`ingest/spreadsheet.py`: `split_preamble` picks one header row and `_emit_sheet` keeps it at row 0; `_sheet_rows` in `process/money_stage.py` is a consumer that inherits it), so a genuine multi-row header is collapsed by pandas into one row and the extra header rows become data rows; and `table_to_element` (`views.py`) reconstructs a legacy `TableData`, whose flat `headers` list cannot carry more than one header row. No **cell-level** header-row coordinate is carried yet — `header_rows` lives on the table element, not on each `Cell`. Decide whether to (a) detect and emit multi-row headers from the spreadsheet layout too and add a per-cell header-row coordinate (a `Cell`/sidecar schema change), or (b) document single-row-header as the intended contract for the spreadsheet and legacy-view producers.
+- **`formula` is never captured.** The element schema carries `formula`, but no spreadsheet producer sets it, so it is always null. The XLSX openpyxl pass in `ingest/spreadsheet.py` already loads formulas (no `data_only`), so it can carry them alongside pandas' cached values.
 
 ## 7. Standalone Reference Register Ingestion
 
@@ -169,7 +147,11 @@ the adjacent concerns and should be consulted rather than duplicated here:
 - Large XML streams are parsed in constant memory to prevent out-of-memory errors on bulk extracts.
 - Spatial files preserve their original geometry, attributes, and coordinate reference systems.
 - File-level malformations isolate failures, logging the error and discarding partial output without halting the directory ingest.
-- Register ingestion explicitly bypasses the extraction/NLP pipeline. The bypass is **structural, not enforced**: register ingests write self-contained (Geo)Parquet with their own schemas and no `source_hash`/element layout, so the text-based downstream stages — which discover work by globbing the extraction sidecars (`*.elements.parquet` / `*.chunks.parquet`) — never see register output. Nothing actively rejects an operator who points a downstream stage at a register directory; it is incompatible by construction rather than blocked by a guard.
+- Register ingestion bypasses the extraction/NLP pipeline: its output carries no extraction sidecars, so text-based downstream stages never discover it. The bypass is structural; no guard rejects a downstream stage pointed at a register directory.
+
+**TO-DO:**
+
+- **G-NAF and geospatial writes are not guarded against partial output (re: "discarding partial output without halting the directory ingest").** `gnaf.ingest_psv` calls `pq.write_table` unguarded, so a write failure propagates out of `ingest_gnaf_directory` and halts the directory ingest, possibly leaving a partial file. `geospatial.ingest_shapefile` catches a `to_parquet` failure and records it on the result but does not remove the partial file, and its follow-up provenance rewrite (`pq.read_table` / `pq.write_table`) is unguarded. Decide whether to (a) guard both writes and unlink partial output on failure, as `abn_bulk` does, or (b) narrow the criterion to read-failure isolation for these two ingests.
 
 ## 8. Output Data Contract & Persistence Integrity
 
@@ -189,10 +171,10 @@ the adjacent concerns and should be consulted rather than duplicated here:
 - A unified run-level manifest correctly consolidates provenance, statuses, and counts for all source files.
 - A persistence verifier ensures all required shard files exist, are readable, match expected document counts, and prevent accidental overwrites.
 - `source_hash` is content-addressed (SHA-256 of the source bytes) and stable across environments and runs; logical row order within a shard is stable given the same inputs and iteration order.
-- Output is **not** byte-for-byte reproducible across runs: the manifest stamps a wall-clock `extracted_at_iso`, and Parquet writes do not pin the writer's embedded metadata (`created_by`, timestamp coercion, statistics). The determinism contract is on *content*: for a given `source_hash` + `womblex.version` + `config_digest` + `womblex.models`, extraction content and row order are stable, so the manifest's `content_digest` (SHA-256 over each document's ordered elements: kind, order, text, table cells, form fields, spreadsheet cells, alt text, meta) matches. A consumer re-running later compares `content_digest`; a mismatch is explained by the stamped version, config and model digests and never blocks output. File bytes and `extracted_at_iso` are not part of the guarantee. A manifest written before the column reads `content_digest` as null.
-- Every pipeline Parquet carries a `womblex.contract_version` footer key (versioned apart from the package) and a `womblex.sensitivity` key of `raw`, `masked`, or `none` by file role; an unknown role reads as `raw`. `egress_manifest.json` carries the contract version too. An additive column is a minor bump with reader back-fill; a rename or removal is a major bump with a reader shim. A file with no contract key reads as `1.0`-compatible.
+- Output is **not** byte-for-byte reproducible across runs; content is. For a given `source_hash`, version, configuration and model set, extraction content and row order are stable, and the manifest's per-document `content_digest` lets a later run confirm it. A mismatch is explained by the stamped version, configuration and model digests and never blocks output.
+- Every pipeline Parquet and `egress_manifest.json` declare a contract version, versioned apart from the package, and every pipeline Parquet declares its sensitivity (`raw`, `masked` or `none`). Additive schema changes are back-filled for older files; renames and removals ship a reader shim.
 - Only files whose footer says `masked` or `none` are safe to hand onward; anything `raw`, or with no sensitivity key, stays inside the trust boundary.
-- `womblex.__all__` declares the stable Python API, pinned by a test, and resolves lazily so `import womblex` does not load the extraction stack. A name in it is removed or changed incompatibly only after one minor release emitting a `DeprecationWarning` that names the replacement.
+- `womblex.__all__` declares the stable Python API, pinned by a test; `import womblex` does not load the extraction stack. A name in it is removed or changed incompatibly only after one minor release emitting a `DeprecationWarning` that names the replacement.
 
 ## 9. Redaction Handling
 
@@ -206,15 +188,15 @@ the adjacent concerns and should be consulted rather than duplicated here:
 
 **Acceptance criteria:**
 
-- Pages are rendered visually to detect solid redaction regions (a vector `get_drawings()` fast path for native filled rectangles, falling back to CV2 contour detection on the rasterised page).
+- Solid redaction regions are detected per page, whether drawn as native filled shapes or present only in the page image.
 - Multiple modes are supported: `flag` (annotation only, no text change), `blackout` (prepend a `<REDACTED>` marker to affected page text), and `delete` (clear affected page text). The `<REDACTED>` marker is a content marker, distinct from the human-readable warning strings described below.
 - A redaction report is attached to the extraction result, and per-page warning strings (e.g. `page N: K redacted region(s) detected`) are appended to the extraction's warnings.
-- Detected redactions are written as an independent Parquet sidecar (`*.redactions.parquet`) **only on the standalone `womblex redact --shards --pdfs` path** (`redact/batch.py`). The in-process E2E `run` path (`batch.py` → `run_redaction`) does **not** emit a redactions sidecar — it annotates the in-memory extraction result (element `meta['has_redaction']`, warning strings, and `has_redaction` folded onto chunks downstream) and, for `blackout`/`delete`, mutates page text in place.
-- Redaction runs at a single fixed point in the pipeline (extraction → redaction detection, per `batch.py`); there is **no** timing/pipeline-point configuration for it. `RedactionConfig` exposes only `enabled`, `mode`, `threshold`, `min_area_ratio`, `max_area_ratio`, `dpi`, and `use_layout_filter`.
+- Detected redactions are written as an independent Parquet sidecar (`*.redactions.parquet`).
+- Redaction detection runs at a single fixed point, immediately after extraction.
 
 **TO-DO:**
 
-- **Redaction has no configurable pipeline point, contrary to earlier documentation.** `RedactionConfig` (`config.py`) carries no `pipeline_point`/timing field, and `batch.py` runs redaction detection at one fixed position (immediately after extraction, before any downstream stage). The claim that redaction runs "at configurable pipeline points (post_chunk, post_enrichment)" in `CLAUDE.md` and older docs appears to be conflated with `PIIConfig.pipeline_point` — that configurability exists for the **PII** stage, not redaction. Decide whether to (a) add a genuine `RedactionConfig.pipeline_point` (post_extraction / post_chunk / post_enrichment) mirroring the PII stage if before/after-chunking placement is actually wanted, or (b) treat the fixed post-extraction position as the intended contract and correct the stale `CLAUDE.md` wording accordingly.
+- **Redaction has no configurable pipeline point, contrary to earlier documentation.** `RedactionConfig` (`config/__init__.py`) carries no `pipeline_point`/timing field, and `batch.py` runs redaction detection at one fixed position (immediately after extraction, before any downstream stage). The claim that redaction runs "at configurable pipeline points (post_chunk, post_enrichment)" in `CLAUDE.md` and older docs appears to be conflated with `PIIConfig.pipeline_point` — that configurability exists for the **PII** stage, not redaction. Decide whether to (a) add a genuine `RedactionConfig.pipeline_point` (post_extraction / post_chunk / post_enrichment) mirroring the PII stage if before/after-chunking placement is actually wanted, or (b) treat the fixed post-extraction position as the intended contract and correct the stale `CLAUDE.md` wording accordingly.
 - **The independent redactions sidecar is only written on the standalone shard CLI, not the E2E `run` path.** `redact/batch.py::annotate_redactions_for_shards` writes `*.redactions.parquet`, but `operations/redact.py::run_redaction` (the path `batch.py` invokes during `womblex run`) persists nothing standalone — redaction survives only as in-memory annotations on the extraction result. Decide whether to (a) have the E2E path also emit `*.redactions.parquet` so the "independent sidecar" contract holds uniformly, or (b) document the two paths' divergence (E2E = in-line annotation; shard CLI = independent sidecar) as intended and keep the acceptance criterion qualified as above.
 
 ## 10. Chunking and AI Chunking Reuse
@@ -230,7 +212,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 **Acceptance criteria:**
 
 - Narrative text and markdown-converted tables are chunked independently with specific tags.
-- Token counting utilizes a local tokenizer to ensure no network dependency.
+- Token counting uses a local tokenizer to ensure no network dependency.
 - Partial redaction markers that split across boundaries are automatically repaired in the chunk overlay.
 - Optional AI chunking uses semantic boundaries, leveraging previously persisted enrichment data if it matches the source text.
 - If AI chunking detects a mismatch with previously persisted enrichment, it falls back to self-enrichment rather than using mismatched data.
@@ -238,24 +220,25 @@ the adjacent concerns and should be consulted rather than duplicated here:
 ## 11. PII Detection and Masking
 
 **As** a user,
-**I want** PII detected, masked, and retained reversibly for authorized audits,
+**I want** PII detected, masked, and retained reversibly for authorised audits,
 **so that** sensitive data is protected for publication without destroying internal provenance.
 
-**Given** an extracted document (and optionally post-enrichment spans)
+**Given** a chunked shard directory, normally already enriched
 **When** the operator runs the PII stage
 **Then** sensitive spans are replaced with typed tags, generating an auditable sidecar and a clean-text layer.
 
 **Acceptance criteria:**
 
-- Candidates for entities like persons and addresses are generated contextually and validated via embedding similarities.
-- If run post-enrichment, external entity spans are merged into the PII candidates.
-- Identified PII spans in the clean-text layer are replaced with normalized typed tags (e.g., `<PERSON_1>`).
+- On the per-stage path (`womblex pii`), candidates are the enrichment graph's person and address entities, mapped onto narrative chunks. The regex/context backstop runs only when `pii.use_regex_backstop` is set (default `false`); with no enrichment and the backstop off, nothing is detected.
+- The stage is terminal: it runs after enrich and embed, never rewrites `*.chunks.parquet`, and writes the masked layer as a separate `*.clean_text.parquet` (when `pii.write_clean_text`, the default).
+- The in-memory PII operation runs at a configurable point (`pii.pipeline_point`): before enrichment it uses the regex/context detector, and after enrichment it merges graph spans with it.
+- Identified PII spans in the clean-text layer are replaced with normalised typed tags (e.g., `<PERSON_1>`).
 - The spans are written to an independent Parquet sidecar (`*.pii_spans.parquet`) that retains each span's original text plus its chunk offsets and graph `entity_id` — the audit record from which an authorised reversal can be reconstructed against the clean-text layer. The sidecar is a reversal-enabling audit layer; no automatic un-masking operation is implemented.
 
 ## 12. Knowledge Graph and External Enrichment
 
 **As** a user,
-**I want** entities and relationships extracted via external APIs and synchronized into a unified document graph,
+**I want** entities and relationships extracted via external APIs and synchronised into a unified document graph,
 **so that** structured mentions accurately map back to their source chunks regardless of run order.
 
 **Given** a chunked extraction result and configured external enrichment credentials
@@ -283,7 +266,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 
 - The annotation scans baseline element and table-cell streams (chunking is not a precondition).
 - Narrative spans index the same coordinate space as enrichment mentions, allowing seamless joins at query time.
-- Output is order-independent within a run: the money sidecars carry identical rows (same `source_hash`, same logical order) whether the stage runs before or after the knowledge-graph stages, because money reads only the extraction sidecars and never stamps the wall-clock `extracted_at_iso`. The timestamp half of the Requirement 8 cross-run caveat therefore does not apply to it; the Parquet-writer-metadata half (`created_by`, encoding) is shared with every sidecar.
+- Output is order-independent within a run: the money sidecars carry identical rows whether the stage runs before or after the knowledge-graph stages.
 - Cell annotations carry their sheet, parent element order, row, and column coordinates. Where an amount sits in a merged region, the merge extent lives on the source cell's `merge_range` (Requirement 6), not on the money span row, and the column's evidencing header is recorded only as joined text on the `money_columns` sidecar. A header-row coordinate is still not carried.
 
 **TO-DO:**
@@ -297,7 +280,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 **so that** I can manage large runs, recover from failures, and inspect outputs easily.
 
 **Given** a configured run (local or distributed)
-**When** the operator utilizes the CLI or Web UI
+**When** the operator uses the CLI or Web UI
 **Then** documents process in isolated, resumable batches, with independent stage controls and visual inspection capabilities.
 
 **Acceptance criteria:**
@@ -320,7 +303,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 
 **Acceptance criteria:**
 
-- The console is an admin and debugging utility, not an integration surface: other software submits and reads work through the authenticated, owner-scoped `womblex serve` `/v1` API or reads the on-disk contract ([`docs/contract.md`](contract.md)). The console has no authentication and binds to loopback unless told otherwise.
+- The console is an admin and debugging utility, not an integration surface: other software submits and reads work through the authenticated, owner-scoped `womblex serve` `/v1` API or reads the on-disk data contract. The console has no authentication and binds to loopback unless told otherwise.
 - The console binds to exactly one run source at construction (local output root or store URI) so no endpoint can be steered to read an unmounted directory.
 - A persistent top bar (global search, run selector, execution controls) and a side-nav rail route between the Dashboard, Corpus Inspector, Semantic Chunk Inspector, Pipeline Composer, and Resources Console.
 - The console is a reader over persisted artefacts and never edits a stage output; its only writable surfaces are dispatch and preset saving.
@@ -343,7 +326,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 - Job status is rendered with the exact values the system writes (`pending` / `running` / `done` / `failed`), plus `stale` for a running row past its lock timeout and `skipped`.
 - The dashboard only *names* a stalled job for a worker to recover; it never requeues, cancels, or claims work itself.
 - Polling is paused while the browser tab is hidden so a backgrounded console stops hitting the queue.
-- Per-stage progress renders in the declared presentation order (`PIPELINE_ORDER`, e.g. enrich before chunk) rather than an ad-hoc frontend ordering — a display convention over the dependency DAG, not a claim that this is the only valid execution order (see Requirement 3).
+- Per-stage progress renders in the declared pipeline order rather than an ad-hoc frontend ordering.
 - Batch and stage logs for the run are listed newest-first and are individually viewable.
 
 ## 17. Corpus Inspector — Document Grid and Integrity Audit
@@ -360,7 +343,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 
 - The grid uses real table semantics with a sticky header, row virtualisation, and an announced total row count for accessibility.
 - Document status is conveyed by a status pill (icon plus label), never by row background tint alone.
-- A checkpoint switcher reports which stages are present for the run, ordered by the declared presentation order (`PIPELINE_ORDER`; see Requirement 3 for why this is a display convention, not the sole valid execution order).
+- A checkpoint switcher reports which stages are present for the run, in the declared pipeline order.
 - A verify-shards action runs the persistence audit, confirming required shard files exist, are readable, and match expected document counts.
 - The grid supports a failed-only filter and a user-selectable density (comfortable / default / compact) persisted locally.
 
@@ -514,7 +497,7 @@ the adjacent concerns and should be consulted rather than duplicated here:
 - The layout model applies to redaction detection as well as extraction.
 - Changing the PII context model is supported. The docs state that `context_similarity_threshold` must be recalibrated when it changes.
 - With no plugin configured, `content_digest` is unchanged on every vendored fixture.
-- [`model-plugins.md`](model-plugins.md) documents each slot's interface and how a package registers a model, with a minimal example.
+- The model-plugin guide documents each slot's interface and how a package registers a model, with a minimal example.
 
 **Out of scope:** model provenance (26), `/v1` submission controls (a submitted config only selects stages; workers run under the operator's config), container-image packaging of plugins, and slots that need a Parquet schema change, each needing its own requirement (25 and 26, and the rest): the enrichment provider, AI chunking with a non-Isaacus model, graph-driven PII detection, link-stage candidates, `graph_refresh`, the enrichment token-budget tokeniser, per-page or per-element OCR engine recording, and the embedder provider (including any CPU embedding baseline).
 
@@ -559,8 +542,15 @@ the adjacent concerns and should be consulted rather than duplicated here:
 
 ## Outstanding
 
-Requirements not yet met. Each entry is written in the same form as the numbered requirements above. When one is fully met, it moves into the numbered list (or is deleted if it is no longer wanted) in the same PR that meets it.
+Requirements not yet fully met. The detail lives in the **TO-DO** block under each requirement; this list is the index. When a gap is closed (or the criterion is deliberately narrowed), its TO-DO block and its entry here are removed in the same PR.
 
-None outstanding.
+
+- **Requirement 2 (Scale-Out):** Azure storage URIs (`az://` / `abfs://`) are not credential-wired, and the enrichment paths have no Azure ML connection.
+- **Requirement 3 (Ingest-First Data Flow):** no up-front whole-DAG composition check; a missing strict `text_source` overlay is refused per base remotely and falls back to verbatim locally with only a warning.
+- **Requirement 6 (Native Office and Spreadsheet Extraction):** multi-row headers are emitted for DOCX only; spreadsheets and the legacy table view collapse to row 0, no per-cell header-row coordinate exists, and cell formulas are never captured.
+- **Requirement 7 (Standalone Reference Register Ingestion):** G-NAF and geospatial writes are not guarded against partial output.
+- **Requirement 9 (Redaction Handling):** no redaction `pipeline_point`, and the E2E `run` path writes no `*.redactions.parquet`.
+- **Requirement 13 (Money Annotation):** the money span row carries no merge extent or header-row coordinate.
+- **Requirements 17 and 21 (Corpus Inspector; Console Design System):** `DocumentGrid.svelte` is not virtualised and emits no `aria-rowcount`.
 
 ---

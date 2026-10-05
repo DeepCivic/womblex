@@ -1,8 +1,5 @@
 # Extraction output
 
-Consumer-facing guarantees (contract version, sensitivity, determinism, public
-API): [contract.md](contract.md).
-
 Extraction reads a source file and produces an ordered stream of
 elements. An element is one thing a reader sees: a paragraph, a
 heading, a table, a form, an image. Spreadsheets get cell-grained
@@ -41,12 +38,12 @@ verbatim text because the writer reads `elements`, not `pages`.
 | `paragraph` | prose block (default for unclassified text) |
 | `heading` | heading-styled prose (large font, or bold short non-sentence text) |
 | `list_item` | sub-paragraph marker `(a)` / `(i)` / `(1)` / bullet `•·-*` at start of block |
-| `caption` | figure / table caption — emitted by the DocLayNet layout model's `Caption` class on OCR'd pages |
+| `caption` | figure / table / chart caption — emitted by the PP-DocLayout-M layout model's `figure_title` / `table_title` / `chart_title` classes on OCR'd pages (`ingest/layout_onnx.py` `LABEL_MAP`) |
 | `header` | short text in top 8% of page (letterhead-style content) |
 | `footer` | page-number footer or short text in bottom 8% of page |
-| `footnote` | sub-paragraph note — emitted by the DocLayNet layout model's `Footnote` class on OCR'd pages |
+| `footnote` | sub-paragraph note — emitted by the PP-DocLayout-M layout model's `footnote` class on OCR'd pages |
 | `signature` | signatory block (reserved; not currently emitted) |
-| `figure` | layout-detected visual region (no extracted image data). A full-page scan whose dominant layout region is a figure but which OCR's to substantial text (≥5 words) is reclassified to `paragraph` so its content reaches chunking — only sparse regions (page-number stamps, bare logos) stay `figure`. See [decisions.md](decisions.md) "Element-kind classification" |
+| `figure` | layout-detected visual region (no extracted image data). A full-page scan whose dominant layout region is a figure but which OCR's to substantial text (≥5 words) is reclassified to `paragraph` so its content reaches chunking — only sparse regions (page-number stamps, bare logos) stay `figure` |
 | `image` | extracted image with alt text |
 | `table` | table; cells nest on `Element.cells` in memory, flatten to a sidecar in parquet |
 | `form` | form region; fields nest on `Element.fields`, flatten to a sidecar in parquet |
@@ -63,18 +60,20 @@ preserves them. If an extractor produces wrong bytes due to its own
 bug (e.g. broken ToUnicode font maps), the fix belongs in the
 extractor, not as a post-processing pass.
 
-This is a hard reversal of the prior `_normalise_text` behaviour.
 Downstream stages may apply their own cleaning to `pages[i].text`,
 but the on-disk parquet always reflects extraction-time content.
 
 **Scope of the verbatim guarantee.** The guarantee covers
-`*.elements.parquet` only. As of I2 (2026-05-27), chunks are also
-built from `elements` (via `reassemble_narrative` over TEXT_KINDS
+`*.elements.parquet` only. Chunks are built from `elements` (via `reassemble_narrative` over TEXT_KINDS
 elements joined with `\n\n`), so `*.chunks.parquet` text is
-*extraction-verbatim* too. In-memory `pages[i].text` mutations from
-PII / redact-blackout under `womblex run` no longer flow to chunks;
-downstream consumers that need post-rewrite text will read it from
-a future `*.clean_text.parquet` sidecar (P1, not yet written).
+*extraction-verbatim* as well when `processing.text_source` is `elements`
+(the default). With `text_source` set to `normalised` or `spellfix`,
+that cleaning layer's element-text overlay is applied before
+reassembly (`process/text_overlay.py`), so chunk text is the cleaned
+text, not the raw extraction. In-memory `pages[i].text` mutations from
+PII / redact-blackout do not flow to chunks;
+consumers that need masked text read the `*.clean_text.parquet`
+sidecar the `pii` stage writes (`store/pii_output.py`).
 
 ---
 
@@ -90,40 +89,6 @@ batch-0001.form_fields.parquet  # children of kind='form' elements
 batch-0001._manifest.parquet    # one row per source file
 ```
 
-Downstream stages add their own siblings — the chunking stage
-(`womblex chunk --shards`) writes a fifth file `batch-0001.chunks.parquet`.
-See [dataflow.md](dataflow.md) for the chunks schema.
-
-#### Chunking adapter boundary
-
-`process/chunker.py` is a thin adapter over **semchunk 3.x** (audited
-I5, 2026-05-30). semchunk owns all chunking; Womblex handles only what
-semchunk can't — parquet I/O, element-stream → `ChunkInput` projection,
-source-hash plumbing, and `<REDACTED>` cross-boundary repair. Every
-`ChunkingConfig` field either maps directly to a semchunk parameter
-(`tokenizer`, `chunk_size`, `memoize`, `cache_maxsize`,
-`max_token_chars` → `chunkerify`; `overlap`, `processes`, `progress` →
-`Chunker.__call__`) or is a Womblex-only concern (`enabled` stage gate,
-`chunk_tables` projection). There is **no** Womblex toggle that
-re-exposes a semchunk feature under a different name — semchunk's
-parameters *are* the feature surface. Three defaults diverge from
-upstream, each for a measured corpus reason:
-`tokenizer="isaacus/kanon-2-tokenizer"` (matches the analysis side),
-`chunk_size=480` (Kanon-2 window — upstream defaults to `None`, which
-auto-derives the size from the tokeniser's `model_max_length`; that
-path still passes through if `chunk_size` is set to `null`),
-`processes=1` (Chromebook portability). The Kanon-2 tokeniser is free on
-Hugging Face (vendored under `_models/kanon-2-tokenizer`, resolved
-locally), so chunk-size counting is exact and offline. **Plain token
-chunking therefore needs no API key** and runs in an air-gapped deployment
-— the chunk stage gates only on the tokeniser resolving locally
-(`womblex.utils.availability.tokenizer_available`). **AI chunking**
-(`chunking_model`) is the one path that calls the Isaacus API per document;
-it alone gates on a configured deployment — `ISAACUS_API_KEY` or
-`ISAACUS_SAGEMAKER_ENDPOINTS`
-(`womblex.utils.availability.isaacus_available`). `offsets=True` is pinned
-in the adapter because Womblex always needs char offsets for page mapping.
-
 ### elements.parquet
 
 | column | type | notes |
@@ -134,11 +99,11 @@ in the adapter because Womblex always needs char offsets for page mapping.
 | `kind` | string | one of the kinds in the table above |
 | `extractor` | string | producing extractor (`native_text`, `ocr_paddle`, `docx`, `xlsx`, `spreadsheet_print`, `figure_image`, …) |
 | `confidence` | float32 | 0–1, extractor-reported |
-| `page`, `bbox` | int32 / struct | document layout; nullable for non-PDF / non-DOCX |
+| `page`, `bbox` | int32 / struct | document layout; null for anything not laid out by the PDF / image path (DOCX, text, spreadsheets) |
 | `text`, `alt_text` | string | content for text-bearing kinds and images |
 | `header_rows` | list&lt;int32&gt; | for `kind='table'`, the row indices that act as headers |
 | `sheet`, `row`, `col` | string / int32 | spreadsheet location |
-| `value`, `value_type`, `formula`, `number_format`, `merge_range` | string | spreadsheet cell payload |
+| `value`, `value_type`, `formula`, `number_format`, `merge_range` | string | spreadsheet cell payload; `merge_range` is set on a merge's anchor cell only; `formula` is in the schema but never set by ingest (always null) |
 | `meta` | map&lt;string,string&gt; | parser-specific overflow |
 
 ### table_cells.parquet
@@ -176,7 +141,7 @@ One row per source file in the batch.
 | `source_relpath` | string — path under that root; root + relpath names the document |
 | `extraction_method` | string |
 | `elements_count`, `table_cells_count`, `form_fields_count` | int64 |
-| `status` | string — `completed` or `error` |
+| `status` | string — `completed` (only completed results are written; a failed document gets no row) |
 | `error` | string — empty on success |
 | `extracted_at_iso` | string |
 | `parser_version` | string |
@@ -184,33 +149,18 @@ One row per source file in the batch.
 
 All four shard files also carry the ingest root, the collection and the
 batch's relative paths in their Parquet footer key-value metadata, under
-`womblex.*` keys — the namespace `store/register_manifest.py` already reads
-back from the register ingests. Footer metadata is additive: a reader that
-ignores it reads the file unchanged. `ingest_root` is declared by
-`paths.ingest_root` (or, unset, by `paths.input_root`) and is never inferred
-from the working directory; both columns are empty for a writer that declared
-no root. Masking never rewrites either — the manifest is not a masking
+`womblex.*` keys, alongside the run-stamp and contract keys every pipeline
+Parquet carries. Footer metadata is additive: a reader that ignores it reads
+the file unchanged. `ingest_root` is declared by `paths.ingest_root` (or,
+unset, by `paths.input_root`) and is never inferred from the working
+directory; both `ingest_root` and `source_relpath` are empty for a writer that
+declared no root. Masking never rewrites the manifest — it is not a masking
 surface, and a `pii` run over a completed run leaves it byte-identical.
-
-The same footer also names the run: `womblex.run_id`, `womblex.version`,
-`womblex.commit`, `womblex.config_digest` and `womblex.stage`, so a shard read
-outside its run directory still says what produced it. `womblex.commit` is the
-source the version was built from — resolved from the work tree or a build
-stamp, and `unavailable:<reason>` where neither answers, since a version alone
-does not identify a build. Every downstream sidecar carries the five keys as
-well, but does not declare them — a stage is handed a shard directory rather
-than a run, so it inherits `run_id` and `config_digest` from a stamped sibling
-of its batch and stamps its own `version`, `commit` and `stage`. The
-sibling is the `.elements.parquet` or the manifest by preference, then any
-sibling of the batch: a stage worker stages in only the inputs its contract
-declares, and several stages never see the elements shard. A sidecar whose
-siblings carry no run, or name two, is written unstamped rather than given an
-invented run.
 
 ### *.redactions.parquet (optional sidecar)
 
 Written by `womblex.redact.batch.annotate_redactions_for_shards` as an
-opt-in 5th sibling alongside the four canonical shards. One row per
+opt-in sibling alongside the four canonical shards. One row per
 element on a page where redactions were detected; elements without nearby
 redactions have no row.
 
@@ -237,10 +187,7 @@ sparse parquet keyed by `source_hash` (plus `elem_order` for
 element-level sidecars, or offset ranges for chunk-level), LEFT-JOIN-
 with-default semantics, opt-in (absence is a valid state). Keeps the
 elements shards canonical and avoids rewriting them when downstream
-annotations land. As of I2 (2026-05-27), chunks land via this pattern
-(`batch-NNNN.chunks.parquet`, schema in
-[dataflow.md](dataflow.md)). PII / `clean_text` sidecars (P1) are
-next.
+annotations land.
 
 ---
 
@@ -289,17 +236,3 @@ For forms, replace `table_cells` with `form_fields` and `kind='form'`.
 Failures raise `ShardVerificationError` and halt the batch run.
 
 ---
-
-## What changed from the previous schema
-
-The previous output was one parquet file per batch with nested struct
-lists for tables / forms / images / text_blocks. That shape made the
-budget-statement class of documents (narrative interleaved with
-tables) unrepresentable — the on-disk order between a table and the
-paragraph before it was lost. It also forced spreadsheets to
-masquerade as documents by emitting one ExtractionResult per row, a
-shape that doesn't match how spreadsheets are queried.
-
-The element-stream shape solves both: `elem_order` preserves
-interleaving; spreadsheet cells are first-class. Sidecars give dense
-typed access to cell content without exploding the elements table.

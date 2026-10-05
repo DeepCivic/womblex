@@ -8,10 +8,10 @@ Reference for CV2 and NumPy-based heuristics used in document classification and
 
 | Heuristic | Signal | Technical Reference | Status |
 |-----------|--------|---------------------|--------|
-| Skew angle (`minAreaRect`) | Scan indicator | `heuristics_cv2.detect_skew_angle` | ✓ Implemented |
+| Skew angle (`Canny` + `HoughLinesP`) | Scan indicator | `heuristics_cv2.detect_skew_angle` | ✓ Implemented |
 | Horizontal ruled line detection (morphology) | Handwriting indicator | `morphology._has_ruled_lines` | ✓ Implemented |
-| Solid rectangle detection (`findContours` + fill) | Redaction indicator | `redact.detector.RedactionDetector.detect` | ✓ Implemented (fallback — see note below) |
-| Large dark connected components (`connectedComponentsWithStats`) | Redaction indicator | `redact.detector.RedactionDetector._is_redaction_candidate` | ✓ Implemented (fallback — see note below) |
+| Dark-region contours (inverse threshold + `findContours`) | Redaction indicator | `redact.detector.RedactionDetector.detect` | ✓ Implemented (fallback — see note below) |
+| Contour bounding-box area ratio + aspect filter | Redaction indicator | `redact.detector.RedactionDetector._is_redaction_candidate` | ✓ Implemented (fallback — see note below) |
 | Connected component bounding box regularity | Typed vs handwritten | `morphology._analyze_glyph_regularity` | ✓ Implemented |
 | Stroke width variance (erosion/dilation) | Typed vs handwritten | `morphology._analyze_stroke_width_variance` | ✓ Implemented |
 | Table/grid detection (morphological line extraction) | Structured content | `heuristics_cv2.detect_table_grid` | ✓ Implemented |
@@ -24,7 +24,7 @@ Reference for CV2 and NumPy-based heuristics used in document classification and
 | Colour uniformity inside dark bounding boxes | Redaction confidence | — | Not implemented |
 | Cardinal rotation (90°/180°/270°) | Orientation correction | — | Not implemented |
 
-`RedactionDetector` (CV2 contour/connected-component path) is the **fallback**
+`RedactionDetector` (CV2 threshold + contour path) is the **fallback**
 detector, not the primary one: `redact/stage.py`'s `detect_redactions()` tries
 a vector-first path over `page.get_drawings()` (filled near-black rectangles)
 first, and only falls back to `RedactionDetector` when that finds nothing.

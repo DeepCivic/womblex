@@ -1,6 +1,6 @@
 # Permissive dependencies — plan
 
-*Status: proposed (2026-10). No merge has shipped. Each merge updates this document's merge list as it lands, and the document is retired into `decisions.md` once F2 ships.*
+*Status: in progress (2026-10). L1 has shipped (#130), and the README layout step is done, landing with the README edit. Fresh accuracy and benchmark runs wait on the revision of the womblex-collection ground-truth files, so every step gated on a GT-scored report waits with them. Each merge updates this document's merge list as it lands, and the document is retired into `decisions.md` once F2 ships.*
 
 ## Context
 Womblex is Apache-2.0. Two of its core dependencies are licensed AGPL-3.0, with a paid commercial licence as the only alternative:
@@ -14,6 +14,10 @@ The plan removes both and declares any capability that is lost.
 - Both dependencies go.
 - YOLO is removed outright, not kept as an optional extra.
 - The replacement layout model is committed under `src/womblex/_models/`.
+- YOLO is retired as part of adapting womblex for cloud deployment, where any layout model can be plugged into the registry's layout slot and benchmarked on consumption pricing. No controlled YOLO-versus-PP-DocLayout run is made; the last YOLO numbers are the 2026-08 reports.
+- Layout becomes its own stage (L3), so a layout model can be tuned and measured on its own.
+- Until L3 ships, the README states that layout detection is not supported for local deployment.
+- L1-B waits on the ground-truth revision. L2 does not wait for it.
 
 **What layout actually feeds.** On every page where layout succeeds, the non-table regions collapse into one OCR text block. The model therefore contributes only three things:
 - table rects, passed to `reconstruct_table` in `ingest/strategies_scanned.py`;
@@ -69,21 +73,29 @@ Check these against the vendored fixtures and the womblex-collection PDFs before
   - whether PDFium is safe to call from `womblex serve`'s threads.
 
 ### Layout
-- **L1 (W).**
-  - Add `PPDocLayoutAnalyzer`, satisfying the `LayoutAnalyzer` protocol (`ingest/interfaces/protocols.py`). It goes in `ingest/paddle_ocr.py`, or in a new `ingest/layout_onnx.py` if that file would pass the cap.
-  - Read `label_list` and the preprocessing from the model's own `inference.yml`.
-  - Map labels to `block_type`: table to `table`; image, chart and seal to `figure`; the rest to text kinds. Keep the 0.3 threshold.
-  - Commit `_models/pp-doclayout-m/inference.{onnx,yml}`. Leave it out of package-data, as the YOLO weights are, and resolve it with `utils/models.resolve_local_model_path`.
-  - Repoint `get_layout_analyzer()`. `strategies_scanned.py` and `redact/stage.py` key off `block_type` and do not change.
-  - Docs: `docs/models.md` (source revision, `paddle2onnx` version, SHA-256), `_models/README.md`, `architecture.md`, `project-structure.md`, the `CLAUDE.md` row and CHANGELOG.
-- **L1-B (B).**
-  - Bring `DOCLAYNET_TO_WOMBLEX` and the report wording in line with the new labels.
-  - Regenerate `EXTRACTION.md`, the table benchmark, the false-table cohort and `REDACTION_HANDLING.md`.
-  - Spot-check exclusion area on the 02737-class scanned forms.
-- **L2 (W, approval).** One dependency-scoped removal:
+- **L1 (W). Shipped (#130).** `PPDocLayoutAnalyzer` in `ingest/layout_onnx.py`, the model under `_models/pp-doclayout-m/`, registered as the default of the registry's layout slot (`pp-doclayout-m`). Two follow-ups, which ride with L2:
+  - add the `layout_onnx.py` row to the `CLAUDE.md` module table;
+  - `onnxruntime` is imported with `type: ignore[import-untyped]`; L2's direct dependency replaces it with a mypy override.
+
+  Re-exporting the model: `PaddlePaddle/PP-DocLayout-M` at the revision in `docs/models.md`, then `paddle2onnx --model_dir . --model_filename inference.json --params_filename inference.pdiparams --save_file inference.onnx --opset_version 14` in a venv with `paddle2onnx`, `paddlepaddle`, `onnx`, `onnxruntime` and `setuptools` (`paddle2onnx` 2.1.0 needs `setuptools` and pulls in neither). The export takes `image` (N,3,640,640) and `scale_factor` (N,2), batch size 1. A different `paddle2onnx` version may change the ONNX digest.
+- **README (W), with L2. Done, landing with the README edit.** The README states that layout detection is not supported for local deployment until L3 ships, and its stale "layout regions via `ultralytics` YOLO" line is replaced.
+- **L2 (W, approval). Next.** One dependency-scoped removal. YOLO is no longer registered, so this is dead code and the registry, model check and `DEFAULT_MODELS` do not change:
   - delete `YOLOLayoutAnalyzer`, the `_YOLO_*` maps, `_select_label_map`, `_TAXONOMY_IMGSZ`, both `.pt` files (in `_models/` and `models/`) and the `TestYolo*` classes;
   - drop `ultralytics` and its mypy override, and make `onnxruntime` a direct dependency;
-  - fix the YOLO notes in `.semgrep/rules/deserialisation.yaml`, the CI disk-space comment and `CLAUDE.md`.
+  - fix the YOLO mentions in `.semgrep/rules/deserialisation.yaml`, the CI disk-space comment, `CLAUDE.md`, `docs/models.md` (both `.pt` rows and the "without `ultralytics`" fallback note), `redact/stage.py`, `redact/detector.py`, `ingest/llm_ocr.py`, `utils/models.py`, `configs/example.yaml`, `tests/test_extract.py` and `tests/test_models_resolution.py`.
+- **L3 (W). Layout as its own stage.** A design note comes first and settles:
+  - what the stage persists: layout regions per page, keyed by `(source_hash, page)`, in its own `store/<stage>_output.py` sidecar;
+  - how OCR table reconstruction gets its table rects. Today it runs inside the OCR page operation on the same render. Either the layout stage runs before OCR within the batch, or OCR regions are persisted so reconstruction can run downstream;
+  - whether redaction reads the same regions instead of building its own analyser from `redaction.layout_model`;
+  - that the model is still chosen through the registry's layout slot. A tuned model is a plugin, never a new toggle. The stage adds what the slot cannot: its own inputs, outputs and checkpoint, so a model can be rerun and measured without re-running OCR.
+
+  When L3 ships, the README note from L2 is removed.
+- **L1-B (B). Waits on the ground-truth revision.** When it runs, it scores PP-DocLayout-M against the revised ground truth; there is no YOLO comparison.
+  - Make the DocLayNet layout-F1 test honour `--model` (it calls `get_layout_analyzer()` with no arguments today).
+  - Bring the `DOCLAYNET_TO_WOMBLEX` comment and the YOLO wording in `accuracy_reports.py` in line with `LABEL_MAP`.
+  - The table benchmark and the false-table cohort feed ground-truth or whole-page rects to `reconstruct_table` and never run layout, so they are not layout gates. The layout gate on tables is end-to-end: tables emitted by `extract_text` on the FUNSD and DocLayNet scanned fixtures.
+  - Check the findings from L1's uncontrolled run: table-class recall fell from 50% to 25%, and `dense_text_548` gave three table regions where the ground truth has one, with a `chart` box (mapped to `figure`) almost identical to the `table` box. `LABEL_MAP` and the 0.3 threshold are the knobs.
+  - Regenerate `EXTRACTION.md` and `REDACTION_HANDLING.md`, and spot-check exclusion area on the 02737-class scanned forms.
 
 ### PyMuPDF
 - **H-B (B), first.** A backend-diff harness. It extracts the womblex fixtures and the womblex-collection with two womblex builds or two backends, and compares:
@@ -92,20 +104,20 @@ Check these against the vendored fixtures and the womblex-collection PDFs before
   - CER between the two, and against transcripts;
   - timing.
 
-  It writes `BACKEND_PARITY.md`. It lands first because it is also the identity gate for P2 and P3, which keeps any scoring against the collection inside the benchmark.
+  It writes `BACKEND_PARITY.md`. It lands first because it is also the identity gate for P2 and P3, which keeps any scoring against the collection inside the benchmark. The between-backend comparisons need no ground truth and can run now; CER against transcripts waits on the ground-truth revision.
 - **P1 (W).**
   - `ingest/pdf/types.py`, with no third-party imports: `Rect`; `Span`, `Line` and `Block`; `Word`, a NamedTuple shaped like fitz's 8-tuple so `grid_projection` slicing is unchanged; `FoundTable`, `Drawing`, `Widget`; and the `Page` and `Document` protocols.
   - The page methods are typed rather than fitz-shaped: `plain_text`, `text_dict`, `words(dehyphenate)`, `text_blocks(dehyphenate)`, `find_tables(strategy)`, `render(dpi, clip) -> ndarray`, `image_rects`, `drawings`, `widgets`, `rect`, `rotation`, `rotation_matrix`, `number`, `doc_name`.
   - `ingest/pdf/__init__.open_document(path)` imports its backend lazily. `ingest/pdf/_fitz.py` wraps fitz.
   - Extend `test_public_api` so `import womblex` loads no PDF backend.
   - Docs: `architecture.md`, `project-structure.md`, the `CLAUDE.md` module table.
-- **P2 (W).** Port `extract.py`, `orchestrator.py`, `strategies_file.py`, `grid_projection.py` and `forms.py` to the seam. Gate: H-B reports identical `content_digest` against `main`.
+- **P2 (W).** Port `extract.py`, `orchestrator.py`, `strategies_file.py`, `grid_projection.py` and `forms.py` to the seam. Gate: H-B reports identical `content_digest` against `main`, and `tests/test_default_digest.py` passes unchanged. That test pins the digests of two native PDFs and four non-PDF fixtures, so it is a CI-speed identity check beside H-B's full one.
 - **P3a (W).** Port `detect.py`, `page_profile.py` and `morphology.py`. Gate: identical digests and `PageProfile`s.
 - **P3b (W).** Port `strategies_scanned.py`, `spreadsheet_print.py`, `redact/stage.py` and `redact/batch.py`. Gate: identical digests and `RedactionReport`s, and `fitz` appears in `src/` only in `_fitz.py`.
 - **D1 (W, approval).** Add `pypdfium2`, `pdfplumber` (pinned) and `pillow` to core, and `reportlab` to `[dev]`. Dependencies only; the lockfile lands as its own change.
 - **P4 (W) + P4-B (B).**
   - Add `tests/_pdf_builders.py` on reportlab (filled rects, text at a point or in a box, embedded PNG). Rendering goes through the seam.
-  - Port the builders in `test_redaction`, `test_extract`, `test_grid_projection`, `test_table_reconstruction`, `test_fixtures` and `test_bench_ocr_accuracy`.
+  - Port the builders in `test_redaction`, `test_extract`, `test_grid_projection`, `test_table_reconstruction`, `test_fixtures`, `test_bench_ocr_accuracy` and `test_model_registry`, and the `fitz.open` readers in `test_spreadsheet_print` and `test_default_digest`.
   - In the benchmark, port the table-fixture builder in `test_table_benchmark.py` and the `page_count` call in `test_fixture_accuracy.py`.
 - **P5 (W).**
   - `ingest/pdf/_pdfium_doc.py`: document and page, coordinates converted to fitz's top-left convention, rendering with crop, image objects, filled paths with fill colour, and widgets.
@@ -118,6 +130,7 @@ Check these against the vendored fixtures and the womblex-collection PDFs before
 - **F1 (W) + F1-B (B).**
   - Flip `open_document`'s default to the permissive backend.
   - Regenerate `EXTRACTION`, `REDACTION_HANDLING`, `PII_CLEANING`, `READING_ORDER` and `CHUNKING`, plus the table and false-table suites.
+  - Re-pin `tests/test_default_digest.py` deliberately, and move its version guard from `fitz.VersionBind` to the pypdfium2 version.
 - **F2 (W, approval).**
   - Delete `_fitz.py` and the backend argument, and drop `pymupdf`, its mypy override and the `pymupdf_layout` warning filter.
   - Simplify the CI fitz-notice workaround and the Dockerfile comments.
@@ -135,6 +148,10 @@ Check these against the vendored fixtures and the womblex-collection PDFs before
 - the unrotated-text versus rotated-`page.rect` mismatch outside `spreadsheet_print`;
 - adding images to the CLI's `SUPPORTED_EXTENSIONS`.
 
+## Open questions
+- **Record the PDF library version in the run stamp?** `content_digest` depends on the PDF library's version, but no footer records it. Options: add it alongside D1, when pypdfium2 arrives; raise it as a separate requirement; or leave it, since the womblex version and `uv.lock` already pin the library.
+- **No PDF-backend registry slot.** Settled, recorded here because the registry makes it tempting: the registry is for swappable models, and a backend slot would be the toggle this plan rules out.
+
 ## Conventions this plan holds to
 - **Merge size.** At most 500 changed lines per merge, green on ruff, mypy and pytest. `uv.lock` doesn't count. P3 is pre-split; any merge that grows splits again before review.
 - **File size.** At most 750 lines per file. `ingest/pdf/` is split by concern, so no backend file approaches the cap.
@@ -147,7 +164,7 @@ Check these against the vendored fixtures and the womblex-collection PDFs before
 
 ## Declared behaviour changes
 - **Fewer formats.** Calling `extract_text` directly can no longer open XPS, EPUB, MOBI, CBZ or SVG. PDF, PNG, JPEG and TIFF remain. None of the dropped formats is reachable through the CLI or API today.
-- **New content digests.** `content_digest` changes at F1. Text stays verbatim, but it comes from a different producer.
+- **New content digests.** `content_digest` changes at F1, and `tests/test_default_digest.py` is re-pinned in that merge. Text stays verbatim, but it comes from a different producer.
 - **Small text differences.** Paragraph segmentation, dehyphenation and bold-based heading detection may shift slightly.
 - **Image counts.** `image_count` may count drawn images only, which moves the sub-page OCR gate. Phase 0 confirms whether it does.
 - **Rendering.** Anti-aliasing differs, so OCR output differs slightly.
@@ -159,8 +176,8 @@ These are migration gates, not quality scores. They retire with this plan.
 | Merge | Gate |
 |---|---|
 | Every merge | `uv run ruff check src/ tests/`, `uv run mypy src/` and `uv run python -m pytest tests/ -v` pass; `uv lock --check` passes on approval merges; touched files are under 750 lines (`wc -l`); `git diff --stat $(git merge-base HEAD origin/main)..HEAD` is within the cap |
-| L1-B | DocLayNet F1 ≥ 0.29 with the `dense_text_548` table found; no regression in table reconstruction, the false-table cohort or `REDACTION_HANDLING` |
-| P2, P3a, P3b | Identical `content_digest`, `PageProfile` and `RedactionReport` on every fixture, as reported by H-B |
+| L1-B | Waits on the ground-truth revision. DocLayNet F1 ≥ 0.29 with the `dense_text_548` table found; end-to-end tables emitted on the scanned fixtures checked by hand; no regression in `REDACTION_HANDLING` |
+| P2, P3a, P3b | Identical `content_digest`, `PageProfile` and `RedactionReport` on every fixture, as reported by H-B; `tests/test_default_digest.py` unchanged |
 
 F1 flips the default only when all of these hold:
 

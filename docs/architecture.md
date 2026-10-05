@@ -14,138 +14,14 @@ Input File
 ├─ Register (XML/ABN) ───────► Standalone Ingest ──► [.parquet]
 └─ Geospatial (SHP) ─────────► Transform Geometry ──► [GeoParquet]
         │
-        ▼  (Optional operations — any combination, caller composes directly)
-        ├─ chunk    — split text into token-bounded chunks
-        ├─ redact   — detect and tag/mask redacted regions
-        ├─ pii      — replace PII spans with <ENTITY_TYPE> tags
-        └─ enrich   — Isaacus enrichment (requires chunks + client)
+        ▼  (Downstream stages over the shard dir — `run-stage` / `enqueue-stages`, in PIPELINE_ORDER)
+        ├─ enrich        — Isaacus enrichment (needs elements + manifest; chunks optional)
+        ├─ chunk         — split text into token-bounded chunks
+        ├─ graph-refresh — offline mention→chunk edge rebuild
+        └─ pii           — mask graph PII spans as numbered <PERSON_n> tags in *.clean_text.parquet (terminal, after enrich + embed)
 ```
 
-Each operation is a standalone function. Preconditions: chunk needs an extraction, enrich needs chunks, build_graph needs enrichment. See `docs/composable-design.md` for the full dependency graph.
-
-## Module Map
-
-```
-src/womblex/
-├── ingest/
-│   ├── detect.py              # Doc-level type classification + non-PDF dispatch
-│   ├── page_profile.py        # Per-page PageProfile + cheap qualifiers (e.g. spreadsheet-print)
-│   ├── orchestrator.py        # Plan-driven PDF extractor — walks per-page profiles, dispatches operations
-│   ├── elements.py            # Element model + kinds + Cell / FieldEntry / BBox (canonical)
-│   ├── views.py               # ExtractionResult + legacy view types (TableData / FormField / TextBlock / ImageData) as read-only projections over elements
-│   ├── extract.py             # extract_text() entry point + page-level primitives (re-exports views)
-│   ├── forms.py               # Form-pair extraction (AcroForm + spatial + line-based)
-│   ├── spreadsheet_print.py   # Multi-page table extractor for spreadsheet-printed PDFs
-│   ├── morphology.py          # Page-image morphology helpers (handwriting / glyph regularity)
-│   ├── grid_projection.py     # Column-aware text reconstruction (block-aware paragraph emission)
-│   ├── strategies.py          # Re-export shim — path-based (non-fitz) extractors
-│   ├── strategies_scanned.py  # OCR primitives (_ocr_page, _layout_blocks_and_tables)
-│   ├── strategies_file.py     # Non-PDF extractors (DOCX, plain text, non-textual)
-│   ├── markdown.py            # Markdown extractor — headings/lists/tables via markdown-it-py
-│   ├── interfaces/
-│   │   └── protocols.py       # Backend protocols: OCRReader, LayoutAnalyzer, Preprocessor
-│   ├── paddle_ocr.py          # PaddleOCR wrapper via rapidocr-onnxruntime (det/rec/cls)
-│   │                          # Also hosts the retired-pending YOLOLayoutAnalyzer (removed with ultralytics)
-│   ├── layout_onnx.py         # PPDocLayoutAnalyzer — PP-DocLayout-M layout regions on onnxruntime
-│   ├── llm_ocr.py             # LLM/VLM OCR backends: Mistral Pixtral Large via AWS Bedrock, + local Ollama
-│   ├── spreadsheet.py         # CSV/Excel extraction — one ExtractionResult per workbook, cells as elements
-│   ├── gnaf.py                # G-NAF PSV → Parquet ingest (standalone, bypasses NLP pipeline)
-│   ├── gnaf_schema.py         # G-NAF table schemas — static column definitions
-│   ├── abn_bulk.py            # ABN bulk extract XML → Parquet ingest (standalone, bypasses NLP pipeline)
-│   ├── geospatial.py          # SHP → GeoParquet ingest (standalone, bypasses NLP pipeline)
-│   ├── redaction.py           # Backwards-compatible re-export of redact.detector
-│   ├── heuristics_cv2.py      # Image heuristics: skew, blur, table grids, contour analysis
-│   └── heuristics_numpy.py    # Signal analysis: Otsu threshold bimodality
-├── redact/
-│   ├── detector.py        # CV2-based RedactionDetector — detect and mask redacted regions
-│   ├── stage.py           # Redaction operation: vector-first detect_redactions, apply_text_redaction, annotate_*
-│   ├── batch.py           # Batch redaction operations: annotate_redactions_for_shards, validate_redactions_against_labels
-│   └── utils.py           # Low-level pre-OCR masking helper (not used by extractors)
-├── pii/
-│   ├── cleaner.py         # PERSON + ADDRESS candidate detection (regex + cosine similarity context); emits <ENTITY_TYPE> tags
-│   └── stage.py           # PII cleaning operation (post_extraction / post_chunk / post_enrichment)
-├── process/
-│   ├── chunker.py         # semchunk integration with configurable tokeniser; repairs split <REDACTED> markers
-│   ├── chunk_stage.py     # chunk_shards() over a shard dir — drives `womblex chunk --shards`
-│   ├── normalise.py / normalise_stage.py   # Text-cleaning transforms + per-stage driver
-│   ├── spellfix.py / spellfix_stage.py     # Hunspell-gated OCR character-confusion repair + driver
-│   ├── quality.py / quality_stage.py       # Chunk-quality annotation heuristics + driver
-│   ├── segmenter.py       # Element stream → budgeted, page-bounded ground-truth segments
-│   ├── renderer.py        # Segment element run → reviewer-facing markdown (narrative + tables + forms, interleaved in element order); RENDERER_VERSION + baseline_digest
-│   ├── ground_truth.py    # build_ground_truth() over a shard dir — segment → render → .gt.md baseline + .meta.json sidecar (identity from manifest, derivation from footer)
-│   ├── ground_truth_roundtrip.py  # Reverse of the renderer — corrected .gt.md → element-keyed corrections (split_rendered / apply_corrections)
-│   ├── money.py, money_numbers.py, money_words.py, money_vocab.py, money_columns.py, money_stage.py
-│   │                       # Money recognition: patterns, number/currency resolution, worded amounts,
-│   │                       # vocab tables, column classification, per-stage driver — see money-extraction.md
-│   └── text_overlay.py    # Shared overlay read/merge helper for the offline text layers
-├── link/
-│   ├── matcher.py         # Generic record-linkage: alias / address-exact / token-set name-fuzzy
-│   ├── reference.py       # Reference-register → normalised ReferenceTable via corpus-declared column roles
-│   ├── normalise.py       # Minimal name/address normalisation for matching
-│   └── stage.py           # link_shards() over a shard dir — drives `womblex link --shards`
-├── analyse/
-│   ├── enrich.py          # Isaacus enrichment API wrapper (kanon-2-enricher)
-│   ├── enrich_stage.py    # enrich_shards() — drives `womblex enrich --shards`
-│   ├── enrich_merge.py    # Stitch per-segment results of a split long document into one
-│   ├── graph_refresh.py   # refresh_graph_edges() — offline mention→chunk edge rebuild after AI chunking
-│   ├── embed.py / embed_stage.py  # Isaacus embeddings.create wrapper + per-stage driver
-│   ├── graph.py           # Entity graph construction from enrichment results
-│   ├── models.py          # ILGS data models (Span, Segment, Person, Location, Term, etc.)
-│   └── query.py           # Load enrichment graph from Parquet for PII masking and internal use
-├── store/
-│   ├── output.py          # Parquet output: elements + table_cells + form_fields + manifest sidecars
-│   ├── shard_audit.py     # Directory-level shard integrity + reconcile-with-checkpoint
-│   ├── enrichment_output.py / enrichment_doc.py  # Enrichment sidecars + raw ILGS Document for AI-chunking reuse
-│   ├── pii_output.py, normalise_output.py, spellfix_output.py, quality_output.py, money_output.py
-│   │                       # Per-stage sidecar parquet schemas + IO (self-contained, one per stage)
-│   ├── ground_truth_output.py  # Ground-truth *.meta.json sidecar: schema, validation, unit-id, IO (JSON, self-contained)
-│   ├── provenance_output.py / run_manifest.py / register_manifest.py  # Manifest consolidation (NLP run + registers) + the run record
-│   ├── source_provenance.py  # Where a source document came from: ingest root + relpath, and their womblex.* footer keys
-│   ├── source_resolver.py  # The way back: source_hash → the source file, verified by content hash, or an explicit reason
-│   ├── egress_output.py   # source_index.parquet schema + IO for the egress bundle (source_hash → raw_key/ext/doc_id/filename/status)
-│   ├── egress.py           # Bundle builder: mirror a run's corpus/ + resolve/copy raw sources/ + write source_index.parquet + egress_manifest.json to any RemoteStore destination (see docs/egress.md; CLI verb: cli/cloud.py's `womblex egress`)
-│   ├── build_info.py      # Which build is running: version + source commit (work tree / build stamp / unavailable)
-│   ├── run_stamp.py       # Which run produced a file: run id / version / commit / config digest / stage / preset (config name) / loaded models / slot models (distribution + version), as womblex.* footer keys
-│   ├── content_digest.py  # SHA-256 over a document's ordered elements: the manifest's content_digest, the determinism handle
-│   ├── contract.py        # Which contract a file conforms to + whether it carries raw, masked or no document text, as womblex.* footer keys
-│   ├── remote.py          # fsspec stage-in/stage-out object-storage adapter for distributed runs
-│   ├── retention.py       # run_id-based retention policy
-│   └── checkpoint.py      # JSON-based checkpoint manager for resumable batch runs
-├── api/                   # Service API (`womblex serve`): app.py (`/v1` routes: run submit, reads, `/files`, document text; owner-scoped), readers.py (document text by layer, sensitivity-gated), auth.py (service-token registry, Caller + scopes; `womblex api-token`), models.py (OpenAPI models)
-├── ui/                    # Admin and debugging console (`womblex ui`): reads run artefacts, dispatches admin runs; no auth, loopback by default — integrations use api/
-├── cloud/                 # Distributed run support (queue.py, dispatch.py, worker.py, stage_contracts.py, stage_runner.py)
-├── verify/
-│   └── engine.py          # Two-pass verification (structural + weak-signal) — defined, not wired in; see the Verify stage
-├── utils/
-│   ├── models.py          # Local model path resolution (WOMBLEX_MODELS_DIR, _models/, models/ + HF snapshot layout) + the load record each footer carries
-│   ├── metrics.py         # CER, WER, CER-s accuracy metrics (numpy-accelerated Levenshtein + spatial sort)
-│   ├── tabular_metrics.py # Tabular extraction accuracy (structural fidelity, data integrity, key preservation)
-│   ├── checksum.py        # Shared streamed MD5 helper for the standalone register ingests
-│   ├── isaacus_client.py  # Build the Isaacus SDK client (hosted API or private SageMaker)
-│   ├── log_format.py      # JSON-lines log formatter + log_context (--log-format json)
-│   └── token_packer.py    # Token-budgeted batching for enrichment API calls
-├── profile/               # Column schema inference (womblex profile subcommand)
-├── score.py               # Labels-vs-parquet CER scoring (womblex score subcommand)
-├── batch.py               # process_batch() — shared per-batch pipeline body (local run + cloud worker)
-├── cli/                   # CLI subpackage — per-topic modules:
-│   ├── __init__.py        # main() + ALL_COMMANDS aggregation + dispatch
-│   ├── _shared.py         # Command NamedTuple, setup_logging, select_supported/discover_files, normalise_prefix
-│   ├── pipeline.py        # run, extract, chunk subcommands
-│   ├── cloud.py           # enqueue / worker / jobs / finalize / run-stage / egress subcommands
-│   ├── serve.py, api_token.py  # serve (the `/v1` service API) and api-token subcommands
-│   ├── ui.py              # ui subcommand (admin and debugging console)
-│   ├── redact.py          # redact, annotate-redactions, validate-redactions subcommands
-│   ├── link.py, embed.py, normalise.py, spellfix.py, quality.py, money.py, pii.py
-│   │                       # link, embed, normalise, spellfix, quality, money, pii subcommands
-│   ├── ingest.py          # ingest-gnaf, ingest-geo, ingest-abn subcommands
-│   ├── score.py           # score subcommand
-│   ├── ground_truth.py    # ground-truth subcommand (segment + render a shard dir into baselines + sidecars)
-│   ├── profile.py         # profile subcommand
-│   └── verify.py          # verify-shards subcommand
-├── config/                # Pydantic config models + YAML loader (__init__); process-stage models in process.py
-└── operations/            # Independent operations (extract/redact/chunk/pii/enrich, one module each,
-                           # plus models.py / persist.py shared helpers) — callers compose directly
-```
+`womblex run` is extraction-only (`batch.process_batch`); downstream stages run per shard directory via `womblex <stage> --shards`, `run-stage` or `enqueue-stages`, ordered by `PIPELINE_ORDER` in `pipeline_order.py` (enrich runs before chunk so AI chunking can reuse the enrichment). Each stage's inputs are declared by its `StageContract` in `cloud/stage_contracts.py`: chunk needs an extraction; enrich needs only elements + manifest; graph-refresh needs enrichment entities, graph edges and chunks; pii needs chunks (enrichment entities are a config-derived conditional input). Redaction detection is optional inside `process_batch` and otherwise runs via `womblex redact --shards`. The in-memory graph is built by `build_document_graph` in `analyse/graph.py`.
 
 ## Stage Detail
 
@@ -191,7 +67,7 @@ else:
     → UNKNOWN
 ```
 
-Defensive classification: uncertain documents route to `UNKNOWN` rather than a wrong bucket. High `UNKNOWN` count signals detection gaps to address. See `heuristics_disambiguation.md` for the full function-level reference of CV2 and NumPy heuristics.
+Defensive classification: uncertain documents route to `UNKNOWN` rather than a wrong bucket. High `UNKNOWN` count signals detection gaps to address.
 
 **Document types:**
 
@@ -221,7 +97,7 @@ Defensive classification: uncertain documents route to `UNKNOWN` rather than a w
 
 **`SpreadsheetExtractor`** in `spreadsheet.py` was separated from `strategies.py` to keep both files under the 750-line cap. Callers import `SpreadsheetExtractor` directly from `ingest.spreadsheet`.
 
-**Layout backend** — scanned extractors use `PPDocLayoutAnalyzer` (`ingest/layout_onnx.py`) for layout region detection: PP-DocLayout-M (Apache-2.0) exported to ONNX and run on `onnxruntime`, its 23 labels mapped to block types via `LABEL_MAP` (e.g. `image` → `figure`, `paragraph_title` → `heading`, `table_title` → `caption`). The class list and preprocessing come from the model's own `inference.yml`. Layout analysis is called from `_layout_blocks_and_tables()` in `strategies_scanned.py`. When a page's layout regions carry no segmented text the fallback collapses the whole page's OCR onto the dominant region's kind; if that kind is non-text (`figure`) but the OCR is substantial (≥5 words) it is promoted to `paragraph` (`_ocr_region_block_type`) so full-page scans are not dropped from chunking. Layout blocks carry no text and OCR text is not yet assigned to layout regions, so what reaches output is the table regions (the only place `reconstruct_table` runs), the dominant region's kind, and the redaction exclusion regions in `redact/stage.py`; other detected classes (heading, list item, caption, footer, footnote) do not reach the element stream. See [models.md](models.md). Backend contracts are formalised as `@runtime_checkable` protocols in `interfaces/protocols.py` (`OCRReader`, `LayoutAnalyzer`, `Preprocessor`).
+**Layout backend** — scanned extractors use `PPDocLayoutAnalyzer` (`ingest/layout_onnx.py`) for layout region detection: PP-DocLayout-M (Apache-2.0) exported to ONNX and run on `onnxruntime`, its 23 labels mapped to block types via `LABEL_MAP` (e.g. `image` → `figure`, `paragraph_title` → `heading`, `table_title` → `caption`). The class list and preprocessing come from the model's own `inference.yml`. Layout analysis is called from `_layout_blocks_and_tables()` in `strategies_scanned.py`. When a page's layout regions carry no segmented text the fallback collapses the whole page's OCR onto the dominant region's kind; if that kind is non-text (`figure`) but the OCR is substantial (≥5 words) it is promoted to `paragraph` (`_ocr_region_block_type`) so full-page scans are not dropped from chunking. Layout blocks carry no text and OCR text is not yet assigned to layout regions, so what reaches output is the table regions (the only place `reconstruct_table` runs), the dominant region's kind, and the redaction exclusion regions in `redact/stage.py`; other detected classes (heading, list item, caption, footer, footnote) do not reach the element stream. Backend contracts are formalised as `@runtime_checkable` protocols in `interfaces/protocols.py` (`OCRReader`, `LayoutAnalyzer`, `Preprocessor`).
 
 The orchestrator's OCR per-page path (`_apply_ocr_page`) drives `_ocr_page()` which:
 
@@ -230,9 +106,9 @@ The orchestrator's OCR per-page path (`_apply_ocr_page`) drives `_ocr_page()` wh
 3. Binarises — skipped for clean digital renders (histogram analysis detects low noise + narrow dynamic range); OTSU if bimodal histogram, adaptive Gaussian otherwise (handles binding shadows and scanner gradients)
 4. Runs OCR and returns `(text, avg_confidence, preprocessing_steps)`; warns if avg confidence < 40%
 
-**Text policy at the extraction boundary is verbatim.** `_normalise_text` no longer runs in the extraction hot path. Whatever the producing extractor (native text layer, paddle OCR, docx, xlsx, spreadsheet_print, figure_image) emits is what lands on the element's `text` field. Downstream stages (PII, redaction, chunking) may rewrite `pages[i].text` in place, but the parquet writer reads `elements`, so on-disk content remains extraction-time verbatim. See `docs/extraction.md`.
+**Text policy at the extraction boundary is verbatim.** `_normalise_text` no longer runs in the extraction hot path. Whatever the producing extractor (native text layer, paddle OCR, docx, xlsx, spreadsheet_print, figure_image) emits is what lands on the element's `text` field. Downstream stages (PII, redaction, chunking) may rewrite `pages[i].text` in place, but the parquet writer reads `elements`, so on-disk content remains extraction-time verbatim.
 
-**Output schema** is a single `elements: list[Element]` stream on `ExtractionResult`, persisted to four sibling parquet files per batch (`*.elements.parquet`, `*.table_cells.parquet`, `*.form_fields.parquet`, `*._manifest.parquet`). Element kinds: `paragraph`, `heading`, `list_item`, `caption`, `header`, `footer`, `signature`, `figure`, `image`, `table`, `form`, `page_break`, `sheet_meta`, `sheet_cell`. Tables nest cells on `Element.cells` in memory and flatten to `table_cells.parquet` on disk; forms flatten the same way to `form_fields.parquet`. Legacy view properties (`result.text_blocks` / `.tables` / `.forms` / `.images`) remain on `ExtractionResult` as read-only derivations for downstream stages that have not migrated. See `docs/extraction.md` for the canonical reference.
+**Output schema** is a single `elements: list[Element]` stream on `ExtractionResult`, persisted to four sibling parquet files per batch (`*.elements.parquet`, `*.table_cells.parquet`, `*.form_fields.parquet`, `*._manifest.parquet`). Element kinds: `paragraph`, `heading`, `list_item`, `caption`, `header`, `footer`, `footnote`, `signature`, `figure`, `image`, `table`, `form`, `page_break`, `sheet_meta`, `sheet_cell`. Tables nest cells on `Element.cells` in memory and flatten to `table_cells.parquet` on disk; forms flatten the same way to `form_fields.parquet`. Legacy view properties (`result.text_blocks` / `.tables` / `.forms` / `.images`) remain on `ExtractionResult` as read-only derivations for downstream stages that have not migrated.
 
 ### 3. Ingest — G-NAF (Standalone)
 
@@ -279,7 +155,7 @@ CLI: `womblex ingest-abn <file-or-dir> -o <output_dir> [--no-md5]`
 
 ### 6. Redact — Post-Extraction Redaction
 
-`redact/stage.py` runs as a separate operation after extraction. It renders each PDF page as an image, runs the CV2-based `RedactionDetector` to find black-box regions, and applies the configured mode:
+`redact/stage.py` runs as a separate operation after extraction. Detection is vector-first: filled near-black rectangles from the page's `get_drawings()`. Only a page with none falls back to rendering it and running the CV2-based `RedactionDetector`, excluding layout-detected figure, chart and form regions (`use_layout_filter`, layout model `redaction.layout_model`). It then applies the configured mode:
 
 - `flag` — sets `has_redaction=True` on affected chunks (no text change)
 - `blackout` — prepends `<REDACTED>` to affected page text
@@ -287,21 +163,47 @@ CLI: `womblex ingest-abn <file-or-dir> -o <output_dir> [--no-md5]`
 
 The `RedactionReport` is stored on `ExtractionResult.redaction_report` for downstream stages. Non-PDF documents (spreadsheets, DOCX) are skipped — redaction detection requires a rasterisable page source.
 
-`redact/utils.py` provides a `pre_ocr_mask()` helper for tooling that needs to mask redactions before OCR. This is not called by extraction strategies (see CLAUDE.md — redaction inside `_ocr_page()` caused false positives on form fields and diagram fills).
+`redact/utils.py` provides a `pre_ocr_mask()` helper for tooling that needs to mask redactions before OCR. This is not called by extraction strategies (redaction inside `_ocr_page()` caused false positives on form fields and diagram fills).
 
 ### 7. Process — Chunking
 
 `chunker.py` wraps [semchunk](https://github.com/isaacus-dev/semchunk) v4 with full parameter exposure. Chunk size defaults to 480 tokens — sized to fit Isaacus classifier and extractor context windows (512 tokens) with 32-token headroom. Uses semchunk's native offset tracking for reliable `(start_char, end_char)` provenance.
 
-**AI chunking + single-enrichment reuse.** Setting `chunking.chunking_model` switches the narrative path to semchunk 4's AI chunking — boundaries follow the Kanon-2 enricher's structure spans instead of the token/recursive split (opt-in, off by default). To avoid enriching the same text twice when the `enrich` stage also runs, the enrich stage persists the raw ILGS Document to `*.enrichment_doc.parquet` and `chunk_batch` reuses it per `source_hash` via `narrative_overrides`, gated by a byte-identity check (`Document.text == reassembled narrative`); on mismatch or absence the doc self-enriches. Run `enrich` before `chunk`. See `docs/decisions.md`.
+**AI chunking + single-enrichment reuse.** Setting `chunking.chunking_model` switches the narrative path to semchunk 4's AI chunking — boundaries follow the Kanon-2 enricher's structure spans instead of the token/recursive split (opt-in, off by default). To avoid enriching the same text twice when the `enrich` stage also runs, the enrich stage persists the raw ILGS Document to `*.enrichment_doc.parquet` and `chunk_batch` reuses it per `source_hash` via `narrative_overrides`, gated by a byte-identity check (`Document.text == reassembled narrative`); on mismatch or absence the doc self-enriches. Run `enrich` before `chunk`.
 
-The `chunk_document()` entry point:
+The `chunk_batch()` entry point (one semchunk call across a whole batch's narratives, another across its tables):
 1. Chunks narrative text with native offset tracking (no `text.find()` heuristics)
 2. Converts `TableData` objects to markdown tables and chunks separately (no overlap on tables)
 3. Tags each chunk with a `content_type` (`"narrative"` or `"table"`) and `has_redaction` flag
 4. Repairs `<REDACTED>` markers that were split across chunk boundaries (safe with overlap)
 
-Configurable via `config.chunking`: `overlap` (token or proportional), `memoize`, `max_token_chars`, `processes` (default 1 for Chromebook deployment).
+**Adapter boundary.** semchunk owns all chunking; Womblex handles only what
+semchunk can't — parquet I/O, element-stream → `ChunkInput` projection,
+source-hash plumbing, and `<REDACTED>` cross-boundary repair. Every
+`ChunkingConfig` field either maps directly to a semchunk parameter
+(`tokenizer`, `chunk_size`, `chunking_model`, `tokenizer_kwargs`,
+`memoize`, `cache_maxsize`, `max_token_chars` → `chunkerify`; `overlap`,
+`processes`, `progress` → `Chunker.__call__`) or is a Womblex-only concern
+(`enabled` stage gate, `chunk_tables` projection, `tokenizer_options` —
+passed to the registered tokeniser's factory, not to semchunk). There is **no** Womblex toggle that
+re-exposes a semchunk feature under a different name — semchunk's
+parameters *are* the feature surface. Three defaults diverge from
+upstream, each for a measured corpus reason:
+`tokenizer="isaacus/kanon-2-tokenizer"` (matches the analysis side),
+`chunk_size=480` (Kanon-2 window — upstream defaults to `None`, which
+auto-derives the size from the tokeniser's `model_max_length`; that
+path still passes through if `chunk_size` is set to `null`),
+`processes=1` (Chromebook portability). The Kanon-2 tokeniser is free on
+Hugging Face (vendored under `_models/kanon-2-tokenizer`, resolved
+locally), so chunk-size counting is exact and offline. **Plain token
+chunking therefore needs no API key** and runs in an air-gapped deployment
+— the chunk stage gates only on the tokeniser resolving locally
+(`womblex.utils.availability.tokenizer_available`). **AI chunking**
+(`chunking_model`) is the one path that calls the Isaacus API per document;
+it alone gates on a configured deployment — `ISAACUS_API_KEY` or
+`ISAACUS_SAGEMAKER_ENDPOINTS`
+(`womblex.utils.availability.isaacus_available`). `offsets=True` is pinned
+in the adapter because Womblex always needs char offsets for page mapping.
 
 When redaction mode is `flag`, the chunking stage calls `annotate_chunks()` to propagate `has_redaction=True` from the `RedactionReport` to affected chunks.
 
@@ -313,7 +215,7 @@ PII is **graph-driven**. `pii/cleaner.py` takes its primary candidates from the 
 
 A local regex + cosine-context detector remains as an **opt-in backstop** (`pii.use_regex_backstop`, default **off**): title-case and honorific regex for PERSON validated against reference contexts via cosine similarity with `all-MiniLM-L6-v2` (threshold 0.35, calibrated on Australian government docs; the regex uses `[^\S\n]+` as the word boundary to prevent multi-line capture), plus a street-type anchor regex for ADDRESS. It is ~15% precision on this corpus (orgs/headings get tagged PERSON), so it is reserved for recall experiments.
 
-Masking is **terminal** — it never rewrites the raw chunks that feed Isaacus. The stage writes two siblings: `*.pii_spans.parquet` (one row per span, audit/reversible, carrying the graph `entity_id`) and `*.clean_text.parquet` (the masked publishable layer, `<PERSON_1>` / `<ADDRESS_1>` typed and numbered off the graph entity, written by default). Current coverage: PERSON and ADDRESS. See `docs/accuracy/PII_CLEANING.md` for the measured baseline.
+Masking is **terminal** — it never rewrites the raw chunks that feed Isaacus. The stage writes two siblings: `*.pii_spans.parquet` (one row per span, audit/reversible, carrying the graph `entity_id`) and `*.clean_text.parquet` (the masked publishable layer, `<PERSON_1>` / `<ADDRESS_1>` typed and numbered off the graph entity, written by default). Current coverage: PERSON and ADDRESS.
 
 ### 9. Analyse — Enrichment
 
@@ -325,7 +227,7 @@ Wrappers in `analyse/` call the Isaacus SDK:
 
 ### 10. Store — Output
 
-`store/output.py` writes four sibling parquet files per batch — `batch-NNNN.elements.parquet`, `batch-NNNN.table_cells.parquet`, `batch-NNNN.form_fields.parquet`, `batch-NNNN._manifest.parquet`. Downstream stages add their own per-batch sidecars over the same shard dir, each via a `womblex <stage> --shards` command and joinable on `source_hash`: `*.chunks.parquet` (chunk, I2), `*.redactions.parquet` (redact, I3), `*.enrichment_entities.parquet` + `*.enrichment_meta.parquet` (enrich, I7), `*.entity_links.parquet` (link, I7), `*.embeddings.parquet` (embed, I7). `store/enrichment_output.py` also has a legacy E2E writer that emits three Parquet files from enrichment results:
+`store/output.py` writes four sibling parquet files per batch — `batch-NNNN.elements.parquet`, `batch-NNNN.table_cells.parquet`, `batch-NNNN.form_fields.parquet`, `batch-NNNN._manifest.parquet`. Downstream stages add their own per-batch sidecars over the same shard dir, each via a `womblex <stage> --shards` command and joinable on `source_hash`: `*.chunks.parquet` (chunk, I2), `*.redactions.parquet` (redact, I3), `*.enrichment_entities.parquet` + `*.enrichment_meta.parquet` + `*.graph_edges.parquet`, plus `*.enrichment_doc.parquet` when `persist_document` is set (enrich, I7), `*.entity_links.parquet` (link, I7), `*.embeddings.parquet` (embed, I7). `store/enrichment_output.py` also has a legacy E2E writer that emits three Parquet files from enrichment results:
 
 - `entities.parquet` — entity type, name, mentions, chunk mapping
 - `graph_edges.parquet` — source/target node IDs, relation type, metadata
@@ -351,7 +253,7 @@ Three mechanisms. None of them scores quality — each checks that what was writ
 - **Directory-level audit** — `womblex verify-shards` (`cli/verify.py`) uses `store/shard_audit.py` (`audit_shard_directory` / `scan_shard_directory`) over a finished shard directory, optionally diffing across runs and, with `--input-dir`, comparing the manifest against the count of documents a run would ingest from the source directory — counted through `discover_files`, the same rule the run used, so the comparison cannot report drift that is only a disagreement about what counts as a document.
 - **Source resolution** — `womblex resolve-source` (`cli/verify.py`) uses `store/source_resolver.py` to take a run's rows back out to the corpus and verify the bytes.
 
-There is no fourth. A `verify/` package once held a `run_verifications` two-pass structural and weak-signal scan; it was never wired into any pipeline and is deleted — see `decisions.md`. Chunk-level quality annotation is `process/quality.py` and its stage, which is a different concern from the integrity checks above.
+There is no fourth. Chunk-level quality annotation is `process/quality.py` and its stage, which is a different concern from the integrity checks above.
 
 ### 12. Additional Per-Stage Sidecars
 
@@ -360,233 +262,8 @@ Later stages follow the same `<stage>_shards()` over a shard dir + `womblex <sta
 - **normalise** (`process/normalise_stage.py`) — text-cleaning transforms, writes `*.normalised_text.parquet`
 - **spellfix** (`process/spellfix_stage.py`) — Hunspell-gated OCR character-confusion repair, writes `*.spellfix_text.parquet` + `*.spellfix_corrections.parquet` (audit)
 - **quality** (`process/quality_stage.py`) — chunk-quality annotation heuristics, writes `*.chunk_quality.parquet`
-- **money** (`process/money_stage.py`) — money-span recognition across narrative/table/sheet loci, writes `*.money_spans.parquet` + `*.money_columns.parquet`; see [`money-extraction.md`](money-extraction.md)
+- **money** (`process/money_stage.py`) — money-span recognition across narrative/table/sheet loci, writes `*.money_spans.parquet` + `*.money_columns.parquet`
 - **link** (`link/stage.py`) — record-linkage against a reference register, writes `*.entity_links.parquet`
 - **pii** (`pii/pii_stage.py`) — graph-driven PII masking, writes `*.pii_spans.parquet` + `*.clean_text.parquet`
 
-Distributed (cloud) runs execute the same stage bodies via `cloud/stage_runner.py` against a declarative `StageContract` per stage (`cloud/stage_contracts.py`), reading/writing an object store instead of local disk. See the module-responsibility table in [`../CLAUDE.md`](../CLAUDE.md) for the full per-module breakdown.
-
-## Key Design Decisions
-
-**Detection first.** Strategy selection is driven entirely by the document profile. No extraction logic lives in detection code.
-
-**Redaction is a post-extraction concern.** Physical black-box masking inside the extractor caused the redaction detector to misfire on form fields, chart regions, and diagram fills — suppressing text it should keep. Redaction now runs as a separate operation after extraction, using `redact/stage.py`. The `RedactionReport` is stored as a proper field on `ExtractionResult` for type-safe downstream access.
-
-**Config-driven, not hardcoded.** Dataset-specific paths, thresholds, and hypotheses live in YAML. Core modules have no knowledge of specific datasets.
-
-**PaddleOCR via rapidocr-onnxruntime.** `rapidocr-onnxruntime` runs PaddleOCR ONNX models with no PaddlePaddle framework. The PaddleOCR v5 mobile models bundled under `_models/paddleocr-v5/` are preferred; the v4 models inside the wheel are the fallback. Layout analysis uses PP-DocLayout-M as ONNX on `onnxruntime` (`_models/pp-doclayout-m/`). Every model is outlined in [models.md](models.md).
-
-**Model registry.** `utils/model_registry.py` maps a config name to a model factory per slot. Built-ins register under their existing names and aliases; an installed package registers more through an entry point in the group `womblex.models.<slot>` (slots: OCR engine, layout, PII context, chunk tokeniser, spellfix dictionary; see [`model-plugins.md`](model-plugins.md)). A package's model files join the offline search roots through the `womblex.model_roots` entry-point group, searched after the built-in roots. A config names registered models only — an unknown name raises and lists the known ones, and import paths are refused — and a plugin cannot shadow a built-in name. A factory's `womblex_traits` declare how the pipeline treats its output (`markdown` for an OCR engine that returns page markdown rather than regions). Engine options pass through to the factory unchanged. The registry also records provenance: a slot's entry is noted as used the moment its factory is actually called — except while `suppress_use_recording` is active (the pre-run model check), and a caching wrapper around a factory must itself check `recording_suppressed()` to bypass its own cache during that window, or the run's first real build afterwards would hit the check's cached instance and never call `record_use` — and `store/run_stamp.py` reads that record into the `womblex.slot_models` footer key (see above).
-
-**Pre-run model check.** `utils/model_check.py` checks the models a config names before work starts, at the level in `processing.models_check` (`off`; `load`, the default, which builds each model through the same entry point the run uses; `smoke`, which also runs one inference on a built-in input). A model behind a service has nothing to load short of calling it, so at either level it gets one minimal request: every Isaacus model an enabled stage calls (enrich, embed, AI chunking) is sent one short sentence, and a registered model exposing `ping()` has it called — the Bedrock OCR reader sends a one-token request, the Ollama reader confirms the server has the model pulled. A run whose paid later stage cannot reach its service therefore stops before its first document, not after the stages before it have been paid for. Building a model to check it is a probe, not the run using it, so the whole check runs under `model_registry.suppress_use_recording` and `models.suppress_recording` — otherwise it would land in `womblex.slot_models` / `womblex.models` for a run that never actually used it, closing the "OCR engine not recorded" gap on a run that never OCR'd. Each model has a scope — `extract`, or the stage that uses it — so failures are collected rather than raised and each caller applies the scopes it owns: `womblex run` checks every enabled stage's scope and stops before any output exists; a worker checks once at startup and releases (never fails) the jobs whose scope failed; `prepare_stage_context` is the stage preflight, and the standalone `chunk`, `pii`, `spellfix` and `redact` commands check their own scope through `cli/_shared.check_stage_models` before they write; and the service API's `cloud/dispatch.downstream_stages` checks registration only, since that host may not carry the models. What a process checked is written into each file's footer (`womblex.model_check`) next to the loaded models and read back by the run record, so mixed variants across workers show as separate entries.
-
-**Local model resolution.** `utils/models.py` provides `resolve_local_model_path(name)` which searches per artefact — `WOMBLEX_MODELS_DIR`, the bundled `_models/`, then `models/` (sibling of `src/`) — before falling back to runtime downloads. It is also the load record: a resolution that finds an artefact is noted, and `loaded_models()` digests each one over its bytes so the digest recomputes from the model files alone. A caller only probing for presence passes `record=False`. Handles the HuggingFace hub snapshot layout (`refs/main` → `snapshots/<hash>/`) and bare files (`.pt`). Models loaded lazily — no import cost unless the stage actually runs.
-
-**No external Levenshtein dependency.** `utils/metrics.py` provides CER, WER, and CER-s (spatially-sorted CER) using a numpy-accelerated Levenshtein implementation. Short strings (≤500 chars) use a pure-Python DP loop; longer strings use numpy vectorised row operations. `spatial_sort_text()` reorders words by bounding-box centroid to isolate recognition errors from reading-order errors. No rapidfuzz or other C-extension dependency.
-
-**PII cleaning is graph-driven, masked after Isaacus.** `pii/cleaner.py` takes its primary candidates from the Kanon-2 enrichment graph (PII-typed entities mapped onto chunks by mention offset); the regex + cosine-context detector (`all-MiniLM-L6-v2`) is an opt-in backstop (`pii.use_regex_backstop`, default off, ~15% precision). Masking is terminal — `*.clean_text.parquet` (`<PERSON_n>`) is written *after* enrich/embed and never rewrites the raw chunks. Current coverage: PERSON and ADDRESS — ORGANISATION, URL, phone, and email are not yet detected. See `docs/accuracy/PII_CLEANING.md` for measured recall/precision baseline.
-
-**750-line hard cap per file.** Signals the need to split before files become unwieldy. The PDF dispatcher (`orchestrator.py` + `page_profile.py` + `extract.py`) and the non-PDF strategy modules (`strategies_scanned.py`, `strategies_file.py`, with `strategies.py` as a re-export shim) are split this way; `SpreadsheetExtractor` lives in `spreadsheet.py`; the CLI is split into a `cli/` subpackage of per-topic modules for the same reason.
-
-**Niche formats get standalone submodules.** Formats with their own structure (e.g. G-NAF's headerless PSV with SQL-defined schemas, ESRI Shapefiles with geometry + CRS) get a dedicated submodule under `ingest/` that reads the format and writes Parquet/GeoParquet directly, bypassing the generic extraction operations. Dependencies (`pyogrio`, `geopandas`, `shapely`) are lazy-imported so they don't affect core pipeline users.
-
-For evaluation metrics and accuracy validation strategy, see [`docs/evaluation.md`](evaluation.md).
-
-================================
-# Future State
-================================
-
-The remaining unimplemented capabilities. Everything above this line is current state.
-
-**Remaining TODOs:**
-
-1. **AI/Semantic Chunking:** ✅ **Shipped 2026-06 via a different mechanism.**
-   Rather than the homegrown boundary-hints layer proposed below, this is now
-   delivered by semchunk 4's native AI chunking (`chunking.chunking_model`) plus
-   single-enrichment reuse — the enrich stage persists the raw ILGS Document to
-   `*.enrichment_doc.parquet` and the chunk stage reuses it (byte-identity
-   guarded). See `docs/decisions.md` ("AI chunking — single-enrichment graph
-   reuse") and the `### 7. Process — Chunking` section above. The proposed design
-   below is retained for historical rationale and is **superseded**; only the
-   *Local Enrichment Fallback* (item 2) remains genuine future work.
-
-### AI/Semantic Chunking — Proposed Design (SUPERSEDED — see note above)
-
-#### Problem
-
-The current chunker (`process/chunker.py`) delegates entirely to semchunk, which splits on punctuation and whitespace heuristics. This works well for generic text but ignores document structure that enrichment has already identified — segment boundaries, entity spans, cross-references. Chunks can split mid-paragraph, mid-entity, or across structural boundaries that a human reader would never break.
-
-The TODO called for a provider-agnostic design. The key insight: enrichment spans (`Span(start, end)`) are already provider-agnostic — they're just character offsets. The coupling risk is in *how we obtain* those spans, not in how we consume them.
-
-#### Design Principle: Boundary Hints, Not a New Chunker
-
-Semantic chunking is not a replacement for semchunk. It's a pre-processing layer that identifies preferred split points and no-split zones, then feeds constrained text regions to the existing algorithmic chunker. This keeps semchunk's token-counting, overlap, and offset-tracking logic intact.
-
-```
-                          ┌─────────────────────┐
-                          │  EnrichmentResult    │
-                          │  (from any provider) │
-                          └──────────┬──────────┘
-                                     │
-                                     ▼
-                          ┌─────────────────────┐
-                          │  extract_boundaries  │  → list[SemanticBoundary]
-                          │  (analyse/boundaries)│    (preferred splits + no-split zones)
-                          └──────────┬──────────┘
-                                     │
-                                     ▼
-┌──────────┐   ┌─────────────────────────────────────┐   ┌──────────────┐
-│ full_text │──►│  chunk_document_semantic             │──►│ list[TextChunk]│
-└──────────┘   │  (process/chunker.py)                │   └──────────────┘
-               │  1. slice text at preferred splits   │
-               │  2. sub-chunk each slice via semchunk│
-               │  3. repair redaction markers          │
-               └──────────────────────────────────────┘
-```
-
-#### Boundary Extraction — Provider-Agnostic
-
-A new module `analyse/boundaries.py` converts an `EnrichmentResult` into a flat list of `SemanticBoundary` objects. This is the only module that reads enrichment structure — the chunker never touches `EnrichmentResult` directly.
-
-```python
-@dataclass
-class SemanticBoundary:
-    """A structurally significant point or zone in the document text."""
-    offset: int              # character offset in full_text
-    kind: str                # "split" | "no_split"
-    weight: float            # 0.0–1.0, higher = stronger signal
-    source: str              # "segment" | "heading" | "entity" | "crossref"
-```
-
-Boundary extraction rules (applied in priority order):
-
-| Source | Kind | Weight | Rationale |
-|--------|------|--------|-----------|
-| Segment boundaries (level ≤ 2) | split | 1.0 | Chapter/section breaks are natural chunk boundaries |
-| Segment boundaries (level > 2) | split | 0.7 | Sub-section breaks — prefer but don't force |
-| Heading spans | split | 0.9 | Keep headings at the start of a chunk, not the end |
-| Entity mention spans | no_split | 0.8 | Don't split a person name or location across chunks |
-| Cross-reference spans | no_split | 0.6 | Keep internal references intact within a chunk |
-| Term definition spans | no_split | 0.5 | Keep defined terms with their meaning |
-
-The `extract_boundaries()` function takes an `EnrichmentResult` and returns `list[SemanticBoundary]`. It has no knowledge of chunk sizes, tokenisers, or the chunking algorithm — it only reads spans.
-
-Because `EnrichmentResult` and `Span` are already Womblex's own data models (defined in `analyse/models.py`), any provider that populates these models works. Isaacus does this today via `enrich.py`. A future local model, a different API, or even hand-annotated spans would work identically — the boundary extractor doesn't care where the spans came from.
-
-#### Chunking Algorithm
-
-`chunk_document_semantic()` in `process/chunker.py`:
-
-1. Collect all `split` boundaries, sorted by offset, filtered to `weight >= min_split_weight` (configurable, default 0.7).
-2. Slice `full_text` at split points into *regions*. Each region is a contiguous block of text between two structural boundaries.
-3. For each region:
-   - If the region fits within `chunk_size` tokens → emit as a single `TextChunk`.
-   - If the region exceeds `chunk_size` → sub-chunk via the existing `chunk_text()` (semchunk), but with `no_split` zones passed as protected spans. Semchunk handles the actual token-counting and splitting; protected spans are enforced by pre-inserting zero-width markers that semchunk won't split on (or by post-merge if a protected span was split).
-4. Re-index all chunks sequentially.
-5. Run `_repair_redaction_splits()` as today.
-
-This means the semantic mode produces the same `list[TextChunk]` output with the same offset tracking — downstream operations (PII, enrichment, graph, store) are completely unaffected.
-
-#### Fallback Behaviour
-
-- If no `EnrichmentResult` is available → fall back to `chunk_document()` (current algorithmic mode). No error, no warning beyond a debug log.
-- If enrichment produced zero segments (e.g. very short document) → same fallback.
-- If a region between split points is empty after whitespace stripping → skip it.
-
-#### Reusing Existing Enrichment
-
-The typical Womblex flow is: extract → chunk → enrich → graph. Semantic chunking inverts the dependency: it needs enrichment *before* chunking. Two paths handle this:
-
-1. **Pre-enrichment mode (new):** `run_chunking()` in `operations.py` checks if `config.chunking.semantic` is enabled. If so, it calls `enrich_document()` on the full text *before* chunking, extracts boundaries, then chunks semantically. The enrichment result is stored on `DocumentResult` so downstream `run_enrichment()` can skip re-enrichment (idempotent — same text, same result).
-
-2. **Cached enrichment mode:** If `DocumentResult.enrichment` is already populated (e.g. from a previous run loaded via `query.py`), `run_chunking()` uses it directly. No API call needed.
-
-This keeps the composable design intact — callers still compose operations directly, and the enrichment dependency is satisfied transparently within `run_chunking()` when semantic mode is active.
-
-#### Configuration
-
-Extend `ChunkingConfig` in `womblex.config`:
-
-```python
-class ChunkingConfig(BaseModel):
-    # ... existing fields ...
-    semantic: bool = Field(
-        default=False,
-        description="Use enrichment spans for semantic boundary detection before chunking.",
-    )
-    semantic_min_split_weight: float = Field(
-        default=0.7, ge=0.0, le=1.0,
-        description="Minimum boundary weight to trigger a split in semantic mode.",
-    )
-```
-
-YAML usage:
-
-```yaml
-chunking:
-  tokenizer: "isaacus/kanon-2-tokenizer"
-  chunk_size: 480
-  semantic: true
-  semantic_min_split_weight: 0.7
-```
-
-When `semantic: false` (default), behaviour is identical to today. No new dependencies, no new API calls.
-
-#### Provider Abstraction — Not an Interface, Just Data
-
-The design deliberately avoids a formal `EnrichmentProvider` interface or plugin system. The project convention is "no premature abstractions" (CLAUDE.md). Instead:
-
-- `EnrichmentResult` is the contract. Any code that populates an `EnrichmentResult` with segments and entity spans is a valid provider.
-- `enrich.py` does this for Isaacus today. A future local model would have its own `enrich_local.py` that returns the same `EnrichmentResult`.
-- `extract_boundaries()` consumes `EnrichmentResult` — it never imports `isaacus`, never calls an API, never knows which provider was used.
-- `run_chunking()` in `operations.py` calls whichever enrichment function the config points to. Today that's `enrich_document()` from `enrich.py`. Swapping providers means changing one function call, not implementing an interface.
-
-This is provider-agnostic through data, not through abstraction.
-
-#### Provider Quality Spectrum
-
-Different providers populate `EnrichmentResult` with varying richness. The boundary extractor works with whatever it gets — fewer spans means fewer boundary hints, which means more reliance on semchunk's punctuation heuristics within each region. This is a graceful degradation, not a failure.
-
-| Provider | Segments | Entities | Cross-refs | Expected boundary quality |
-|----------|----------|----------|------------|--------------------------|
-| Isaacus (kanon-2-enricher) | Full structural hierarchy (chapter → paragraph) | Persons, locations, terms, external docs | Yes | High — rich split points at every structural level, entity-aware no-split zones |
-| Sentence-transformers / local NER | None (or synthetic via topic segmentation) | Named entities only (PER, LOC, ORG) | No | Moderate — entity no-split zones work, but split points fall back to semchunk heuristics between entity clusters |
-| spaCy (en_core_web_trf or similar) | Sentence boundaries only | Named entities (PER, LOC, ORG, etc.) | No | Moderate — sentence boundaries as split hints, entity spans as no-split zones |
-| No enrichment available | — | — | — | Baseline — pure semchunk, identical to current behaviour |
-
-A lightweight local model (sentence-transformers, spaCy) is a valid provider that produces usable results out of the box. The output quality is lower than Isaacus because the boundary signals are coarser — you get entity protection but not structural segmentation. The tradeoff is: no API dependency, no cost, runs offline, at the expense of less structurally aware chunk boundaries.
-
-#### New Files
-
-| File | Purpose | Lines (est.) |
-|------|---------|-------------|
-| `analyse/boundaries.py` | `SemanticBoundary` dataclass + `extract_boundaries(EnrichmentResult) → list[SemanticBoundary]` | ~120 |
-
-No new files for the chunker — `chunk_document_semantic()` is added to the existing `process/chunker.py`.
-
-#### Composition Changes
-
-The composable-design dependency graph gains one new valid composition:
-
-```
-extract(pdf) → chunk(semantic=true) → done
-  └── internally: enrich(full_text) → extract_boundaries → chunk_semantic
-```
-
-And the existing enrichment composition remains valid (enrichment is not duplicated):
-
-```
-extract(pdf) → chunk(semantic=true) → enrich → build_graph → done
-  └── chunk reuses the enrichment it already obtained
-```
-
-Invalid compositions remain the same — semantic chunking still requires an extraction, and enrichment still requires chunks.
-
-#### What This Does Not Do
-
-- No new provider interface or plugin system. The abstraction is the `EnrichmentResult` dataclass.
-- No changes to `TextChunk`, `chunk_text()`, or `chunk_document()`. The algorithmic path is untouched.
-- No new dependencies. Semantic chunking uses the same Isaacus client (or whatever populates `EnrichmentResult`).
-- No changes to downstream operations. PII, graph, store, verify all consume `list[TextChunk]` as before.
-
-2. **Local Enrichment Fallback:** The PII cleaner's `post_enrichment` mode and the semantic chunking design both depend on `EnrichmentResult`, which today only comes from Isaacus (`enrich.py`). Without an Isaacus client there are no graph spans, so PII has only the opt-in regex backstop (off by default) and semantic chunking falls back to pure semchunk. A local enrichment provider (e.g. spaCy `en_core_web_trf`, a fine-tuned NER model, or sentence-transformers topic segmentation) that populates `EnrichmentResult` with entity mentions and optionally segments would give both systems something to work with offline — lower quality than Isaacus, but better than regex-only / no boundaries. The provider quality spectrum in the semantic chunking design above applies here too. Implementation: a new `analyse/enrich_local.py` returning `EnrichmentResult`, selected by config (e.g. `enrichment.provider: local`), no changes to downstream consumers.
+Distributed (cloud) runs execute the same stage bodies via `cloud/stage_runner.py` against a declarative `StageContract` per stage (`cloud/stage_contracts.py`), reading/writing an object store instead of local disk.

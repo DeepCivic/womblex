@@ -2,18 +2,11 @@
 
 The canonical reference for the `money` annotation op: how Womblex recovers
 monetary amounts from its extraction output, normalises them to exact values,
-and records them as a joinable sidecar. It sits alongside
-[extraction.md](extraction.md) as a per-feature reference; the durable
-cross-cutting rationale (offset spaces, placement of annotation ops) lives in
-[decisions.md](decisions.md) and the accuracy metric set in
-[evaluation.md](evaluation.md).
+and records them as a joinable sidecar.
 
 `womblex money --shards <dir>` writes `*.money_spans.parquet` +
 `*.money_columns.parquet` per batch (`process/money*.py`,
-`store/money_output.py`); the prerequisite spreadsheet change under
-[Number-format prerequisite](#number-format-prerequisite) is in place. There is
-still no labelled ground truth, so no precision or recall figure is quoted here
-— see [Open gap: no ground truth](#open-gap-no-ground-truth).
+`store/money_output.py`).
 
 ## Scope and naming
 
@@ -29,30 +22,17 @@ That work is tracked separately and is not in scope here.
 The op is named `money` rather than `currency` to keep the distinction
 visible.
 
-## The problem shape, as measured
+## The problem shape
 
-Measured across the benchmark corpus (29 PDFs, two register spreadsheets, one
-DOCX). These counts are **detector output, not accuracy** — there is no
-labelled money ground truth in the benchmark, so no precision or recall figure
-can honestly be quoted for any approach yet. See
-[Open gap: no ground truth](#open-gap-no-ground-truth).
-
-| Locus | Amounts | Carries a currency marker |
-|---|---|---|
-| PDF running text (29 PDFs) | 658 | yes |
-| AusTender contract register, `Value` column | 1,777 | **none** |
-| GrantConnect award register, `Value (AUD)` column | 48,997 | **none** |
-| Auditor-General financial tables (pp. 120–260 sample) | ~1,271 | **none** |
-
-The finding that shapes the design: **the overwhelming majority of monetary
-amounts in this corpus carry no currency marker at all.** In a 48,997-row grant
-register recording $22.7bn of awards, exactly one `$` survives extraction — an
-aggregate in the sheet preamble. Symbol-keyed detection alone reaches roughly
-1.3% of the corpus's amounts.
-
-A second measured fact: of the amounts that *are* marked, **97% carry a scale
+Across the benchmark corpus (29 PDFs, two register spreadsheets, one DOCX),
+**the overwhelming majority of monetary amounts carry no currency marker at
+all**. Register columns (AusTender `Value`, GrantConnect `Value (AUD)`) and
+financial tables print bare numbers: a 48,997-row grant register recording
+$22.7bn of awards keeps exactly one `$` through extraction, an aggregate in the
+sheet preamble. Symbol-keyed detection alone reaches roughly 1.3% of the
+corpus's amounts. Of the amounts that *are* marked, **97% carry a scale
 suffix** (`$33.1 million`, `$78.7bn`, `($684.2m)`) across at least six
-spellings. Scale handling is the dominant narrative form, not an edge case.
+spellings, so scale handling is the dominant narrative form, not an edge case.
 
 ### What this implies
 
@@ -109,11 +89,11 @@ another currency has been explicitly established earlier in the document.
 ### Tier 2 — Common international
 
 ```
-USD  NZD  GBP  EUR  JPY  CAD  SGD  CHF  HKD  CNY  RMB
+USD  NZD  GBP  EUR  JPY  CAD  SGD  CHF  HKD  CNY
 ```
 
 These occur regularly in procurement, defence, treasury, trade and economic
-reporting.
+reporting. `RMB`, not an ISO code, is read as an alias of `CNY`.
 
 ### Tier 3 — Full ISO 4217
 
@@ -170,8 +150,9 @@ Repairing the typo would be a guess; declining is the only honest outcome.
 
 ### Optional international mode
 
-Configurable, off by default. When enabled, accepts `1.000,50` and
-`10.000.000,00`, normalising after locale detection.
+Configurable (`international_numbers`), off by default. When enabled, also
+accepts `1.000,50` and `10.000.000,00`; there is no locale detection — each
+number's separators are read from its own shape.
 
 ## Currency indicators
 
@@ -205,7 +186,7 @@ the amount is lost entirely.
 ## Extraction patterns
 
 The `#` column below is a pattern catalogue index (also the internal `pN`
-evidence code), **not** the overlap-resolution order. When two patterns match
+evidence code, except 8), **not** the overlap-resolution order. When two patterns match
 overlapping text, `money.py`'s `_PRIORITY` table decides the winner, in this
 order (lowest number wins first): accounting-negative (`p9`) and range
 (`p7`, pre-claimed before overlap resolution runs, so it never actually
@@ -287,15 +268,12 @@ real negative.
 
 ### Magnitude suffixes
 
-Supported: `k`, `m`, `b`, `bn`, `tn`, `million`, `billion`, `trillion`.
+Supported: `k`, `thousand(s)`, `m`, `mn`, `million(s)`, `b`, `bn`,
+`billion(s)`, `t`, `tn`, `trillion(s)`.
 
-The bare single letters `m`, `b`, `k` are interpreted as multipliers **only**
-when one of the following holds:
-
-- preceded by a currency indicator
-- followed by a currency indicator
-- inside a recognised financial context
-
+The bare single letters `k`, `m`, `b`, `t` are interpreted as multipliers
+**only** when preceded or followed by a currency indicator. Implicit financial
+context does not license one (`The budget cost is 100m.` yields no span).
 This gate exists to reject `100m road`, `50m radius`, `20m hose`.
 
 ### Ranges
@@ -358,7 +336,7 @@ in:
 | Postcodes | `2600`, `3000` | Reject only where address context exists |
 | Parcel / land identifiers | `Lot 5`, `DP12345`, `SP4567`, PID, LGA IDs | Common in government datasets |
 | Legislative references | `Section 10`, `Clause 12`, `Schedule 3`, `Division 2` | |
-| Incident numbers | `INC123456`, `F2024/12345`, `IR000456` | Common in emergency datasets |
+| Incident numbers | `INC123456`, `IR000456` | Two to four capitals before the digits; a one-letter file reference (`F2024/12345`) is not blocked |
 | Measurements | `50m`, `100 km`, `20 kg`, `5 ha`, `10 MW`, `250 ML`, `40°C` | Metric suffixes are never monetary multipliers |
 | Percentages | `10%`, `15.5%`, `100 percent` | |
 
@@ -369,8 +347,9 @@ column is classified once; every cell beneath inherits the verdict.
 
 **Evidence, strongest first:**
 
-1. **Number format carrying a currency symbol** — `$#,##0.00`. Definitive.
-   Available for spreadsheets as of the [number-format prerequisite](#number-format-prerequisite) below.
+1. **Number format carrying a currency symbol** — `$#,##0.00`. Decisive once
+   at least 70% of present cells are numeric (`numeric_fraction_min`), unless a
+   veto fires first. Spreadsheets only ([number-format prerequisite](#number-format-prerequisite)).
 2. **Money-vocabulary header** — the trigger list above applied to the header
    text (`Value`, `Value (AUD)`, `Amount`, `Approved Budget $m`), combined with
    the cells being predominantly numeric.
@@ -378,9 +357,9 @@ column is classified once; every cell beneath inherits the verdict.
    promotes a column on its own: identifiers, counts and postcodes are
    numerically indistinguishable from money.
 
-**Vetoes.** A header matching non-money vocabulary suppresses a column that
-would otherwise be promoted on vocabulary alone, even when its cells are
-numeric and thousands-separated: `postcode`, `abn`, `acn`,
+**Vetoes.** Checked before any promotion — even a currency number format; a
+`%` number format also vetoes (`percent_format`). The header veto terms:
+`postcode`, `abn`, `acn`,
 `id`, `count`, `number`, `phone`, `year`, `date`, `percent`, `%`, `rate`,
 `ratio`, `index`, `quantity`, `fte`, `headcount`, `latitude`, `longitude`.
 Term matching must be **whole-word** — `age` is a veto term and `Average Cost`
@@ -489,18 +468,20 @@ populated, and **exactly one group is non-null per row**:
 | `table_cell` | `parent_elem_order`, `row`, `col` |
 | `sheet_cell` | `sheet`, `row`, `col`, `elem_order` |
 
-Beyond the JSON above the row also carries `evidence` (`p1`–`p11` for the
-narrative patterns, `number_format` / `header+numeric` / `header_currency` for
+Beyond the JSON above the row also carries `evidence` (`p1`–`p7`, `p9`–`p11`
+for the narrative patterns — pattern 8 has no code; its qualifier lands in
+`modifier`, `number_format` / `header+numeric` / `header_currency` for
 the column path), `range_group` + `range_role` (which link a range's two
 endpoints — the JSON record has no way to express the relationship the design
 requires be preserved), and `column_id` (the classified column a cell
 inherited from; null when the cell was self-evidencing).
 
-`*.money_columns.parquet` is the second sidecar: one row per column
-considered, money or not, with the evidence that decided it — header text,
+`*.money_columns.parquet` is the second sidecar: one row per sheet column and
+per column of a table with a declared header row (headerless tables get none),
+money or not, with the evidence that decided it — header text,
 number format, numeric and null fractions, veto term, currency, scale, and how
 many cells it yielded. The column path decides ~98.7% of the corpus's amounts
-off a single per-column verdict, and with no labelled ground truth yet that
+off a single per-column verdict, and table-cell recall is unmeasured, so that
 verdict needs to be reviewable rather than implicit in the spans it produced.
 
 Two departures from the pipeline sketch below, both consequences of the
@@ -530,11 +511,10 @@ wrap (`$5\nmillion`), because PDF text layers wrap mid-phrase constantly.
 1. **Pre-processing** — preserve original text and character offsets; Unicode
    normalisation; standardise whitespace while maintaining span mappings;
    detect document structure (tables, headers, footers, OCR artefacts).
-2. **Candidate generation** — apply the extraction patterns in strict priority
-   order (1–10 above).
-3. **Overlap resolution** — collect all candidate spans, rank by pattern
-   priority, confidence and span length, retain the highest-quality
-   non-overlapping match.
+2. **Candidate generation** — apply the extraction patterns (1–11 above).
+3. **Overlap resolution** — collect all candidate spans, rank by `_PRIORITY`
+   (not catalogue order), then span length, then confidence, and retain the
+   highest-ranked non-overlapping match.
 4. **False-positive filtering** — exclude candidates embedded in the Australian
    false-positive classes above.
 5. **Normalisation** — convert numeric strings to canonical values; expand
@@ -586,279 +566,16 @@ currency, scale and the accounting-negative gate — while cells in every other
 column, vetoed ones included, are still scanned for *self-evidencing* amounts:
 a `$1,200.50` cell carries its own evidence whatever its header says.
 
-## Decisions
-
-### Hand-written patterns, not a parsing library
-
-Evaluated: `price-parser`, `money-parser`, `quantulum3`, `pint`, spaCy `MONEY`,
-Presidio, LayoutLMv3. **Decision: no new dependency.**
-
-- **`price-parser` / `money-parser`** — measured wrong on the dominant form.
-  `$2m` → 2, `$8.7 billion` → 8.7, `AUD$21.9 million` → 21.9, and `(6,550.1)`
-  loses its sign. Silently wrong by 10⁶–10⁹ on 97% of narrative amounts. They
-  encode e-commerce assumptions: prices are small, unscaled and always marked.
-- **`quantulum3`** — the strongest candidate, and the closest call. It extracts
-  *and* normalises scale in one pass, handles worded magnitudes natively, and
-  is externally maintained. Rejected because: it is a **units** library whose
-  competence spans an enormous physical-unit space of which currency is one
-  corner, so on an audit report it surfaces page counts, percentages, years and
-  section numbers that we then filter away — and that filter is where precision
-  is actually decided, and is ours to write either way. It returns **floats**,
-  and converting back to Decimal cannot recover precision the float never had.
-  It fails the "thin adapter" test in [CLAUDE.md](../CLAUDE.md), which applies
-  when the library's full surface *is* the feature; here we would use a few
-  percent and suppress the rest. And it only addresses the self-evidencing
-  ~1.3% — it has nothing to say about a bare `50000` in a column.
-  **Revisit if the corpus grows to legislation and contracts**, where worded
-  amounts ("a sum not exceeding five hundred thousand dollars") and penalty
-  units become common; both scored zero on the current corpus. The worded half
-  of that revisit has since been written in-house as pattern 11 — one module
-  (`process/money_words.py`) of number-word tables, a phrase regex and a
-  parser, which is the same "small and stable residual surface" argument as
-  the rest of the pattern set, and it returns exact `Decimal`s rather than the
-  floats that were half the reason for rejecting the library. Penalty units
-  remain deferred.
-- **`pint`** — solves unit *dimensionality and conversion*. Currency is not a
-  physical dimension, the conversion analogue is exchange rates (which pint
-  does not carry and this corpus does not need), and it is float-first. What we
-  need is a scale lookup and exact arithmetic.
-- **spaCy `MONEY`** — unvalidated; the model could not be obtained in this
-  environment, so no claim is made about its behaviour. Architecturally it
-  returns a labelled span, not a value, so normalisation remains ours
-  regardless, and it has no purchase on bare cells.
-- **Presidio** — the recognizers live in `presidio-analyzer`, which is *not*
-  currently a dependency (`presidio-anonymizer` is). Architecturally it is
-  regex + context returning spans, with no normalisation layer. Money is also
-  not PII, and routing it through that stack merges two concerns the codebase
-  deliberately separates.
-- **LayoutLMv3** — needs page images and fine-tuning on labelled key-value
-  data. The op's input is parquet, by which point layout is gone; and there are
-  no money annotations to fine-tune on. The dependency is the cheap part, the
-  labels are the expensive part.
-
-The residual hand-written surface is small and stable: a ~12-entry scale table
-and the Australian pattern set. Australian government money vocabulary is
-closed and slow-moving. **The risk in this feature is not narrative parsing —
-it is deciding whether a bare column of numbers is money, and no candidate
-library addresses that.**
-
-### Header continuation rows are folded into the header
-
-Measured on the ANAO Major Projects Report: PDF financial tables wrap their
-header across two lines — `Approved` on row 0, `Budget $m` on row 1 — and the
-extractor declares only the first a header row. The unit and the money
-vocabulary both live in the second, so the column read as a nameless run of
-bare numbers and was left alone, losing all 27 approved-budget amounts.
-
-`fold_header_continuation` absorbs **one** leading body row into the header,
-and only when that row is non-numeric text while the rest of the column is
-numeric enough to be a data column — so a genuine text data row is never eaten.
-This is a header-*reading* fix, not a relaxation of the deferred "no
-recoverable header" case below: the header is present in the table, just not
-where the extractor said it was.
-
-### Cross-validation by re-reading sources: rejected
-
-An earlier design recounted amounts by independently re-reading each source
-file and comparing multisets of normalised Decimals. Rejected: it constitutes a
-second extraction path, duplicating work extraction already performs correctly,
-which is contrary to the objective of this feature. Reconciliation, if
-reintroduced, must operate on extracted output.
-
-Two constraints recorded for whenever that is revisited: comparison must be on
-**multisets of values, not counts** (counts hide compensating errors — one
-amount dropped and another duplicated nets to zero); and pages with no text
-layer must be reported **`unverifiable`, never `mismatch`** (38% of benchmark
-PDFs have no text layer, and reporting those as failures would bury real ones).
-
-### Deferred
-
-- **Bare cells in PDF financial tables with no recoverable header.** The
-  measured header-recovery rate is 41 of 273 tables; the rest put the unit in a
-  caption or the row above the grid. Promoting a numeric column with no header
-  is where percentage columns leak in. Left un-extracted.
-- **Implicit financial context in narrative** — specified above, default off,
-  pending a precision measurement.
-- **Penalty units** — zero occurrences across all 29 benchmark PDFs. These are
-  audit, FOI and budget documents, not legislation.
-
-Worded amounts were on this list ("zero occurrences measured; revisit with a
-legislation/contract corpus") and are now implemented as pattern 11. The
-occurrence count has not changed — still zero in the benchmark — so this is a
-capability decision, not a measured recall win: the corpus these documents are
-a sample of does contain drafted instruments, and an amount written in words is
-invisible to every other pattern rather than merely lower-confidence. What the
-benchmark *does* supply is the precision evidence, which is the part that
-matters: the one worded-number phrase in it is a headcount, and the
-currency-word gate declines it (measured: zero worded spans across 1.6 MB of
-real text).
-
-## First real-document run
-
-Four benchmark fixtures, run through the real pipeline (extract → money) rather
-than synthetic shards. Still **not** a precision/recall measurement — there is
-no labelled set — but every span was checked by hand against the source.
-
-| Fixture | Amounts found | Checked against |
-|---|---|---|
-| ANAO Major Projects Report 2020–21 (PDF, 30pp) | 42 narrative + 53 table_cell | every `$` in the transcript |
-| ANAO, same report as a text transcript | 42 narrative | 44 `$` in the file |
-| DFAT PBS 2025–26 (DOCX) | 47 narrative + 12 table_cell | source `python-docx` table dump |
-| DocLayNet `dense_text_548` (scanned page, OCR) | 1 of ~35 | ground-truth transcript |
-| FUNSD `82200067_0069` (transcript) | 0 | ground-truth transcript |
-
-Findings that changed the code are in the [Decisions](#decisions) section
-below. The rest, as measurements:
-
-- **Recall on marked narrative amounts is complete on the two ANAO runs.** Of
-  44 `$` characters in the transcript, 42 are amounts and all 42 are
-  extracted; the other two are the `Budget $m` / `Amount $b` column headers,
-  which are unit declarations, not amounts.
-- **The `Approved Budget $m` column reconciles three ways.** Its 25 project
-  amounts sum to $78,699.2m, matching both the table's own total row and the
-  narrative's independently written "$78.7 billion". That is the strongest
-  correctness signal available without a labelled set, and it exercises the
-  whole column path — header scale, cell parsing, exact decimals.
-- **FUNSD's zero is correct.** Its `AMOUNT RECEIVED FROM VENDOR` column is
-  empty in the source; the numbers on the page are unit counts and rep counts.
-- **Two header-marker defects, both found on one scanned page.** That page
-  carries `Threshold ($)` and `Threshold (#)` — dollars and unit counts,
-  distinguished only by the marker. The money op honoured neither correctly:
-  `Grant Date Fair Value ... ($)` was vetoed on the incidental word `date`,
-  and `Threshold (#)` was promoted to money because the header tokeniser
-  dropped `#` entirely and matched the vocabulary term `threshold`. The first
-  lost 5 real amounts; the second invented 5. Both are fixed, and `#` is now a
-  token character precisely because a financial table marks a count column the
-  same way it marks a money one.
-
-- **Scanned money tables are unreachable today, and that is the largest
-  measured gap.** DocLayNet `dense_text_548` is a proxy-statement
-  *Grants of Plan-Based Awards* page: four money columns headed
-  `Threshold ($)` / `Target ($)` / `Maximum ($)` / `Grant Date Fair Value …
-  ($)`, about 35 amounts. The op recovers **one** — the single footnote where
-  OCR preserved a `$`. OCR captures nearly every digit correctly, but the
-  layout model's table region (YOLO confidence 0.96) became a `[TABLE]`
-  placeholder block with **no cells**, so the column path had nothing to
-  classify and every amount on the page was a bare number the narrative path
-  is right to decline.
-
-  **Partly closed, 2026-07-28.** `_layout_blocks_and_tables` now reconstructs
-  cells inside a detected table region (#17 step A3), so an OCR'd page yields
-  a real `table` element and the column path reaches it. The mechanism
-  sentence this note originally gave — that `tables` is never populated on any
-  code path — no longer holds.
-
-  This applies to `dense_text_548` too, despite it being a PNG: an earlier
-  revision of this note said image inputs route through `ImageExtractor`,
-  which never calls the layout pass. **That was wrong** — `extract_text`
-  sends everything `fitz` can open, images included, through the orchestrator,
-  and `ImageExtractor` has since been deleted as unreachable (#17 step A4).
-
-  What still limits this fixture is grid *quality*, not routing: it is the
-  hard shape round 1 does not solve (7-line stacked spanning header,
-  hierarchical rows). As of #17 step B2 the reconstructor **refuses** this
-  shape rather than emitting a grid — the row-fill density gate
-  (`MIN_ROW_FILL_RATIO`) rejects the sparse ~0.45-fill grid it binned to
-  (pre-B2 it passed a 12×12 partial against the 39×11 ground truth). So the
-  column path reaches a `[TABLE]` placeholder here again, not cells — the
-  precision-first outcome: no cells is better than wrong cells. Repairing
-  (rather than refusing) this shape is the deferred scan round.
-
-  Fed the same page's real structure, the column path recovers **30 of 30**.
-  The op is ready; the remaining missing piece is extraction-side, tracked as
-  item #17 in
-  [steering.md](steering.md#table-cell-reconstruction-on-ocrd-pages-17) — not
-  a change to this op. This
-  also answers the benchmark gap noted below — money loss through OCR was
-  unmeasured, and on this page it is ~97%, none of it attributable to the
-  detector.
-
-  (Two further amounts are lost to OCR reading `$15.37` as `s15.37`. The op is
-  right to decline those: `s15` is precisely the legislative-reference shape
-  the false-positive table blocks, so accepting `s` as a currency symbol would
-  trade two recoveries for a large class of false positives. That fix belongs
-  in OCR or a cleaning op, and it is a rounding error next to the 30.)
-- **Plain-text records cannot use the column path.** The ANAO transcript
-  flattens the same `Approved Budget $m` table into narrative, where the
-  amounts are bare numbers with no column to inherit from — 27 amounts
-  recovered from the PDF, 0 from the transcript of the same pages. This is the
-  designed refusal, and it is a reason to prefer the structural source when a
-  corpus offers both.
-- **No financial tables in the DFAT DOCX.** All 51 of its tables are
-  performance-measure or glossary tables (confirmed against the source with
-  `python-docx`); its money is narrative, and 47 amounts were recovered there.
-  Zero money columns is correct, not a miss.
-
-## Narrative-expression round, measured
-
-The patterns above were re-run over the same fixtures before and after the
-narrative-expression work (worded amounts, space-grouped thousands, the
-`$US`/`$A` symbol order, the true minus sign, `$(…)`, `¢`, restatement),
-comparing spans by offset so a moved value shows up as a pair rather than a
-count that happens to match.
-
-| Fixture | Spans before → after | Change |
-|---|---|---|
-| ACT regulatory notice (PDF) | 2 → 2 | both **values corrected**: `$10` → `$10 000`, `$50` → `$50 000` |
-| ANAO Major Projects Report (PDF, full) | 1,078 → 1,081 | `$US655.5m`, `$US617.7m`, `$US601.9m` recovered |
-| ANAO, first 30pp + transcript | 42 → 42 | unchanged |
-| DFAT PBS 2025–26 (DOCX) | 59 → 59 | unchanged |
-
-Three things this says, and one it does not:
-
-- **The two corrected values are the point of the round.** They were not
-  missing, they were *wrong by 10³* — a legislative penalty of $10 000 stored
-  as ten dollars. A miss is visible in a count; a silently wrong magnitude is
-  not, which is why the comparison is by offset and value rather than volume.
-- **The three `$US` amounts were lost to a false-positive blocker, not to the
-  patterns.** The metre pattern matches at `5m` inside `$US655.5m` — there is
-  no word boundary before `655`, so the match starts mid-number and the
-  currency check behind it saw `655.` rather than the `$`. The check now steps
-  back over the number's own digits first. The same defect silently affected
-  `US$655.5m`.
-- **Nothing regressed.** No span present before is absent after, on any
-  fixture.
-- **It is still not a recall measurement.** Worded amounts contributed zero
-  spans here because the corpus contains none, and the scanned-money gap
-  described below is untouched by any of this.
-
-Cost: `find_money` over the 1.3 MB ANAO report goes 1.42s → 1.83s, of which
-0.22s is the worded scan.
-
-## Open gap: no ground truth
-
-**There is no labelled money data in the benchmark.** Every count in this
-document is detector output — what a pattern found — not a measurement of
-correctness. No precision or recall figure can be honestly quoted for this
-design, or for any alternative, until a labelled set exists.
-
-The proportionate next step is a bounded labelled sample drawn from the
-*parquet* — a few hundred candidate strings across the three loci, labelled
-money / not-money with expected value. That is a small artefact, not a
-subsystem, and it is what would let the `quantulum3` decision above be settled
-by measurement rather than argument, and serve as a regression baseline.
-
-Fixture coverage is otherwise good for spreadsheets and native PDFs. The
-scanned-money gap is now partly closed: DocLayNet `dense_text_548` is a scanned
-page of money columns, and the measured loss is ~97% — attributable entirely to
-OCR producing no table cells, not to the detector (see
-[First real-document run](#first-real-document-run)). Of the 29 PDFs, 11 have
-no text layer and none of those contain monetary amounts, so OCR money loss
-across the PDF set specifically remains unmeasured.
-
 ## Number-format prerequisite
 
-`ingest/spreadsheet.py` read cells with pandas (`dtype=str`), which discards
-both the cell's number format and its stored type. Every `sheet_cell` element
-landed with `value_type="text"` and `number_format=None`, despite
-`ELEMENT_SCHEMA` carrying columns for both. A second read-only openpyxl pass
-now populates them; the pandas read stays authoritative for `value`, so the
-verbatim contract ("1,234" stays "1,234") is unchanged.
+Spreadsheet extraction (`ingest/spreadsheet.py`) records each `sheet_cell`'s
+`number_format` and `value_type` from a read-only openpyxl pass; the pandas
+read (`dtype=str`) stays authoritative for `value`, so the verbatim contract
+("1,234" stays "1,234") holds.
 
-This matters because it restores the strongest available signal for the
+That number format is the strongest available signal for the
 column-evidenced path. GrantConnect's award register carries `$#,##0.00` on
 48,997 cells whose text is a bare `50000` — the only unambiguous currency
-marker in the entire workbook, previously discarded at the extraction boundary
-where no downstream stage could recover it. AusTender's `#,##0.00` carries no
-symbol, so that register still depends on its `Value` header; the two together
-are why both evidence sources are specified rather than either alone.
+marker in the entire workbook. AusTender's `#,##0.00` carries no symbol, so
+that register still depends on its `Value` header; the two together are why
+both evidence sources are specified rather than either alone.
