@@ -19,21 +19,7 @@ what every model (local and hosted) does in the pipeline.
 - **Type:** PP-DocLayout-M layout detector (ONNX) + the model's `inference.yml` (labels, preprocessing)
 - **Source:** [PaddlePaddle/PP-DocLayout-M](https://huggingface.co/PaddlePaddle/PP-DocLayout-M) (HF), Apache-2.0; exported with `paddle2onnx` 2.1.0, opset 14. Digests in `docs/models.md`
 - **Size:** ~23 MB
-- **Used by:** `ingest/layout_onnx.py` (`PPDocLayoutAnalyzer`) — layout backend; also `redact/stage.py` for raster-fallback exclusion regions. Not in package-data, like the YOLO weights; resolved via `WOMBLEX_MODELS_DIR` or an editable install
-
-### yolo11n_doc_layout.pt
-
-- **Type:** YOLO11 nano object-detection weights (DocLayNet-finetuned, 11 classes)
-- **Source:** [Armaggheddon/yolo11-document-layout](https://huggingface.co/Armaggheddon/yolo11-document-layout) (HF), MIT license
-- **Size:** 5.37 MB
-- **Used by:** `ingest/paddle_ocr.py` — primary layout backend via `YOLOLayoutAnalyzer`; also `redact/stage.py` for raster-fallback exclusion regions
-
-### yolov8n.pt
-
-- **Type:** YOLOv8 nano object-detection weights (COCO-pretrained)
-- **Source:** Ultralytics
-- **Size:** ~6 MB
-- **Used by:** `ingest/paddle_ocr.py` — layout fallback only when `yolo11n_doc_layout.pt` is missing. COCO classes carry no document semantics
+- **Used by:** `ingest/layout_onnx.py` (`PPDocLayoutAnalyzer`) — layout backend; also `redact/stage.py` for raster-fallback exclusion regions. Not in package-data; resolved via `WOMBLEX_MODELS_DIR` or an editable install
 
 ### kanon-2-tokenizer/
 
@@ -66,9 +52,9 @@ footer the run writes.
 ```python
 from womblex.utils.models import resolve_local_model_path
 
-path = resolve_local_model_path("yolo11n_doc_layout.pt")
-# → Path(".../_models/yolo11n_doc_layout.pt")
-#   or "yolo11n_doc_layout.pt" if not found
+path = resolve_local_model_path("pp-doclayout-m")
+# → Path(".../_models/pp-doclayout-m")
+#   or "pp-doclayout-m" if not found
 ```
 
 All models are loaded lazily — no import cost until the relevant stage runs.

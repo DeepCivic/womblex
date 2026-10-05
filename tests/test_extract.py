@@ -294,61 +294,6 @@ class TestFormLabelDenylist:
         assert _looks_like_form_label("Approved provider name")
 
 
-class TestYoloLabelMapSelection:
-    """K7(b) — DocLayNet vs COCO label-map selection from loaded class names."""
-
-    def test_doclaynet_selected_by_section_header(self) -> None:
-        from womblex.ingest.paddle_ocr import _YOLO_DOCLAYNET_LABEL_MAP, _select_label_map
-        m, t = _select_label_map({0: "Section-header", 1: "Text", 2: "Title"})
-        assert t == "doclaynet"
-        assert m is _YOLO_DOCLAYNET_LABEL_MAP
-
-    def test_doclaynet_selected_by_page_footer(self) -> None:
-        from womblex.ingest.paddle_ocr import _select_label_map
-        _, t = _select_label_map({0: "Page-footer", 1: "Text"})
-        assert t == "doclaynet"
-
-    def test_coco_fallback_for_unknown_classes(self) -> None:
-        from womblex.ingest.paddle_ocr import _YOLO_COCO_LABEL_MAP, _select_label_map
-        m, t = _select_label_map({0: "person", 1: "book", 2: "tv"})
-        assert t == "coco"
-        assert m is _YOLO_COCO_LABEL_MAP
-
-    def test_unknown_class_defaults_to_paragraph(self) -> None:
-        # K7(a) invariant preserved: unknown classes default to paragraph, not figure.
-        from womblex.ingest.paddle_ocr import _YOLO_COCO_LABEL_MAP, _YOLO_DOCLAYNET_LABEL_MAP
-        assert _YOLO_COCO_LABEL_MAP.get("unknown_class", "paragraph") == "paragraph"
-        assert _YOLO_DOCLAYNET_LABEL_MAP.get("unknown_class", "paragraph") == "paragraph"
-
-
-class TestYoloDocLayNetMap:
-    """K7(b) — DocLayNet class names map to expected element kinds."""
-
-    def test_text_classes_map_to_text_kinds(self) -> None:
-        from womblex.ingest.paddle_ocr import _YOLO_DOCLAYNET_LABEL_MAP
-        assert _YOLO_DOCLAYNET_LABEL_MAP["Text"] == "paragraph"
-        assert _YOLO_DOCLAYNET_LABEL_MAP["Title"] == "heading"
-        assert _YOLO_DOCLAYNET_LABEL_MAP["Section-header"] == "heading"
-        assert _YOLO_DOCLAYNET_LABEL_MAP["List-item"] == "list_item"
-        assert _YOLO_DOCLAYNET_LABEL_MAP["Caption"] == "caption"
-
-    def test_structural_classes(self) -> None:
-        from womblex.ingest.paddle_ocr import _YOLO_DOCLAYNET_LABEL_MAP
-        assert _YOLO_DOCLAYNET_LABEL_MAP["Page-header"] == "header"
-        assert _YOLO_DOCLAYNET_LABEL_MAP["Page-footer"] == "footer"
-        assert _YOLO_DOCLAYNET_LABEL_MAP["Footnote"] == "footnote"
-
-    def test_visual_classes(self) -> None:
-        from womblex.ingest.paddle_ocr import _YOLO_DOCLAYNET_LABEL_MAP
-        assert _YOLO_DOCLAYNET_LABEL_MAP["Picture"] == "figure"
-        assert _YOLO_DOCLAYNET_LABEL_MAP["Table"] == "table"
-
-    def test_formula_collapses_to_paragraph(self) -> None:
-        # No dedicated formula kind — text is preserved, label collapses.
-        from womblex.ingest.paddle_ocr import _YOLO_DOCLAYNET_LABEL_MAP
-        assert _YOLO_DOCLAYNET_LABEL_MAP["Formula"] == "paragraph"
-
-
 class TestFootnoteKind:
     """K7(b) — `footnote` is a real ElementKind, in TEXT_KINDS and block-type map."""
 

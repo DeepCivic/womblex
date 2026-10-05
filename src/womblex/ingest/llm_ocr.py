@@ -80,7 +80,7 @@ class MistralOCRReader:
     prompt; the model returns markdown text in reading order.
 
     ``OCRPageResult.reading_order_native`` is True so downstream
-    strategies bypass YOLO layout sorting.
+    strategies bypass layout-model region sorting.
 
     AWS credentials and region come from the standard boto3 resolution
     chain. Override the region with ``AWS_REGION`` / ``AWS_DEFAULT_REGION``
@@ -238,7 +238,7 @@ class OllamaOCRReader:
 
     The model returns markdown/prose with native reading order, so
     ``OCRPageResult.reading_order_native`` is set to True and downstream
-    strategies bypass YOLO layout sorting.
+    strategies bypass layout-model region sorting.
     """
 
     DEFAULT_BASE_URL = "http://localhost:11435/v1"

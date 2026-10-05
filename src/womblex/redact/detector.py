@@ -71,7 +71,7 @@ class RedactionDetector:
             exclude_rects: Optional pixel-coord rects ``(x1, y1, x2, y2)`` whose
                 interior is treated as off-limits — candidates whose centre
                 falls inside any rect are dropped. Used by the redaction stage
-                to suppress contour hits inside YOLO-detected figure / chart /
+                to suppress contour hits inside layout-detected figure / chart /
                 form-background regions, which is where the scanned_mixed
                 false-positive cohort (02737-class CRM forms) originates.
 

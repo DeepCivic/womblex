@@ -93,7 +93,7 @@ jobs:
 
       - name: Reclaim runner disk
         # The preinstalled toolchains are what the build would otherwise run
-        # out of room behind; torch, ultralytics and opencv need the space.
+        # out of room behind; torch and opencv need the space.
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
           df -h /

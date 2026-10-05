@@ -47,9 +47,9 @@ redaction:
   max_area_ratio: 0.9
   dpi: 150
   # Raster-fallback only: drop contour hits inside figure / chart /
-  # form-background regions detected by YOLO layout analysis. Suppresses
+  # form-background regions detected by layout analysis. Suppresses
   # scanned_mixed CRM-form false positives (02737-class). Best-effort —
-  # no-op if ultralytics is unavailable.
+  # no-op if the layout model fails to load.
   use_layout_filter: true
 
 chunking:

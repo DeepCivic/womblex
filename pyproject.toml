@@ -32,19 +32,20 @@ classifiers = [
 # hosted-VLM (Bedrock) OCR, the AWS SDK, object-storage staging (fsspec + s3fs)
 # and the Postgres job queue (psycopg) are all part of the base install.
 # Every real deployment uses them, and they are comparatively tiny next to the
-# vision/ML stack already here (pymupdf, ultralytics, sentence-transformers) —
+# vision/ML stack already here (pymupdf, onnxruntime, sentence-transformers) —
 # gating them behind extras only produced misconfiguration (a missing SDK read
 # as "no API key", and a cloud deployment 500ing on `s3://` because the image
 # was built without `[cloud]`). rapidocr-onnxruntime is the bundled CPU OCR
-# engine; boto3 backs both the mistral-ocr engine and the isaacus-sagemaker
-# HTTP client. A local / air-gapped run touches none of s3fs/psycopg — they
-# stay dormant until a `s3://` store or a `--dsn` names them — so shipping them
-# costs a CPU-only box nothing but keeps `s3://` working the moment it is asked
-# for, on any install.
+# engine; onnxruntime also runs the PP-DocLayout-M layout model directly
+# (`ingest/layout_onnx.py`). boto3 backs both the mistral-ocr engine and the
+# isaacus-sagemaker HTTP client. A local / air-gapped run touches none of
+# s3fs/psycopg — they stay dormant until a `s3://` store or a `--dsn` names
+# them — so shipping them costs a CPU-only box nothing but keeps `s3://`
+# working the moment it is asked for, on any install.
 dependencies = [
     "pymupdf>=1.24",
     "rapidocr-onnxruntime>=1.4",
-    "ultralytics>=8.0",
+    "onnxruntime>=1.20",
     "opencv-python-headless",
     "semchunk>=4.0",
     "pandas>=2.0",
@@ -205,6 +206,8 @@ module = [
     "fitz.*",
     "rapidocr_onnxruntime",
     "rapidocr_onnxruntime.*",
+    "onnxruntime",
+    "onnxruntime.*",
     "pyarrow",
     "pyarrow.*",
     "sentence_transformers",
@@ -234,7 +237,5 @@ module = [
     "psycopg.*",
     "torch",
     "torch.*",
-    "ultralytics",
-    "ultralytics.*",
 ]
 ignore_missing_imports = true
