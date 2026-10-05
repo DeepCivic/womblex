@@ -53,20 +53,26 @@ For a given `source_hash` + `womblex.version` + `config_digest` +
 `womblex.models` + `womblex.slot_models`, extraction content and row order are
 stable, so the manifest's `content_digest` matches. File bytes and
 `extracted_at_iso` are not guaranteed. A mismatch is explained by the stamped
-version, config and model digests and never blocks output. Detail:
-[extraction.md](extraction.md).
+version, config and model digests and never blocks output.
 
 ## Model provenance
 
-Two further footer keys name what produced a file, beyond the four-key run
-stamp: `womblex.models` names loaded local model *artefacts* by digest
+The run stamp is five footer keys (`womblex.run_id`, `version`, `commit`,
+`config_digest`, `stage`), plus `womblex.preset` (the config's `dataset.name`)
+when the config names one. `commit` is `unavailable:<reason>` when neither the
+work tree nor a build stamp answers. A downstream sidecar inherits `run_id`,
+`config_digest` and `preset` from the batch it annotates, preferring the
+elements shard or manifest, then any sibling; a sidecar whose siblings carry no
+run, or disagree, is written unstamped. Further keys name what produced a file:
+`womblex.models` names loaded local model *artefacts* by digest
 (`store/run_stamp.read_footer_models`); `womblex.slot_models` names which
 swappable-slot model (`docs/model-plugins.md`) each slot actually built, by
 slot, name, and the distribution and version that supplied it
-(`read_footer_slot_models`). Both are written only when non-empty — a process
-that loaded or built nothing writes no key — and both are additive metadata,
-so a reader that ignores them reads the file unchanged. No column is added
-for either.
+(`read_footer_slot_models`); `womblex.model_check` records the pre-run model
+check's result (`read_footer_model_check`). Each is written only when it has a
+value — a process that loaded, built or checked nothing writes no key — and
+all are additive metadata, so a reader that ignores them reads the file
+unchanged. No column is added for any.
 
 ## Safe to hand onward
 
@@ -76,7 +82,7 @@ or carrying no `sensitivity` key, stays inside the trust boundary.
 ## Python API
 
 `womblex.__all__` is the stable API, pinned by `tests/test_public_api.py`:
-`extract_text`; the `run_*` operations; the `*_shards` stage functions;
+`__version__`; `extract_text`; the `run_*` operations; the `*_shards` stage functions;
 `build_bundle`; `write_run_manifest`; `read_results` (reads the elements
 role); `CONTRACT_VERSION`. Names resolve lazily, so `import womblex` does not
 load the extraction stack. Anything not in `__all__` is internal and may change

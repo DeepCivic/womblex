@@ -70,16 +70,16 @@ that submitted them.
 | GET | `/v1/health` | none | Liveness |
 | GET | `/v1/ready` | none | Store and queue reachability; 503 when either fails |
 | POST | `/v1/uploads` | submit | Multipart `files` to `<ingest>/<client_id>/<upload_id>/`; returns that folder as `input_prefix` |
-| POST | `/v1/runs` | submit | Enqueue extraction plus the downstream stages the config enables; returns the run id |
-| GET | `/v1/runs` | read | The caller's runs with a status rollup |
+| POST | `/v1/runs` | submit | Enqueue extraction plus the downstream stages the config enables; returns `run_id`, `document_count`, `batch_count` and `stages` |
+| GET | `/v1/runs` | read | The caller's runs with a status rollup, latest activity first, at most 1000 (`RUN_LIMIT`) |
 | GET | `/v1/runs/{id}` | read | One run's state and per-status counts |
 | GET | `/v1/runs/{id}/manifest` | read | The consolidated run manifest |
 | GET | `/v1/runs/{id}/files` | read | Object keys, row counts and footer `contract_version` / `sensitivity` |
 | GET | `/v1/runs/{id}/documents/{hash}/text` | read / read_raw | One document's text in document order, by `layer` |
 | GET | `/v1/runs/{id}/metrics` | read | Queue stats, workers and throughput as JSON |
 
-Pydantic models generate the OpenAPI spec; a test pins its operation and model
-surface so breaking changes show in review.
+Both POST routes answer 201. Pydantic models generate the OpenAPI spec; a test
+pins its operation and model surface so breaking changes show in review.
 
 ### Uploads
 

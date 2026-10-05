@@ -23,9 +23,9 @@ Defined once by Womblex, read by both consumers:
     batch-*.chunks.parquet    # + any downstream-stage sidecars the run produced
     manifest.parquet          # consolidated documents table
   sources/
-    <source_hash>.<ext>       # the raw file each document was extracted from
+    <source_hash><ext>        # the raw file each document was extracted from (ext keeps its dot)
   source_index.parquet        # source_hash -> raw key, ext, doc_id, filename, status
-  egress_manifest.json        # bundle descriptor (incl. contract_version) + per-document resolution report
+  egress_manifest.json        # bundle descriptor (incl. contract_version) + aggregate source counts by status
 ```
 
 Everything content-addresses by `source_hash`, so raw and extracted resolve to
@@ -68,19 +68,24 @@ finalised **local** run and writes a bundle to any `RemoteStore` destination
   shards) plus `manifest.parquet` under `corpus/`, resolve and copy raw sources,
   write `source_index.parquet`, write `egress_manifest.json`. Reuses
   `RemoteStore` for all I/O, `SourceResolver.resolve_all()` for local-run hash
-  verification, and the existing manifest consolidation.
+  verification, and reads the already-consolidated `manifest.parquet` via
+  `source_resolver.load_manifest` (it consolidates nothing itself).
+  `egress_manifest.json` holds aggregates only — `run_id`, `contract_version`,
+  `womblex_version`, `created_at_iso`, `documents`, `sources_copied`,
+  `sources_by_status`; per-document status lives in `source_index.parquet`.
 - `store/egress_output.py` — `source_index.parquet` schema and IO,
   self-contained in the manner of the other `store/*_output.py` modules.
 
 ### Source resolution and copy
 
-Raw sources are copied through `RemoteStore` off each manifest row's
-`ingest_root` and `source_relpath`, so a run ingested from `file://` and one
-ingested from `s3://` are handled by one path. On a locally-ingested run,
-`SourceResolver.resolve_all()` is layered over that copy to verify bytes by
-hash and to populate the resolution report. **Scoped to a local run** — a run
-ingested from an object store is refused before anything is written; stage it
-locally first (`womblex finalize` then a sync-down).
+Raw sources are located by `SourceResolver.resolve_all()`, which verifies
+each document's bytes by hash against a local corpus, and each resolved local
+path is then uploaded to the destination with `RemoteStore`. The resolver is
+built by `SourceResolver.for_run`, which needs the manifest's `ingest_root` to
+be a single `file://` root (or a `--source-root` override). **Scoped to a local
+run** — a run ingested from an object store is refused before anything is
+written; stage it locally first (`womblex finalize` then a sync-down). Only the
+destination may be an object store.
 
 Resolution is non-fatal per document. Each `source_index.parquet` row carries a
 status drawn from the existing `SourceResolver` vocabulary — `resolved`,

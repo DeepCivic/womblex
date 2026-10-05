@@ -358,8 +358,9 @@ Run with `-rs` to see live reasons. The recurring ones:
   (`bedrock-runtime`). boto3 is a core dependency (always installed), so the
   skip is now purely about resolvable AWS credentials with Pixtral Large
   model access enabled. Skips cleanly when absent.
-- **geospatial** (`test_geospatial.py`): needs the optional `geopandas` /
-  `pyogrio` extras.
+- **geospatial** (`test_geospatial.py`): needs `geopandas` / `pyogrio`, which
+  are not declared in `pyproject.toml` (no extra installs them); install them
+  separately to run these tests.
 - **isaacus SDK** (`test_enrich.py` / `test_graph.py` / `test_query.py` /
   `test_enrichment_output.py`): module-level `importorskip("isaacus")` — the SDK
   is a core dependency now, so these run (mocked clients); the guard only skips

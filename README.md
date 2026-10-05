@@ -1,857 +1,348 @@
 # Womblex
 
-Document extraction pipeline for converting files into ML-friendly corpus or collections. Extracts text from PDFs and Word documents (native, scanned, forms, hybrid). Spreadsheets are ingested as cell-grained element streams with automatic header/preamble detection, ready for per-record semantic analysis. Reference registers (G-NAF, ABN bulk extract, geospatial) have standalone Parquet ingests that bypass the NLP pipeline.
+Womblex turns messy document releases (FOI bundles, government papers,
+scanned forms, spreadsheets) into a versioned Parquet corpus that other
+systems can trust. Extraction comes first and keeps text verbatim. After it,
+independent stages clean, chunk, annotate, enrich and mask the corpus, each one
+writing its own sidecar file beside the extraction output.
 
-## Runs on your laptop, scales to a cluster
+It runs on a laptop with no network access, and the same code scales out to a
+fleet of workers over object storage and a Postgres job queue. The models
+behind each step are swappable without changing any output schema.
 
-**Local is the default and always works.** `pip install womblex` gives you the
-entire pipeline — extraction, OCR, chunking, PII — running CPU-only against the
-local filesystem. No cloud account, no object store, no database, no API key,
-no network access at runtime (models are bundled or resolved from `models/`).
-A Chromebook is a supported deployment, not a degraded one.
+What Womblex must do is specified in
+[docs/functional_requirements.md](docs/functional_requirements.md). This README
+is the overview and the command reference.
 
-**Cloud is additive, not a different product.** When one machine stops being
-enough, the same wheel runs behind object storage and a shared job queue, and
-you buy throughput by adding workers — `--scale worker=8` is the whole
-operation. What does *not* change when you scale out:
+## What it does
 
-- the extraction logic (`womblex run` and the cloud worker call a byte-identical
-  `process_batch` body)
-- the OCR engine (the bundled CPU one by default; the hosted Bedrock VLM
-  engine ships in the base install too and is selected by config, not a
-  separate install)
-- the output layout (distributed runs land the ordinary shard layout, so every
-  local `--shards` command consumes them unchanged)
+### Extraction
+- **PDFs and images** are profiled page by page. Each page is routed on its own
+  signals: native text, OCR, tables, forms, or a spreadsheet printed to PDF. A
+  single FOI bundle that mixes a cover letter, a scanned form and a printed
+  table is handled page by page rather than forced through one strategy.
+- **Word, Markdown and spreadsheets** are read natively, in document order.
+  Spreadsheets become a cell-grained stream with header and preamble detection,
+  and merged regions are kept.
+- **Output is an ordered element stream** (paragraphs, headings, tables, forms,
+  sheet cells) written as Parquet. Text is verbatim from the extractor; any
+  cleanup happens in later stages, as overlays.
 
-Scaling out is not a lock-in: a distributed run's shards sync down and every
-local per-stage command (`womblex manifest`, `chunk --shards`, …) consumes them
-unchanged, or you run those stages in place with `run-stage` and never sync at
-all. See [Environment-Agnostic Execution](#environment-agnostic-execution).
+### Downstream stages
+Each stage reads the extraction shards (and sometimes another stage's
+sidecar), writes its own sidecar, and checkpoints independently. A stage can
+run whenever its inputs exist, so several orderings are valid.
 
-## Design disclosure
-This project is designed for everyone with a focus on inexpensive processing. This means Womblex doesn't include many of the more robust 'all in one' OCR models.
+| Stage | What it writes | Needs |
+|---|---|---|
+| `normalise` | Cleaned text overlay (whitespace, footer glyphs, configured substitutions) | Offline |
+| `spellfix` | OCR character-confusion repairs, gated by an en_AU dictionary, plus an audit file | Offline |
+| `redact` | Detected redaction regions | Offline |
+| `chunk` | Token-bounded chunks of narrative and tables ([semchunk](https://github.com/isaacus-dev/semchunk)) | Offline; AI chunking is optional and calls a hosted model |
+| `money` | Monetary amounts in narrative text and table cells, with exact values | Offline |
+| `enrich` | Entities, relationships and a document graph | A hosted enrichment model ([Isaacus](https://isaacus.com/) Kanon-2) |
+| `graph-refresh` | Mention-to-chunk edges, rebuilt after chunking | Offline |
+| `embed` | One vector per chunk | A hosted embedding model (Isaacus) |
+| `link` | Entity mentions matched to a reference register you supply | Offline |
+| `pii` | PII spans (audit) and a masked text layer (`<PERSON_1>`) | Offline; reads the enrichment graph |
+| `quality` | Chunk-quality annotations, including corpus-wide duplicates | Offline |
 
-Mature OCR models are used to compete with Womblex for evaluations and guide development.
+### Reference registers
+G-NAF, the ABN bulk extract and shapefiles have their own ingests. They write
+typed Parquet or GeoParquet directly and bypass the text stages.
 
-## Add-ons/integrations
-Optionally outputs are prepared for semantic analysis via [Isaacus](https://isaacus.com/).
+### How you use it
+- **Other software** integrates in one of two ways: it calls the
+  authenticated `/v1` service API (`womblex serve`), or it reads the versioned
+  Parquet a run writes, under the data contract. See
+  [Integrating with Womblex](#integrating-with-womblex).
+- **Operators** drive runs with the `womblex` CLI, where every capability is a
+  subcommand.
+- **The console** (`womblex ui`) is an optional admin and debugging UI over a
+  run's files: queue and stage progress, a document grid, a chunk inspector
+  with entity, PII and money overlays, and a pipeline composer. It has no
+  authentication, binds to loopback, and is not an integration surface.
 
-## The Problem
+## Support status
 
-Files are in a mix of formats:
-- **PDFs** — native (selectable text), scanned (narrative, forms, tables), hybrid, or redacted
-- **Word documents** (`.docx`) — paragraphs and embedded tables
-- **Markdown** (`.md`, `.markdown`) — headings, lists, paragraphs and GFM tables
-- **Spreadsheets** (`.csv`, `.xlsx`, `.xls`) — row-level data, glossaries, key-value lookups, and narrative sheets
-
-One-size-fits-all OCR fails because each format and sub-type needs a different extraction strategy. Womblex detects the document type first, then routes to the right extractor.
+- **Layout detection is not currently supported for local deployment.** A
+  local run still applies the bundled PP-DocLayout-M model to scanned pages,
+  but its output (OCR table regions, redaction exclusion zones) has not been
+  validated, so don't rely on it. The layout model can be swapped through the
+  `womblex.models.layout` plugin slot. Local support returns once layout runs
+  as its own stage; see
+  [docs/permissive-deps-plan.md](docs/permissive-deps-plan.md).
+- **Licensing is in transition.** Womblex is Apache-2.0, but PDF handling still
+  depends on PyMuPDF (AGPL-3.0). The plan above replaces it with permissively
+  licensed libraries.
+- **Alpha.** Schemas are versioned by the data contract (below), but the Python
+  surface outside `womblex.__all__` may change between minor releases.
 
 ## Installation
 
-Pick the row that matches where you are running it. The pipeline logic is
-identical in every row — the extras add *reach* (object storage, a shared
-queue, hosted APIs), never a different extraction path.
-
-| Deployment | Install | Adds |
-|---|---|---|
-| **Local CPU** (laptop, Chromebook, air-gapped box) | `pip install womblex` | the whole pipeline — extraction, OCR, chunking, PII, **Isaacus enrichment/embeddings**, and **hosted Bedrock VLM OCR** — are all in the base install |
-| **Cloud CPU** (scalable, S3 + Postgres) | `pip install womblex` (or `womblex[cloud]`) | nothing extra — fsspec + s3fs staging and the psycopg3 job queue are in the base install; `[cloud]` is an empty marker |
-
-Enrichment/embeddings (Isaacus SDK — hosted API via `ISAACUS_API_KEY` or a
-private SageMaker deployment via `ISAACUS_SAGEMAKER_ENDPOINTS`), hosted VLM OCR
-(Mistral Pixtral Large via AWS Bedrock), and the AWS SDK (`boto3`) are **core
-dependencies** — they need no extra. Every real deployment uses them, and they
-are tiny next to the vision/ML stack already in the base install, so gating
-them behind extras only produced misconfiguration (a missing SDK read as "no
-API key"). They stay dormant until you configure them: no key, no endpoints,
-and no `mistral-ocr` engine selected means nothing calls out.
-
-`pip install womblex[local]` is accepted and resolves to the plain base
-install — it exists so a deployment can state which mode it is, and so
-`[local]` and `[cloud]` read as a pair.
-
-Two things worth being explicit about:
-
-- **Configured, not installed.** Isaacus enrichment, the Bedrock VLM OCR
-  engine, and `boto3` are always present but never active until you turn them
-  on — enrichment needs `ISAACUS_API_KEY` or `ISAACUS_SAGEMAKER_ENDPOINTS`, and
-  the hosted VLM OCR engine only fires when `extraction.ocr.engine:
-  mistral-ocr` is set. A default run stays fully local and CPU-only.
-- **Local vs cloud is a runtime choice, not a build-time one.** The same
-  wheel does both; see [Environment-Agnostic Execution](#environment-agnostic-execution).
-  Installing `[cloud]` does not commit you to running in the cloud.
-
-For development:
+Requires Python 3.11 or later.
 
 ```bash
-git clone https://github.com/DeepCivic/womblex.git
-cd womblex
-uv sync --extra dev
+pip install womblex          # the whole pipeline, CPU-only
+pip install womblex[api]     # + the /v1 service API (womblex serve)
+pip install womblex[ui]      # + the admin console (womblex ui)
 ```
 
-A minimal test-fixture set is vendored in this repo (`fixtures/fixtures/`), so a
-fresh clone runs most of the suite with no extra setup. The full benchmark set
-lives in a separate repository — see [THIRD_PARTY_DATA.md](https://github.com/DeepCivic/womblex/blob/main/THIRD_PARTY_DATA.md)
-for how to obtain it.
+Object-storage staging, the Postgres job queue and the SDKs for the hosted
+models are all in the base install. They stay dormant until configured: with
+no credentials or endpoints set, nothing calls out. `[local]` and `[cloud]` are
+accepted but empty.
 
-### System Dependencies
+**Model files.** The wheel ships only the small artefacts: the en_AU dictionary
+and the Kanon-2 tokeniser. The larger local models (PaddleOCR v5,
+PP-DocLayout-M, the PII context model) are resolved from `WOMBLEX_MODELS_DIR`,
+or from `src/womblex/_models/` and `models/` in a source checkout. Without
+them, OCR falls back to the PaddleOCR v4 models inside the `rapidocr` wheel,
+and layout detection is skipped. Every model, local or hosted, is listed in
+[docs/models.md](docs/models.md), along with how to connect the hosted ones.
 
-No system-level dependencies beyond Python. All extraction backends are pure Python packages:
-- **PyMuPDF** (`fitz`) — native PDF text and structure
-- **PaddleOCR** (`rapidocr-onnxruntime`) — scanned-page OCR (no Tesseract or PaddlePaddle required); layout regions via `ultralytics` YOLO. Every model is outlined in [docs/models.md](docs/models.md)
-- **python-docx** — Word document extraction
-- **pandas** + **openpyxl** — spreadsheet ingestion (CSV/Excel)
-
-Once you have extraction working, semantic analysis via Isaacus (embeddings, classification, extractive QA) is straightforward.
-
-### Isaacus API Key (optional)
-
-Required only for the enrichment/embedding stages. Text extraction works
-without it, and the Isaacus SDK is already installed (a core dependency).
+## Quick start
 
 ```bash
-cp .env.example .env
-# Edit .env and add your key from https://isaacus.com/
-```
+# Extract one file to text or Parquet
+womblex extract report.pdf -o output/
+womblex extract register.xlsx -o output/ --format parquet
 
-Or export directly:
-
-```bash
-export ISAACUS_API_KEY="your-key-here"
-```
-
-### Isaacus on Amazon SageMaker (private deployment)
-
-Isaacus models can also run [inside your own AWS
-account](https://docs.isaacus.com/integrations/amazon-sagemaker), fully
-air-gapped — no API key, no egress. Deploy the Marketplace package(s), then set
-`ISAACUS_SAGEMAKER_ENDPOINTS` *instead of* `ISAACUS_API_KEY`; every stage that
-calls Kanon-2 (`chunk` with AI chunking, `enrich`, `embed`) routes through the
-endpoints with no other change.
-
-Subscriptions are per model plus a universal one, so declare what you actually
-deployed — comma-separated `name[@region][=model|model|...]`, where an entry
-with no `=models` part serves every model:
-
-```bash
-export ISAACUS_SAGEMAKER_ENDPOINTS="kanon-2-universal-001"                        # one endpoint, all models
-export ISAACUS_SAGEMAKER_ENDPOINTS="embed-001=kanon-2-embedder,enrich-001=kanon-2-enricher"  # per-feature
-export ISAACUS_SAGEMAKER_ENDPOINTS="embed-001=kanon-2-embedder,universal-001"     # mixed: plus a catch-all
-
-export ISAACUS_SAGEMAKER_REGION="ap-southeast-2"   # optional; else the AWS SDK default
-export ISAACUS_SAGEMAKER_PROFILE="my-aws-profile"  # optional; else the AWS SDK default
-```
-
-A stage whose model no endpoint serves fails before its first request, naming
-the model and listing what the endpoints do serve. Chunk-size token counting is
-unaffected: the Kanon-2 tokeniser is vendored and stays local.
-
-**SageMaker credentials and the MinIO conflict.** The `/invocations` calls are
-SigV4-signed by boto3's standard credential chain — on EC2 that resolves the
-instance role (e.g. one with a `SageMakerInvokeEndpoint` policy scoped to your
-endpoint), which is what you want. The trap: if the object store is MinIO, you
-may have set `AWS_ACCESS_KEY_ID=minioadmin` for s3fs. That env var is
-**process-global**, and boto3 checks env vars *before* the instance role — so
-it disables the role for the SageMaker signer too, which then signs `minioadmin`
-against real SageMaker and 403s (`security token … is invalid`). Symmetrically,
-setting the real AWS keys makes s3fs fail against MinIO (`InvalidAccessKeyId`).
-Give the object store its **own** credentials via `WOMBLEX_S3_ACCESS_KEY_ID` /
-`WOMBLEX_S3_SECRET_ACCESS_KEY` and leave `AWS_ACCESS_KEY_ID` **unset** — then
-s3fs authenticates to MinIO explicitly while SageMaker keeps the instance role.
-(`ISAACUS_SAGEMAKER_PROFILE` selects a non-default AWS profile if you need one
-for SageMaker specifically.)
-
-**Rotating the object-store key.** The `WOMBLEX_S3_*` keys above are read from
-the environment at process start-up by the console, workers and CLI alike, so a
-rotated key is an env/redeploy change everywhere. The console no longer accepts
-or stores a credential; its Resources screen reports only a masked last-four.
-
-## Quick Start
-
-```bash
-# Process a document set using a config (E2E composition)
+# Extract a corpus described by a config (resumable)
 womblex run --config configs/example.yaml
-
-# Resume from checkpoint after interruption
 womblex run --config configs/example.yaml --resume
-
-# Process individual files (PDF, DOCX, Markdown, CSV, Excel)
-womblex extract document.pdf -o output/
-womblex extract report.docx -o output/
-womblex extract dataset.xlsx -o output/
-
-# Per-stage commands (primary workflow for staged corpora): each consumes the
-# prior stage's shard directory and writes its own sidecar in place, with an
-# independent resumable CheckpointManager.
-womblex normalise --shards output/<run_id>/documents/               # *.normalised_text.parquet (offline text cleanup)
-womblex spellfix  --shards output/<run_id>/documents/               # *.spellfix_text.parquet + *.spellfix_corrections.parquet (offline OCR repair)
-womblex chunk     --shards output/<run_id>/documents/               # *.chunks.parquet
-womblex quality   --shards output/<run_id>/documents/               # *.chunk_quality.parquet (offline chunk annotation)
-womblex money     --shards output/<run_id>/documents/               # *.money_spans.parquet + *.money_columns.parquet (offline amount annotation)
-womblex redact    --shards output/<run_id>/documents/ --pdfs <dir>  # *.redactions.parquet
-womblex enrich    --shards output/<run_id>/documents/               # *.enrichment_entities.parquet (Kanon-2; needs ISAACUS_API_KEY)
-womblex link      --shards output/<run_id>/documents/ --config <yaml> # *.entity_links.parquet (register match)
-womblex embed     --shards output/<run_id>/documents/               # *.embeddings.parquet (Kanon-2 chunk embeddings)
-womblex pii       --shards output/<run_id>/documents/               # *.pii_spans.parquet (audit) + *.clean_text.parquet (masked, terminal)
-
-# Standalone register ingests (bypass the NLP pipeline, write Parquet directly)
-womblex ingest-gnaf "G-NAF/G-NAF FEBRUARY 2026" -o output/gnaf   # G-NAF PSV → Parquet
-womblex ingest-abn  extracts/ -o output/abn                      # ABN bulk extract XML → records + names Parquet
-womblex ingest-geo  shapefiles/ -o output/geo                    # SHP → GeoParquet
-
-# Audit shard integrity (extraction stage)
-womblex verify-shards output/<run_id>/
-
-# Resolve a run's rows back to the source documents (verified by content hash)
-womblex resolve-source output/<run_id>/                    # every row
-womblex resolve-source output/<run_id>/ --hash <source_hash>
-womblex resolve-source output/<run_id>/ --root /new/corpus # corpus has moved
 ```
 
-## Environment-Agnostic Execution
-
-The system scales from minimum hardware (e.g., a Chromebook) 
-to distributed cloud clusters without altering extraction behavior. 
-Configurable "knobs," such as parallel thread limits, allow you to optimize 
-resource usage for your specific infrastructure.
-
-**You do not need any of this to use Womblex.** Everything below is the
-scale-out path for when a single machine is the bottleneck; `womblex run` on a
-local directory remains fully supported and produces the same shards.
+`womblex run` does extraction (and redaction detection) only. Every other stage
+is its own command over the run's shard directory:
 
 ```bash
-pip install womblex           # fsspec + s3fs + psycopg3 are already in the base install
-pip install womblex[cloud]    # accepted, but empty — a marker that says "cloud deployment"
+SHARDS=output/<run_id>/documents
+womblex normalise --shards $SHARDS
+womblex chunk     --shards $SHARDS --config configs/example.yaml
+womblex money     --shards $SHARDS
+womblex pii       --shards $SHARDS
+womblex manifest  --shards $SHARDS     # rebuild the run-level manifest
 ```
 
-### Selecting the backend
-
-There is no `STORAGE_TYPE` / `QUEUE_TYPE` switch to set, because there is no
-branch for one to select. Both choices fall out of what you already pass:
-
-| Choice | Local | Cloud | Selected by |
-|---|---|---|---|
-| Storage | `--store /data/runs` | `--store s3://womblex` | the URI scheme |
-| Execution | `womblex run` | `womblex enqueue` + `womblex worker` | which command you invoke |
-
-`RemoteStore.from_uri` hands the URI to `fsspec.core.url_to_fs`, which returns
-a `LocalFileSystem` for a bare path or `file://` and an `S3FileSystem` for
-`s3://` (likewise `gs://`, `az://`). The staging code above it is one code
-path — a local `--store` runs the whole stage-in → `process_batch` → stage-out
-cycle with s3fs never imported. Credentials follow the same rule: the S3 store
-creds (`WOMBLEX_S3_ACCESS_KEY_ID` / `WOMBLEX_S3_SECRET_ACCESS_KEY`, falling back
-to `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`) and `WOMBLEX_S3_ENDPOINT`
-(for MinIO, falling back to `AWS_ENDPOINT_URL`) are read only for `s3://`, so a
-local store needs no configuration at all. Prefer the store-specific `WOMBLEX_S3_*` vars in the cloud: setting the
-ambient `AWS_ACCESS_KEY_ID` is process-global and would clobber the instance
-role boto3 uses to sign Isaacus-on-SageMaker `/invocations` calls (see the
-SageMaker section above).
-
-Execution mode is the command, not a setting. `womblex run` processes batches
-in-process and checkpoints to `CheckpointManager`; `enqueue`/`worker` put the
-same `process_batch` body behind the Postgres queue, where the job row's
-`status` *is* the checkpoint. Both call byte-identical pipeline code, which is
-why a distributed run's output is the ordinary shard layout.
-
-```bash
-# 1. Plan: list source docs in object storage, split into batches, enqueue.
-#    Idempotent on (run_id, batch_num) — re-run to resume. --ingest names a
-#    location distinct from --store's runs/ output (assert_disjoint_locations
-#    enforces this); the whole ingest root is the run's input, no prefix
-#    needed. --input-prefix still works for a sub-folder of --ingest.
-womblex enqueue --store s3://womblex --ingest s3://womblex/inbox \
-    --config configs/example.yaml --create-schema
-
-# 2. Process: run as many workers as you like (separate hosts/containers).
-#    Each claims batches via FOR UPDATE SKIP LOCKED — no double-processing.
-womblex worker --store s3://womblex --ingest s3://womblex/inbox \
-    --config configs/example.yaml \
-    --stale-timeout 900            # requeue batches orphaned by crashed workers
-
-#    For log aggregation, put `--log-format json` before the subcommand (or set
-#    WOMBLEX_LOG_FORMAT=json): one JSON object per line with run_id/job_id/stage.
-
-# 3. Watch progress.
-womblex jobs --run-id <run_id>     # pending/running/done/failed counts
-
-# 4. Finalise once the fleet drains: consolidate the per-batch shard manifests
-#    into <store>/runs/<run_id>/manifest.parquet (the local `run` does this at
-#    its end; a distributed run has no single end, so it's an explicit step).
-womblex finalize --store s3://womblex --run-id <run_id>
-
-# 5. Run downstream stages in the store, without syncing the run down.
-#    `run-stage` generalises finalize's shape to the per-batch sidecar stages:
-#    one batch staged in at a time, all declared outputs published or none.
-#    Idempotent — re-run as more batches land. Ordering is yours to pick.
-womblex run-stage --stage normalise --store s3://womblex --run-id <run_id>
-womblex run-stage --stage chunk --store s3://womblex --run-id <run_id> \
-    --config configs/example.yaml
-womblex run-stage --stage embed --store s3://womblex --run-id <run_id>
-
-# 5b. …or hand the whole sequence to the workers instead of typing it.
-#     Same stages, same contracts, ordering supplied from PIPELINE_ORDER and
-#     gated by the config (a run that does not embed enqueues no embed job).
-#     Deliberately a separate press from step 1: a worker will not start a
-#     stage until the run's batches have settled, but a *bad* extraction
-#     should not spend Isaacus budget on enrich and embed either.
-womblex enqueue-stages --run-id <run_id> --config configs/example.yaml
-womblex enqueue-stages --run-id <run_id> --config configs/example.yaml --dry-run
-```
-
-`run-stage` covers `normalise`, `spellfix`, `chunk`, `money`, `enrich`, `embed`,
-`link`, `pii`, `graph-refresh` and `quality`. `manifest` is deliberately absent —
-`finalize` already does it. Two stages are special: `graph-refresh` rewrites
-`*.enrichment_entities.parquet` / `*.graph_edges.parquet` **in place**, so it is
-never skipped by output existence and relies on its own idempotency; `quality`
-is **run-scoped**, staging every batch's chunks in one pass because its
-duplicate-cluster ids are corpus-wide. Pass `--shards <dir>` instead of
-`--store`/`--run-id` to run the same contract locally.
-
-`enqueue-stages` writes one queue row per stage instead of running it here, so
-execution stays on the fleet with its retry and crash recovery, and a dispatcher
-(the CLI, or the console) only ever writes rows. Rows are idempotent per
-`(run_id, stage)`, so pressing it twice does not re-run what finished. A stage
-row is claimable only once nothing earlier in its run is pending or running —
-all of extraction, then each stage ahead of it — so the fleet self-sequences.
-It covers `normalise`, `spellfix`, `enrich`, `chunk`, `graph-refresh`, `embed`,
-`money` and `link`; **`pii` and `quality` are never dispatched** (PII masking is
-irreversible and must not run because a flag was left on in a copied config;
-`quality` is run-scoped), and both stay reachable through `run-stage`.
-
-Connection details come from `--store`/`WOMBLEX_STORE_URI`, `--ingest`/`WOMBLEX_INGEST_URI`
-(defaults to `--store` when unset, for back-compatibility), `--dsn`/`WOMBLEX_DB_DSN`
-(or `DATABASE_URL`), and the S3 store env vars (`WOMBLEX_S3_ACCESS_KEY_ID` /
-`WOMBLEX_S3_SECRET_ACCESS_KEY`, or the `AWS_*` fallback, plus
-`WOMBLEX_S3_ENDPOINT` / `AWS_ENDPOINT_URL` — MinIO works as an S3 endpoint).
-Shards land at `<store>/runs/<run_id>/documents/`
-in the **ordinary layout**, so once synced down, `womblex manifest` /
-`chunk --shards` / every per-stage command consume a distributed run exactly
-like a local one — or run them in place with `run-stage`, above.
-
-### Scaling out
-
-Throughput is workers. Each one claims batches with `FOR UPDATE SKIP LOCKED`,
-so they cooperate without a broker, without double-processing, and without
-coordinating with each other — which means you can add and remove workers
-mid-run, on the same host or across hosts, with no reconfiguration and no
-restart of the ones already going. A worker that dies mid-batch is not a lost
-batch: `--stale-timeout` returns its claim to `pending` and another worker
-picks it up. `--idle-timeout` exits a worker that finds no work, so a fleet can
-scale to zero on its own once the run drains.
-
-A ready-to-run stack (Postgres + MinIO + scalable workers) lives in
-`docker-compose.yml`. It is self-contained by default and points at external
-Postgres + S3 the moment you set the connection env vars — no code change. The
-bundled Postgres/MinIO sit behind a `local` profile, so bring the local stack
-up explicitly.
-
-Name the override file first. `docker-compose.yml` builds nothing — it names
-published images — so a local stack that does not pass
-`docker-compose.local.override.yml` pulls a release instead of building your
-working tree. Exported once, every command below reads both:
-
-```bash
-export COMPOSE_FILE=docker-compose.yml:docker-compose.local.override.yml
-
-docker compose --profile local up -d postgres minio createbuckets init
-# upload source docs to the 'womblex' bucket under inbox/, then:
-docker compose run --rm womblex enqueue --config configs/example.yaml --create-schema
-docker compose up --scale worker=4 worker     # raise or lower at any time
-```
-
-### Cloud deployment (external Postgres + external S3)
-
-The same compose file runs against externally-provided Postgres and an
-externally-provided S3 bucket with **no code change** — you set three
-connection env vars (plus S3 credentials) and skip the bundled backends. What
-makes this work: every connection value in the file is `${VAR:-<local
-default>}`, so unset env is the local stack byte-for-byte and set env is the
-external service; the bundled `postgres`/`minio` sit behind the `local`
-profile (so a plain `up` never starts them); and `init`/`worker`/`ui` declare
-their dependency on those backends as `required: false`, so an absent bundled
-backend is a warning, not a missing-dependency error. (Requires Docker Compose
-≥ 2.20.0 for `required: false`; the compose header documents the one
-mechanical edit for older engines.)
-
-```bash
-# 1. Point at the external services. WOMBLEX_STORE_URI takes a path prefix, so
-#    Womblex keeps its output in its own folder of a shared bucket — verified:
-#    fsspec splits s3://shared/womblex into bucket `shared` + root `womblex/`,
-#    and every run lands under runs/<run_id>/documents/ beneath that prefix.
-#    WOMBLEX_INGEST_URI must be disjoint from that runs/ output — its own
-#    prefix of the same bucket, or a different bucket entirely.
-export WOMBLEX_DB_DSN=postgresql://user:pass@db.example:5432/shared  # pragma: allowlist secret -- placeholder, not a real DSN
-export WOMBLEX_STORE_URI=s3://shared/womblex        # own prefix of a shared bucket
-export WOMBLEX_INGEST_URI=s3://shared/womblex/inbox # disjoint from the store's runs/
-export WOMBLEX_S3_ENDPOINT=                          # leave empty for real AWS S3
-export AWS_REGION=ap-southeast-2
-# Store credentials go on the store-specific vars, NOT AWS_ACCESS_KEY_ID —
-# see the SageMaker section: an ambient AWS_ACCESS_KEY_ID is process-global
-# and clobbers the instance role the isaacus-sagemaker signer needs. For real
-# AWS S3 reachable by the same instance role, leave these unset too.
-export WOMBLEX_S3_ACCESS_KEY_ID=... WOMBLEX_S3_SECRET_ACCESS_KEY=...  # pragma: allowlist secret -- placeholders
-export ISAACUS_API_KEY=...                           # if enrichment/embeddings run (omit on SageMaker)
-
-# 2. Create the one table Womblex owns (womblex_jobs) in the external DSN.
-#    Either run the init one-shot (it resolves WOMBLEX_DB_DSN)...
-docker compose run --rm init
-#    ...or apply the checked-in schema directly, for DBA review / grants:
-#    psql "$WOMBLEX_DB_DSN" -f sql/womblex_jobs.sql
-
-# 3. Enqueue and scale workers exactly as local — no bundled backend started.
-docker compose run --rm womblex enqueue --config configs/example.yaml
-docker compose up --scale worker=4 worker
-docker compose up -d ui                              # optional admin console, :8080
-```
-
-**Womblex owns exactly one table (`womblex_jobs`) and writes no vectors.** It
-is a well-behaved tenant of a shared database: every statement is scoped to
-that one table (no `DROP`/`TRUNCATE`, no `CREATE DATABASE`/`SCHEMA`, no
-`search_path`), so it coexists with another system's tables in the same
-database provided the name does not collide. Embeddings are published as
-`*.embeddings.parquet` in the object store (under your `WOMBLEX_STORE_URI`
-prefix), **not** written to Postgres — so `pgvector` is a property of the
-shared database for *other* consumers of those embeddings, never a Womblex
-requirement. Womblex does not read or write a vector column.
-
-### Service API
-
-Software that integrates with Womblex submits and reads work through
-`womblex serve`, the `/v1` service API: authenticated with static service
-tokens, owner-scoped (a client sees only its own runs; `admin` sees all), and needing the `api`
-extra (`docker compose --profile api up -d api` runs it on the pipeline image). It can upload documents, submit a run over the upload's prefix, poll its status, list its
-files with their contract version and sensitivity, and read one document's
-masked text (raw layers need the `read_raw` scope). Consumers that read the
-Parquet directly follow [`docs/contract.md`](docs/contract.md). The client
-registry and the flags are in
-[`docs/deployment-images.md`](docs/deployment-images.md).
-
-```bash
-womblex api-token --client redline --scope submit --scope read   # mint a token + its registry entry
-WOMBLEX_API_CLIENTS=clients.yaml womblex serve --store <uri> --dsn <dsn> --ingest <uri>   # :8081
-```
-
-### Console (optional admin and debugging utility)
-
-`womblex ui` is an admin and debugging utility, not an integration surface;
-integrations use `womblex serve`. It serves a web console over artefacts a run has already
-written — a run selector and documents table, a Dashboard (queue state and
-per-stage checkpoint progress), Corpus and Chunk inspectors (a document's
-chunks with their entity / PII / money overlays), a Pipeline Composer (build a
-`WomblexConfig` against the live JSON Schema, with named presets — built-in and
-operator-saved — and the stage DAG rendered from the stage contracts; it can
-save the composed config as a preset and enqueue a run over the deployment's
-configured ingest location — the composer is the console's one dispatch
-surface), and a Resources console (store / ingest / queue / Isaacus connection
-checks; ingest and output locations are deploy-time configuration, shown read-only). It is a sidecar, never
-in-process with the pipeline, and reads either a local run root or the object
-store a distributed run published to:
-
-```bash
-pip install womblex[ui]                        # reads a local root or an s3:// store out of the box
-womblex ui --output-root output/               # local runs, at :8080
-womblex ui --output-root output/ --presets-dir presets/  # + save composer presets
-womblex ui --store <uri> --dsn <dsn>           # + dispatch a run into the queue
-docker compose up -d ui                        # or beside the stack above
-```
-
-It adds no pipeline logic. Wire a `--store`, a
-`--dsn` and an `--ingest` location and the Pipeline Composer can plan a run into
-the queue (workers do the work; the console runs no scheduler); a console with
-no store or queue configured still reads and inspects runs. Its writable surfaces are
-deliberately narrow. The Pipeline Composer's saved presets are filed as one JSON
-file each, always a *sibling* of the runs, never inside one: locally they need a writable `--presets-dir` (or `$WOMBLEX_UI_PRESETS_DIR`;
-without one the built-in presets still serve but saving is disabled), and in
-store-backed mode they land under the object store's own `presets/` prefix,
-so the compose service writes presets to the object store, needing no
-writable mount for them. There is
-no authentication, so it binds to loopback unless `--host` says otherwise; put
-your own control in front of anything wider.
-
-## How It Works
-
-### 1. Per-page profiling + plan-driven orchestrator
-
-PDFs are profiled per-page (`PageProfile` per page) rather than at
-document level. The orchestrator dispatches operations page-by-page
-based on the profiles, then merges into a single `ExtractionResult`.
-A doc-level summary type still surfaces in metadata.
-
-**Per-page operations** the orchestrator can apply:
-
-| Page profile | Operation | Notes |
-|---|---|---|
-| `has_text_layer` | Native text + tables + forms + blocks | Per-image OCR fires when the page has embedded image regions |
-| `needs_ocr` | PaddleOCR + layout blocks + form-pair line scan | YOLO layout for table regions and the page's block kind; line-based form-pair extraction on assembled text |
-| Mixed-typed | Per-page typed/handwritten classification | Tags blocks as `typed` or `handwritten` |
-
-**Doc-level shape detection** (informs the orchestrator):
-
-| Shape | Detection | Specialised handling |
-|---|---|---|
-| Spreadsheet-print | Native text + table signal + filename hint | Custom multi-page table extractor with metadata-block capture (`ingest/spreadsheet_print.py`) |
-| Hybrid | Mix of native and OCR-needed pages | Per-page dispatch picks the right operation |
-
-**Other formats** — routed by file extension:
-
-| Format | Extensions | Extraction Strategy |
-|--------|-----------|---------------------|
-| Word | `.docx` | python-docx (paragraphs + tables) |
-| Markdown | `.md`, `.markdown` | markdown-it-py (headings, lists, paragraphs + GFM tables) |
-| Spreadsheet | `.csv`, `.xlsx`, `.xls` | pandas cell-grained element stream with header/preamble detection |
-
-### 2. Extraction
-
-Each document type routes to an appropriate extractor. `extract_text()` always returns a `list[ExtractionResult]`:
-
-- **PDFs** return a single-element list. The per-page orchestrator dispatches `_apply_native_page` or `_apply_ocr_page` based on each page's `PageProfile`. PaddleOCR returns per-region confidence scores stored in the document profile. YOLO layout analysis (DocLayNet `yolo11n_doc_layout.pt`, with COCO `yolov8n.pt` as fallback) is called on OCR pages by `_layout_blocks_and_tables`. Its table regions drive OCR table reconstruction and the dominant region's kind types the page's OCR text, which is collapsed onto one block; other detected classes do not yet reach the element stream. A full-page scan whose dominant region is a figure but which OCR's to substantial text is tagged `paragraph` rather than `figure` so its content reaches chunking.
-- **DOCX** returns a single-element list with paragraphs and tables interleaved in OOXML body order.
-- **Markdown** returns a single-element list with headings, list items, paragraphs and GFM tables in source order. Inline markdown syntax is kept verbatim; YAML front matter and link reference definitions are kept as verbatim paragraphs.
-- **Spreadsheets** return one `ExtractionResult` per workbook. Each sheet contributes a leading `kind='sheet_meta'` element followed by one `kind='sheet_cell'` element per non-empty cell. Export products that open with title rows or `key: value` metadata blocks above the real header (e.g. AusTender contract-notice exports) are handled: the header is detected by run-scoring (the candidate row starting the longest run of table-consistent rows below it), preamble rows land verbatim on `sheet_meta.meta["preamble"]`, and row 0 of the cell grid is always the real header. Ragged CSVs (a one-field title row above a wide header) parse rather than fail.
-
-Each result carries a `document_id` used as the primary key downstream.
-
-Text at the extraction boundary is **verbatim** — `_normalise_text` no longer runs in the extraction hot path. Whatever the producing extractor (native text layer, PaddleOCR, DOCX, spreadsheet-print, …) emits is what lands on the element's `text` field. Downstream stages (PII, redaction, chunking) may rewrite `pages[i].text`, but the parquet writer serialises `elements`, so on-disk content stays extraction-time verbatim. Cleanup (font-encoding artefacts, running OCR footers, OCR character-confusions) belongs to downstream offline stages — `womblex normalise` writes a `*.normalised_text.parquet` overlay and `womblex spellfix` writes a `*.spellfix_text.parquet` overlay, both leaving the verbatim `elements` untouched. See `docs/extraction.md`.
-
-### 3. Redaction
-
-Redaction runs as a post-extraction stage, separate from extraction. This avoids false positives that occur when running redaction detection inside OCR (form fields, chart regions, and diagram fills trigger the detector).
-
-Redacted regions can be replaced with `<REDACTED>` markers (preserving sentence structure) or deleted entirely. The stage is configurable: apply after chunking, after enrichment, or both.
-
-### 4. Chunking
-
-Extracted text is split into semantically meaningful chunks using [semchunk](https://github.com/isaacus-dev/semchunk) with the Kanon tokeniser (default 480 tokens, leaving 32-token headroom for Isaacus 512-token context windows). Tables are converted to markdown and chunked separately, with each chunk tagged as `"narrative"` or `"table"`. `<REDACTED>` markers are preserved across chunk boundaries.
-
-Chunking has two invocation modes that share one engine (`chunk_batch`):
-
-- **Per-stage:** `womblex chunk --shards <run_dir>/documents/` consumes the extraction-stage shards directly and writes `*.chunks.parquet` siblings. Independent `CheckpointManager` so the chunk stage resumes without re-extracting. This is the workflow — `womblex run` is extraction only, so chunking is always dispatched as its own stage over the extraction shards.
-- **E2E composition:** `womblex chunk --config <yaml>` (no `--shards`) extracts and chunks in one process (a back-compat convenience for simple corpora; `womblex run` itself no longer chunks).
-
-Both modes reassemble narrative + tables from each source's element stream, then feed every doc's narratives into a single semchunk call (with overlap) and every doc's table markdowns into another (no overlap), so `processes` parallelises across the whole batch. Chunks carry `(start_char, end_char, page_start, page_end, has_redaction, content_type)`; they join back to `elements` via `source_hash` plus offset-range overlap.
-
-**AI chunking (optional).** Setting `chunking.chunking_model` (e.g. `kanon-2-enricher`) switches narrative chunking to semchunk 4's AI chunking — boundaries follow the Isaacus enricher's document structure instead of the offline token split. Off by default, so non-Kanon setups are unaffected. When the `enrich` stage also runs, enrich it once: run `womblex enrich` **before** `womblex chunk`, and enrich persists the graph (`*.enrichment_doc.parquet`) for chunk to reuse instead of enriching twice. A byte-identity guard ensures reuse only happens when the persisted text matches the chunk source; otherwise it self-enriches.
-
-### 5. PII Cleaning
-
-An optional PII stage masks personal identifiers in chunk text. It is **graph-driven**: the primary candidates are PII-typed entities from the Kanon-2 enrichment graph (`natural`→PERSON, `address`→ADDRESS), mapped onto chunks via mention offsets — so PII runs *after* enrichment, not before. Recall is flexed by enrichment granularity, not by a separate detector.
-
-A local regex + cosine-context backstop (PERSON via `all-MiniLM-L6-v2`, ADDRESS via street-type regex) exists but is **opt-in and off by default** (`pii.use_regex_backstop = false`): on this corpus it is low-precision (~15% — orgs and headings get tagged PERSON), so it is reserved for recall experiments. The `all-MiniLM-L6-v2` model is pre-bundled in `models/` and loaded from disk — no network access at runtime.
-
-Masking is **terminal**. The stage writes two siblings and never rewrites the raw chunks that feed Isaacus:
-
-- **`*.pii_spans.parquet`** — one row per detected span (audit/reversible), carrying the graph `entity_id` and its `<PERSON_n>` replacement.
-- **`*.clean_text.parquet`** — the masked, publishable text layer (`<PERSON_1>`, `<ADDRESS_1>`, … — typed and numbered off the graph entity), written by default (`pii.write_clean_text = true`).
-
-See `docs/accuracy/PII_CLEANING.md` for the measured baseline and [docs/decisions.md](https://github.com/DeepCivic/womblex/blob/main/docs/decisions.md) for why masking is terminal.
-
-### 6. Embeddings and Enrichment
-
-Clean chunks feed into Isaacus models:
-
-- **kanon-2-embedder**: Semantic embeddings for search/retrieval
-- **kanon-universal-classifier**: Zero-shot document classification
-- **kanon-answer-extractor**: Structured field extraction (dates, names, references)
-
-### Graph construction
-
-Using Isaacus outputs an entity graph can be created for further analysis.
-
-
-## Configuration
-
-Configs are YAML files defining paths, detection thresholds, and analysis settings:
-
-```yaml
-dataset:
-  name: my_dataset
-
-paths:
-  input_root: ./data/raw/my_dataset
-  output_root: ./data/processed/my_dataset
-  checkpoint_dir: ./data/checkpoints/my_dataset
-
-detection:
-  min_text_coverage: 0.3
-  form_signal_threshold: 0.5
-  table_signal_threshold: 0.4
-
-extraction:
-  ocr:
-    engine: paddleocr
-    dpi: 200
-
-chunking:
-  tokenizer: "isaacus/kanon-2-tokenizer"
-  chunk_size: 480
-  enabled: true
-  chunk_tables: true
-
-processing:
-  batch_size: 25
-  checkpoint_every: 25
-```
-
-See `configs/example.yaml` for a complete example.
-
-### Preset pipelines
-
-Ready-to-run configs for common end-to-end shapes live in `configs/`. The
-console's Pipeline Composer offers the same ones by name (e.g.
-`DEFAULT-Isaacus`); the config file is the CLI source of truth.
-
-**`configs/default-isaacus.yaml` — the reference Isaacus pipeline**
-(`extract → normalise → enrich → chunk → build_graph → embed →
-money → link → done`, for PDF/DOCX/Markdown). The text is cleaned first (normalise,
-selected via `processing.text_source`), then the entity graph, chunk
-embeddings, monetary amounts and entity links are produced over the one run.
-`spellfix` is not in the reference shape — dictionary-gated OCR repair is a
-per-corpus opt-in (see the note in the config). Note that `womblex run` alone
-runs only `extract → redaction detection` (extraction only); `normalise`,
-`chunk`, `enrich`, `build_graph` (graph-refresh), `embed`, `money`, `link` and
-`pii` are per-stage commands, `normalise` runs before `enrich`, and `enrich`
-must precede `chunk` so AI chunking reuses the enrichment (no double cost):
-
-```bash
-RUN=out/$(date -u +run-%Y%m%dT%H%M%SZ); SHARDS=$RUN/documents
-CFG=configs/default-isaacus.yaml
-
-womblex run           --config $CFG --run-id "$(basename "$RUN")"  # 1. extract
-womblex normalise     --shards "$SHARDS" --config $CFG             # 2. clean text
-womblex enrich        --shards "$SHARDS" --config $CFG             # 3. enrich BEFORE chunk
-womblex chunk         --shards "$SHARDS" --config $CFG             # 4. AI chunk (reuses enrich)
-womblex graph-refresh --shards "$SHARDS"                           # 5. build_graph edges
-womblex embed         --shards "$SHARDS" --config $CFG             # 6. chunk embeddings
-womblex money         --shards "$SHARDS" --config $CFG             # 7. amounts (offline)
-womblex link          --shards "$SHARDS" --config $CFG             # 8. entity links (needs a register)
-womblex manifest      --shards "$SHARDS"                           # 9. consolidate manifest
-```
-
-On object storage, steps 2–8 are the same via `womblex run-stage --stage
-<normalise|enrich|chunk|graph-refresh|embed|money|link> --store <uri>
---run-id <id> --config $CFG`. Linking needs a corpus reference register
-(`linking.reference`) you supply. The full command sequence and per-setting
-rationale are commented inside the config file itself.
+`configs/default-isaacus.yaml` is the reference full pipeline (extract,
+normalise, enrich, chunk, graph-refresh, embed, money, link), with the command
+sequence and the reason for each setting commented inside it. With AI chunking
+on, run `enrich` before `chunk`, so chunking reuses the enrichment instead of
+paying for it a second time. Copy a config
+under `configs/` to start a new dataset; dataset-specific settings belong in
+config, never in code.
+
+### Other commands
+
+| Command | Purpose |
+|---|---|
+| `ingest-gnaf`, `ingest-abn`, `ingest-geo` | Reference-register ingests |
+| `verify-shards` | Audit a run's shard files; optionally diff two runs |
+| `resolve-source` | Map output rows back to their source files, verified by content hash |
+| `egress` | Export a finished run as a bundle |
+| `ground-truth`, `score` | Build review baselines from a run, and score corrected ones |
+| `profile` | Print the inferred column schema of a tabular file |
+| `api-token`, `serve` | Mint service tokens; run the service API |
+| `ui`, `seed-demo` | Run the console; seed a demo corpus for it |
+
+`womblex <command> --help` lists each command's options.
 
 ## Output
 
-Each batch writes four sibling Parquet shards. The shard base name is the
-caller's choice (e.g. `batch-0001`):
+Extraction writes four Parquet files per batch, joined on `source_hash` (the
+SHA-256 of the source file):
 
-**`batch-NNNN.elements.parquet`** — one row per structural element
-(paragraph, heading, table, form, image, sheet cell, …). Canonical
-output.
+| File | Holds |
+|---|---|
+| `batch-NNNN.elements.parquet` | One row per element, in document order |
+| `batch-NNNN.table_cells.parquet` | Cells of table elements, joined by `(source_hash, parent_elem_order)` |
+| `batch-NNNN.form_fields.parquet` | Fields of form elements, same join |
+| `batch-NNNN._manifest.parquet` | One row per source file: status, counts, `content_digest` |
 
-**`batch-NNNN.table_cells.parquet`** — children of `kind='table'`
-elements, one row per cell. Joins back via
-`(source_hash, parent_elem_order)`.
+Each stage adds siblings named after the same batch, such as
+`batch-NNNN.chunks.parquet`. At the end of a run, `<run>/manifest.parquet`
+consolidates the batch manifests, and its footer holds the run record: version,
+commit, config digest, the stages observed and the models used.
 
-**`batch-NNNN.form_fields.parquet`** — children of `kind='form'`
-elements, one row per field. Same join key.
+**The data contract.** Every file's footer carries a contract version and a
+sensitivity (`raw`, `masked` or `none`). Only `masked` and `none` files are safe
+to pass beyond your trust boundary. Content is deterministic given the same
+source, version, config and models, which `content_digest` lets you check.
+See [docs/contract.md](docs/contract.md) for the consumer rules and
+[docs/extraction.md](docs/extraction.md) for the element schema.
 
-**`batch-NNNN._manifest.parquet`** — one row per source file with
-provenance, status, and element / cell / field counts.
+## Integrating with Womblex
 
-`womblex manifest --shards` (run automatically at the end of `womblex run`,
-and by `womblex finalize` for a distributed run) consolidates those into
-`<run_root>/manifest.parquet`, and writes a **run record** into that file's
-footer key-value metadata: the run id, version, commit and configuration
-digest, the corpus and document counts, the stages observed to have run, the
-local models loaded with a digest each, and the external services declared.
-It is regenerated from the shard directory alone, so re-running the command
-reproduces it; anything it could not establish is named in its `partial` list
-rather than omitted.
+### The service API
+`womblex serve` is a `/v1` HTTP API over a store, a job queue and an ingest
+location. Software uploads documents, submits a run over them, polls it, and
+reads the results back. Workers do the processing; the API only writes queue
+rows and reads output.
 
-See [docs/extraction.md](https://github.com/DeepCivic/womblex/blob/main/docs/extraction.md) for the canonical schema
-reference, element kinds, the reassembly query, and the verbatim-text
-policy.
-
-The per-stage `womblex enrich --shards` writes sidecars alongside each batch (enrichment is a core capability — no extra install, just a key or SageMaker endpoints):
-
-**`batch-NNNN.enrichment_entities.parquet`** — flat entity mentions for filtering / PII candidates
-
-**`batch-NNNN.enrichment_meta.parquet`** — document-level enrichment metadata
-
-**`batch-NNNN.enrichment_doc.parquet`** — *(only with `enrichment.persist_document`, auto-enabled when AI chunking is on)* the raw ILGS Document per doc, reused by the chunk stage for AI chunking
-
-The E2E graph path (`womblex run`) additionally emits `entities.parquet` and `graph_edges.parquet` for graph queries.
-
-## Project Structure
-
-A file-level map of the source tree lives in
-[docs/project-structure.md](https://github.com/DeepCivic/womblex/blob/main/docs/project-structure.md). At a glance:
-
-```
-womblex/
-├── configs/           # Dataset-specific configurations
-├── docs/              # Architecture docs, ADRs, accuracy reports
-├── fixtures/          # Test fixtures (separate repo, see THIRD_PARTY_DATA.md)
-├── src/womblex/
-│   ├── cli/           # CLI subpackage — per-topic command modules
-│   ├── operations/    # Independent operations (extract/redact/chunk/pii/enrich)
-│   ├── ingest/        # Detection, per-page profiling, PDF/non-PDF extraction
-│   ├── redact/        # Redaction detection + post-extraction stage
-│   ├── pii/           # Graph-driven PII detection + terminal masking
-│   ├── process/       # Chunking + offline text/annotation stages (normalise/spellfix/quality/money)
-│   ├── link/          # Record linkage to reference registers
-│   ├── analyse/       # Isaacus enrichment + embeddings + entity graph
-│   ├── store/         # Parquet schemas, sidecar IO, checkpoints, retention
-│   ├── utils/         # Metrics + local model path resolution
-│   └── verify/        # Two-pass extraction quality verification
-└── tests/
+```bash
+pip install womblex[api]
+womblex api-token --client my-app --scope submit --scope read   # token shown once, plus its registry entry
+WOMBLEX_API_CLIENTS=clients.yaml womblex serve --store <uri> --dsn <dsn> --ingest <uri>   # 127.0.0.1:8081
 ```
 
-See [docs/project-structure.md](https://github.com/DeepCivic/womblex/blob/main/docs/project-structure.md) for the full
-per-module breakdown.
+```bash
+H="Authorization: Bearer $TOKEN"
+curl -H "$H" -F files=@report.pdf http://localhost:8081/v1/uploads          # returns input_prefix
+curl -H "$H" -H "Content-Type: application/json" \
+     -d '{"input_prefix": "<input_prefix>"}' http://localhost:8081/v1/runs  # returns the run id
+curl -H "$H" http://localhost:8081/v1/runs/<run_id>                         # pending, running, done or failed
+curl -H "$H" http://localhost:8081/v1/runs/<run_id>/files                   # keys, row counts, contract footers
+curl -H "$H" "http://localhost:8081/v1/runs/<run_id>/documents/<source_hash>/text?layer=elements"
+```
+
+- **Tokens and scopes.** Callers present static service tokens; the registry
+  stores only their hashes. Scopes are `submit`, `read`, `read_raw` and `admin`.
+  `serve` refuses to start with an empty registry.
+- **Ownership.** A run belongs to the client that submitted it. Another
+  client's run answers 404, a non-admin can submit only over its own upload
+  folder, and only `admin` sees runs started from the CLI or console.
+- **Stages.** A submitted `preset` or `config` is validated before anything is
+  queued, and it only selects which downstream stages run; workers run them
+  under their own config. A config that enables no stage gives an
+  extraction-only run.
+- **Text layers.** The default layer is `masked`. Raw layers (`chunks`,
+  `elements`) need `read_raw`. The masked layer is written by the `pii` stage,
+  which is never dispatched automatically, because masking is irreversible: an
+  operator runs it deliberately with `run-stage --stage pii`. Until then a
+  document's masked text answers 404.
+
+Callers poll; there are no webhooks. Endpoints, status rules and error codes are
+in [docs/service-api.md](docs/service-api.md), and the OpenAPI surface is
+pinned by a test.
+
+### The data contract
+A consumer can instead read a run's Parquet directly, or receive it as an
+egress bundle (`womblex egress <run> --to <dest>`): the corpus, the deduplicated
+source files and an index between them. See [docs/egress.md](docs/egress.md).
+Files are self-describing through their footers, as described under
+[Output](#output). In Python, `womblex.__all__` is the stable surface.
+
+## Models
+
+Each model sits in a named slot (OCR engine, layout analyser, PII context
+model, chunk tokeniser, spellfix dictionary), and the default set is CPU-only.
+An installed package can register its own model for a slot through an entry
+point, and a config selects it by name, with no schema change. Built-in
+alternatives include a hosted VLM OCR engine on AWS Bedrock and a local Ollama
+vision model.
+
+Before a run, worker or stage processes anything, the models it needs are
+checked (`--models-check off|load|smoke`), and every output file records which
+model filled each slot. See [docs/model-plugins.md](docs/model-plugins.md).
+
+## Scaling out
+
+You don't need any of this to use Womblex. A distributed run calls the same
+batch code as `womblex run` and writes the same shard layout, so its output can
+be synced down and used by every local command, or processed in place.
+
+The backend follows from what you pass: `--store` takes a local path or an
+`s3://` (or `gs://`, `az://`) URI, and execution is either `womblex run` or
+`enqueue` plus `worker`.
+
+```bash
+womblex enqueue  --store s3://bucket --ingest s3://bucket/inbox \
+                 --config configs/example.yaml --create-schema
+womblex worker   --store s3://bucket --ingest s3://bucket/inbox \
+                 --config configs/example.yaml --stale-timeout 900
+womblex jobs     --run-id <run_id>
+womblex finalize --store s3://bucket --run-id <run_id>    # consolidate the manifest
+
+# Downstream stages, in place in the store...
+womblex run-stage --stage chunk --store s3://bucket --run-id <run_id> --config <yaml>
+# ...or queued for the workers, ordered and gated by the config
+womblex enqueue-stages --run-id <run_id> --config <yaml>
+```
+
+Workers claim batches with `FOR UPDATE SKIP LOCKED`, so you can add or remove
+them mid-run. A crashed worker's batch returns to the queue after
+`--stale-timeout`. `enqueue-stages` never dispatches `pii` (masking is
+irreversible) or `quality` (run-scoped); run those with `run-stage`.
+
+Connections come from `WOMBLEX_STORE_URI`, `WOMBLEX_INGEST_URI` and
+`WOMBLEX_DB_DSN`. S3 credentials go on `WOMBLEX_S3_ACCESS_KEY_ID`,
+`WOMBLEX_S3_SECRET_ACCESS_KEY` and `WOMBLEX_S3_ENDPOINT` (MinIO works as an S3
+endpoint). Womblex owns one table, `womblex_jobs` (schema in
+`sql/womblex_jobs.sql`), and writes no vectors to the database.
+
+### Docker Compose
+
+`docker-compose.yml` runs Postgres, MinIO, scalable workers and the console,
+using published images. Postgres and MinIO sit behind the `local` profile, so
+setting the connection variables points the same file at external services
+instead. The service API runs under the `api` profile
+(`docker compose --profile api up -d api`, port 8081) with the client registry
+mounted read-only.
+
+```bash
+export COMPOSE_FILE=docker-compose.yml:docker-compose.local.override.yml  # build your working tree
+docker compose --profile local up -d postgres minio createbuckets init
+docker compose run --rm womblex enqueue --config configs/example.yaml --create-schema
+docker compose up --scale worker=4 worker
+```
+
+Without the override file, Compose pulls released images; pin a release with
+`docker compose --env-file deploy/images.env up`. Each service's image is
+listed in [docs/deployment-images.md](docs/deployment-images.md).
+
+## Documentation
+
+| Document | Covers |
+|---|---|
+| [functional_requirements.md](docs/functional_requirements.md) | What Womblex must do |
+| [architecture.md](docs/architecture.md), [project-structure.md](docs/project-structure.md) | How it is built, module by module |
+| [dataflow.md](docs/dataflow.md), [composable-design.md](docs/composable-design.md) | How data moves between stages, and the stage contracts |
+| [extraction.md](docs/extraction.md), [contract.md](docs/contract.md) | The output schema and the consumer contract |
+| [models.md](docs/models.md), [model-plugins.md](docs/model-plugins.md) | Every model, and how to plug in your own |
+| [decisions.md](docs/decisions.md) | Why things are the way they are, and dead ends not to retry |
+| [steering.md](docs/steering.md), [CHANGELOG.md](CHANGELOG.md) | What's next, and what has shipped |
+| [accuracy/](docs/accuracy/) | Benchmark reports, generated by [womblex-benchmark](https://github.com/DeepCivic/womblex-benchmark) |
 
 ## Development
 
 ```bash
-# Install with dev dependencies (pytest, ruff, mypy live in the extras)
-uv sync --all-extras
+git clone https://github.com/DeepCivic/womblex.git && cd womblex
+uv sync --extra dev --extra ui --extra api
 
-# A minimal fixture set is vendored; the full benchmark set is optional —
-# see THIRD_PARTY_DATA.md.
-
-# Run the suite (no addopts filter — runs everything; heavy tests skip on a
-# bare checkout). Use -m "not slow and not benchmark" for the fast subset.
-uv run python -m pytest
-
-# Accuracy benchmarks live in womblex-benchmark, not here; run them from that
-# checkout and they regenerate docs/accuracy/*.md in this one:
-#   uv run python -m pytest accuracy/ -v
-
-# Type checking
+uv run ruff check src/ tests/
 uv run mypy src/
-
-# Lint
-uv run ruff check src/
+uv run python -m pytest tests/ -v                               # whole suite
+uv run python -m pytest tests/ -v -m "not slow and not benchmark"  # fast subset
 ```
 
-Accuracy docs (`docs/accuracy/*.md`) are regenerated automatically at the end of each test run — no manual editing needed.
+These three checks are the CI gate. A minimal fixture set is vendored, so a bare
+clone runs most of the suite; tests that need the full fixture set, credentials
+or optional extras skip. See [THIRD_PARTY_DATA.md](THIRD_PARTY_DATA.md) for the
+full fixtures. Accuracy benchmarks live in womblex-benchmark, not here.
 
-### Container images
-
-CI builds both images on every pull request and on `main` — the pipeline image
-(`Dockerfile`) and the console image (`Dockerfile.ui`) — runs the CLI and the
-console's health endpoint against what it built, and fails the change if either
-build fails. It builds the same instructions a deployment builds, with no
-CI-only variant.
-
-Each build takes the source commit as an argument and stamps it into the
-installed package and onto the image as `org.opencontainers.image.revision`, so
-a container says what it was built from instead of reporting `unavailable`:
-
-```bash
-# A published build: the commit is required, and a build without one fails.
-docker build --build-arg SOURCE_COMMIT=$(git rev-parse HEAD) \
-             --build-arg REQUIRE_STAMP=1 -t womblex:$(git rev-parse --short HEAD) .
-
-# Read it back, from the image or from inside it.
-docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' womblex:...
-docker run --rm --entrypoint python womblex:... \
-  -c 'from womblex.store.build_info import build_info; print(build_info().commit_value)'
-```
-
-A local build passes neither argument and its image reports `unavailable` with
-a reason — honest for a build that is not published, and one less thing between
-an edit and a running stack. (Local builds live in
-`docker-compose.local.override.yml`, so the command is `docker compose -f
-docker-compose.yml -f docker-compose.local.override.yml build`; the base file
-names published images and builds nothing.)
-
-Where each compose service's image comes from is enumerated per service in
-[`docs/deployment-images.md`](docs/deployment-images.md), with a recorded
-decision for every one of them and a note on which third-party tags are
-unpinned. `tests/test_deployment_images.py` holds the document to the compose
-files, so the enumeration cannot go stale.
-
-### Published images
-
-Cutting a release publishes both images to GHCR — `ghcr.io/deepcivic/womblex`
-and `ghcr.io/deepcivic/womblex-console` — under the release version and
-`latest`, and records the digest each one received in
-[`deploy/images.env`](deploy/images.env):
-
-```bash
-docker compose --env-file deploy/images.env up   # runs the pinned artefact
-```
-
-The reference recorded there is a **digest**, not a tag. A tag can be moved to
-point at different bytes; a digest is those bytes. That distinction is the
-whole reason the file exists: dependencies resolve at image build time and the
-base image tag moves, so one commit can yield materially different images — the
-commit says which source, the digest says which artefact.
-
-Publication holds no credential of its own. GHCR accepts the workflow's ambient
-`GITHUB_TOKEN` for this repository's own packages, so there is nothing to
-provision and nothing to commit; the only build arguments are the commit and
-the stamp guard. `REQUIRE_STAMP=1` is set on this path, so an image that cannot
-name its commit fails the build instead of reaching the registry, and each
-published image is pulled back **by digest** afterwards and asked what it was
-built from — the one place that guarantee can be checked against the artefact
-rather than a local build.
-
-The workflow can also be run manually (Actions, "Publish images"), which
-publishes an `edge-<sha>` tag and leaves `deploy/images.env` alone — useful for
-exercising the path without cutting a version, and it cannot move what a
-deployment follows.
-
-Where each compose service's image comes from is enumerated per service in
-[`docs/deployment-images.md`](docs/deployment-images.md), with a recorded
-decision for every one of them and a note on which third-party tags are
-unpinned. `tests/test_deployment_images.py` holds the document to the compose
-files, so the enumeration cannot go stale.
-
-### Commit hook
-
-Two checks run on the files you stage: a secret scan (`detect-secrets`) and SAST over the
-local semgrep rulesets in `.semgrep/rules/`. Install it once per clone:
+The commit hook runs a secret scan and the semgrep rules in `.semgrep/rules/`:
 
 ```bash
 pip install pre-commit==4.6.1 && pre-commit install
-
-# Run both over the whole tree rather than just staged files
-pre-commit run --all-files
 ```
 
-`pre-commit` is deliberately not in the `[dev]` extra — adding it would change
-`pyproject.toml` and rewrite `uv.lock`, which is a dependency-scoped decision of its own.
+Record a reviewed false positive at the site (`# pragma: allowlist secret` or
+`# nosemgrep: <rule-id> -- <reason>`) rather than switching a check off.
+`bash .github/scripts/doctor.sh` compares your environment with `.env.example`.
 
-The hook is the **only** thing here that stops an action, and `git commit --no-verify`
-walks straight past it. CI re-runs both over the whole tree and adds a scan of reachable
-history, which is what catches a credential committed behind `--no-verify` and removed
-later. Nothing blocks a merge — that is branch protection, a GitHub setting.
+Contributor conventions (file and merge size caps, what belongs in core) are in
+[CLAUDE.md](CLAUDE.md).
 
-If a scan flags something you have checked and know to be safe, record the reason rather
-than switching the check off: `# pragma: allowlist secret` for detect-secrets, or
-`# nosemgrep: <rule-id> -- <reason>` for semgrep. Both rulesets document their known
-false-positive classes in their file headers. When a new benign finding is real drift
-rather than a one-off, regenerate the baseline with the exclusions recorded in
-`.pre-commit-config.yaml` and review every new entry before committing it.
+## Licence
 
-### Environment check
-
-```bash
-bash .github/scripts/doctor.sh
-```
-
-Compares what `.env.example` declares against what is actually set, and any declared
-runtime pins (`mise.toml`, `.tool-versions`) against the interpreters on PATH. It reads
-variable *names* only and never prints a value. Variables under an `# Optional:` comment
-are reported but never failed, so an unset `ISAACUS_API_KEY` on an extraction-only clone
-is a note rather than an error. Not wired into CI, where none of these are set.
-
-## License
-
-Apache 2.0
+Apache-2.0. See the support status above for the PyMuPDF dependency.
 
 ## Acknowledgements
 
-- [Isaacus](https://isaacus.com/) for legal AI models
-- [semchunk](https://github.com/isaacus-dev/semchunk) for semantic chunking
 - [PyMuPDF](https://pymupdf.readthedocs.io/) for PDF handling
-- [RapidOCR](https://github.com/RapidAI/RapidOCR) for OCR (runs PaddleOCR v5 / v4 ONNX models, no PaddlePaddle required)
-- [Ultralytics](https://github.com/ultralytics/ultralytics) for YOLO layout analysis (DocLayNet YOLO11n; COCO YOLOv8n fallback)
-- [python-docx](https://python-docx.readthedocs.io/) for Word document extraction
-- [pandas](https://pandas.pydata.org/) + [openpyxl](https://openpyxl.readthedocs.io/) for spreadsheet ingestion
+- [RapidOCR](https://github.com/RapidAI/RapidOCR) for OCR, running PaddleOCR ONNX models
+- [PP-DocLayout](https://huggingface.co/PaddlePaddle/PP-DocLayout-M) for layout detection
+- [semchunk](https://github.com/isaacus-dev/semchunk) for chunking
+- [python-docx](https://python-docx.readthedocs.io/), [pandas](https://pandas.pydata.org/) and [openpyxl](https://openpyxl.readthedocs.io/) for Office formats
+- [Isaacus](https://isaacus.com/) for the Kanon-2 enrichment and embedding models

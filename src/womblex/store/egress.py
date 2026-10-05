@@ -13,7 +13,7 @@ destination :class:`~womblex.store.remote.RemoteStore`, and writes::
       corpus/                     # documents/ mirrored recursively + manifest.parquet
       sources/<source_hash><ext>  # raw files, deduplicated by hash
       source_index.parquet        # source_hash -> raw key, ext, doc_id, filename, status
-      egress_manifest.json        # bundle descriptor + per-document resolution report
+      egress_manifest.json        # bundle descriptor + source counts by status
 
 Resolution reuses :class:`~womblex.store.source_resolver.SourceResolver`, so
 ``source_index.parquet`` carries its four-status vocabulary plus one more of

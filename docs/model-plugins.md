@@ -1,9 +1,7 @@
 # Model Plugins
 
 How an installed package supplies a model for a pipeline slot. The registry is
-`utils/model_registry.py`; the requirement and design calls are in
-[`functional_requirements.md`](functional_requirements.md) (O1) and
-[`decisions.md`](decisions.md).
+`utils/model_registry.py`.
 
 ## How a package registers a model
 
@@ -118,14 +116,13 @@ returning one, or a callable returning several:
 my-pkg = "my_pkg:models_dir"
 ```
 
-Plugin roots are searched after `WOMBLEX_MODELS_DIR`, the bundled `_models/`
-and the repo `models/`, so a plugin cannot shadow a built-in artefact. Every
-file resolved is recorded in the run's loaded-model record with its digest.
+A plugin root cannot shadow a built-in artefact, so give plugin files names of
+their own.
 
 A plugin that loads its weights from inside its own package rather than
 through a models root (bundled wheel data, for instance) calls
 `utils/models.record_loaded_path(name, path)` directly so those bytes still
-reach the record — the same path the built-in PaddleOCR reader uses for its
+reach the run's loaded-model record — the same path the built-in PaddleOCR reader uses for its
 wheel-bundled v4 fallback.
 
 ## Minimal example
