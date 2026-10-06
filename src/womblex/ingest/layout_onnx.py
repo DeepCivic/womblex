@@ -76,7 +76,7 @@ class PPDocLayoutAnalyzer:
                 f"PP-DocLayout-M model not found at {onnx_path}; "
                 "set WOMBLEX_MODELS_DIR or reinstall womblex"
             )
-        import onnxruntime as ort  # type: ignore[import-untyped]
+        import onnxruntime as ort
 
         cfg = yaml.safe_load((self._model_dir / "inference.yml").read_text())
         self._labels = list(cfg["label_list"])

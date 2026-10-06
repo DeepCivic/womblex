@@ -37,7 +37,7 @@ def only_env_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A WOMBLEX_MODELS_DIR holding the large artefacts and nothing else."""
     root = tmp_path / "app-models"
     (root / "all-MiniLM-L6-v2").mkdir(parents=True)
-    (root / "yolov8n.pt").write_bytes(b"weights")
+    (root / "large-artefact.bin").write_bytes(b"weights")
     monkeypatch.setenv("WOMBLEX_MODELS_DIR", str(root))
     return root
 
@@ -53,7 +53,7 @@ def test_env_root_does_not_shadow_bundled_dictionary(only_env_root: Path):
 def test_env_root_still_wins_for_what_it_holds(only_env_root: Path):
     """The override keeps priority for the artefacts it does carry."""
     assert resolve_local_model_path("all-MiniLM-L6-v2") == only_env_root / "all-MiniLM-L6-v2"
-    assert resolve_local_model_path("yolov8n.pt") == only_env_root / "yolov8n.pt"
+    assert resolve_local_model_path("large-artefact.bin") == only_env_root / "large-artefact.bin"
 
 
 def test_roots_are_ordered_and_deduplicated(only_env_root: Path):
@@ -201,9 +201,9 @@ class TestDigestRecomputes:
         assert digest_model_path(renamed) != digest_model_path(artefact)
 
     def test_a_single_file_artefact_digests_its_bytes(self, tmp_path: Path):
-        one = tmp_path / "yolo.pt"
+        one = tmp_path / "model.bin"
         one.write_bytes(b"weights")
-        two = tmp_path / "elsewhere" / "yolo.pt"
+        two = tmp_path / "elsewhere" / "model.bin"
         two.parent.mkdir()
         two.write_bytes(b"weights")
         assert digest_model_path(one) == digest_model_path(two)

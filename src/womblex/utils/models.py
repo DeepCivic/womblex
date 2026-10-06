@@ -159,8 +159,8 @@ def resolve_local_model_path(model_name: str, *, record: bool = True) -> str | P
     If a flat directory ``<root>/<model_name>/`` exists without the hub
     layout, that directory is returned directly.
 
-    For non-directory artefacts (e.g. ``yolov8n.pt``), pass the filename as
-    *model_name* and the full file path is returned if it exists.
+    For non-directory artefacts (e.g. a single ``.onnx`` checkpoint), pass the
+    filename as *model_name* and the full file path is returned if it exists.
 
     Args:
         model_name: HuggingFace model identifier or bare filename.

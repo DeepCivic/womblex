@@ -10,12 +10,13 @@
 #
 # This is the ruleset with the most womblex-specific bite. The pipeline loads
 # model artefacts at runtime (`utils/models.py` resolves local paths for
-# rapidocr, YOLOv8 and sentence-transformers), and a `.pt` checkpoint is a
-# pickle: loading one executes whatever it was built to execute. Today no
-# womblex code calls `torch.load` or `joblib.load` directly — the bundled
-# `yolov8n.pt` is loaded inside ultralytics — so these rules are silent. They
-# are here to stay silent, and to fire the day somebody adds a load path for a
-# checkpoint fetched from somewhere less trusted than `models/`.
+# rapidocr, the ONNX layout model and sentence-transformers), and a `.pt`
+# checkpoint is a pickle: loading one executes whatever it was built to
+# execute. No womblex code calls `torch.load` or `joblib.load` directly, and
+# no `.pt` checkpoint ships in the bundle — the layout model is ONNX, which
+# carries no executable state. These rules are here to stay silent, and to
+# fire the day somebody adds a load path for a checkpoint fetched from
+# somewhere less trusted than `models/`.
 #
 # KNOWN FALSE-POSITIVE CLASSES
 #

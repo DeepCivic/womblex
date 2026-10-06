@@ -1,6 +1,6 @@
 # Permissive dependencies — plan
 
-*Status: in progress (2026-10). L1 has shipped (#130), and the README layout step is done, landing with the README edit. Fresh accuracy and benchmark runs wait on the revision of the womblex-collection ground-truth files, so every step gated on a GT-scored report waits with them. Each merge updates this document's merge list as it lands, and the document is retired into `decisions.md` once F2 ships.*
+*Status: in progress (2026-10). L1 has shipped (#130), the README layout step is done, and L2 is done. Fresh accuracy and benchmark runs wait on the revision of the womblex-collection ground-truth files, so every step gated on a GT-scored report waits with them. Each merge updates this document's merge list as it lands, and the document is retired into `decisions.md` once F2 ships.*
 
 ## Context
 Womblex is Apache-2.0. Two of its core dependencies are licensed AGPL-3.0, with a paid commercial licence as the only alternative:
@@ -79,7 +79,7 @@ Check these against the vendored fixtures and the womblex-collection PDFs before
 
   Re-exporting the model: `PaddlePaddle/PP-DocLayout-M` at the revision in `docs/models.md`, then `paddle2onnx --model_dir . --model_filename inference.json --params_filename inference.pdiparams --save_file inference.onnx --opset_version 14` in a venv with `paddle2onnx`, `paddlepaddle`, `onnx`, `onnxruntime` and `setuptools` (`paddle2onnx` 2.1.0 needs `setuptools` and pulls in neither). The export takes `image` (N,3,640,640) and `scale_factor` (N,2), batch size 1. A different `paddle2onnx` version may change the ONNX digest.
 - **README (W), with L2. Done, landing with the README edit.** The README states that layout detection is not supported for local deployment until L3 ships, and its stale "layout regions via `ultralytics` YOLO" line is replaced.
-- **L2 (W, approval). Next.** One dependency-scoped removal. YOLO is no longer registered, so this is dead code and the registry, model check and `DEFAULT_MODELS` do not change:
+- **L2 (W, approval). Done.** One dependency-scoped removal. YOLO is no longer registered, so this is dead code and the registry, model check and `DEFAULT_MODELS` do not change:
   - delete `YOLOLayoutAnalyzer`, the `_YOLO_*` maps, `_select_label_map`, `_TAXONOMY_IMGSZ`, both `.pt` files (in `_models/` and `models/`) and the `TestYolo*` classes;
   - drop `ultralytics` and its mypy override, and make `onnxruntime` a direct dependency;
   - fix the YOLO mentions in `.semgrep/rules/deserialisation.yaml`, the CI disk-space comment, `CLAUDE.md`, `docs/models.md` (both `.pt` rows and the "without `ultralytics`" fallback note), `redact/stage.py`, `redact/detector.py`, `ingest/llm_ocr.py`, `utils/models.py`, `configs/example.yaml`, `tests/test_extract.py` and `tests/test_models_resolution.py`.

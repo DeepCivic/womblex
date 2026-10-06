@@ -28,7 +28,7 @@ ENV PYTHONUNBUFFERED=1 \
 
 # The console imports `store/` readers, which reach `ingest.extract` for
 # `ExtractionResult` and so import PyMuPDF and numpy at module load. Verified
-# by import trace: fitz, numpy and semchunk load; ultralytics, torch,
+# by import trace: fitz, numpy and semchunk load; torch,
 # sentence-transformers and cv2 do not. libglib/libGL are what PyMuPDF needs.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libglib2.0-0 libgl1 \

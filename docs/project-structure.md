@@ -60,7 +60,7 @@ womblex/
 │   │   ├── markdown.py          # Markdown extractor — headings/lists/tables via markdown-it-py
 │   │   ├── interfaces/
 │   │   │   └── protocols.py     # Backend protocols (OCRReader, LayoutAnalyzer, Preprocessor)
-│   │   ├── paddle_ocr.py        # PaddleOCR wrapper via rapidocr-onnxruntime (det/rec/cls) (+ YOLOLayoutAnalyzer, unregistered — no longer a layout slot option)
+│   │   ├── paddle_ocr.py        # PaddleOCR wrapper via rapidocr-onnxruntime (det/rec/cls)
 │   │   ├── layout_onnx.py       # PPDocLayoutAnalyzer — PP-DocLayout-M layout detection (onnxruntime; registered default `pp-doclayout-m`)
 │   │   ├── llm_ocr.py           # LLM/VLM OCR backends: Mistral Pixtral Large via AWS Bedrock, + local Ollama
 │   │   ├── spreadsheet.py       # CSV/Excel extraction — one ExtractionResult per workbook with cells as elements

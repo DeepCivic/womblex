@@ -4,8 +4,7 @@ Uses the ``rapidocr-onnxruntime`` package which bundles pre-exported
 PaddleOCR v4 ONNX models (det + rec + cls).  No separate model download
 required — models ship with the pip package (~15 MB wheel).
 
-Layout analysis is ``ingest/layout_onnx.py`` (PP-DocLayout-M). The YOLO
-analyzer below is retained until the dependency-scoped removal merge.
+Layout analysis is ``ingest/layout_onnx.py`` (PP-DocLayout-M).
 """
 
 from __future__ import annotations
@@ -43,12 +42,12 @@ logger = logging.getLogger(__name__)
 # Inference thread capping
 # ---------------------------------------------------------------------------
 #
-# RapidOCR (onnxruntime) and the YOLO layout filter (torch) each default their
-# thread pools to the full core count (onnxruntime config ships
-# ``intra_op_num_threads = -1``; torch sizes to cpu_count). Loaded together in a
-# per-page loop they spin up ~100 threads but contend for the cores, yielding
-# little real parallelism (~1.2 cores of useful work) while thrashing on a
-# low-core deployment target (the Chromebook profile this corpus targets).
+# RapidOCR and the layout model (ingest/layout_onnx.py) both run on
+# onnxruntime, whose sessions each default their thread pool to the full core
+# count (``intra_op_num_threads = -1``). Loaded together in a per-page loop
+# they contend for the same cores, yielding little real parallelism while
+# thrashing on a low-core deployment target (the Chromebook profile this
+# corpus targets).
 #
 # Capping makes CPU usage a deliberate, bounded choice. Default 4; override via
 # the ``WOMBLEX_INFERENCE_THREADS`` env var or ``extraction.ocr.num_threads``
@@ -248,177 +247,6 @@ class PaddleOCRReader:
             reading_order_native=False,
             confidence=avg_conf,
         )
-
-
-# DocLayNet class name → womblex block_type mapping.
-# Primary mapping. The 11-class DocLayNet taxonomy aligns directly with
-# ElementKind: Picture → figure, Section-header / Title → heading, etc.
-# Formula has no dedicated kind so it collapses to paragraph (text is
-# preserved on the element; downstream consumers can read the original
-# label via meta).
-_YOLO_DOCLAYNET_LABEL_MAP: dict[str, str] = {
-    "Caption": "caption",
-    "Footnote": "footnote",
-    "Formula": "paragraph",
-    "List-item": "list_item",
-    "Page-footer": "footer",
-    "Page-header": "header",
-    "Picture": "figure",
-    "Section-header": "heading",
-    "Table": "table",
-    "Text": "paragraph",
-    "Title": "heading",
-}
-
-# Legacy COCO class name → womblex block_type mapping.
-# Retained for the fallback path only — when the DocLayNet checkpoint is
-# unavailable, the COCO-trained yolov8n.pt produces detections whose
-# class names have no document meaning. These mappings are best-effort
-# guesses and produce mostly noise on real document pages (see
-# docs/decisions.md "Element-kind classification"). Prefer the DocLayNet path.
-_YOLO_COCO_LABEL_MAP: dict[str, str] = {
-    "person": "paragraph",
-    "book": "paragraph",
-    "dining table": "table",
-    "tv": "figure",
-    "laptop": "figure",
-    "cell phone": "figure",
-    "monitor": "figure",
-    "keyboard": "figure",
-    "mouse": "figure",
-    "scissors": "figure",
-    "clock": "figure",
-}
-
-
-def _select_label_map(model_names: dict[int, str]) -> tuple[dict[str, str], str]:
-    """Pick a label map based on the loaded model's class names.
-
-    Returns ``(label_map, taxonomy_name)``. DocLayNet is detected by the
-    presence of any DocLayNet-unique class (e.g. ``Section-header``);
-    everything else falls back to COCO. ``taxonomy_name`` is used in logs
-    and downstream telemetry.
-    """
-    classes = set(model_names.values())
-    if "Section-header" in classes or "Page-footer" in classes:
-        return _YOLO_DOCLAYNET_LABEL_MAP, "doclaynet"
-    return _YOLO_COCO_LABEL_MAP, "coco"
-
-
-# Recommended inference resolution per taxonomy. DocLayNet was trained at
-# 1280×1280 — the model card recommends that resolution for small-class
-# recall (Caption / Footnote). Empirically on government FOI documents
-# (the ACT_EarlyChildhoodIncidents cohort) 832 matches or beats 1280 on
-# the dominant text classes at ~3× the speed. The few real Caption /
-# Footnote regions present are missed by the model at any resolution,
-# so the 1280 cost isn't paying for itself on this corpus. Override to
-# 1280 when running against documents with heavy small-class content.
-_TAXONOMY_IMGSZ: dict[str, int] = {
-    "doclaynet": 832,
-    "coco": 640,
-}
-
-
-class YOLOLayoutAnalyzer:
-    """Layout region detection via a local YOLO model.
-
-    Resolves the DocLayNet-trained ``yolo11n_doc_layout.pt`` first, falling
-    back to the COCO-trained ``yolov8n.pt`` only if the DocLayNet
-    checkpoint is missing. The fallback exists to keep the layout path
-    functional in partial installs — its output has no real document
-    semantics. Class names from the loaded model select the matching
-    label map at first use.
-
-    Requires ``ultralytics`` to be installed (optional dependency).
-    """
-
-    def __init__(self, model_path: str | None = None) -> None:
-        from pathlib import Path as _Path
-
-        if model_path is None:
-            from womblex.utils.models import resolve_local_model_path
-            # DocLayNet-trained checkpoint is the primary path.
-            resolved = resolve_local_model_path("yolo11n_doc_layout.pt")
-            if isinstance(resolved, str):
-                # Not present locally; fall back to COCO so the layout path
-                # stays functional (predictions are mostly noise, but the
-                # plumbing keeps working).
-                resolved = resolve_local_model_path("yolov8n.pt")
-            self._model_path = str(resolved)
-        else:
-            self._model_path = str(_Path(model_path))
-
-        self._engine: object | None = None
-        self._label_map: dict[str, str] = _YOLO_COCO_LABEL_MAP
-        self._taxonomy: str = "coco"
-        self._imgsz: int = _TAXONOMY_IMGSZ["coco"]
-
-    def _ensure_loaded(self) -> None:
-        if self._engine is not None:
-            return
-        try:
-            n = get_inference_threads()
-            _apply_thread_env(n)
-            # Cap torch's intra-op pool (defaults to cpu_count). interop must be
-            # set before any parallel work — best-effort, ignore if already used.
-            import torch
-            from ultralytics import YOLO  # type: ignore[import-not-found]
-
-            torch.set_num_threads(n)
-            try:
-                torch.set_num_interop_threads(1)
-            except RuntimeError:
-                pass
-
-            self._engine = YOLO(self._model_path)
-            names = getattr(self._engine, "names", {}) or {}
-            self._label_map, self._taxonomy = _select_label_map(names)
-            self._imgsz = _TAXONOMY_IMGSZ[self._taxonomy]
-            logger.info(
-                "YOLO layout model loaded from %s (taxonomy=%s, imgsz=%d)",
-                self._model_path, self._taxonomy, self._imgsz,
-            )
-        except ImportError as exc:
-            raise ImportError(
-                "YOLOLayoutAnalyzer requires 'ultralytics'. "
-                "Install with: pip install ultralytics"
-            ) from exc
-
-    def analyze(self, img: np.ndarray, conf_threshold: float = 0.3) -> list[LayoutRegion]:
-        """Detect layout regions, returning sorted ``LayoutRegion`` objects.
-
-        Inference resolution defaults to the per-taxonomy value in
-        ``_TAXONOMY_IMGSZ`` (DocLayNet: 832, COCO: 640). Detected class
-        names map through the loaded model's selected label map.
-        """
-        self._ensure_loaded()
-        assert self._engine is not None
-
-        results = self._engine(  # type: ignore[operator]
-            img, conf=conf_threshold, verbose=False, imgsz=self._imgsz,
-        )
-        regions: list[LayoutRegion] = []
-
-        for result in results:
-            if result.boxes is None:
-                continue
-            for box in result.boxes:
-                conf = float(box.conf[0])
-                if conf < conf_threshold:
-                    continue
-                cls_id = int(box.cls[0])
-                x0, y0, x1, y1 = (float(v) for v in box.xyxy[0])
-                label = result.names.get(cls_id, str(cls_id)) if result.names else str(cls_id)
-                block_type = self._label_map.get(label, "paragraph")
-                regions.append(LayoutRegion(
-                    bbox=(x0, y0, x1, y1),
-                    label=label,
-                    block_type=block_type,
-                    confidence=conf,
-                ))
-
-        regions.sort(key=lambda r: r.bbox[1])
-        return regions
 
 
 # ------------------------------------------------------------------

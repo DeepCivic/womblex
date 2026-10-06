@@ -60,9 +60,7 @@ _VECTOR_MIN_HEIGHT_PT = 8.0  # filters glyph-rendering small filled rects (body 
 # Layout regions whose ``block_type`` indicates image / tabular content
 # where raster contour redaction false-positives originate (02737-class
 # scanned_mixed CRM forms with dark form-field backgrounds and embedded
-# chart regions). Taxonomy-agnostic — works for both DocLayNet
-# (Picture / Table) and the legacy COCO fallback (tv / laptop / etc.
-# get mapped to figure / table by ``_YOLO_COCO_LABEL_MAP``).
+# chart regions).
 _LAYOUT_EXCLUSION_BLOCK_TYPES = frozenset({"figure", "table"})
 
 

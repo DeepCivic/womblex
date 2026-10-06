@@ -561,7 +561,7 @@ classification decisions:
 - Layout backend is **PP-DocLayout-M on `onnxruntime`** (`ingest/layout_onnx.py`,
   registered default `pp-doclayout-m`, #130). It replaced the DocLayNet
   `yolo11n_doc_layout.pt` checkpoint (with COCO `yolov8n.pt` fallback);
-  `YOLOLayoutAnalyzer` is unregistered and is removed in L2.
+  `YOLOLayoutAnalyzer` and `ultralytics` were removed in L2.
 - **Full-page-scan figure trap:** the OCR dominant-region fallback in
   `_layout_blocks_and_tables` collapses a whole page's OCR onto one block using
   the largest region's kind; when that is a `Picture`, a text-bearing full-page
@@ -594,7 +594,7 @@ than assumed: unless the dimensions are supplied *and* match, the coordinates
 are not known to be comparable and the regions are dropped with a warning.
 Losing reconstruction inputs is the correct failure; a mis-binned grid would be
 confidently wrong downstream. Deskewed pages are a distinct hazard (OCR runs on
-the warped image, YOLO on the raw one) that this check does **not** catch —
+the warped image, the layout model on the raw one) that this check does **not** catch —
 `warpAffine` preserves dimensions — so they get their own page-level refusal:
 the orchestrator reads `"deskew" ∈ steps` off `_ocr_page` and the layout pass
 drops its cell source, keeping the page's pre-reconstruction behaviour exactly.
@@ -846,14 +846,14 @@ Womblex serves other software two ways: a versioned on-disk contract
   annotations, strict config and ordering checks, file checksums, a recipe
   file with a local multi-stage runner, then destinations. No quality scoring
   and no field extraction. Plan, dependency assessment and phases:
-  [trust-and-recipes-plan.md](trust-and-recipes-plan.md).
+  [plan-trust-and-recipes.md](plan-trust-and-recipes.md).
 - **Permissive dependencies — remove `ultralytics` and PyMuPDF.** *In
   progress 2026-10; layout swap shipped (#130).* Both are AGPL-3.0 with a
   commercial licence as the only alternative. YOLO layout is replaced by an
   Apache-2.0 PP-DocLayout ONNX model on `onnxruntime`; PyMuPDF goes behind a
   womblex-owned `ingest/pdf/` seam and is replaced by pypdfium2 + pdfplumber
   once a backend-diff harness clears the parity gates. Plan and merge
-  sequence: [permissive-deps-plan.md](permissive-deps-plan.md).
+  sequence: [plan-permissive-deps.md](plan-permissive-deps.md).
   - **YOLO is retired as part of adapting womblex for cloud deployment.**
     The model registry lets any layout model be plugged into the layout
     slot and benchmarked on consumption pricing, so keeping an AGPL model
