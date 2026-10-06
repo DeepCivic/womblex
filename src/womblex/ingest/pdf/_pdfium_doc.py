@@ -26,6 +26,7 @@ import numpy as np
 import pypdfium2 as pdfium  # type: ignore[import-untyped]
 import pypdfium2.raw as pdfium_c  # type: ignore[import-untyped]
 
+from womblex.ingest.pdf import _image
 from womblex.ingest.pdf.types import (
     Block,
     Drawing,
@@ -42,6 +43,8 @@ from womblex.ingest.pdf.types import (
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+
+    from womblex.ingest.pdf.types import Document
 
 _IDENTITY: Matrix = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
 
@@ -281,5 +284,16 @@ class PdfiumDocument:
         self.close()
 
 
-def open_document(path: Path) -> PdfiumDocument:
-    return PdfiumDocument(path)
+def open_document(path: Path) -> Document:
+    """A PDF through pdfium; anything else through Pillow, as an image.
+
+    Sniffed rather than trusted to the suffix, as MuPDF did: the PDF header may
+    sit anywhere in the first kilobyte. A format Pillow opens but this backend
+    does not support is a `ValueError`; a file that is no image at all raises
+    Pillow's `UnidentifiedImageError`, as MuPDF raised on one it could not open.
+    """
+    with Path(path).open("rb") as handle:
+        head = handle.read(1024)
+    if b"%PDF" in head:
+        return PdfiumDocument(path)
+    return _image.ImageDocument(path)
