@@ -1,4 +1,4 @@
-"""PNG, JPEG and TIFF opened through Pillow, one page per frame.
+"""PNG, JPEG and TIFF opened through Pillow, one page per TIFF frame.
 
 MuPDF opened a raster image as a document of image-only pages; this keeps that
 shape so images stay on the orchestrator's per-page OCR path. Such a page has
@@ -36,7 +36,7 @@ from womblex.ingest.pdf.types import (
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-_FORMATS = {"PNG", "JPEG", "TIFF"}
+_FORMATS = {"PNG", "JPEG", "TIFF", "MPO"}
 _DEFAULT_DPI, _SANE_DPI, _INSANE_DPI = 96, 72, 4800
 _CM_PER_INCH = 2.54
 
@@ -51,7 +51,7 @@ def _declared_dpi(image: Image.Image) -> float | None:
     if image.format == "PNG":
         dpi = image.info.get("dpi")
         return float(dpi[0]) if dpi else None
-    if image.format == "JPEG":
+    if image.format in ("JPEG", "MPO"):
         unit, density = image.info.get("jfif_unit"), image.info.get("jfif_density")
         if unit in (1, 2) and density:
             return float(density[0]) * (_CM_PER_INCH if unit == 2 else 1)
@@ -143,8 +143,15 @@ class ImagePage:
 
 
 def _rgb(frame: Image.Image) -> Image.Image:
-    """Upright RGB, any alpha composited onto white as MuPDF renders it."""
+    """Upright 8-bit RGB, any alpha composited onto white as MuPDF renders it.
+
+    Pillow's own conversion clips 16-bit greyscale at 255 where MuPDF scales
+    it, so those samples are shifted down to 8 bits first.
+    """
     frame = ImageOps.exif_transpose(frame)
+    if frame.mode.startswith("I"):
+        wide = np.asarray(frame).astype(np.uint32).clip(0, 0xFFFF)
+        frame = Image.fromarray((wide >> 8).astype(np.uint8))
     if frame.mode in ("RGBA", "LA", "PA") or "transparency" in frame.info:
         rgba = frame.convert("RGBA")
         canvas = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
@@ -162,7 +169,10 @@ class ImageDocument:
             fmt = self._image.format
             self._image.close()
             raise ValueError(f"unsupported image format {fmt!r} for {path}; expected PNG, JPEG or TIFF")
-        self._indices = list(range(getattr(self._image, "n_frames", 1)))
+        # Only a TIFF is multi-page under MuPDF: an animated PNG, or a camera
+        # JPEG Pillow reads as MPO, opens as its first picture.
+        frames = getattr(self._image, "n_frames", 1) if self._image.format == "TIFF" else 1
+        self._indices = list(range(frames))
 
     @property
     def page_count(self) -> int:

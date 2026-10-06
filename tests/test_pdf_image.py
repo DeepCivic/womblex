@@ -72,6 +72,24 @@ def test_multi_frame_tiff_is_one_page_per_frame(tmp_path) -> None:
     assert sizes == [(0, 72, 36), (1, 36, 72)]
 
 
+@pytest.mark.parametrize("name", ["animated.png", "camera.jpg"])
+def test_other_formats_open_their_first_picture_only(tmp_path, name) -> None:
+    """An animated PNG, and a JPEG with a preview (Pillow's MPO), are one page."""
+    path = tmp_path / name
+    fmt = "MPO" if name.endswith(".jpg") else None
+    _image().save(path, format=fmt, save_all=True, append_images=[_image(colour=(255, 0, 0))])
+    with open_document(path, backend="pdfium") as doc:
+        assert doc.page_count == 1 and doc[0].rect.width == 150
+
+
+@pytest.mark.parametrize("name", ["grey16.png", "grey16.tif"])
+def test_16_bit_grey_is_scaled_not_clipped(tmp_path, name) -> None:
+    path = tmp_path / name
+    Image.fromarray(np.full(_SIZE[::-1], 0x8000, dtype=np.uint16)).save(path)
+    with open_document(path, backend="pdfium") as doc:
+        assert (doc[0].render(dpi=96) == 128).all()
+
+
 def test_an_image_page_has_nothing_but_pixels(tmp_path) -> None:
     path = tmp_path / "plain.png"
     _image().save(path)
