@@ -13,14 +13,15 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import fitz  # type: ignore[import-untyped]
 import numpy as np
 import pytest
 from PIL import Image
 
+from tests._pdf_builders import PdfBuilder
 from womblex.cli.redact import cmd_annotate_redactions, cmd_redact
 from womblex.config import RedactionConfig
 from womblex.ingest.elements import Element, ElementKind
+from womblex.ingest.pdf.types import Rect
 from womblex.redact import RedactionDetector, RedactionInfo
 from womblex.redact.batch import (
     REDACTIONS_SCHEMA,
@@ -525,21 +526,14 @@ class TestVectorRedactionPath:
     rasterising, and without the area threshold that filters small bars
     out of the raster contour detector."""
 
-    def _build(self, tmp_path: Path, draw_fn) -> Path:
-        doc = fitz.open()
-        page = doc.new_page(width=595, height=842)  # A4
-        draw_fn(page)
-        pdf_path = tmp_path / "vec.pdf"
-        doc.save(str(pdf_path))
-        doc.close()
-        return pdf_path
+    def _build(
+        self, tmp_path: Path, rect: Rect, colour: tuple[float, float, float] = (0, 0, 0),
+    ) -> Path:
+        return PdfBuilder(tmp_path / "vec.pdf").page().rect(rect, colour).save()  # A4
 
     def test_detects_native_vector_black_fill(self, tmp_path: Path) -> None:
         from womblex.config import RedactionConfig
-        pdf_path = self._build(
-            tmp_path,
-            lambda p: p.draw_rect(fitz.Rect(100, 200, 300, 220), color=(0, 0, 0), fill=(0, 0, 0)),
-        )
+        pdf_path = self._build(tmp_path, Rect(100, 200, 300, 220))
         report = detect_redactions(pdf_path, 1, build_detector(RedactionConfig()))
         assert 0 in report.page_redactions
         assert len(report.page_redactions[0]) >= 1
@@ -547,40 +541,28 @@ class TestVectorRedactionPath:
     def test_filters_thin_vector_lines(self, tmp_path: Path) -> None:
         """A 1pt-tall horizontal underline should not register (min-side filter)."""
         from womblex.config import RedactionConfig
-        pdf_path = self._build(
-            tmp_path,
-            lambda p: p.draw_rect(fitz.Rect(100, 200, 300, 201), color=(0, 0, 0), fill=(0, 0, 0)),
-        )
+        pdf_path = self._build(tmp_path, Rect(100, 200, 300, 201))
         report = detect_redactions(pdf_path, 1, build_detector(RedactionConfig()))
         assert 0 not in report.page_redactions
 
     def test_filters_narrow_vertical_separators(self, tmp_path: Path) -> None:
         """A 0.4pt-wide vertical line (table column separator) should not register."""
         from womblex.config import RedactionConfig
-        pdf_path = self._build(
-            tmp_path,
-            lambda p: p.draw_rect(fitz.Rect(150, 100, 150.4, 800), color=(0, 0, 0), fill=(0, 0, 0)),
-        )
+        pdf_path = self._build(tmp_path, Rect(150, 100, 150.4, 800))
         report = detect_redactions(pdf_path, 1, build_detector(RedactionConfig()))
         assert 0 not in report.page_redactions
 
     def test_filters_glyph_sized_fills(self, tmp_path: Path) -> None:
         """A 5pt × 6pt fill (body-glyph rendering) should not register."""
         from womblex.config import RedactionConfig
-        pdf_path = self._build(
-            tmp_path,
-            lambda p: p.draw_rect(fitz.Rect(100, 200, 105, 206), color=(0, 0, 0), fill=(0, 0, 0)),
-        )
+        pdf_path = self._build(tmp_path, Rect(100, 200, 105, 206))
         report = detect_redactions(pdf_path, 1, build_detector(RedactionConfig()))
         assert 0 not in report.page_redactions
 
     def test_vector_bbox_in_pixel_coords(self, tmp_path: Path) -> None:
         """Vector path scales PDF coords (72dpi) to detection dpi for consistency."""
         from womblex.config import RedactionConfig
-        pdf_path = self._build(
-            tmp_path,
-            lambda p: p.draw_rect(fitz.Rect(100, 200, 200, 230), color=(0, 0, 0), fill=(0, 0, 0)),
-        )
+        pdf_path = self._build(tmp_path, Rect(100, 200, 200, 230))
         config = RedactionConfig(dpi=150)
         report = detect_redactions(pdf_path, 1, build_detector(config), dpi=config.dpi)
         regions = report.page_redactions[0]
@@ -593,10 +575,7 @@ class TestVectorRedactionPath:
     def test_ignores_non_black_fills(self, tmp_path: Path) -> None:
         """A light-grey filled rectangle should not register (header shading etc)."""
         from womblex.config import RedactionConfig
-        pdf_path = self._build(
-            tmp_path,
-            lambda p: p.draw_rect(fitz.Rect(100, 200, 300, 220), color=(0.8, 0.8, 0.8), fill=(0.8, 0.8, 0.8)),
-        )
+        pdf_path = self._build(tmp_path, Rect(100, 200, 300, 220), (0.8, 0.8, 0.8))
         report = detect_redactions(pdf_path, 1, build_detector(RedactionConfig()))
         assert 0 not in report.page_redactions
 
@@ -641,11 +620,7 @@ class TestRedactionBatch:
         pdf_dir.mkdir()
 
         # Programmatic PDF with no redactions (a blank page)
-        doc = fitz.open()
-        doc.new_page()
-        pdf_path = pdf_dir / "blank.pdf"
-        doc.save(str(pdf_path))
-        doc.close()
+        PdfBuilder(pdf_dir / "blank.pdf").page().save()
 
         # Minimal manifest + elements
         manifest_tbl = pa.table({"source_hash": ["h1"], "filename": ["blank.pdf"]})
@@ -678,12 +653,7 @@ class TestRedactionBatch:
         pdf_dir.mkdir()
 
         # PDF with a fat black rectangle on page 0
-        doc = fitz.open()
-        page = doc.new_page(width=600, height=400)
-        page.draw_rect(fitz.Rect(100, 100, 300, 140), color=(0, 0, 0), fill=(0, 0, 0))
-        pdf_path = pdf_dir / "redacted.pdf"
-        doc.save(str(pdf_path))
-        doc.close()
+        PdfBuilder(pdf_dir / "redacted.pdf").page(600, 400).rect(Rect(100, 100, 300, 140)).save()
 
         manifest_tbl = pa.table({"source_hash": ["h2"], "filename": ["redacted.pdf"]})
         pq.write_table(manifest_tbl, shard_dir / "batch-0002._manifest.parquet")
@@ -715,10 +685,7 @@ class TestRedactionBatch:
         checkpoint_path = tmp_path / "redactions_checkpoint.json"
 
         # Build a single batch + matching blank PDF
-        doc = fitz.open()
-        doc.new_page()
-        doc.save(str(pdf_dir / "blank.pdf"))
-        doc.close()
+        PdfBuilder(pdf_dir / "blank.pdf").page().save()
         pq.write_table(
             pa.table({"source_hash": ["h1"], "filename": ["blank.pdf"]}),
             shard_dir / "batch-0001._manifest.parquet",
@@ -786,11 +753,7 @@ def _seed_redaction_shards(tmp_path: Path) -> tuple[Path, Path]:
     shard_dir.mkdir()
     pdf_dir.mkdir()
 
-    doc = fitz.open()
-    page = doc.new_page(width=600, height=400)
-    page.draw_rect(fitz.Rect(100, 100, 300, 140), color=(0, 0, 0), fill=(0, 0, 0))
-    doc.save(str(pdf_dir / "redacted.pdf"))
-    doc.close()
+    PdfBuilder(pdf_dir / "redacted.pdf").page(600, 400).rect(Rect(100, 100, 300, 140)).save()
 
     pq.write_table(
         pa.table({"source_hash": ["h1"], "filename": ["redacted.pdf"]}),

@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from tests._pdf_builders import PdfBuilder
 from womblex.ingest.detect import DocumentProfile, DocumentType
 from womblex.ingest.extract import (
     ExtractionMetadata,
@@ -20,7 +21,7 @@ from womblex.ingest.extract import (
     _normalise_bbox,
     get_extractor,
 )
-from womblex.ingest.pdf._fitz import FitzDocument, FitzPage
+from womblex.ingest.pdf._fitz import FitzPage
 from womblex.ingest.pdf.types import Rect
 from womblex.ingest.spreadsheet import SpreadsheetExtractor
 from womblex.ingest.strategies import (
@@ -373,24 +374,16 @@ class TestPageBreakEmission:
     """K8 — orchestrator emits kind='page_break' between consecutive pages."""
 
     def test_three_page_pdf_emits_two_page_breaks(self, tmp_path: Path) -> None:
-        import fitz
-
         from womblex.ingest.detect import DocumentType
         from womblex.ingest.orchestrator import extract_with_plan
         from womblex.ingest.page_profile import profile_pages
 
-        doc = fitz.open()
+        builder = PdfBuilder(tmp_path / "multi.pdf")
         for i in range(3):
-            page = doc.new_page(width=595, height=842)
-            page.insert_text((72, 72), f"Page {i} body text")
-        pdf_path = tmp_path / "multi.pdf"
-        doc.save(str(pdf_path))
-        doc.close()
-
-        doc = fitz.open(str(pdf_path))
-        profiles = profile_pages(FitzDocument.wrap(doc))
-        result = extract_with_plan(FitzDocument.wrap(doc), profiles, DocumentType.NATIVE_NARRATIVE)
-        doc.close()
+            builder.page().text(72, 72, f"Page {i} body text")
+        with builder.open() as doc:
+            profiles = profile_pages(doc)
+            result = extract_with_plan(doc, profiles, DocumentType.NATIVE_NARRATIVE)
 
         page_breaks = [e for e in result.elements if e.kind == "page_break"]
         assert len(page_breaks) == 2  # N-1 breaks between N pages
@@ -399,23 +392,13 @@ class TestPageBreakEmission:
         assert page_breaks[1].page == 2
 
     def test_single_page_pdf_emits_no_page_breaks(self, tmp_path: Path) -> None:
-        import fitz
-
         from womblex.ingest.detect import DocumentType
         from womblex.ingest.orchestrator import extract_with_plan
         from womblex.ingest.page_profile import profile_pages
 
-        doc = fitz.open()
-        page = doc.new_page(width=595, height=842)
-        page.insert_text((72, 72), "single page")
-        pdf_path = tmp_path / "single.pdf"
-        doc.save(str(pdf_path))
-        doc.close()
-
-        doc = fitz.open(str(pdf_path))
-        profiles = profile_pages(FitzDocument.wrap(doc))
-        result = extract_with_plan(FitzDocument.wrap(doc), profiles, DocumentType.NATIVE_NARRATIVE)
-        doc.close()
+        with PdfBuilder(tmp_path / "single.pdf").page().text(72, 72, "single page").open() as doc:
+            profiles = profile_pages(doc)
+            result = extract_with_plan(doc, profiles, DocumentType.NATIVE_NARRATIVE)
 
         assert not any(e.kind == "page_break" for e in result.elements)
 
