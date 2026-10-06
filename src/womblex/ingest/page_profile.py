@@ -13,8 +13,7 @@ collapses this to one strategy. Page-level profiling matches the data.
 from __future__ import annotations
 
 from dataclasses import dataclass
-
-import fitz
+from typing import TYPE_CHECKING
 
 from womblex.ingest.detect import (
     _MIN_TEXT_LENGTH,
@@ -26,6 +25,9 @@ from womblex.ingest.detect import (
     _has_table_structure,
     _table_signals,
 )
+
+if TYPE_CHECKING:
+    from womblex.ingest.pdf.types import Document
 
 
 @dataclass
@@ -40,7 +42,7 @@ class PageProfile:
     vector_drawings: int
     has_text_layer: bool          # char_count > _MIN_TEXT_LENGTH
     needs_ocr: bool               # no text layer but content exists (images/vectors)
-    has_table_signal: bool        # text-pattern OR PyMuPDF find_tables (permissive)
+    has_table_signal: bool        # text-pattern OR find_tables (permissive)
     has_form_signal: bool         # ≥10 short text spans (label-shape) or AcroForm widgets
     has_handwriting_signal: bool  # only computed for non-text-layer pages
     has_manifest_signal: bool = False  # page dominated by a manifest-shape table (≥30 cells)
@@ -57,7 +59,7 @@ class PageProfile:
         return "blank"
 
 
-def profile_pages(doc: fitz.Document) -> list[PageProfile]:
+def profile_pages(doc: Document) -> list[PageProfile]:
     """Build a PageProfile for every page in the document.
 
     Unlike `detect.detect_file_type`, this does NOT sample — it walks every
@@ -67,17 +69,16 @@ def profile_pages(doc: fitz.Document) -> list[PageProfile]:
     """
     profiles: list[PageProfile] = []
     for page in doc:
-        text = page.get_text().strip()
+        text = page.plain_text(dehyphenate=False).strip()
         char_count = len(text)
         has_text_layer = char_count > _MIN_TEXT_LENGTH
 
-        images = page.get_images()
-        image_count = len(images)
+        image_count = len(page.images())
         has_image = image_count > 0
 
         vector_drawings = 0
         if not has_text_layer and not has_image:
-            vector_drawings = len(page.get_drawings())
+            vector_drawings = len(page.drawings())
 
         needs_ocr = (not has_text_layer) and (
             has_image or vector_drawings >= _MIN_VECTOR_DRAWINGS

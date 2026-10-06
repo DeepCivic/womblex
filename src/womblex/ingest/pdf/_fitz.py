@@ -7,6 +7,9 @@ dataclasses out; pixmaps in, arrays out.
 
 from __future__ import annotations
 
+import io
+import sys
+import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self
 
@@ -30,6 +33,9 @@ from womblex.ingest.pdf.types import (
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+
+# Suppress the pymupdf_layout suggestion find_tables() emits.
+warnings.filterwarnings("ignore", message=".*pymupdf_layout.*")
 
 #: MuPDF's span flag bit for a bold font. Its font names are the other signal,
 #: since synthetic bold does not always set the flag.
@@ -140,18 +146,25 @@ class FitzPage:
         ]
 
     def find_tables(self, *, strategy: TableStrategy = "lines") -> list[FoundTable]:
-        out: list[FoundTable] = []
-        for table in self._page.find_tables(strategy=strategy).tables:
-            rows = tuple(
-                tuple(None if cell is None else str(cell) for cell in row)
-                for row in table.extract()
-            )
-            out.append(FoundTable(
-                bbox=_rect(table.bbox),
-                row_count=int(table.row_count),
-                col_count=int(table.col_count),
-                rows=rows,
-            ))
+        # find_tables prints a layout hint to stdout on some builds.
+        old_stdout = sys.stdout
+        sys.stdout = io.StringIO()
+        try:
+            found = self._page.find_tables(strategy=strategy)
+            out: list[FoundTable] = []
+            for table in found.tables:
+                rows = tuple(
+                    tuple(None if cell is None else str(cell) for cell in row)
+                    for row in table.extract()
+                )
+                out.append(FoundTable(
+                    bbox=_rect(table.bbox),
+                    row_count=int(table.row_count),
+                    col_count=int(table.col_count),
+                    rows=rows,
+                ))
+        finally:
+            sys.stdout = old_stdout
         return out
 
     def render(self, *, dpi: int, clip: Rect | None = None) -> np.ndarray:

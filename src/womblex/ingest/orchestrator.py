@@ -486,7 +486,7 @@ def extract_pdf_with_plan(
     """Convenience: profile pages, summarise type, run the orchestrator."""
     from womblex.ingest.page_profile import profile_pages, summarise_doc_type
 
-    profiles = profile_pages(native(doc))  # until P3a ports page_profile
+    profiles = profile_pages(doc)
     doc_type = summarise_doc_type(profiles, profile)
     logger.debug(
         "plan: pages=%d native=%d ocr=%d tables=%d forms=%d type=%s",

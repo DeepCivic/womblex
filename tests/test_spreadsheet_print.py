@@ -12,6 +12,7 @@ import fitz
 import pytest
 
 from womblex.ingest.page_profile import profile_pages, qualify_for_spreadsheet_print
+from womblex.ingest.pdf._fitz import FitzDocument
 from womblex.ingest.spreadsheet_print import extract_spreadsheet_print
 
 _FIXTURES = (
@@ -43,7 +44,7 @@ class TestQualifier:
     def test_qualifier_accepts_master_index(self) -> None:
         doc = fitz.open(str(_MASTER_INDEX))
         try:
-            profiles = profile_pages(doc)
+            profiles = profile_pages(FitzDocument.wrap(doc))
             assert qualify_for_spreadsheet_print(profiles, _MASTER_INDEX.name)
         finally:
             doc.close()
@@ -51,7 +52,7 @@ class TestQualifier:
     def test_qualifier_accepts_schedule_2b(self) -> None:
         doc = fitz.open(str(_SCHEDULE_2B))
         try:
-            profiles = profile_pages(doc)
+            profiles = profile_pages(FitzDocument.wrap(doc))
             assert qualify_for_spreadsheet_print(profiles, _SCHEDULE_2B.name)
         finally:
             doc.close()

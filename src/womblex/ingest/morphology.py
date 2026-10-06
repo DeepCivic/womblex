@@ -8,29 +8,26 @@ Kept separate from `detect.py` to keep that file under the 750-line cap.
 """
 from __future__ import annotations
 
-import fitz
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from womblex.ingest.pdf.types import Page
 
 
-def _page_to_grayscale(page: fitz.Page, dpi: int = 72) -> tuple:
+def _page_to_grayscale(page: Page, dpi: int = 72) -> tuple:
     """Convert a PDF page to grayscale numpy array.
 
     Returns (gray_image, width, height) tuple.
     """
     import cv2
-    import numpy as np
 
-    pix = page.get_pixmap(dpi=dpi)
-    img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
-
-    if pix.n >= 3:
-        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-    else:
-        gray = img.copy()
-
-    return gray, pix.width, pix.height
+    img = page.render(dpi=dpi)
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    height, width = gray.shape
+    return gray, width, height
 
 
-def _has_ruled_lines(page: fitz.Page, dpi: int = 72) -> bool:
+def _has_ruled_lines(page: Page, dpi: int = 72) -> bool:
     """Detect ruled/lined paper patterns (notebook paper).
 
     Looks for evenly-spaced horizontal lines spanning most of page width.
@@ -70,7 +67,7 @@ def _has_ruled_lines(page: fitz.Page, dpi: int = 72) -> bool:
     return bool(mean_spacing > 0 and (std_spacing / mean_spacing) < 0.3)
 
 
-def _analyze_glyph_regularity(page: fitz.Page, dpi: int = 150) -> float | None:
+def _analyze_glyph_regularity(page: Page, dpi: int = 150) -> float | None:
     """Analyze bounding box regularity of text glyphs using connected components.
 
     Typed text has uniform glyph heights and consistent horizontal spacing.
@@ -132,7 +129,7 @@ def _analyze_glyph_regularity(page: fitz.Page, dpi: int = 150) -> float | None:
     return float(regularity)
 
 
-def _analyze_stroke_width_variance(page: fitz.Page, dpi: int = 150) -> float | None:
+def _analyze_stroke_width_variance(page: Page, dpi: int = 150) -> float | None:
     """Analyze stroke width consistency using morphological operations.
 
     Typed text has consistent stroke widths (from uniform font rendering).
@@ -186,7 +183,7 @@ def _analyze_stroke_width_variance(page: fitz.Page, dpi: int = 150) -> float | N
     return consistency
 
 
-def _has_handwriting_signals(page: fitz.Page, dpi: int = 150) -> bool:
+def _has_handwriting_signals(page: Page, dpi: int = 150) -> bool:
     """Detect handwriting indicators on a scanned page.
 
     Combines ruled-line detection, glyph regularity, and stroke-width
@@ -217,7 +214,7 @@ def _has_handwriting_signals(page: fitz.Page, dpi: int = 150) -> bool:
 
 
 def _sample_ocr_confidence(
-    page: fitz.Page, dpi: int = 150
+    page: Page, dpi: int = 150
 ) -> tuple[float | None, list[float] | None]:
     """Sample OCR confidence on a page using PaddleOCR.
 
@@ -225,12 +222,9 @@ def _sample_ocr_confidence(
     Typed text typically scores avg >= 85, handwriting scores 40-70.
     """
     try:
-        import numpy as np
-
         from womblex.ingest.paddle_ocr import get_paddle_reader
 
-        pix = page.get_pixmap(dpi=dpi)
-        img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
+        img = page.render(dpi=dpi)
 
         reader = get_paddle_reader("eng")
         results = reader.readtext(img)
