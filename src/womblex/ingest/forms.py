@@ -23,8 +23,7 @@ punctuation, no list-marker shapes (`A)`, `(i)`), no URL-prefix labels
 from __future__ import annotations
 
 import re
-
-import fitz
+from typing import TYPE_CHECKING
 
 from womblex.ingest.extract import (
     FormField,
@@ -33,6 +32,9 @@ from womblex.ingest.extract import (
     _normalise_rect,
 )
 from womblex.ingest.interfaces.protocols import OCRRegionResult
+
+if TYPE_CHECKING:
+    from womblex.ingest.pdf.types import Page
 
 # Label heuristics: 1–6 words, must start with uppercase, no sentence
 # punctuation inside, no list-marker shapes ("A)", "(i)").
@@ -71,21 +73,21 @@ def _looks_like_form_label(text: str) -> bool:
     return bool(_FORM_LABEL_RE.match(text + ":"))
 
 
-def _extract_form_fields(page: fitz.Page) -> list[FormField]:
+def _extract_form_fields(page: Page) -> list[FormField]:
     """Extract interactive AcroForm widgets from a page."""
     fields: list[FormField] = []
     pw, ph = page.rect.width, page.rect.height
 
     for widget in page.widgets():
-        name = widget.field_name or ""
-        value = widget.field_value or ""
         pos = _normalise_rect(widget.rect, pw, ph)
-        fields.append(FormField(field_name=name, value=value, position=pos, confidence=0.9))
+        fields.append(FormField(
+            field_name=widget.field_name, value=widget.field_value, position=pos, confidence=0.9,
+        ))
 
     return fields
 
 
-def _extract_form_pairs_from_text(page: fitz.Page) -> list[FormField]:
+def _extract_form_pairs_from_text(page: Page) -> list[FormField]:
     """Extract label/value pairs from text-only forms (no AcroForm widgets).
 
     Catches NQA-style notification forms where labels and values are
@@ -95,37 +97,34 @@ def _extract_form_pairs_from_text(page: fitz.Page) -> list[FormField]:
     fields: list[FormField] = []
     pw, ph = page.rect.width, page.rect.height
 
-    raw = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
-    for block in raw.get("blocks", []):
-        if block.get("type") != 0:
+    for block in page.text_dict():
+        if block.kind != "text":
             continue
-        for line in block.get("lines", []):
-            spans = [s for s in line.get("spans", []) if s.get("text", "").strip()]
+        for line in block.lines:
+            spans = [s for s in line.spans if s.text.strip()]
             if not spans:
                 continue
 
             # Multi-span line — first span = label candidate, rest = value
             if len(spans) >= 2:
                 first = spans[0]
-                label = first.get("text", "").strip().rstrip(":")
-                value_parts = [s.get("text", "").strip() for s in spans[1:]]
+                label = first.text.strip().rstrip(":")
+                value_parts = [s.text.strip() for s in spans[1:]]
                 value = " ".join(p for p in value_parts if p).strip()
                 if not value or not _looks_like_form_label(label):
                     continue
                 # Require horizontal gap between label end and value start
-                first_bbox = first.get("bbox", (0, 0, 0, 0))
-                second_bbox = spans[1].get("bbox", (0, 0, 0, 0))
-                gap = second_bbox[0] - first_bbox[2]
+                gap = spans[1].bbox.x0 - first.bbox.x1
                 if gap < 5:
                     continue
-                pos = _normalise_bbox(first_bbox, pw, ph)
+                pos = _normalise_bbox(first.bbox.as_tuple(), pw, ph)
                 fields.append(
                     FormField(field_name=label, value=value, position=pos, confidence=0.65)
                 )
                 continue
 
             # Single span — only catch explicit "Label: value" pattern
-            text = spans[0].get("text", "").strip()
+            text = spans[0].text.strip()
             if ":" not in text or len(text) > 200:
                 continue
             label, _, value = text.partition(":")
@@ -133,8 +132,7 @@ def _extract_form_pairs_from_text(page: fitz.Page) -> list[FormField]:
             value = value.strip()
             if not value or not _looks_like_form_label(label):
                 continue
-            bbox = spans[0].get("bbox", (0, 0, 0, 0))
-            pos = _normalise_bbox(bbox, pw, ph)
+            pos = _normalise_bbox(spans[0].bbox.as_tuple(), pw, ph)
             fields.append(
                 FormField(field_name=label, value=value, position=pos, confidence=0.7)
             )
@@ -142,7 +140,7 @@ def _extract_form_pairs_from_text(page: fitz.Page) -> list[FormField]:
     return fields
 
 
-def _extract_forms(page: fitz.Page) -> list[FormField]:
+def _extract_forms(page: Page) -> list[FormField]:
     """Extract form fields, preferring AcroForm widgets, falling back to text."""
     fields = _extract_form_fields(page)
     if fields:

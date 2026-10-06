@@ -7,7 +7,7 @@ columns.  Within each column, words are clustered into lines and rendered
 to a whitespace-aligned character grid.
 
 The algorithm is purely geometric — no model, no training data — and
-operates directly on PyMuPDF ``page.get_text("words", ...)`` tuples.
+operates directly on the seam's ``page.words()`` tuples.
 """
 
 from __future__ import annotations
@@ -20,15 +20,17 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from womblex.ingest.pdf.types import Word
+
 if TYPE_CHECKING:
-    import fitz
+    from womblex.ingest.pdf.types import Page, Rect
 
 logger = logging.getLogger(__name__)
 
-# Only the first five positions of PyMuPDF's word tuple are used; trailing
-# fields (block_no, line_no, word_no) are ignored, so callers may pass the
-# full tuple unchanged.
-WordTuple = tuple[float, float, float, float, str]
+# Only the first five positions of a word are used; trailing fields
+# (block_no, line_no, word_no) are ignored, so callers may pass the seam's
+# full `Word` unchanged.
+WordTuple = tuple[float, float, float, float, str] | Word
 
 
 @dataclass
@@ -177,9 +179,9 @@ def _render_column(col: ColumnRegion) -> str:
 
 
 def extract_page_text(
-    page: fitz.Page,
+    page: Page,
     *,
-    exclude_rects: Sequence[object] | None = None,
+    exclude_rects: Sequence[Rect] | None = None,
 ) -> str:
     """Extract page text, using grid projection for multi-column layouts.
 
@@ -193,10 +195,8 @@ def extract_page_text(
     Used by the orchestrator's native path to splice out detected-table
     regions before prose emission so cells aren't read row-major.
     """
-    import fitz
-
     page_width = page.rect.width
-    words = page.get_text("words", flags=fitz.TEXT_DEHYPHENATE)
+    words = page.words()
     if not words:
         return ""
 
@@ -212,7 +212,7 @@ def extract_page_text(
 
 
 def _word_in_any_rect(
-    word: WordTuple, rects: Sequence[fitz.Rect],
+    word: WordTuple, rects: Sequence[Rect],
 ) -> bool:
     """Test if a word's midpoint falls inside any of the given rects."""
     cx = (word[0] + word[2]) / 2
@@ -224,33 +224,28 @@ def _word_in_any_rect(
 
 
 def _render_blocks_with_breaks(
-    page: fitz.Page, *, exclude_rects: Sequence[fitz.Rect] | None = None,
+    page: Page, *, exclude_rects: Sequence[Rect] | None = None,
 ) -> str:
     """Render single-column page text block-by-block with ``\\n\\n`` separators.
 
-    PyMuPDF `page.get_text("blocks")` returns
-    ``(x0, y0, x1, y1, text, block_no, block_type)`` already split at
-    paragraph-shaped boundaries; joining with blank lines preserves the
-    structure that the downstream block-type classifier later annotates.
+    `page.text_blocks()` is already split at paragraph-shaped boundaries;
+    joining with blank lines preserves the structure that the downstream
+    block-type classifier later annotates.
     """
-    import fitz
-
-    blocks = page.get_text("blocks", flags=fitz.TEXT_DEHYPHENATE)
     parts: list[str] = []
-    for x0, y0, x1, y1, text, _block_no, block_type in blocks:
-        if block_type != 0:
+    for block in page.text_blocks():
+        if block.kind != "text":
             continue
         if exclude_rects:
-            block_rect = fitz.Rect(x0, y0, x1, y1)
             # Drop block if its centre falls inside any exclusion rect —
             # using centre rather than full overlap allows narrow text
             # bands (e.g. the "Section / 165(1)" cell-internal lines)
             # to still drop while leaving adjacent prose intact.
-            cx = (block_rect.x0 + block_rect.x1) / 2
-            cy = (block_rect.y0 + block_rect.y1) / 2
+            cx = (block.bbox.x0 + block.bbox.x1) / 2
+            cy = (block.bbox.y0 + block.bbox.y1) / 2
             if any(r.x0 <= cx <= r.x1 and r.y0 <= cy <= r.y1 for r in exclude_rects):
                 continue
-        text = text.rstrip()
+        text = block.text.rstrip()
         if text:
             parts.append(text)
     return "\n\n".join(parts)

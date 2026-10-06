@@ -9,7 +9,7 @@ PDF library.
 from __future__ import annotations
 
 from importlib import import_module
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -38,4 +38,13 @@ def open_document(path: Path, *, backend: str | None = None) -> Document:
     return cast("Document", import_module(module).open_document(path))
 
 
-__all__ = ["DEFAULT_BACKEND", "open_document"]
+def native(obj: object) -> Any:
+    """The backend's own page or document, for callees not yet on the seam.
+
+    Transitional: P3a and P3b port `page_profile`, `strategies_scanned`,
+    `spreadsheet_print` and the rest, and this goes with the last of them.
+    """
+    return obj.native  # type: ignore[attr-defined]
+
+
+__all__ = ["DEFAULT_BACKEND", "native", "open_document"]

@@ -45,8 +45,9 @@ def _rect(r: Any) -> Rect:
     return Rect.of((float(r[0]), float(r[1]), float(r[2]), float(r[3])))
 
 
-def _text_flags(dehyphenate: bool) -> int:
-    return fitz.TEXT_DEHYPHENATE if dehyphenate else 0
+def _text_kwargs(dehyphenate: bool) -> dict[str, int]:
+    """``flags`` only when dehyphenating: passing 0 would drop MuPDF's defaults."""
+    return {"flags": fitz.TEXT_DEHYPHENATE} if dehyphenate else {}
 
 
 def _is_bold(span: dict) -> bool:
@@ -60,6 +61,11 @@ class FitzPage:
 
     def __init__(self, page: fitz.Page) -> None:
         self._page = page
+
+    @property
+    def native(self) -> fitz.Page:
+        """The wrapped page, for callers not yet ported to the seam (P3)."""
+        return self._page
 
     @property
     def number(self) -> int:
@@ -84,7 +90,7 @@ class FitzPage:
         return str(getattr(parent, "name", "") or "")
 
     def plain_text(self, *, dehyphenate: bool = True) -> str:
-        return str(self._page.get_text("text", flags=_text_flags(dehyphenate)))
+        return str(self._page.get_text("text", **_text_kwargs(dehyphenate)))
 
     def text_dict(self) -> list[Block]:
         raw = self._page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
@@ -114,7 +120,7 @@ class FitzPage:
         return out
 
     def words(self, *, dehyphenate: bool = True) -> list[Word]:
-        raw = self._page.get_text("words", flags=_text_flags(dehyphenate))
+        raw = self._page.get_text("words", **_text_kwargs(dehyphenate))
         return [
             Word(float(w[0]), float(w[1]), float(w[2]), float(w[3]), str(w[4]),
                  int(w[5]), int(w[6]), int(w[7]))
@@ -122,7 +128,7 @@ class FitzPage:
         ]
 
     def text_blocks(self, *, dehyphenate: bool = True) -> list[Block]:
-        raw = self._page.get_text("blocks", flags=_text_flags(dehyphenate))
+        raw = self._page.get_text("blocks", **_text_kwargs(dehyphenate))
         return [
             Block(
                 bbox=Rect.of((float(b[0]), float(b[1]), float(b[2]), float(b[3]))),
@@ -205,8 +211,18 @@ class FitzPage:
 class FitzDocument:
     """One fitz document, presented as `types.Document`."""
 
-    def __init__(self, path: Path) -> None:
-        self._doc = fitz.open(str(path))
+    def __init__(self, path: Path | None = None, *, native: fitz.Document | None = None) -> None:
+        self._doc = native if native is not None else fitz.open(str(path))
+
+    @classmethod
+    def wrap(cls, doc: fitz.Document) -> FitzDocument:
+        """Present an already-open fitz document, for test builders."""
+        return cls(native=doc)
+
+    @property
+    def native(self) -> fitz.Document:
+        """The wrapped document, for callers not yet ported to the seam (P3)."""
+        return self._doc
 
     @property
     def page_count(self) -> int:

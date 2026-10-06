@@ -20,6 +20,8 @@ from womblex.ingest.extract import (
     _normalise_bbox,
     get_extractor,
 )
+from womblex.ingest.pdf._fitz import FitzDocument, FitzPage
+from womblex.ingest.pdf.types import Rect
 from womblex.ingest.spreadsheet import SpreadsheetExtractor
 from womblex.ingest.strategies import (
     DocxExtractor,
@@ -148,14 +150,14 @@ class TestFindNativeTablesGate:
         page.insert_text((50, 200), "beta")
         page.insert_text((50, 500), "gamma")
 
-        bbox_top = fitz.Rect(0, 0, 400, 300)
-        assert _count_blocks_in_bbox(page, bbox_top) == 2  # alpha, beta
+        bbox_top = Rect(0, 0, 400, 300)
+        assert _count_blocks_in_bbox(FitzPage(page), bbox_top) == 2  # alpha, beta
 
-        bbox_bottom = fitz.Rect(0, 400, 400, 600)
-        assert _count_blocks_in_bbox(page, bbox_bottom) == 1  # gamma
+        bbox_bottom = Rect(0, 400, 400, 600)
+        assert _count_blocks_in_bbox(FitzPage(page), bbox_bottom) == 1  # gamma
 
-        bbox_none = fitz.Rect(0, 300, 400, 400)
-        assert _count_blocks_in_bbox(page, bbox_none) == 0
+        bbox_none = Rect(0, 300, 400, 400)
+        assert _count_blocks_in_bbox(FitzPage(page), bbox_none) == 0
 
         doc.close()
 
@@ -177,7 +179,7 @@ class TestFindNativeTablesGate:
         )
         page.insert_textbox(fitz.Rect(50, 50, 545, 800), prose, fontsize=11)
 
-        tables = _find_native_tables(page)
+        tables = _find_native_tables(FitzPage(page))
         # Any text-strategy hit on this page would be over-firing; the gate
         # should leave us with no tables.
         assert tables == []
@@ -387,7 +389,7 @@ class TestPageBreakEmission:
 
         doc = fitz.open(str(pdf_path))
         profiles = profile_pages(doc)
-        result = extract_with_plan(doc, profiles, DocumentType.NATIVE_NARRATIVE)
+        result = extract_with_plan(FitzDocument.wrap(doc), profiles, DocumentType.NATIVE_NARRATIVE)
         doc.close()
 
         page_breaks = [e for e in result.elements if e.kind == "page_break"]
@@ -412,7 +414,7 @@ class TestPageBreakEmission:
 
         doc = fitz.open(str(pdf_path))
         profiles = profile_pages(doc)
-        result = extract_with_plan(doc, profiles, DocumentType.NATIVE_NARRATIVE)
+        result = extract_with_plan(FitzDocument.wrap(doc), profiles, DocumentType.NATIVE_NARRATIVE)
         doc.close()
 
         assert not any(e.kind == "page_break" for e in result.elements)
