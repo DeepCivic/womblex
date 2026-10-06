@@ -72,14 +72,32 @@ def test_multi_frame_tiff_is_one_page_per_frame(tmp_path) -> None:
     assert sizes == [(0, 72, 36), (1, 36, 72)]
 
 
-@pytest.mark.parametrize("name", ["animated.png", "camera.jpg"])
-def test_other_formats_open_their_first_picture_only(tmp_path, name) -> None:
-    """An animated PNG, and a JPEG with a preview (Pillow's MPO), are one page."""
+@pytest.mark.parametrize(("name", "fmt"), [
+    ("animated.png", None), ("animated.gif", None), ("animated.webp", None), ("camera.jpg", "MPO"),
+])
+def test_every_frame_is_a_page(tmp_path, name, fmt) -> None:
+    """MuPDF gave only the first frame of these."""
     path = tmp_path / name
-    fmt = "MPO" if name.endswith(".jpg") else None
     _image().save(path, format=fmt, save_all=True, append_images=[_image(colour=(255, 0, 0))])
     with open_document(path, backend="pdfium") as doc:
-        assert doc.page_count == 1 and doc[0].rect.width == 150
+        assert doc.page_count == 2 and doc[1].rect.width == 150
+        r, g, b = doc[1].render(dpi=96)[40, 100].astype(int)  # lossy formats drift a little
+        assert r > 240 and g < 15 and b < 15
+
+
+@pytest.mark.parametrize(("name", "save_kwargs", "expected"), [
+    ("plain.bmp", {}, (150, 75)),
+    ("tagged.bmp", {"dpi": (150, 150)}, (96, 48)),
+    ("plain.gif", {}, (150, 75)),
+    ("plain.ppm", {}, (150, 75)),
+    ("plain.jp2", {}, (200, 100)),  # MuPDF assumes 72dpi for an undeclared JPEG 2000
+    ("plain.webp", {}, (150, 75)),
+    ("plain.avif", {}, (150, 75)),
+])
+def test_mupdfs_other_formats_and_webp_open(tmp_path, name, save_kwargs, expected) -> None:
+    path = tmp_path / name
+    _image().save(path, **save_kwargs)
+    assert _page_size(path) == expected
 
 
 @pytest.mark.parametrize("name", ["grey16.png", "grey16.tif"])
@@ -119,9 +137,9 @@ def test_alpha_is_composited_onto_white(tmp_path) -> None:
 
 
 def test_an_unsupported_image_format_is_refused(tmp_path) -> None:
-    path = tmp_path / "anim.gif"
-    _image("P", 1).save(path)
-    with pytest.raises(ValueError, match="unsupported image format 'GIF'"):
+    path = tmp_path / "icon.ico"
+    _image().save(path)
+    with pytest.raises(ValueError, match="unsupported image format 'ICO'"):
         open_document(path, backend="pdfium")
 
 

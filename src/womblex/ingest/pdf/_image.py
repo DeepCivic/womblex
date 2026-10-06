@@ -1,4 +1,10 @@
-"""PNG, JPEG and TIFF opened through Pillow, one page per TIFF frame.
+"""Raster images opened through Pillow, one page per frame.
+
+The formats are MuPDF's that Pillow decodes — PNG, JPEG, TIFF, BMP, GIF,
+JPEG 2000, PNM, PSD — plus WebP and AVIF, which MuPDF could not open. Every
+frame of an animated GIF, PNG or WebP, or of a JPEG Pillow reads as MPO, is a
+page, where MuPDF gave only the first; a PSD's layers are not frames, so it
+is its composite, one page.
 
 MuPDF opened a raster image as a document of image-only pages; this keeps that
 shape so images stay on the orchestrator's per-page OCR path. Such a page has
@@ -8,8 +14,9 @@ the page *is* the image, so callers render it.
 The page rect follows MuPDF's rule, measured in Phase 0 of
 `docs/plan-permissive-deps.md`: ``pixels * 72 / dpi`` on both axes from the
 horizontal resolution, rounded to a whole dpi; 96 when the file declares none;
-72 when the declared value is outside 72..4800. Orientation tags are applied
-before measuring, as MuPDF does.
+72 when the declared value is outside 72..4800. An undeclared JPEG 2000 is
+72dpi, as MuPDF measured it. Orientation tags are applied before measuring, as
+MuPDF does.
 """
 
 from __future__ import annotations
@@ -36,8 +43,9 @@ from womblex.ingest.pdf.types import (
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-_FORMATS = {"PNG", "JPEG", "TIFF", "MPO"}
+_FORMATS = {"PNG", "JPEG", "MPO", "TIFF", "BMP", "GIF", "JPEG2000", "PPM", "PSD", "WEBP", "AVIF"}
 _DEFAULT_DPI, _SANE_DPI, _INSANE_DPI = 96, 72, 4800
+_UNDECLARED_DPI = {"JPEG2000": 72}
 _CM_PER_INCH = 2.54
 
 
@@ -48,18 +56,18 @@ def _declared_dpi(image: Image.Image) -> float | None:
     with 72 for a JPEG whose EXIF lacks a resolution and with 1 for an untagged
     TIFF, where MuPDF sees no resolution at all.
     """
-    if image.format == "PNG":
-        dpi = image.info.get("dpi")
-        return float(dpi[0]) if dpi else None
     if image.format in ("JPEG", "MPO"):
         unit, density = image.info.get("jfif_unit"), image.info.get("jfif_density")
         if unit in (1, 2) and density:
             return float(density[0]) * (_CM_PER_INCH if unit == 2 else 1)
         exif = image.getexif()
         resolution, unit = exif.get(0x011A), exif.get(0x0128, 2)
-    else:
+    elif image.format == "TIFF":
         tags = getattr(image, "tag_v2", {})
         resolution, unit = tags.get(282), tags.get(296, 2)
+    else:
+        dpi = image.info.get("dpi")
+        return float(dpi[0]) if dpi and dpi[0] else None
     if not resolution:
         return None
     return float(resolution) * (_CM_PER_INCH if unit == 3 else 1)
@@ -68,7 +76,7 @@ def _declared_dpi(image: Image.Image) -> float | None:
 def page_dpi(image: Image.Image) -> int:
     declared = _declared_dpi(image)
     if not declared:
-        return _DEFAULT_DPI
+        return _UNDECLARED_DPI.get(image.format or "", _DEFAULT_DPI)
     dpi = round(declared)
     return dpi if _SANE_DPI <= dpi <= _INSANE_DPI else _SANE_DPI
 
@@ -168,10 +176,9 @@ class ImageDocument:
         if self._image.format not in _FORMATS:
             fmt = self._image.format
             self._image.close()
-            raise ValueError(f"unsupported image format {fmt!r} for {path}; expected PNG, JPEG or TIFF")
-        # Only a TIFF is multi-page under MuPDF: an animated PNG, or a camera
-        # JPEG Pillow reads as MPO, opens as its first picture.
-        frames = getattr(self._image, "n_frames", 1) if self._image.format == "TIFF" else 1
+            raise ValueError(f"unsupported image format {fmt!r} for {path}")
+        # Pillow counts a PSD's layers as frames; the composite is the page.
+        frames = 1 if self._image.format == "PSD" else getattr(self._image, "n_frames", 1)
         self._indices = list(range(frames))
 
     @property

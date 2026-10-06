@@ -46,7 +46,7 @@ womblex/
 │   │   │   ├── types.py         # Rect / Word / Span / Line / Block / FoundTable / Drawing / Widget / PageImage + the Page and Document protocols
 │   │   │   ├── _fitz.py         # The PyMuPDF backend — the only module in src/ that imports fitz
 │   │   │   ├── _pdfium_doc.py   # The pypdfium2 backend: document, page geometry, render, images, drawings, widgets (text P6, tables P7)
-│   │   │   └── _image.py        # PNG / JPEG / TIFF through Pillow as image-only pages, MuPDF's page-rect rule
+│   │   │   └── _image.py        # Raster images through Pillow as image-only pages, one per frame, MuPDF's page-rect rule
 │   │   ├── detect.py            # Doc-level type classification (non-PDF dispatch + summary type for PDFs)
 │   │   ├── page_profile.py      # Per-page PageProfile + cheap qualifiers (e.g. spreadsheet-print)
 │   │   ├── orchestrator.py      # Plan-driven PDF extractor — walks per-page profiles, dispatches operations
