@@ -44,6 +44,12 @@ classifiers = [
 # working the moment it is asked for, on any install.
 dependencies = [
     "pymupdf>=1.24",
+    # The permissive PDF backend (docs/plan-permissive-deps.md) that replaces
+    # pymupdf at F1/F2. pdfplumber is pinned exactly: its TableFinder is the
+    # table engine and its output moves with the release.
+    "pypdfium2>=4.30",
+    "pdfplumber==0.11.10",
+    "pillow>=10.0",
     "rapidocr-onnxruntime>=1.4",
     "onnxruntime>=1.20",
     "opencv-python-headless",
@@ -125,6 +131,8 @@ dev = [
     # Starlette's TestClient transport, for the [ui] route tests. Test-only:
     # the console itself never makes an HTTP request, so this stays out of [ui].
     "httpx>=0.27",
+    # Builds the test PDFs once the fitz-based builders are ported (P4).
+    "reportlab>=4.0",
 ]
 
 # Full install - pip install womblex[all]
