@@ -89,6 +89,7 @@ A corpus exists to mature Womblex capability, not host custom code. Corpus-side 
 | `ingest/detect.py` | Doc-level type classification + non-PDF dispatch (DOCX, spreadsheet, text, image) | Per-page routing or final extracted text |
 | `ingest/page_profile.py` | Per-page `PageProfile` (text layer, table signal, form signal, blur, image count); cheap qualifier for spreadsheet-print | Run any extraction operation |
 | `ingest/orchestrator.py` | Walk per-page profiles, dispatch native or OCR operations, merge results into one `ExtractionResult` | Hold any extractor logic — calls primitives in `extract.py` and `strategies_scanned.py` |
+| `ingest/pdf/types.py` | The PDF seam's backend-neutral vocabulary: `Rect`, `Word` (tuple-shaped for `grid_projection`), `Span`/`Line`/`Block`, `FoundTable`, `Drawing`, `Widget`, `PageImage`, and the `Page`/`Document` protocols. No third-party imports at runtime | Open a document, import a PDF library, or hold adapter logic (a backend's `_*.py` does) |
 | `ingest/elements.py` | Canonical `Element`, `Cell`, `FieldEntry`, `BBox`; kind enumeration | Touch extractor logic or parquet I/O |
 | `ingest/extract.py` | Page-level primitives (text, blocks, tables, images), `ExtractionResult` with `elements` stream + derived views, `extract_text()` entry point | Document-level routing (orchestrator does that); post-processing of text |
 | `ingest/forms.py` | Form-pair extraction: AcroForm widgets, spatial label-value pairs from `page.get_text("dict")`, line-based pairs from OCR'd text | Know about document types |
