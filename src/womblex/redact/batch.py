@@ -32,11 +32,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
-import fitz  # type: ignore[import-untyped]
 import pyarrow as pa
 import pyarrow.parquet as pq
 
 from womblex.config import RedactionConfig
+from womblex.ingest.pdf import open_document
 from womblex.redact.stage import build_detector, detect_redactions
 from womblex.store.output import _write_rows
 
@@ -201,7 +201,7 @@ def _annotate_one_batch(
             continue
 
         try:
-            with fitz.open(str(pdf_path)) as doc:
+            with open_document(pdf_path) as doc:
                 page_count = len(doc)
         except Exception as exc:
             logger.warning("could not open %s: %s", pdf_path, exc)
@@ -287,7 +287,7 @@ def validate_redactions_against_labels(
             logger.warning("source PDF not found for label entry: %s", source_pdf)
             continue
 
-        with fitz.open(str(pdf_path)) as doc:
+        with open_document(pdf_path) as doc:
             n_pages = len(doc)
 
         report = detect_redactions(

@@ -6,7 +6,7 @@ default, or an LLM/VLM engine such as Mistral OCR via AWS Bedrock).
 
 These are page-level primitives, not document-level strategies: every
 one of the types above is dispatched per page by
-``orchestrator.extract_with_plan``. Images are no exception — ``fitz``
+``orchestrator.extract_with_plan``. Images are no exception — the PDF seam
 opens one as a single-page document, so it reaches the same
 ``_apply_ocr_page`` path a scanned PDF page does.
 """
@@ -15,8 +15,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-
-import fitz
+from typing import TYPE_CHECKING
 
 from womblex.ingest.elements import TEXT_KINDS
 from womblex.ingest.extract import (
@@ -25,7 +24,6 @@ from womblex.ingest.extract import (
     _normalise_bbox,
     _normalise_rect,
     _ocr_text_block,
-    _pixmap_to_array,
 )
 from womblex.ingest.interfaces.protocols import OCRRegionResult, check_layout_regions
 from womblex.ingest.ocr_tables import reconstruct_table, regions_in_rect, span_from_region
@@ -38,6 +36,9 @@ from womblex.ingest.paddle_ocr import (
 )
 from womblex.ingest.table_grid import Span, cluster_x_centroids, rows_from_spans
 from womblex.utils.model_registry import SLOT_LAYOUT, resolve
+
+if TYPE_CHECKING:
+    from womblex.ingest.pdf.types import Page, Rect, Word
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +159,7 @@ def _emit_columns(table_rows: list[list[Span]], avg_h: float) -> str:
 
 
 def _ocr_page(
-    page: fitz.Page,
+    page: Page,
     dpi: int,
     lang: str,
     engine: str = "paddleocr",
@@ -182,12 +183,11 @@ def _ocr_page(
 
     from womblex.ingest.heuristics_cv2 import calculate_blur_score
 
-    pix = page.get_pixmap(dpi=dpi)
-    img = _pixmap_to_array(pix)
-    pix_dims = (int(pix.width), int(pix.height))
+    img = page.render(dpi=dpi)
+    pix_dims = (int(img.shape[1]), int(img.shape[0]))
 
     # Pre-OCR blur check (cheap, useful for any engine)
-    pre_gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY) if pix.n >= 3 else img
+    pre_gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
     blur = calculate_blur_score(pre_gray)
 
     reader = get_ocr_reader(engine=engine, lang=lang, **(engine_options or {}))
@@ -202,7 +202,7 @@ def _ocr_page(
 
     if blur is not None and blur < 50:
         steps.append("low_blur_warning")
-        logger.warning("blurry page: doc=%s page=%d blur_score=%.1f", page.parent.name, page.number, blur)
+        logger.warning("blurry page: doc=%s page=%d blur_score=%.1f", page.doc_name, page.number, blur)
 
     page_result = reader.read_page(ocr_input)
 
@@ -214,7 +214,7 @@ def _ocr_page(
         avg_conf = page_result.confidence * 100.0
 
     if avg_conf < 40.0:
-        logger.warning("low OCR confidence: doc=%s page=%d confidence=%.1f", page.parent.name, page.number, avg_conf)
+        logger.warning("low OCR confidence: doc=%s page=%d confidence=%.1f", page.doc_name, page.number, avg_conf)
 
     return (
         text, avg_conf, steps, page_result.reading_order_native,
@@ -222,8 +222,8 @@ def _ocr_page(
     )
 
 
-def _word_inside(word: tuple, rect: fitz.Rect) -> bool:
-    """Check if a PyMuPDF word tuple's midpoint falls inside a rect."""
+def _word_inside(word: Word, rect: Rect) -> bool:
+    """Check if a word's midpoint falls inside a rect."""
     cx = (word[0] + word[2]) / 2
     cy = (word[1] + word[3]) / 2
     return bool(rect.x0 <= cx <= rect.x1 and rect.y0 <= cy <= rect.y1)
@@ -254,8 +254,8 @@ def _ocr_region_block_type(
 # covers the region.  min_rect_size=50 px filters icons/bullets that won't
 # OCR meaningfully at 72 dpi.
 def _ocr_image_regions(
-    page: fitz.Page,
-    native_words: list,
+    page: Page,
+    native_words: list[Word],
     dpi: int,
     lang: str,
     engine: str = "paddleocr",
@@ -280,17 +280,11 @@ def _ocr_image_regions(
     if pw <= 0 or ph <= 0:
         return blocks, steps
 
-    image_rects: list[fitz.Rect] = []
-    for img_info in page.get_images(full=True):
-        xref = img_info[0]
-        try:
-            image_rects.extend(page.get_image_rects(xref))
-        except Exception:
-            continue
+    image_rects = [image.rect for image in page.images()]
     if not image_rects:
         return blocks, steps
 
-    candidate_rects: list[fitz.Rect] = []
+    candidate_rects: list[Rect] = []
     for rect in image_rects:
         if rect.width < min_rect_size or rect.height < min_rect_size:
             continue
@@ -304,8 +298,7 @@ def _ocr_image_regions(
 
     for rect in candidate_rects:
         try:
-            pix = page.get_pixmap(dpi=dpi, clip=rect)
-            img = _pixmap_to_array(pix, drop_alpha=True)
+            img = page.render(dpi=dpi, clip=rect)
             page_result = reader.read_page(img)
         except Exception as exc:
             logger.warning(
@@ -333,7 +326,7 @@ def _ocr_image_regions(
 
 
 def _markdown_page_block(
-    page: fitz.Page, text: str, conf: float,
+    page: Page, text: str, conf: float,
 ) -> list[TextBlock]:
     """Wrap LLM-derived markdown as a single page-spanning paragraph block.
 
@@ -353,7 +346,7 @@ def _markdown_page_block(
 
 
 def _layout_blocks_and_tables(
-    page: fitz.Page,
+    page: Page,
     dpi: int,
     text: str,
     conf: float,
@@ -396,8 +389,7 @@ def _layout_blocks_and_tables(
     resolve(SLOT_LAYOUT, layout_model)
     try:
         analyzer = get_layout_analyzer(layout_model, **(layout_options or {}))
-        pix = page.get_pixmap(dpi=dpi)
-        img = _pixmap_to_array(pix)
+        img = page.render(dpi=dpi)
 
         # The OCR render and this layout render are the same page at the
         # same dpi, so their pixel spaces coincide and region bboxes can be
@@ -407,7 +399,7 @@ def _layout_blocks_and_tables(
         # dropped. That costs reconstruction inputs but never produces a
         # mis-binned grid.
         cell_source = list(ocr_regions or ())
-        layout_dims = (int(pix.width), int(pix.height))
+        layout_dims = (int(img.shape[1]), int(img.shape[0]))
         ocr_dims = tuple(ocr_pix_dims) if ocr_pix_dims is not None else None
         if cell_source and ocr_dims != layout_dims:
             logger.warning(
@@ -439,7 +431,7 @@ def _layout_blocks_and_tables(
 
         for region in regions:
             rx0, ry0, rx1, ry1 = region.bbox
-            pos = _normalise_bbox((rx0, ry0, rx1, ry1), float(pix.width), float(pix.height))
+            pos = _normalise_bbox((rx0, ry0, rx1, ry1), float(img.shape[1]), float(img.shape[0]))
 
             if region.block_type == "table":
                 table = None

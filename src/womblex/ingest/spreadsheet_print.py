@@ -31,8 +31,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-
-import fitz
+from typing import TYPE_CHECKING
 
 from womblex.ingest.extract import TableData, _normalise_bbox
 from womblex.ingest.table_grid import (
@@ -45,6 +44,9 @@ from womblex.ingest.table_grid import (
     columns_from_data,
     drop_blank_rows,
 )
+
+if TYPE_CHECKING:
+    from womblex.ingest.pdf.types import Document
 
 # Minimum columns the page must expose for spreadsheet-print routing.
 MIN_COLUMNS = 3
@@ -66,7 +68,7 @@ class _PageData:
 
 
 def extract_spreadsheet_print(
-    doc: fitz.Document,
+    doc: Document,
     *,
     metadata_location: str = "both",
 ) -> tuple[list[TableData], dict[str, str]]:
@@ -175,10 +177,10 @@ def extract_spreadsheet_print(
 # ---------------------------------------------------------------------------
 
 
-def _collect_pages(doc: fitz.Document) -> list[_PageData]:
+def _collect_pages(doc: Document) -> list[_PageData]:
     """Walk the doc and gather text spans per page.
 
-    Rotation: ``page.get_text("dict")`` returns bboxes in unrotated mediabox
+    Rotation: ``page.text_dict()`` returns bboxes in unrotated mediabox
     coordinates. Spreadsheet-print PDFs are commonly rotated 90° (landscape
     spreadsheet rendered to a portrait mediabox + rotation flag) — we apply
     ``page.rotation_matrix`` so downstream column/row inference works in
@@ -190,25 +192,19 @@ def _collect_pages(doc: fitz.Document) -> list[_PageData]:
         rotation_matrix = page.rotation_matrix if rotation else None
 
         spans: list[Span] = []
-        raw = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
-        for block in raw.get("blocks", []):
-            if block.get("type") != 0:
+        for block in page.text_dict():
+            if block.kind != "text":
                 continue
-            for line in block.get("lines", []):
-                for span in line.get("spans", []):
-                    text = span.get("text", "").strip()
+            for line in block.lines:
+                for span in line.spans:
+                    text = span.text.strip()
                     if not text:
                         continue
-                    bb = span.get("bbox", (0.0, 0.0, 0.0, 0.0))
-                    if rotation_matrix is not None:
-                        rect = fitz.Rect(bb) * rotation_matrix
-                        # After rotation, swap to ensure x0<x1 and y0<y1.
-                        x0, x1 = sorted((rect.x0, rect.x1))
-                        y0, y1 = sorted((rect.y0, rect.y1))
-                        bb = (x0, y0, x1, y1)
+                    # `Rect.transform` re-normalises so x0<x1 and y0<y1.
+                    box = span.bbox if rotation_matrix is None else span.bbox.transform(rotation_matrix)
                     spans.append(Span(
-                        y_top=bb[1], y_bottom=bb[3],
-                        x_left=bb[0], x_right=bb[2], text=text,
+                        y_top=box.y0, y_bottom=box.y1,
+                        x_left=box.x0, x_right=box.x1, text=text,
                     ))
         pages.append(_PageData(spans=spans, width=page.rect.width, height=page.rect.height))
     return pages
