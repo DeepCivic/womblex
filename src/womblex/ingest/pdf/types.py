@@ -18,6 +18,7 @@ Two conventions the adapters own, so no caller has to:
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, NamedTuple, Protocol, Self
 
@@ -75,6 +76,23 @@ class Rect:
         x0, y0, x1, y1 = values
         return cls(min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
 
+
+def render_box(page: Rect, dpi: int, clip: Rect | None = None) -> tuple[int, int, int, int]:
+    """The pixel box ``(x0, y0, x1, y1)`` a render of *page* at *dpi* covers.
+
+    MuPDF's rule, which every backend reproduces so a render's shape does not
+    depend on the backend: the page is rounded up to whole pixels and a clip is
+    rounded outward, then cut to the page. A clip off the page leaves an empty
+    axis (``x1 <= x0`` or ``y1 <= y0``) rather than raising.
+    """
+    scale = dpi / 72
+    width, height = math.ceil(page.width * scale), math.ceil(page.height * scale)
+    if clip is None:
+        return 0, 0, width, height
+    return (
+        max(0, math.floor(clip.x0 * scale)), max(0, math.floor(clip.y0 * scale)),
+        min(width, math.ceil(clip.x1 * scale)), min(height, math.ceil(clip.y1 * scale)),
+    )
 
 class Word(NamedTuple):
     """One word and its box, shaped like MuPDF's 8-tuple.
