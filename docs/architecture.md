@@ -33,9 +33,9 @@ Input File
 
 | Signal | Method | Drives |
 |--------|--------|--------|
-| Text layer coverage | `page.get_text()` length per page | Native vs scanned split |
+| Text layer coverage | `page.plain_text()` length per page | Native vs scanned split |
 | Table coverage | Regex on text + `page.find_tables()`, per-page count | STRUCTURED (≥80%) or structured content flag |
-| Image presence | `page.get_images()` | Scanned/hybrid flag |
+| Image presence | `page.images()` | Scanned/hybrid flag |
 | Ruled lines | Morphological horizontal line detection | Handwriting signal |
 | Glyph regularity | Connected-component height variance | Typed vs handwritten |
 | Stroke width variance | Skeleton distance-transform CV | Typed vs handwritten |

@@ -78,7 +78,7 @@ def detect_redactions(
 
     For each page:
 
-    - First check ``page.get_drawings()`` for filled near-black rectangles
+    - First check ``page.drawings()`` for filled near-black rectangles
       (matches native-PDF vector-drawn redactions; no area threshold).
     - If none found, rasterise the page at *dpi* and run the CV2 contour
       detector (handles raster overlays and scanned pages). When

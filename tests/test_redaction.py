@@ -516,7 +516,7 @@ class TestAnnotateExtraction:
 
 
 # ---------------------------------------------------------------------------
-# Vector-direct redaction detection (via page.get_drawings())
+# Vector-direct redaction detection (via page.drawings())
 # ---------------------------------------------------------------------------
 
 

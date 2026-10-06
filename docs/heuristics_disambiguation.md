@@ -26,7 +26,7 @@ Reference for CV2 and NumPy-based heuristics used in document classification and
 
 `RedactionDetector` (CV2 threshold + contour path) is the **fallback**
 detector, not the primary one: `redact/stage.py`'s `detect_redactions()` tries
-a vector-first path over `page.get_drawings()` (filled near-black rectangles)
+a vector-first path over `page.drawings()` (filled near-black rectangles)
 first, and only falls back to `RedactionDetector` when that finds nothing.
 This doc covers the CV2/NumPy mechanism, which is that fallback path.
 
