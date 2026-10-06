@@ -11,6 +11,7 @@ from womblex.ingest.pdf.types import (
     FoundTable,
     Rect,
     Word,
+    render_box,
 )
 
 
@@ -60,6 +61,17 @@ class TestDrawing:
         assert Drawing(kind="fill", rect=rect).filled
         assert Drawing(kind="fill_stroke", rect=rect).filled
         assert not Drawing(kind="stroke", rect=rect).filled
+
+
+class TestRenderBox:
+    def test_an_edge_within_a_thousandth_of_a_pixel_rounds_to_it(self) -> None:
+        """MuPDF's values: 595.2pt at 150dpi is 1240px, not 1241."""
+        assert render_box(Rect(0.0, 0.0, 595.2, 100.0004), 150)[2:] == (1240, 209)
+        assert render_box(Rect(0.0, 0.0, 612.0001, 300.0), 72)[2:] == (612, 300)
+
+    def test_a_clip_rounds_outward_within_the_same_tolerance(self) -> None:
+        clip = Rect(10.0004, 9.9996, 20.0004, 30.5)
+        assert render_box(Rect(0.0, 0.0, 100.0, 100.0), 72, clip) == (10, 10, 20, 31)
 
 
 class TestDefaults:

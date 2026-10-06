@@ -2,7 +2,7 @@
 
 PDFium's coordinates are PDF user space, origin bottom-left, y growing upward;
 `types.py`'s are MuPDF's, origin at the crop box's top-left, y downward. Every
-rect leaves this module through `_PageSpace.rect`, which does that flip, so no
+rect leaves this module through `PdfiumPage._rect`, which does that flip, so no
 caller sees pdfium's convention. Like MuPDF, objects are reported in unrotated
 page space while `rect` is the rotated page.
 
