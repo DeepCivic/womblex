@@ -16,6 +16,7 @@ from womblex.ingest.grid_projection import (
     project_to_columns,
     render_spatial_text,
 )
+from womblex.ingest.pdf._fitz import FitzDocument, FitzPage
 
 # ---------------------------------------------------------------------------
 # project_to_columns — algorithm-level tests using fake word tuples
@@ -180,13 +181,13 @@ def letter_page():
 class TestExtractPageText:
     def test_empty_page_returns_empty_string(self, letter_page) -> None:
         doc, _ = letter_page
-        assert extract_page_text(doc[0]) == ""
+        assert extract_page_text(FitzPage(doc[0])) == ""
 
     def test_single_column_page_falls_back_to_get_text(self, letter_page) -> None:
         _, page = letter_page
         for i in range(20):
             page.insert_text((72, 100 + i * 16), f"single column line number {i}", fontsize=11)
-        output = extract_page_text(page)
+        output = extract_page_text(FitzPage(page))
         for i in range(20):
             assert f"line number {i}" in output
         lines = [f"line number {i}" for i in range(20)]
@@ -198,7 +199,7 @@ class TestExtractPageText:
         for i in range(10):
             page.insert_text((72, 100 + i * 18), f"LEFT{i:02d}", fontsize=11)
             page.insert_text((340, 100 + i * 18), f"RIGHT{i:02d}", fontsize=11)
-        output = extract_page_text(page)
+        output = extract_page_text(FitzPage(page))
 
         for i in range(10):
             assert f"LEFT{i:02d}" in output
@@ -216,7 +217,7 @@ class TestExtractPageText:
         for i in range(8):
             page.insert_text((72, 100 + i * 18), f"L{i}", fontsize=11)
             page.insert_text((340, 100 + i * 18), f"R{i}", fontsize=11)
-        output = extract_page_text(page)
+        output = extract_page_text(FitzPage(page))
         left_positions = [output.index(f"L{i}") for i in range(8)]
         right_positions = [output.index(f"R{i}") for i in range(8)]
         assert left_positions == sorted(left_positions)
@@ -248,7 +249,7 @@ class TestNativeExtractorIntegration:
             stroke_consistency=None,
             confidence=0.9,
         )
-        return extract_pdf_with_plan(doc, profile)
+        return extract_pdf_with_plan(FitzDocument.wrap(doc), profile)
 
     def test_native_extractor_handles_two_column_page(self, letter_page) -> None:
         doc, page = letter_page

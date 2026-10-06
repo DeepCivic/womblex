@@ -31,6 +31,7 @@ from womblex.ingest.ocr_tables import (
     span_from_region,
 )
 from womblex.ingest.page_profile import PageProfile
+from womblex.ingest.pdf._fitz import FitzPage
 from womblex.ingest.strategies_scanned import (
     _layout_blocks_and_tables,
     _spatial_sort_regions,
@@ -222,7 +223,7 @@ class TestOcrPageScoping:
 
         accum = _PageAccum(page_number=0)
         _apply_ocr_page(
-            blank_page, _ocr_profile(), accum,
+            FitzPage(blank_page), _ocr_profile(), accum,
             dpi=200, lang="eng", engine="paddleocr", engine_options={},
             doc_type=DocumentType.SCANNED_MACHINEWRITTEN,
         )
@@ -247,7 +248,7 @@ class TestOcrPageScoping:
 
         accum = _PageAccum(page_number=0)
         _apply_ocr_page(
-            blank_page, _ocr_profile(), accum,
+            FitzPage(blank_page), _ocr_profile(), accum,
             dpi=200, lang="eng", engine="mistral-ocr", engine_options={},
             doc_type=DocumentType.SCANNED_MACHINEWRITTEN,
         )
@@ -553,7 +554,7 @@ class TestOrchestratorTableWiring:
         )
         accum = _PageAccum(page_number=0)
         _apply_ocr_page(
-            page, _ocr_profile(), accum,
+            FitzPage(page), _ocr_profile(), accum,
             dpi=200, lang="eng", engine="paddleocr", engine_options={},
             doc_type=DocumentType.SCANNED_MACHINEWRITTEN,
         )

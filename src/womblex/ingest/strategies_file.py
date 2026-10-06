@@ -23,7 +23,7 @@ from womblex.ingest.extract import (
 )
 
 if TYPE_CHECKING:
-    import fitz
+    from womblex.ingest.pdf.types import Document
 
 logger = logging.getLogger(__name__)
 
@@ -185,7 +185,7 @@ class TextExtractor:
 class NonTextualExtractor:
     """Placeholder for documents that cannot be extracted — flags for manual review."""
 
-    def extract(self, doc: fitz.Document) -> ExtractionResult:
+    def extract(self, doc: Document) -> ExtractionResult:
         return ExtractionResult(
             pages=[], method="non_textual",
             error="Document flagged as non-textual; requires manual review.",

@@ -11,9 +11,8 @@ import logging
 import re
 import time
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
-import fitz
 import numpy as np
 
 from womblex.ingest.detect import DocumentProfile, DocumentType
@@ -29,6 +28,9 @@ from womblex.ingest.views import (  # re-exported for back-compat
     TextBlock,
 )
 
+if TYPE_CHECKING:
+    from womblex.ingest.pdf.types import Document, Page, Rect
+
 logger = logging.getLogger(__name__)
 
 
@@ -40,7 +42,7 @@ logger = logging.getLogger(__name__)
 class ExtractionStrategy(Protocol):
     """Protocol for document extraction strategies (PDF-based)."""
 
-    def extract(self, doc: fitz.Document) -> ExtractionResult: ...
+    def extract(self, doc: Document) -> ExtractionResult: ...
 
 
 class PathExtractionStrategy(Protocol):
@@ -62,19 +64,18 @@ def _text_coverage(pages: list[PageResult]) -> float:
     return filled / len(pages)
 
 
-def _page_to_gray(page: fitz.Page, dpi: int = 150) -> np.ndarray:
+def _page_to_gray(page: Page, dpi: int = 150) -> np.ndarray:
     """Render a page to a grayscale numpy array."""
     import cv2
 
-    pix = page.get_pixmap(dpi=dpi)
-    img = _pixmap_to_array(pix, drop_alpha=False)
-    if pix.n >= 3:
-        return cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-    return img.copy()
+    return cv2.cvtColor(page.render(dpi=dpi), cv2.COLOR_RGB2GRAY)
 
 
-def _pixmap_to_array(pix: fitz.Pixmap, *, drop_alpha: bool = False) -> np.ndarray:
-    """Convert a PyMuPDF Pixmap to a numpy array, optionally dropping alpha."""
+def _pixmap_to_array(pix: Any, *, drop_alpha: bool = False) -> np.ndarray:
+    """Convert a PyMuPDF Pixmap to a numpy array, optionally dropping alpha.
+
+    Still used by `strategies_scanned`; goes when P3b moves it onto `render`.
+    """
     img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
     if drop_alpha and pix.n == 4:
         return img[:, :, :3]
@@ -93,7 +94,7 @@ def _avg_ocr_confidence(results: list[tuple], *, scale: float = 1.0) -> float:
     return (sum(confs) / len(confs)) * scale
 
 
-def _normalise_rect(rect: fitz.Rect, page_width: float, page_height: float) -> Position:
+def _normalise_rect(rect: Rect, page_width: float, page_height: float) -> Position:
     """Convert a PyMuPDF Rect to normalised 0-1 coordinates."""
     return Position(
         x=rect.x0 / page_width if page_width else 0.0,
@@ -116,8 +117,8 @@ def _normalise_bbox(
     )
 
 
-def _count_blocks_in_bbox(page: fitz.Page, bbox: fitz.Rect) -> int:
-    """Count `get_text("dict")` text blocks whose centre falls inside ``bbox``.
+def _count_blocks_in_bbox(page: Page, bbox: Rect) -> int:
+    """Count `text_dict` text blocks whose centre falls inside ``bbox``.
 
     Used as a cross-check against PyMuPDF's `find_tables` over-firing: a
     real table has at least one natural text block per row (each cell row
@@ -127,20 +128,18 @@ def _count_blocks_in_bbox(page: fitz.Page, bbox: fitz.Rect) -> int:
     many real rows the table region can contain.
     """
     count = 0
-    raw = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
-    for block in raw.get("blocks", []):
-        if block.get("type") != 0:
+    for block in page.text_dict():
+        if block.kind != "text":
             continue
-        bx0, by0, bx1, by1 = block.get("bbox", (0, 0, 0, 0))
-        cx, cy = (bx0 + bx1) / 2, (by0 + by1) / 2
+        cx, cy = (block.bbox.x0 + block.bbox.x1) / 2, (block.bbox.y0 + block.bbox.y1) / 2
         if bbox.x0 <= cx <= bbox.x1 and bbox.y0 <= cy <= bbox.y1:
             count += 1
     return count
 
 
 def _find_native_tables(
-    page: fitz.Page,
-) -> list[tuple[TableData, fitz.Rect, list[list]]]:
+    page: Page,
+) -> list[tuple[TableData, Rect, list[list]]]:
     """Detect tables and return ``(TableData, bbox_rect, cells)`` per hit.
 
     The bbox lets the caller exclude table regions from prose emission;
@@ -163,7 +162,7 @@ def _find_native_tables(
     import io as _io
     import sys
 
-    found: list[tuple[TableData, fitz.Rect, list[list]]] = []
+    found: list[tuple[TableData, Rect, list[list]]] = []
     pw, ph = page.rect.width, page.rect.height
 
     old_stdout = sys.stdout
@@ -171,22 +170,22 @@ def _find_native_tables(
     try:
         found_lines: list = []
         try:
-            found_lines = list(page.find_tables(strategy="lines").tables)
+            found_lines = page.find_tables(strategy="lines")
         except Exception:
             pass
 
         found_text: list = []
         if not found_lines:
             try:
-                found_text = list(page.find_tables(strategy="text").tables)
+                found_text = page.find_tables(strategy="text")
             except Exception:
                 pass
 
         for tbl in found_lines:
             if tbl.row_count < 1 or tbl.col_count < 1:
                 continue
-            extracted = tbl.extract()
-            rect = fitz.Rect(tbl.bbox)
+            extracted = [list(row) for row in tbl.rows]
+            rect = tbl.bbox
             n_rows = len(extracted)
             if n_rows and _count_blocks_in_bbox(page, rect) < n_rows:
                 continue
@@ -202,8 +201,8 @@ def _find_native_tables(
         for tbl in found_text:
             if tbl.row_count < 3 or tbl.col_count < 2:
                 continue
-            extracted = tbl.extract()
-            rect = fitz.Rect(tbl.bbox)
+            extracted = [list(row) for row in tbl.rows]
+            rect = tbl.bbox
             n_rows = len(extracted)
             if n_rows and _count_blocks_in_bbox(page, rect) < n_rows:
                 continue
@@ -221,7 +220,7 @@ def _find_native_tables(
     return found
 
 
-def _extract_tables_from_page(page: fitz.Page) -> list[TableData]:
+def _extract_tables_from_page(page: Page) -> list[TableData]:
     """Extract tables from a page using PyMuPDF's table finder.
 
     Backward-compatible thin wrapper around `_find_native_tables` —
@@ -260,22 +259,13 @@ def _emit_table_column_major(cells: list[list]) -> str:
     return "\n\n".join(parts)
 
 
-def _extract_images_from_page(page: fitz.Page) -> list[ImageData]:
-    """Extract image metadata from a page."""
-    images_out: list[ImageData] = []
+def _extract_images_from_page(page: Page) -> list[ImageData]:
+    """Extract image metadata from a page, one entry per drawn instance."""
     pw, ph = page.rect.width, page.rect.height
-
-    for img_info in page.get_images(full=True):
-        xref = img_info[0]
-        try:
-            rects = page.get_image_rects(xref)
-            for rect in rects:
-                pos = _normalise_rect(rect, pw, ph)
-                images_out.append(ImageData(alt_text="", position=pos, confidence=0.7))
-        except Exception:
-            continue
-
-    return images_out
+    return [
+        ImageData(alt_text="", position=_normalise_rect(image.rect, pw, ph), confidence=0.7)
+        for image in page.images()
+    ]
 
 
 # Form-field extraction lives in womblex.ingest.forms — re-exported below
@@ -291,7 +281,7 @@ from womblex.ingest.forms import (  # noqa: F401
 
 
 def _ocr_text_block(
-    page: fitz.Page, text: str, conf: float, block_type: str = "paragraph"
+    page: Page, text: str, conf: float, block_type: str = "paragraph"
 ) -> TextBlock | None:
     """Build a TextBlock from OCR output, or None if text is empty."""
     text = text.strip()
@@ -343,30 +333,25 @@ def _classify_native_block(
     return "paragraph"
 
 
-def _build_text_blocks(page: fitz.Page) -> list[TextBlock]:
+def _build_text_blocks(page: Page) -> list[TextBlock]:
     """Extract text blocks with positional data and type classification."""
     blocks: list[TextBlock] = []
     pw, ph = page.rect.width, page.rect.height
 
-    raw = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
-    for block in raw.get("blocks", []):
-        if block.get("type") != 0:  # text blocks only
+    for block in page.text_dict():
+        if block.kind != "text":
             continue
-        bbox = block.get("bbox", (0, 0, 0, 0))
-        pos = _normalise_bbox(bbox, pw, ph)
+        pos = _normalise_bbox(block.bbox.as_tuple(), pw, ph)
 
         # Collect text + typography signals from spans
         block_text = ""
         max_font_size = 0.0
         any_bold = False
-        for line in block.get("lines", []):
-            for span in line.get("spans", []):
-                block_text += span.get("text", "")
-                fs = span.get("size", 0)
-                max_font_size = max(max_font_size, fs)
-                # PyMuPDF span flags: bit 4 (16) = bold
-                if span.get("flags", 0) & 16:
-                    any_bold = True
+        for line in block.lines:
+            for span in line.spans:
+                block_text += span.text
+                max_font_size = max(max_font_size, span.size)
+                any_bold = any_bold or span.bold
 
         block_text = block_text.strip()
         if not block_text:
@@ -390,7 +375,7 @@ def get_extractor(profile: DocumentProfile) -> PathExtractionStrategy:
 
     Only SPREADSHEET, DOCX, TEXT and MARKDOWN reach here — exactly the set
     ``extract_text`` routes to this function. Everything else, **IMAGE
-    included**, is opened with ``fitz`` and dispatched through
+    included**, is opened through the PDF seam and dispatched through
     ``extract_pdf_with_plan`` (per-page profile + orchestrator): PyMuPDF
     opens a standalone image as a one-page document, the profiler marks
     that page as needing OCR, and ``_apply_ocr_page`` handles it with the
@@ -472,8 +457,9 @@ def extract_text(
 
     # PDF: profile per page, summarise doc type, dispatch via orchestrator.
     from womblex.ingest.orchestrator import extract_pdf_with_plan
+    from womblex.ingest.pdf import open_document
 
-    doc = fitz.open(str(path))
+    doc = open_document(path)
     try:
         if max_pages is not None and doc.page_count > max_pages:
             doc.select(list(range(max_pages)))
@@ -504,7 +490,7 @@ def extract_text(
 def _apply_normalisation_and_warnings(
     result: ExtractionResult,
     path: Path,
-    doc: fitz.Document | None = None,
+    doc: Document | None = None,
     dpi: int = 200,
     lang: str = "eng",
     engine: str = "paddleocr",
@@ -526,9 +512,10 @@ def _apply_normalisation_and_warnings(
         recovered = False
         if doc is not None and page.method == "native" and 0 <= page.page_number < doc.page_count:
             try:
+                from womblex.ingest.pdf import native
                 from womblex.ingest.strategies_scanned import _ocr_page
                 ocr_text, _conf, _steps, _native_order, _regions, _pix = _ocr_page(
-                    doc[page.page_number], dpi=dpi, lang=lang,
+                    native(doc[page.page_number]), dpi=dpi, lang=lang,
                     engine=engine, engine_options=engine_options,
                 )
                 if ocr_text.strip():
