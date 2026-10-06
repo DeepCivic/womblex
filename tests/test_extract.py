@@ -388,7 +388,7 @@ class TestPageBreakEmission:
         doc.close()
 
         doc = fitz.open(str(pdf_path))
-        profiles = profile_pages(doc)
+        profiles = profile_pages(FitzDocument.wrap(doc))
         result = extract_with_plan(FitzDocument.wrap(doc), profiles, DocumentType.NATIVE_NARRATIVE)
         doc.close()
 
@@ -413,7 +413,7 @@ class TestPageBreakEmission:
         doc.close()
 
         doc = fitz.open(str(pdf_path))
-        profiles = profile_pages(doc)
+        profiles = profile_pages(FitzDocument.wrap(doc))
         result = extract_with_plan(FitzDocument.wrap(doc), profiles, DocumentType.NATIVE_NARRATIVE)
         doc.close()
 

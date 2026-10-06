@@ -56,7 +56,7 @@ womblex/
 │   │   ├── table_grid.py        # Shared table-grid geometry (spans/columns, y-band binning, row assembly)
 │   │   ├── ocr_tables.py        # OCR table feeder: reconstruct_table() over OCR regions, behind precision gates
 │   │   ├── records.py           # Pre-extracted text records → element shards that feed the NLP pipeline
-│   │   ├── morphology.py        # Page-image morphology helpers (handwriting / glyph regularity)
+│   │   ├── morphology.py        # Page-image morphology helpers (handwriting / glyph regularity), over `Page.render`
 │   │   ├── grid_projection.py   # Column-aware text reconstruction (block-aware paragraph emission)
 │   │   ├── strategies.py        # Re-export shim — path-based (non-fitz) extractors
 │   │   ├── strategies_scanned.py # OCR primitives (_ocr_page, _layout_blocks_and_tables)

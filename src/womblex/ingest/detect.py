@@ -5,19 +5,20 @@ Detection is based on text-layer presence, text quality, image presence,
 table structure signals, and handwriting indicators.
 """
 
+from __future__ import annotations
+
 import logging
 import re
-import warnings
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-
-import fitz
+from typing import TYPE_CHECKING
 
 from womblex.config import DetectionConfig
+from womblex.ingest.pdf import open_document
 
-# Suppress pymupdf_layout suggestion from find_tables()
-warnings.filterwarnings("ignore", message=".*pymupdf_layout.*")
+if TYPE_CHECKING:
+    from womblex.ingest.pdf.types import Page
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +99,7 @@ def _has_table_structure(text: str) -> bool:
 
 
 def _table_signals(
-    page: fitz.Page,
+    page: Page,
     *,
     min_cells: int = 4,
     min_non_empty_cells: int = 300,
@@ -127,43 +128,33 @@ def _table_signals(
       (170-280 cells/page), since the text strategy pads an oversized grid on
       every multi-paragraph page.
     """
-    import io
-    import sys
-
-    old_stdout = sys.stdout
-    sys.stdout = io.StringIO()
-    try:
-        has_structural = False
-        has_manifest = False
-        for strategy in ("lines", "text"):
-            try:
-                tables = page.find_tables(strategy=strategy)
-            except Exception:
+    has_structural = False
+    has_manifest = False
+    for strategy in ("lines", "text"):
+        try:
+            tables = page.find_tables(strategy=strategy)
+        except Exception:
+            continue
+        for table in tables:
+            # Text-strategy needs stricter shape to avoid letterhead noise.
+            if strategy == "text" and (table.row_count < 3 or table.col_count < 2):
                 continue
-            for table in tables.tables:
-                # Text-strategy needs stricter shape to avoid letterhead noise.
-                if strategy == "text" and (table.row_count < 3 or table.col_count < 2):
-                    continue
-                if not has_structural and table.row_count * table.col_count >= min_cells:
-                    has_structural = True
-                if need_manifest and not has_manifest:
-                    extracted = table.extract()
-                    if extracted:
-                        non_empty = sum(
-                            1 for row in extracted
-                            for cell in row
-                            if cell and str(cell).strip()
-                        )
-                        if non_empty >= min_non_empty_cells:
-                            has_manifest = True
-                if has_structural and (has_manifest or not need_manifest):
-                    return has_structural, has_manifest
-        return has_structural, has_manifest
-    finally:
-        sys.stdout = old_stdout
+            if not has_structural and table.row_count * table.col_count >= min_cells:
+                has_structural = True
+            if need_manifest and not has_manifest and table.rows:
+                non_empty = sum(
+                    1 for row in table.rows
+                    for cell in row
+                    if cell and str(cell).strip()
+                )
+                if non_empty >= min_non_empty_cells:
+                    has_manifest = True
+            if has_structural and (has_manifest or not need_manifest):
+                return has_structural, has_manifest
+    return has_structural, has_manifest
 
 
-def _has_structural_tables(page: fitz.Page, min_cells: int = 4) -> bool:
+def _has_structural_tables(page: Page, min_cells: int = 4) -> bool:
     """Detect tables using PyMuPDF's structural table finder.
 
     Tries strategy="lines" first (ruled cells), falls back to strategy="text"
@@ -174,7 +165,7 @@ def _has_structural_tables(page: fitz.Page, min_cells: int = 4) -> bool:
     return _table_signals(page, min_cells=min_cells, need_manifest=False)[0]
 
 
-def _has_manifest_table(page: fitz.Page, min_non_empty_cells: int = 300) -> bool:
+def _has_manifest_table(page: Page, min_non_empty_cells: int = 300) -> bool:
     """Detect manifest-shape tables: a page dominated by one big table.
 
     Stricter than :func:`_has_structural_tables` — gates the
@@ -185,27 +176,23 @@ def _has_manifest_table(page: fitz.Page, min_non_empty_cells: int = 300) -> bool
     return _table_signals(page, min_non_empty_cells=min_non_empty_cells)[1]
 
 
-def _has_form_structure(page: fitz.Page) -> bool:
+def _has_form_structure(page: Page) -> bool:
     """Detect form field structures on a page.
 
     Looks for widget annotations (interactive form fields) or
     a high density of short text fragments that suggest labels.
     """
     # Check for interactive form widgets
-    widgets = list(page.widgets())
-    if len(widgets) >= 2:
+    if len(page.widgets()) >= 2:
         return True
 
     # Check for label-like text blocks: many short text spans
-    blocks = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)["blocks"]
     short_text_count = 0
-    for block in blocks:
-        if block.get("type") == 0:  # text block
-            for line in block.get("lines", []):
-                for span in line.get("spans", []):
-                    text = span.get("text", "").strip()
-                    if 1 <= len(text) <= 30:
-                        short_text_count += 1
+    for block in page.text_dict():
+        for line in block.lines:
+            for span in line.spans:
+                if 1 <= len(span.text.strip()) <= 30:
+                    short_text_count += 1
     # A page with many short labels is likely a form
     return short_text_count >= 10
 
@@ -352,13 +339,13 @@ def detect_document_type(
     if config is None:
         config = DetectionConfig()
 
-    doc = fitz.open(str(path))
+    doc = open_document(path)
     try:
         text_pages = 0
         image_pages = 0
         table_signals = 0
         handwriting_signals = 0
-        scanned_page_for_analysis: fitz.Page | None = None
+        scanned_page_for_analysis: Page | None = None
         
         total_pages = len(doc)
         max_pages = config.max_sample_pages
@@ -372,8 +359,8 @@ def detect_document_type(
 
         for idx in page_indices:
             page = doc[idx]
-            text = page.get_text().strip()
-            images = page.get_images()
+            text = page.plain_text(dehyphenate=False).strip()
+            images = page.images()
 
             has_meaningful_text = len(text) > _MIN_TEXT_LENGTH
             
@@ -388,7 +375,7 @@ def detect_document_type(
             # text rendered as vector paths (Form XObjects) that need OCR via pixmap.
             has_ocr_content = bool(images)
             if not has_meaningful_text and not images:
-                drawings = page.get_drawings()
+                drawings = page.drawings()
                 if len(drawings) >= _MIN_VECTOR_DRAWINGS:
                     has_ocr_content = True
 
