@@ -126,7 +126,7 @@ Checked against the vendored fixtures and the womblex-collection PDFs before the
   - For P8: MuPDF's `get_drawings` also reports annotation and widget appearance streams, which pdfium's page objects do not hold (`FPDFAnnot_GetObject` reaches them, in appearance space). No vendored fixture is affected.
 
   Images stay on the orchestrator path; there is still no separate image extractor.
-- **P6 (W).** `ingest/pdf/_text.py`, the text engine Phase 0 chose. It covers dehyphenation, and bold detection from font weight or name.
+- **P6 (W). Done.** `ingest/pdf/_text.py`, the text engine Phase 0 chose. It covers dehyphenation, and bold detection from font weight, the ForceBold flag or name. Characters come from pdfium in content order; lines, blocks and spans are rebuilt in womblex. pdfium reports an end-of-line hyphen as U+0002, which is read back as a hyphen. Checked against fitz on the vendored PDFs (first pages): whitespace-normalised text similarity 0.999 to 1.0, and block counts within a few of MuPDF's. Multi-column reading order is P8's.
 - **P7 (W).** `ingest/pdf/_tables.py`, an adapter onto pdfplumber's `TableFinder`.
 - **P8… (W).** Fidelity fixes driven by `BACKEND_PARITY.md`, repeated until the gates below hold.
 - **F1 (W) + F1-B (B).**

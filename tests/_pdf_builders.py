@@ -47,10 +47,10 @@ class PdfBuilder:
         self._height = height
         return self
 
-    def text(self, x: float, y: float, text: str, *, size: float = 11) -> Self:
+    def text(self, x: float, y: float, text: str, *, size: float = 11, bold: bool = False) -> Self:
         """Draw *text* with its baseline starting at (x, y)."""
         self._canvas.setFillColorRGB(0, 0, 0)
-        self._canvas.setFont("Helvetica", size)
+        self._canvas.setFont("Helvetica-Bold" if bold else "Helvetica", size)
         self._canvas.drawString(x, self._flip(y), text)
         return self
 
