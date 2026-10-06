@@ -47,8 +47,20 @@ def test_unknown_attribute_raises() -> None:
         womblex.not_a_thing  # noqa: B018
 
 
+#: Every PDF backend the seam can sit on. `import womblex` must load none of
+#: them — which backend opens a document is `ingest/pdf`'s call, made per call.
+PDF_BACKENDS = ("fitz", "pypdfium2", "pdfplumber", "pdfminer")
+
+
 def test_import_does_not_load_the_heavy_modules() -> None:
-    code = "import sys, womblex; sys.exit(int('fitz' in sys.modules or 'pyarrow' in sys.modules))"
+    loaded = " or ".join(f"{m!r} in sys.modules" for m in (*PDF_BACKENDS, "pyarrow"))
+    code = f"import sys, womblex; sys.exit(int({loaded}))"
+    assert subprocess.run([sys.executable, "-c", code], check=False).returncode == 0
+
+
+def test_importing_the_pdf_seam_loads_no_backend() -> None:
+    loaded = " or ".join(f"{m!r} in sys.modules" for m in PDF_BACKENDS)
+    code = f"import sys, womblex.ingest.pdf; sys.exit(int({loaded}))"
     assert subprocess.run([sys.executable, "-c", code], check=False).returncode == 0
 
 
