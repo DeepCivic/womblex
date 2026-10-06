@@ -699,8 +699,131 @@ Womblex serves other software two ways: a versioned on-disk contract
   precision measurement); penalty units (revisit with a legislation/contract
   corpus).
 
+### Permissive-dependencies Phase 0 — pypdfium2 over pdfminer for the text engine
+`docs/plan-permissive-deps.md`'s Phase 0 spike (scratch only, measured against
+the womblex-collection fixture PDFs) settled the text-engine choice for P6 and
+the plan's three unverified mechanism claims — two as stated, one the other way
+round. The spike's scripts were not retained, so each figure below carries the
+method that produced it and the page set it ran over: the numbers are meant to
+be re-derivable, and the first pass's were not.
+
+- **pdfminer's native segmentation misses the speed gate by ~67x, which is
+  the axis that rejects it. On fidelity to fitz it is the *better* of the
+  two.** The plan's working assumption was that pdfminer's own `LAParams`
+  layout analysis is the default choice because the library does it natively,
+  and hand-rolling segmentation from pypdfium2 characters would only be
+  justified if pdfminer missed the speed gate. It misses it decisively.
+  Measured over 76 native-text pages (≥200 chars of text layer) from 19
+  womblex-collection PDFs, text extraction only, fitz
+  `get_text("text", TEXT_DEHYPHENATE)` as the reference:
+
+  | engine | ms/page | vs fitz | CER vs fitz: median / p90 / max | pages > 0.2 |
+  |---|---|---|---|---|
+  | fitz | 1.4 | — | — | — |
+  | pdfminer (`pdfplumber.open(path, laparams={})`) | 93.9 | 67x | 0.010 / 0.237 / 0.720 | 8 / 76 |
+  | pypdfium2 characters, rebuilt | 11.7 | 8.4x | 0.122 / 0.698 / 0.891 | 17 / 76 |
+
+  So the ordering is not "pypdfium2 wins on both axes" — an earlier draft of
+  this entry said that, and re-measurement does not support it. pdfminer's
+  *output* tracks fitz closely (median CER 0.010, i.e. near-identical on a
+  typical page); it is 67x the cost that buys it. The rebuild is 8.4x fitz
+  and much further from fitz's text, and the rebuild measured here is the
+  naive one — lines binned on a 3pt baseline tolerance, no dehyphenation, no
+  block grouping, no column handling — so its CER is an upper bound on what
+  P6 would ship, but the fidelity work behind closing that gap is real and
+  not yet done. pdfminer is rejected as the P6 candidate on speed; pypdfium2
+  characters, rebuilt in womblex, is what Phase 0 carries forward, with P6
+  owning the segmentation quality the numbers above say is still missing.
+- **The divergence tail is multi-column reading order, and it is not
+  pdfminer-specific.** Both candidates' worst pages are the same pages: the
+  five measured pages of the ASX annual-report excerpt account for every
+  pdfminer page above CER 0.49, and the rebuild is no better there (0.61–0.74
+  on the same pages). What the tail measures is reading order on
+  multi-column, table-adjacent text, where each engine serialises a page
+  differently from fitz rather than reading it wrongly — which is why CER
+  against fitz is a *similarity* measure here, not an accuracy one. Scoring
+  either engine as right or wrong on those pages needs the transcript CER
+  half of H-B, i.e. the ground-truth revision.
+- **pdfplumber's table-finding is not better calibrated than fitz's, just
+  faster.** Over 65 native-text pages from the same fixture set: pdfplumber's
+  "text" strategy fires on 63 of them, which is the same over-firing
+  `extract.py` already guards against for fitz, not a signal that 63 pages
+  hold tables. On the "lines" strategy fitz fires on 15 pages and pdfplumber
+  on 25; they agree on *whether* a page has a table on 51 of 65 and disagree
+  on 14, while of the 13 pages where both found one they agree on rows and
+  columns on 10. So the disagreement is about existence, not shape. Timing,
+  same pages: fitz `find_tables` 79.9 ms/page, pdfplumber "lines" 53.8,
+  pdfplumber "text" 28.5 — faster, which is a genuine win independent of
+  calibration. P7's pdfplumber adapter needs the same kind of post-filtering
+  `extract.py` already carries for fitz (the cross-check against
+  `get_text("dict")` block density), not a fresh assumption that pdfplumber
+  tables arrive clean.
+- **MuPDF's page rect for a standalone raster image honours the file's own
+  DPI tag.** It is not a fixed 72dpi assumption: the page rect in points is
+  `pixels / (dpi / 72)`, read from the image's own metadata, falling back to
+  a 96dpi assumption when the file carries none (Pillow's own default when a
+  caller saves a PNG without specifying one). Measured on a 200x100px PNG
+  saved at each of 72 / 96 / 150 / 300 dpi and with no tag: the rect comes
+  back 200x100, 150x75, 96x48, 48x24 and — untagged — 150x75 pt, i.e. exactly
+  `px / (dpi / 72)` with 96 assumed. P5's Pillow-based `_image.py` must read
+  `image.info.get("dpi", (96, 96))` to reproduce the same page rect fitz
+  would have reported, not hardcode 72.
+- **`get_images()` lists one entry per *draw*, not one per resource — and
+  `_extract_images_from_page` does not account for that.** An earlier draft of
+  this entry had the mechanism backwards. Measured directly: one image XObject
+  drawn twice on a page (both by two `insert_image(stream=…)` calls and by
+  re-using the first draw's xref) reports as **two** `get_images(full=True)`
+  entries carrying the **same** xref, and `get_image_rects(xref)` returns both
+  rects. So the two calls overlap rather than decompose cleanly into resources
+  and draws. `_extract_images_from_page` loops `get_images` outer and
+  `get_image_rects` inner with no xref de-duplication, so an image drawn N
+  times on one page emits N² image elements. It is latent, not active: no page
+  in the fixture corpus repeats an xref (0 of the first 20 pages of all 30
+  fixture PDFs), which is why it has never shown up. Fixing it is its own
+  change — image elements feed `content_digest`, so it re-pins
+  `tests/test_default_digest.py` — and P5 must not port the quadratic loop
+  across to pypdfium2's differently-shaped image-object API.
+- **pypdfium2 needs disciplined object closing; thread safety is the
+  caller's job, not the library's.** A 300-odd-document open/close sweep in
+  one process threw a spurious "Data format error" re-opening a file that
+  had opened cleanly earlier in the same run — caused by leaving
+  `PdfTextPage` objects unclosed across their parent documents' lifetimes,
+  not by the file. Closing every child object before its parent resolved
+  it. Separately, pypdfium2's own packaged documentation ("Incompatibility
+  with Threading") settles the question the first spike left open: PDFium
+  is not thread-safe, full stop — no two pdfium calls may run concurrently
+  on different threads of one process, *even against different documents*,
+  unless every call is serialised behind one mutex; the 8-thread smoke test
+  that produced no crash earlier is consistent with this (small, fast calls
+  rarely overlap in practice) but was never a safety guarantee. There is no
+  internal lock to rely on; a caller who skips the mutex "would crash or
+  corrupt the process," in the library's own words. This turns out not to
+  bind today regardless, and the check is one grep: neither server imports
+  fitz at all (`api/` for `womblex serve`, `ui/` for `womblex ui` — both only
+  enqueue and read parquet), which is the thing protecting them: their route
+  handlers are sync `def`, so uvicorn runs them in a thread pool, and a
+  single fitz/pdfium call added to a route would be concurrent by default.
+  Beyond that, no module under `src/` constructs a thread,
+  a thread pool or a process pool. The one place extraction actually runs,
+  `cloud/worker.py`, claims and processes one job at a time in a single
+  thread per process, scaling concurrency by running more worker
+  *processes*, never threads inside one. P1/P5 just need to keep it that
+  way — no pdfium call site becomes reachable from more than one thread of
+  the same process. If a future change ever wants in-process thread
+  concurrency over pdfium (a thread pool inside one worker, say), the fix is
+  one process-wide `threading.Lock` around every pdfium call, not per-object
+  isolation — the restriction is process-wide, not per-document.
+
 ## Rejected approaches / dead-ends
 
+- **pdfminer.six's own layout analysis as the permissive text engine — lost on
+  speed.** Rejected in the permissive-dependencies Phase 0 spike on the speed
+  gate (~67x fitz per page; on fidelity to fitz it is the better of the two
+  candidates) in favour of a character-level rebuild over pypdfium2; the
+  measurement is in "Permissive-dependencies Phase 0" above. Re-attempting needs a reason to
+  expect different numbers (a pdfminer release that changes `LAParams`, or a
+  corpus whose reading order its segmentation handles and the rebuild does
+  not), not a preference for native segmentation.
 - **OCR-side table-detection relaxation — do not retry without a new
   discriminator.** Four variants of relaxing the OCR `_table_aware_text` rule
   were tried; all hit the same trade-off cliff — the relaxed rule helps real
