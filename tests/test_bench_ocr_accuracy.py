@@ -19,17 +19,17 @@ skip cleanly otherwise.
 
 from __future__ import annotations
 
-import io
 import json
 import os
 from pathlib import Path
 
-import fitz
 import pytest
 from PIL import Image
 
+from tests._pdf_builders import PdfBuilder
 from womblex.ingest.detect import DocumentProfile, DocumentType
 from womblex.ingest.extract import extract_text
+from womblex.ingest.pdf.types import Rect
 from womblex.utils.metrics import cer, wer
 
 # Engines exercised by every parametrised test. Add new engines here.
@@ -120,14 +120,8 @@ def _image_to_pdf(image_path: Path, output_path: Path) -> Path:
     """Wrap a PNG in a single-page PDF, preserving aspect ratio at _TARGET_W pt."""
     page_w, page_h = _ar_page_size(image_path)
     img = Image.open(image_path).convert("RGB")
-    doc = fitz.open()
-    page = doc.new_page(width=page_w, height=page_h)
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    page.insert_image(fitz.Rect(0, 0, page_w, page_h), stream=buf.getvalue())
-    doc.save(str(output_path))
-    doc.close()
-    return output_path
+    builder = PdfBuilder(output_path).page(page_w, page_h)
+    return builder.image(Rect(0, 0, page_w, page_h), img).save()
 
 
 def _iam_gt(name: str) -> str:

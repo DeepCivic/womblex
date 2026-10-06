@@ -186,17 +186,13 @@ def test_plugin_context_model_scores_candidates(
 
 from pathlib import Path
 
-import fitz
-
+from tests._pdf_builders import PdfBuilder
 from womblex.config import RedactionConfig
 from womblex.redact.stage import _layout_exclude_rects, build_detector, detect_redactions
 
 
 def test_redaction_unknown_layout_name_raises(tmp_path: Path) -> None:
-    pdf = tmp_path / "blank.pdf"
-    doc = fitz.open()
-    doc.new_page()
-    doc.save(pdf)
+    pdf = PdfBuilder(tmp_path / "blank.pdf").page().save()
     with pytest.raises(ValueError, match="pp-doclayout-m"):
         detect_redactions(pdf, 1, build_detector(RedactionConfig()), layout_model="nope")
 

@@ -12,17 +12,17 @@ known ground truth. Tests are grouped by concern:
 
 from __future__ import annotations
 
-import io
 import json
 from pathlib import Path
 
-import fitz
 import numpy as np
 import pytest
 from PIL import Image
 
+from tests._pdf_builders import PdfBuilder
 from womblex.ingest.detect import DocumentProfile, DocumentType, detect_document_type
 from womblex.ingest.extract import extract_text
+from womblex.ingest.pdf.types import Rect
 from womblex.process.chunker import ChunkInput, TextChunk, chunk_batch, create_chunker
 from womblex.redact import RedactionDetector
 
@@ -86,14 +86,8 @@ def _image_to_pdf(
     (e.g. 150×150 pt → ~417×417 px at 200 DPI) to keep wall time low.
     """
     img = Image.open(image_path).convert("RGB")
-    doc = fitz.open()
-    page = doc.new_page(width=page_w, height=page_h)
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    page.insert_image(fitz.Rect(0, 0, page_w, page_h), stream=buf.getvalue())
-    doc.save(str(output_path))
-    doc.close()
-    return output_path
+    builder = PdfBuilder(output_path).page(page_w, page_h)
+    return builder.image(Rect(0, 0, page_w, page_h), img).save()
 
 
 def _funsd_ground_truth(name: str) -> list[str]:
