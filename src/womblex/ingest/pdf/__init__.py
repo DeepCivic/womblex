@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from womblex.ingest.pdf.types import Document
 
 #: Backend name to the module providing ``open_document(path)``.
-_BACKENDS = {"fitz": "womblex.ingest.pdf._fitz"}
+_BACKENDS = {"fitz": "womblex.ingest.pdf._fitz", "pdfium": "womblex.ingest.pdf._pdfium_doc"}
 
 #: The backend used when a caller names none. F1 in
 #: `docs/plan-permissive-deps.md` flips this to the permissive backend.

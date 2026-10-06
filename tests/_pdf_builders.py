@@ -35,10 +35,15 @@ class PdfBuilder:
         self._height: float | None = None
         self._saved = False
 
-    def page(self, width: float = 595, height: float = 842) -> Self:
+    def page(self, width: float = 595, height: float = 842, *, rotation: int = 0) -> Self:
+        """Start a page; *rotation* is its ``/Rotate``, drawing stays unrotated."""
         if self._height is not None:
             self._canvas.showPage()
-        self._canvas.setPageSize((width, height))
+        # reportlab swaps a quarter-turned page's size; pre-swap so the
+        # MediaBox stays width x height.
+        quarter = rotation % 180 == 90
+        self._canvas.setPageSize((height, width) if quarter else (width, height))
+        self._canvas.setPageRotation(rotation)
         self._height = height
         return self
 
@@ -53,7 +58,23 @@ class PdfBuilder:
         """A rectangle filled and stroked (1pt) in *colour*."""
         self._canvas.setStrokeColorRGB(*colour)
         self._canvas.setFillColorRGB(*colour)
+        self._canvas.setLineWidth(1)
         self._canvas.rect(rect.x0, self._flip(rect.y1), rect.width, rect.height, stroke=1, fill=1)
+        return self
+
+    def line(self, x0: float, y0: float, x1: float, y1: float, *, width: float = 1) -> Self:
+        """A black stroked line."""
+        self._canvas.setStrokeColorRGB(0, 0, 0)
+        self._canvas.setLineWidth(width)
+        self._canvas.line(x0, self._flip(y0), x1, self._flip(y1))
+        return self
+
+    def text_field(self, name: str, value: str, rect: Rect) -> Self:
+        """An AcroForm text field holding *value*."""
+        self._canvas.acroForm.textfield(
+            name=name, value=value, x=rect.x0, y=self._flip(rect.y1),
+            width=rect.width, height=rect.height,
+        )
         return self
 
     def image(self, rect: Rect, image: Image) -> Self:

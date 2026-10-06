@@ -18,6 +18,7 @@ Two conventions the adapters own, so no caller has to:
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, NamedTuple, Protocol, Self
 
@@ -74,6 +75,38 @@ class Rect:
         """Build from a 4-tuple, normalising the corners."""
         x0, y0, x1, y1 = values
         return cls(min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
+
+
+#: MuPDF's ``fz_round_rect`` tolerance: an edge within this of a whole pixel
+#: rounds to it, so 595.2pt at 150dpi is 1240px rather than 1241.
+_ROUND_TOLERANCE = 0.001
+
+
+def render_box(page: Rect, dpi: int, clip: Rect | None = None) -> tuple[int, int, int, int]:
+    """The pixel box ``(x0, y0, x1, y1)`` a render of *page* at *dpi* covers.
+
+    MuPDF's rule (``fz_round_rect``), which every backend reproduces so a
+    render's shape does not depend on the backend: the page is rounded up to
+    whole pixels and a clip is rounded outward, both within a 0.001px
+    tolerance, then cut to the page. A clip off the page leaves an empty axis
+    (``x1 <= x0`` or ``y1 <= y0``) rather than raising.
+    """
+    scale = dpi / 72
+    width, height = _round_up(page.width * scale), _round_up(page.height * scale)
+    if clip is None:
+        return 0, 0, width, height
+    return (
+        max(0, _round_down(clip.x0 * scale)), max(0, _round_down(clip.y0 * scale)),
+        min(width, _round_up(clip.x1 * scale)), min(height, _round_up(clip.y1 * scale)),
+    )
+
+
+def _round_down(value: float) -> int:
+    return math.floor(value + _ROUND_TOLERANCE)
+
+
+def _round_up(value: float) -> int:
+    return math.ceil(value - _ROUND_TOLERANCE)
 
 
 class Word(NamedTuple):
