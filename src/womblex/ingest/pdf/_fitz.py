@@ -69,11 +69,6 @@ class FitzPage:
         self._page = page
 
     @property
-    def native(self) -> fitz.Page:
-        """The wrapped page, for callers not yet ported to the seam (P3)."""
-        return self._page
-
-    @property
     def number(self) -> int:
         return int(self._page.number)
 
@@ -231,11 +226,6 @@ class FitzDocument:
     def wrap(cls, doc: fitz.Document) -> FitzDocument:
         """Present an already-open fitz document, for test builders."""
         return cls(native=doc)
-
-    @property
-    def native(self) -> fitz.Document:
-        """The wrapped document, for callers not yet ported to the seam (P3)."""
-        return self._doc
 
     @property
     def page_count(self) -> int:

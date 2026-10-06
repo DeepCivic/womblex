@@ -11,7 +11,7 @@ import logging
 import re
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
 
@@ -71,17 +71,6 @@ def _page_to_gray(page: Page, dpi: int = 150) -> np.ndarray:
     return cv2.cvtColor(page.render(dpi=dpi), cv2.COLOR_RGB2GRAY)
 
 
-def _pixmap_to_array(pix: Any, *, drop_alpha: bool = False) -> np.ndarray:
-    """Convert a PyMuPDF Pixmap to a numpy array, optionally dropping alpha.
-
-    Still used by `strategies_scanned`; goes when P3b moves it onto `render`.
-    """
-    img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
-    if drop_alpha and pix.n == 4:
-        return img[:, :, :3]
-    return img
-
-
 def _avg_ocr_confidence(results: list[tuple], *, scale: float = 1.0) -> float:
     """Mean confidence across non-empty OCR results.
 
@@ -95,7 +84,7 @@ def _avg_ocr_confidence(results: list[tuple], *, scale: float = 1.0) -> float:
 
 
 def _normalise_rect(rect: Rect, page_width: float, page_height: float) -> Position:
-    """Convert a PyMuPDF Rect to normalised 0-1 coordinates."""
+    """Convert a `Rect` to normalised 0-1 coordinates."""
     return Position(
         x=rect.x0 / page_width if page_width else 0.0,
         y=rect.y0 / page_height if page_height else 0.0,
@@ -512,10 +501,9 @@ def _apply_normalisation_and_warnings(
         recovered = False
         if doc is not None and page.method == "native" and 0 <= page.page_number < doc.page_count:
             try:
-                from womblex.ingest.pdf import native
                 from womblex.ingest.strategies_scanned import _ocr_page
                 ocr_text, _conf, _steps, _native_order, _regions, _pix = _ocr_page(
-                    native(doc[page.page_number]), dpi=dpi, lang=lang,
+                    doc[page.page_number], dpi=dpi, lang=lang,
                     engine=engine, engine_options=engine_options,
                 )
                 if ocr_text.strip():

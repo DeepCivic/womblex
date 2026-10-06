@@ -50,7 +50,6 @@ from womblex.ingest.extract import (
 )
 from womblex.ingest.grid_projection import extract_page_text
 from womblex.ingest.page_profile import PageProfile, qualify_for_spreadsheet_print
-from womblex.ingest.pdf import native
 from womblex.ingest.views import table_to_element
 
 if TYPE_CHECKING:
@@ -135,7 +134,7 @@ def _apply_native_page(
 
     native_words = page.words(dehyphenate=False)
     sub_blocks, sub_steps = _ocr_image_regions(
-        native(page), native_words, dpi, lang,
+        page, native_words, dpi, lang,
         engine=engine, engine_options=engine_options or {},
     )
     if sub_blocks:
@@ -165,9 +164,8 @@ def _apply_ocr_page(
         _ocr_page,
     )
 
-    fitz_page = native(page)  # until P3b ports strategies_scanned
     text, conf, steps, native_order, regions, pix_dims = _ocr_page(
-        fitz_page, dpi, lang, engine, engine_options,
+        page, dpi, lang, engine, engine_options,
     )
     accum.text = text
     accum.method = "ocr"
@@ -182,11 +180,11 @@ def _apply_ocr_page(
     # docs/decisions.md “Table-cell reconstruction on OCR pages”.
     consumed: list = []
     if native_order:
-        accum.blocks.extend(_markdown_page_block(fitz_page, text, conf))
+        accum.blocks.extend(_markdown_page_block(page, text, conf))
         page_tables: list[TableData] = []
     else:
         page_blocks, page_tables, consumed = _layout_blocks_and_tables(
-            fitz_page, dpi, text, conf,
+            page, dpi, text, conf,
             ocr_regions=regions, ocr_pix_dims=pix_dims,
             # A2: deskew rotated the OCR input, so the region coords no longer
             # share the layout render's frame — refuse reconstruction there.
@@ -393,7 +391,7 @@ def extract_with_plan(
             qualify_for_spreadsheet_print(profiles, filename, **sp_qualifier_kwargs):
         from womblex.ingest.spreadsheet_print import extract_spreadsheet_print
         spreadsheet_tables, document_metadata = extract_spreadsheet_print(
-            native(doc), metadata_location=sp_loc,
+            doc, metadata_location=sp_loc,
         )
         is_spreadsheet_print = bool(spreadsheet_tables)
 

@@ -118,7 +118,7 @@ class TestLayoutPassPlumbing:
     def test_regions_are_optional(self, blank_page: fitz.Page) -> None:
         """Callers without regions (legacy, tests) keep today's behaviour."""
         blocks, tables, consumed = _layout_blocks_and_tables(
-            blank_page, 200, "page text", 90.0,
+            FitzPage(blank_page), 200, "page text", 90.0,
         )
         # With no cell source there is nothing to reconstruct, so the fallback
         # still collapses the page — table content included — onto one block.
@@ -133,7 +133,7 @@ class TestLayoutPassPlumbing:
         pix = blank_page.get_pixmap(dpi=200)
         with caplog.at_level(logging.WARNING, logger="womblex.ingest.strategies_scanned"):
             _blocks, tables, _consumed = _layout_blocks_and_tables(
-                blank_page, 200, "page text", 90.0,
+                FitzPage(blank_page), 200, "page text", 90.0,
                 ocr_regions=[_region(10, 10, 100, 40)],
                 ocr_pix_dims=(int(pix.width), int(pix.height)),
             )
@@ -148,7 +148,7 @@ class TestLayoutPassPlumbing:
         pix = blank_page.get_pixmap(dpi=200)
         with caplog.at_level(logging.DEBUG, logger="womblex.ingest.strategies_scanned"):
             _layout_blocks_and_tables(
-                blank_page, 200, "page text", 90.0,
+                FitzPage(blank_page), 200, "page text", 90.0,
                 ocr_regions=[_region(10, 10, 100, 40)],
                 ocr_pix_dims=(int(pix.width), int(pix.height)),
             )
@@ -163,7 +163,7 @@ class TestLayoutPassPlumbing:
         """Unverifiable is treated as non-comparable: regions need their dims."""
         with caplog.at_level(logging.WARNING, logger="womblex.ingest.strategies_scanned"):
             _blocks, tables, _consumed = _layout_blocks_and_tables(
-                blank_page, 200, "page text", 90.0,
+                FitzPage(blank_page), 200, "page text", 90.0,
                 ocr_regions=[_region(10, 10, 100, 40)],
             )
         assert "dropping cell regions" in caplog.text
@@ -175,7 +175,7 @@ class TestLayoutPassPlumbing:
         """Non-comparable coordinate spaces lose the inputs, never mis-bin."""
         with caplog.at_level(logging.WARNING, logger="womblex.ingest.strategies_scanned"):
             _blocks, tables, _consumed = _layout_blocks_and_tables(
-                blank_page, 200, "page text", 90.0,
+                FitzPage(blank_page), 200, "page text", 90.0,
                 ocr_regions=[_region(10, 10, 100, 40)],
                 ocr_pix_dims=(17, 23),
             )
@@ -444,7 +444,7 @@ class TestLayoutPassReconstruction:
 
     def _run(self, page: fitz.Page, regions: list[OCRRegionResult]):
         return _layout_blocks_and_tables(
-            page, 200, "whole page OCR text", 90.0,
+            FitzPage(page), 200, "whole page OCR text", 90.0,
             ocr_regions=regions, ocr_pix_dims=self.DIMS,
         )
 
@@ -514,7 +514,7 @@ class TestLayoutPassReconstruction:
         """A2 — deskew rotated the OCR input out of the layout render's frame."""
         with caplog.at_level(logging.DEBUG, logger="womblex.ingest.strategies_scanned"):
             blocks, tables, consumed = _layout_blocks_and_tables(
-                blank_page, 200, "whole page OCR text", 90.0,
+                FitzPage(blank_page), 200, "whole page OCR text", 90.0,
                 ocr_regions=_grid_regions() + _narrative_regions(),
                 ocr_pix_dims=self.DIMS,
                 page_deskewed=True,

@@ -25,6 +25,7 @@ from womblex.redact.detector import RedactionDetector, RedactionInfo
 if TYPE_CHECKING:
     from womblex.ingest.elements import Element
     from womblex.ingest.extract import ExtractionResult, PageResult
+    from womblex.ingest.pdf.types import Page
     from womblex.process.chunker import TextChunk
 
 logger = logging.getLogger(__name__)
@@ -77,7 +78,7 @@ def detect_redactions(
 
     For each page:
 
-    - First check ``page.get_drawings()`` for filled near-black rectangles
+    - First check ``page.drawings()`` for filled near-black rectangles
       (matches native-PDF vector-drawn redactions; no area threshold).
     - If none found, rasterise the page at *dpi* and run the CV2 contour
       detector (handles raster overlays and scanned pages). When
@@ -106,7 +107,7 @@ def detect_redactions(
     Returns:
         RedactionReport with per-page detection results.
     """
-    import fitz
+    from womblex.ingest.pdf import open_document
 
     if use_layout_filter:
         # A config error (unknown model name) must surface, not read as a
@@ -118,31 +119,27 @@ def detect_redactions(
 
     report = RedactionReport()
     try:
-        doc = fitz.open(str(path))
-        pages_to_scan = min(page_count, len(doc))
-        scale = dpi / 72.0  # PDF coord (72 DPI) → pixel coord at *dpi*
-        for page_num in range(pages_to_scan):
-            page = doc[page_num]
+        with open_document(path) as doc:
+            pages_to_scan = min(page_count, len(doc))
+            scale = dpi / 72.0  # PDF coord (72 DPI) → pixel coord at *dpi*
+            for page_num in range(pages_to_scan):
+                page = doc[page_num]
 
-            vector_redactions = _detect_vector_redactions(page, page_num, scale)
-            if vector_redactions:
-                report.page_redactions[page_num] = vector_redactions
-                continue
+                vector_redactions = _detect_vector_redactions(page, page_num, scale)
+                if vector_redactions:
+                    report.page_redactions[page_num] = vector_redactions
+                    continue
 
-            pix = page.get_pixmap(dpi=dpi)
-            img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(
-                pix.height, pix.width, pix.n
-            )
-            exclude_rects = (
-                _layout_exclude_rects(img, layout_model, layout_options)
-                if use_layout_filter else None
-            )
-            raster_redactions = detector.detect(
-                img, page=page_num, exclude_rects=exclude_rects,
-            )
-            if raster_redactions:
-                report.page_redactions[page_num] = raster_redactions
-        doc.close()
+                img = page.render(dpi=dpi)
+                exclude_rects = (
+                    _layout_exclude_rects(img, layout_model, layout_options)
+                    if use_layout_filter else None
+                )
+                raster_redactions = detector.detect(
+                    img, page=page_num, exclude_rects=exclude_rects,
+                )
+                if raster_redactions:
+                    report.page_redactions[page_num] = raster_redactions
     except Exception as e:
         logger.warning("Redaction detection failed for %s: %s", path, e)
 
@@ -187,21 +184,19 @@ def _layout_exclude_rects(
     return rects
 
 
-def _detect_vector_redactions(page, page_num: int, scale: float) -> list[RedactionInfo]:
-    """Enumerate filled near-black rectangles from ``page.get_drawings()``.
+def _detect_vector_redactions(page: Page, page_num: int, scale: float) -> list[RedactionInfo]:
+    """Enumerate filled near-black rectangles from ``page.drawings()``.
 
     Bboxes converted from PDF coords (72 DPI) to pixel coords using *scale*
     so all ``RedactionInfo.bbox`` values share one coord system regardless of
     which detection path produced them.
     """
     out: list[RedactionInfo] = []
-    for d in page.get_drawings():
-        if d.get("type") not in ("f", "fs", "sf"):
+    for d in page.drawings():
+        if not d.filled or not _is_near_black_fill(d.fill):
             continue
-        if not _is_near_black_fill(d.get("fill")):
-            continue
-        rect = d.get("rect")
-        if rect is None or rect.width < _VECTOR_MIN_WIDTH_PT or rect.height < _VECTOR_MIN_HEIGHT_PT:
+        rect = d.rect
+        if rect.width < _VECTOR_MIN_WIDTH_PT or rect.height < _VECTOR_MIN_HEIGHT_PT:
             continue
         x1 = int(rect.x0 * scale)
         y1 = int(rect.y0 * scale)

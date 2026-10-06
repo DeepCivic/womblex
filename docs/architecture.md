@@ -33,9 +33,9 @@ Input File
 
 | Signal | Method | Drives |
 |--------|--------|--------|
-| Text layer coverage | `page.get_text()` length per page | Native vs scanned split |
+| Text layer coverage | `page.plain_text()` length per page | Native vs scanned split |
 | Table coverage | Regex on text + `page.find_tables()`, per-page count | STRUCTURED (≥80%) or structured content flag |
-| Image presence | `page.get_images()` | Scanned/hybrid flag |
+| Image presence | `page.images()` | Scanned/hybrid flag |
 | Ruled lines | Morphological horizontal line detection | Handwriting signal |
 | Glyph regularity | Connected-component height variance | Typed vs handwritten |
 | Stroke width variance | Skeleton distance-transform CV | Typed vs handwritten |
@@ -89,9 +89,9 @@ Defensive classification: uncertain documents route to `UNKNOWN` rather than a w
 
 ### 2. Ingest — Extraction
 
-`ingest/pdf/` is the PDF seam the permissive-dependencies plan replaces PyMuPDF behind (`docs/plan-permissive-deps.md`, P1 onward). `ingest/pdf/types.py` holds the vocabulary — `Rect`, `Word`, `Span`/`Line`/`Block`, `FoundTable`, `Drawing`, `Widget`, `PageImage`, and the `Page` and `Document` protocols — with no third-party imports, so a backend is only loaded when a document is opened. The types are deliberately not fitz-shaped: a backend adapter converts to top-left coordinates, returns dataclasses rather than dicts and tuples, and rasterises to an array rather than a pixmap. `Word` is the one exception, kept as an 8-field NamedTuple because `grid_projection` slices it positionally. `open_document(path, backend=…)` is the single entry point and resolves its backend through `_BACKENDS` at call time; `_fitz.py` is the first adapter, and becomes the only module in `src/` importing fitz once P2/P3 finish the port.
+`ingest/pdf/` is the PDF seam the permissive-dependencies plan replaces PyMuPDF behind (`docs/plan-permissive-deps.md`, P1 onward). `ingest/pdf/types.py` holds the vocabulary — `Rect`, `Word`, `Span`/`Line`/`Block`, `FoundTable`, `Drawing`, `Widget`, `PageImage`, and the `Page` and `Document` protocols — with no third-party imports, so a backend is only loaded when a document is opened. The types are deliberately not fitz-shaped: a backend adapter converts to top-left coordinates, returns dataclasses rather than dicts and tuples, and rasterises to an array rather than a pixmap. `Word` is the one exception, kept as an 8-field NamedTuple because `grid_projection` slices it positionally. `open_document(path, backend=…)` is the single entry point and resolves its backend through `_BACKENDS` at call time; `_fitz.py` is the first adapter and, now the extractors are ported, the only module in `src/` importing fitz.
 
-`extract.py` defines the `ExtractionStrategy` and `PathExtractionStrategy` protocols, shared helpers, and the `extract_text()` dispatcher. PDFs route via the per-page orchestrator (`ingest/orchestrator.py` + `ingest/page_profile.py`); the per-doc `Native*` / `Scanned*` / `Hybrid` / `Structured` strategy classes have been removed and their bodies inlined into the orchestrator's per-page operations (`_apply_native_page`, `_apply_ocr_page`). Standalone images take the orchestrator path too — `fitz` opens one as a single-page document, so it reaches the same `_apply_ocr_page` dispatch a scanned PDF page does; `get_extractor()` is reached only by the path-based formats. OCR primitives live in `strategies_scanned.py` and the file-format extractors in `strategies_file.py` (DOCX, plain text) and `markdown.py` (Markdown); `strategies.py` re-exports for back-compat. `spreadsheet.py` handles CSV and Excel files.
+`extract.py` defines the `ExtractionStrategy` and `PathExtractionStrategy` protocols, shared helpers, and the `extract_text()` dispatcher. PDFs route via the per-page orchestrator (`ingest/orchestrator.py` + `ingest/page_profile.py`); the per-doc `Native*` / `Scanned*` / `Hybrid` / `Structured` strategy classes have been removed and their bodies inlined into the orchestrator's per-page operations (`_apply_native_page`, `_apply_ocr_page`). Standalone images take the orchestrator path too — the PDF seam opens one as a single-page document, so it reaches the same `_apply_ocr_page` dispatch a scanned PDF page does; `get_extractor()` is reached only by the path-based formats. OCR primitives live in `strategies_scanned.py` and the file-format extractors in `strategies_file.py` (DOCX, plain text) and `markdown.py` (Markdown); `strategies.py` re-exports for back-compat. `spreadsheet.py` handles CSV and Excel files.
 
 `extract_text()` logs the strategy selection (`doc, type, confidence, strategy`) at INFO level, then always returns `list[ExtractionResult]`. PDF, DOCX, and spreadsheet paths each return a single-element list (one result per source file). The list shape is retained for call-site symmetry. Spreadsheet cells live as `kind='sheet_cell'` elements on the single result; `_classify_sheet` survives as a detection-time metadata helper but no longer routes extraction.
 
@@ -157,7 +157,7 @@ CLI: `womblex ingest-abn <file-or-dir> -o <output_dir> [--no-md5]`
 
 ### 6. Redact — Post-Extraction Redaction
 
-`redact/stage.py` runs as a separate operation after extraction. Detection is vector-first: filled near-black rectangles from the page's `get_drawings()`. Only a page with none falls back to rendering it and running the CV2-based `RedactionDetector`, excluding layout-detected figure, chart and form regions (`use_layout_filter`, layout model `redaction.layout_model`). It then applies the configured mode:
+`redact/stage.py` runs as a separate operation after extraction. Detection is vector-first: filled near-black rectangles from the page's `drawings()`. Only a page with none falls back to rendering it and running the CV2-based `RedactionDetector`, excluding layout-detected figure, chart and form regions (`use_layout_filter`, layout model `redaction.layout_model`). It then applies the configured mode:
 
 - `flag` — sets `has_redaction=True` on affected chunks (no text change)
 - `blackout` — prepends `<REDACTED>` to affected page text

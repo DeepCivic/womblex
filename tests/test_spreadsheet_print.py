@@ -148,7 +148,7 @@ class TestMasterIndex:
         doc = fitz.open(str(_MASTER_INDEX))
         try:
             tables, doc_meta = extract_spreadsheet_print(
-                doc, metadata_location="both",
+                FitzDocument.wrap(doc), metadata_location="both",
             )
             return tables, doc_meta
         finally:
@@ -202,7 +202,7 @@ class TestSchedulePart2b:
         doc = fitz.open(str(_SCHEDULE_2B))
         try:
             tables, doc_meta = extract_spreadsheet_print(
-                doc, metadata_location="both",
+                FitzDocument.wrap(doc), metadata_location="both",
             )
             return tables, doc_meta
         finally:
@@ -225,7 +225,7 @@ class TestMetadataLocation:
         doc = fitz.open(str(_SCHEDULE_2B))
         try:
             tables, doc_meta = extract_spreadsheet_print(
-                doc, metadata_location="table",
+                FitzDocument.wrap(doc), metadata_location="table",
             )
             assert tables[0].context  # populated
             assert doc_meta == {}      # empty
@@ -236,7 +236,7 @@ class TestMetadataLocation:
         doc = fitz.open(str(_SCHEDULE_2B))
         try:
             tables, doc_meta = extract_spreadsheet_print(
-                doc, metadata_location="document",
+                FitzDocument.wrap(doc), metadata_location="document",
             )
             assert tables[0].context == {}  # empty
             assert doc_meta                  # populated
@@ -247,6 +247,6 @@ class TestMetadataLocation:
         doc = fitz.open(str(_SCHEDULE_2B))
         try:
             with pytest.raises(ValueError):
-                extract_spreadsheet_print(doc, metadata_location="invalid")
+                extract_spreadsheet_print(FitzDocument.wrap(doc), metadata_location="invalid")
         finally:
             doc.close()
