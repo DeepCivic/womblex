@@ -222,11 +222,6 @@ class FitzDocument:
     def __init__(self, path: Path | None = None, *, native: fitz.Document | None = None) -> None:
         self._doc = native if native is not None else fitz.open(str(path))
 
-    @classmethod
-    def wrap(cls, doc: fitz.Document) -> FitzDocument:
-        """Present an already-open fitz document, for test builders."""
-        return cls(native=doc)
-
     @property
     def page_count(self) -> int:
         return int(self._doc.page_count)

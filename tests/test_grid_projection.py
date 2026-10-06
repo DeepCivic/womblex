@@ -7,16 +7,18 @@ suite and is run separately.
 
 from __future__ import annotations
 
-import fitz
+from collections.abc import Sequence
+
 import pytest
 
+from tests._pdf_builders import PdfBuilder
 from womblex.ingest.grid_projection import (
     ColumnRegion,
     extract_page_text,
     project_to_columns,
     render_spatial_text,
 )
-from womblex.ingest.pdf._fitz import FitzDocument, FitzPage
+from womblex.ingest.pdf.types import Document
 
 # ---------------------------------------------------------------------------
 # project_to_columns — algorithm-level tests using fake word tuples
@@ -166,40 +168,51 @@ class TestRenderSpatialText:
 
 
 # ---------------------------------------------------------------------------
-# extract_page_text — integration with PyMuPDF programmatic PDFs
+# extract_page_text — integration with programmatic PDFs
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture
-def letter_page():
-    doc = fitz.open()
-    page = doc.new_page(width=612, height=792)
-    yield doc, page
-    doc.close()
+def letter_doc(tmp_path):
+    """Build a US Letter one-page document from ``(x, y, text)`` lines."""
+    opened: list[Document] = []
+
+    def build(lines: Sequence[tuple[float, float, str]] = ()) -> Document:
+        builder = PdfBuilder(tmp_path / "letter.pdf").page(612, 792)
+        for x, y, text in lines:
+            builder.text(x, y, text)
+        opened.append(builder.open())
+        return opened[-1]
+
+    yield build
+    for doc in opened:
+        doc.close()
+
+
+def _columns(left: str, right: str, rows: int, step: int) -> list[tuple[float, float, str]]:
+    return [
+        line
+        for i in range(rows)
+        for line in ((72, 100 + i * step, left.format(i)), (340, 100 + i * step, right.format(i)))
+    ]
 
 
 class TestExtractPageText:
-    def test_empty_page_returns_empty_string(self, letter_page) -> None:
-        doc, _ = letter_page
-        assert extract_page_text(FitzPage(doc[0])) == ""
+    def test_empty_page_returns_empty_string(self, letter_doc) -> None:
+        assert extract_page_text(letter_doc()[0]) == ""
 
-    def test_single_column_page_falls_back_to_get_text(self, letter_page) -> None:
-        _, page = letter_page
-        for i in range(20):
-            page.insert_text((72, 100 + i * 16), f"single column line number {i}", fontsize=11)
-        output = extract_page_text(FitzPage(page))
+    def test_single_column_page_falls_back_to_get_text(self, letter_doc) -> None:
+        doc = letter_doc([(72, 100 + i * 16, f"single column line number {i}") for i in range(20)])
+        output = extract_page_text(doc[0])
         for i in range(20):
             assert f"line number {i}" in output
         lines = [f"line number {i}" for i in range(20)]
         positions = [output.index(line) for line in lines]
         assert positions == sorted(positions)
 
-    def test_two_column_page_uses_grid_projection(self, letter_page) -> None:
-        _, page = letter_page
-        for i in range(10):
-            page.insert_text((72, 100 + i * 18), f"LEFT{i:02d}", fontsize=11)
-            page.insert_text((340, 100 + i * 18), f"RIGHT{i:02d}", fontsize=11)
-        output = extract_page_text(FitzPage(page))
+    def test_two_column_page_uses_grid_projection(self, letter_doc) -> None:
+        doc = letter_doc(_columns("LEFT{:02d}", "RIGHT{:02d}", 10, 18))
+        output = extract_page_text(doc[0])
 
         for i in range(10):
             assert f"LEFT{i:02d}" in output
@@ -212,12 +225,9 @@ class TestExtractPageText:
             "fully consumed before right column starts"
         )
 
-    def test_two_column_page_preserves_within_column_order(self, letter_page) -> None:
-        _, page = letter_page
-        for i in range(8):
-            page.insert_text((72, 100 + i * 18), f"L{i}", fontsize=11)
-            page.insert_text((340, 100 + i * 18), f"R{i}", fontsize=11)
-        output = extract_page_text(FitzPage(page))
+    def test_two_column_page_preserves_within_column_order(self, letter_doc) -> None:
+        doc = letter_doc(_columns("L{}", "R{}", 8, 18))
+        output = extract_page_text(doc[0])
         left_positions = [output.index(f"L{i}") for i in range(8)]
         right_positions = [output.index(f"R{i}") for i in range(8)]
         assert left_positions == sorted(left_positions)
@@ -249,14 +259,10 @@ class TestNativeExtractorIntegration:
             stroke_consistency=None,
             confidence=0.9,
         )
-        return extract_pdf_with_plan(FitzDocument.wrap(doc), profile)
+        return extract_pdf_with_plan(doc, profile)
 
-    def test_native_extractor_handles_two_column_page(self, letter_page) -> None:
-        doc, page = letter_page
-        for i in range(8):
-            page.insert_text((72, 100 + i * 18), f"COL_A_line_{i}", fontsize=11)
-            page.insert_text((340, 100 + i * 18), f"COL_B_line_{i}", fontsize=11)
-
+    def test_native_extractor_handles_two_column_page(self, letter_doc) -> None:
+        doc = letter_doc(_columns("COL_A_line_{}", "COL_B_line_{}", 8, 18))
         result = self._extract_native(doc)
 
         assert len(result.pages) == 1
@@ -268,11 +274,8 @@ class TestNativeExtractorIntegration:
         first_b = min(text.index(f"COL_B_line_{i}") for i in range(8))
         assert last_a < first_b
 
-    def test_native_extractor_unchanged_on_single_column(self, letter_page) -> None:
-        doc, page = letter_page
-        for i in range(10):
-            page.insert_text((72, 100 + i * 16), f"single body line {i}", fontsize=11)
-
+    def test_native_extractor_unchanged_on_single_column(self, letter_doc) -> None:
+        doc = letter_doc([(72, 100 + i * 16, f"single body line {i}") for i in range(10)])
         result = self._extract_native(doc)
         text = result.pages[0].text
         for i in range(10):
