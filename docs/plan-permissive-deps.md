@@ -1,6 +1,6 @@
 # Permissive dependencies — plan
 
-*Status: in progress (2026-10). L1 has shipped (#130), the README layout step is done, and L2 is done. Fresh accuracy and benchmark runs wait on the revision of the womblex-collection ground-truth files, so every step gated on a GT-scored report waits with them. Each merge updates this document's merge list as it lands, and the document is retired into `decisions.md` once F2 ships.*
+*Status: in progress (2026-10). L1 has shipped (#130), the README layout step is done, and L2 is done. The Phase 0 spike is done (scratch only; outcome in `decisions.md`). H-B's between-backend half has landed in womblex-benchmark, publishing `docs/accuracy/BACKEND_PARITY.md`; its CER-against-transcripts half still waits on the ground-truth revision, as does every other step gated on a GT-scored report — L1-B and F1-B's regeneration, and those only. Everything else is deliverable now: the P2/P3 identity gates read H-B, which runs today, so the critical path is P1, D1 (approval), the three ports, P4 to P7, then P8/F1/F2, with L3 independent of all of them. Each merge updates this document's merge list as it lands, and the document is retired into `decisions.md` once F2 ships.*
 
 ## Context
 Womblex is Apache-2.0. Two of its core dependencies are licensed AGPL-3.0, with a paid commercial licence as the only alternative:
@@ -58,19 +58,19 @@ Nothing in `src/` writes a PDF. The test builders in both repositories do.
 
 The merges are listed below. W is womblex, B is womblex-benchmark (a paired merge), and an approval tag means the merge edits `pyproject.toml` and needs human sign-off.
 
-### Phase 0 — spike (scratch only, nothing merged)
-Check these against the vendored fixtures and the womblex-collection PDFs before the seam's shape is fixed. Record the outcome in `decisions.md`, under Rejected approaches if a path fails.
+### Phase 0 — spike. Done (scratch only, nothing merged).
+Checked against the vendored fixtures and the womblex-collection PDFs before the seam's shape is fixed. Outcome recorded in [`decisions.md`](decisions.md#permissive-dependencies-phase-0--pypdfium2-over-pdfminer-for-the-text-engine). Reversed the plan's working assumption: pypdfium2's character-rebuild is the P6 text-engine candidate, not pdfminer's native `LAParams` segmentation, which misses the speed gate by ~67x — on fidelity to fitz pdfminer is the better of the two, so P6 owns real segmentation work. pdfplumber tables are faster than fitz's but no better calibrated. Two of the three mechanism claims are settled as stated; the third came back the other way, and `get_images` turns out to list draws rather than resources, which leaves a latent quadratic duplication in `_extract_images_from_page` for P5 not to port. On threading: PDFium is not thread-safe (confirmed from pypdfium2's own docs, not just measurement) and needs a mutex around every call if ever shared across threads in one process — moot for now, since `womblex serve` never calls fitz/pdfium directly and `cloud/worker.py` is already single-threaded per process. P1/P5 just need to keep it that way.
 
-- **Text engine, library-native first.** Compare against fitz `words` and `blocks`:
+- **Text engine, library-native first.** Compared against fitz `words` and `blocks`:
   - pdfminer.six's own layout analysis (`LAParams`: `LTTextLine` and `LTTextBox`, reached through pdfplumber);
   - lines and blocks rebuilt from pypdfium2 characters (`FPDFText_*` boxes, size, weight).
 
-  Measure between-backend CER, paragraph-block counts and wall time per page. pdfminer's segmentation is the default because the library does it natively. Rebuilding segmentation in womblex is only justified if pdfminer misses the speed gate.
+  Measured between-backend CER and wall time per page over 76 native-text pages. pdfminer's segmentation was expected to be the default since the library does it natively; it tracks fitz closely (median CER 0.010) but costs 67x fitz per page, so the speed gate rejected it (see `decisions.md` for the table).
 - **Tables.** pdfplumber's `TableFinder` (lines and text strategies) against `fitz.find_tables`: table counts and shapes on table pages, and time per page. `page_profile` calls `find_tables` on every page, so timing matters.
-- **Unverified mechanism claims, to settle by measurement:**
+- **Unverified mechanism claims, settled by measurement:**
   - MuPDF's page rect for a PNG or JPEG, with and without a dpi tag;
-  - whether `get_images` lists image resources rather than drawn images;
-  - whether PDFium is safe to call from `womblex serve`'s threads.
+  - whether `get_images` lists image resources rather than drawn images — **settled: draws**, the opposite of the assumption, and `_extract_images_from_page` emits N² elements for an image drawn N times on a page (latent; no fixture triggers it). See `decisions.md`.
+  - whether PDFium is safe to call from `womblex serve`'s threads — **settled: no**, a process-wide mutex is required for any in-process thread concurrency over pdfium (per pypdfium2's own docs); not a live risk today since extraction only ever runs single-threaded in `cloud/worker.py`. See `decisions.md`.
 
 ### Layout
 - **L1 (W). Shipped (#130).** `PPDocLayoutAnalyzer` in `ingest/layout_onnx.py`, the model under `_models/pp-doclayout-m/`, registered as the default of the registry's layout slot (`pp-doclayout-m`). Two follow-ups, which ride with L2:
@@ -98,13 +98,13 @@ Check these against the vendored fixtures and the womblex-collection PDFs before
   - Regenerate `EXTRACTION.md` and `REDACTION_HANDLING.md`, and spot-check exclusion area on the 02737-class scanned forms.
 
 ### PyMuPDF
-- **H-B (B), first.** A backend-diff harness. It extracts the womblex fixtures and the womblex-collection with two womblex builds or two backends, and compares:
-  - open failures, doc type, `PageProfile` fields and per-page plan operation;
-  - element kinds and counts, `content_digest`, tables, form fields and vector redactions;
+- **H-B (B), first. Between-backend half landed** (`accuracy/backend_parity.py` + `accuracy/test_backend_parity.py` in womblex-benchmark, publishing `docs/accuracy/BACKEND_PARITY.md`). A backend-diff harness. It extracts the womblex fixtures and the womblex-collection with two womblex builds or two backends, and compares:
+  - open failures, page count, doc type, every `PageProfile` field (the page rect included) and per-page plan operation;
+  - element kinds and counts, `content_digest`, table shapes, form fields and the full per-page geometry of every detected redaction;
   - CER between the two, and against transcripts;
-  - timing.
+  - timing, split by phase.
 
-  It writes `BACKEND_PARITY.md`. It lands first because it is also the identity gate for P2 and P3, which keeps any scoring against the collection inside the benchmark. The between-backend comparisons need no ground truth and can run now; CER against transcripts waits on the ground-truth revision.
+  It writes `BACKEND_PARITY.md`. It lands first because it is also the identity gate for P2 and P3, which keeps any scoring against the collection inside the benchmark. The between-backend comparisons need no ground truth and can run now; CER against transcripts waits on the ground-truth revision. **Landed now:** every axis above except CER (no second backend exists yet to disagree with the first — see Phase 0's note in [`decisions.md`](decisions.md) — so today's run is both sides on the current fitz build, i.e. a repeatability baseline). 45 fixtures, identical. Three bounds the gate's wording should be read with: PDFs are capped to their first 20 pages (uncapped, the 406-page Auditor-General fixture pushed one run past an hour on OCR-dispatched pages alone), the harness opens with `fitz` so the DOCX/XLSX/CSV/XML/TXT fixtures reach `tests/test_default_digest.py` instead, and the comparison is reflexive while there is one backend — so the suite asserts a floor (every fixture opened and produced elements) and the report publishes element, table and redaction totals, or uniform breakage would read as agreement. CER (between backends and against transcripts) is deferred until a real second backend exists.
 - **P1 (W).**
   - `ingest/pdf/types.py`, with no third-party imports: `Rect`; `Span`, `Line` and `Block`; `Word`, a NamedTuple shaped like fitz's 8-tuple so `grid_projection` slicing is unchanged; `FoundTable`, `Drawing`, `Widget`; and the `Page` and `Document` protocols.
   - The page methods are typed rather than fitz-shaped: `plain_text`, `text_dict`, `words(dehyphenate)`, `text_blocks(dehyphenate)`, `find_tables(strategy)`, `render(dpi, clip) -> ndarray`, `image_rects`, `drawings`, `widgets`, `rect`, `rotation`, `rotation_matrix`, `number`, `doc_name`.
@@ -177,7 +177,7 @@ These are migration gates, not quality scores. They retire with this plan.
 |---|---|
 | Every merge | `uv run ruff check src/ tests/`, `uv run mypy src/` and `uv run python -m pytest tests/ -v` pass; `uv lock --check` passes on approval merges; touched files are under 750 lines (`wc -l`); `git diff --stat $(git merge-base HEAD origin/main)..HEAD` is within the cap |
 | L1-B | Waits on the ground-truth revision. DocLayNet F1 ≥ 0.29 with the `dense_text_548` table found; end-to-end tables emitted on the scanned fixtures checked by hand; no regression in `REDACTION_HANDLING` |
-| P2, P3a, P3b | Identical `content_digest`, `PageProfile` and `RedactionReport` on every fixture, as reported by H-B; `tests/test_default_digest.py` unchanged |
+| P2, P3a, P3b | Identical `content_digest`, `PageProfile` (page rect included) and per-page redaction geometry on every fitz-openable fixture, as reported by H-B — PDFs to their first 20 pages, images whole; `tests/test_default_digest.py` unchanged, which is what gates the non-PDF formats H-B cannot open |
 
 F1 flips the default only when all of these hold:
 
