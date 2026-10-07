@@ -8,6 +8,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from tests._synthetic import REGISTER_CSV
 from womblex.utils.tabular_metrics import (
     data_integrity,
     key_column_preservation,
@@ -248,25 +249,16 @@ class TestSchemaConformance:
 
 
 
-# ── Integration: Real CSV Fixture ───────────────────────────────────────────
+# ── Integration: CSV Fixture ────────────────────────────────────────────────
 
 
-FIXTURE_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "fixtures" / "womblex-collection"
-
-_CSV_FILE = FIXTURE_DIR / "_spreadsheets" / "Approved-providers-au-export_20260204.csv"
+_CSV_FILE = REGISTER_CSV
 
 
 
 class TestCSVFixtureAccuracy:
 
-    """Validate the spreadsheet extractor against the real CSV fixture."""
-
-    # Skip cleanly when the fixtures repo is not cloned (e.g. CI); the other
-    # classes in this module use synthetic frames. See THIRD_PARTY_DATA.md.
-    pytestmark = pytest.mark.skipif(
-        not _CSV_FILE.exists(),
-        reason="womblex-benchmark not cloned (see THIRD_PARTY_DATA.md)",
-    )
+    """Round-trip the synthetic register CSV through the spreadsheet extractor."""
 
 
     @pytest.fixture()
@@ -341,7 +333,7 @@ class TestCSVFixtureAccuracy:
 
     def test_key_column_preservation(self, source_df: pd.DataFrame, extracted_df: pd.DataFrame) -> None:
 
-        result = key_column_preservation(source_df, extracted_df, "Provider Approval Number")
+        result = key_column_preservation(source_df, extracted_df, "SightingID")
         assert result.passed, (
 
             f"Key column: {result.source_unique} source, {result.extracted_unique} extracted. "
