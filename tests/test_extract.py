@@ -170,8 +170,9 @@ class TestFindNativeTablesGate:
         with builder.open() as doc:
             page = doc[0]
             assert _count_blocks_in_bbox(page, Rect(0, 0, 595, 842)) == 1
-            # Any text-strategy hit on this page would be over-firing; the gate
-            # should leave us with no tables.
+            # The text strategy over-claims rows here, so an empty result is the
+            # gate rejecting it rather than nothing to reject.
+            assert any(t.row_count >= 3 for t in page.find_tables(strategy="text"))
             assert _find_native_tables(page) == []
 
 
