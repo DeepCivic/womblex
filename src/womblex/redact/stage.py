@@ -39,6 +39,8 @@ class RedactionReport:
     """Summary of redactions detected across a document."""
 
     page_redactions: dict[int, list[RedactionInfo]] = field(default_factory=dict)
+    # Raster pages the layout filter was asked of but had no usable layout for.
+    unfiltered_pages: list[int] = field(default_factory=list)
 
     @property
     def total(self) -> int:
@@ -90,7 +92,7 @@ def detect_redactions(
       form-field backgrounds and embedded chart regions (02737-class
       scanned_mixed CRM forms). The filter is best-effort: a page with no
       usable layout (``error`` status, or none recorded) is detected with no
-      exclusion and a warning naming the document and page.
+      exclusion, listed on ``report.unfiltered_pages`` and warned once per document.
 
     Bboxes are returned in pixel coordinates at *dpi* regardless of which
     path produced them, so consumers see a single coord system.
@@ -126,11 +128,11 @@ def detect_redactions(
 
                 img = page.render(dpi=dpi)
                 exclude_rects = (
-                    _layout_exclude_rects(
-                        img, (layout or {}).get(page_num), path.name, page_num,
-                    )
+                    _layout_exclude_rects(img, (layout or {}).get(page_num))
                     if use_layout_filter else None
                 )
+                if use_layout_filter and exclude_rects is None:
+                    report.unfiltered_pages.append(page_num)
                 raster_redactions = detector.detect(
                     img, page=page_num, exclude_rects=exclude_rects,
                 )
@@ -139,28 +141,27 @@ def detect_redactions(
     except Exception as e:
         logger.warning("Redaction detection failed for %s: %s", path, e)
 
+    if report.unfiltered_pages:
+        logger.warning(
+            "layout filter unavailable, redaction ran without exclusion zones: doc=%s "
+            "pages=%s (no usable layout; `run-stage layout` with redaction enabled "
+            "records it)", path.name, report.unfiltered_pages,
+        )
     return report
 
 
 def _layout_exclude_rects(
     img: np.ndarray,
     page_layout: PageLayout | None,
-    doc_name: str,
-    page_num: int,
 ) -> list[tuple[int, int, int, int]] | None:
     """Figure/table bboxes in *img* pixels from a page's persisted layout.
 
     ``None`` means the page has no usable layout (none recorded, or the layout
     step failed on it): detection runs without exclusion zones and the page is
-    named in a warning. An ``empty`` page is ``[]``, a genuine "nothing to
-    exclude". Callers treat ``None`` and ``[]`` alike.
+    recorded on the report. An ``empty`` page is ``[]``, a genuine "nothing to
+    exclude".
     """
     if page_layout is None or page_layout.status == "error":
-        logger.warning(
-            "layout filter unavailable, redaction runs without exclusion zones: "
-            "doc=%s page=%d (%s)", doc_name, page_num,
-            page_layout.error if page_layout else "no layout recorded for the page",
-        )
         return None
 
     height, width = img.shape[:2]

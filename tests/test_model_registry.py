@@ -205,23 +205,18 @@ def test_redaction_filter_excludes_only_figures_and_tables_in_render_pixels() ->
         ("paragraph", (0.0, 0.0, 1.0, 0.1)),
         ("figure", (0.5, 0.5, 0.5, 0.5)),
     )
-    rects = _layout_exclude_rects(np.zeros((200, 100, 3), dtype=np.uint8), layout, "d.pdf", 0)
+    rects = _layout_exclude_rects(np.zeros((200, 100, 3), dtype=np.uint8), layout)
     assert rects == [(10, 40, 60, 90), (50, 100, 100, 200)]
 
 
 def test_redaction_filter_treats_an_empty_page_as_nothing_to_exclude() -> None:
     img = np.zeros((10, 10, 3), dtype=np.uint8)
-    assert _layout_exclude_rects(img, _page_layout("empty"), "d.pdf", 0) == []
+    assert _layout_exclude_rects(img, _page_layout("empty")) == []
 
 
 @pytest.mark.parametrize("layout", [None, _page_layout("error")])
-def test_redaction_filter_warns_and_runs_unfiltered_without_usable_layout(
-    layout, caplog: pytest.LogCaptureFixture,
-) -> None:
-    with caplog.at_level("WARNING", logger="womblex.redact.stage"):
-        rects = _layout_exclude_rects(np.zeros((10, 10, 3), dtype=np.uint8), layout, "d.pdf", 3)
-    assert rects is None
-    assert "doc=d.pdf page=3" in caplog.text
+def test_redaction_filter_has_nothing_without_usable_layout(layout) -> None:
+    assert _layout_exclude_rects(np.zeros((10, 10, 3), dtype=np.uint8), layout) is None
 
 
 # --- tokenizer and spellfix-dictionary slots -------------------------------

@@ -50,6 +50,8 @@ LAYOUT_SCHEMA_VERSION = "1"
 
 FINGERPRINT_KEY = f"{NAMESPACE}.layout_fingerprint"
 REDACTION_CONSUMED_KEY = f"{NAMESPACE}.layout_redaction_consumed"
+#: On a standalone ``*.redactions.parquet``: ``{source_hash: [page, ...]}`` it ran unfiltered.
+REDACTION_UNFILTERED_KEY = f"{NAMESPACE}.redaction_unfiltered_pages"
 
 STATUS_OK = "ok"
 STATUS_EMPTY = "empty"
@@ -271,18 +273,27 @@ def read_page_layouts(path: Path) -> dict[str, dict[int, PageLayout]]:
 def unfiltered_redaction_pages(path: Path) -> list[tuple[str, int]]:
     """``(source_hash, page)`` pairs redaction ran on without exclusion zones.
 
-    A page is unfiltered when its layout row has status ``error`` in a sidecar
-    whose footer says redaction consumed the regions. Footer-less files and
-    files whose footer says redaction did not consume them contribute nothing:
-    for those, no filter was asked of the regions. This over-reports slightly
-    (a page redaction resolved from vector drawings never needed the filter),
-    which is the safe direction.
+    From a layout sidecar: a page whose row has status ``error`` where the
+    footer says redaction consumed the regions (a footer saying otherwise, or
+    none, asked nothing of them). This over-reports slightly (a page redaction
+    resolved from vector drawings never needed the filter), the safe direction.
+    From a ``*.redactions.parquet`` written by ``redact --shards``: the pages its
+    footer records under ``REDACTION_UNFILTERED_KEY``, which also covers pages
+    with no layout row at all. Pass the directory holding both.
     """
     p = Path(path)
-    files = sorted(p.glob(f"*{LAYOUT_REGIONS_SUFFIX}")) if p.is_dir() else [p]
+    files = (
+        sorted(p.glob(f"*{LAYOUT_REGIONS_SUFFIX}")) + sorted(p.glob("*.redactions.parquet"))
+        if p.is_dir() else [p]
+    )
     pairs: list[tuple[str, int]] = []
     for f in files:
-        if read_footer_redaction_consumed(pq.read_metadata(str(f)).metadata) is not True:
+        meta = pq.read_metadata(str(f)).metadata or {}
+        recorded = meta.get(REDACTION_UNFILTERED_KEY.encode())
+        if recorded is not None:
+            pairs.extend((h, pg) for h, pages in json.loads(recorded).items() for pg in pages)
+            continue
+        if not f.name.endswith(LAYOUT_REGIONS_SUFFIX) or read_footer_redaction_consumed(meta) is not True:
             continue
         pairs.extend(
             (r["source_hash"], r["page"])
@@ -332,6 +343,7 @@ __all__ = [
     "MATCH",
     "MISMATCH",
     "REDACTION_CONSUMED_KEY",
+    "REDACTION_UNFILTERED_KEY",
     "STATUS_EMPTY",
     "STATUS_ERROR",
     "STATUS_OK",
