@@ -21,7 +21,6 @@ from womblex.ingest.extract import (
     _normalise_bbox,
     get_extractor,
 )
-from womblex.ingest.pdf._fitz import FitzPage
 from womblex.ingest.pdf.types import Rect
 from womblex.ingest.spreadsheet import SpreadsheetExtractor
 from womblex.ingest.strategies import (
@@ -142,50 +141,39 @@ class TestFindNativeTablesGate:
     rows. The gate rejects candidates where block count < row count.
     """
 
-    def test_count_blocks_in_bbox_uses_block_centre(self) -> None:
-        import fitz
+    def test_count_blocks_in_bbox_uses_block_centre(self, tmp_path) -> None:
+        builder = PdfBuilder(tmp_path / "blocks.pdf").page(400, 600)
+        builder.text(50, 50, "alpha").text(50, 200, "beta").text(50, 500, "gamma")
 
-        doc = fitz.open()
-        page = doc.new_page(width=400, height=600)
-        page.insert_text((50, 50), "alpha")
-        page.insert_text((50, 200), "beta")
-        page.insert_text((50, 500), "gamma")
+        with builder.open() as doc:
+            page = doc[0]
+            assert _count_blocks_in_bbox(page, Rect(0, 0, 400, 300)) == 2  # alpha, beta
+            assert _count_blocks_in_bbox(page, Rect(0, 400, 400, 600)) == 1  # gamma
+            assert _count_blocks_in_bbox(page, Rect(0, 300, 400, 400)) == 0
 
-        bbox_top = Rect(0, 0, 400, 300)
-        assert _count_blocks_in_bbox(FitzPage(page), bbox_top) == 2  # alpha, beta
+    def test_gate_rejects_prose_as_table(self, tmp_path) -> None:
+        # One paragraph block of prose with consistent left-indent. The
+        # text-strategy `find_tables` reads the whitespace pattern as columnar
+        # and over-claims many rows; the gate should reject because
+        # `n_blocks_in_bbox` (about 1) is much smaller than the claimed row count.
+        prose = [
+            "1. As you are aware, the Authority has issued this Notice.",
+            "2. The Provider must comply with the requirements set out below.",
+            "3. The Authority will continue to monitor compliance.",
+            "4. Should you have any questions, contact the Director.",
+            "5. This Notice takes effect immediately upon receipt.",
+        ]
+        builder = PdfBuilder(tmp_path / "prose.pdf").page()
+        for i, line in enumerate(prose):
+            builder.text(50, 62 + i * 13.2, line)
 
-        bbox_bottom = Rect(0, 400, 400, 600)
-        assert _count_blocks_in_bbox(FitzPage(page), bbox_bottom) == 1  # gamma
-
-        bbox_none = Rect(0, 300, 400, 400)
-        assert _count_blocks_in_bbox(FitzPage(page), bbox_none) == 0
-
-        doc.close()
-
-    def test_gate_rejects_prose_as_table(self) -> None:
-        import fitz
-
-        doc = fitz.open()
-        page = doc.new_page(width=595, height=842)
-        # One paragraph block of prose with consistent left-indent. PyMuPDF's
-        # text-strategy `find_tables` will read the whitespace pattern as
-        # columnar and over-claim many rows; the gate should reject because
-        # `n_blocks_in_bbox` (≈1) is much smaller than the claimed row count.
-        prose = (
-            "1. As you are aware, the Authority has issued this Notice.\n"
-            "2. The Provider must comply with the requirements set out below.\n"
-            "3. The Authority will continue to monitor compliance.\n"
-            "4. Should you have any questions, contact the Director.\n"
-            "5. This Notice takes effect immediately upon receipt.\n"
-        )
-        page.insert_textbox(fitz.Rect(50, 50, 545, 800), prose, fontsize=11)
-
-        tables = _find_native_tables(FitzPage(page))
-        # Any text-strategy hit on this page would be over-firing; the gate
-        # should leave us with no tables.
-        assert tables == []
-
-        doc.close()
+        with builder.open() as doc:
+            page = doc[0]
+            assert _count_blocks_in_bbox(page, Rect(0, 0, 595, 842)) == 1
+            # The text strategy over-claims rows here, so an empty result is the
+            # gate rejecting it rather than nothing to reject.
+            assert any(t.row_count >= 3 for t in page.find_tables(strategy="text"))
+            assert _find_native_tables(page) == []
 
 
 class TestClassifyNativeBlock:

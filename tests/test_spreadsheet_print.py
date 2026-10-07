@@ -8,11 +8,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import fitz
 import pytest
 
 from womblex.ingest.page_profile import profile_pages, qualify_for_spreadsheet_print
-from womblex.ingest.pdf._fitz import FitzDocument
+from womblex.ingest.pdf import open_document
 from womblex.ingest.spreadsheet_print import extract_spreadsheet_print
 
 _FIXTURES = (
@@ -42,17 +41,17 @@ class TestQualifier:
     reject vanilla letters."""
 
     def test_qualifier_accepts_master_index(self) -> None:
-        doc = fitz.open(str(_MASTER_INDEX))
+        doc = open_document(_MASTER_INDEX)
         try:
-            profiles = profile_pages(FitzDocument.wrap(doc))
+            profiles = profile_pages(doc)
             assert qualify_for_spreadsheet_print(profiles, _MASTER_INDEX.name)
         finally:
             doc.close()
 
     def test_qualifier_accepts_schedule_2b(self) -> None:
-        doc = fitz.open(str(_SCHEDULE_2B))
+        doc = open_document(_SCHEDULE_2B)
         try:
-            profiles = profile_pages(FitzDocument.wrap(doc))
+            profiles = profile_pages(doc)
             assert qualify_for_spreadsheet_print(profiles, _SCHEDULE_2B.name)
         finally:
             doc.close()
@@ -145,10 +144,10 @@ class TestMasterIndex:
 
     @pytest.fixture(scope="class")
     def extracted(self):
-        doc = fitz.open(str(_MASTER_INDEX))
+        doc = open_document(_MASTER_INDEX)
         try:
             tables, doc_meta = extract_spreadsheet_print(
-                FitzDocument.wrap(doc), metadata_location="both",
+                doc, metadata_location="both",
             )
             return tables, doc_meta
         finally:
@@ -199,10 +198,10 @@ class TestSchedulePart2b:
 
     @pytest.fixture(scope="class")
     def extracted(self):
-        doc = fitz.open(str(_SCHEDULE_2B))
+        doc = open_document(_SCHEDULE_2B)
         try:
             tables, doc_meta = extract_spreadsheet_print(
-                FitzDocument.wrap(doc), metadata_location="both",
+                doc, metadata_location="both",
             )
             return tables, doc_meta
         finally:
@@ -222,10 +221,10 @@ class TestMetadataLocation:
     """The three metadata_location modes shape where the metadata lands."""
 
     def test_table_only(self) -> None:
-        doc = fitz.open(str(_SCHEDULE_2B))
+        doc = open_document(_SCHEDULE_2B)
         try:
             tables, doc_meta = extract_spreadsheet_print(
-                FitzDocument.wrap(doc), metadata_location="table",
+                doc, metadata_location="table",
             )
             assert tables[0].context  # populated
             assert doc_meta == {}      # empty
@@ -233,10 +232,10 @@ class TestMetadataLocation:
             doc.close()
 
     def test_document_only(self) -> None:
-        doc = fitz.open(str(_SCHEDULE_2B))
+        doc = open_document(_SCHEDULE_2B)
         try:
             tables, doc_meta = extract_spreadsheet_print(
-                FitzDocument.wrap(doc), metadata_location="document",
+                doc, metadata_location="document",
             )
             assert tables[0].context == {}  # empty
             assert doc_meta                  # populated
@@ -244,9 +243,9 @@ class TestMetadataLocation:
             doc.close()
 
     def test_invalid_value_raises(self) -> None:
-        doc = fitz.open(str(_SCHEDULE_2B))
+        doc = open_document(_SCHEDULE_2B)
         try:
             with pytest.raises(ValueError):
-                extract_spreadsheet_print(FitzDocument.wrap(doc), metadata_location="invalid")
+                extract_spreadsheet_print(doc, metadata_location="invalid")
         finally:
             doc.close()
