@@ -165,6 +165,11 @@ class RedactionConfig(BaseModel):
 
     dpi: int = Field(default=150, ge=72, le=600, description="DPI for rendering pages during detection")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _no_layout_keys(cls, data: Any) -> Any:
+        return _reject_removed(data, "redaction")
+
     use_layout_filter: bool = Field(
         default=True,
         description=(
