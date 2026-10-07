@@ -6,11 +6,12 @@ model runs once per selected page in the extraction batch, so what it found can
 be inspected on disk and compared across models and settings.
 
 This is the first step of moving layout out of OCR and redaction into a stage of
-its own (see [plan-permissive-deps.md](plan-permissive-deps.md)). **Today
-nothing reads the sidecar.** OCR table reconstruction and redaction's exclusion
-zones still run their own analyser (`extraction.ocr.layout_model`,
-`redaction.layout_model`), so the regions here do not change any element. The
-sidecar is what a later release will switch them over to.
+its own (see [plan-permissive-deps.md](plan-permissive-deps.md)). **OCR reads
+these regions:** table reconstruction and the block types on a scanned page come
+from the layout step's output, and `extraction.ocr.layout_model` /
+`layout_options` no longer exist (use `layout.model` / `layout.options`). A page
+whose layout is `empty` or `error` falls back to whole-page OCR text. Redaction's
+exclusion zones still run their own analyser (`redaction.layout_model`).
 
 ## Settings
 

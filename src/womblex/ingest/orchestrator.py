@@ -53,7 +53,7 @@ from womblex.ingest.page_profile import PageProfile, qualify_for_spreadsheet_pri
 from womblex.ingest.views import table_to_element
 
 if TYPE_CHECKING:
-    from womblex.ingest.layout_step import LayoutSettings
+    from womblex.ingest.layout_step import LayoutSettings, PageLayout
     from womblex.ingest.pdf.types import Document, Page
 
 logger = logging.getLogger(__name__)
@@ -155,8 +155,7 @@ def _apply_ocr_page(
     engine: str,
     engine_options: dict,
     doc_type: DocumentType,
-    layout_model: str = "pp-doclayout-m",
-    layout_options: dict | None = None,
+    page_layout: PageLayout | None = None,
 ) -> None:
     # Imported lazily to keep startup paths free of OCR deps.
     from womblex.ingest.strategies_scanned import (
@@ -190,7 +189,7 @@ def _apply_ocr_page(
             # A2: deskew rotated the OCR input, so the region coords no longer
             # share the layout render's frame — refuse reconstruction there.
             page_deskewed="deskew" in steps,
-            layout_model=layout_model, layout_options=layout_options,
+            page_layout=page_layout,
         )
         accum.blocks.extend(page_blocks)
 
@@ -349,8 +348,6 @@ def extract_with_plan(
     lang: str = "eng",
     engine: str = "paddleocr",
     engine_options: dict | None = None,
-    layout_model: str = "pp-doclayout-m",
-    layout_options: dict | None = None,
     filename: str = "",
     spreadsheet_print: dict | None = None,
     layout: LayoutSettings | None = None,
@@ -371,7 +368,8 @@ def extract_with_plan(
     - ``filename_hints``: tuple of substrings to fast-trigger the qualifier
 
     ``layout`` runs the one layout step (after profiling, before any page is
-    extracted) and carries its regions on the result; nothing here reads them.
+    extracted), carries its regions on the result, and feeds each OCR page its
+    own regions. Omitted, no layout runs and OCR pages fall back to whole-page text.
     """
     opts = engine_options or {}
     layout_outcome = None
@@ -379,6 +377,7 @@ def extract_with_plan(
         from womblex.ingest.layout_step import run_layout_step
 
         layout_outcome = run_layout_step(doc, profiles, layout, engine)
+    page_layouts = {pl.page: pl for pl in layout_outcome.pages} if layout_outcome else {}
     pages: list[PageResult] = []
     all_elements: list[Element] = []
     next_order = 0
@@ -420,8 +419,7 @@ def extract_with_plan(
             _apply_ocr_page(
                 page, profile, accum,
                 dpi=dpi, lang=lang, engine=engine, engine_options=opts,
-                doc_type=doc_type,
-                layout_model=layout_model, layout_options=layout_options,
+                doc_type=doc_type, page_layout=page_layouts.get(page.number),
             )
 
         pages.append(PageResult(page_number=page.number, text=accum.text, method=accum.method))
@@ -487,8 +485,6 @@ def extract_pdf_with_plan(
     lang: str = "eng",
     engine: str = "paddleocr",
     engine_options: dict | None = None,
-    layout_model: str = "pp-doclayout-m",
-    layout_options: dict | None = None,
     filename: str = "",
     spreadsheet_print: dict | None = None,
     layout: LayoutSettings | None = None,
@@ -510,6 +506,5 @@ def extract_pdf_with_plan(
     return extract_with_plan(
         doc, profiles, doc_type,
         dpi=dpi, lang=lang, engine=engine, engine_options=engine_options,
-        layout_model=layout_model, layout_options=layout_options,
         filename=filename, spreadsheet_print=spreadsheet_print, layout=layout,
     )

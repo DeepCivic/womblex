@@ -93,7 +93,7 @@ class TestWhatTheConfigNames:
             "all-minilm-l6-v2",
         ]
 
-    def test_a_markdown_engine_has_no_ocr_layout_model(self) -> None:
+    def test_a_markdown_engine_with_no_redaction_has_no_layout_model(self) -> None:
         cfg = _config(
             extraction={"ocr": {"engine": "ollama"}},
             redaction={"enabled": False},
@@ -242,7 +242,7 @@ class TestCheckDoesNotPollute:
         reg.register(reg.SLOT_OCR, "quiet-ocr", lambda **_: object(), source="quiet-dist")
         reg.register(reg.SLOT_LAYOUT, "quiet-layout", lambda **_: object(), source="quiet-dist")
         cfg = _config(
-            extraction={"ocr": {"engine": "quiet-ocr", "layout_model": "quiet-layout"}},
+            extraction={"ocr": {"engine": "quiet-ocr"}}, layout={"model": "quiet-layout"},
             redaction={"enabled": False},
         )
         before = {e.name for e in reg.used_entries()}
@@ -255,7 +255,7 @@ class TestCheckDoesNotPollute:
         reg.register(reg.SLOT_OCR, "quiet-ocr-2", lambda **_: object(), source="quiet-dist")
         reg.register(reg.SLOT_LAYOUT, "quiet-layout-2", lambda **_: object(), source="quiet-dist")
         cfg = _config(
-            extraction={"ocr": {"engine": "quiet-ocr-2", "layout_model": "quiet-layout-2"}},
+            extraction={"ocr": {"engine": "quiet-ocr-2"}}, layout={"model": "quiet-layout-2"},
             redaction={"enabled": False},
         )
         check_models(cfg, "load", scopes=(SCOPE_EXTRACT,))

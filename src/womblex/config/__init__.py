@@ -49,6 +49,20 @@ class PathsConfig(BaseModel):
         return qualify_root(v) if v is not None else None
 
 
+def _reject_removed(data: Any, section: str) -> Any:
+    """Refuse the per-consumer layout keys that moved to the top-level ``layout:``.
+
+    Ignoring them would run the default model in place of the one the config names.
+    """
+    if isinstance(data, dict):
+        for key in ("layout_model", "layout_options"):
+            if key in data:
+                raise ValueError(
+                    f"{section}.{key} was removed; use layout.{key.removeprefix('layout_')}"
+                )
+    return data
+
+
 
 class DetectionConfig(BaseModel):
 
@@ -94,16 +108,12 @@ class OCRConfig(BaseModel):
     dpi: int = Field(default=200, ge=72, le=600)
     lang: str = "eng"
     engine_options: dict = Field(default_factory=dict)
-    layout_model: str = Field(
-        default="pp-doclayout-m",
-        description="Registered layout analyser for OCR pages (by name, never "
-                    "an import path). Must emit the womblex block_type "
-                    "vocabulary.",
-    )
-    layout_options: dict = Field(
-        default_factory=dict,
-        description="Passed unchanged to the layout model's factory.",
-    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _no_layout_keys(cls, data: Any) -> Any:
+        return _reject_removed(data, "extraction.ocr")
+
     num_threads: int = Field(
         default=4, ge=1,
         description="Cap on OCR (onnxruntime) + layout (torch) inference threads. "
