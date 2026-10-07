@@ -220,6 +220,84 @@ def audit_pdf(path: Path, transcript: Path) -> None:
     transcript.write_text("\n\n".join(out) + "\n", encoding="utf-8")
 
 
+INDEX_COLUMNS = [  # (header lines, x in landscape points, value maker)
+    (["Unique ID"], 30, lambda r, i: f"{i:05d}"),
+    (["Directorate"], 78, lambda r, i: r.choice(["NWS", "PKS", "ENV"])),
+    (["Service Name"], 128, lambda r, i: f"{r.choice(['Bilby', 'Numbat', 'Quoll'])} Care {r.randint(1, 9)}"),
+    (["File Name"], 220, lambda r, i: f"doc-{i:05d}.pdf"),
+    (["Document Type"], 300, lambda r, i: r.choice(["Email", "Letter", "Report", "Notice"])),
+    (["Case Number"], 372, lambda r, i: f"CAS-{r.randint(100000, 999999)}"),
+    (["Subsection", "code"], 452, lambda r, i: r.choice(["3bi", "3bii"])),
+    (["Issue Date"], 512, lambda r, i: f"{r.randint(1, 28):02d}/{r.randint(1, 12):02d}/2024"),
+    (["Author"], 582, lambda r, i: r.choice(["NWSA", "Ranger", "Vet"])),
+    (["Privilege"], 642, lambda r, i: r.choice(["No", "Yes"])),
+    (["Out of Scope", "Exemption"], 702, lambda r, i: r.choice(["No", "Partial"])),
+]
+
+
+def _index_rows(rng: random.Random, n: int) -> list[list[str]]:
+    return [[make(rng, i) for _, _, make in INDEX_COLUMNS] for i in range(1, n + 1)]
+
+
+def foi_index_pdf(path: Path, *, pages: int = 4, per_page: int = 36) -> list[list[str]]:
+    """A spreadsheet printed to PDF: landscape content on rotated portrait pages."""
+    rng = random.Random(6)
+    rows = _index_rows(rng, pages * per_page)
+    c = Canvas(str(path), pagesize=(842, 595), invariant=1)
+    for p in range(pages):
+        c.setPageRotation(90)
+        c.saveState()
+        c.translate(595, 0)
+        c.rotate(90)  # draw in a 842 x 595 landscape frame
+        y = 560
+        c.setFont("Helvetica-Bold", 9)
+        for label, value in [("FOI reference", "FOI-2025-042"), ("Element #", "3(b)(i) - 3(b)(ii)")]:
+            if p == 0:  # later pages leave the space, so the frozen header keeps its height
+                c.drawString(30, y, label)
+                c.drawString(128, y, value)
+            y -= 14
+        y -= 10
+        c.setFont("Helvetica-Bold", 7)
+        for lines, x, _ in INDEX_COLUMNS:
+            for k, line in enumerate(lines):
+                c.drawString(x, y - 8 * k, line)
+        y -= 22
+        c.setFont("Helvetica", 7)
+        for row in rows[p * per_page:(p + 1) * per_page]:
+            for (_, x, _), cell in zip(INDEX_COLUMNS, row, strict=True):
+                c.drawString(x, y, cell)
+            y -= 13
+        c.restoreState()
+        c.showPage()
+    c.save()
+    return rows
+
+
+def schedule_pdf(path: Path, *, n: int = 44) -> None:
+    """A single-page schedule of documents, printed from a spreadsheet, unrotated."""
+    rng = random.Random(7)
+    cols = [("No.", 40), ("Date", 70), ("Type", 130), ("Author", 185), ("Pages", 245),
+            ("Decision", 285), ("Exemption", 350), ("Folio", 410), ("Reference", 460)]
+    c = Canvas(str(path), invariant=1)
+    c.setFont("Helvetica-Bold", 9)
+    c.drawString(40, 800, "FOI reference: FOI-2025-042")
+    c.drawString(40, 786, "Schedule: Part 3(b)")
+    c.setFont("Helvetica-Bold", 8)
+    for head, x in cols:
+        c.drawString(x, 760, head)
+    c.setFont("Helvetica", 8)
+    y = 744
+    for i in range(1, n + 1):
+        cells = [str(i), f"{rng.randint(1, 28):02d}/0{rng.randint(1, 9)}/2024",
+                 rng.choice(["Email", "Letter", "Brief"]), rng.choice(["NWSA", "Ranger"]),
+                 str(rng.randint(1, 12)), rng.choice(["Release", "Partial", "Exempt"]),
+                 rng.choice(["s47F", "s47E", "nil"]), f"F{i * 3:03d}", f"FOI-042-{i:03d}"]
+        for (_, x), cell in zip(cols, cells, strict=True):
+            c.drawString(x, y, cell)
+        y -= 15.5
+    c.save()
+
+
 def register_csv(path: Path) -> None:
     """A register export: one row per platypus sighting."""
     rng = random.Random(4)
@@ -272,6 +350,8 @@ def main() -> None:
     budget_docx(DOCUMENTS / "wombat-portfolio-budget-statements.docx")
     redacted_notice_pdf(DOCUMENTS / "quokka-care-decision-notice_redacted.pdf")
     audit_pdf(DOCUMENTS / "koala-habitat-audit.pdf", DOCUMENTS / "koala-habitat-audit_transcript.txt")
+    foi_index_pdf(DOCUMENTS / "bilby-foi-documents-index.pdf")
+    schedule_pdf(DOCUMENTS / "bilby-schedule-of-documents.pdf")
     register_csv(SPREADSHEETS / "platypus-sightings-register.csv")
     statistics_xlsx(SPREADSHEETS / "echidna-population-statistics.xlsx")
 

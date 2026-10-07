@@ -1,39 +1,18 @@
 """Integration tests for the spreadsheet-print extractor.
 
-Uses real ACT FOI manifest fixtures from the womblex-benchmark repo
-(`fixtures/fixtures/womblex-collection/_documents/`). Tests skip gracefully if
-those fixtures are unavailable.
+Uses the synthetic FOI index (rotated, four pages) and schedule (one page) from
+``tests/_synthetic.py``, printed-from-a-spreadsheet in the ACT FOI manifests'
+shape.
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
+from tests._synthetic import FOI_INDEX_PDF as _MASTER_INDEX
+from tests._synthetic import SCHEDULE_PDF as _SCHEDULE_2B
 from womblex.ingest.page_profile import profile_pages, qualify_for_spreadsheet_print
 from womblex.ingest.pdf import open_document
 from womblex.ingest.spreadsheet_print import extract_spreadsheet_print
-
-_FIXTURES = (
-    Path(__file__).resolve().parent.parent
-    / "fixtures" / "fixtures" / "womblex-collection" / "_documents"
-)
-_MASTER_INDEX = _FIXTURES / (
-    "Early-childhood-education-and-care-incident-recordsOrder-to-"
-    "TableAssembly-resolution-of-24-June-2025"
-    "Index-of-returned-documents-for-part-2aRevised.pdf"
-)
-_SCHEDULE_2B = _FIXTURES / "Schedule-of-documents-Part-2b.pdf"
-
-
-def _has_fixtures() -> bool:
-    return _MASTER_INDEX.is_file() and _SCHEDULE_2B.is_file()
-
-
-pytestmark = pytest.mark.skipif(
-    not _has_fixtures(),
-    reason="ACT FOI Index Files fixtures not available on this host",
-)
 
 
 class TestQualifier:
@@ -140,7 +119,7 @@ class TestQualifier:
 
 
 class TestMasterIndex:
-    """The 37-page rotated FOI manifest — the corpus's hardest tabular doc."""
+    """A multi-page FOI index printed on rotated pages, with a metadata block."""
 
     @pytest.fixture(scope="class")
     def extracted(self):
@@ -157,11 +136,10 @@ class TestMasterIndex:
         tables, _ = extracted
         assert len(tables) == 1
 
-    def test_row_count_matches_corpus_scale(self, extracted) -> None:
-        # Corpus is ~2615 docs; manifest covers most. Tolerance for
-        # post-manifest additions / pagination quirks.
+    def test_rows_accumulate_across_pages(self, extracted) -> None:
+        # Four pages of 36 rows; the header repeated on each page is not a row.
         tables, _ = extracted
-        assert 2300 <= len(tables[0].rows) <= 2700
+        assert len(tables[0].rows) == 144
 
     def test_canonical_columns_present(self, extracted) -> None:
         tables, _ = extracted
@@ -170,27 +148,23 @@ class TestMasterIndex:
         assert headers == [
             "Unique ID", "Directorate", "Service Name", "File Name",
             "Document Type", "Case Number", "Subsection code",
-            "Issue Date", "Author", "Privilege", "Reason for Privilege",
-            "Out of Scope Exemption", "Assembly Permitted Redactions",
+            "Issue Date", "Author", "Privilege", "Out of Scope Exemption",
         ]
 
     def test_first_row_known_values(self, extracted) -> None:
         tables, _ = extracted
         row = tables[0].rows[0]
-        assert row[0] == "00008"
-        assert row[1] == "EDU"
-        assert row[2] == "360 Early Education Throsby"
-        assert row[5] == "CAS-00312020"
-        assert row[6] == "2ai"
-        assert row[7] == "02/09/2024"
-        assert row[8] == "CECA"
+        assert row == [
+            "00001", "ENV", "Bilby Care 8", "doc-00001.pdf", "Report",
+            "CAS-138611", "3bi", "05/11/2024", "Vet", "Yes", "Partial",
+        ]
 
     def test_metadata_block_captured(self, extracted) -> None:
         tables, doc_meta = extracted
         # Both surfaces populated when metadata_location="both".
         assert doc_meta == tables[0].context
-        assert doc_meta.get("213A reference") == "213A-2025-008"
-        assert doc_meta.get("Element #") == "2(a)(i) - 2(a)(iv)"
+        assert doc_meta.get("FOI reference") == "FOI-2025-042"
+        assert doc_meta.get("Element #") == "3(b)(i) - 3(b)(ii)"
 
 
 class TestSchedulePart2b:
@@ -210,11 +184,11 @@ class TestSchedulePart2b:
     def test_extracts_rows(self, extracted) -> None:
         tables, _ = extracted
         assert len(tables) == 1
-        assert 15 <= len(tables[0].rows) <= 30  # ~22 rows on this single page
+        assert len(tables[0].rows) == 44
 
-    def test_metadata_has_213a_reference(self, extracted) -> None:
+    def test_metadata_has_foi_reference(self, extracted) -> None:
         _, doc_meta = extracted
-        assert doc_meta.get("213A reference") == "213A-2025-008"
+        assert doc_meta.get("FOI reference") == "FOI-2025-042"
 
 
 class TestMetadataLocation:

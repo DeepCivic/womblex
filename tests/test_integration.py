@@ -1,4 +1,4 @@
-"""Integration tests using fixtures/womblex-collection as real-world fixtures.
+"""Integration tests on the synthetic document set (``tests/_synthetic.py``).
 
 
 Exercises detection, extraction, chunking, and Parquet output against
@@ -15,6 +15,7 @@ from unittest.mock import patch
 import pytest
 import semchunk
 
+from tests._synthetic import DOCUMENTS_DIR, NOTICE_PDF, REGISTER_CSV, SPREADSHEETS_DIR
 from womblex.config import (
     ChunkingConfig,
     DatasetConfig,
@@ -59,23 +60,13 @@ def _chunk_doc(full_text, chunker, tables=None):
     return chunk_batch([ci], chunker).get("d", [])
 
 
-FIXTURE_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "fixtures" / "womblex-collection"
+PDF_DIR = DOCUMENTS_DIR
 
-PDF_DIR = FIXTURE_DIR / "_documents"
+CSV_DIR = SPREADSHEETS_DIR
 
-CSV_DIR = FIXTURE_DIR / "_spreadsheets"
+_CSV_FILE = REGISTER_CSV
 
-
-_CSV_FILE = CSV_DIR / "Approved-providers-au-export_20260204.csv"
-
-# Every test here reads a real document from the collection. Skip cleanly when
-# the fixtures repo is not cloned (e.g. CI). See THIRD_PARTY_DATA.md.
-pytestmark = pytest.mark.skipif(
-    not FIXTURE_DIR.exists(),
-    reason="womblex-benchmark not cloned (see THIRD_PARTY_DATA.md)",
-)
-
-_REDACTED_PDF = PDF_DIR / "00768-213A-270825-Throsby-Out-of-School-Care-Administrative-Decision-Other-Notice-and-Direction_Redacted.pdf"
+_REDACTED_PDF = NOTICE_PDF
 
 
 
@@ -87,11 +78,8 @@ def _word_token_counter(text: str) -> int:
 
 
 
-# Fast-tier page bound. Native extraction OCRs embedded image regions and
-# detects tables per page (~0.8s/page on these government PDFs), so the full
-# 406-page Auditor-General report takes minutes — a benchmark-scale input, not
-# a fast-tier unit. Its vendored `-First-30-Pages` truncation is the fast-tier
-# proxy; the full report is exercised by the benchmark accuracy suite.
+# Fast-tier page bound: native extraction OCRs embedded image regions and
+# detects tables per page, so a long report belongs to the benchmark suite.
 _FAST_TIER_MAX_PAGES = 60
 
 
@@ -498,22 +486,9 @@ class TestCSVChunkingIntegration:
 
 
 
-@pytest.mark.skipif(
-    not _REDACTED_PDF.exists(),
-    reason="Throsby 213A redacted PDF not vendored (research-use only; lives in the external womblex-development-fixtures repo — see THIRD_PARTY_DATA.md)",
-)
 class TestRedactedPDFChunkingIntegration:
 
     """End-to-end: redacted PDF detection → extraction → chunking."""
-
-    # The Throsby redacted PDF is a womblex-benchmark fixture, not part of the
-    # vendored minimal set (the womblex-collection dir exists via _spreadsheets,
-    # so the module-level guard passes — this needs the specific file). Skip
-    # cleanly on a bare checkout. See THIRD_PARTY_DATA.md.
-    pytestmark = pytest.mark.skipif(
-        not _REDACTED_PDF.exists(),
-        reason="redacted PDF fixture (Throsby) needs womblex-benchmark (see THIRD_PARTY_DATA.md)",
-    )
 
     def test_redacted_pdf_extracts_text(self) -> None:
 

@@ -2,13 +2,11 @@
 
 from pathlib import Path
 
-import pytest
-
+from tests._synthetic import AUDIT_TRANSCRIPT
 from womblex.ingest.detect import DetectionConfig, DocumentType, detect_file_type
 from womblex.ingest.extract import extract_text
 
-FIXTURE_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "fixtures" / "womblex-collection"
-_TXT_FILE = FIXTURE_DIR / "_documents" / "Auditor-General_Report_2020-21_19_transcript.txt"
+_TXT_FILE = AUDIT_TRANSCRIPT
 
 
 class TestTextDetection:
@@ -65,9 +63,7 @@ class TestTextExtraction:
         assert "caf" in results[0].full_text
 
     def test_real_transcript_fixture(self) -> None:
-        """Extract from a real transcript fixture."""
-        if not _TXT_FILE.exists():
-            pytest.skip("Transcript fixture not available")
+        """Extract from the synthetic audit report transcript."""
 
         profile = detect_file_type(_TXT_FILE)
         assert profile.doc_type == DocumentType.TEXT
@@ -76,5 +72,5 @@ class TestTextExtraction:
         assert len(results) == 1
         r = results[0]
         assert r.error is None
-        assert len(r.full_text) > 1000  # Auditor-General transcript is substantial
+        assert len(r.full_text) > 1000  # the transcript is several pages
         assert r.method == "text"

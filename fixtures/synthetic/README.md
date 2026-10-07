@@ -14,6 +14,8 @@ released under the repository's licence (Apache-2.0).
 | `documents/quokka-care-decision-notice_redacted.pdf` | Three-page native PDF, a logo image, six vector redactions on page one | A redacted FOI decision notice |
 | `documents/koala-habitat-audit.pdf` | Six-page native PDF, chapter headings, page footers, one ruled table | An audit report |
 | `documents/koala-habitat-audit_transcript.txt` | Plain text of the audit report | A report transcript |
+| `documents/bilby-foi-documents-index.pdf` | A spreadsheet printed to PDF: four rotated pages (portrait MediaBox, `/Rotate 90`), a metadata block, two-line headers, 144 rows | An FOI manifest |
+| `documents/bilby-schedule-of-documents.pdf` | A one-page schedule printed from a spreadsheet, 44 rows | An FOI schedule of documents |
 | `spreadsheets/platypus-sightings-register.csv` | 300-row register export | A register CSV |
 | `spreadsheets/echidna-population-statistics.xlsx` | Three sheets, title rows above each table | A statistics workbook |
 
