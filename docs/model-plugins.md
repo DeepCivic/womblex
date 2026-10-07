@@ -16,7 +16,7 @@ my-ocr = "my_pkg.ocr:make_reader"
 A config names registered models only. An unknown name raises and lists the
 known names; anything shaped like an import path is refused. A plugin cannot
 take a built-in's name or alias. Options in the config (`engine_options`,
-`layout_options`, `model_options`, `tokenizer_options`, `dict_options`)
+`layout.options`, `model_options`, `tokenizer_options`, `dict_options`)
 reach the factory as keyword arguments, unchanged.
 
 ## Slots

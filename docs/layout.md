@@ -5,14 +5,14 @@ header, footer and so on) and records them in `*.layout_regions.parquet`. One
 model runs once per selected page in the extraction batch, so what it found can
 be inspected on disk and compared across models and settings.
 
-This is the first step of moving layout out of OCR and redaction into a stage of
-its own (see [plan-permissive-deps.md](plan-permissive-deps.md)). **OCR reads
-these regions:** table reconstruction and the block types on a scanned page come
-from the layout step's output, and `extraction.ocr.layout_model` /
-`layout_options` no longer exist (use `layout.model` / `layout.options`). A page
-whose layout is `empty` or `error` falls back to whole-page OCR text. Redaction
-reads the same regions for its exclusion zones, and `redaction.layout_model` /
-`layout_options` are gone too.
+Two things read the regions. **OCR:** table reconstruction and the block types
+on a scanned page come from the layout step's output; a page whose layout is
+`empty` or `error` falls back to whole-page OCR text. **Redaction:** the same
+regions are its exclusion zones. Neither runs a model of its own, and the old
+`extraction.ocr.layout_model` / `redaction.layout_model` keys (and their
+`layout_options`) are refused at config load: use `layout.model` /
+`layout.options`. Why layout is shaped this way is in
+[decisions.md](decisions.md).
 
 ## Settings
 
@@ -165,7 +165,8 @@ womblex run-stage --stage layout --shards shards/ --config config.yaml
 Reruns the layout step against the source documents and replaces each batch's
 `*.layout_regions.parquet`. Use it to measure another model or setting on a run
 already extracted: change `layout.model`, `layout.options` or
-`layout.page_scope` in the config and rerun. A batch whose sidecar already
+`layout.page_scope` in the config (or turn on redaction's layout filter, which
+widens the pages `consumers` selects) and rerun. A batch whose sidecar already
 carries the config's fingerprint is skipped; `--force` reruns it anyway.
 
 What a rerun changes, and what it does not:

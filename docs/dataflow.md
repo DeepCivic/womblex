@@ -33,11 +33,12 @@ Raw files (PDF / DOCX / MD / CSV / XLSX)
 │  PDF: extract_pdf_with_plan               │  → ExtractionResult
 │  (ingest/orchestrator)                    │    elements: list[Element]
 │   ├── profile_pages → list[PageProfile]   │    (paragraph / heading / table /
-│   ├── _apply_native_page (page.get_text)  │     form / image / sheet_cell / …)
-│   └── _apply_ocr_page   (OCR+PP-DocLayout)│    + legacy view properties
-│                                           │      (.pages / .text_blocks / .tables /
-│  Non-PDF: strategy.extract                │       .forms / .images) as read-only
-│  (strategies_file / spreadsheet)          │      derivations over elements.
+│   ├── run_layout_step (PP-DocLayout)      │     form / image / sheet_cell / …)
+│   ├── _apply_native_page (page.get_text)  │    + legacy view properties
+│   └── _apply_ocr_page   (OCR + regions)   │      (.pages / .text_blocks / .tables /
+│                                           │       .forms / .images) as read-only
+│  Non-PDF: strategy.extract                │      derivations over elements.
+│  (strategies_file / spreadsheet)          │
 └───────────────────────────────────────────┘
         │
         ▼

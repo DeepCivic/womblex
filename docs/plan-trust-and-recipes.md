@@ -44,7 +44,7 @@ Assessed against the repository's rules: thin adapters only, delete Womblex code
 |---|---|---|---|
 | DBOS Transact | MIT | Defer to Phase 3 | Overlaps `cloud/queue.py`, the worker, the stage runner and checkpoints, all working. Adoption means deleting those, and stores step results in its database while Womblex's checkpoint unit is a Parquet shard in object storage. Phase 3 is the decision point: delivery retries and events in the existing queue, or DBOS replacing it |
 | OpenLineage (`openlineage-python`) | Apache-2.0 | No dependency | Emit spec-conformant JSON from the run record and test it against the published schema. An optional extra only if pushing to a lineage server becomes a requirement |
-| Docling (full converter) | MIT | Reject for core | Brings torch and its own layout models. After layout becomes its own stage (L3 in `plan-permissive-deps.md`), its layout model could be a `womblex.models.layout` plugin installed outside core and judged by the benchmark |
+| Docling (full converter) | MIT | Reject for core | Brings torch and its own layout models. Now that layout is its own stage ([`layout.md`](layout.md)), its layout model could be a `womblex.models.layout` plugin installed outside core and judged by the benchmark |
 | docling-core | MIT | Optional egress format, later | Light, pydantic-based. Useful only as an output format for consumers that want Docling's schema |
 | docling-parse | MIT | Hold | A fallback for the PyMuPDF replacement if pypdfium2 + pdfplumber miss their parity gates |
 | Docling Graph | MIT | Reject; borrow the idea | Its deterministic provenance ledger informs the evidence reference below; the package brings full Docling plus LLM clients |

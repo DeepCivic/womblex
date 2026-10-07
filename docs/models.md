@@ -27,25 +27,30 @@ Parquet footer, so a run's record names the models it actually loaded.
 
 ### What the layout model feeds
 
-On OCR'd pages, `_layout_blocks_and_tables` in `ingest/strategies_scanned.py`
-uses layout regions for three things that reach output:
+The layout step (`ingest/layout_step.py`) runs the model once per selected page
+and persists its regions in `*.layout_regions.parquet` ([layout.md](layout.md)).
+Three things read them and reach output:
 
-1. **Table regions** — the only place `ocr_tables.reconstruct_table` runs.
+1. **Table regions** — on OCR'd pages, `_layout_blocks_and_tables` in
+   `ingest/strategies_scanned.py` passes them to `ocr_tables.reconstruct_table`,
+   the only place it runs.
 2. **Dominant region kind** — the page's OCR text is collapsed onto one block,
    typed by the largest region (promoted to `paragraph` when it carries prose).
 3. **Redaction exclusion regions** — `redact/stage.py` drops raster redaction
-   hits inside figure / chart / form-background regions when
-   `redaction.use_layout_filter` is on.
+   hits inside `figure` / `table` regions when `redaction.use_layout_filter` is
+   on.
 
 Other detected classes (heading, list item, caption, footer, footnote) do not
 reach the element stream: layout blocks carry no text, and OCR text is not yet
 assigned to layout regions. The per-class layout scores in
 `docs/accuracy/EXTRACTION.md` measure the detector's raw regions, not the
-elements written. Native-text pages never run the layout model.
+elements written. A native-text page is analysed only when redaction's filter
+needs it (no vector redaction) or `layout.page_scope` is `all`.
 
-Both layout call sites catch failure: without `onnxruntime` or
-`pp-doclayout-m/inference.onnx`, OCR pages fall back to one paragraph block per page and the redaction filter
-becomes a no-op.
+Without `onnxruntime` or `pp-doclayout-m/inference.onnx`, the pre-run model
+check stops `womblex run`. With the check off, the step records each selected
+page as an `error` row: OCR pages fall back to one paragraph block per page, and
+redaction runs those pages unfiltered and records them.
 
 Re-exporting `pp-doclayout-m/`: fetch `PaddlePaddle/PP-DocLayout-M` at the revision above, then run
 `paddle2onnx --model_dir . --model_filename inference.json --params_filename inference.pdiparams --save_file inference.onnx --opset_version 14`
