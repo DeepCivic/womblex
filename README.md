@@ -65,13 +65,6 @@ typed Parquet or GeoParquet directly and bypass the text stages.
 
 ## Support status
 
-- **Layout detection is not currently supported for local deployment.** A
-  local run still applies the bundled PP-DocLayout-M model to scanned pages,
-  but its output (OCR table regions, redaction exclusion zones) has not been
-  validated, so don't rely on it. The layout model can be swapped through the
-  `womblex.models.layout` plugin slot. Local support returns once layout runs
-  as its own stage; see
-  [docs/plan-permissive-deps.md](docs/plan-permissive-deps.md).
 - **Licensing is in transition.** Womblex is Apache-2.0, but PDF handling still
   depends on PyMuPDF (AGPL-3.0). The plan above replaces it with permissively
   licensed libraries.

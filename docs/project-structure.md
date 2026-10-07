@@ -106,6 +106,7 @@ womblex/
 │   │   ├── money_words.py   # Worded amounts (find_worded_amounts, parse_number_words)
 │   │   ├── money_vocab.py   # Currency tiers / ISO 4217 / scale / false-positive / header vocabulary tables (data only)
 │   │   ├── money_columns.py # Column-evidenced money — classify_column + per-cell parsing
+│   │   ├── layout_stage.py  # layout_shards() — drives `run-stage layout --shards`; fingerprint-aware rerun of *.layout_regions.parquet from the source documents
 │   │   ├── money_stage.py   # money_shards() — drives `womblex money --shards`; writes *.money_spans.parquet + *.money_columns.parquet
 │   │   └── text_overlay.py  # Shared overlay read/merge helper for the offline text layers
 │   ├── link/

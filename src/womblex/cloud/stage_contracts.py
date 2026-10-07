@@ -45,6 +45,7 @@ from womblex.store.enrichment_output import (
     GRAPH_EDGES_SUFFIX,
 )
 from womblex.store.entity_links_output import ENTITY_LINKS_SUFFIX
+from womblex.store.layout_output import LAYOUT_REGIONS_SUFFIX
 from womblex.store.money_output import MONEY_COLUMNS_SUFFIX, MONEY_SPANS_SUFFIX
 from womblex.store.normalise_output import NORMALISED_TEXT_SUFFIX
 from womblex.store.output import _SHARD_ROLES, _SHARD_SUFFIX, CHUNKS_SUFFIX
@@ -126,6 +127,10 @@ class RunContext:
 
     client: object | None = None
     checkpoint_mgr: CheckpointManager | None = None
+    # Source-document stages only (`layout`): where the corpus is, if not where
+    # the manifest recorded it, and whether to rerun an unchanged fingerprint.
+    source_root: str | None = None
+    force: bool = False
 
 
 @dataclass(frozen=True)
@@ -153,6 +158,9 @@ class StageContract:
     # display (the composer graph), while this resolves whether *this config*
     # actually will (e.g. ``chunk`` calls the API only under AI chunking).
     needs_isaacus_api_for: Callable[[WomblexConfig], bool] | None = None
+    # The stage re-reads the source documents, not just the shards. A runner
+    # with no way to stage them in refuses the stage rather than failing per base.
+    needs_sources: bool = False
 
     def requires_isaacus_api(self, config: WomblexConfig) -> bool:
         """Whether *config* makes this stage call the Isaacus API at runtime."""
@@ -235,6 +243,13 @@ def _pii_conditional(_config: WomblexConfig) -> tuple[ConditionalInput, ...]:
 
 def _no_conditional(_config: WomblexConfig) -> tuple[ConditionalInput, ...]:
     return ()
+
+
+def _layout_conditional(_config: WomblexConfig) -> tuple[ConditionalInput, ...]:
+    # The sidecar being replaced: its footer fingerprint drives the skip rule.
+    return (
+        ConditionalInput(LAYOUT_REGIONS_SUFFIX, strict=False, reason="fingerprint-aware skip"),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -355,6 +370,12 @@ def _run_pii(shard_dir: Path, config: WomblexConfig, ctx: RunContext) -> None:
     pii_shards(shard_dir, config.pii, checkpoint_mgr=ctx.checkpoint_mgr)
 
 
+def _run_layout(shard_dir: Path, config: WomblexConfig, ctx: RunContext) -> None:
+    from womblex.process.layout_stage import layout_shards
+
+    layout_shards(shard_dir, config, source_root=ctx.source_root, force=ctx.force)
+
+
 def _run_graph_refresh(shard_dir: Path, _config: WomblexConfig, ctx: RunContext) -> None:
     from womblex.analyse.graph_refresh import refresh_graph_edges
 
@@ -374,6 +395,18 @@ def _run_quality(shard_dir: Path, config: WomblexConfig, _ctx: RunContext) -> No
 _ELEMENT_INPUTS = (ELEMENTS_SUFFIX, TABLE_CELLS_SUFFIX, MANIFEST_SUFFIX)
 
 STAGE_CONTRACTS: dict[str, StageContract] = {
+    # Replaces the extraction batch's own layout sidecar, so it never takes the
+    # output-exists skip (IN_PLACE); its fingerprint check is the skip rule.
+    "layout": StageContract(
+        name="layout",
+        scope=StageScope.PER_BATCH,
+        mutation=MutationMode.IN_PLACE,
+        required_inputs=(ELEMENTS_SUFFIX, MANIFEST_SUFFIX),
+        conditional_inputs=_layout_conditional,
+        outputs=lambda _c: (LAYOUT_REGIONS_SUFFIX,),
+        run=_run_layout,
+        needs_sources=True,
+    ),
     "normalise": StageContract(
         name="normalise",
         scope=StageScope.PER_BATCH,
@@ -502,6 +535,7 @@ PRODUCER_OF: dict[str, str] = {
     NORMALISED_TEXT_SUFFIX: "normalise",
     SPELLFIX_TEXT_SUFFIX: "spellfix",
     ENRICHMENT_DOC_SUFFIX: "enrich",
+    LAYOUT_REGIONS_SUFFIX: "layout",
 }
 
 STAGE_NAMES: tuple[str, ...] = tuple(STAGE_CONTRACTS)

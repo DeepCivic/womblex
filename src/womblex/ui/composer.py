@@ -44,7 +44,9 @@ EXTRACT_NODE = "extract"
 #: real field). It is what lets a node in the composer's graph carry its own
 #: enabled toggle instead of the operator hunting for the matching section.
 #: `graph-refresh` is absent because it has none: it re-derives edges from what
-#: `enrich` and `chunk` already wrote. `extract` is absent because it is
+#: `enrich` and `chunk` already wrote. `layout` is absent because its section
+#: has no `enabled` toggle to wire: extraction already ran it, and `run-stage
+#: layout` is a deliberate rerun, never part of a composed pipeline. `extract` is absent because it is
 #: configured by `detection` + `extraction` + `redaction` together, so no one
 #: section is *the* one.
 CONFIG_SECTION: dict[str, str] = {

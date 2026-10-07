@@ -279,17 +279,55 @@ def unfiltered_redaction_pages(path: Path) -> list[tuple[str, int]]:
     return sorted(set(pairs))
 
 
+MATCH = "match"
+MISMATCH = "mismatch"
+UNKNOWN = "unknown"
+
+
+def layout_fingerprint_status(base_path: Path) -> str:
+    """Whether a batch's layout sidecar is what its elements were built from.
+
+    ``match``: both footers carry a fingerprint and they are equal.
+    ``mismatch``: both carry one and they differ, so the sidecar was rerun under
+    another model or setting and no longer describes the extraction (the
+    out-of-date signal for anything reading both). ``unknown``: either side
+    carries none: a run extracted before the layout stage existed, or a batch
+    with no sidecar. That is "provenance unknown", never a mismatch.
+    """
+    elements = base_path.parent / f"{base_path.stem}.elements.parquet"
+    sidecar = layout_regions_path_for(base_path)
+    if not elements.exists() or not sidecar.exists():
+        return UNKNOWN
+    extracted = read_footer_layout_fingerprint(pq.read_metadata(str(elements)).metadata)
+    current = read_footer_layout_fingerprint(pq.read_metadata(str(sidecar)).metadata)
+    if extracted is None or current is None:
+        return UNKNOWN
+    return MATCH if extracted == current else MISMATCH
+
+
+def layout_fingerprint_statuses(shard_dir: Path) -> dict[str, str]:
+    """:func:`layout_fingerprint_status` for every batch in *shard_dir*, by batch stem."""
+    suffix = ".elements.parquet"
+    stems = sorted(p.name[: -len(suffix)] for p in Path(shard_dir).glob(f"*{suffix}"))
+    return {s: layout_fingerprint_status(Path(shard_dir) / f"{s}.parquet") for s in stems}
+
+
 __all__ = [
     "FINGERPRINT_KEY",
     "LAYOUT_REGIONS_SCHEMA",
     "LAYOUT_REGIONS_SUFFIX",
     "LAYOUT_SCHEMA_VERSION",
+    "MATCH",
+    "MISMATCH",
     "REDACTION_CONSUMED_KEY",
     "STATUS_EMPTY",
     "STATUS_ERROR",
     "STATUS_OK",
+    "UNKNOWN",
     "LayoutFingerprint",
     "layout_fingerprint",
+    "layout_fingerprint_status",
+    "layout_fingerprint_statuses",
     "layout_regions_path_for",
     "layout_rows",
     "read_footer_layout_fingerprint",

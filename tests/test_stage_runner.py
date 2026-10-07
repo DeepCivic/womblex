@@ -81,9 +81,9 @@ def test_inputs_and_outputs_disjoint_except_in_place_mutators():
             assert outs <= ins, f"{name} is IN_PLACE but its outputs are not a subset of inputs"
 
 
-def test_graph_refresh_is_the_only_in_place_mutator():
+def test_graph_refresh_and_layout_are_the_in_place_mutators():
     in_place = {n for n, c in STAGE_CONTRACTS.items() if c.mutation is MutationMode.IN_PLACE}
-    assert in_place == {"graph-refresh"}
+    assert in_place == {"graph-refresh", "layout"}
 
 
 def test_quality_is_the_only_whole_run_stage():

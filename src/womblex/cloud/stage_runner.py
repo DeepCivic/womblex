@@ -343,6 +343,11 @@ def run_stage_remote(
     checkpoint_dataset: str = "runner",
 ) -> StageRunSummary:
     """Execute *contract* against a store's shard prefix, one unit at a time."""
+    if contract.needs_sources:
+        raise StagePreconditionError(
+            f"{contract.name} re-reads the source documents, which a store run cannot "
+            "stage in yet; run it locally with --shards."
+        )
     ctx = ctx or RunContext()
     summary = StageRunSummary(stage=contract.name)
 

@@ -263,6 +263,7 @@ There is no fourth. Chunk-level quality annotation is `process/quality.py` and i
 
 Later stages follow the same `<stage>_shards()` over a shard dir + `womblex <stage> --shards` pattern as chunk/enrich/embed above, each writing its own sidecar(s) joinable on `source_hash`:
 
+- **layout** (`process/layout_stage.py`) — reruns the layout step against the source documents and replaces the batch's `*.layout_regions.parquet`; skips a batch whose sidecar fingerprint already matches the config. Elements, tables and redaction stay as extracted. See [layout.md](layout.md)
 - **normalise** (`process/normalise_stage.py`) — text-cleaning transforms, writes `*.normalised_text.parquet`
 - **spellfix** (`process/spellfix_stage.py`) — Hunspell-gated OCR character-confusion repair, writes `*.spellfix_text.parquet` + `*.spellfix_corrections.parquet` (audit)
 - **quality** (`process/quality_stage.py`) — chunk-quality annotation heuristics, writes `*.chunk_quality.parquet`
