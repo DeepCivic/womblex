@@ -559,9 +559,8 @@ classification decisions:
 - Form-pair label denylist (`Penalty`, `OFFICIAL`, `Note`, `Caution`) stops
   regulation-citation / banner text being matched as form fields.
 - Layout backend is **PP-DocLayout-M on `onnxruntime`** (`ingest/layout_onnx.py`,
-  registered default `pp-doclayout-m`, #130). It replaced the DocLayNet
-  `yolo11n_doc_layout.pt` checkpoint (with COCO `yolov8n.pt` fallback);
-  `YOLOLayoutAnalyzer` and `ultralytics` were removed in L2.
+  registered default `pp-doclayout-m`, #130). It replaced the previous
+  layout analyser, which was removed in L2.
 - **Full-page-scan figure trap:** the OCR dominant-region fallback in
   `_layout_blocks_and_tables` collapses a whole page's OCR onto one block using
   the largest region's kind; when that is a `Picture`, a text-bearing full-page
@@ -970,19 +969,26 @@ be re-derivable, and the first pass's were not.
   file with a local multi-stage runner, then destinations. No quality scoring
   and no field extraction. Plan, dependency assessment and phases:
   [plan-trust-and-recipes.md](plan-trust-and-recipes.md).
-- **Permissive dependencies — remove `ultralytics` and PyMuPDF.** *In
-  progress 2026-10; layout swap shipped (#130).* Both are AGPL-3.0 with a
-  commercial licence as the only alternative. YOLO layout is replaced by an
-  Apache-2.0 PP-DocLayout ONNX model on `onnxruntime`; PyMuPDF goes behind a
-  womblex-owned `ingest/pdf/` seam and is replaced by pypdfium2 + pdfplumber
-  once a backend-diff harness clears the parity gates. Plan and merge
-  sequence: [plan-permissive-deps.md](plan-permissive-deps.md).
-  - **YOLO is retired as part of adapting womblex for cloud deployment.**
-    The model registry lets any layout model be plugged into the layout
-    slot and benchmarked on consumption pricing, so keeping an AGPL model
-    in the base install buys nothing. No controlled YOLO-versus-PP-DocLayout
-    comparison was run; the last YOLO numbers are the 2026-08 accuracy
-    reports.
+- **Permissive dependencies — Apache-2.0 compatibility.** *In progress
+  2026-10; layout swap shipped (#130).* The previous layout model's
+  dependency and PyMuPDF are not licence-compatible with Apache-2.0. Layout
+  is now an Apache-2.0 PP-DocLayout ONNX model on `onnxruntime`; PyMuPDF goes
+  behind a womblex-owned `ingest/pdf/` seam and is replaced by pypdfium2 +
+  pdfplumber once a backend-diff harness clears the parity gates. Plan and
+  merge sequence: [plan-permissive-deps.md](plan-permissive-deps.md).
+  - **Layout measurements at the swap (uncontrolled, no like-for-like run).**
+    PP-DocLayout-M is 23 MB and runs at about 65 ms per CPU page. Scored with
+    the benchmark's DocLayNet scorer: layout F1 0.297; the one real
+    ground-truth table (`dense_text_548`) found; table regions on 5 FUNSD
+    forms: 3. The DocLayNet fixtures hold one table and one picture, so they
+    cannot separate models; the end-to-end suites are the real gate.
+  - **Layout feeds three things only.** Table rects (to `reconstruct_table`),
+    figure and table rects (redaction exclusion zones) and the dominant
+    region's kind: on a successful page the non-table regions collapse into
+    one OCR text block.
+  - **No PDF-backend registry slot.** The registry is for swappable models;
+    a backend slot would be the toggle the plan rules out. Backend selection
+    is a private `open_document` argument used by the parity harness.
   - **Layout becomes its own stage**, so a layout model can be tuned and
     measured on its own. Until it ships, layout detection is not supported
     for local deployment.

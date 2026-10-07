@@ -47,6 +47,12 @@ Both layout call sites catch failure: without `onnxruntime` or
 `pp-doclayout-m/inference.onnx`, OCR pages fall back to one paragraph block per page and the redaction filter
 becomes a no-op.
 
+Re-exporting `pp-doclayout-m/`: fetch `PaddlePaddle/PP-DocLayout-M` at the revision above, then run
+`paddle2onnx --model_dir . --model_filename inference.json --params_filename inference.pdiparams --save_file inference.onnx --opset_version 14`
+in a venv with `paddle2onnx`, `paddlepaddle`, `onnx`, `onnxruntime` and `setuptools` (`paddle2onnx` 2.1.0 needs
+`setuptools` and pulls in none of them). The export takes `image` (N,3,640,640) and `scale_factor` (N,2), batch size 1.
+A different `paddle2onnx` version may change the ONNX digest.
+
 ## Hosted models
 
 | Model | Provider | Used by | What it does | Enabled by |

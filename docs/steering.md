@@ -16,13 +16,13 @@ Where the pipeline is today, what to work on next, and why. Updated as changes l
 | 3 | Replace mean threshold with histogram analysis | Medium | DocLayNet avg CER pp −15.5% | **Done** |
 | 4 | Wire `STRUCTURED` detection into `_classify()` | Medium | Surfaces table-heavy documents as a doc-level summary type (per-page routing handles per-region structure) | **Done — superseded by per-page orchestrator** |
 | 5 | Add strategy-selection log line | Low | Enables pipeline path tracing | **Done** |
-| 6 | Integrate local models (all-MiniLM-L6-v2, yolov8n) | Low | No network access at inference time | **Done** |
+| 6 | Integrate local models (all-MiniLM-L6-v2) | Low | No network access at inference time | **Done** |
 | 7 | Programmatic accuracy doc generation | Low | Docs reflect actual last test run | **Done** |
 | 8 | URL / phone / email PII regex | Low | Covers 6/12 GT Throsby entities (WEBSITE ×4, PHONE, EMAIL) at near-zero FP risk | |
 | 9 | Adaptive binarisation second signal | Medium | CER-s shows binarisation hurts FUNSD by +39%; histogram alone is insufficient | |
 | 10 | NER-based PII (Presidio Analyzer + spaCy) | Medium | Covers ORGANISATION (4 GT) + improves PERSON precision (currently 16.7%) | |
 | 11 | Redaction threshold tuning for signature blocks | Low | 3/7 GT redactions missed on page 2 Throsby; aspect-ratio filter likely culprit | |
-| 12 | Replace YOLO COCO model with document-specific layout model | High | YOLOv8n produces 0 predictions on all DocLayNet fixtures — general COCO model has no document layout classes | **Done — K7(b) DocLayNet `yolo11n_doc_layout.pt` swap, 2026-05-25; since replaced by PP-DocLayout-M (#130)** |
+| 12 | Replace the general-purpose detection model with a document-specific layout model | High | A general model has no document layout classes and produced 0 predictions on all DocLayNet fixtures | **Done — document-specific layout model, 2026-05-25; since replaced by PP-DocLayout-M (#130)** |
 | 13 | ~~Layout class coverage (heading, footer, caption, figure)~~ | — | Subsumed by #12 — entire layout pipeline needs a document-trained model | **Merged into #12** |
 | 14 | Per-document-type config overrides | High | Enables type-specific DPI, thresholds | |
 | 15 | End-to-end task metrics (Isaacus integration) | High | Measures actual application success | **In progress — I6-I10 landed (enrich/link/embed + graph-driven PII); end-to-end coverage metrics still pending** |
@@ -48,9 +48,7 @@ Two `DocumentType` values are still unreachable:
 
 ### Layout Detection
 
-**Resolved (model): the document-specific swap landed** (#12, `yolo11n_doc_layout.pt`, 2026-05-25) — the earlier "0 predictions across all DocLayNet fixtures" finding described the general-purpose COCO YOLOv8n and is obsolete. That model detected document layout, including tables: on `dense_text_548` it returned a `table` region at 0.96 confidence.
-
-**Open (model): PP-DocLayout-M replaced YOLO** (#130, `ingest/layout_onnx.py`, registered default `pp-doclayout-m`) for licensing, not accuracy. In an uncontrolled run table-class recall fell from 50% to 25%, and `dense_text_548` gave three table regions where the ground truth has one, plus a `chart` box (mapped to `figure`) almost identical to the `table` box. Tuning is tracked in [plan-permissive-deps.md](plan-permissive-deps.md).
+**Open (model): PP-DocLayout-M is the layout model** (#130, `ingest/layout_onnx.py`, registered default `pp-doclayout-m`), chosen for licence compatibility. In an uncontrolled run table-class recall fell from 50% to 25%, and `dense_text_548` gave three table regions where the ground truth has one, plus a `chart` box (mapped to `figure`) almost identical to the `table` box. Tuning is tracked in [plan-permissive-deps.md](plan-permissive-deps.md).
 
 **Resolved (metric): the reported 25% table recall was largely a GT-aggregation artefact** (B0, 2026-07-28). `_aggregate_doclaynet_blocks` groups *consecutive* same-label word spans, so two stray 1-word Table-labelled footnote lines in `dense_text_548` split the real 397-word table run into three GT blocks, each unmatched stray charged as a separate false negative. GT Table blocks are now filtered by a minimum span count (`MIN_TABLE_GT_SPANS = 3`) before matching. Note also `table_0` contains no Table-labelled GT at all (196 Text, 2 Section-header, 1 Page-footer) — despite the name it is not a table fixture and serves as a false-table (no-GT) fixture instead.
 
