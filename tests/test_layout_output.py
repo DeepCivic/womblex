@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pyarrow.parquet as pq
@@ -62,6 +63,15 @@ class TestFingerprint:
         assert layout_fingerprint(_config(options={"model_dir": "x"})).options_digest != (
             base.options_digest
         )
+
+    def test_consumers_move_it_under_consumers_scope_only(self) -> None:
+        cfg = _config()
+        assert layout_fingerprint(cfg).consumers == "ocr,redaction"
+        cfg.redaction.enabled = False
+        assert layout_fingerprint(cfg).consumers == "ocr"
+        assert layout_fingerprint(_config(page_scope="all")).consumers == ""
+        legacy = {k: v for k, v in json.loads(_fp().to_json()).items() if k != "consumers"}
+        assert LayoutFingerprint.from_json(json.dumps(legacy)) == _fp()  # a pre-consumers footer
 
     def test_dpi_is_the_ocr_dpi(self) -> None:
         cfg = _config()

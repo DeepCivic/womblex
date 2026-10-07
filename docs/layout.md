@@ -116,17 +116,61 @@ and `y` and `height` by its height; any render of the page works.
 
 The footer of the sidecar, and of the batch's `*.elements.parquet`, carries a
 fingerprint under `womblex.layout_fingerprint`: the model name, a model digest,
-a digest of `options`, the render dpi, the page scope and the sidecar schema
-version. Two files with equal fingerprints were produced by the same layout
-model and settings.
+a digest of `options`, the render dpi, the page scope, its `consumers` (`ocr`,
+`redaction`: what selects pages under `consumers` scope) and the schema version.
+Equal fingerprints mean the same model and settings over the same pages.
 
 `model_digest` is the content digest of the model's local files for a built-in
 model, and `<distribution>==<version>` for a plugin, which Womblex cannot digest.
 
 The sidecar's footer also records, under `womblex.layout_redaction_consumed`,
 whether redaction was configured to consume layout (`redaction.enabled` and
-`use_layout_filter`).
+`use_layout_filter`); always `false` once `run-stage layout` rewrites it.
 
 The elements footer records the layout that extraction ran with. A shard written
 before this existed has no fingerprint there; that reads as provenance unknown,
 not as a mismatch.
+
+### Is a sidecar out of date?
+
+```python
+from womblex.store.layout_output import layout_fingerprint_statuses
+
+layout_fingerprint_statuses("shards/")   # {"batch-0001": "match", ...}
+```
+
+For each batch it compares the sidecar's fingerprint with the one in the
+elements footer:
+
+| Status | Meaning |
+|---|---|
+| `match` | Both carry a fingerprint and they are equal: the sidecar describes the layout extraction consumed. |
+| `mismatch` | Both carry one and they differ: the sidecar was rerun under another model or setting, so the elements (tables, redaction) were built from different regions. |
+| `unknown` | One side carries none: a run extracted before the layout stage, or a batch with no sidecar. This is "provenance unknown", never a mismatch. |
+
+## Rerunning layout
+
+```bash
+womblex run-stage --stage layout --shards shards/ --config config.yaml
+```
+
+Reruns the layout step against the source documents and replaces each batch's
+`*.layout_regions.parquet`. Use it to measure another model or setting on a run
+already extracted: change `layout.model`, `layout.options` or
+`layout.page_scope` in the config and rerun. A batch whose sidecar already
+carries the config's fingerprint is skipped; `--force` reruns it anyway.
+
+What a rerun changes, and what it does not:
+
+- Only the layout sidecar is replaced. Elements, tables and redaction results
+  stay as extracted, so a rerun under a different model reads as `mismatch`.
+  Applying a new model to tables or redaction means re-extracting.
+- Sources are found through the manifest's recorded ingest root and paths, and
+  checked by hash. `--ingest <dir>` names the corpus where it has moved. A
+  document that cannot be found or analysed is logged with its source hash, and
+  its batch is left exactly as it was (a sidecar is never half one model and
+  half another).
+- DOCX, spreadsheets and text carry no layout and are not opened.
+- `layout` is not in the stages `enqueue-stages` dispatches: a rerun is
+  deliberate. A store run (`--store`) is refused for now, as a worker cannot yet
+  stage in source documents.

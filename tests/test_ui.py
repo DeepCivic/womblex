@@ -862,6 +862,7 @@ class TestComposerApi:
         assert {n["id"] for n in body["nodes"] if n["config_section"] is None} == {
             "extract",
             "graph-refresh",
+            "layout",
         }
 
     def test_schema_is_the_womblex_config_schema_minus_paths(self, client: TestClient) -> None:

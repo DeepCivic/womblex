@@ -50,6 +50,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 #: meaningful only over a drained run.
 PIPELINE_ORDER: tuple[str, ...] = (
     "extract",
+    "layout",
     "normalise",
     "spellfix",
     "enrich",
@@ -88,7 +89,7 @@ def in_pipeline_order(stages: Iterable[str]) -> tuple[str, ...]:
 
 #: The stages a dispatcher may enqueue on the operator's behalf, in order.
 #:
-#: Three of `PIPELINE_ORDER`'s entries are deliberately absent:
+#: Four of `PIPELINE_ORDER`'s entries are deliberately absent:
 #:
 #: - `extract` is the batch queue itself — it is already dispatched, per batch,
 #:   and downstream stages run over what it published.
@@ -98,7 +99,10 @@ def in_pipeline_order(stages: Iterable[str]) -> tuple[str, ...]:
 #: - `quality` is run-scoped and undercooked; its cluster ids are meaningful
 #:   only over a fully drained run.
 #:
-#: Both remain reachable through `womblex run-stage --stage …`, which is
+#: A fourth, `layout`, is not listed either: extraction already ran it, so a
+#: rerun is a deliberate act (a new model to measure), never automatic.
+#:
+#: These remain reachable through `womblex run-stage --stage …`, which is
 #: unchanged: this tuple bounds *automatic* dispatch, not the stage runner.
 DOWNSTREAM_STAGES: tuple[str, ...] = (
     "normalise",

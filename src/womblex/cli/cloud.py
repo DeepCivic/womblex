@@ -37,7 +37,7 @@ logger = logging.getLogger("womblex")
 #: asserts this equals `stage_contracts.STAGE_NAMES`, so it cannot drift.
 #: `manifest` is absent by design — `womblex finalize` already covers it.
 RUN_STAGE_CHOICES = (
-    "normalise", "spellfix", "chunk", "money", "enrich",
+    "layout", "normalise", "spellfix", "chunk", "money", "enrich",
     "embed", "link", "pii", "graph-refresh", "quality",
 )
 
@@ -449,6 +449,9 @@ def _register_run_stage(p: argparse.ArgumentParser) -> None:
     target.add_argument("--shards", type=Path, default=None,
                         help="Local shard dir — run the same contract without a store.")
     p.add_argument("--run-id", default=None, help="Run to operate on (required with --store)")
+    p.add_argument("--ingest", default=None,
+                   help="`layout` only: the local corpus root holding the source documents, "
+                        "when it is not where the manifest recorded it.")
     p.add_argument(
         "--output-prefix", default=None,
         help="Store-relative outputs dir (default: runs/<run_id>). "
@@ -530,6 +533,7 @@ def cmd_run_stage(args: argparse.Namespace) -> int:
             logger.error("--shards path is not a directory: %s", args.shards)
             return 1
         logger.info("run-stage %s --shards %s", args.stage, args.shards)
+        ctx.source_root, ctx.force = getattr(args, "ingest", None), args.force
         summary = run_stage_local(contract, args.shards, config, ctx=ctx)
         summary.log()
         return summary.exit_code
@@ -537,6 +541,10 @@ def cmd_run_stage(args: argparse.Namespace) -> int:
     store_uri = _resolve_store(args)
     if not store_uri:
         logger.error("No target (pass --shards, or --store / $WOMBLEX_STORE_URI)")
+        return 1
+    if contract.needs_sources:
+        logger.error("%s re-reads the source documents, which a store run cannot stage in "
+                     "yet; run it locally with --shards.", args.stage)
         return 1
     if not args.run_id:
         logger.error("--run-id is required with --store")
