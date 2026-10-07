@@ -52,7 +52,9 @@ class TestSelectSupported:
         )
         assert got == ["a.pdf"]
 
-    @pytest.mark.parametrize("name", ["scan.png", "scan.JPG", "scan.jpeg", "scan.tif", "scan.tiff"])
+    @pytest.mark.parametrize(
+        "name", ["scan.png", "scan.JPG", "scan.jpeg", "scan.tif", "scan.tiff", "scan.bmp", "scan.gif", "scan.jp2"],
+    )
     def test_standalone_images_are_supported(self, name):
         assert select_supported([name, "notes.txt"], location="/c") == [name]
 

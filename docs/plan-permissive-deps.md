@@ -147,8 +147,9 @@ Checked against the vendored fixtures and the womblex-collection PDFs before the
 - `extract._pixmap_to_array`'s RGB and alpha handling, which moves into `render()`.
 
 **Out of scope, kept as-is for parity:**
-- the unrotated-text versus rotated-`page.rect` mismatch outside `spreadsheet_print`;
-- adding images to the CLI's `SUPPORTED_EXTENSIONS`.
+- the unrotated-text versus rotated-`page.rect` mismatch outside `spreadsheet_print`.
+
+Adding images to the CLI's `SUPPORTED_EXTENSIONS`, kept out of this plan, landed as its own merge after P5: the formats the default fitz backend opens, without WebP or AVIF.
 
 ## Open questions
 - **Record the PDF library version in the run stamp?** `content_digest` depends on the PDF library's version, but no footer records it. Options: add it alongside D1, when pypdfium2 arrives; raise it as a separate requirement; or leave it, since the womblex version and `uv.lock` already pin the library.
