@@ -102,6 +102,15 @@ class TestSelection:
     def test_all_is_every_page(self, tmp_path: Path) -> None:
         assert _select(tmp_path, scope="all") == [0, 1, 2]
 
+    def test_unreadable_drawings_select_the_page_rather_than_fail(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        def _boom(*_a, **_k):
+            raise RuntimeError("bad content stream")
+
+        monkeypatch.setattr("womblex.redact.stage._detect_vector_redactions", _boom)
+        assert _select(tmp_path, redaction=True) == [0, 1, 2]
+
     def test_a_markdown_engine_bypasses_layout_for_ocr_pages(self, tmp_path: Path) -> None:
         reg.register(reg.SLOT_OCR, "step-md", lambda **_: object(), source="test-dist",
                      traits={"markdown": True})

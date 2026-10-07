@@ -120,7 +120,13 @@ def select_pages(
     for page in doc:
         wanted = ocr_layout and not profiles[page.number].has_text_layer
         if not wanted and settings.redaction_filter:
-            wanted = not _detect_vector_redactions(page, page.number, scale)
+            try:
+                wanted = not _detect_vector_redactions(page, page.number, scale)
+            except Exception as e:
+                # Unreadable drawings must not fail extraction; analysing the
+                # page is the safe direction for redaction's filter.
+                logger.warning("layout scope: page=%d drawings unreadable: %s", page.number, e)
+                wanted = True
         if wanted:
             chosen.append(page.number)
     return chosen
