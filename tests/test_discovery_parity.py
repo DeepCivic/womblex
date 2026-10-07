@@ -47,10 +47,20 @@ class TestSelectSupported:
 
     def test_subdirectory_without_documents_is_not_a_refusal(self):
         got = select_supported(
-            ["a.pdf", ".git/config", "notes/readme.txt", "images/logo.png"],
+            ["a.pdf", ".git/config", "notes/readme.txt", "data/rows.json"],
             location="/corpus",
         )
         assert got == ["a.pdf"]
+
+    @pytest.mark.parametrize(
+        "name", ["scan.png", "scan.JPG", "scan.jpeg", "scan.tif", "scan.tiff", "scan.bmp", "scan.gif", "scan.jp2"],
+    )
+    def test_standalone_images_are_supported(self, name):
+        assert select_supported([name, "notes.txt"], location="/c") == [name]
+
+    def test_nested_image_is_refused_like_any_document(self):
+        with pytest.raises(NestedCorpusError):
+            select_supported(["images/logo.png"], location="/corpus")
 
     def test_message_names_a_subdirectory_and_its_count(self):
         with pytest.raises(NestedCorpusError) as e:

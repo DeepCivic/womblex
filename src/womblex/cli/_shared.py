@@ -10,7 +10,13 @@ from typing import NamedTuple
 
 logger = logging.getLogger("womblex")
 
-SUPPORTED_EXTENSIONS = {".pdf", ".csv", ".xlsx", ".xls", ".docx", ".md", ".markdown"}
+# Standalone images open as one-page documents and take the scanned-page OCR
+# route, so they are ingested like a PDF.
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif", ".jp2"}
+
+SUPPORTED_EXTENSIONS = {
+    ".pdf", ".csv", ".xlsx", ".xls", ".docx", ".md", ".markdown", *IMAGE_EXTENSIONS,
+}
 
 
 class Command(NamedTuple):
