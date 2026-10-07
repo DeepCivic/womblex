@@ -1,7 +1,6 @@
 """Tests for womblex.operations — independent operations.
 
-
-Tests use real fixtures. No synthetic data.
+File inputs come from the synthetic fixture set (``tests/_synthetic.py``).
 """
 
 
@@ -11,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from tests._synthetic import NOTICE_PDF, REGISTER_CSV
 from womblex.cli.pipeline import _register_chunk, cmd_chunk, cmd_manifest, cmd_run
 from womblex.config import ChunkingConfig, DatasetConfig, PathsConfig, WomblexConfig, load_config
 from womblex.operations import BatchResult, DocumentResult, run_chunking, run_extraction
@@ -68,11 +68,7 @@ class TestRunExtraction:
 
     def test_extracts_real_spreadsheet(self, spreadsheet_dir: Path, sample_config_path: Path) -> None:
 
-        csv_path = spreadsheet_dir / "Approved-providers-au-export_20260204.csv"
-
-        if not csv_path.exists():
-
-            pytest.skip("CSV fixture not available")
+        csv_path = spreadsheet_dir / "platypus-sightings-register.csv"
 
 
         config = _make_config(sample_config_path)
@@ -162,9 +158,7 @@ class TestBatchResult:
 # ---------------------------------------------------------------------------
 
 
-FIXTURE_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "fixtures" / "womblex-collection"
-
-_CSV_FILE = FIXTURE_DIR / "_spreadsheets" / "Approved-providers-au-export_20260204.csv"
+_CSV_FILE = REGISTER_CSV
 
 
 
@@ -175,10 +169,6 @@ class TestComposition:
 
     @requires_chunking
     def test_extract_then_chunk(self) -> None:
-
-        if not _CSV_FILE.exists():
-
-            pytest.skip("CSV fixture not available")
 
         config = WomblexConfig(
             dataset=DatasetConfig(name="t"),
@@ -201,10 +191,6 @@ class TestComposition:
 
     def test_extract_only(self) -> None:
 
-        if not _CSV_FILE.exists():
-
-            pytest.skip("CSV fixture not available")
-
         config = WomblexConfig(
             dataset=DatasetConfig(name="t"),
             paths=PathsConfig(input_root=Path("."), output_root=Path("."), checkpoint_dir=Path(".")),
@@ -224,13 +210,8 @@ class TestComposition:
 # Live AI chunking (semchunk 4, kanon-2-enricher)
 # ---------------------------------------------------------------------------
 
-# The Throsby ACT FOI notice — small, native, real prose the enricher can
+# The synthetic decision notice — small, native prose the enricher can
 # segment. Same fixture the live enrich test uses.
-_THROSBY_PDF = (
-    FIXTURE_DIR / "_documents"
-    / "00768-213A-270825-Throsby-Out-of-School-Care-"
-      "Administrative-Decision-Other-Notice-and-Direction_Redacted.pdf"
-)
 
 
 class TestAiChunkingLive:
@@ -247,8 +228,6 @@ class TestAiChunkingLive:
     def test_chunk_shards_ai_chunking_produces_chunks(
         self, tmp_path: Path, isaacus_client
     ) -> None:
-        if not _THROSBY_PDF.exists():
-            pytest.skip(f"fixture not present: {_THROSBY_PDF}")
 
         from womblex.ingest.detect import DetectionConfig, detect_file_type
         from womblex.ingest.extract import extract_text
@@ -259,10 +238,10 @@ class TestAiChunkingLive:
         d = tmp_path / "documents"
         d.mkdir()
         extraction = extract_text(
-            _THROSBY_PDF, detect_file_type(_THROSBY_PDF, DetectionConfig())
+            NOTICE_PDF, detect_file_type(NOTICE_PDF, DetectionConfig())
         )[0]
         base = d / "batch-0001.parquet"
-        write_results([("throsby", str(_THROSBY_PDF), extraction)], base,
+        write_results([("notice", str(NOTICE_PDF), extraction)], base,
                       collection_id="test")
 
         # AI chunking on: boundaries come from the live enricher.
@@ -327,8 +306,6 @@ def test_run_ignores_downstream_stage_flags(tmp_path: Path) -> None:
     post_enrichment PII config that `run` could never satisfy) no longer make
     it run or reject — they declare pipeline membership, dispatched separately.
     The run extracts and succeeds regardless."""
-    if not _CSV_FILE.exists():
-        pytest.skip("CSV fixture not available")
     input_root = tmp_path / "in"
     input_root.mkdir()
     shutil.copy(_CSV_FILE, input_root / _CSV_FILE.name)
@@ -360,8 +337,6 @@ class TestCmdRunRunIdLayout:
     """End-to-end CLI-level verification of the I1 run_id + retention plumbing."""
 
     def test_auto_generated_run_id_writes_to_nested_layout(self, tmp_path: Path) -> None:
-        if not _CSV_FILE.exists():
-            pytest.skip("CSV fixture not available")
 
         input_root = tmp_path / "in"
         input_root.mkdir()
@@ -387,8 +362,6 @@ class TestCmdRunRunIdLayout:
         assert (tmp_path / "ckpt" / run_dir.name / "i1_test_checkpoint.json").exists()
 
     def test_explicit_run_id_via_cli(self, tmp_path: Path) -> None:
-        if not _CSV_FILE.exists():
-            pytest.skip("CSV fixture not available")
 
         input_root = tmp_path / "in"
         input_root.mkdir()
@@ -411,8 +384,6 @@ class TestCmdRunRunIdLayout:
         overwrites the original batch-0001 with a later doc cohort's content
         — the failure observed live during the i1b corpus extraction resume.
         """
-        if not _CSV_FILE.exists():
-            pytest.skip("CSV fixture not available")
 
         input_root = tmp_path / "in"
         input_root.mkdir()
@@ -450,8 +421,6 @@ class TestCmdRunRunIdLayout:
         assert (run_dir / "batch-0001.elements.parquet").stat().st_size == b1_size_before
 
     def test_retention_rolling_purges_old_run(self, tmp_path: Path) -> None:
-        if not _CSV_FILE.exists():
-            pytest.skip("CSV fixture not available")
 
         input_root = tmp_path / "in"
         input_root.mkdir()
@@ -495,8 +464,6 @@ class TestCmdRunRunIdLayout:
 
 class TestRunManifest:
     def test_run_writes_consolidated_manifest_at_run_root(self, tmp_path: Path) -> None:
-        if not _CSV_FILE.exists():
-            pytest.skip("CSV fixture not available")
 
         import pyarrow.parquet as pq
 
@@ -513,8 +480,6 @@ class TestRunManifest:
         assert {"source_hash", "doc_id", "filename", "status"} <= set(table.schema.names)
 
     def test_cmd_manifest_consolidates_existing_run(self, tmp_path: Path) -> None:
-        if not _CSV_FILE.exists():
-            pytest.skip("CSV fixture not available")
 
         shard_dir = _seed_run_with_extraction(tmp_path, run_id="manifest-cmd")
         manifest_path = shard_dir.parent / "manifest.parquet"
@@ -555,8 +520,6 @@ def _seed_run_with_extraction(tmp_path: Path, run_id: str = "i2-test") -> Path:
 class TestCmdChunkShards:
     @requires_chunking
     def test_writes_chunks_sidecar_for_each_batch(self, tmp_path: Path) -> None:
-        if not _CSV_FILE.exists():
-            pytest.skip("CSV fixture not available")
 
         shard_dir = _seed_run_with_extraction(tmp_path)
 
@@ -576,8 +539,6 @@ class TestCmdChunkShards:
 
     @requires_chunking
     def test_chunks_join_back_to_elements_via_source_hash(self, tmp_path: Path) -> None:
-        if not _CSV_FILE.exists():
-            pytest.skip("CSV fixture not available")
 
         from womblex.store.output import read_chunks, read_elements, read_manifest
 
@@ -607,8 +568,6 @@ class TestCmdChunkShards:
         self, tmp_path: Path,
     ) -> None:
         """The count reaches the sidecar, and is the tokeniser's, not a proxy."""
-        if not _CSV_FILE.exists():
-            pytest.skip("CSV fixture not available")
 
         from womblex.process.chunker import create_chunker
         from womblex.store.output import read_chunks
@@ -642,8 +601,6 @@ class TestCmdChunkShards:
 
     @requires_chunking
     def test_no_resume_clears_checkpoint(self, tmp_path: Path) -> None:
-        if not _CSV_FILE.exists():
-            pytest.skip("CSV fixture not available")
 
         shard_dir = _seed_run_with_extraction(tmp_path, run_id="i2-ckpt")
         ckpt_dir = tmp_path / "ckpt-chunk"
@@ -667,8 +624,6 @@ class TestCmdChunkShards:
     def test_resume_recovers_corrupt_chunks_shard(self, tmp_path: Path) -> None:
         """Wire-up test: a corrupt *.chunks.parquet on resume drops the affected
         docs from the chunk checkpoint and re-writes a clean sidecar."""
-        if not _CSV_FILE.exists():
-            pytest.skip("CSV fixture not available")
 
 
         shard_dir = _seed_run_with_extraction(tmp_path, run_id="i2-recover")
@@ -723,8 +678,6 @@ class TestChunkCliFlags:
 
     def test_shards_with_config_sources_chunking_settings(self, tmp_path: Path) -> None:
         """The --shards branch reads chunking + text_source from --config."""
-        if not _CSV_FILE.exists():
-            pytest.skip("CSV fixture not available")
         if not tokenizer_available(_CHUNK_TOKENIZER):
             pytest.skip("offline chunking needs `transformers` + the vendored kanon-2 tokeniser")
 

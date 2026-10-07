@@ -1,18 +1,16 @@
-"""Tests for womblex.store.output — fixture-driven, ground-truth only.
+"""Tests for womblex.store.output.
 
-Exercises the writer / reader / integrity check round-trip on the
-budget-statement DOCX fixture. No synthetic data — every test relies
-on a real fixture in womblex-benchmark.
+Exercises the writer / reader / integrity check round-trip on the synthetic
+budget-statement DOCX (``tests/_synthetic.py``).
 """
 
 from __future__ import annotations
-
-from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from tests._synthetic import BUDGET_DOCX as _BUDGET_DOCX
 from womblex.ingest.strategies_file import DocxExtractor
 from womblex.store.output import (
     CHUNKS_SCHEMA,
@@ -35,19 +33,9 @@ from womblex.store.output import (
     write_results,
 )
 
-_FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "fixtures"
-_BUDGET_DOCX = (
-    _FIXTURES
-    / "womblex-collection"
-    / "_documents"
-    / "foreign-affairs-and-trade-2025-26-portfolio-budget-statements.docx"
-)
-
 
 @pytest.fixture(scope="module")
 def budget_statement_extraction():
-    if not _BUDGET_DOCX.exists():
-        pytest.skip(f"fixture not present: {_BUDGET_DOCX}")
     return DocxExtractor().extract_path(_BUDGET_DOCX)
 
 
@@ -338,8 +326,6 @@ def test_chunks_path_for_uses_stem(tmp_path):
 
 def test_content_digest_is_stable_across_extractions(tmp_path):
     """Same source, same code: equal digest and rows; bytes and timestamps may differ."""
-    if not _BUDGET_DOCX.exists():
-        pytest.skip(f"fixture not present: {_BUDGET_DOCX}")
     manifests, elements = [], []
     for name in ("a", "b"):
         result = DocxExtractor().extract_path(_BUDGET_DOCX)

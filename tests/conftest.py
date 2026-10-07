@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._synthetic import SPREADSHEETS_DIR
+
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "fixtures"
 
 # Load the local .env so real-service tests (Isaacus embed/enrich) can run
@@ -89,8 +91,8 @@ def doclaynet_dir() -> Path:
 
 @pytest.fixture
 def spreadsheet_dir() -> Path:
-    """Real spreadsheet fixtures (CSV, Excel)."""
-    return FIXTURES_DIR / "womblex-collection" / "_spreadsheets"
+    """Synthetic spreadsheet fixtures (CSV, Excel)."""
+    return SPREADSHEETS_DIR
 
 
 @pytest.fixture

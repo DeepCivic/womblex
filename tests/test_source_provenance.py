@@ -5,19 +5,19 @@ the namespaced footer, resolution after the corpus moves, the read-side
 back-fill for shards written before the columns existed, and the stated
 non-goal that masking never rewrites either.
 
-Extraction round-trips use the budget-statement DOCX fixture; the schema-level
+Extraction round-trips use the synthetic budget-statement DOCX; the schema-level
 cases build rows directly, as ``test_pii_stage`` does.
 """
 
 from __future__ import annotations
 
 import shutil
-from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from tests._synthetic import BUDGET_DOCX as _BUDGET_DOCX
 from womblex.ingest.strategies_file import DocxExtractor
 from womblex.store.output import MANIFEST_SCHEMA, _shard_paths, read_manifest, write_results
 from womblex.store.source_provenance import (
@@ -30,18 +30,11 @@ from womblex.store.source_provenance import (
     relpath_under,
 )
 
-_FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "fixtures"
-_BUDGET_DOCX = (
-    _FIXTURES / "womblex-collection" / "_documents"
-    / "foreign-affairs-and-trade-2025-26-portfolio-budget-statements.docx"
-)
 _REL = f"dfat/2025-26/{_BUDGET_DOCX.name}"
 
 
 @pytest.fixture(scope="module")
 def extraction():
-    if not _BUDGET_DOCX.exists():
-        pytest.skip(f"fixture not present: {_BUDGET_DOCX}")
     return DocxExtractor().extract_path(_BUDGET_DOCX)
 
 

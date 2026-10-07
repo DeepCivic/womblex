@@ -1,10 +1,10 @@
 """Tests for the per-stage enrich + link wiring over a shard directory.
 
-Builds a real extraction shard from the **Throsby** ACT FOI childcare notice
-(small, native, ~5k chars), runs ``enrich_shards`` against the **live** Isaacus
+Builds an extraction shard from the synthetic quokka care decision notice
+(small, native), runs ``enrich_shards`` against the **live** Isaacus
 Kanon-2 enricher (no mocks — real for local validation per CLAUDE.md; skips
-cleanly without ``ISAACUS_API_KEY``), then ``link_shards`` against Throsby's
-real Education-services register row to confirm the two stages compose: the
+cleanly without ``ISAACUS_API_KEY``), then ``link_shards`` against the
+notice's register row to confirm the two stages compose: the
 provider legal name resolves to the canonical SE-/PR- ids. Also covers
 checkpoint skip-on-resume and no-checkpoint-on-failure (the latter via a real
 invalid-key client, not a stubbed exception).
@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from tests._synthetic import NOTICE_PDF
 from womblex.analyse.enrich_stage import enrich_shards
 from womblex.config import EnrichmentConfig, LinkingConfig, ReferenceConfig
 from womblex.ingest.detect import DetectionConfig, detect_file_type
@@ -31,32 +32,23 @@ from womblex.store.enrichment_output import (
 from womblex.store.entity_links_output import read_entity_links
 from womblex.store.output import write_results
 
-_FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "fixtures"
-_THROSBY_PDF = (
-    _FIXTURES / "womblex-collection" / "_documents"
-    / "00768-213A-270825-Throsby-Out-of-School-Care-"
-      "Administrative-Decision-Other-Notice-and-Direction_Redacted.pdf"
-)
-
-# Throsby's real row from the ACT Education-services register. Real enrichment
-# extracts the provider legal name ("Community Services #1 Incorporated"), which
-# fuzzy-resolves to this SE-/PR- pair.
+# The notice's service, as a register row. Enrichment extracts the provider
+# legal name ("Rottnest Community Services Incorporated"), which fuzzy-resolves
+# to this SE-/PR- pair.
 _REGISTER_CSV = (
     "ServiceApprovalNumber,Provider Approval Number,ServiceName,ProviderLegalName,"
     "ServiceAddress,Suburb,Postcode\n"
-    "SE-40022307,PR-00005865,Throsby Out of School Hours Care,"
-    "Community Services #1 Incorporated,1 Freshwater Street,THROSBY,2914\n"
+    "SE-40099001,PR-00099017,Quokka Cove Out of School Hours Care,"
+    "Rottnest Community Services Incorporated,1 Thomson Bay Road,ROTTNEST,6161\n"
 )
 
 
 @pytest.fixture
 def shard_dir(tmp_path) -> Path:
-    if not _THROSBY_PDF.exists():
-        pytest.skip(f"fixture not present: {_THROSBY_PDF}")
     d = tmp_path / "documents"
     d.mkdir()
-    extraction = extract_text(_THROSBY_PDF, detect_file_type(_THROSBY_PDF, DetectionConfig()))[0]
-    write_results([("throsby", str(_THROSBY_PDF), extraction)], d / "batch-0001.parquet",
+    extraction = extract_text(NOTICE_PDF, detect_file_type(NOTICE_PDF, DetectionConfig()))[0]
+    write_results([("notice", str(NOTICE_PDF), extraction)], d / "batch-0001.parquet",
                   collection_id="test")
     return d
 
@@ -82,7 +74,7 @@ class TestEnrichShards:
         rows = read_enrichment_entities(base).to_pylist()
         assert rows, "real enrichment produced no entities"
         kinds = {r["entity_type"] for r in rows}
-        # Throsby notice really contains a corporate provider + a postal address.
+        # The notice names a corporate provider and gives a postal address.
         assert "corporate" in kinds and "address" in kinds
 
     def test_writes_graph_edges_sidecar(self, shard_dir, isaacus_client):
@@ -114,7 +106,7 @@ class TestEnrichShards:
         ckpt.load()
         enrich_shards(shard_dir, EnrichmentConfig(), client=bad_isaacus_client,
                       checkpoint_mgr=ckpt)
-        assert "throsby" not in ckpt.state.processed_ids
+        assert "notice" not in ckpt.state.processed_ids
 
 
 class TestPersistDocumentReuse:
@@ -160,7 +152,7 @@ class TestPersistDocumentReuse:
 
 
 class TestEnrichThenLink:
-    def test_full_chain_resolves_throsby(self, shard_dir, reference_config, isaacus_client):
+    def test_full_chain_resolves_the_notice_provider(self, shard_dir, reference_config, isaacus_client):
         enrich_shards(shard_dir, EnrichmentConfig(), client=isaacus_client)
 
         cfg = LinkingConfig(enabled=True, reference=reference_config)
@@ -170,6 +162,6 @@ class TestEnrichThenLink:
 
         doc = read_entity_links(shard_dir, grain="doc").to_pylist()
         assert len(doc) == 1
-        # provider legal name resolved to Throsby's canonical service/provider ids
-        assert doc[0]["entity_id"] == "SE-40022307"
-        assert doc[0]["parent_entity_id"] == "PR-00005865"
+        # provider legal name resolved to the notice's canonical service/provider ids
+        assert doc[0]["entity_id"] == "SE-40099001"
+        assert doc[0]["parent_entity_id"] == "PR-00099017"
