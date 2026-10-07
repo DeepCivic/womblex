@@ -155,6 +155,11 @@ class TestExtractionConfigDefaults:
         cfg = ExtractionConfig()
         assert cfg.ocr.lang == "eng"
 
+    @pytest.mark.parametrize("key", ["layout_model", "layout_options"])
+    def test_removed_ocr_layout_key_is_refused(self, key: str) -> None:
+        with pytest.raises(ValidationError, match=f"extraction.ocr.{key} was removed"):
+            ExtractionConfig.model_validate({"ocr": {key: "x"}})
+
 
 
 
