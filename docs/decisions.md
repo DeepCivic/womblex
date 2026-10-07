@@ -980,7 +980,10 @@ be re-derivable, and the first pass's were not.
     PP-DocLayout-M is 23 MB and runs at about 65 ms per CPU page. Scored with
     the benchmark's DocLayNet scorer: layout F1 0.297; the one real
     ground-truth table (`dense_text_548`) found; table regions on 5 FUNSD
-    forms: 3. The DocLayNet fixtures hold one table and one picture, so they
+    forms: 3. Table-class recall fell from 50% to 25%, and `dense_text_548`
+    gave three table regions where the ground truth has one, with a `chart`
+    box (mapped to `figure`) almost identical to the `table` box. The
+    DocLayNet fixtures hold one table and one picture, so they
     cannot separate models; the end-to-end suites are the real gate.
   - **Layout feeds three things only.** Table rects (to `reconstruct_table`),
     figure and table rects (redaction exclusion zones) and the dominant
