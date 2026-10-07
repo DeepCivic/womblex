@@ -1,7 +1,9 @@
-"""Fixture-based tests using curated images from FUNSD, IAM-line, and DocLayNet.
+"""Pipeline tests on the synthetic scans: forms, single text lines and report pages.
 
+The three groups stand in for FUNSD forms, IAM lines and DocLayNet pages
+(``tests/_synthetic.py``); scoring against those datasets is the benchmark's.
 Validates the detection → extraction → chunking pipeline against images with
-known ground truth. Tests are grouped by concern:
+known text. Tests are grouped by concern:
 
 - Detection: image-only PDFs classify as SCANNED_MACHINEWRITTEN
 - Extraction: OCR runs without error on all fixture types
@@ -12,7 +14,6 @@ known ground truth. Tests are grouped by concern:
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import numpy as np
@@ -20,6 +21,7 @@ import pytest
 from PIL import Image
 
 from tests._pdf_builders import PdfBuilder
+from tests._synthetic import SCANS_DIR
 from womblex.ingest.detect import DocumentProfile, DocumentType, detect_document_type
 from womblex.ingest.extract import extract_text
 from womblex.ingest.pdf.types import Rect
@@ -30,18 +32,7 @@ from womblex.redact import RedactionDetector
 def _chunk(text: str, chunker) -> list[TextChunk]:
     return chunk_batch([ChunkInput(source_hash="d", narrative=text)], chunker).get("d", [])
 
-FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "fixtures"
-FUNSD_IMAGES = FIXTURES_DIR / "funsd" / "images"
-FUNSD_ANNOTATIONS = FIXTURES_DIR / "funsd" / "annotations"
-IAM_DIR = FIXTURES_DIR / "iam_line"
-DOCLAYNET_DIR = FIXTURES_DIR / "doclaynet"
-
-# Every test in this module reads a real fixture file. Skip cleanly when the
-# fixtures repo is not cloned (e.g. CI). See THIRD_PARTY_DATA.md.
-pytestmark = pytest.mark.skipif(
-    not FIXTURES_DIR.exists(),
-    reason="womblex-benchmark not cloned (see THIRD_PARTY_DATA.md)",
-)
+FUNSD_IMAGES = IAM_DIR = DOCLAYNET_DIR = SCANS_DIR
 
 
 # ---------------------------------------------------------------------------
@@ -90,23 +81,23 @@ def _image_to_pdf(
     return builder.image(Rect(0, 0, page_w, page_h), img).save()
 
 
+def _gt(name: str) -> str:
+    return (SCANS_DIR / f"{name}.gt.txt").read_text(encoding="utf-8").strip()
+
+
 def _funsd_ground_truth(name: str) -> list[str]:
-    """Return non-empty text strings from a FUNSD annotation file."""
-    with open(FUNSD_ANNOTATIONS / f"{name}.json") as f:
-        data = json.load(f)
-    return [entry["text"].strip() for entry in data["form"] if entry["text"].strip()]
+    """The form's text, one entry per line (title, label-value pairs, declaration)."""
+    return _gt(name).splitlines()
 
 
 def _doclaynet_ground_truth(name: str) -> list[str]:
-    """Return word-level ground truth strings from a DocLayNet annotation file."""
-    with open(DOCLAYNET_DIR / f"{name}.json") as f:
-        data = json.load(f)
-    return [w.strip() for w in data["words"] if w.strip()]
+    """The page's text as words."""
+    return _gt(name).split()
 
 
 def _iam_ground_truth(name: str) -> str:
-    """Return the ground truth transcription for an IAM-line sample."""
-    return (IAM_DIR / f"{name}.gt.txt").read_text().strip()
+    """The line's text."""
+    return _gt(name)
 
 
 def _word_token_counter(text: str) -> int:
@@ -118,29 +109,9 @@ def _word_token_counter(text: str) -> int:
 # Parametrise fixture names
 # ---------------------------------------------------------------------------
 
-FUNSD_SAMPLES = [
-    "85540866",
-    "82200067_0069",
-    "87594142_87594144",
-    "87528321",
-    "87528380",
-]
-
-IAM_SAMPLES = [
-    "short_1602",
-    "median_15",
-    "long_4",
-    "wide_1739",
-    "narrow_1163",
-]
-
-DOCLAYNET_SAMPLES = [
-    "diverse_layout_49",
-    "table_0",
-    "formula_29",
-    "sparse_text_344",
-    "dense_text_548",
-]
+FUNSD_SAMPLES = ["form-koala-rescue-intake", "form-bilby-sighting-report", "form-wombat-burrow-permit"]
+IAM_SAMPLES = ["line-field-note-1", "line-field-note-2", "line-field-note-3"]
+DOCLAYNET_SAMPLES = ["page-sparse", "page-table", "page-dense"]
 
 
 # ---------------------------------------------------------------------------
@@ -171,10 +142,9 @@ class TestFixtureDetection:
     """All fixture images should classify as a SCANNED_* type when wrapped in a
     PDF — they have no text layer, only an embedded raster image.
 
-    FUNSD images are noisy scanned documents (always SCANNED_*).  IAM images
-    are handwritten lines (IAM Handwriting Database); very small or very
-    low-contrast images may fall through to UNKNOWN when OCR confidence is
-    below classification thresholds.  That is expected behaviour.
+    Forms and pages are scanned documents (always SCANNED_*).  A single text
+    line is a very small image, which may fall through to UNKNOWN when OCR
+    confidence is below classification thresholds.  That is expected behaviour.
     """
 
     @pytest.mark.parametrize("name", FUNSD_SAMPLES)
@@ -218,7 +188,7 @@ class TestFixtureDetection:
 
     def test_detection_profile_fields_populated(self, tmp_path: Path) -> None:
         """Profile returned for a fixture PDF has all expected fields set."""
-        pdf = _image_to_pdf(FUNSD_IMAGES / "85540866.png", tmp_path / "test.pdf")
+        pdf = _image_to_pdf(FUNSD_IMAGES / "form-koala-rescue-intake.png", tmp_path / "test.pdf")
         profile = detect_document_type(pdf)
 
         assert profile.page_count == 1
@@ -254,14 +224,14 @@ class TestFixtureExtraction:
         pytest.importorskip("rapidocr_onnxruntime", reason="rapidocr-onnxruntime not installed")
 
     def test_funsd_sparse_form_extraction(self, tmp_path: Path) -> None:
-        """85540866 is the smallest FUNSD sample (25 words); OCR should
+        """The koala intake form is the sparsest form; OCR should
         return one result with no error.
 
         The profile is set explicitly to SCANNED_MACHINEWRITTEN so this test
         exercises the extraction path independent of detection.
         """
         pdf = _image_to_pdf(
-            FUNSD_IMAGES / "85540866.png",
+            FUNSD_IMAGES / "form-koala-rescue-intake.png",
             tmp_path / "test.pdf",
             page_w=_OCR_TEST_PAGE_W,
             page_h=_OCR_TEST_PAGE_H,
@@ -273,10 +243,10 @@ class TestFixtureExtraction:
         assert results[0].method == "scanned_machinewritten"
 
     def test_iam_single_line_extraction(self, tmp_path: Path) -> None:
-        """median_15 is a single handwritten line; extraction should produce
+        """A single text line; extraction should produce
         one PageResult regardless of OCR confidence."""
         pdf = _image_to_pdf(
-            IAM_DIR / "median_15.png",
+            IAM_DIR / "line-field-note-1.png",
             tmp_path / "test.pdf",
             page_w=_OCR_TEST_PAGE_W,
             page_h=_OCR_TEST_PAGE_H,
@@ -287,10 +257,10 @@ class TestFixtureExtraction:
         assert results[0].page_count == 1
 
     def test_doclaynet_sparse_extraction(self, tmp_path: Path) -> None:
-        """sparse_text_344 has minimal content (13 labelled words); OCR should
+        """The sparse page has minimal content; OCR should
         complete and return one result."""
         pdf = _image_to_pdf(
-            DOCLAYNET_DIR / "sparse_text_344.png",
+            DOCLAYNET_DIR / "page-sparse.png",
             tmp_path / "test.pdf",
             page_w=_OCR_TEST_PAGE_W,
             page_h=_OCR_TEST_PAGE_H,
@@ -303,7 +273,7 @@ class TestFixtureExtraction:
     def test_extraction_result_has_metadata(self, tmp_path: Path) -> None:
         """ExtractionResult always carries metadata with strategy and timing."""
         pdf = _image_to_pdf(
-            FUNSD_IMAGES / "85540866.png",
+            FUNSD_IMAGES / "form-koala-rescue-intake.png",
             tmp_path / "test.pdf",
             page_w=_OCR_TEST_PAGE_W,
             page_h=_OCR_TEST_PAGE_H,
@@ -319,7 +289,7 @@ class TestFixtureExtraction:
     def test_extraction_result_has_pages(self, tmp_path: Path) -> None:
         """A single-page fixture always returns exactly one PageResult."""
         pdf = _image_to_pdf(
-            DOCLAYNET_DIR / "sparse_text_344.png",
+            DOCLAYNET_DIR / "page-sparse.png",
             tmp_path / "test.pdf",
             page_w=_OCR_TEST_PAGE_W,
             page_h=_OCR_TEST_PAGE_H,
@@ -350,10 +320,10 @@ class TestFixtureOCRContent:
         pytest.importorskip("rapidocr_onnxruntime", reason="rapidocr-onnxruntime not installed")
 
     def test_funsd_sparse_form_has_some_text(self, tmp_path: Path) -> None:
-        """85540866 is a sparse FUNSD form (25 words); OCR should return
+        """The sparse koala intake form; OCR should return
         non-empty text."""
         pdf = _image_to_pdf(
-            FUNSD_IMAGES / "85540866.png",
+            FUNSD_IMAGES / "form-koala-rescue-intake.png",
             tmp_path / "test.pdf",
             page_w=_OCR_TEST_PAGE_W,
             page_h=_OCR_TEST_PAGE_H,
@@ -361,14 +331,14 @@ class TestFixtureOCRContent:
         results = extract_text(pdf, _scanned_profile())
 
         assert len(results[0].full_text) > 0, (
-            "Expected non-empty OCR output from FUNSD/85540866"
+            "Expected non-empty OCR output from the koala intake form"
         )
 
     def test_doclaynet_sparse_has_some_text(self, tmp_path: Path) -> None:
-        """sparse_text_344 has 13 labelled words; OCR should return
+        """The sparse page has a heading and one line; OCR should return
         non-empty output."""
         pdf = _image_to_pdf(
-            DOCLAYNET_DIR / "sparse_text_344.png",
+            DOCLAYNET_DIR / "page-sparse.png",
             tmp_path / "test.pdf",
             page_w=_OCR_TEST_PAGE_W,
             page_h=_OCR_TEST_PAGE_H,
@@ -376,14 +346,14 @@ class TestFixtureOCRContent:
         results = extract_text(pdf, _scanned_profile())
 
         assert len(results[0].full_text) > 0, (
-            "Expected non-empty OCR output from DocLayNet/sparse_text_344"
+            "Expected non-empty OCR output from the sparse page"
         )
 
     def test_iam_line_page_count_is_one(self, tmp_path: Path) -> None:
-        """Each IAM-line sample is a single-line image; extraction must
+        """Each line sample is a single-line image; extraction must
         return exactly one page regardless of content."""
         pdf = _image_to_pdf(
-            IAM_DIR / "median_15.png",
+            IAM_DIR / "line-field-note-1.png",
             tmp_path / "test.pdf",
             page_w=_OCR_TEST_PAGE_W,
             page_h=_OCR_TEST_PAGE_H,
@@ -413,7 +383,7 @@ class TestFixtureRedaction:
     """
 
     # A genuine censorship bar spans nearly the full page width. Form borders
-    # and thick horizontal rules in FUNSD documents can reach 60–93 % of width;
+    # and thick horizontal rules on scanned forms can reach 60–93 % of width;
     # only flag regions above 95 % as suspicious full-page redactions.
     _FULL_WIDTH_RATIO = 0.95
 
@@ -490,8 +460,8 @@ class TestFixtureChunking:
         )
 
     def test_iam_long_line_single_chunk(self) -> None:
-        """IAM long_4 is a 22-word sentence; at chunk_size=30 words it fits in one chunk."""
-        gt = _iam_ground_truth("long_4")
+        """The longest line is 17 words; at chunk_size=30 words it fits in one chunk."""
+        gt = _iam_ground_truth("line-field-note-3")
         chunks = _chunk(gt, self.chunker)
 
         assert len(chunks) == 1
@@ -499,17 +469,17 @@ class TestFixtureChunking:
         assert gt.strip() in chunks[0].text
 
     def test_iam_median_single_chunk(self) -> None:
-        """IAM median_15 is a short 9-word sentence; must be exactly one chunk."""
-        gt = _iam_ground_truth("median_15")
+        """A short 8-word line; must be exactly one chunk."""
+        gt = _iam_ground_truth("line-field-note-1")
         chunks = _chunk(gt, self.chunker)
 
         assert len(chunks) == 1
         assert chunks[0].chunk_index == 0
 
     def test_doclaynet_dense_text_produces_multiple_chunks(self) -> None:
-        """dense_text_548 has 413 labelled regions; concatenated ground truth
-        is long enough to produce multiple chunks at chunk_size=30 words."""
-        words = _doclaynet_ground_truth("dense_text_548")
+        """The dense page's text is long enough to produce multiple chunks
+        at chunk_size=30 words."""
+        words = _doclaynet_ground_truth("page-dense")
         full_text = " ".join(words)
         chunks = _chunk(full_text, self.chunker)
 
@@ -517,7 +487,7 @@ class TestFixtureChunking:
 
     def test_chunker_indices_are_sequential(self) -> None:
         """chunk_index must be 0, 1, 2, … with no gaps."""
-        words = _doclaynet_ground_truth("dense_text_548")
+        words = _doclaynet_ground_truth("page-dense")
         full_text = " ".join(words)
         chunks = _chunk(full_text, self.chunker)
 
@@ -525,9 +495,9 @@ class TestFixtureChunking:
         assert indices == list(range(len(chunks)))
 
     def test_funsd_ground_truth_round_trips_through_chunker(self) -> None:
-        """Text from FUNSD annotation JSON should chunk without error and
+        """A form's text should chunk without error and
         the combined chunk text should contain all original content."""
-        gt_texts = _funsd_ground_truth("82200067_0069")
+        gt_texts = _funsd_ground_truth("form-wombat-burrow-permit")
         # Join all form field texts into a single document body
         full_text = " ".join(gt_texts)
         chunks = _chunk(full_text, self.chunker)
@@ -546,10 +516,10 @@ class TestFixtureChunking:
         assert chunks == []
 
     def test_sparse_doclaynet_chunks_at_small_size(self) -> None:
-        """sparse_text_344 has only 13 words; at chunk_size=5 this produces
+        """The sparse page has only 11 words; at chunk_size=5 this produces
         multiple small chunks that together cover all the original words."""
         small_chunker = create_chunker(tokenizer=_word_token_counter, chunk_size=5)
-        words = _doclaynet_ground_truth("sparse_text_344")
+        words = _doclaynet_ground_truth("page-sparse")
         full_text = " ".join(words)
         chunks = _chunk(full_text, small_chunker)
 
@@ -560,7 +530,7 @@ class TestFixtureChunking:
 
     def test_chunk_offsets_cover_input(self) -> None:
         """start_char and end_char must span non-overlapping, contiguous regions."""
-        gt = _iam_ground_truth("long_4")
+        gt = _iam_ground_truth("line-field-note-3")
         large_chunker = create_chunker(tokenizer=_word_token_counter, chunk_size=5)
         chunks = _chunk(gt, large_chunker)
 

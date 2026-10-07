@@ -3,7 +3,7 @@
 The RedactionDetector operates on numpy image arrays.  Positive-case
 tests (detecting known black boxes) need controlled inputs with exact
 geometry, so ``redacted_image`` is constructed inline.  Negative-case
-tests (no spurious detections) use a real FUNSD benchmark image.
+tests (no spurious detections) use a synthetic scanned page.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ import pytest
 from PIL import Image
 
 from tests._pdf_builders import PdfBuilder
+from tests._synthetic import SCANS_DIR
 from womblex.cli.redact import cmd_annotate_redactions, cmd_redact
 from womblex.config import RedactionConfig
 from womblex.ingest.elements import Element, ElementKind
@@ -42,9 +43,6 @@ from womblex.redact.utils import pre_ocr_mask
 if TYPE_CHECKING:
     from womblex.process.chunker import TextChunk
 
-_FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "fixtures"
-
-
 @pytest.fixture
 def redacted_image() -> np.ndarray:
     """RGB image with two black rectangles at known coordinates."""
@@ -56,11 +54,8 @@ def redacted_image() -> np.ndarray:
 
 @pytest.fixture
 def clean_image() -> np.ndarray:
-    """Real FUNSD benchmark image (sparse form, 25 words) as grayscale — no redaction boxes."""
-    path = _FIXTURES_DIR / "funsd" / "images" / "85540866.png"
-    if not path.exists():
-        pytest.skip("womblex-benchmark not cloned (see THIRD_PARTY_DATA.md)")
-    return np.array(Image.open(path).convert("L"))
+    """A synthetic scanned page (a heading and one line) as grayscale — no redaction boxes."""
+    return np.array(Image.open(SCANS_DIR / "page-sparse.png").convert("L"))
 
 
 # ---------------------------------------------------------------------------
