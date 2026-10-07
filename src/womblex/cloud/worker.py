@@ -127,7 +127,7 @@ def _process_job(
             with log_context(run_id=job.run_id, job_id=job.id, stage=job.stage), \
                     capture_batch_log(log_path):
                 if job.kind == "stage":
-                    _run_stage(job, config, store)
+                    _run_stage(job, config, store, ingest)
                 else:
                     _run_batch(job, config, store, ingest, root, ingest_root)
         finally:
@@ -196,7 +196,9 @@ def _run_batch(
     )
 
 
-def _run_stage(job: Job, config: WomblexConfig, store: RemoteStore) -> None:
+def _run_stage(
+    job: Job, config: WomblexConfig, store: RemoteStore, ingest: RemoteStore | None = None,
+) -> None:
     """Run one downstream stage over the run's shard prefix.
 
     The same call ``womblex run-stage --store`` makes, with the same
@@ -224,6 +226,7 @@ def _run_stage(job: Job, config: WomblexConfig, store: RemoteStore) -> None:
     summary = run_stage_remote(
         contract, store, job.shard_prefix, config, ctx=ctx,
         checkpoint_prefix=checkpoint_prefix_for(contract, _output_prefix(job)),
+        ingest=ingest,
     )
     summary.log()
     if summary.exit_code == 0:

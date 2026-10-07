@@ -128,8 +128,11 @@ class RunContext:
     client: object | None = None
     checkpoint_mgr: CheckpointManager | None = None
     # Source-document stages only (`layout`): where the corpus is, if not where
-    # the manifest recorded it, and whether to rerun an unchanged fingerprint.
+    # the manifest recorded it; a fetcher that stages one document from the
+    # ingest store (the distributed runner's); and whether to rerun an
+    # unchanged fingerprint.
     source_root: str | None = None
+    source_fetcher: Callable[[dict], Path] | None = None
     force: bool = False
 
 
@@ -158,8 +161,8 @@ class StageContract:
     # display (the composer graph), while this resolves whether *this config*
     # actually will (e.g. ``chunk`` calls the API only under AI chunking).
     needs_isaacus_api_for: Callable[[WomblexConfig], bool] | None = None
-    # The stage re-reads the source documents, not just the shards. A runner
-    # with no way to stage them in refuses the stage rather than failing per base.
+    # The stage re-reads the source documents, not just the shards: the runner
+    # hands it a fetcher for the ingest store (`RunContext.source_fetcher`).
     needs_sources: bool = False
 
     def requires_isaacus_api(self, config: WomblexConfig) -> bool:
@@ -373,7 +376,15 @@ def _run_pii(shard_dir: Path, config: WomblexConfig, ctx: RunContext) -> None:
 def _run_layout(shard_dir: Path, config: WomblexConfig, ctx: RunContext) -> None:
     from womblex.process.layout_stage import layout_shards
 
-    layout_shards(shard_dir, config, source_root=ctx.source_root, force=ctx.force)
+    result = layout_shards(
+        shard_dir, config, source_root=ctx.source_root,
+        source_fetcher=ctx.source_fetcher, force=ctx.force,
+    )
+    if result.batches_failed:
+        raise RuntimeError(
+            f"layout: {result.batches_failed} batch(es) not analysed; they are left as they "
+            "were (the log names each document)"
+        )
 
 
 def _run_graph_refresh(shard_dir: Path, _config: WomblexConfig, ctx: RunContext) -> None:

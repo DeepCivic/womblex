@@ -13,7 +13,7 @@ import womblex.utils.model_registry as reg
 from tests._pdf_builders import PdfBuilder
 from womblex.batch import process_batch
 from womblex.cloud.stage_contracts import STAGE_CONTRACTS
-from womblex.cloud.stage_runner import StagePreconditionError, run_stage_local, run_stage_remote
+from womblex.cloud.stage_runner import run_stage_local, run_stage_remote
 from womblex.config import DatasetConfig, PathsConfig, WomblexConfig
 from womblex.ingest.interfaces.protocols import LayoutRegionResult
 from womblex.ingest.pdf.types import Rect
@@ -28,6 +28,8 @@ from womblex.store.layout_output import (
     read_footer_redaction_consumed,
     read_layout_regions,
 )
+from womblex.store.remote import RemoteStore
+from womblex.store.source_provenance import IngestProvenance
 
 
 class _Analyzer:
@@ -63,7 +65,10 @@ def run(tmp_path: Path):
     pdf = PdfBuilder(corpus / "scan.pdf").page().image(Rect(50, 50, 450, 450), img).save()
     (corpus / "t.csv").write_text("a,b\n1,2\n")
     shards = tmp_path / "shards"
-    process_batch([pdf, corpus / "t.csv"], _config(tmp_path, "stage-a"), batch_num=1, shard_dir=shards)
+    process_batch(
+        [pdf, corpus / "t.csv"], _config(tmp_path, "stage-a"), batch_num=1, shard_dir=shards,
+        provenance=IngestProvenance.declare(corpus, "t"),
+    )
     return corpus, shards
 
 
@@ -126,15 +131,64 @@ def test_a_run_from_before_the_layout_stage_reads_as_unknown(run) -> None:
     assert layout_fingerprint_status(shards / "batch-0001.parquet") == UNKNOWN
 
 
-def test_the_contract_runs_locally_and_refuses_a_store(tmp_path: Path, run) -> None:
+def test_the_contract_runs_locally(tmp_path: Path, run) -> None:
     from womblex.cloud.stage_contracts import RunContext
 
     corpus, shards = run
-    contract = STAGE_CONTRACTS["layout"]
     run_stage_local(
-        contract, shards, _config(tmp_path, "stage-b"),
+        STAGE_CONTRACTS["layout"], shards, _config(tmp_path, "stage-b"),
         ctx=RunContext(source_root=str(corpus)),
     )
     assert _label(shards) == {"stage-b"}
-    with pytest.raises(StagePreconditionError, match="--shards"):
-        run_stage_remote(contract, object(), "p", _config(tmp_path, "stage-b"))  # type: ignore[arg-type]
+
+
+class TestStoreRun:
+    """The distributed path: shards in a store, documents fetched from an ingest store."""
+
+    PREFIX = "runs/r1/documents"
+
+    @pytest.fixture
+    def stores(self, tmp_path: Path, run):
+        import shutil
+
+        corpus, shards = run
+        root = tmp_path / "store"
+        shutil.copytree(shards, root / self.PREFIX)
+        return RemoteStore.from_uri(str(root)), RemoteStore.from_uri(str(corpus)), root, corpus
+
+    def _go(self, tmp_path: Path, store, ingest, model: str = "stage-b"):
+        return run_stage_remote(
+            STAGE_CONTRACTS["layout"], store, self.PREFIX, _config(tmp_path, model), ingest=ingest,
+        )
+
+    def test_a_new_model_replaces_the_published_sidecar(self, tmp_path: Path, stores) -> None:
+        store, ingest, root, _ = stores
+        summary = self._go(tmp_path, store, ingest)
+        assert (summary.processed, summary.failed, summary.exit_code) == (1, 0, 0)
+        assert _label(root / self.PREFIX) == {"stage-b"}
+        assert not list((root / self.PREFIX / ".staging").glob("*"))
+
+    def test_an_unchanged_fingerprint_fetches_no_source(self, tmp_path: Path, stores) -> None:
+        store, _, root, _ = stores
+
+        class _Tripwire(RemoteStore):
+            def download_file(self, rel, local_path):
+                raise AssertionError("a skipped batch must not download sources")
+
+        ingest = _Tripwire.from_uri(str(root))
+        assert self._go(tmp_path, store, ingest, "stage-a").exit_code == 0
+        assert _label(root / self.PREFIX) == {"stage-a"}
+
+    def test_a_missing_source_fails_the_batch_and_keeps_the_sidecar(self, tmp_path: Path, stores) -> None:
+        store, ingest, root, corpus = stores
+        (corpus / "scan.pdf").unlink()
+        summary = self._go(tmp_path, store, ingest)
+        assert (summary.failed, summary.exit_code) == (1, 1)
+        assert _label(root / self.PREFIX) == {"stage-a"}
+
+    def test_a_source_whose_bytes_changed_is_refused(self, tmp_path: Path, stores) -> None:
+        store, ingest, root, corpus = stores
+        other = PdfBuilder(tmp_path / "other.pdf").page().text(72, 72, "different").save()
+        (corpus / "scan.pdf").write_bytes(other.read_bytes())
+        assert self._go(tmp_path, store, ingest).failed == 1
+        assert _label(root / self.PREFIX) == {"stage-a"}

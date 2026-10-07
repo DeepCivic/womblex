@@ -1,6 +1,6 @@
 # Permissive dependencies — outstanding work
 
-*Status: in progress (2026-10). Outstanding: P7, P8, F1, F2 (PyMuPDF) and L3c-B, L3e, L1-B (layout). Everything shipped is recorded in [`CHANGELOG.md`](../CHANGELOG.md), [`architecture.md`](architecture.md), [`models.md`](models.md) and [`decisions.md`](decisions.md), not here. The ground-truth revision gates only L1-B, F1-B's regeneration and H-B's CER-against-transcripts half; everything else is deliverable now. L3 is independent of the rest. Each merge updates this list as it lands, and the document is deleted once F2 ships.*
+*Status: in progress (2026-10). Outstanding: P7, P8, F1, F2 (PyMuPDF) and L3c-B, L1-B (layout). Everything shipped is recorded in [`CHANGELOG.md`](../CHANGELOG.md), [`architecture.md`](architecture.md), [`models.md`](models.md) and [`decisions.md`](decisions.md), not here. The ground-truth revision gates only L1-B, F1-B's regeneration and H-B's CER-against-transcripts half; everything else is deliverable now. L3 is independent of the rest. Each merge updates this list as it lands, and the document is deleted once F2 ships.*
 
 ## Context
 Womblex is Apache-2.0, so its dependencies must be licence-compatible. The remaining incompatible one is `pymupdf` (`import fitz`; opens every PDF and standalone image) and it is being replaced: every extractor already reads through the `ingest/pdf/` seam, `fitz` is imported only in `ingest/pdf/_fitz.py`, and the pdfium backend (`backend="pdfium"`) opens PDFs and images with geometry, rendering, images, drawings, widgets and text. Its `find_tables` raises `NotImplementedError` until P7. The default backend is still fitz.
@@ -25,7 +25,6 @@ A merge is W (womblex) or B (womblex-benchmark, paired). An approval tag means t
 
   *Merges.*
   - **L3c-B (B).** Regenerate `REDACTION_HANDLING`: exclusion zones now come from the 200 dpi layout render (the W half, L3c, has shipped).
-  - **L3e (W).** Distributed `run-stage layout`: a contract flag for source documents; the runner maps each manifest row to its ingest key from the recorded provenance, downloads it into the batch's temp dir and checks its hash (missing or moved is a per-document error); `--ingest` on `run-stage` and through the worker. `docs/layout.md` gains the distributed rerun. Splits in two if it grows past the cap.
 
 - **L1-B (B). Waits on the ground-truth revision.** Scores PP-DocLayout-M against the revised ground truth.
   - Make the DocLayNet layout-F1 test honour `--model` (it calls `get_layout_analyzer()` with no arguments today).
