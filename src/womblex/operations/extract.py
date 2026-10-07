@@ -55,8 +55,6 @@ def run_extraction(paths: list[Path], config: WomblexConfig) -> list[DocumentRes
                 lang=config.extraction.ocr.lang,
                 engine=config.extraction.ocr.engine,
                 engine_options=config.extraction.ocr.engine_options or None,
-                layout_model=config.extraction.ocr.layout_model,
-                layout_options=config.extraction.ocr.layout_options or None,
                 spreadsheet_print=config.extraction.native.spreadsheet_print.model_dump(),
                 layout=layout,
             )

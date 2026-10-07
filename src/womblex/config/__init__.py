@@ -94,16 +94,6 @@ class OCRConfig(BaseModel):
     dpi: int = Field(default=200, ge=72, le=600)
     lang: str = "eng"
     engine_options: dict = Field(default_factory=dict)
-    layout_model: str = Field(
-        default="pp-doclayout-m",
-        description="Registered layout analyser for OCR pages (by name, never "
-                    "an import path). Must emit the womblex block_type "
-                    "vocabulary.",
-    )
-    layout_options: dict = Field(
-        default_factory=dict,
-        description="Passed unchanged to the layout model's factory.",
-    )
     num_threads: int = Field(
         default=4, ge=1,
         description="Cap on OCR (onnxruntime) + layout (torch) inference threads. "

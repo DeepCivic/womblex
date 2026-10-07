@@ -21,11 +21,13 @@ import pytest
 from PIL import Image
 
 from tests._pdf_builders import PdfBuilder
+from womblex.ingest.elements import BBox
 from womblex.ingest.interfaces.protocols import (
     LayoutRegionResult,
     OCRPageResult,
     OCRRegionResult,
 )
+from womblex.ingest.layout_step import LayoutRegion, PageLayout
 from womblex.ingest.ocr_tables import (
     reconstruct_table,
     regions_in_rect,
@@ -68,6 +70,26 @@ class _StubAnalyzer:
         return self._regions
 
 
+def _layout_for(
+    regions: list[LayoutRegionResult], dims: tuple[int, int] = (1700, 2200),
+) -> PageLayout:
+    """The layout step's output for a page: pixel boxes, normalised by the render."""
+    w, h = dims
+    return PageLayout(0, "ok", [
+        LayoutRegion(
+            BBox(r.bbox[0] / w, r.bbox[1] / h, (r.bbox[2] - r.bbox[0]) / w, (r.bbox[3] - r.bbox[1]) / h),
+            r.label, r.block_type, r.confidence,
+        )
+        for r in regions
+    ])
+
+
+_PLUMBING_LAYOUT = _layout_for([
+    LayoutRegionResult(bbox=(0, 0, 400, 400), label="Table", block_type="table", confidence=0.96),
+    LayoutRegionResult(bbox=(0, 500, 400, 700), label="Text", block_type="paragraph", confidence=0.90),
+])
+
+
 @pytest.fixture
 def blank_page(tmp_path):
     with PdfBuilder(tmp_path / "blank.pdf").page(612, 792).text(72, 100, "Some page text").open() as doc:
@@ -99,24 +121,12 @@ class TestRegionsInRect:
 
 
 class TestLayoutPassPlumbing:
-    """A0 — the layout pass accepts OCR regions and guards their coord space."""
-
-    @pytest.fixture(autouse=True)
-    def _stub_analyzer(self, monkeypatch) -> None:
-        monkeypatch.setattr(
-            "womblex.ingest.strategies_scanned.get_layout_analyzer",
-            lambda *_a, **_k: _StubAnalyzer([
-                LayoutRegionResult(bbox=(0, 0, 400, 400), label="Table",
-                                   block_type="table", confidence=0.96),
-                LayoutRegionResult(bbox=(0, 500, 400, 700), label="Text",
-                                   block_type="paragraph", confidence=0.90),
-            ]),
-        )
+    """A0 — the layout pass accepts OCR regions and maps layout onto their render."""
 
     def test_regions_are_optional(self, blank_page: Page) -> None:
         """Callers without regions (legacy, tests) keep today's behaviour."""
         blocks, tables, consumed = _layout_blocks_and_tables(
-            blank_page, 200, "page text", 90.0,
+            blank_page, 200, "page text", 90.0, page_layout=_PLUMBING_LAYOUT,
         )
         # With no cell source there is nothing to reconstruct, so the fallback
         # still collapses the page — table content included — onto one block.
@@ -133,7 +143,7 @@ class TestLayoutPassPlumbing:
             _blocks, tables, _consumed = _layout_blocks_and_tables(
                 blank_page, 200, "page text", 90.0,
                 ocr_regions=[_region(10, 10, 100, 40)],
-                ocr_pix_dims=(width, height),
+                ocr_pix_dims=(width, height), page_layout=_PLUMBING_LAYOUT,
             )
         assert "dropping cell regions" not in caplog.text
         # One stray region inside the rect is not a grid — the gates refuse.
@@ -148,7 +158,7 @@ class TestLayoutPassPlumbing:
             _layout_blocks_and_tables(
                 blank_page, 200, "page text", 90.0,
                 ocr_regions=[_region(10, 10, 100, 40)],
-                ocr_pix_dims=(width, height),
+                ocr_pix_dims=(width, height), page_layout=_PLUMBING_LAYOUT,
             )
         assert (
             "layout table region: page=0 confidence=0.96 reconstructed=False"
@@ -162,20 +172,7 @@ class TestLayoutPassPlumbing:
         with caplog.at_level(logging.WARNING, logger="womblex.ingest.strategies_scanned"):
             _blocks, tables, _consumed = _layout_blocks_and_tables(
                 blank_page, 200, "page text", 90.0,
-                ocr_regions=[_region(10, 10, 100, 40)],
-            )
-        assert "dropping cell regions" in caplog.text
-        assert tables == []
-
-    def test_mismatched_render_dims_drop_regions(
-        self, blank_page: Page, caplog,
-    ) -> None:
-        """Non-comparable coordinate spaces lose the inputs, never mis-bin."""
-        with caplog.at_level(logging.WARNING, logger="womblex.ingest.strategies_scanned"):
-            _blocks, tables, _consumed = _layout_blocks_and_tables(
-                blank_page, 200, "page text", 90.0,
-                ocr_regions=[_region(10, 10, 100, 40)],
-                ocr_pix_dims=(17, 23),
+                ocr_regions=[_region(10, 10, 100, 40)], page_layout=_PLUMBING_LAYOUT,
             )
         assert "dropping cell regions" in caplog.text
         assert tables == []
@@ -414,6 +411,11 @@ class TestReconstructTable:
 # both sit inside the page.
 _TABLE_RECT = (50.0, 50.0, 1300.0, 900.0)
 _NARRATIVE_RECT = (50.0, 950.0, 1300.0, 1300.0)
+_RECON_REGIONS = [
+    LayoutRegionResult(bbox=_TABLE_RECT, label="Table", block_type="table", confidence=0.96),
+    LayoutRegionResult(bbox=_NARRATIVE_RECT, label="Text", block_type="paragraph", confidence=0.90),
+]
+_RECON_LAYOUT = _layout_for(_RECON_REGIONS)
 
 
 def _narrative_regions() -> list[OCRRegionResult]:
@@ -428,22 +430,10 @@ class TestLayoutPassReconstruction:
 
     DIMS = (1700, 2200)
 
-    @pytest.fixture(autouse=True)
-    def _stub_analyzer(self, monkeypatch) -> None:
-        monkeypatch.setattr(
-            "womblex.ingest.strategies_scanned.get_layout_analyzer",
-            lambda *_a, **_k: _StubAnalyzer([
-                LayoutRegionResult(bbox=_TABLE_RECT, label="Table",
-                                   block_type="table", confidence=0.96),
-                LayoutRegionResult(bbox=_NARRATIVE_RECT, label="Text",
-                                   block_type="paragraph", confidence=0.90),
-            ]),
-        )
-
     def _run(self, page: Page, regions: list[OCRRegionResult]):
         return _layout_blocks_and_tables(
             page, 200, "whole page OCR text", 90.0,
-            ocr_regions=regions, ocr_pix_dims=self.DIMS,
+            ocr_regions=regions, ocr_pix_dims=self.DIMS, page_layout=_RECON_LAYOUT,
         )
 
     def test_table_region_yields_cells(self, blank_page: Page) -> None:
@@ -514,7 +504,7 @@ class TestLayoutPassReconstruction:
             blocks, tables, consumed = _layout_blocks_and_tables(
                 blank_page, 200, "whole page OCR text", 90.0,
                 ocr_regions=_grid_regions() + _narrative_regions(),
-                ocr_pix_dims=self.DIMS,
+                ocr_pix_dims=self.DIMS, page_layout=_RECON_LAYOUT,
                 page_deskewed=True,
             )
         assert "deskewed page, refusing table reconstruction" in caplog.text
@@ -527,18 +517,6 @@ class TestOrchestratorTableWiring:
     """A3 — the orchestrator surfaces reconstructed tables and de-duplicates."""
 
     DIMS = (1700, 2200)
-
-    @pytest.fixture(autouse=True)
-    def _stub_analyzer(self, monkeypatch) -> None:
-        monkeypatch.setattr(
-            "womblex.ingest.strategies_scanned.get_layout_analyzer",
-            lambda *_a, **_k: _StubAnalyzer([
-                LayoutRegionResult(bbox=_TABLE_RECT, label="Table",
-                                   block_type="table", confidence=0.96),
-                LayoutRegionResult(bbox=_NARRATIVE_RECT, label="Text",
-                                   block_type="paragraph", confidence=0.90),
-            ]),
-        )
 
     def _apply(self, page: Page, monkeypatch, regions, steps=()):
         from womblex.ingest.detect import DocumentType
@@ -554,7 +532,7 @@ class TestOrchestratorTableWiring:
         _apply_ocr_page(
             page, _ocr_profile(), accum,
             dpi=200, lang="eng", engine="paddleocr", engine_options={},
-            doc_type=DocumentType.SCANNED_MACHINEWRITTEN,
+            doc_type=DocumentType.SCANNED_MACHINEWRITTEN, page_layout=_RECON_LAYOUT,
         )
         return accum
 
@@ -621,18 +599,6 @@ class TestReconstructedTableDownstream:
         )
         elements, _next = _accum_to_elements(accum, 0, include_tables=True)
         return elements
-
-    @pytest.fixture(autouse=True)
-    def _stub_analyzer(self, monkeypatch) -> None:
-        monkeypatch.setattr(
-            "womblex.ingest.strategies_scanned.get_layout_analyzer",
-            lambda *_a, **_k: _StubAnalyzer([
-                LayoutRegionResult(bbox=_TABLE_RECT, label="Table",
-                                   block_type="table", confidence=0.96),
-                LayoutRegionResult(bbox=_NARRATIVE_RECT, label="Text",
-                                   block_type="paragraph", confidence=0.90),
-            ]),
-        )
 
     def test_projects_to_a_cellified_table_element(
         self, blank_page: Page, monkeypatch,
@@ -717,13 +683,8 @@ class TestImageDocumentsRouteThroughTheOrchestrator:
             lambda **kw: _StubReader(_grid_regions() + _narrative_regions()),
         )
         monkeypatch.setattr(
-            "womblex.ingest.strategies_scanned.get_layout_analyzer",
-            lambda *_a, **_k: _StubAnalyzer([
-                LayoutRegionResult(bbox=_TABLE_RECT, label="Table",
-                                   block_type="table", confidence=0.96),
-                LayoutRegionResult(bbox=_NARRATIVE_RECT, label="Text",
-                                   block_type="paragraph", confidence=0.90),
-            ]),
+            "womblex.ingest.paddle_ocr.get_layout_analyzer",
+            lambda *_a, **_k: _StubAnalyzer(_RECON_REGIONS),
         )
         # Deskew would refuse reconstruction (A2); this fixture has no skew,
         # so hold preprocessing to the identity and keep the test about routing.
@@ -731,7 +692,17 @@ class TestImageDocumentsRouteThroughTheOrchestrator:
             "womblex.ingest.strategies_scanned.preprocess_for_ocr",
             lambda img: (img, []),
         )
-        return extract_text(self._png(tmp_path), self._profile(), dpi=200)[0]
+        from womblex.config import DatasetConfig, PathsConfig, WomblexConfig
+        from womblex.ingest.layout_step import LayoutSettings
+
+        config = WomblexConfig(
+            dataset=DatasetConfig(name="t"),
+            paths=PathsConfig(input_root=tmp_path, output_root=tmp_path, checkpoint_dir=tmp_path),
+        )
+        return extract_text(
+            self._png(tmp_path), self._profile(), dpi=200,
+            layout=LayoutSettings.from_config(config),
+        )[0]
 
     def test_get_extractor_refuses_image(self) -> None:
         """The dead IMAGE case is gone — routing it here would be the bug."""

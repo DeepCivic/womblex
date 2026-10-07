@@ -937,8 +937,9 @@ be re-derivable, and the first pass's were not.
   - **Readers declare their output shape** (`regions` or `markdown`),
     replacing `LLM_OCR_ENGINES`; `is_llm_engine` now reads the `markdown` trait. The reader cache is keyed
     by engine plus a frozen copy of its options.
-  - **Layout slot (merge 2).** `extraction.ocr.layout_model` /
-    `layout_options` and `redaction.layout_model` / `layout_options` name a
+  - **Layout slot (merge 2).** `layout.model` / `options` (formerly
+    `extraction.ocr.layout_model` / `layout_options`, removed in L3b) and
+    `redaction.layout_model` / `layout_options` name a
     registered analyser (default `pp-doclayout-m`); options pass to its
     factory unchanged. The two selections are independent because the
     standalone `redact` commands hold only `RedactionConfig`. An unknown name

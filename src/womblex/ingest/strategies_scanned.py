@@ -25,19 +25,17 @@ from womblex.ingest.extract import (
     _normalise_rect,
     _ocr_text_block,
 )
-from womblex.ingest.interfaces.protocols import OCRRegionResult, check_layout_regions
+from womblex.ingest.interfaces.protocols import OCRRegionResult
 from womblex.ingest.ocr_tables import reconstruct_table, regions_in_rect, span_from_region
 from womblex.ingest.paddle_ocr import (
-    DEFAULT_LAYOUT_MODEL,
-    get_layout_analyzer,
     get_ocr_reader,
     is_llm_engine,
     preprocess_for_ocr,
 )
 from womblex.ingest.table_grid import Span, cluster_x_centroids, rows_from_spans
-from womblex.utils.model_registry import SLOT_LAYOUT, resolve
 
 if TYPE_CHECKING:
+    from womblex.ingest.layout_step import PageLayout
     from womblex.ingest.pdf.types import Page, Rect, Word
 
 logger = logging.getLogger(__name__)
@@ -353,18 +351,19 @@ def _layout_blocks_and_tables(
     ocr_regions: Sequence[OCRRegionResult] | None = None,
     ocr_pix_dims: tuple[int, int] | None = None,
     page_deskewed: bool = False,
-    layout_model: str = DEFAULT_LAYOUT_MODEL,
-    layout_options: dict | None = None,
+    page_layout: PageLayout | None = None,
 ) -> tuple[list[TextBlock], list[TableData], list[OCRRegionResult]]:
-    """Run layout analysis on a page, returning typed TextBlocks and tables.
+    """Turn a page's persisted layout regions into typed TextBlocks and tables.
 
-    Falls back to a single paragraph block if the layout model is unavailable.
+    ``page_layout`` is the batch's layout step output for this page. Without
+    one, or when it is ``empty`` / ``error``, the page falls back to a single
+    paragraph block of its OCR text.
 
     ``ocr_regions`` / ``ocr_pix_dims`` carry the per-detection OCR output
     that produced *text*, in image-pixel coords at *dpi* — the raw
     material for reconstructing cells inside a detected table rect. They
     are supplied together or not at all: regions without their render
-    dimensions cannot be checked against this pass's own render, so they
+    dimensions cannot be mapped from the layout's normalised boxes, so they
     are dropped. Only region-based engines (paddleocr) supply them; LLM/VLM
     engines resolve reading order natively, return no regions, and are
     dispatched to ``_markdown_page_block`` instead, so they never reach
@@ -384,54 +383,44 @@ def _layout_blocks_and_tables(
     tables: list[TableData] = []
     consumed: list[OCRRegionResult] = []
 
-    # A config error (unknown model name) must surface, not read as a
-    # missing model and fall back silently.
-    resolve(SLOT_LAYOUT, layout_model)
     try:
-        analyzer = get_layout_analyzer(layout_model, **(layout_options or {}))
-        img = page.render(dpi=dpi)
+        if page_layout is None or page_layout.status != "ok":
+            raise RuntimeError("no layout regions available")
 
-        # The OCR render and this layout render are the same page at the
-        # same dpi, so their pixel spaces coincide and region bboxes can be
-        # intersected with layout rects directly. Verify rather than assume:
-        # unless the OCR render's dimensions are supplied *and* match, the
-        # coordinates are not known to be comparable and the regions are
-        # dropped. That costs reconstruction inputs but never produces a
-        # mis-binned grid.
+        # Layout renders at the OCR dpi, so its page is the OCR render; the
+        # normalised boxes map onto the OCR render's own pixel dimensions.
+        if ocr_pix_dims is not None:
+            layout_dims = (int(ocr_pix_dims[0]), int(ocr_pix_dims[1]))
+        else:
+            img = page.render(dpi=dpi)
+            layout_dims = (int(img.shape[1]), int(img.shape[0]))
+        width, height = float(layout_dims[0]), float(layout_dims[1])
+
+        # Cell regions need their render dimensions to be placed at all.
         cell_source = list(ocr_regions or ())
-        layout_dims = (int(img.shape[1]), int(img.shape[0]))
-        ocr_dims = tuple(ocr_pix_dims) if ocr_pix_dims is not None else None
-        if cell_source and ocr_dims != layout_dims:
+        if cell_source and ocr_pix_dims is None:
             logger.warning(
-                "OCR/layout renders not comparable, dropping cell regions: "
-                "page=%d ocr_dims=%s layout_dims=%s",
-                page.number, ocr_dims, layout_dims,
+                "OCR render dimensions missing, dropping cell regions: page=%d", page.number,
             )
             cell_source = []
-        # Deskew survives the dimension check — warpAffine preserves the
-        # frame — so it needs its own refusal (A2). Mapping the layout rect
-        # into deskewed space is deferred to the round that targets scans.
+        # Deskew rotates the OCR input, so region coords leave the frame the
+        # layout was found in (A2). Mapping the layout rect into deskewed space
+        # is deferred to the round that targets scans.
         if cell_source and page_deskewed:
             logger.debug(
                 "deskewed page, refusing table reconstruction: page=%d", page.number,
             )
             cell_source = []
 
-        regions = analyzer.analyze(img)
-        try:
-            check_layout_regions(regions)
-        except ValueError:
-            logger.warning(
-                "layout model %r is non-conforming, using full-page text: page=%d",
-                layout_model, page.number, exc_info=True,
-            )
-            raise
+        regions = page_layout.regions
         if not regions:
             raise RuntimeError("no layout regions detected")
 
         for region in regions:
-            rx0, ry0, rx1, ry1 = region.bbox
-            pos = _normalise_bbox((rx0, ry0, rx1, ry1), float(img.shape[1]), float(img.shape[0]))
+            rx0, ry0 = region.bbox.x * width, region.bbox.y * height
+            rx1 = (region.bbox.x + region.bbox.width) * width
+            ry1 = (region.bbox.y + region.bbox.height) * height
+            pos = _normalise_bbox((rx0, ry0, rx1, ry1), width, height)
 
             if region.block_type == "table":
                 table = None
@@ -490,9 +479,7 @@ def _layout_blocks_and_tables(
                 if consumed:
                     block_type = "paragraph"
                 else:
-                    dominant = max(
-                        regions, key=lambda r: (r.bbox[2] - r.bbox[0]) * (r.bbox[3] - r.bbox[1]),
-                    )
+                    dominant = max(regions, key=lambda r: r.bbox.width * r.bbox.height)
                     block_type = _ocr_region_block_type(block.text, dominant.block_type)
                 block = TextBlock(
                     text=block.text,

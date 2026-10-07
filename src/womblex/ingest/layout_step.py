@@ -3,8 +3,8 @@
 Runs after page profiling and before OCR and redaction detection, because it
 needs each page's route. Its output is carried on ``ExtractionResult.layout``
 and written to ``*.layout_regions.parquet`` by ``store.output.write_results``.
-Nothing reads it yet: OCR and redaction still call their own analysers, so
-elements are unchanged.
+OCR reads each page's regions for table rects and block types; redaction
+still calls its own analyser.
 
 Boxes are stored normalised (0-1, top-left), converted from the pixels of the
 render the analyser saw, so any later consumer maps them onto its own render.

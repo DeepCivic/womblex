@@ -17,8 +17,10 @@ from pathlib import Path
 import fitz
 import pytest
 
+from womblex.config import DatasetConfig, PathsConfig, WomblexConfig
 from womblex.ingest.detect import detect_file_type
 from womblex.ingest.extract import extract_text
+from womblex.ingest.layout_step import LayoutSettings
 from womblex.store.content_digest import content_digest
 
 _COLLECTION = Path(__file__).resolve().parent.parent / "fixtures" / "fixtures" / "womblex-collection"
@@ -54,5 +56,10 @@ def test_default_content_digest_is_pinned(rel: str) -> None:
         pytest.skip(f"fixture not present: {path}")
     if path.suffix == ".pdf" and fitz.VersionBind != _PDF_PINNED_UNDER:
         pytest.skip(f"PDF digests pinned under PyMuPDF {_PDF_PINNED_UNDER}, found {fitz.VersionBind}")
-    results = extract_text(path, detect_file_type(path))
+    # The layout step is part of default extraction: OCR pages read its regions.
+    config = WomblexConfig(
+        dataset=DatasetConfig(name="digest"),
+        paths=PathsConfig(input_root=path.parent, output_root=path.parent, checkpoint_dir=path.parent),
+    )
+    results = extract_text(path, detect_file_type(path), layout=LayoutSettings.from_config(config))
     assert content_digest(results[0].elements) == _PINNED[rel]
