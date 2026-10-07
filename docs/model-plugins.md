@@ -24,7 +24,7 @@ reach the factory as keyword arguments, unchanged.
 | Slot | Group | Config key | Factory receives | Factory returns |
 |---|---|---|---|---|
 | OCR engine | `womblex.models.ocr` | `extraction.ocr.engine` | `lang` plus `engine_options` | a reader with `read_page(img) -> OCRPageResult` |
-| Layout analyser | `womblex.models.layout` | `layout.model`, `redaction.layout_model` | `layout.options`, `layout_options` | an object with `analyze(img, conf_threshold) -> list[LayoutRegion]` |
+| Layout analyser | `womblex.models.layout` | `layout.model` | `layout.options` | an object with `analyze(img, conf_threshold) -> list[LayoutRegion]` |
 | PII context model | `womblex.models.pii-context` | `pii.model` | `model_options` | an object with `encode(texts) -> embeddings` |
 | Chunk tokeniser | `womblex.models.tokenizer` | `chunking.tokenizer` | `tokenizer_options` | a Hugging Face id string, or a `(str) -> int` token counter |
 | Spellfix dictionary | `womblex.models.spellfix-dictionary` | `spellfix.dict_name` | `dict_options` | an object with `lookup(word)`, as a Hunspell dictionary has |
@@ -51,7 +51,7 @@ Each region's `block_type` must be one of `LAYOUT_BLOCK_TYPES` in
 `ingest/interfaces/protocols.py`. `check_layout_regions` enforces it; a
 non-conforming result is logged and the page falls back to full-page text.
 Run it over your model's output in your package's tests. The same model
-applies to redaction detection when named in `redaction.layout_model`.
+applies to redaction's exclusion zones too, since they read the layout step's regions.
 
 ### Pre-run check
 

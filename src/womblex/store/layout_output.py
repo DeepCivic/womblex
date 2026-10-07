@@ -233,6 +233,52 @@ def _read_shard(path: Path) -> pa.Table:
     return raw.select([f.name for f in LAYOUT_REGIONS_SCHEMA]).cast(LAYOUT_REGIONS_SCHEMA)
 
 
+def read_page_layouts(path: Path) -> dict[str, dict[int, PageLayout]]:
+    """A sidecar file or shard directory as ``{source_hash: {page: PageLayout}}``.
+
+    The inverse of :func:`layout_rows`: what a consumer that was not handed the
+    extraction's in-memory regions (redaction over shards) reads instead.
+    """
+    from womblex.ingest.elements import BBox
+    from womblex.ingest.layout_step import LayoutRegion, PageLayout
+
+    out: dict[str, dict[int, PageLayout]] = {}
+    for row in read_layout_regions(path).to_pylist():
+        page = out.setdefault(row["source_hash"], {}).setdefault(
+            row["page"], PageLayout(row["page"], row["status"], error=row["error"] or ""),
+        )
+        if row["bbox"] is not None:
+            b = row["bbox"]
+            page.regions.append(LayoutRegion(
+                BBox(b["x"], b["y"], b["width"], b["height"]),
+                row["label"], row["block_type"], float(row["confidence"]),
+            ))
+    return out
+
+
+def unfiltered_redaction_pages(path: Path) -> list[tuple[str, int]]:
+    """``(source_hash, page)`` pairs redaction ran on without exclusion zones.
+
+    A page is unfiltered when its layout row has status ``error`` in a sidecar
+    whose footer says redaction consumed the regions. Footer-less files and
+    files whose footer says redaction did not consume them contribute nothing:
+    for those, no filter was asked of the regions. This over-reports slightly
+    (a page redaction resolved from vector drawings never needed the filter),
+    which is the safe direction.
+    """
+    p = Path(path)
+    files = sorted(p.glob(f"*{LAYOUT_REGIONS_SUFFIX}")) if p.is_dir() else [p]
+    pairs: list[tuple[str, int]] = []
+    for f in files:
+        if read_footer_redaction_consumed(pq.read_metadata(str(f)).metadata) is not True:
+            continue
+        pairs.extend(
+            (r["source_hash"], r["page"])
+            for r in _read_shard(f).to_pylist() if r["status"] == STATUS_ERROR
+        )
+    return sorted(set(pairs))
+
+
 __all__ = [
     "FINGERPRINT_KEY",
     "LAYOUT_REGIONS_SCHEMA",
@@ -249,5 +295,7 @@ __all__ = [
     "read_footer_layout_fingerprint",
     "read_footer_redaction_consumed",
     "read_layout_regions",
+    "read_page_layouts",
+    "unfiltered_redaction_pages",
     "write_layout_regions",
 ]

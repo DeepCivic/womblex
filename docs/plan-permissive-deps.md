@@ -1,6 +1,6 @@
 # Permissive dependencies — outstanding work
 
-*Status: in progress (2026-10). Outstanding: P7, P8, F1, F2 (PyMuPDF) and L3c to L3e, L1-B (layout). Everything shipped is recorded in [`CHANGELOG.md`](../CHANGELOG.md), [`architecture.md`](architecture.md), [`models.md`](models.md) and [`decisions.md`](decisions.md), not here. The ground-truth revision gates only L1-B, F1-B's regeneration and H-B's CER-against-transcripts half; everything else is deliverable now. L3 is independent of the rest. Each merge updates this list as it lands, and the document is deleted once F2 ships.*
+*Status: in progress (2026-10). Outstanding: P7, P8, F1, F2 (PyMuPDF) and L3c-B, L3d, L3e, L1-B (layout). Everything shipped is recorded in [`CHANGELOG.md`](../CHANGELOG.md), [`architecture.md`](architecture.md), [`models.md`](models.md) and [`decisions.md`](decisions.md), not here. The ground-truth revision gates only L1-B, F1-B's regeneration and H-B's CER-against-transcripts half; everything else is deliverable now. L3 is independent of the rest. Each merge updates this list as it lands, and the document is deleted once F2 ships.*
 
 ## Context
 Womblex is Apache-2.0, so its dependencies must be licence-compatible. The remaining incompatible one is `pymupdf` (`import fitz`; opens every PDF and standalone image) and it is being replaced: every extractor already reads through the `ingest/pdf/` seam, `fitz` is imported only in `ingest/pdf/_fitz.py`, and the pdfium backend (`backend="pdfium"`) opens PDFs and images with geometry, rendering, images, drawings, widgets and text. Its `find_tables` raises `NotImplementedError` until P7. The default backend is still fitz.
@@ -26,7 +26,7 @@ A merge is W (womblex) or B (womblex-benchmark, paired). An approval tag means t
   - **Measurement without OCR.** `run-stage layout` renders pages from the source documents, the first downstream stage to need them: locally through `SourceResolver`, distributed through source staging in the stage runner.
 
   *Merges.*
-  - **L3c (W) + L3c-B (B).** Redaction reads the persisted regions, the unfiltered-page warning and reader land, `redaction.layout_model` / `layout_options` are deleted (same doc and test sites as L3b). `docs/layout.md` gains the unfiltered-pages section. Regenerate `REDACTION_HANDLING` (exclusion zones now come from the 200 dpi render).
+  - **L3c-B (B).** Regenerate `REDACTION_HANDLING`: exclusion zones now come from the 200 dpi layout render (the W half, L3c, has shipped).
   - **L3d (W).** The `layout` stage contract and local `run-stage layout --shards`, sources through `SourceResolver`, fingerprint-aware skip, and a reader that compares the layout sidecar's fingerprint with the elements footer (`match` / `mismatch` / `unknown` for pre-L3 runs). `docs/layout.md` gains the out-of-date check and local rerun. Remove the README's layout note. From here L1-B can score the sidecar directly.
   - **L3e (W).** Distributed `run-stage layout`: a contract flag for source documents; the runner maps each manifest row to its ingest key from the recorded provenance, downloads it into the batch's temp dir and checks its hash (missing or moved is a per-document error); `--ingest` on `run-stage` and through the worker. `docs/layout.md` gains the distributed rerun. Splits in two if it grows past the cap.
 

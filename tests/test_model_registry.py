@@ -184,27 +184,44 @@ def test_plugin_context_model_scores_candidates(
 
 # --- redaction layout filter -----------------------------------------------
 
-from pathlib import Path
 
-from tests._pdf_builders import PdfBuilder
-from womblex.config import RedactionConfig
-from womblex.redact.stage import _layout_exclude_rects, build_detector, detect_redactions
+from womblex.redact.stage import _layout_exclude_rects
 
 
-def test_redaction_unknown_layout_name_raises(tmp_path: Path) -> None:
-    pdf = PdfBuilder(tmp_path / "blank.pdf").page().save()
-    with pytest.raises(ValueError, match="pp-doclayout-m"):
-        detect_redactions(pdf, 1, build_detector(RedactionConfig()), layout_model="nope")
+def _page_layout(status: str, *regions: tuple[str, tuple[float, float, float, float]]):
+    from womblex.ingest.elements import BBox
+    from womblex.ingest.layout_step import LayoutRegion, PageLayout
 
-
-def test_redaction_filter_drops_non_conforming_output(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    analyzer = SimpleNamespace(analyze=lambda img: [_region("textbox")])
-    monkeypatch.setattr(
-        "womblex.ingest.paddle_ocr.get_layout_analyzer", lambda *a, **k: analyzer
+    return PageLayout(
+        0, status, [LayoutRegion(BBox(*box), "x", block_type, 0.9) for block_type, box in regions],
+        error="boom" if status == "error" else "",
     )
-    assert _layout_exclude_rects(np.zeros((10, 10, 3), dtype=np.uint8)) is None
+
+
+def test_redaction_filter_excludes_only_figures_and_tables_in_render_pixels() -> None:
+    layout = _page_layout(
+        "ok",
+        ("table", (0.1, 0.2, 0.5, 0.25)),
+        ("paragraph", (0.0, 0.0, 1.0, 0.1)),
+        ("figure", (0.5, 0.5, 0.5, 0.5)),
+    )
+    rects = _layout_exclude_rects(np.zeros((200, 100, 3), dtype=np.uint8), layout, "d.pdf", 0)
+    assert rects == [(10, 40, 60, 90), (50, 100, 100, 200)]
+
+
+def test_redaction_filter_treats_an_empty_page_as_nothing_to_exclude() -> None:
+    img = np.zeros((10, 10, 3), dtype=np.uint8)
+    assert _layout_exclude_rects(img, _page_layout("empty"), "d.pdf", 0) == []
+
+
+@pytest.mark.parametrize("layout", [None, _page_layout("error")])
+def test_redaction_filter_warns_and_runs_unfiltered_without_usable_layout(
+    layout, caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level("WARNING", logger="womblex.redact.stage"):
+        rects = _layout_exclude_rects(np.zeros((10, 10, 3), dtype=np.uint8), layout, "d.pdf", 3)
+    assert rects is None
+    assert "doc=d.pdf page=3" in caplog.text
 
 
 # --- tokenizer and spellfix-dictionary slots -------------------------------

@@ -165,19 +165,11 @@ class RedactionConfig(BaseModel):
 
     dpi: int = Field(default=150, ge=72, le=600, description="DPI for rendering pages during detection")
 
-    layout_model: str = Field(
-        default="pp-doclayout-m",
-        description="Registered layout analyser used by the layout filter.",
-    )
-    layout_options: dict = Field(
-        default_factory=dict,
-        description="Passed unchanged to the layout model's factory.",
-    )
     use_layout_filter: bool = Field(
         default=True,
         description=(
-            "On raster-fallback pages, run layout analysis and drop "
-            "contour hits inside figure / chart / form-background regions. "
+            "On raster-fallback pages, drop contour hits inside the figure / "
+            "table regions the layout step found (`layout:`). "
             "Suppresses 02737-class scanned_mixed false positives. "
             "A layout model that cannot load stops the run at the pre-run model check "
             "(processing.models_check); with the check off, the filter is a no-op."

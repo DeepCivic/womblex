@@ -507,22 +507,6 @@ class TestStandaloneStageCommands:
         assert rc == 1
         assert not (tmp_path / ".spellfix-checkpoint").exists()
 
-    def test_redact_stops_when_the_layout_model_will_not_load(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        from womblex.cli.redact import _register_redact, cmd_redact
-
-        def gone(*_: object, **__: object) -> object:
-            raise RuntimeError("layout weights gone")
-
-        monkeypatch.setattr("womblex.ingest.paddle_ocr.get_layout_analyzer", gone)
-        shards = self._shards(tmp_path, "batch-0001._manifest.parquet")
-        pdfs = tmp_path / "pdfs"
-        pdfs.mkdir()
-        rc = self._run(_register_redact, cmd_redact, "--shards", str(shards), "--pdfs", str(pdfs))
-        assert rc == 1
-        assert not list(shards.glob("*.redactions.parquet"))
-
     def test_the_flag_switches_the_check_off(self) -> None:
         import argparse
 

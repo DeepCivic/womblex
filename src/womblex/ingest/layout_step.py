@@ -3,8 +3,8 @@
 Runs after page profiling and before OCR and redaction detection, because it
 needs each page's route. Its output is carried on ``ExtractionResult.layout``
 and written to ``*.layout_regions.parquet`` by ``store.output.write_results``.
-OCR reads each page's regions for table rects and block types; redaction
-still calls its own analyser.
+OCR reads each page's regions for table rects and block types, and redaction
+reads them for its exclusion zones.
 
 Boxes are stored normalised (0-1, top-left), converted from the pixels of the
 render the analyser saw, so any later consumer maps them onto its own render.
@@ -163,31 +163,42 @@ def run_layout_step(
     """Analyse the selected pages once each and return the document's layout."""
     outcome = LayoutOutcome(settings.fingerprint, settings.redaction_filter)
     selected = select_pages(doc, profiles, settings, engine)
-    if not selected:
-        return outcome
+    if selected:
+        outcome.pages = analyse_pages(doc, selected, settings.model, settings.options, settings.dpi)
+    return outcome
 
+
+def analyse_pages(
+    doc: Document, numbers: list[int], model: str, options: dict, dpi: int,
+) -> list[PageLayout]:
+    """Analyse *numbers* with the named model, one ``PageLayout`` per page.
+
+    A model that cannot be built or a page that fails is an ``error`` row, not
+    an exception; only an unknown model name raises.
+    """
     from womblex.ingest.paddle_ocr import get_layout_analyzer
     from womblex.utils.model_registry import SLOT_LAYOUT, resolve
 
-    resolve(SLOT_LAYOUT, settings.model)  # an unknown name is a config error: raise
+    resolve(SLOT_LAYOUT, model)  # an unknown name is a config error: raise
     analyzer: object | None = None
     build_error = ""
     try:
-        analyzer = get_layout_analyzer(settings.model, **settings.options)
+        analyzer = get_layout_analyzer(model, **options)
     except Exception as e:
         build_error = f"{type(e).__name__}: {e}"
-        logger.warning("layout model %r unavailable: %s", settings.model, build_error)
+        logger.warning("layout model %r unavailable: %s", model, build_error)
 
-    for number in selected:
+    pages: list[PageLayout] = []
+    for number in numbers:
         if analyzer is None:
-            outcome.pages.append(PageLayout(number, "error", error=build_error))
+            pages.append(PageLayout(number, "error", error=build_error))
             continue
         try:
-            outcome.pages.append(_analyse_page(doc[number], analyzer, settings.dpi))
+            pages.append(_analyse_page(doc[number], analyzer, dpi))
         except Exception as e:
             logger.warning("layout failed: page=%d error=%s", number, e)
-            outcome.pages.append(PageLayout(number, "error", error=f"{type(e).__name__}: {e}"))
-    return outcome
+            pages.append(PageLayout(number, "error", error=f"{type(e).__name__}: {e}"))
+    return pages
 
 
 __all__ = [
@@ -195,6 +206,7 @@ __all__ = [
     "LayoutRegion",
     "LayoutSettings",
     "PageLayout",
+    "analyse_pages",
     "run_layout_step",
     "select_pages",
 ]

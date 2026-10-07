@@ -849,3 +849,72 @@ class TestAnnotateRedactionsAlias:
             checkpoint=None, dpi=150, max_area_ratio=0.05,
         )
         assert cmd_annotate_redactions(args) == 1
+
+
+class TestLayoutFilterOnRasterPages:
+    """The filter reads the layout step's regions; it never runs an analyser."""
+
+    @staticmethod
+    def _scan(tmp_path: Path) -> Path:
+        px = np.full((400, 600, 3), 240, dtype=np.uint8)
+        px[80:120, 100:500] = 0  # one dark bar, no vector redaction anywhere
+        return (
+            PdfBuilder(tmp_path / "scan.pdf").page(600, 400)
+            .image(Rect(0, 0, 600, 400), Image.fromarray(px)).save()
+        )
+
+    @staticmethod
+    def _layout(status: str, block_type: str = "figure"):
+        from womblex.ingest.elements import BBox
+        from womblex.ingest.layout_step import LayoutRegion, PageLayout
+
+        regions = [LayoutRegion(BBox(0.1, 0.1, 0.8, 0.3), "x", block_type, 0.9)] if status == "ok" else []
+        return {0: PageLayout(0, status, regions, error="boom" if status == "error" else "")}
+
+    def _detect(self, tmp_path: Path, layout):
+        return detect_redactions(
+            self._scan(tmp_path), 1, build_detector(RedactionConfig()), dpi=72, layout=layout,
+        )
+
+    def test_a_figure_region_suppresses_the_hit(self, tmp_path: Path) -> None:
+        assert self._detect(tmp_path, self._layout("ok")).total == 0
+
+    def test_a_paragraph_region_does_not(self, tmp_path: Path) -> None:
+        assert self._detect(tmp_path, self._layout("ok", "paragraph")).total == 1
+
+    @pytest.mark.parametrize("layout", [None, {}])
+    def test_no_layout_runs_unfiltered(self, tmp_path: Path, layout) -> None:
+        assert self._detect(tmp_path, layout).total == 1
+
+    def test_an_errored_page_runs_unfiltered(self, tmp_path: Path) -> None:
+        assert self._detect(tmp_path, self._layout("error")).total == 1
+
+    def test_shards_read_the_batch_layout_sidecar(self, tmp_path: Path) -> None:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        from womblex.ingest.elements import BBox
+        from womblex.ingest.layout_step import LayoutRegion, PageLayout
+        from womblex.store.layout_output import LayoutFingerprint, layout_rows, write_layout_regions
+
+        shards, pdfs = tmp_path / "shards", tmp_path / "pdfs"
+        shards.mkdir()
+        pdfs.mkdir()
+        self._scan(tmp_path).rename(pdfs / "scan.pdf")
+        pq.write_table(pa.table({"source_hash": ["h1"], "filename": ["scan.pdf"]}),
+                       shards / "batch-0001._manifest.parquet")
+        pq.write_table(pa.table({
+            "source_hash": ["h1"], "elem_order": pa.array([0], type=pa.int32()),
+            "page": pa.array([0], type=pa.int32()),
+        }), shards / "batch-0001.elements.parquet")
+        config = RedactionConfig(dpi=72)
+
+        assert annotate_redactions_for_shards(shards, pdfs, config) == {"h1": 1}
+
+        fp = LayoutFingerprint("m", "d", "o", 72, "consumers")
+        page = PageLayout(0, "ok", [LayoutRegion(BBox(0.1, 0.1, 0.8, 0.3), "x", "figure", 0.9)])
+        write_layout_regions(
+            layout_rows([("h1", [page])]), shards / "batch-0001.parquet", fp, redaction_consumed=True,
+        )
+        (shards / "batch-0001.redactions.parquet").unlink()
+        assert annotate_redactions_for_shards(shards, pdfs, config) == {"h1": 0}
