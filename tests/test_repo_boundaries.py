@@ -9,8 +9,8 @@ published depended on which was run last. They then drifted 81, 54 and 191
 lines apart without either being wrong.
 
 So the invariant is about *producers*, not about fixtures. A unit test reading
-a document out of the vendored ``womblex-collection`` subset is fine — that
-subset is vendored precisely so a bare clone can run the suite (see
+a synthetic document out of ``fixtures/synthetic/`` is fine — that set is
+committed precisely so a bare clone can run the suite (see
 THIRD_PARTY_DATA.md). Writing an accuracy report from here is not.
 
 Limitation: this reads source text, so it catches a test that names the
