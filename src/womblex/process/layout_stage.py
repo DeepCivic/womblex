@@ -42,6 +42,7 @@ from womblex.store.run_stamp import sidecar_footer
 
 if TYPE_CHECKING:
     from womblex.config import WomblexConfig
+    from womblex.ingest.layout_step import LayoutSettings
     from womblex.store.source_resolver import SourceResolver
 
 logger = logging.getLogger(__name__)
@@ -116,7 +117,7 @@ def layout_shards(
 
 
 def _analyse_batch(
-    base: Path, settings, config: WomblexConfig,
+    base: Path, settings: LayoutSettings, config: WomblexConfig,
     resolver: SourceResolver | None, fetcher: Callable[[dict], Path] | None,
 ) -> tuple[list[dict] | None, int]:
     """``(rows, documents analysed)`` for one batch; rows are ``None`` if any document failed."""
