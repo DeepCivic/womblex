@@ -7,8 +7,8 @@ declared, that a model digest recomputes from the model files, that no
 credential reaches the footer, and that a run predating the stamps is marked
 partial rather than failing.
 
-Shards are written through the real writer on the budget-statement DOCX
-fixture, as `test_run_stamp` does.
+Shards are written through the real writer on the synthetic budget-statement
+DOCX, as `test_run_stamp` does.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from tests._synthetic import BUDGET_DOCX as _BUDGET_DOCX
 from womblex.config import DatasetConfig, PathsConfig, WomblexConfig
 from womblex.ingest.strategies_file import DocxExtractor
 from womblex.store.build_info import IMAGE_REF_ENV, image_info
@@ -49,12 +50,6 @@ from womblex.utils.models import (
     resolve_local_model_path,
 )
 
-_FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "fixtures"
-_BUDGET_DOCX = (
-    _FIXTURES / "womblex-collection" / "_documents"
-    / "foreign-affairs-and-trade-2025-26-portfolio-budget-statements.docx"
-)
-
 # The names a run's credentials arrive under; none of their values may reach
 # the record, which carries endpoints, regions, digests and model ids.
 CREDENTIAL_ENV = (
@@ -81,8 +76,6 @@ def _clean_record():
 
 @pytest.fixture(scope="module")
 def extraction():
-    if not _BUDGET_DOCX.exists():
-        pytest.skip(f"fixture not present: {_BUDGET_DOCX}")
     return DocxExtractor().extract_path(_BUDGET_DOCX)
 
 

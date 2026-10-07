@@ -1,0 +1,301 @@
+SightingID,Date,Waterway,Suburb,State,Postcode,Observer Organisation,Count,Notes
+PL-00001,2025-04-10,Murrumbidgee River,OAKS ESTATE,ACT,2911,Platypus Watch Inc,1,
+PL-00002,2025-01-13,Queanbeyan River,THARWA,ACT,2611,Ranger Service,3,dusk survey
+PL-00003,2025-03-27,Murrumbidgee River,PADDYS RIVER,ACT,2611,Platypus Watch Inc,3,dusk survey
+PL-00004,2025-04-06,Queanbeyan River,PADDYS RIVER,ACT,2620,Platypus Watch Inc,3,burrow entrance seen
+PL-00005,2025-09-08,Tidbinbilla Creek,UPPER COTTER,ACT,2911,Waterwatch Volunteers,1,dusk survey
+PL-00006,2025-01-10,Queanbeyan River,UPPER COTTER,ACT,2911,Waterwatch Volunteers,3,burrow entrance seen
+PL-00007,2025-08-06,Cotter River,PADDYS RIVER,ACT,2620,Platypus Watch Inc,1,
+PL-00008,2025-08-21,Queanbeyan River,OAKS ESTATE,ACT,2620,Platypus Watch Inc,2,
+PL-00009,2025-07-07,Gudgenby River,PADDYS RIVER,ACT,2611,Waterwatch Volunteers,4,dusk survey
+PL-00010,2025-11-18,Cotter River,PADDYS RIVER,ACT,2620,Platypus Watch Inc,2,dusk survey
+PL-00011,2025-10-20,Cotter River,THARWA,ACT,2620,Platypus Watch Inc,3,burrow entrance seen
+PL-00012,2025-01-02,Naas River,THARWA,ACT,2620,Ranger Service,3,
+PL-00013,2025-06-10,Naas River,UPPER COTTER,ACT,2911,Ranger Service,1,dusk survey
+PL-00014,2025-10-07,Gudgenby River,PADDYS RIVER,ACT,2611,Waterwatch Volunteers,4,juvenile present
+PL-00015,2025-06-19,Molonglo River,PADDYS RIVER,ACT,2620,Waterwatch Volunteers,2,dusk survey
+PL-00016,2025-06-10,Murrumbidgee River,OAKS ESTATE,ACT,2611,Waterwatch Volunteers,2,
+PL-00017,2025-01-02,Molonglo River,UPPER COTTER,ACT,2611,Ranger Service,1,burrow entrance seen
+PL-00018,2025-10-08,Naas River,THARWA,ACT,2620,Ranger Service,3,burrow entrance seen
+PL-00019,2025-11-07,Gudgenby River,UPPER COTTER,ACT,2611,Waterwatch Volunteers,4,burrow entrance seen
+PL-00020,2025-01-08,Paddys River,OAKS ESTATE,ACT,2611,Ranger Service,4,juvenile present
+PL-00021,2025-08-07,Molonglo River,THARWA,ACT,2620,Waterwatch Volunteers,2,juvenile present
+PL-00022,2025-04-14,Queanbeyan River,UPPER COTTER,ACT,2620,Platypus Watch Inc,3,
+PL-00023,2025-10-13,Molonglo River,OAKS ESTATE,ACT,2911,Platypus Watch Inc,4,juvenile present
+PL-00024,2025-10-06,Naas River,PADDYS RIVER,ACT,2911,Ranger Service,3,burrow entrance seen
+PL-00025,2025-09-07,Queanbeyan River,PADDYS RIVER,ACT,2911,Waterwatch Volunteers,1,dusk survey
+PL-00026,2025-11-22,Cotter River,THARWA,ACT,2911,Ranger Service,2,dusk survey
+PL-00027,2025-11-28,Molonglo River,UPPER COTTER,ACT,2911,Ranger Service,4,burrow entrance seen
+PL-00028,2025-07-07,Molonglo River,UPPER COTTER,ACT,2611,Platypus Watch Inc,3,
+PL-00029,2025-07-26,Paddys River,UPPER COTTER,ACT,2620,Platypus Watch Inc,2,dusk survey
+PL-00030,2025-09-25,Gudgenby River,OAKS ESTATE,ACT,2620,Platypus Watch Inc,1,
+PL-00031,2025-08-18,Queanbeyan River,UPPER COTTER,ACT,2620,Waterwatch Volunteers,1,
+PL-00032,2025-05-27,Naas River,THARWA,ACT,2620,Ranger Service,4,burrow entrance seen
+PL-00033,2025-04-26,Queanbeyan River,OAKS ESTATE,ACT,2611,Waterwatch Volunteers,4,
+PL-00034,2025-02-04,Naas River,OAKS ESTATE,ACT,2911,Ranger Service,4,
+PL-00035,2025-11-07,Queanbeyan River,OAKS ESTATE,ACT,2911,Platypus Watch Inc,2,dusk survey
+PL-00036,2025-03-06,Tidbinbilla Creek,PADDYS RIVER,ACT,2911,Waterwatch Volunteers,3,
+PL-00037,2025-12-06,Molonglo River,PADDYS RIVER,ACT,2620,Ranger Service,1,burrow entrance seen
+PL-00038,2025-12-20,Gudgenby River,THARWA,ACT,2611,Waterwatch Volunteers,3,dusk survey
+PL-00039,2025-04-25,Tidbinbilla Creek,THARWA,ACT,2620,Ranger Service,3,burrow entrance seen
+PL-00040,2025-10-10,Gudgenby River,OAKS ESTATE,ACT,2911,Platypus Watch Inc,3,dusk survey
+PL-00041,2025-11-11,Tidbinbilla Creek,OAKS ESTATE,ACT,2620,Ranger Service,2,juvenile present
+PL-00042,2025-05-12,Cotter River,PADDYS RIVER,ACT,2620,Platypus Watch Inc,4,juvenile present
+PL-00043,2025-06-21,Naas River,PADDYS RIVER,ACT,2611,Waterwatch Volunteers,1,
+PL-00044,2025-09-25,Murrumbidgee River,PADDYS RIVER,ACT,2620,Platypus Watch Inc,2,burrow entrance seen
+PL-00045,2025-11-19,Murrumbidgee River,THARWA,ACT,2611,Ranger Service,4,juvenile present
+PL-00046,2025-10-26,Queanbeyan River,OAKS ESTATE,ACT,2611,Waterwatch Volunteers,2,dusk survey
+PL-00047,2025-06-08,Naas River,OAKS ESTATE,ACT,2911,Ranger Service,4,dusk survey
+PL-00048,2025-05-15,Paddys River,THARWA,ACT,2620,Platypus Watch Inc,4,dusk survey
+PL-00049,2025-07-13,Molonglo River,UPPER COTTER,ACT,2620,Waterwatch Volunteers,3,dusk survey
+PL-00050,2025-02-25,Queanbeyan River,OAKS ESTATE,ACT,2611,Ranger Service,4,
+PL-00051,2025-03-08,Murrumbidgee River,PADDYS RIVER,ACT,2611,Platypus Watch Inc,2,burrow entrance seen
+PL-00052,2025-10-22,Queanbeyan River,THARWA,ACT,2611,Platypus Watch Inc,1,juvenile present
+PL-00053,2025-01-11,Murrumbidgee River,THARWA,ACT,2620,Platypus Watch Inc,3,juvenile present
+PL-00054,2025-12-05,Paddys River,UPPER COTTER,ACT,2620,Ranger Service,3,
+PL-00055,2025-12-18,Tidbinbilla Creek,OAKS ESTATE,ACT,2611,Platypus Watch Inc,3,burrow entrance seen
+PL-00056,2025-09-03,Paddys River,UPPER COTTER,ACT,2611,Waterwatch Volunteers,4,dusk survey
+PL-00057,2025-07-11,Tidbinbilla Creek,OAKS ESTATE,ACT,2620,Waterwatch Volunteers,1,dusk survey
+PL-00058,2025-11-01,Queanbeyan River,UPPER COTTER,ACT,2620,Platypus Watch Inc,1,
+PL-00059,2025-04-08,Molonglo River,OAKS ESTATE,ACT,2611,Waterwatch Volunteers,4,dusk survey
+PL-00060,2025-03-27,Cotter River,THARWA,ACT,2911,Ranger Service,3,dusk survey
+PL-00061,2025-11-27,Paddys River,THARWA,ACT,2611,Waterwatch Volunteers,3,burrow entrance seen
+PL-00062,2025-11-27,Naas River,THARWA,ACT,2611,Waterwatch Volunteers,1,
+PL-00063,2025-10-11,Gudgenby River,PADDYS RIVER,ACT,2620,Platypus Watch Inc,1,burrow entrance seen
+PL-00064,2025-09-18,Cotter River,THARWA,ACT,2611,Ranger Service,1,dusk survey
+PL-00065,2025-10-05,Queanbeyan River,THARWA,ACT,2620,Platypus Watch Inc,2,dusk survey
+PL-00066,2025-10-01,Molonglo River,THARWA,ACT,2911,Ranger Service,2,juvenile present
+PL-00067,2025-06-08,Naas River,PADDYS RIVER,ACT,2911,Ranger Service,4,
+PL-00068,2025-03-14,Gudgenby River,THARWA,ACT,2620,Ranger Service,3,juvenile present
+PL-00069,2025-12-23,Paddys River,PADDYS RIVER,ACT,2611,Platypus Watch Inc,1,burrow entrance seen
+PL-00070,2025-07-09,Naas River,OAKS ESTATE,ACT,2911,Waterwatch Volunteers,2,dusk survey
+PL-00071,2025-05-17,Murrumbidgee River,THARWA,ACT,2911,Waterwatch Volunteers,3,juvenile present
+PL-00072,2025-10-25,Naas River,THARWA,ACT,2611,Ranger Service,1,juvenile present
+PL-00073,2025-05-22,Cotter River,OAKS ESTATE,ACT,2620,Ranger Service,3,
+PL-00074,2025-08-19,Cotter River,UPPER COTTER,ACT,2620,Platypus Watch Inc,1,
+PL-00075,2025-06-10,Tidbinbilla Creek,THARWA,ACT,2611,Ranger Service,1,juvenile present
+PL-00076,2025-11-07,Queanbeyan River,THARWA,ACT,2620,Ranger Service,3,dusk survey
+PL-00077,2025-03-06,Cotter River,THARWA,ACT,2620,Platypus Watch Inc,1,dusk survey
+PL-00078,2025-12-22,Gudgenby River,THARWA,ACT,2611,Platypus Watch Inc,4,burrow entrance seen
+PL-00079,2025-10-18,Gudgenby River,PADDYS RIVER,ACT,2620,Waterwatch Volunteers,4,
+PL-00080,2025-01-06,Tidbinbilla Creek,PADDYS RIVER,ACT,2611,Waterwatch Volunteers,2,dusk survey
+PL-00081,2025-10-28,Cotter River,PADDYS RIVER,ACT,2911,Waterwatch Volunteers,1,juvenile present
+PL-00082,2025-04-12,Tidbinbilla Creek,UPPER COTTER,ACT,2620,Platypus Watch Inc,1,juvenile present
+PL-00083,2025-05-27,Naas River,OAKS ESTATE,ACT,2620,Waterwatch Volunteers,4,juvenile present
+PL-00084,2025-03-13,Gudgenby River,PADDYS RIVER,ACT,2620,Platypus Watch Inc,4,juvenile present
+PL-00085,2025-08-01,Paddys River,UPPER COTTER,ACT,2620,Waterwatch Volunteers,3,
+PL-00086,2025-02-16,Tidbinbilla Creek,THARWA,ACT,2611,Ranger Service,2,dusk survey
+PL-00087,2025-10-01,Molonglo River,OAKS ESTATE,ACT,2911,Platypus Watch Inc,2,
+PL-00088,2025-03-06,Queanbeyan River,UPPER COTTER,ACT,2911,Ranger Service,3,dusk survey
+PL-00089,2025-03-24,Naas River,PADDYS RIVER,ACT,2620,Ranger Service,3,
+PL-00090,2025-09-05,Naas River,UPPER COTTER,ACT,2911,Waterwatch Volunteers,1,
+PL-00091,2025-11-20,Cotter River,UPPER COTTER,ACT,2611,Ranger Service,2,
+PL-00092,2025-09-27,Naas River,THARWA,ACT,2620,Ranger Service,2,juvenile present
+PL-00093,2025-05-20,Molonglo River,PADDYS RIVER,ACT,2911,Waterwatch Volunteers,2,burrow entrance seen
+PL-00094,2025-05-17,Molonglo River,UPPER COTTER,ACT,2620,Waterwatch Volunteers,1,
+PL-00095,2025-06-17,Naas River,THARWA,ACT,2611,Waterwatch Volunteers,1,burrow entrance seen
+PL-00096,2025-01-10,Cotter River,UPPER COTTER,ACT,2611,Platypus Watch Inc,1,
+PL-00097,2025-01-01,Queanbeyan River,OAKS ESTATE,ACT,2620,Platypus Watch Inc,3,juvenile present
+PL-00098,2025-11-07,Molonglo River,THARWA,ACT,2620,Platypus Watch Inc,4,juvenile present
+PL-00099,2025-02-25,Naas River,PADDYS RIVER,ACT,2620,Platypus Watch Inc,1,
+PL-00100,2025-10-01,Tidbinbilla Creek,THARWA,ACT,2620,Ranger Service,4,dusk survey
+PL-00101,2025-10-12,Tidbinbilla Creek,PADDYS RIVER,ACT,2911,Platypus Watch Inc,4,juvenile present
+PL-00102,2025-08-21,Molonglo River,UPPER COTTER,ACT,2620,Ranger Service,4,dusk survey
+PL-00103,2025-03-10,Tidbinbilla Creek,PADDYS RIVER,ACT,2620,Waterwatch Volunteers,2,burrow entrance seen
+PL-00104,2025-10-10,Queanbeyan River,PADDYS RIVER,ACT,2611,Waterwatch Volunteers,1,juvenile present
+PL-00105,2025-06-21,Cotter River,UPPER COTTER,ACT,2911,Platypus Watch Inc,3,
+PL-00106,2025-09-01,Molonglo River,THARWA,ACT,2611,Platypus Watch Inc,2,dusk survey
+PL-00107,2025-11-13,Paddys River,UPPER COTTER,ACT,2911,Ranger Service,4,dusk survey
+PL-00108,2025-09-03,Naas River,THARWA,ACT,2620,Platypus Watch Inc,1,burrow entrance seen
+PL-00109,2025-01-13,Tidbinbilla Creek,OAKS ESTATE,ACT,2620,Ranger Service,2,dusk survey
+PL-00110,2025-06-17,Naas River,UPPER COTTER,ACT,2620,Waterwatch Volunteers,3,
+PL-00111,2025-07-19,Cotter River,OAKS ESTATE,ACT,2620,Ranger Service,4,
+PL-00112,2025-07-06,Murrumbidgee River,OAKS ESTATE,ACT,2911,Ranger Service,2,
+PL-00113,2025-02-10,Murrumbidgee River,UPPER COTTER,ACT,2611,Waterwatch Volunteers,4,dusk survey
+PL-00114,2025-07-11,Paddys River,PADDYS RIVER,ACT,2911,Ranger Service,1,dusk survey
+PL-00115,2025-07-17,Murrumbidgee River,OAKS ESTATE,ACT,2911,Ranger Service,3,juvenile present
+PL-00116,2025-10-28,Tidbinbilla Creek,OAKS ESTATE,ACT,2620,Platypus Watch Inc,3,
+PL-00117,2025-09-25,Cotter River,UPPER COTTER,ACT,2911,Platypus Watch Inc,3,burrow entrance seen
+PL-00118,2025-08-14,Murrumbidgee River,OAKS ESTATE,ACT,2620,Ranger Service,4,dusk survey
+PL-00119,2025-08-24,Queanbeyan River,UPPER COTTER,ACT,2611,Waterwatch Volunteers,3,juvenile present
+PL-00120,2025-05-18,Gudgenby River,UPPER COTTER,ACT,2911,Waterwatch Volunteers,4,dusk survey
+PL-00121,2025-10-17,Molonglo River,OAKS ESTATE,ACT,2620,Ranger Service,2,juvenile present
+PL-00122,2025-01-15,Queanbeyan River,UPPER COTTER,ACT,2620,Platypus Watch Inc,2,dusk survey
+PL-00123,2025-03-11,Naas River,OAKS ESTATE,ACT,2611,Waterwatch Volunteers,1,
+PL-00124,2025-01-15,Murrumbidgee River,UPPER COTTER,ACT,2611,Waterwatch Volunteers,1,juvenile present
+PL-00125,2025-03-07,Molonglo River,UPPER COTTER,ACT,2611,Platypus Watch Inc,1,burrow entrance seen
+PL-00126,2025-06-12,Queanbeyan River,OAKS ESTATE,ACT,2611,Ranger Service,3,
+PL-00127,2025-10-09,Queanbeyan River,THARWA,ACT,2620,Waterwatch Volunteers,1,burrow entrance seen
+PL-00128,2025-02-07,Cotter River,THARWA,ACT,2911,Ranger Service,4,dusk survey
+PL-00129,2025-02-28,Murrumbidgee River,UPPER COTTER,ACT,2911,Ranger Service,4,burrow entrance seen
+PL-00130,2025-12-04,Tidbinbilla Creek,UPPER COTTER,ACT,2620,Platypus Watch Inc,4,burrow entrance seen
+PL-00131,2025-08-12,Paddys River,UPPER COTTER,ACT,2620,Waterwatch Volunteers,1,dusk survey
+PL-00132,2025-07-23,Naas River,PADDYS RIVER,ACT,2620,Platypus Watch Inc,2,juvenile present
+PL-00133,2025-12-25,Paddys River,UPPER COTTER,ACT,2611,Ranger Service,2,
+PL-00134,2025-09-24,Murrumbidgee River,PADDYS RIVER,ACT,2620,Platypus Watch Inc,4,
+PL-00135,2025-11-17,Molonglo River,PADDYS RIVER,ACT,2620,Platypus Watch Inc,2,
+PL-00136,2025-05-19,Paddys River,PADDYS RIVER,ACT,2620,Platypus Watch Inc,1,burrow entrance seen
+PL-00137,2025-06-20,Tidbinbilla Creek,OAKS ESTATE,ACT,2620,Ranger Service,2,burrow entrance seen
+PL-00138,2025-04-06,Tidbinbilla Creek,PADDYS RIVER,ACT,2620,Platypus Watch Inc,2,burrow entrance seen
+PL-00139,2025-09-11,Tidbinbilla Creek,UPPER COTTER,ACT,2620,Ranger Service,4,burrow entrance seen
+PL-00140,2025-06-11,Murrumbidgee River,OAKS ESTATE,ACT,2911,Waterwatch Volunteers,3,juvenile present
+PL-00141,2025-02-23,Queanbeyan River,OAKS ESTATE,ACT,2911,Ranger Service,4,
+PL-00142,2025-05-12,Murrumbidgee River,PADDYS RIVER,ACT,2620,Platypus Watch Inc,4,juvenile present
+PL-00143,2025-11-13,Gudgenby River,UPPER COTTER,ACT,2620,Waterwatch Volunteers,2,juvenile present
+PL-00144,2025-07-18,Tidbinbilla Creek,UPPER COTTER,ACT,2911,Ranger Service,4,dusk survey
+PL-00145,2025-07-09,Naas River,OAKS ESTATE,ACT,2611,Ranger Service,1,
+PL-00146,2025-09-07,Molonglo River,OAKS ESTATE,ACT,2620,Waterwatch Volunteers,1,juvenile present
+PL-00147,2025-06-02,Paddys River,OAKS ESTATE,ACT,2620,Platypus Watch Inc,3,burrow entrance seen
+PL-00148,2025-06-13,Molonglo River,OAKS ESTATE,ACT,2611,Platypus Watch Inc,4,burrow entrance seen
+PL-00149,2025-05-25,Tidbinbilla Creek,OAKS ESTATE,ACT,2620,Waterwatch Volunteers,1,juvenile present
+PL-00150,2025-03-10,Tidbinbilla Creek,THARWA,ACT,2911,Ranger Service,1,dusk survey
+PL-00151,2025-10-24,Cotter River,THARWA,ACT,2911,Waterwatch Volunteers,3,burrow entrance seen
+PL-00152,2025-03-27,Molonglo River,THARWA,ACT,2611,Waterwatch Volunteers,3,burrow entrance seen
+PL-00153,2025-02-21,Naas River,PADDYS RIVER,ACT,2911,Platypus Watch Inc,1,dusk survey
+PL-00154,2025-05-09,Queanbeyan River,OAKS ESTATE,ACT,2620,Platypus Watch Inc,2,burrow entrance seen
+PL-00155,2025-05-19,Murrumbidgee River,UPPER COTTER,ACT,2620,Platypus Watch Inc,4,dusk survey
+PL-00156,2025-07-24,Murrumbidgee River,OAKS ESTATE,ACT,2911,Waterwatch Volunteers,4,juvenile present
+PL-00157,2025-11-28,Gudgenby River,UPPER COTTER,ACT,2620,Waterwatch Volunteers,3,
+PL-00158,2025-08-22,Cotter River,PADDYS RIVER,ACT,2911,Waterwatch Volunteers,4,dusk survey
+PL-00159,2025-01-11,Gudgenby River,PADDYS RIVER,ACT,2620,Platypus Watch Inc,2,juvenile present
+PL-00160,2025-10-12,Murrumbidgee River,PADDYS RIVER,ACT,2911,Waterwatch Volunteers,3,burrow entrance seen
+PL-00161,2025-09-06,Paddys River,UPPER COTTER,ACT,2911,Waterwatch Volunteers,3,juvenile present
+PL-00162,2025-05-15,Cotter River,UPPER COTTER,ACT,2911,Platypus Watch Inc,4,juvenile present
+PL-00163,2025-02-09,Molonglo River,UPPER COTTER,ACT,2620,Waterwatch Volunteers,3,dusk survey
+PL-00164,2025-12-05,Murrumbidgee River,THARWA,ACT,2911,Waterwatch Volunteers,2,dusk survey
+PL-00165,2025-12-12,Murrumbidgee River,PADDYS RIVER,ACT,2620,Ranger Service,4,burrow entrance seen
+PL-00166,2025-09-20,Gudgenby River,UPPER COTTER,ACT,2611,Ranger Service,3,burrow entrance seen
+PL-00167,2025-03-27,Queanbeyan River,OAKS ESTATE,ACT,2611,Platypus Watch Inc,2,burrow entrance seen
+PL-00168,2025-04-21,Paddys River,UPPER COTTER,ACT,2620,Waterwatch Volunteers,2,juvenile present
+PL-00169,2025-10-26,Naas River,UPPER COTTER,ACT,2611,Waterwatch Volunteers,4,
+PL-00170,2025-01-12,Queanbeyan River,UPPER COTTER,ACT,2911,Platypus Watch Inc,3,juvenile present
+PL-00171,2025-11-06,Murrumbidgee River,PADDYS RIVER,ACT,2620,Platypus Watch Inc,2,juvenile present
+PL-00172,2025-10-28,Murrumbidgee River,UPPER COTTER,ACT,2620,Platypus Watch Inc,1,dusk survey
+PL-00173,2025-06-21,Queanbeyan River,OAKS ESTATE,ACT,2911,Platypus Watch Inc,1,dusk survey
+PL-00174,2025-05-20,Queanbeyan River,PADDYS RIVER,ACT,2620,Ranger Service,1,burrow entrance seen
+PL-00175,2025-11-09,Molonglo River,PADDYS RIVER,ACT,2620,Ranger Service,3,
+PL-00176,2025-12-18,Gudgenby River,THARWA,ACT,2911,Waterwatch Volunteers,4,burrow entrance seen
+PL-00177,2025-09-28,Gudgenby River,PADDYS RIVER,ACT,2620,Ranger Service,2,juvenile present
+PL-00178,2025-07-19,Queanbeyan River,PADDYS RIVER,ACT,2911,Ranger Service,1,dusk survey
+PL-00179,2025-03-14,Cotter River,OAKS ESTATE,ACT,2620,Platypus Watch Inc,2,burrow entrance seen
+PL-00180,2025-05-23,Cotter River,OAKS ESTATE,ACT,2620,Platypus Watch Inc,1,
+PL-00181,2025-12-16,Tidbinbilla Creek,OAKS ESTATE,ACT,2620,Platypus Watch Inc,2,juvenile present
+PL-00182,2025-12-26,Tidbinbilla Creek,UPPER COTTER,ACT,2620,Waterwatch Volunteers,2,dusk survey
+PL-00183,2025-04-10,Murrumbidgee River,THARWA,ACT,2911,Waterwatch Volunteers,4,dusk survey
+PL-00184,2025-09-28,Paddys River,UPPER COTTER,ACT,2620,Waterwatch Volunteers,4,burrow entrance seen
+PL-00185,2025-11-25,Gudgenby River,PADDYS RIVER,ACT,2620,Ranger Service,3,juvenile present
+PL-00186,2025-05-07,Gudgenby River,UPPER COTTER,ACT,2611,Waterwatch Volunteers,3,burrow entrance seen
+PL-00187,2025-03-12,Gudgenby River,UPPER COTTER,ACT,2620,Platypus Watch Inc,4,
+PL-00188,2025-09-05,Cotter River,THARWA,ACT,2620,Waterwatch Volunteers,4,
+PL-00189,2025-12-20,Queanbeyan River,UPPER COTTER,ACT,2611,Platypus Watch Inc,2,burrow entrance seen
+PL-00190,2025-04-06,Tidbinbilla Creek,THARWA,ACT,2911,Waterwatch Volunteers,2,
+PL-00191,2025-03-28,Cotter River,PADDYS RIVER,ACT,2911,Waterwatch Volunteers,1,dusk survey
+PL-00192,2025-07-27,Cotter River,OAKS ESTATE,ACT,2620,Platypus Watch Inc,4,juvenile present
+PL-00193,2025-05-04,Murrumbidgee River,UPPER COTTER,ACT,2620,Waterwatch Volunteers,4,burrow entrance seen
+PL-00194,2025-12-09,Cotter River,UPPER COTTER,ACT,2620,Ranger Service,1,dusk survey
+PL-00195,2025-10-24,Molonglo River,PADDYS RIVER,ACT,2911,Ranger Service,4,dusk survey
+PL-00196,2025-09-25,Cotter River,OAKS ESTATE,ACT,2620,Ranger Service,4,burrow entrance seen
+PL-00197,2025-06-03,Paddys River,OAKS ESTATE,ACT,2620,Platypus Watch Inc,1,burrow entrance seen
+PL-00198,2025-09-12,Naas River,UPPER COTTER,ACT,2911,Platypus Watch Inc,3,dusk survey
+PL-00199,2025-08-18,Cotter River,UPPER COTTER,ACT,2911,Platypus Watch Inc,2,dusk survey
+PL-00200,2025-04-27,Cotter River,PADDYS RIVER,ACT,2620,Platypus Watch Inc,3,burrow entrance seen
+PL-00201,2025-12-16,Tidbinbilla Creek,THARWA,ACT,2620,Platypus Watch Inc,1,
+PL-00202,2025-07-03,Tidbinbilla Creek,UPPER COTTER,ACT,2620,Waterwatch Volunteers,1,juvenile present
+PL-00203,2025-06-22,Tidbinbilla Creek,OAKS ESTATE,ACT,2620,Ranger Service,4,dusk survey
+PL-00204,2025-07-08,Gudgenby River,UPPER COTTER,ACT,2911,Ranger Service,4,
+PL-00205,2025-12-08,Queanbeyan River,PADDYS RIVER,ACT,2911,Ranger Service,2,
+PL-00206,2025-01-26,Murrumbidgee River,PADDYS RIVER,ACT,2611,Ranger Service,2,burrow entrance seen
+PL-00207,2025-09-22,Tidbinbilla Creek,OAKS ESTATE,ACT,2911,Ranger Service,4,dusk survey
+PL-00208,2025-02-11,Tidbinbilla Creek,OAKS ESTATE,ACT,2911,Platypus Watch Inc,2,juvenile present
+PL-00209,2025-02-13,Cotter River,OAKS ESTATE,ACT,2620,Waterwatch Volunteers,1,
+PL-00210,2025-06-15,Molonglo River,THARWA,ACT,2620,Waterwatch Volunteers,4,burrow entrance seen
+PL-00211,2025-03-19,Tidbinbilla Creek,OAKS ESTATE,ACT,2611,Ranger Service,3,dusk survey
+PL-00212,2025-05-26,Gudgenby River,OAKS ESTATE,ACT,2911,Ranger Service,4,juvenile present
+PL-00213,2025-11-06,Murrumbidgee River,UPPER COTTER,ACT,2911,Platypus Watch Inc,3,dusk survey
+PL-00214,2025-01-17,Gudgenby River,THARWA,ACT,2620,Ranger Service,4,juvenile present
+PL-00215,2025-11-20,Paddys River,PADDYS RIVER,ACT,2611,Platypus Watch Inc,4,juvenile present
+PL-00216,2025-03-27,Murrumbidgee River,PADDYS RIVER,ACT,2620,Platypus Watch Inc,4,
+PL-00217,2025-09-10,Gudgenby River,PADDYS RIVER,ACT,2911,Ranger Service,4,juvenile present
+PL-00218,2025-02-23,Molonglo River,UPPER COTTER,ACT,2611,Waterwatch Volunteers,2,juvenile present
+PL-00219,2025-08-17,Murrumbidgee River,PADDYS RIVER,ACT,2620,Waterwatch Volunteers,2,
+PL-00220,2025-11-19,Cotter River,UPPER COTTER,ACT,2620,Ranger Service,1,juvenile present
+PL-00221,2025-06-08,Molonglo River,UPPER COTTER,ACT,2620,Platypus Watch Inc,2,burrow entrance seen
+PL-00222,2025-06-22,Queanbeyan River,THARWA,ACT,2911,Waterwatch Volunteers,3,juvenile present
+PL-00223,2025-08-09,Naas River,THARWA,ACT,2611,Platypus Watch Inc,2,dusk survey
+PL-00224,2025-02-20,Cotter River,THARWA,ACT,2620,Platypus Watch Inc,2,burrow entrance seen
+PL-00225,2025-05-12,Tidbinbilla Creek,UPPER COTTER,ACT,2911,Platypus Watch Inc,4,juvenile present
+PL-00226,2025-12-22,Naas River,PADDYS RIVER,ACT,2620,Platypus Watch Inc,2,burrow entrance seen
+PL-00227,2025-02-27,Molonglo River,UPPER COTTER,ACT,2620,Platypus Watch Inc,2,
+PL-00228,2025-04-19,Molonglo River,OAKS ESTATE,ACT,2620,Waterwatch Volunteers,4,dusk survey
+PL-00229,2025-07-16,Molonglo River,OAKS ESTATE,ACT,2911,Ranger Service,1,dusk survey
+PL-00230,2025-04-25,Tidbinbilla Creek,UPPER COTTER,ACT,2911,Waterwatch Volunteers,1,burrow entrance seen
+PL-00231,2025-10-15,Gudgenby River,UPPER COTTER,ACT,2911,Ranger Service,2,juvenile present
+PL-00232,2025-05-03,Naas River,THARWA,ACT,2911,Platypus Watch Inc,2,
+PL-00233,2025-06-28,Naas River,PADDYS RIVER,ACT,2611,Ranger Service,3,dusk survey
+PL-00234,2025-05-09,Queanbeyan River,THARWA,ACT,2620,Ranger Service,2,juvenile present
+PL-00235,2025-07-08,Tidbinbilla Creek,PADDYS RIVER,ACT,2611,Waterwatch Volunteers,2,
+PL-00236,2025-05-05,Tidbinbilla Creek,UPPER COTTER,ACT,2620,Waterwatch Volunteers,1,juvenile present
+PL-00237,2025-02-22,Cotter River,THARWA,ACT,2911,Waterwatch Volunteers,2,dusk survey
+PL-00238,2025-09-12,Murrumbidgee River,PADDYS RIVER,ACT,2620,Platypus Watch Inc,3,
+PL-00239,2025-10-27,Gudgenby River,THARWA,ACT,2620,Ranger Service,1,burrow entrance seen
+PL-00240,2025-05-14,Tidbinbilla Creek,UPPER COTTER,ACT,2611,Ranger Service,3,burrow entrance seen
+PL-00241,2025-07-16,Murrumbidgee River,UPPER COTTER,ACT,2911,Ranger Service,4,burrow entrance seen
+PL-00242,2025-01-06,Paddys River,OAKS ESTATE,ACT,2911,Waterwatch Volunteers,2,juvenile present
+PL-00243,2025-03-16,Tidbinbilla Creek,PADDYS RIVER,ACT,2620,Platypus Watch Inc,2,juvenile present
+PL-00244,2025-09-24,Queanbeyan River,OAKS ESTATE,ACT,2620,Platypus Watch Inc,4,dusk survey
+PL-00245,2025-10-06,Naas River,THARWA,ACT,2911,Ranger Service,2,juvenile present
+PL-00246,2025-11-11,Naas River,UPPER COTTER,ACT,2611,Ranger Service,2,dusk survey
+PL-00247,2025-01-19,Murrumbidgee River,PADDYS RIVER,ACT,2620,Ranger Service,1,juvenile present
+PL-00248,2025-06-11,Paddys River,OAKS ESTATE,ACT,2620,Ranger Service,2,juvenile present
+PL-00249,2025-01-24,Tidbinbilla Creek,PADDYS RIVER,ACT,2911,Platypus Watch Inc,3,dusk survey
+PL-00250,2025-09-05,Queanbeyan River,UPPER COTTER,ACT,2911,Platypus Watch Inc,2,juvenile present
+PL-00251,2025-02-20,Murrumbidgee River,THARWA,ACT,2620,Ranger Service,1,dusk survey
+PL-00252,2025-02-06,Cotter River,PADDYS RIVER,ACT,2620,Platypus Watch Inc,1,
+PL-00253,2025-12-27,Molonglo River,UPPER COTTER,ACT,2911,Waterwatch Volunteers,2,burrow entrance seen
+PL-00254,2025-07-22,Naas River,THARWA,ACT,2611,Ranger Service,3,dusk survey
+PL-00255,2025-12-02,Queanbeyan River,PADDYS RIVER,ACT,2620,Platypus Watch Inc,4,burrow entrance seen
+PL-00256,2025-06-19,Cotter River,THARWA,ACT,2911,Platypus Watch Inc,2,dusk survey
+PL-00257,2025-08-07,Naas River,PADDYS RIVER,ACT,2611,Waterwatch Volunteers,3,dusk survey
+PL-00258,2025-05-06,Murrumbidgee River,UPPER COTTER,ACT,2911,Ranger Service,4,
+PL-00259,2025-04-10,Naas River,OAKS ESTATE,ACT,2911,Ranger Service,4,burrow entrance seen
+PL-00260,2025-10-19,Naas River,OAKS ESTATE,ACT,2620,Waterwatch Volunteers,1,burrow entrance seen
+PL-00261,2025-02-11,Molonglo River,THARWA,ACT,2911,Waterwatch Volunteers,2,burrow entrance seen
+PL-00262,2025-08-15,Queanbeyan River,UPPER COTTER,ACT,2620,Ranger Service,2,dusk survey
+PL-00263,2025-06-22,Queanbeyan River,THARWA,ACT,2620,Platypus Watch Inc,1,
+PL-00264,2025-06-18,Murrumbidgee River,UPPER COTTER,ACT,2620,Waterwatch Volunteers,2,juvenile present
+PL-00265,2025-12-19,Cotter River,PADDYS RIVER,ACT,2611,Platypus Watch Inc,1,burrow entrance seen
+PL-00266,2025-03-18,Tidbinbilla Creek,PADDYS RIVER,ACT,2620,Ranger Service,3,
+PL-00267,2025-03-08,Naas River,OAKS ESTATE,ACT,2620,Waterwatch Volunteers,4,
+PL-00268,2025-12-15,Tidbinbilla Creek,PADDYS RIVER,ACT,2620,Ranger Service,4,dusk survey
+PL-00269,2025-09-24,Molonglo River,UPPER COTTER,ACT,2911,Ranger Service,4,burrow entrance seen
+PL-00270,2025-09-16,Gudgenby River,OAKS ESTATE,ACT,2620,Platypus Watch Inc,4,juvenile present
+PL-00271,2025-05-20,Naas River,UPPER COTTER,ACT,2620,Ranger Service,3,dusk survey
+PL-00272,2025-06-19,Molonglo River,THARWA,ACT,2611,Ranger Service,1,dusk survey
+PL-00273,2025-06-19,Tidbinbilla Creek,THARWA,ACT,2620,Platypus Watch Inc,1,
+PL-00274,2025-01-23,Paddys River,THARWA,ACT,2911,Waterwatch Volunteers,4,
+PL-00275,2025-01-22,Murrumbidgee River,THARWA,ACT,2611,Ranger Service,4,dusk survey
+PL-00276,2025-01-14,Murrumbidgee River,UPPER COTTER,ACT,2911,Waterwatch Volunteers,1,juvenile present
+PL-00277,2025-12-04,Molonglo River,THARWA,ACT,2620,Ranger Service,3,dusk survey
+PL-00278,2025-05-02,Tidbinbilla Creek,UPPER COTTER,ACT,2911,Waterwatch Volunteers,4,
+PL-00279,2025-09-09,Molonglo River,OAKS ESTATE,ACT,2620,Platypus Watch Inc,1,
+PL-00280,2025-04-21,Molonglo River,UPPER COTTER,ACT,2620,Platypus Watch Inc,3,juvenile present
+PL-00281,2025-06-06,Murrumbidgee River,OAKS ESTATE,ACT,2620,Ranger Service,3,dusk survey
+PL-00282,2025-02-06,Gudgenby River,UPPER COTTER,ACT,2620,Waterwatch Volunteers,1,juvenile present
+PL-00283,2025-05-23,Murrumbidgee River,THARWA,ACT,2620,Waterwatch Volunteers,1,
+PL-00284,2025-11-13,Murrumbidgee River,OAKS ESTATE,ACT,2620,Platypus Watch Inc,3,juvenile present
+PL-00285,2025-07-19,Murrumbidgee River,PADDYS RIVER,ACT,2911,Waterwatch Volunteers,3,
+PL-00286,2025-09-12,Paddys River,OAKS ESTATE,ACT,2611,Ranger Service,2,burrow entrance seen
+PL-00287,2025-09-08,Cotter River,UPPER COTTER,ACT,2611,Platypus Watch Inc,1,
+PL-00288,2025-02-24,Murrumbidgee River,THARWA,ACT,2620,Ranger Service,2,burrow entrance seen
+PL-00289,2025-05-08,Cotter River,PADDYS RIVER,ACT,2911,Waterwatch Volunteers,4,dusk survey
+PL-00290,2025-12-16,Naas River,THARWA,ACT,2620,Platypus Watch Inc,3,burrow entrance seen
+PL-00291,2025-02-18,Molonglo River,OAKS ESTATE,ACT,2911,Waterwatch Volunteers,3,burrow entrance seen
+PL-00292,2025-05-25,Queanbeyan River,UPPER COTTER,ACT,2620,Waterwatch Volunteers,4,juvenile present
+PL-00293,2025-07-02,Murrumbidgee River,THARWA,ACT,2620,Platypus Watch Inc,2,burrow entrance seen
+PL-00294,2025-09-22,Naas River,PADDYS RIVER,ACT,2611,Ranger Service,1,juvenile present
+PL-00295,2025-06-04,Cotter River,THARWA,ACT,2911,Ranger Service,4,juvenile present
+PL-00296,2025-02-12,Molonglo River,OAKS ESTATE,ACT,2620,Platypus Watch Inc,4,dusk survey
+PL-00297,2025-01-01,Naas River,PADDYS RIVER,ACT,2620,Platypus Watch Inc,2,
+PL-00298,2025-08-03,Tidbinbilla Creek,OAKS ESTATE,ACT,2620,Platypus Watch Inc,4,juvenile present
+PL-00299,2025-03-27,Naas River,UPPER COTTER,ACT,2611,Ranger Service,1,dusk survey
+PL-00300,2025-08-27,Murrumbidgee River,THARWA,ACT,2620,Waterwatch Volunteers,1,dusk survey

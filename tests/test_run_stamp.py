@@ -5,7 +5,7 @@ four keys on every extraction Parquet, a reader that ignores them, attribution
 surviving the file being moved, the digest's basis and its formatting
 invariance, local/distributed parity, and the credential non-goal.
 
-Round-trips go through the real writer on the budget-statement DOCX fixture,
+Round-trips go through the real writer on the synthetic budget-statement DOCX,
 as ``test_output`` and ``test_source_provenance`` do; the digest cases build
 configurations directly.
 """
@@ -18,6 +18,7 @@ from pathlib import Path
 import pyarrow.parquet as pq
 import pytest
 
+from tests._synthetic import BUDGET_DOCX as _BUDGET_DOCX
 from womblex import __version__
 from womblex.config import (
     ChunkingConfig,
@@ -50,12 +51,6 @@ from womblex.utils.models import (
     resolve_local_model_path,
 )
 
-_FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "fixtures"
-_BUDGET_DOCX = (
-    _FIXTURES / "womblex-collection" / "_documents"
-    / "foreign-affairs-and-trade-2025-26-portfolio-budget-statements.docx"
-)
-
 # The names a run's credentials arrive under. The stamp must contain none of
 # their values — it carries a digest, a run id, a version and a stage.
 CREDENTIAL_ENV = (
@@ -84,8 +79,6 @@ def _config(tmp_path: Path, **over) -> WomblexConfig:
 
 @pytest.fixture(scope="module")
 def extraction():
-    if not _BUDGET_DOCX.exists():
-        pytest.skip(f"fixture not present: {_BUDGET_DOCX}")
     return DocxExtractor().extract_path(_BUDGET_DOCX)
 
 

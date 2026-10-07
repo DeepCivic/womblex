@@ -472,9 +472,7 @@ class TestSpreadsheetExtractor:
     """
 
     def test_extracts_real_csv(self, spreadsheet_dir: Path) -> None:
-        csv_path = spreadsheet_dir / "Approved-providers-au-export_20260204.csv"
-        if not csv_path.exists():
-            pytest.skip("CSV fixture not available")
+        csv_path = spreadsheet_dir / "platypus-sightings-register.csv"
 
         ext = SpreadsheetExtractor()
         result = ext.extract_path(csv_path)
@@ -487,9 +485,7 @@ class TestSpreadsheetExtractor:
         assert kinds.count("sheet_cell") >= 1
 
     def test_extracts_real_xlsx(self, spreadsheet_dir: Path) -> None:
-        xlsx_path = spreadsheet_dir / "mso-statistics-sept-qtr-2025.xlsx"
-        if not xlsx_path.exists():
-            pytest.skip("Excel fixture not available")
+        xlsx_path = spreadsheet_dir / "echidna-population-statistics.xlsx"
 
         ext = SpreadsheetExtractor()
         result = ext.extract_path(xlsx_path)

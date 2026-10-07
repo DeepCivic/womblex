@@ -1,6 +1,6 @@
 """Tests for womblex.store.shard_audit — directory-level shard integrity.
 
-Builds shards from the budget-statement DOCX fixture (re-used from
+Builds shards from the synthetic budget-statement DOCX (re-used from
 test_output) and exercises scan / audit / reconcile against various
 tampering modes.
 """
@@ -13,6 +13,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from tests._synthetic import BUDGET_DOCX as _BUDGET_DOCX
 from womblex.ingest.strategies_file import DocxExtractor
 from womblex.store.checkpoint import CheckpointManager
 from womblex.store.enrichment_output import ENRICHMENT_ENTITIES_SUFFIX
@@ -37,19 +38,9 @@ from womblex.store.shard_audit import (
     scan_sidecar_directory,
 )
 
-_FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "fixtures"
-_BUDGET_DOCX = (
-    _FIXTURES
-    / "womblex-collection"
-    / "_documents"
-    / "foreign-affairs-and-trade-2025-26-portfolio-budget-statements.docx"
-)
-
 
 @pytest.fixture(scope="module")
 def budget_extraction():
-    if not _BUDGET_DOCX.exists():
-        pytest.skip(f"fixture not present: {_BUDGET_DOCX}")
     return DocxExtractor().extract_path(_BUDGET_DOCX)
 
 
