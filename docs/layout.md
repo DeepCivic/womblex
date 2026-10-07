@@ -116,16 +116,16 @@ and `y` and `height` by its height; any render of the page works.
 
 The footer of the sidecar, and of the batch's `*.elements.parquet`, carries a
 fingerprint under `womblex.layout_fingerprint`: the model name, a model digest,
-a digest of `options`, the render dpi, the page scope and the sidecar schema
-version. Two files with equal fingerprints were produced by the same layout
-model and settings.
+a digest of `options`, the render dpi, the page scope, its `consumers` (`ocr`,
+`redaction`: what selects pages under `consumers` scope) and the schema version.
+Equal fingerprints mean the same model and settings over the same pages.
 
 `model_digest` is the content digest of the model's local files for a built-in
 model, and `<distribution>==<version>` for a plugin, which Womblex cannot digest.
 
 The sidecar's footer also records, under `womblex.layout_redaction_consumed`,
 whether redaction was configured to consume layout (`redaction.enabled` and
-`use_layout_filter`).
+`use_layout_filter`); always `false` once `run-stage layout` rewrites it.
 
 The elements footer records the layout that extraction ran with. A shard written
 before this existed has no fingerprint there; that reads as provenance unknown,

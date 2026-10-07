@@ -78,7 +78,8 @@ class LayoutFingerprint:
     a rerun that would reproduce them can be skipped. ``model_digest`` is the
     content digest of the model's local files where it has them, and
     ``<distribution>==<version>`` for a plugin model, which Womblex cannot
-    digest.
+    digest. ``consumers`` (``ocr,redaction``; empty under ``all``) is what
+    selects the pages under ``consumers`` scope.
     """
 
     model: str
@@ -86,6 +87,7 @@ class LayoutFingerprint:
     options_digest: str
     dpi: int
     page_scope: str
+    consumers: str = ""
     schema_version: str = LAYOUT_SCHEMA_VERSION
 
     def to_json(self) -> str:
@@ -102,6 +104,7 @@ class LayoutFingerprint:
                 options_digest=str(data["options_digest"]),
                 dpi=int(data["dpi"]),
                 page_scope=str(data["page_scope"]),
+                consumers=str(data.get("consumers", "")),
                 schema_version=str(data["schema_version"]),
             )
         except (ValueError, KeyError, TypeError):
@@ -134,14 +137,23 @@ def _model_digest(name: str, options: Mapping[str, Any]) -> str:
 
 def layout_fingerprint(config: WomblexConfig) -> LayoutFingerprint:
     """The fingerprint *config* would produce: its layout model and settings at the OCR dpi."""
+    from womblex.ingest.layout_step import _is_markdown_engine
+
     layout = config.layout
     options = json.dumps(layout.options, sort_keys=True, separators=(",", ":"), default=str)
+    consumers: list[str] = []
+    if layout.page_scope == "consumers":
+        if not _is_markdown_engine(config.extraction.ocr.engine):
+            consumers.append("ocr")
+        if config.redaction.enabled and config.redaction.use_layout_filter:
+            consumers.append("redaction")
     return LayoutFingerprint(
         model=layout.model,
         model_digest=_model_digest(layout.model, layout.options),
         options_digest="sha256:" + hashlib.sha256(options.encode()).hexdigest(),
         dpi=config.extraction.ocr.dpi,
         page_scope=layout.page_scope,
+        consumers=",".join(consumers),
     )
 
 

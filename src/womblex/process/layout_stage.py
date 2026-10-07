@@ -100,9 +100,10 @@ def layout_shards(
         if rows is None:
             result.batches_failed += 1
             continue
+        # Redaction ran at extraction, against the regions these replace.
         write_layout_regions(
             rows, base, settings.fingerprint,
-            redaction_consumed=settings.redaction_filter,
+            redaction_consumed=False,
             metadata=sidecar_footer(base, "layout"),
         )
         result.batches_written += 1

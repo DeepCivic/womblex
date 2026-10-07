@@ -25,6 +25,7 @@ from womblex.store.layout_output import (
     layout_fingerprint_status,
     layout_fingerprint_statuses,
     read_footer_layout_fingerprint,
+    read_footer_redaction_consumed,
     read_layout_regions,
 )
 
@@ -44,12 +45,12 @@ def _fake_models():
         reg.register(reg.SLOT_LAYOUT, name, lambda _n=name, **_: _Analyzer(_n), source="test-dist")
 
 
-def _config(tmp_path: Path, model: str) -> WomblexConfig:
+def _config(tmp_path: Path, model: str, *, redaction: bool = False) -> WomblexConfig:
     return WomblexConfig(
         dataset=DatasetConfig(name="t"),
         paths=PathsConfig(input_root=tmp_path, output_root=tmp_path, checkpoint_dir=tmp_path),
         layout={"model": model},
-        redaction={"enabled": False},
+        redaction={"enabled": redaction},
     )
 
 
@@ -96,6 +97,12 @@ def test_a_new_model_reruns_and_the_two_footers_then_disagree(tmp_path: Path, ru
     assert layout_fingerprint_status(shards / "batch-0001.parquet") == MISMATCH
     fp = read_footer_layout_fingerprint(pq.read_metadata(str(_sidecar(shards))).metadata)
     assert fp is not None and fp.model == "stage-b"
+
+
+def test_turning_on_the_redaction_filter_reruns_and_never_claims_consumption(tmp_path, run):
+    corpus, shards = run
+    assert layout_shards(shards, _config(tmp_path, "stage-a", redaction=True), source_root=corpus).batches_written == 1
+    assert read_footer_redaction_consumed(pq.read_metadata(str(_sidecar(shards))).metadata) is False
 
 
 def test_force_reruns_an_unchanged_fingerprint(tmp_path: Path, run) -> None:
