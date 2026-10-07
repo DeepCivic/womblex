@@ -90,8 +90,9 @@ accepted but empty.
 and the Kanon-2 tokeniser. The larger local models (PaddleOCR v5,
 PP-DocLayout-M, the PII context model) are resolved from `WOMBLEX_MODELS_DIR`,
 or from `src/womblex/_models/` and `models/` in a source checkout. Without
-them, OCR falls back to the PaddleOCR v4 models inside the `rapidocr` wheel,
-and layout detection is skipped. Every model, local or hosted, is listed in
+them, OCR falls back to the PaddleOCR v4 models inside the `rapidocr` wheel;
+without PP-DocLayout-M the pre-run model check stops `womblex run`
+([layout.md](docs/layout.md)). Every model, local or hosted, is listed in
 [docs/models.md](docs/models.md), along with how to connect the hosted ones.
 
 ## Quick start

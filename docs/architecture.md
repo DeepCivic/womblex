@@ -159,7 +159,7 @@ CLI: `womblex ingest-abn <file-or-dir> -o <output_dir> [--no-md5]`
 
 ### 6. Redact — Post-Extraction Redaction
 
-`redact/stage.py` runs as a separate operation after extraction. Detection is vector-first: filled near-black rectangles from the page's `drawings()`. Only a page with none falls back to rendering it and running the CV2-based `RedactionDetector`, excluding the layout step's figure and table regions (`use_layout_filter`; a page with no usable layout runs unfiltered with a warning). It then applies the configured mode:
+`redact/stage.py` runs as a separate operation after extraction. Detection is vector-first: filled near-black rectangles from the page's `drawings()`. Only a page with none falls back to rendering it and running the CV2-based `RedactionDetector`, excluding the layout step's figure and table regions (`use_layout_filter`; a page with no usable layout runs unfiltered, warned once per document and recorded for `unfiltered_redaction_pages`). It then applies the configured mode:
 
 - `flag` — sets `has_redaction=True` on affected chunks (no text change)
 - `blackout` — prepends `<REDACTED>` to affected page text

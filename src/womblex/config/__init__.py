@@ -177,7 +177,8 @@ class RedactionConfig(BaseModel):
             "table regions the layout step found (`layout:`). "
             "Suppresses 02737-class scanned_mixed false positives. "
             "A layout model that cannot load stops the run at the pre-run model check "
-            "(processing.models_check); with the check off, the filter is a no-op."
+            "(processing.models_check); with the check off, those pages run unfiltered "
+            "and are recorded (`unfiltered_redaction_pages`)."
         ),
     )
 

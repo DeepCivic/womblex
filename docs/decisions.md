@@ -586,17 +586,17 @@ engine the numbers would describe a different pipeline. A
 markdown-pipe-table → `TableData` parser is the LLM path's separate feeder,
 deferred.
 
-`_layout_blocks_and_tables` takes the regions plus the OCR render's pixel
-dimensions, together or not at all. The OCR render and the layout render are
-the same page at the same dpi, so their pixel spaces coincide — verified rather
-than assumed: unless the dimensions are supplied *and* match, the coordinates
-are not known to be comparable and the regions are dropped with a warning.
-Losing reconstruction inputs is the correct failure; a mis-binned grid would be
+`_layout_blocks_and_tables` takes the OCR regions plus the OCR render's pixel
+dimensions, together or not at all. The layout step's boxes are normalised, so
+they are mapped onto the OCR render's own dimensions; regions supplied without
+those dimensions cannot be placed and are dropped with a warning. Losing
+reconstruction inputs is the correct failure; a mis-binned grid would be
 confidently wrong downstream. Deskewed pages are a distinct hazard (OCR runs on
-the warped image, the layout model on the raw one) that this check does **not** catch —
-`warpAffine` preserves dimensions — so they get their own page-level refusal:
-the orchestrator reads `"deskew" ∈ steps` off `_ocr_page` and the layout pass
-drops its cell source, keeping the page's pre-reconstruction behaviour exactly.
+the warped image, the layout model on the raw one) that normalising does **not**
+remove — `warpAffine` preserves the frame's dimensions — so they get their own
+page-level refusal: the orchestrator reads `"deskew" ∈ steps` off `_ocr_page`
+and the layout pass drops its cell source, keeping the page's
+pre-reconstruction behaviour exactly.
 Mapping the layout rect into deskewed space is deferred to the round targeting
 real scans.
 
@@ -971,7 +971,7 @@ be re-derivable, and the first pass's were not.
   and no field extraction. Plan, dependency assessment and phases:
   [plan-trust-and-recipes.md](plan-trust-and-recipes.md).
 - **Permissive dependencies — Apache-2.0 compatibility.** *In progress
-  2026-10; layout swap shipped (#130).* The previous layout model's
+  2026-10; layout swap (#130) and layout stage (L3) shipped.* The previous layout model's
   dependency and PyMuPDF are not licence-compatible with Apache-2.0. Layout
   is now an Apache-2.0 PP-DocLayout ONNX model on `onnxruntime`; PyMuPDF goes
   behind a womblex-owned `ingest/pdf/` seam and is replaced by pypdfium2 +
@@ -993,9 +993,36 @@ be re-derivable, and the first pass's were not.
   - **No PDF-backend registry slot.** The registry is for swappable models;
     a backend slot would be the toggle the plan rules out. Backend selection
     is a private `open_document` argument used by the parity harness.
-  - **Layout becomes its own stage**, so a layout model can be tuned and
-    measured on its own. Until it ships, layout detection is not supported
-    for local deployment.
+  - **Layout is its own stage (L3, shipped 2026-10)**, so a layout model can
+    be tuned and measured on its own ([layout.md](layout.md)). One model
+    (`layout:`) runs once per selected page in the extraction batch, after
+    profiling and before OCR; OCR's table rects and block types and
+    redaction's exclusion zones read its regions, persisted in
+    `*.layout_regions.parquet`. Before it, layout ran twice and unpersisted
+    (inside OCR at the OCR dpi, inside redaction at 150 dpi), so a page could
+    get two models at two resolutions and neither result could be inspected
+    or rerun. The per-consumer `layout_model` / `layout_options` keys were
+    removed outright and are refused at config load.
+    - *Rejected: persist OCR regions and reconstruct tables downstream.*
+      OCR-page table elements would then depend on a downstream stage and
+      need an element-structure overlay.
+    - *Page scope `consumers` by default:* OCR-routed pages (a `markdown`
+      engine bypasses layout) plus, with the redaction filter on, pages
+      without vector redactions. Both are known before layout runs, so there
+      is no circularity. `all` is for measuring a model. Which consumers are
+      on is part of the fingerprint, since it changes the pages analysed.
+    - *Normalised boxes, rendered at the OCR dpi.* Each consumer maps them
+      onto its own render, replacing the old OCR-versus-layout
+      pixel-dimension check. The A2 deskew refusal stays with OCR, which
+      alone knows it deskewed.
+    - *A rerun replaces only the sidecar.* Nothing reads layout after
+      extraction, so no stale-output tracking is added: the elements
+      footer's fingerprint against the sidecar's is the out-of-date signal,
+      and applying a new model to tables or redaction is a re-extract.
+      `layout` stays out of `DOWNSTREAM_STAGES`, as a rerun is deliberate.
+    - *A failed page is a status row, not a failed document.* OCR falls back
+      to whole-page text; redaction runs the page unfiltered and records it
+      (`unfiltered_redaction_pages`), over-reporting rather than missing one.
 
 - **AI chunking (semchunk 4) — single-enrichment graph reuse.** *Shipped
   2026-06, off-by-default.* The `chunking.chunking_model` pass-through lets
