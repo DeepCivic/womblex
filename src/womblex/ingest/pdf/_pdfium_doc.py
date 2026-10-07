@@ -6,9 +6,9 @@ rect leaves this module through `PdfiumPage._rect`, which does that flip, so no
 caller sees pdfium's convention. Like MuPDF, objects are reported in unrotated
 page space while `rect` is the rotated page.
 
-Text and tables are not here: the text engine is P6 (`_text.py`) and the table
-finder P7 (`_tables.py`) of `docs/plan-permissive-deps.md`. Until they land the
-page raises on those methods, so this backend is reachable only by naming it.
+Text is `_text.py` (P6 of `docs/plan-permissive-deps.md`); the table finder is
+P7 (`_tables.py`), and until it lands `find_tables` raises, so this backend is
+reachable only by naming it.
 
 PDFium is not thread-safe (see `docs/decisions.md`); nothing here locks, since
 extraction runs one document at a time per process.
@@ -26,7 +26,7 @@ import numpy as np
 import pypdfium2 as pdfium  # type: ignore[import-untyped]
 import pypdfium2.raw as pdfium_c  # type: ignore[import-untyped]
 
-from womblex.ingest.pdf import _image
+from womblex.ingest.pdf import _image, _text
 from womblex.ingest.pdf.types import (
     Block,
     Drawing,
@@ -105,12 +105,18 @@ class PdfiumPage:
         self._number = number
         left, _bottom, _right, top = page.get_cropbox()
         self._origin = (left, top)
+        self._char_cache: list[_text.Char] | None = None
 
     def _rect(self, box: tuple[float, float, float, float], matrix: Matrix = _IDENTITY) -> Rect:
         """A user-space box, through *matrix*, into top-left page space."""
         x0, y0, x1, y1 = Rect.of(box).transform(matrix).as_tuple()
         left, top = self._origin
         return Rect.of((x0 - left, top - y1, x1 - left, top - y0))
+
+    def _flip(self, box: tuple[float, float, float, float]) -> Rect:
+        """`_rect` without a matrix, for the per-character hot path."""
+        left, top = self._origin
+        return Rect.of((box[0] - left, top - box[3], box[2] - left, top - box[1]))
 
     def _objects(self) -> Iterator[tuple[pdfium.PdfObject, Matrix]]:
         """Every object, form XObjects descended, with its container's transform.
@@ -153,17 +159,22 @@ class PdfiumPage:
     def doc_name(self) -> str:
         return self._doc.name
 
+    def _chars(self) -> list[_text.Char]:
+        if self._char_cache is None:
+            self._char_cache = _text.read_chars(self._page, self._flip, self._rect(self._page.get_cropbox()))
+        return self._char_cache
+
     def plain_text(self, *, dehyphenate: bool = True) -> str:
-        raise NotImplementedError("pdfium text extraction arrives with P6 (_text.py)")
+        return _text.plain_text(self._chars())
 
     def text_dict(self) -> list[Block]:
-        raise NotImplementedError("pdfium text extraction arrives with P6 (_text.py)")
+        return _text.text_dict(self._chars())
 
     def words(self, *, dehyphenate: bool = True) -> list[Word]:
-        raise NotImplementedError("pdfium text extraction arrives with P6 (_text.py)")
+        return _text.words(self._chars())
 
     def text_blocks(self, *, dehyphenate: bool = True) -> list[Block]:
-        raise NotImplementedError("pdfium text extraction arrives with P6 (_text.py)")
+        return _text.text_blocks(self._chars())
 
     def find_tables(self, *, strategy: TableStrategy = "lines") -> list[FoundTable]:
         raise NotImplementedError("pdfium table finding arrives with P7 (_tables.py)")
