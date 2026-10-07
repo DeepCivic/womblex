@@ -28,17 +28,22 @@ from __future__ import annotations
 import json
 import logging
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from womblex.config import RedactionConfig
+from womblex.config import LayoutConfig, RedactionConfig
 from womblex.ingest.pdf import open_document
 from womblex.redact.stage import build_detector, detect_redactions
+from womblex.store.layout_output import layout_regions_path_for, read_page_layouts
 from womblex.store.output import _write_rows
+
+if TYPE_CHECKING:
+    from womblex.ingest.layout_step import PageLayout
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +53,26 @@ REDACTIONS_SCHEMA = pa.schema([
     ("elem_order", pa.int32()),
     ("has_redaction", pa.bool_()),
 ])
+
+
+def _layout_for_labels(
+    pdf_path: Path, n_pages: int, config: RedactionConfig,
+) -> dict[int, PageLayout]:
+    """Layout for a labels-packet document, which has no shard sidecar.
+
+    Runs the default layout model over every page at the detection dpi, so the
+    validation exercises the same filter a run would. A failure leaves the
+    document unfiltered, as a missing sidecar does.
+    """
+    from womblex.ingest.layout_step import analyse_pages
+
+    try:
+        with open_document(pdf_path) as doc:
+            pages = analyse_pages(doc, list(range(n_pages)), LayoutConfig().model, {}, config.dpi)
+    except Exception as exc:
+        logger.warning("layout unavailable for %s: %s", pdf_path, exc)
+        return {}
+    return {p.page: p for p in pages}
 
 
 @dataclass
@@ -128,6 +153,12 @@ def annotate_redactions_for_shards(
             logger.warning("manifest %s has no matching elements parquet — skipping batch", manifest_path.name)
             continue
 
+        layout_path = layout_regions_path_for(shard_dir / batch_stem)
+        if config.use_layout_filter and not layout_path.exists():
+            logger.warning(
+                "no layout sidecar for batch %s: redaction runs without exclusion zones",
+                batch_stem,
+            )
         rows = _annotate_one_batch(
             elements_path=elements_path,
             manifest_path=manifest_path,
@@ -136,8 +167,7 @@ def annotate_redactions_for_shards(
             dpi=config.dpi,
             summary=summary,
             use_layout_filter=config.use_layout_filter,
-            layout_model=config.layout_model,
-            layout_options=config.layout_options,
+            layouts=read_page_layouts(layout_path) if layout_path.exists() else {},
         )
 
         out_path = output_dir / f"{batch_stem}.redactions.parquet"
@@ -169,8 +199,7 @@ def _annotate_one_batch(
     dpi: int,
     summary: dict[str, int],
     use_layout_filter: bool = True,
-    layout_model: str = "pp-doclayout-m",
-    layout_options: dict | None = None,
+    layouts: Mapping[str, Mapping[int, PageLayout]] | None = None,
 ) -> list[tuple[str, int]]:
     """Process a single batch; mutate *summary* and return ``[(source_hash, elem_order), ...]``."""
     manifest_tbl = pq.read_table(manifest_path, columns=["source_hash", "filename"])
@@ -210,7 +239,7 @@ def _annotate_one_batch(
         report = detect_redactions(
             pdf_path, page_count, detector, dpi=dpi,
             use_layout_filter=use_layout_filter,
-            layout_model=layout_model, layout_options=layout_options,
+            layout=(layouts or {}).get(source_hash),
         )
         summary[source_hash] = report.total
         if not report.total:
@@ -293,8 +322,7 @@ def validate_redactions_against_labels(
         report = detect_redactions(
             pdf_path, n_pages, detector, dpi=config.dpi,
             use_layout_filter=config.use_layout_filter,
-            layout_model=config.layout_model,
-            layout_options=config.layout_options,
+            layout=_layout_for_labels(pdf_path, n_pages, config) if config.use_layout_filter else None,
         )
 
         per_page_bboxes: dict[int, list[tuple[int, int, int, int]]] = {

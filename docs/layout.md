@@ -10,8 +10,9 @@ its own (see [plan-permissive-deps.md](plan-permissive-deps.md)). **OCR reads
 these regions:** table reconstruction and the block types on a scanned page come
 from the layout step's output, and `extraction.ocr.layout_model` /
 `layout_options` no longer exist (use `layout.model` / `layout.options`). A page
-whose layout is `empty` or `error` falls back to whole-page OCR text. Redaction's
-exclusion zones still run their own analyser (`redaction.layout_model`).
+whose layout is `empty` or `error` falls back to whole-page OCR text. Redaction
+reads the same regions for its exclusion zones, and `redaction.layout_model` /
+`layout_options` are gone too.
 
 ## Settings
 
@@ -37,6 +38,40 @@ whenever the step would use it.
 
 Documents the PDF seam does not open (DOCX, spreadsheets, text, and the records
 ingest) are never analysed and write no rows.
+
+## Redaction's exclusion zones
+
+On a page with no vector redaction, redaction renders the page and runs a
+contour detector. With `redaction.use_layout_filter` on, the page's `figure` and
+`table` regions are exclusion zones: a dark region whose centre falls inside one
+is not reported. Regions are normalised, so they map onto redaction's own render
+(150 dpi) whatever dpi layout ran at. `redaction.use_layout_filter` decides
+whether redaction reads the regions; `layout.model` decides which model made
+them. `womblex redact --shards` reads each batch's `*.layout_regions.parquet`;
+`womblex run` hands over the regions it just found.
+
+A page whose layout row has `status = error`, or that has no row, is detected
+with no exclusion zones and a warning naming the document and page. An `empty`
+page is a real "nothing to exclude" and does not warn.
+
+### Listing unfiltered pages
+
+`store.layout_output.unfiltered_redaction_pages(path)` returns the
+`(source_hash, page)` pairs redaction ran on without exclusion zones, for one
+sidecar file or a shard directory:
+
+```python
+from womblex.store.layout_output import unfiltered_redaction_pages
+
+unfiltered_redaction_pages("shards/")   # [("<source_hash>", 2), ...]
+```
+
+It counts a page when its layout row has `status = error` **and** the file's
+footer key `womblex.layout_redaction_consumed` is `true`; a file whose footer
+says `false`, or has none, asked nothing of the regions. The equivalent query:
+read the footer, skip the file unless it says `true`, then select the distinct
+`(source_hash, page)` where `status = 'error'`. The list over-reports slightly,
+because a page redaction resolved from vector drawings never needed the filter.
 
 ## The sidecar
 

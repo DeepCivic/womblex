@@ -537,7 +537,7 @@ contour detection on scanned pages. Filters surfaced during validation:
 near-black RGB/CMYK fill; `min_width ≥ 3pt` (excludes narrow column
 separators); `min_height ≥ 8pt` (excludes glyph-rendering small filled rects on
 PDFs that draw text as filled-path glyphs). Raster-path layout exclusion
-(`redaction.layout_model` regions, default `pp-doclayout-m`, as exclusion zones) is best-effort and gated by
+(the layout step's `figure` / `table` regions, as exclusion zones) is best-effort and gated by
 `RedactionConfig.use_layout_filter`.
 
 Detection runs *after* extraction, never inside it: masking within `_ocr_page()`
@@ -938,8 +938,8 @@ be re-derivable, and the first pass's were not.
     replacing `LLM_OCR_ENGINES`; `is_llm_engine` now reads the `markdown` trait. The reader cache is keyed
     by engine plus a frozen copy of its options.
   - **Layout slot (merge 2).** `layout.model` / `options` (formerly
-    `extraction.ocr.layout_model` / `layout_options`, removed in L3b) and
-    `redaction.layout_model` / `layout_options` name a
+    `extraction.ocr.layout_model` / `layout_options`, removed in L3b, and
+    `redaction.layout_model` / `layout_options`, removed in L3c) name a
     registered analyser (default `pp-doclayout-m`); options pass to its
     factory unchanged. The two selections are independent because the
     standalone `redact` commands hold only `RedactionConfig`. An unknown name

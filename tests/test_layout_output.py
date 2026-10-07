@@ -20,6 +20,8 @@ from womblex.store.layout_output import (
     read_footer_layout_fingerprint,
     read_footer_redaction_consumed,
     read_layout_regions,
+    read_page_layouts,
+    unfiltered_redaction_pages,
     write_layout_regions,
 )
 
@@ -137,3 +139,32 @@ class TestSidecar:
 
     def test_contract_classifies_it_without_text(self) -> None:
         assert ROLE_SENSITIVITY["layout_regions"] == "none"
+
+
+class TestReaders:
+    def _write(self, tmp_path: Path, name: str, *, consumed: bool) -> None:
+        pages = [("h1", [
+            PageLayout(0, "ok", [LayoutRegion(BBox(0.1, 0.2, 0.5, 0.25), "table", "table", 0.9)]),
+            PageLayout(1, "empty"),
+            PageLayout(2, "error", error="RuntimeError: boom"),
+        ])]
+        write_layout_regions(
+            layout_rows(pages), tmp_path / name, _fp(), redaction_consumed=consumed,
+        )
+
+    def test_page_layouts_invert_layout_rows(self, tmp_path: Path) -> None:
+        self._write(tmp_path, "batch-0001.parquet", consumed=True)
+        got = read_page_layouts(tmp_path)["h1"]
+        assert {p: (v.status, len(v.regions)) for p, v in got.items()} == {
+            0: ("ok", 1), 1: ("empty", 0), 2: ("error", 0),
+        }
+        b = got[0].regions[0].bbox
+        assert (b.x, b.y, b.width, b.height) == pytest.approx((0.1, 0.2, 0.5, 0.25))
+        assert got[0].regions[0].block_type == "table"
+        assert got[2].error == "RuntimeError: boom"
+
+    def test_unfiltered_pages_need_an_errored_page_and_a_consuming_footer(self, tmp_path: Path) -> None:
+        self._write(tmp_path, "batch-0001.parquet", consumed=True)
+        self._write(tmp_path, "batch-0002.parquet", consumed=False)
+        assert unfiltered_redaction_pages(tmp_path) == [("h1", 2)]
+        assert unfiltered_redaction_pages(tmp_path / "batch-0002.layout_regions.parquet") == []

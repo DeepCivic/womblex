@@ -192,6 +192,11 @@ class TestRedactionConfigDefaults:
 
         assert cfg.dpi == 150
 
+    @pytest.mark.parametrize("key", ["layout_model", "layout_options"])
+    def test_removed_redaction_layout_key_is_refused(self, key: str) -> None:
+        with pytest.raises(ValidationError, match=f"redaction.{key} was removed"):
+            RedactionConfig.model_validate({key: "x"})
+
 
 # ---------------------------------------------------------------------------
 

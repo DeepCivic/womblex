@@ -23,8 +23,11 @@ from womblex.config import RedactionConfig
 from womblex.redact.detector import RedactionDetector, RedactionInfo
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from womblex.ingest.elements import Element
     from womblex.ingest.extract import ExtractionResult, PageResult
+    from womblex.ingest.layout_step import PageLayout
     from womblex.ingest.pdf.types import Page
     from womblex.process.chunker import TextChunk
 
@@ -71,8 +74,7 @@ def detect_redactions(
     detector: RedactionDetector,
     dpi: int = 150,
     use_layout_filter: bool = True,
-    layout_model: str = "pp-doclayout-m",
-    layout_options: dict | None = None,
+    layout: Mapping[int, PageLayout] | None = None,
 ) -> RedactionReport:
     """Detect redacted regions per page; prefer vector ops, fall back to raster.
 
@@ -82,13 +84,13 @@ def detect_redactions(
       (matches native-PDF vector-drawn redactions; no area threshold).
     - If none found, rasterise the page at *dpi* and run the CV2 contour
       detector (handles raster overlays and scanned pages). When
-      *use_layout_filter* is true, run layout analysis on the rasterised
-      image and pass figure/chart/form-background regions as exclusion zones
+      *use_layout_filter* is true, pass the page's figure/table layout
+      regions (from *layout*, the batch's layout step) as exclusion zones
       to the contour detector — suppresses raster false positives on dark
       form-field backgrounds and embedded chart regions (02737-class
-      scanned_mixed CRM forms). The filter is best-effort: if the layout model
-      is missing or layout analysis fails, detection falls back to the
-      raw raster pass with no exclusion.
+      scanned_mixed CRM forms). The filter is best-effort: a page with no
+      usable layout (``error`` status, or none recorded) is detected with no
+      exclusion and a warning naming the document and page.
 
     Bboxes are returned in pixel coordinates at *dpi* regardless of which
     path produced them, so consumers see a single coord system.
@@ -98,24 +100,16 @@ def detect_redactions(
         page_count: Number of pages to scan (from extraction metadata).
         detector: Configured RedactionDetector instance.
         dpi: Resolution for page rendering / coord scaling.
-        use_layout_filter: Run layout analysis on raster-fallback pages
-            and drop contour hits inside figure / chart / form-background
-            regions. Best-effort; falls back to raw raster pass on error.
-        layout_model: Registered layout analyser for the filter.
-        layout_options: Passed unchanged to the layout model's factory.
+        use_layout_filter: Drop contour hits inside figure / table layout
+            regions on raster-fallback pages. Best-effort; falls back to the
+            raw raster pass where a page has no layout.
+        layout: Per-page layout regions by 0-based page number; where absent,
+            the filter has nothing to read.
 
     Returns:
         RedactionReport with per-page detection results.
     """
     from womblex.ingest.pdf import open_document
-
-    if use_layout_filter:
-        # A config error (unknown model name) must surface, not read as a
-        # missing model and drop the filter silently.
-        import womblex.ingest.paddle_ocr  # noqa: F401  (registers the built-in)
-        from womblex.utils.model_registry import SLOT_LAYOUT, resolve
-
-        resolve(SLOT_LAYOUT, layout_model)
 
     report = RedactionReport()
     try:
@@ -132,7 +126,9 @@ def detect_redactions(
 
                 img = page.render(dpi=dpi)
                 exclude_rects = (
-                    _layout_exclude_rects(img, layout_model, layout_options)
+                    _layout_exclude_rects(
+                        img, (layout or {}).get(page_num), path.name, page_num,
+                    )
                     if use_layout_filter else None
                 )
                 raster_redactions = detector.detect(
@@ -148,39 +144,35 @@ def detect_redactions(
 
 def _layout_exclude_rects(
     img: np.ndarray,
-    layout_model: str = "pp-doclayout-m",
-    layout_options: dict | None = None,
+    page_layout: PageLayout | None,
+    doc_name: str,
+    page_num: int,
 ) -> list[tuple[int, int, int, int]] | None:
-    """Return figure/chart/form-background bboxes from layout analysis.
+    """Figure/table bboxes in *img* pixels from a page's persisted layout.
 
-    Best-effort: returns ``None`` on any failure (model weights absent,
-    inference error, non-conforming output). Caller treats ``None`` and
-    ``[]`` interchangeably — both mean "no exclusion".
+    ``None`` means the page has no usable layout (none recorded, or the layout
+    step failed on it): detection runs without exclusion zones and the page is
+    named in a warning. An ``empty`` page is ``[]``, a genuine "nothing to
+    exclude". Callers treat ``None`` and ``[]`` alike.
     """
-    from womblex.ingest.interfaces.protocols import check_layout_regions
-
-    try:
-        from womblex.ingest.paddle_ocr import get_layout_analyzer
-        analyzer = get_layout_analyzer(layout_model, **(layout_options or {}))
-        regions = analyzer.analyze(img)
-    except Exception as e:
-        logger.debug("layout filter unavailable; falling back to raw raster: %s", e)
-        return None
-    try:
-        check_layout_regions(regions)
-    except ValueError:
+    if page_layout is None or page_layout.status == "error":
         logger.warning(
-            "layout model %r is non-conforming; no layout filter on this page",
-            layout_model, exc_info=True,
+            "layout filter unavailable, redaction runs without exclusion zones: "
+            "doc=%s page=%d (%s)", doc_name, page_num,
+            page_layout.error if page_layout else "no layout recorded for the page",
         )
         return None
 
+    height, width = img.shape[:2]
     rects: list[tuple[int, int, int, int]] = []
-    for region in regions:
+    for region in page_layout.regions:
         if region.block_type not in _LAYOUT_EXCLUSION_BLOCK_TYPES:
             continue
-        x0, y0, x1, y1 = region.bbox
-        rects.append((int(x0), int(y0), int(x1), int(y1)))
+        b = region.bbox
+        rects.append((
+            int(b.x * width), int(b.y * height),
+            int((b.x + b.width) * width), int((b.y + b.height) * height),
+        ))
     return rects
 
 
