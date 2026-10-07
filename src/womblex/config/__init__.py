@@ -176,6 +176,35 @@ class RedactionConfig(BaseModel):
 
 
 
+class LayoutConfig(BaseModel):
+
+    """Layout analysis: which model finds page regions, and on which pages.
+
+    One model for the whole pipeline, chosen through the registry's layout
+    slot (a tuned model is a ``womblex.models.layout`` plugin). Regions are
+    rendered at ``extraction.ocr.dpi`` and written to ``*.layout_regions.parquet``.
+    See ``docs/layout.md``.
+    """
+
+    model: str = Field(
+        default="pp-doclayout-m",
+        description="Registered layout analyser (by name, never an import path). "
+                    "Must emit the womblex block_type vocabulary.",
+    )
+    options: dict = Field(
+        default_factory=dict,
+        description="Passed unchanged to the layout model's factory.",
+    )
+    page_scope: Literal["consumers", "all"] = Field(
+        default="consumers",
+        description="`consumers`: only the pages something reads layout on "
+                    "(OCR-routed pages, and pages without vector redactions "
+                    "when the redaction layout filter is on). `all`: every page "
+                    "of every PDF or image.",
+    )
+
+
+
 class PIIConfig(BaseModel):
 
     """PII cleaning pipeline settings.
@@ -576,6 +605,7 @@ class WomblexConfig(BaseModel):
     detection: DetectionConfig = DetectionConfig()
     extraction: ExtractionConfig = ExtractionConfig()
     redaction: RedactionConfig = RedactionConfig()
+    layout: LayoutConfig = LayoutConfig()
     chunking: ChunkingConfig = ChunkingConfig()
     normalise: NormaliseConfig = NormaliseConfig()
     spellfix: SpellfixConfig = SpellfixConfig()
@@ -636,6 +666,7 @@ __all__ = [
     "EmbeddingConfig",
     "EnrichmentConfig",
     "ExtractionConfig",
+    "LayoutConfig",
     "LinkingConfig",
     "MoneyColumnsConfig",
     "MoneyConfig",

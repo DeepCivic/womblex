@@ -7,7 +7,7 @@ column-level schemas are in [extraction.md](extraction.md).
 
 ## Contract version
 
-`womblex.contract_version` (currently `1.0`, `store/contract.CONTRACT_VERSION`)
+`womblex.contract_version` (currently `1.1`, `store/contract.CONTRACT_VERSION`)
 is in the footer of every pipeline Parquet and in `egress_manifest.json`. It is
 versioned apart from the package: a release that changes no schema leaves it
 alone.
@@ -41,6 +41,7 @@ the single source). An unknown role reads as `raw`.
 | `pii_spans` | `(source_hash, chunk_index)`; `entity_id` to `enrichment_entities` | raw |
 | `clean_text` | `(source_hash, chunk_index)` | masked |
 | `money_spans`, `money_columns` | `source_hash` plus the locus anchor (`start_char` / `elem_order` / `parent_elem_order`) | none |
+| `layout_regions` | `(source_hash, page)`; boxes are normalised like element `bbox` ([layout.md](layout.md)) | none |
 | `redactions`, `source_index` | `source_hash` | none |
 | `provenance` | `source_hash` | raw |
 
