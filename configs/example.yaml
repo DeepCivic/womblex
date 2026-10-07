@@ -52,6 +52,14 @@ redaction:
   # no-op if the layout model fails to load.
   use_layout_filter: true
 
+# Layout analysis: one model finds page regions, written to
+# *.layout_regions.parquet (docs/layout.md). Nothing reads it yet.
+layout:
+  model: pp-doclayout-m
+  options: {}
+  # consumers: only pages something reads layout on; all: every page
+  page_scope: consumers
+
 chunking:
   # The Kanon-2 tokeniser is free on Hugging Face (isaacus/kanon-2-tokenizer),
   # so chunk-size token counting is exact and fully offline — no API key needed

@@ -29,6 +29,7 @@ from womblex.ingest.views import (  # re-exported for back-compat
 )
 
 if TYPE_CHECKING:
+    from womblex.ingest.layout_step import LayoutSettings
     from womblex.ingest.pdf.types import Document, Page, Rect
 
 logger = logging.getLogger(__name__)
@@ -403,6 +404,7 @@ def extract_text(
     spreadsheet_print: dict | None = None,
     layout_model: str = "pp-doclayout-m",
     layout_options: dict | None = None,
+    layout: LayoutSettings | None = None,
 ) -> list[ExtractionResult]:
     """Extract a document using the strategy matching its profile.
 
@@ -419,6 +421,10 @@ def extract_text(
     forwards engine-specific kwargs (e.g. ``model``, ``region``,
     ``base_url``, ``prompt``). ``layout_model`` / ``layout_options`` pick the
     registered layout analyser the OCR pages use, and its options.
+
+    ``layout`` is the batch's one layout step (``ingest/layout_step.py``): run
+    for PDFs and images, and recorded as not applicable on the path-based
+    formats. Omitted, no layout is run and none is recorded.
     """
     # The path-based formats keep the legacy strategy switch: `fitz` cannot
     # open them, so there are no pages to profile. Everything it *can* open
@@ -442,6 +448,10 @@ def extract_text(
             if r.metadata:
                 r.metadata.processing_time = per
             _apply_normalisation_and_warnings(r, path)
+            if layout is not None:
+                from womblex.ingest.layout_step import LayoutOutcome
+
+                r.layout = LayoutOutcome(layout.fingerprint, layout.redaction_filter)
         return results
 
     # PDF: profile per page, summarise doc type, dispatch via orchestrator.
@@ -457,7 +467,7 @@ def extract_text(
             doc, profile,
             dpi=dpi, lang=lang, engine=engine, engine_options=engine_options,
             layout_model=layout_model, layout_options=layout_options,
-            filename=path.name, spreadsheet_print=spreadsheet_print,
+            filename=path.name, spreadsheet_print=spreadsheet_print, layout=layout,
         )
         elapsed = time.monotonic() - t0
         if result.metadata:

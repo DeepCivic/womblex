@@ -68,6 +68,7 @@ womblex/
 │   │   ├── interfaces/
 │   │   │   └── protocols.py     # Backend protocols (OCRReader, LayoutAnalyzer, Preprocessor)
 │   │   ├── paddle_ocr.py        # PaddleOCR wrapper via rapidocr-onnxruntime (det/rec/cls)
+│   │   ├── layout_step.py       # The batch's one layout step — page selection, one analyser call per page, normalised regions on ExtractionResult
 │   │   ├── layout_onnx.py       # PPDocLayoutAnalyzer — PP-DocLayout-M layout detection (onnxruntime; registered default `pp-doclayout-m`)
 │   │   ├── llm_ocr.py           # LLM/VLM OCR backends: Mistral Pixtral Large via AWS Bedrock, + local Ollama
 │   │   ├── spreadsheet.py       # CSV/Excel extraction — one ExtractionResult per workbook with cells as elements
@@ -133,6 +134,7 @@ womblex/
 │   │   ├── quality_output.py     # *.chunk_quality.parquet schema + IO
 │   │   ├── embed_output.py  # *.embeddings.parquet schema + IO
 │   │   ├── entity_links_output.py # *.entity_links.parquet schema + IO (mention grain; doc grain derived on read)
+│   │   ├── layout_output.py # *.layout_regions.parquet schema + IO, LayoutFingerprint and its footer keys
 │   │   ├── money_output.py  # *.money_spans.parquet (decimal128 values) + *.money_columns.parquet schemas + IO
 │   │   ├── provenance_output.py  # *.provenance.parquet sidecar + manifest for pre-extracted-record corpora
 │   │   ├── ground_truth_output.py  # Ground-truth *.meta.json sidecar: schema, validation, unit-id, IO (JSON, not parquet)

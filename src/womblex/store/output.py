@@ -279,9 +279,11 @@ def write_results(
     extracted_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
     relpaths: list[str] = []
+    hashes: list[str] = []
 
     for doc_id, source_path, res in results:
         src_hash = _source_hash(source_path)
+        hashes.append(src_hash)
         relpath = provenance.relpath_for(source_path) if provenance is not None else ""
         relpaths.append(relpath)
         tc_count = 0
@@ -359,10 +361,25 @@ def write_results(
         provenance.footer_metadata(relpaths) if provenance is not None else None,
         stamp.footer_metadata() if stamp is not None else None,
     )
-    _write_rows(elements_rows, paths["elements"], ELEMENT_SCHEMA, metadata=footer)
+    outcome = next((res.layout for _, _, res in results if res.layout is not None), None)
+    elements_footer = (
+        _merge_footers(footer, outcome.fingerprint.footer_metadata()) if outcome else footer
+    )
+    _write_rows(elements_rows, paths["elements"], ELEMENT_SCHEMA, metadata=elements_footer)
     _write_rows(table_cells_rows, paths["table_cells"], TABLE_CELLS_SCHEMA, metadata=footer)
     _write_rows(form_fields_rows, paths["form_fields"], FORM_FIELDS_SCHEMA, metadata=footer)
     _write_rows(manifest_rows, paths["manifest"], MANIFEST_SCHEMA, metadata=footer)
+    if outcome is not None:
+        from womblex.store.layout_output import layout_rows, write_layout_regions
+
+        write_layout_regions(
+            layout_rows(
+                (src, res.layout.pages) for src, (_, _, res) in zip(hashes, results, strict=True)
+                if res.layout is not None
+            ),
+            output_path, outcome.fingerprint,
+            redaction_consumed=outcome.redaction_consumed, metadata=footer,
+        )
 
     logger.info(
         "Wrote shard %s: docs=%d elements=%d table_cells=%d form_fields=%d",
