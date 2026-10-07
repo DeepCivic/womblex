@@ -51,14 +51,15 @@ them. `womblex redact --shards` reads each batch's `*.layout_regions.parquet`;
 `womblex run` hands over the regions it just found.
 
 A page whose layout row has `status = error`, or that has no row, is detected
-with no exclusion zones and a warning naming the document and page. An `empty`
-page is a real "nothing to exclude" and does not warn.
+with no exclusion zones; one warning per document names those pages, and the
+report carries them as `RedactionReport.unfiltered_pages`. An `empty` page is a
+real "nothing to exclude" and does not count.
 
 ### Listing unfiltered pages
 
 `store.layout_output.unfiltered_redaction_pages(path)` returns the
 `(source_hash, page)` pairs redaction ran on without exclusion zones, for one
-sidecar file or a shard directory:
+file or a directory holding the layout sidecars and any `*.redactions.parquet`:
 
 ```python
 from womblex.store.layout_output import unfiltered_redaction_pages
@@ -72,6 +73,13 @@ says `false`, or has none, asked nothing of the regions. The equivalent query:
 read the footer, skip the file unless it says `true`, then select the distinct
 `(source_hash, page)` where `status = 'error'`. The list over-reports slightly,
 because a page redaction resolved from vector drawings never needed the filter.
+
+`womblex redact --shards` can meet pages the run never analysed (shards
+extracted with redaction off have no layout rows for native pages), so it
+records the pages it ran unfiltered in each `*.redactions.parquet` footer under
+`womblex.redaction_unfiltered_pages` (`{source_hash: [page, ...]}`), and the
+query adds those. Rerunning `run-stage layout` with redaction enabled gives
+those pages layout.
 
 ## The sidecar
 

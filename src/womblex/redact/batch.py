@@ -39,7 +39,11 @@ import pyarrow.parquet as pq
 from womblex.config import LayoutConfig, RedactionConfig
 from womblex.ingest.pdf import open_document
 from womblex.redact.stage import build_detector, detect_redactions
-from womblex.store.layout_output import layout_regions_path_for, read_page_layouts
+from womblex.store.layout_output import (
+    REDACTION_UNFILTERED_KEY,
+    layout_regions_path_for,
+    read_page_layouts,
+)
 from womblex.store.output import _write_rows
 
 if TYPE_CHECKING:
@@ -159,6 +163,7 @@ def annotate_redactions_for_shards(
                 "no layout sidecar for batch %s: redaction runs without exclusion zones",
                 batch_stem,
             )
+        unfiltered: dict[str, list[int]] = {}
         rows = _annotate_one_batch(
             elements_path=elements_path,
             manifest_path=manifest_path,
@@ -168,10 +173,11 @@ def annotate_redactions_for_shards(
             summary=summary,
             use_layout_filter=config.use_layout_filter,
             layouts=read_page_layouts(layout_path) if layout_path.exists() else {},
+            unfiltered=unfiltered,
         )
 
         out_path = output_dir / f"{batch_stem}.redactions.parquet"
-        _write_redactions_parquet(rows, out_path)
+        _write_redactions_parquet(rows, out_path, unfiltered)
         logger.info("batch %s: %d affected elements → %s", batch_stem, len(rows), out_path)
 
         processed_batches.add(batch_stem)
@@ -200,8 +206,10 @@ def _annotate_one_batch(
     summary: dict[str, int],
     use_layout_filter: bool = True,
     layouts: Mapping[str, Mapping[int, PageLayout]] | None = None,
+    unfiltered: dict[str, list[int]] | None = None,
 ) -> list[tuple[str, int]]:
-    """Process a single batch; mutate *summary* and return ``[(source_hash, elem_order), ...]``."""
+    """Process a single batch; mutate *summary* (and *unfiltered*, the pages run
+    without exclusion zones) and return ``[(source_hash, elem_order), ...]``."""
     manifest_tbl = pq.read_table(manifest_path, columns=["source_hash", "filename"])
     elements_tbl = pq.read_table(elements_path, columns=["source_hash", "elem_order", "page"])
 
@@ -242,6 +250,8 @@ def _annotate_one_batch(
             layout=(layouts or {}).get(source_hash),
         )
         summary[source_hash] = report.total
+        if report.unfiltered_pages and unfiltered is not None:
+            unfiltered[source_hash] = report.unfiltered_pages
         if not report.total:
             continue
 
@@ -253,10 +263,16 @@ def _annotate_one_batch(
     return rows
 
 
-def _write_redactions_parquet(rows: list[tuple[str, int]], path: Path) -> None:
-    """Write the sparse sidecar parquet at *path* (writes empty file if rows is empty)."""
+def _write_redactions_parquet(
+    rows: list[tuple[str, int]], path: Path, unfiltered: dict[str, list[int]] | None = None,
+) -> None:
+    """Write the sparse sidecar parquet at *path* (writes empty file if rows is empty).
+
+    *unfiltered* rides in the footer for ``unfiltered_redaction_pages``.
+    """
     records = [{"source_hash": h, "elem_order": o, "has_redaction": True} for h, o in rows]
-    _write_rows(records, path, REDACTIONS_SCHEMA)
+    meta = {REDACTION_UNFILTERED_KEY.encode(): json.dumps(unfiltered).encode()} if unfiltered else None
+    _write_rows(records, path, REDACTIONS_SCHEMA, metadata=meta)
 
 
 # ---------------------------------------------------------------------------

@@ -882,12 +882,16 @@ class TestLayoutFilterOnRasterPages:
     def test_a_paragraph_region_does_not(self, tmp_path: Path) -> None:
         assert self._detect(tmp_path, self._layout("ok", "paragraph")).total == 1
 
-    @pytest.mark.parametrize("layout", [None, {}])
-    def test_no_layout_runs_unfiltered(self, tmp_path: Path, layout) -> None:
-        assert self._detect(tmp_path, layout).total == 1
+    @pytest.mark.parametrize("case", ["none", "no-row", "error"])
+    def test_no_layout_runs_unfiltered_and_says_so(self, tmp_path: Path, case, caplog) -> None:
+        layout = {"none": None, "no-row": {}, "error": self._layout("error")}[case]
+        with caplog.at_level("WARNING", logger="womblex.redact.stage"):
+            report = self._detect(tmp_path, layout)
+        assert (report.total, report.unfiltered_pages) == (1, [0])
+        assert caplog.text.count("doc=scan.pdf pages=[0]") == 1  # one warning per document
 
-    def test_an_errored_page_runs_unfiltered(self, tmp_path: Path) -> None:
-        assert self._detect(tmp_path, self._layout("error")).total == 1
+    def test_a_usable_page_is_not_unfiltered(self, tmp_path: Path) -> None:
+        assert self._detect(tmp_path, self._layout("empty")).unfiltered_pages == []
 
     def test_shards_read_the_batch_layout_sidecar(self, tmp_path: Path) -> None:
         import pyarrow as pa
@@ -895,7 +899,12 @@ class TestLayoutFilterOnRasterPages:
 
         from womblex.ingest.elements import BBox
         from womblex.ingest.layout_step import LayoutRegion, PageLayout
-        from womblex.store.layout_output import LayoutFingerprint, layout_rows, write_layout_regions
+        from womblex.store.layout_output import (
+            LayoutFingerprint,
+            layout_rows,
+            unfiltered_redaction_pages,
+            write_layout_regions,
+        )
 
         shards, pdfs = tmp_path / "shards", tmp_path / "pdfs"
         shards.mkdir()
@@ -910,6 +919,7 @@ class TestLayoutFilterOnRasterPages:
         config = RedactionConfig(dpi=72)
 
         assert annotate_redactions_for_shards(shards, pdfs, config) == {"h1": 1}
+        assert unfiltered_redaction_pages(shards) == [("h1", 0)]  # no sidecar, no layout
 
         fp = LayoutFingerprint("m", "d", "o", 72, "consumers")
         page = PageLayout(0, "ok", [LayoutRegion(BBox(0.1, 0.1, 0.8, 0.3), "x", "figure", 0.9)])
@@ -918,3 +928,4 @@ class TestLayoutFilterOnRasterPages:
         )
         (shards / "batch-0001.redactions.parquet").unlink()
         assert annotate_redactions_for_shards(shards, pdfs, config) == {"h1": 0}
+        assert unfiltered_redaction_pages(shards) == []
