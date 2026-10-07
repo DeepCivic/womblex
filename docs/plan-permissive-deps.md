@@ -1,22 +1,37 @@
 # Permissive dependencies — outstanding work
 
-*Status: in progress (2026-10). Outstanding: P7, P8, F1, F2 (PyMuPDF) and L3, L1-B (layout). Everything shipped is recorded in [`CHANGELOG.md`](../CHANGELOG.md), [`architecture.md`](architecture.md), [`models.md`](models.md) and [`decisions.md`](decisions.md), not here. The ground-truth revision gates only L1-B, F1-B's regeneration and H-B's CER-against-transcripts half; everything else is deliverable now. L3 is independent of the rest. Each merge updates this list as it lands, and the document is deleted once F2 ships.*
+*Status: in progress (2026-10). Outstanding: P7, P8, F1, F2 (PyMuPDF) and L3a-i to L3e, L1-B (layout). Everything shipped is recorded in [`CHANGELOG.md`](../CHANGELOG.md), [`architecture.md`](architecture.md), [`models.md`](models.md) and [`decisions.md`](decisions.md), not here. The ground-truth revision gates only L1-B, F1-B's regeneration and H-B's CER-against-transcripts half; everything else is deliverable now. L3 is independent of the rest. Each merge updates this list as it lands, and the document is deleted once F2 ships.*
 
 ## Context
 Womblex is Apache-2.0, so its dependencies must be licence-compatible. The remaining incompatible one is `pymupdf` (`import fitz`; opens every PDF and standalone image) and it is being replaced: every extractor already reads through the `ingest/pdf/` seam, `fitz` is imported only in `ingest/pdf/_fitz.py`, and the pdfium backend (`backend="pdfium"`) opens PDFs and images with geometry, rendering, images, drawings, widgets and text. Its `find_tables` raises `NotImplementedError` until P7. The default backend is still fitz.
 
-Until L3 ships, the README states that layout detection is not supported for local deployment.
+Until L3d ships, the README states that layout detection is not supported for local deployment.
 
 A merge is W (womblex) or B (womblex-benchmark, paired). An approval tag means the merge edits `pyproject.toml` and needs human sign-off.
 
 ## Layout
-- **L3 (W). Layout as its own stage.** A design note comes first and settles:
-  - what the stage persists: layout regions per page, keyed by `(source_hash, page)`, in its own `store/<stage>_output.py` sidecar;
-  - how OCR table reconstruction gets its table rects. Today it runs inside the OCR page operation on the same render. Either the layout stage runs before OCR within the batch, or OCR regions are persisted so reconstruction can run downstream;
-  - whether redaction reads the same regions instead of building its own analyser from `redaction.layout_model`;
-  - that the model is still chosen through the registry's layout slot. A tuned model is a plugin, never a new toggle. The stage adds what the slot cannot: its own inputs, outputs and checkpoint, so a model can be rerun and measured without re-running OCR.
+- **L3. Layout as its own stage.** Design settled 2026-10; merges below.
 
-  When L3 ships, remove the README's layout note.
+  *Today.* Layout runs twice, unpersisted: inside the OCR page operation (`extraction.ocr.layout_model`, OCR dpi, paddleocr branch only) for table rects and the collapsed block's `block_type`, and inside redaction detection (`redaction.layout_model`, redaction dpi, raster-fallback pages) for `figure` / `table` exclusion zones. A page can get two models at two resolutions, and neither result can be inspected or rerun.
+
+  *Decisions.*
+  - **One model, one setting.** A top-level `layout:` section (`model`, `options`, `page_scope`) chosen through the registry's layout slot; a tuned model is a `womblex.models.layout` plugin. `extraction.ocr.layout_model` / `layout_options` and `redaction.layout_model` / `layout_options` are deleted outright (pre-1.0 breaking change, recorded in the CHANGELOG). `redaction.use_layout_filter` stays: it decides whether redaction consumes the regions, not which model runs. `model_check` gets a `layout` scope in place of the slot appearing under both `extract` and redaction.
+  - **Runs in-batch, before OCR.** Order: profile → layout → OCR → redaction detection. OCR table reconstruction and redaction read the persisted regions instead of calling an analyser. The rejected alternative (persist OCR regions, reconstruct tables downstream) would make OCR-page table elements depend on a downstream stage, needing an element-structure overlay. Distributed workers already stage sources for a batch, so this needs nothing new there.
+  - **Page scope.** `layout.page_scope`: `consumers` (default) or `all`. `consumers` is the OCR-routed pages plus, when redaction and its layout filter are on, the pages without vector redactions. Both are known before layout runs (the vector test reads only drawings), so there is no circular dependency. `all` is the benchmark-coverage setting. Skipping pure-vector pages is a consequence of `consumers`, not a separate rule.
+  - **Sidecar.** `store/layout_output.py`, `*.layout_regions.parquet`, one row per region keyed by `(source_hash, page)`: `region_order`, `bbox` (normalised 0–1, top-left, the element `BBox` convention, float32), `label`, `block_type`, `confidence` (always present: `check_layout_regions` requires it), `status` (`ok` / `empty` / `error`) and `error`. Pages that ran and found nothing, and pages where layout failed, get one status row each, so the two are never conflated. Strings dictionary-encoded. The footer carries a layout fingerprint (model name, model digest, options digest, render dpi, page scope, schema version), since a standalone rerun cannot inherit the extraction run's stamp.
+  - **Geometry.** Normalised boxes let OCR (200 dpi) and redaction convert to their own render. Layout renders the raw page; the A2 deskew refusal stays with OCR, which alone knows it deskewed.
+  - **Failure.** A page whose layout failed (`status=error`) falls back to whole-page OCR text, as today; the document continues. On such a page with `use_layout_filter` on, redaction runs without exclusion zones and marks that page's result unfiltered for review, never silently.
+  - **Reruns.** The elements footer records the layout fingerprint extraction consumed. `run-stage layout` replaces only the layout sidecar; elements, tables and redaction results stay as extracted, and a fingerprint mismatch between the two footers is the out-of-date signal for anything reading both (benchmark, console, shard verification). No stage reads layout after extraction, so no stale-output tracking is added. The skip rule compares fingerprints: same model and settings skip, a change reruns. Applying a new model to tables or redaction is a re-extract. A run extracted before L3 has no fingerprint in its elements footer; a rerun over it reads as "provenance unknown", not a mismatch. Layout stays out of `DOWNSTREAM_STAGES`: a rerun is deliberate, as `pii` is.
+  - **Measurement without OCR.** `run-stage layout` renders pages from the source documents, the first downstream stage to need them: locally through `SourceResolver`, distributed through source staging in the stage runner.
+
+  *Merges.*
+  - **L3a-i (W).** `store/layout_output.py` schema and IO, the `layout:` config section and fingerprint. Nothing writes the sidecar yet.
+  - **L3a-ii (W).** The single canonical layout step in the batch: scope selection, one analyser call per page, the sidecar written with its fingerprint, the fingerprint in the elements footer. OCR and redaction still call their own analysers.
+  - **L3b (W).** OCR reads the persisted regions; `_layout_blocks_and_tables` stops calling the analyser; `extraction.ocr.layout_model` / `layout_options` are deleted.
+  - **L3c (W) + L3c-B (B).** Redaction reads the persisted regions, the unfiltered-page marker lands, `redaction.layout_model` / `layout_options` are deleted. Regenerate `REDACTION_HANDLING` (exclusion zones now come from the 200 dpi render).
+  - **L3d (W).** The `layout` stage contract and local `run-stage layout --shards`, sources through `SourceResolver`, fingerprint-aware skip. Remove the README's layout note.
+  - **L3e (W).** Distributed `run-stage layout`: a contract flag for source documents; the runner maps each manifest row to its ingest key from the recorded provenance, downloads it into the batch's temp dir and checks its hash (missing or moved is a per-document error); `--ingest` on `run-stage` and through the worker. Splits in two if it grows past the cap.
+
 - **L1-B (B). Waits on the ground-truth revision.** Scores PP-DocLayout-M against the revised ground truth.
   - Make the DocLayNet layout-F1 test honour `--model` (it calls `get_layout_analyzer()` with no arguments today).
   - Bring the `DOCLAYNET_TO_WOMBLEX` comment and any stale wording for the previous layout model in `accuracy_reports.py` in line with `LABEL_MAP`.
@@ -72,6 +87,7 @@ Migration gates, not quality scores. They retire with this plan.
 | Merge | Gate |
 |---|---|
 | Every merge | `uv run ruff check src/ tests/`, `uv run mypy src/` and `uv run python -m pytest tests/ -v` pass; `uv lock --check` passes on approval merges; touched files are under 750 lines (`wc -l`); `git diff --stat $(git merge-base HEAD origin/main)..HEAD` is within the cap |
+| L3c-B | No regression in `REDACTION_HANDLING` beyond the declared render-dpi change, reviewed by hand |
 | L1-B | DocLayNet F1 ≥ 0.29 with the `dense_text_548` table found; end-to-end tables emitted on the scanned fixtures checked by hand; no regression in `REDACTION_HANDLING` |
 
 F1 flips the default only when all of these hold:
