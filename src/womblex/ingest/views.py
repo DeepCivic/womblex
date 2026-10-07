@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from womblex.ingest.elements import TEXT_KINDS, BBox, Cell, Element
 
 if TYPE_CHECKING:
+    from womblex.ingest.layout_step import LayoutOutcome
     from womblex.redact.stage import RedactionReport
 
 
@@ -154,6 +155,7 @@ class ExtractionResult:
     warnings: list[str] = field(default_factory=list)
     document_id: str | None = None
     redaction_report: RedactionReport | None = None
+    layout: LayoutOutcome | None = None
 
     @property
     def full_text(self) -> str:

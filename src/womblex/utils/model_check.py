@@ -157,8 +157,12 @@ def _candidates(config: WomblexConfig) -> list[tuple[str, str, str, dict[str, An
     """``(scope, slot, name, options)`` for every model the config would use."""
     ocr, red = config.extraction.ocr, config.redaction
     out = [(SCOPE_EXTRACT, SLOT_OCR, ocr.engine, {"lang": ocr.lang, **ocr.engine_options})]
-    if not _is_markdown_engine(ocr.engine):
+    ocr_reads_layout = not _is_markdown_engine(ocr.engine)
+    if ocr_reads_layout:
         out.append((SCOPE_EXTRACT, SLOT_LAYOUT, ocr.layout_model, dict(ocr.layout_options)))
+    lay = config.layout
+    if lay.page_scope == "all" or ocr_reads_layout or (red.enabled and red.use_layout_filter):
+        out.append((SCOPE_EXTRACT, SLOT_LAYOUT, lay.model, dict(lay.options)))
     if red.enabled and red.use_layout_filter:
         for scope in (SCOPE_EXTRACT, SCOPE_REDACT):
             out.append((scope, SLOT_LAYOUT, red.layout_model, dict(red.layout_options)))

@@ -53,6 +53,7 @@ from womblex.ingest.page_profile import PageProfile, qualify_for_spreadsheet_pri
 from womblex.ingest.views import table_to_element
 
 if TYPE_CHECKING:
+    from womblex.ingest.layout_step import LayoutSettings
     from womblex.ingest.pdf.types import Document, Page
 
 logger = logging.getLogger(__name__)
@@ -352,6 +353,7 @@ def extract_with_plan(
     layout_options: dict | None = None,
     filename: str = "",
     spreadsheet_print: dict | None = None,
+    layout: LayoutSettings | None = None,
 ) -> ExtractionResult:
     """Execute a per-page extraction plan and merge results.
 
@@ -367,8 +369,16 @@ def extract_with_plan(
     ``spreadsheet_print`` config dict (optional):
     - ``metadata_location``: ``"both"`` | ``"table"`` | ``"document"`` (default ``"both"``)
     - ``filename_hints``: tuple of substrings to fast-trigger the qualifier
+
+    ``layout`` runs the one layout step (after profiling, before any page is
+    extracted) and carries its regions on the result; nothing here reads them.
     """
     opts = engine_options or {}
+    layout_outcome = None
+    if layout is not None:
+        from womblex.ingest.layout_step import run_layout_step
+
+        layout_outcome = run_layout_step(doc, profiles, layout, engine)
     pages: list[PageResult] = []
     all_elements: list[Element] = []
     next_order = 0
@@ -454,6 +464,7 @@ def extract_with_plan(
     return ExtractionResult(
         pages=pages,
         elements=all_elements,
+        layout=layout_outcome,
         method=doc_type.value,
         document_metadata=document_metadata,
         metadata=ExtractionMetadata(
@@ -480,6 +491,7 @@ def extract_pdf_with_plan(
     layout_options: dict | None = None,
     filename: str = "",
     spreadsheet_print: dict | None = None,
+    layout: LayoutSettings | None = None,
 ) -> ExtractionResult:
     """Convenience: profile pages, summarise type, run the orchestrator."""
     from womblex.ingest.page_profile import profile_pages, summarise_doc_type
@@ -499,5 +511,5 @@ def extract_pdf_with_plan(
         doc, profiles, doc_type,
         dpi=dpi, lang=lang, engine=engine, engine_options=engine_options,
         layout_model=layout_model, layout_options=layout_options,
-        filename=filename, spreadsheet_print=spreadsheet_print,
+        filename=filename, spreadsheet_print=spreadsheet_print, layout=layout,
     )

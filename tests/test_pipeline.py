@@ -381,7 +381,7 @@ class TestCmdRunRunIdLayout:
         run_dir = run_dirs[0]
         assert run_dir.name.startswith("run-")
         shard_files = list((run_dir / "documents").glob("*.parquet"))
-        assert len(shard_files) == 4  # elements, table_cells, form_fields, manifest
+        assert len(shard_files) == 5  # elements, table_cells, form_fields, manifest, layout_regions
 
         # Checkpoint nested under run_id
         assert (tmp_path / "ckpt" / run_dir.name / "i1_test_checkpoint.json").exists()

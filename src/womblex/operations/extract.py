@@ -8,6 +8,7 @@ from pathlib import Path
 from womblex.config import WomblexConfig
 from womblex.ingest.detect import detect_file_type
 from womblex.ingest.extract import extract_text
+from womblex.ingest.layout_step import LayoutSettings
 from womblex.operations.models import DocumentResult
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,7 @@ def run_extraction(paths: list[Path], config: WomblexConfig) -> list[DocumentRes
     # so onnxruntime and torch don't each grab every core (oversubscription).
     from womblex.ingest.paddle_ocr import set_inference_threads
     set_inference_threads(config.extraction.ocr.num_threads)
+    layout = LayoutSettings.from_config(config)
 
     for path in paths:
         try:
@@ -56,6 +58,7 @@ def run_extraction(paths: list[Path], config: WomblexConfig) -> list[DocumentRes
                 layout_model=config.extraction.ocr.layout_model,
                 layout_options=config.extraction.ocr.layout_options or None,
                 spreadsheet_print=config.extraction.native.spreadsheet_print.model_dump(),
+                layout=layout,
             )
         except Exception as e:
             logger.error("Extraction failed: doc=%s error=%s", path.stem, e)
