@@ -51,9 +51,9 @@ class TestDocument:
         with pytest.raises(ValueError, match="known backends: fitz, pdfium"):
             open_document(pdf_path, backend="nope")
 
-    def test_text_waits_on_p6(self, pdf_path) -> None:
-        with _open(pdf_path) as doc, pytest.raises(NotImplementedError, match="P6"):
-            doc[0].plain_text()
+    def test_tables_wait_on_p7(self, pdf_path) -> None:
+        with _open(pdf_path) as doc, pytest.raises(NotImplementedError, match="P7"):
+            doc[0].find_tables()
 
 
 class TestGeometry:
