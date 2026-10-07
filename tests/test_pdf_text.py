@@ -38,31 +38,24 @@ class TestSegment:
         chars = _chars("left", 72, 100) + _chars("right", 340, 100)
         assert [line.text for block in _text.segment(chars) for line in block] == ["left", "right"]
 
+    def test_rotated_text_forms_lines_along_its_direction(self) -> None:
+        # Bottom to top, as a side tab reads; each character sits above the last.
+        up = [
+            _text.Char(ch, Rect(400, 500 - (i + 1) * 5, 410, 500 - i * 5), 10, "Helv", False, (0.0, -1.0))
+            for i, ch in enumerate("Part 2")
+        ]
+        assert [line.text for block in _text.segment(up) for line in block] == ["Part 2"]
+
     def test_spans_split_on_font_and_bold(self) -> None:
         chars = _chars("plain ", 72, 100) + _chars("heavy", 102, 100, font="Helv-Bold", bold=True)
         (block,) = _text.text_dict(chars)
         assert [(s.text, s.bold) for s in block.lines[0].spans] == [("plain ", False), ("heavy", True)]
 
 
-class TestDehyphenate:
-    def _wrapped(self, tail: str, head: str) -> list[_text.Char]:
-        return _chars(tail, 72, 100) + _chars(head, 72, 100 + LINE)
-
-    def test_joins_a_hyphen_before_a_letter(self) -> None:
-        text = _text.plain_text(self._wrapped("a hyphen-", "ated word"), dehyphenate=True)
-        assert text == "a hyphenated word\n"
-
-    def test_off_keeps_the_hyphen_and_the_break(self) -> None:
-        text = _text.plain_text(self._wrapped("a hyphen-", "ated word"), dehyphenate=False)
-        assert text == "a hyphen-\nated word\n"
-
-    @pytest.mark.parametrize("tail, head", [("range 1 -", "2 apples"), ("a -", "dash")])
-    def test_leaves_a_hyphen_not_after_a_letter_or_before_a_letter(self, tail, head) -> None:
-        assert "-\n" in _text.plain_text(self._wrapped(tail, head), dehyphenate=True)
-
-    def test_words_follow_the_join(self) -> None:
-        got = [w.text for w in _text.words(self._wrapped("a hyphen-", "ated word"), dehyphenate=True)]
-        assert got == ["a", "hyphenated", "word"]
+class TestHyphens:
+    def test_a_line_end_hyphen_and_its_break_are_kept(self) -> None:
+        chars = _chars("a hyphen-", 72, 100) + _chars("ated word", 72, 100 + LINE)
+        assert _text.plain_text(chars) == "a hyphen-\nated word\n"
 
 
 @pytest.fixture(scope="module")
@@ -100,6 +93,45 @@ class TestPage:
         assert (heading.text, heading.size, heading.bold) == ("Heading", 16.0, True)
         assert heading.font == "Helvetica-Bold"
         assert not spans[1].bold and spans[1].size == 11.0
+
+    def test_a_line_end_hyphen_matches_fitz(self, tmp_path) -> None:
+        builder = PdfBuilder(tmp_path / "h.pdf").page()
+        builder.text(72, 100, "the Auditor-").text(72, 113, "General reported")
+        with open_document(builder.save(), backend="fitz") as fitz_doc, \
+                open_document(builder.path, backend="pdfium") as doc:
+            assert doc[0].plain_text() == fitz_doc[0].plain_text() == "the Auditor-\nGeneral reported\n"
+
+    def test_text_off_the_page_is_clipped_like_fitz(self, tmp_path) -> None:
+        builder = PdfBuilder(tmp_path / "off.pdf").page(400, 400)
+        builder.text(50, -20, "Above the page").text(50, 100, "On the page").text(350, 200, "Straddles the edge")
+        with open_document(builder.save(), backend="fitz") as fitz_doc, \
+                open_document(builder.path, backend="pdfium") as doc:
+            got = doc[0].plain_text()
+            assert got == fitz_doc[0].plain_text()
+            assert got.startswith("On the page\nStraddles") and "Above" not in got and "edge" not in got
+
+    def test_size_scaled_by_the_text_matrix(self, tmp_path) -> None:
+        # Producers commonly set `1 Tf` and scale through `Tm`; pdfium's own size
+        # is then 1, and every size-relative threshold collapses with it.
+        # Words are placed apart with no space glyph between them, as kerned
+        # output often is.
+        from reportlab.pdfbase.pdfmetrics import stringWidth
+        from reportlab.pdfgen.canvas import Canvas
+
+        path = tmp_path / "tm.pdf"
+        canvas = Canvas(str(path), pagesize=(400, 400))
+        text = canvas.beginText()
+        text.setTextTransform(12, 0, 0, 12, 50, 300)
+        text.setFont("Helvetica", 1)
+        for word in ("Kerned", "scaled", "words"):
+            text.textOut(word)
+            text.moveCursor(stringWidth(word, "Helvetica", 1) + 0.4, 0)
+        canvas.drawText(text)
+        canvas.save()
+        with open_document(path, backend="fitz") as fitz_doc, open_document(path, backend="pdfium") as doc:
+            assert doc[0].plain_text() == fitz_doc[0].plain_text() == "Kerned scaled words\n"
+            (span, *_) = [s for b in doc[0].text_dict() for line in b.lines for s in line.spans]
+            assert span.size == pytest.approx(12.0)
 
     def test_empty_page(self, tmp_path) -> None:
         with PdfBuilder(tmp_path / "e.pdf").page().open() as doc:

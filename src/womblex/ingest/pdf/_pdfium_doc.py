@@ -113,6 +113,11 @@ class PdfiumPage:
         left, top = self._origin
         return Rect.of((x0 - left, top - y1, x1 - left, top - y0))
 
+    def _flip(self, box: tuple[float, float, float, float]) -> Rect:
+        """`_rect` without a matrix, for the per-character hot path."""
+        left, top = self._origin
+        return Rect.of((box[0] - left, top - box[3], box[2] - left, top - box[1]))
+
     def _objects(self) -> Iterator[tuple[pdfium.PdfObject, Matrix]]:
         """Every object, form XObjects descended, with its container's transform.
 
@@ -156,20 +161,20 @@ class PdfiumPage:
 
     def _chars(self) -> list[_text.Char]:
         if self._char_cache is None:
-            self._char_cache = _text.read_chars(self._page, self._rect)
+            self._char_cache = _text.read_chars(self._page, self._flip, self._rect(self._page.get_cropbox()))
         return self._char_cache
 
     def plain_text(self, *, dehyphenate: bool = True) -> str:
-        return _text.plain_text(self._chars(), dehyphenate=dehyphenate)
+        return _text.plain_text(self._chars())
 
     def text_dict(self) -> list[Block]:
         return _text.text_dict(self._chars())
 
     def words(self, *, dehyphenate: bool = True) -> list[Word]:
-        return _text.words(self._chars(), dehyphenate=dehyphenate)
+        return _text.words(self._chars())
 
     def text_blocks(self, *, dehyphenate: bool = True) -> list[Block]:
-        return _text.text_blocks(self._chars(), dehyphenate=dehyphenate)
+        return _text.text_blocks(self._chars())
 
     def find_tables(self, *, strategy: TableStrategy = "lines") -> list[FoundTable]:
         raise NotImplementedError("pdfium table finding arrives with P7 (_tables.py)")

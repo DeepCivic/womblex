@@ -10,14 +10,20 @@ Reading order is content-stream order, as in MuPDF; a column jump starts a new
 block but no reordering is attempted, so multi-column pages differ from MuPDF
 exactly where Phase 0 measured the divergence tail.
 
-Dehyphenation follows MuPDF's observable behaviour: a line ending in a hyphen
-after a letter, followed in the same block by a line starting with a letter,
-loses the hyphen and joins that line. It does not check case, as MuPDF does not.
+Dehyphenation follows MuPDF's measured behaviour, which is to join nothing: the
+locked MuPDF (1.27.2) keeps every line-end hyphen and its break under
+`TEXT_DEHYPHENATE`, on synthetic pages and in the vendored corpus alike, so the
+`dehyphenate` flag is accepted and changes nothing here either.
+
+Font size is the effective size, the font's size scaled by the character's
+matrix as MuPDF reports it: pdfium's own figure is the `Tf` operand, which is 1
+wherever a producer scales text through the text matrix.
 """
 
 from __future__ import annotations
 
 import ctypes
+import math
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -35,18 +41,20 @@ if TYPE_CHECKING:
 _FORCE_BOLD = 1 << 18
 _BOLD_WEIGHT = 600
 _SUBSET_PREFIX = re.compile(r"^[A-Z]{6}\+")
-_HYPHENS = ("-", "­")
+_LTR = (1.0, 0.0)
 
 
 @dataclass(frozen=True)
 class Char:
-    """One character, its box in top-left page space, and its font."""
+    """One character, its box in top-left page space, its font, and its writing
+    direction there as a unit vector (left to right is ``(1, 0)``)."""
 
     text: str
     box: Rect
     size: float
     font: str
     bold: bool
+    direction: tuple[float, float] = _LTR
 
 
 @dataclass
@@ -73,10 +81,13 @@ def _is_bold(weight: int, flags: int, font: str) -> bool:
     return weight >= _BOLD_WEIGHT or bool(flags & _FORCE_BOLD) or "bold" in font.lower()
 
 
-def read_chars(page: pdfium.PdfPage, to_rect: Callable[[tuple[float, float, float, float]], Rect]) -> list[Char]:
-    """Every printable character of *page*, in content order.
+def read_chars(
+    page: pdfium.PdfPage, to_rect: Callable[[tuple[float, float, float, float]], Rect], clip: Rect,
+) -> list[Char]:
+    """Every printable character of *page* that touches *clip*, in content order.
 
-    *to_rect* turns a pdfium user-space box into top-left page space. Control
+    *to_rect* turns a pdfium user-space box into top-left page space, where
+    *clip* is the page: MuPDF drops each character lying off it. Control
     characters (pdfium's generated line breaks) are dropped: lines are rebuilt
     from geometry. A surrogate pair is one character, boxed by its first unit.
     """
@@ -87,6 +98,7 @@ def read_chars(page: pdfium.PdfPage, to_rect: Callable[[tuple[float, float, floa
         high = 0
         name = ctypes.create_string_buffer(256)
         flags = ctypes.c_int(0)
+        matrix = pdfium_c.FS_MATRIX()
         for i in range(textpage.count_chars()):
             code = pdfium_c.FPDFText_GetUnicode(raw, i)
             if 0xD800 <= code < 0xDC00:
@@ -102,28 +114,50 @@ def read_chars(page: pdfium.PdfPage, to_rect: Callable[[tuple[float, float, floa
                 text = "-"
             if text in "\r\n\x00￾" or (ord(text) < 0x20 and text != "\t"):
                 continue
+            box = to_rect(textpage.get_charbox(i, loose=True))
+            if not (box.x1 > clip.x0 and box.x0 < clip.x1 and box.y1 > clip.y0 and box.y0 < clip.y1):
+                continue
             length = pdfium_c.FPDFText_GetFontInfo(raw, i, name, len(name), ctypes.byref(flags))
             font = _SUBSET_PREFIX.sub("", name.value.decode("latin-1")) if length > 0 else ""
             weight = pdfium_c.FPDFText_GetFontWeight(raw, i)
-            left, bottom, right, top = textpage.get_charbox(i, loose=True)
+            pdfium_c.FPDFText_GetMatrix(raw, i, ctypes.byref(matrix))
+            scale = math.sqrt(abs(matrix.a * matrix.d - matrix.b * matrix.c))
+            # User space is y-up, so the direction's y flips into page space.
+            norm = math.hypot(matrix.a, matrix.b) or 1.0
+            direction = (round(matrix.a / norm, 2) + 0.0, round(-matrix.b / norm, 2) + 0.0)
             out.append(Char(
                 text=" " if text == "\t" else text,
-                box=to_rect((left, bottom, right, top)),
-                size=float(pdfium_c.FPDFText_GetFontSize(raw, i)),
+                box=box,
+                size=float(pdfium_c.FPDFText_GetFontSize(raw, i)) * scale,
                 font=font,
                 bold=_is_bold(weight, flags.value, font),
+                direction=direction,
             ))
         return out
     finally:
         textpage.close()
 
 
+def _extent(box: Rect, axis: tuple[float, float]) -> tuple[float, float]:
+    """The interval *box* covers along *axis*."""
+    ends = [x * axis[0] + y * axis[1] for x in (box.x0, box.x1) for y in (box.y0, box.y1)]
+    return min(ends), max(ends)
+
+
 def _same_line(line: _Line, char: Char) -> bool:
-    """The character sits on the line's row, abutting it rather than across a gutter."""
-    box = line.chars[-1].box
-    overlap = min(box.y1, char.box.y1) - max(box.y0, char.box.y0)
-    shortest = min(box.height, char.box.height)
-    return overlap > 0.5 * shortest and box.x1 - char.size <= char.box.x0 <= box.x1 + _MAX_GAP * char.size
+    """The character sits on the line's row, abutting it rather than across a gutter.
+
+    Row and gap are measured in the writing direction, so rotated text forms lines too.
+    """
+    prev = line.chars[-1]
+    if prev.direction != char.direction:
+        return False
+    along = char.direction
+    across = (-along[1], along[0])
+    (a0, a1), (b0, b1) = _extent(prev.box, across), _extent(char.box, across)
+    overlap = min(a1, b1) - max(a0, b0)
+    end, start = _extent(prev.box, along)[1], _extent(char.box, along)[0]
+    return overlap > 0.5 * min(a1 - a0, b1 - b0) and end - char.size <= start <= end + _MAX_GAP * char.size
 
 
 #: How many earlier lines a stray fragment may rejoin; content order seldom
@@ -143,20 +177,29 @@ def _join(left: _Line, right: _Line) -> _Line:
     return _Line(chars)
 
 
-def _rejoin(lines: list[_Line], line: _Line) -> bool:
-    """Merge a fragment into the recent line on its row that it abuts."""
-    box, size = line.box, line.chars[0].size
+def _rejoin(lines: list[_Line], boxes: list[Rect], line: _Line, box: Rect) -> bool:
+    """Merge a fragment into the recent line on its row that it abuts.
+
+    *boxes* holds each line's box, kept in step so no line is re-measured.
+    """
+    size = line.chars[0].size
+    if line.chars[0].direction != _LTR:
+        return False
     for i in range(len(lines) - 1, max(len(lines) - 1 - _REJOIN_WINDOW, -1), -1):
-        other = lines[i].box
+        if lines[i].chars[0].direction != _LTR:
+            continue
+        other = boxes[i]
         overlap = min(box.y1, other.y1) - max(box.y0, other.y0)
         if overlap <= 0.5 * min(box.height, other.height):
             continue
         if -0.3 * size <= box.x0 - other.x1 <= _MAX_GAP * size:
             lines[i] = _join(lines[i], line)
-            return True
-        if -0.3 * size <= other.x0 - box.x1 <= _MAX_GAP * size:
+        elif -0.3 * size <= other.x0 - box.x1 <= _MAX_GAP * size:
             lines[i] = _join(line, lines[i])
-            return True
+        else:
+            continue
+        boxes[i] = _union([other, box])
+        return True
     return False
 
 
@@ -168,9 +211,12 @@ def _lines(chars: list[Char]) -> list[_Line]:
         else:
             runs.append(_Line([char]))
     lines: list[_Line] = []
+    boxes: list[Rect] = []
     for run in runs:
-        if not _rejoin(lines, run):
+        box = run.box
+        if not _rejoin(lines, boxes, run, box):
             lines.append(run)
+            boxes.append(box)
     for line in lines:
         # Edge spaces are separators between layout runs, not content.
         while line.chars and line.chars[-1].text == " ":
@@ -181,6 +227,8 @@ def _lines(chars: list[Char]) -> list[_Line]:
 
 
 def _same_block(prev: _Line, line: _Line) -> bool:
+    if prev.chars[0].direction != _LTR or line.chars[0].direction != _LTR:
+        return False
     a, b = prev.box, line.box
     height = max(a.height, b.height)
     return -0.5 * height <= b.y0 - a.y1 <= 0.7 * height and b.x0 < a.x1
@@ -197,44 +245,17 @@ def segment(chars: list[Char]) -> list[list[_Line]]:
     return blocks
 
 
-def _hyphenated(line: _Line, following: _Line) -> bool:
-    text = line.text
-    return (
-        len(text) > 1 and text.endswith(_HYPHENS) and text[-2].isalpha()
-        and following.chars[0].text.isalpha()
-    )
+def plain_text(chars: list[Char]) -> str:
+    return "".join(f"{line.text}\n" for block in segment(chars) for line in block)
 
 
-def _dehyphenated(block: list[_Line]) -> list[_Line]:
-    """Join each hyphenated line break; the joined line keeps the hyphen's row."""
-    out: list[_Line] = []
-    carry: list[Char] | None = None
-    for i, line in enumerate(block):
-        chars = (carry or []) + line.chars
-        carry = None
-        if i + 1 < len(block) and _hyphenated(_Line(chars), block[i + 1]):
-            carry = chars[:-1]
-            continue
-        out.append(_Line(chars))
-    return out
-
-
-def _blocks(chars: list[Char], dehyphenate: bool) -> list[list[_Line]]:
-    blocks = segment(chars)
-    return [_dehyphenated(b) for b in blocks] if dehyphenate else blocks
-
-
-def plain_text(chars: list[Char], *, dehyphenate: bool) -> str:
-    return "".join(f"{line.text}\n" for block in _blocks(chars, dehyphenate) for line in block)
-
-
-def text_blocks(chars: list[Char], *, dehyphenate: bool) -> list[Block]:
+def text_blocks(chars: list[Char]) -> list[Block]:
     return [
         Block(
             bbox=_union([line.box for line in block]), number=number,
             text="".join(f"{line.text}\n" for line in block),
         )
-        for number, block in enumerate(_blocks(chars, dehyphenate))
+        for number, block in enumerate(segment(chars))
     ]
 
 
@@ -256,7 +277,7 @@ def _spans(line: _Line) -> tuple[Span, ...]:
 
 
 def text_dict(chars: list[Char]) -> list[Block]:
-    """Blocks with spans. Never dehyphenated: the dict is the raw layout."""
+    """Blocks with lines and spans."""
     return [
         Block(
             bbox=_union([line.box for line in block]), number=number,
@@ -266,9 +287,9 @@ def text_dict(chars: list[Char]) -> list[Block]:
     ]
 
 
-def words(chars: list[Char], *, dehyphenate: bool) -> list[Word]:
+def words(chars: list[Char]) -> list[Word]:
     out: list[Word] = []
-    for block_no, block in enumerate(_blocks(chars, dehyphenate)):
+    for block_no, block in enumerate(segment(chars)):
         for line_no, line in enumerate(block):
             word_no = 0
             run: list[Char] = []
