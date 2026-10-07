@@ -450,8 +450,10 @@ def _register_run_stage(p: argparse.ArgumentParser) -> None:
                         help="Local shard dir — run the same contract without a store.")
     p.add_argument("--run-id", default=None, help="Run to operate on (required with --store)")
     p.add_argument("--ingest", default=None,
-                   help="`layout` only: the local corpus root holding the source documents, "
-                        "when it is not where the manifest recorded it.")
+                   help="`layout` only: where the source documents are. With --shards, a "
+                        "local corpus root (when it is not where the manifest recorded "
+                        "it); with --store, the ingest location (default: $WOMBLEX_INGEST_URI, "
+                        "else the store itself).")
     p.add_argument(
         "--output-prefix", default=None,
         help="Store-relative outputs dir (default: runs/<run_id>). "
@@ -542,10 +544,6 @@ def cmd_run_stage(args: argparse.Namespace) -> int:
     if not store_uri:
         logger.error("No target (pass --shards, or --store / $WOMBLEX_STORE_URI)")
         return 1
-    if contract.needs_sources:
-        logger.error("%s re-reads the source documents, which a store run cannot stage in "
-                     "yet; run it locally with --shards.", args.stage)
-        return 1
     if not args.run_id:
         logger.error("--run-id is required with --store")
         return 1
@@ -555,6 +553,8 @@ def cmd_run_stage(args: argparse.Namespace) -> int:
     output_prefix = (args.output_prefix or f"runs/{args.run_id}").strip("/")
     shard_prefix = f"{output_prefix}/documents"
     store = RemoteStore.from_uri(store_uri)
+    ingest_uri = _resolve_ingest(args) if contract.needs_sources else None
+    ingest = RemoteStore.from_uri(ingest_uri) if ingest_uri else None
 
     _warn_if_draining(args, args.run_id)
 
@@ -565,7 +565,7 @@ def cmd_run_stage(args: argparse.Namespace) -> int:
     summary = run_stage_remote(
         contract, store, shard_prefix, config,
         ctx=ctx, force=args.force,
-        checkpoint_prefix=ckpt_prefix, checkpoint_dataset=args.dataset,
+        checkpoint_prefix=ckpt_prefix, checkpoint_dataset=args.dataset, ingest=ingest,
     )
     summary.log()
     return summary.exit_code

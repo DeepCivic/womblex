@@ -28,7 +28,8 @@ from __future__ import annotations
 import contextlib
 import logging
 import tempfile
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -284,13 +285,43 @@ def _cleanup_staged(store: RemoteStore, temp_keys: list[str]) -> None:
 def _run_unit(
     contract: StageContract, config: WomblexConfig, ctx: RunContext,
     store: RemoteStore, shard_prefix: str, stems: list[str], input_keys: list[str],
+    ingest: RemoteStore,
 ) -> int:
     """Stage in, run the unchanged ``*_shards()``, publish. Returns files published."""
     with tempfile.TemporaryDirectory(prefix="womblex-stage-") as tmp:
         documents = Path(tmp) / "documents"
         store.download_to_dir(input_keys, documents)
+        if contract.needs_sources:
+            ctx = replace(ctx, source_fetcher=_source_fetcher(ingest, Path(tmp) / "sources"))
         contract.run(documents, config, ctx)
         return _publish(contract, config, store, shard_prefix, stems, documents)
+
+
+def _source_fetcher(ingest: RemoteStore, scratch: Path) -> Callable[[dict], Path]:
+    """A per-document fetcher for a source-document stage.
+
+    Maps a manifest row to its ingest key from the recorded provenance
+    (``source_relpath``), stages it flat under *scratch* by hash, and checks the
+    bytes against ``source_hash``. A missing or moved document, or one whose
+    bytes differ, is an error for that document alone; the stage decides what a
+    failed document means for its batch.
+    """
+    from womblex.store.output import _source_hash
+
+    def fetch(row: dict) -> Path:
+        key = (row.get("source_relpath") or "").strip("/")
+        if not key:
+            raise FileNotFoundError("the manifest row records no source_relpath")
+        local = scratch / f"{row['source_hash']}{row.get('ext') or ''}"
+        try:
+            ingest.download_file(key, local)
+        except FileNotFoundError as e:
+            raise FileNotFoundError(f"{key} is not in the ingest store (missing or moved)") from e
+        if _source_hash(str(local)) != row["source_hash"]:
+            raise ValueError(f"{key} does not match the hash the manifest records")
+        return local
+
+    return fetch
 
 
 # ---------------------------------------------------------------------------
@@ -341,13 +372,13 @@ def run_stage_remote(
     force: bool = False,
     checkpoint_prefix: str | None = None,
     checkpoint_dataset: str = "runner",
+    ingest: RemoteStore | None = None,
 ) -> StageRunSummary:
-    """Execute *contract* against a store's shard prefix, one unit at a time."""
-    if contract.needs_sources:
-        raise StagePreconditionError(
-            f"{contract.name} re-reads the source documents, which a store run cannot "
-            "stage in yet; run it locally with --shards."
-        )
+    """Execute *contract* against a store's shard prefix, one unit at a time.
+
+    ``ingest`` is where a source-document stage reads the documents from (the
+    store itself when ``None``, as the worker does); other stages ignore it.
+    """
     ctx = ctx or RunContext()
     summary = StageRunSummary(stage=contract.name)
 
@@ -397,6 +428,7 @@ def run_stage_remote(
                 input_keys = _resolve_inputs(contract, config, shard_prefix, unit, present)
                 summary.published += _run_unit(
                     contract, config, ctx, store, shard_prefix, unit, input_keys,
+                    ingest or store,
                 )
                 summary.processed += 1
             except NotReady as nr:

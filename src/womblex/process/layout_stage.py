@@ -13,7 +13,9 @@ left alone; a changed model, option, dpi or page scope reruns it. ``force``
 reruns regardless.
 
 Sources come back through :class:`SourceResolver`, the first downstream stage to
-need them. A batch is written only if every document in it was analysed, so a
+need them, or, on a distributed run, through a ``source_fetcher`` the runner
+supplies: it stages one document from the ingest store and checks its hash, and
+is called only for a batch that will actually be analysed. A batch is written only if every document in it was analysed, so a
 sidecar is never half old model and half new; one that could not be analysed is
 logged with its source hash and the batch is counted failed.
 """
@@ -21,6 +23,7 @@ logged with its source hash and the batch is counted failed.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -39,6 +42,7 @@ from womblex.store.run_stamp import sidecar_footer
 
 if TYPE_CHECKING:
     from womblex.config import WomblexConfig
+    from womblex.ingest.layout_step import LayoutSettings
     from womblex.store.source_resolver import SourceResolver
 
 logger = logging.getLogger(__name__)
@@ -64,6 +68,7 @@ def layout_shards(
     config: WomblexConfig,
     *,
     source_root: str | Path | None = None,
+    source_fetcher: Callable[[dict], Path] | None = None,
     force: bool = False,
 ) -> LayoutStageResult:
     """Rerun layout for every batch in *shard_dir* whose sidecar is out of date."""
@@ -90,9 +95,9 @@ def layout_shards(
             result.batches_skipped += 1
             continue
         try:
-            if resolver is None:
+            if resolver is None and source_fetcher is None:
                 resolver = SourceResolver.for_run(shard_dir, root=source_root)
-            rows, documents = _analyse_batch(base, settings, config, resolver)
+            rows, documents = _analyse_batch(base, settings, config, resolver, source_fetcher)
         except Exception as e:  # one batch must not stop the run
             logger.error("layout_shards: %s failed: %s", base.stem, e)
             result.batches_failed += 1
@@ -112,7 +117,8 @@ def layout_shards(
 
 
 def _analyse_batch(
-    base: Path, settings, config: WomblexConfig, resolver: SourceResolver,
+    base: Path, settings: LayoutSettings, config: WomblexConfig,
+    resolver: SourceResolver | None, fetcher: Callable[[dict], Path] | None,
 ) -> tuple[list[dict] | None, int]:
     """``(rows, documents analysed)`` for one batch; rows are ``None`` if any document failed."""
     from womblex.ingest.layout_step import run_layout_step
@@ -129,16 +135,9 @@ def _analyse_batch(
         if source_hash in seen or row["status"] == "error" or row["ext"] not in seam:
             continue
         seen.add(source_hash)
-        resolution = resolver.resolve(source_hash)
-        if not resolution.ok or resolution.path is None:
-            logger.error(
-                "layout_shards: doc=%s source_hash=%s not resolved (%s): %s",
-                row["doc_id"], source_hash, resolution.status, resolution.detail,
-            )
-            failed += 1
-            continue
         try:
-            with open_document(resolution.path) as doc:
+            path = _source_path(row, resolver, fetcher)
+            with open_document(path) as doc:
                 outcome = run_layout_step(
                     doc, profile_pages(doc), settings, config.extraction.ocr.engine,
                 )
@@ -153,6 +152,19 @@ def _analyse_batch(
         )
         return None, 0
     return layout_rows(per_document), len(per_document)
+
+
+def _source_path(
+    row: dict, resolver: SourceResolver | None, fetcher: Callable[[dict], Path] | None,
+) -> Path:
+    """The local file for a manifest row: the fetcher's, else the resolver's, else an error."""
+    if fetcher is not None:
+        return fetcher(row)
+    assert resolver is not None
+    resolution = resolver.resolve(row["source_hash"])
+    if not resolution.ok or resolution.path is None:
+        raise FileNotFoundError(f"not resolved ({resolution.status}): {resolution.detail}")
+    return resolution.path
 
 
 __all__ = ["LayoutStageResult", "layout_shards"]

@@ -172,5 +172,21 @@ What a rerun changes, and what it does not:
   half another).
 - DOCX, spreadsheets and text carry no layout and are not opened.
 - `layout` is not in the stages `enqueue-stages` dispatches: a rerun is
-  deliberate. A store run (`--store`) is refused for now, as a worker cannot yet
-  stage in source documents.
+  deliberate.
+
+### On a distributed run
+
+```bash
+womblex run-stage --stage layout --store s3://bucket --run-id <run_id> \
+    --ingest s3://bucket/ingest --config config.yaml
+```
+
+The runner takes each batch's shards from the store, and for a batch that needs
+rerunning fetches each PDF or image from the ingest location (`--ingest`, else
+`$WOMBLEX_INGEST_URI`, else the store itself). A document's key is the
+`source_relpath` its manifest row recorded at extraction; the downloaded bytes
+are checked against `source_hash`. A document that is missing from the ingest
+store, has moved, or whose bytes differ is an error for that document, which
+fails its batch and leaves the published sidecar as it was. A batch whose
+sidecar fingerprint already matches fetches nothing. The new sidecar is
+published atomically, and a failed batch does not stop the others.
