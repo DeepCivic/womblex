@@ -165,7 +165,7 @@ womblex = ["_models/en_AU/*", "_models/kanon-2-tokenizer/*"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 markers = [
-    "benchmark: OCR accuracy benchmarks (slow, run with -m benchmark)",
+    "benchmark: OCR accuracy benchmarks against the benchmark datasets; maintainer-only (copy them to fixtures/fixtures/, run with -m benchmark). CI deselects them",
     "slow: OCR-fixture tests, historically slow under EasyOCR. Now fast under rapidocr-onnxruntime (~7s for the whole cohort) so they run by default; the marker is retained for ad-hoc filtering via -m slow / -m 'not slow'.",
 ]
 # Live console stays quiet (WARNING+) so the slow-test/hang monitor's alerts

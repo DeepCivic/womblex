@@ -306,14 +306,15 @@ uv sync --extra dev --extra ui --extra api
 
 uv run ruff check src/ tests/
 uv run mypy src/
-uv run python -m pytest tests/ -v                               # whole suite
+uv run python -m pytest tests/ -v -m "not benchmark"           # what CI runs
 uv run python -m pytest tests/ -v -m "not slow and not benchmark"  # fast subset
 ```
 
-These three checks are the CI gate. A minimal fixture set is vendored, so a bare
-clone runs most of the suite; tests that need the full fixture set, credentials
-or optional extras skip. See [THIRD_PARTY_DATA.md](THIRD_PARTY_DATA.md) for the
-full fixtures. Accuracy benchmarks live in womblex-benchmark, not here.
+These three checks are the CI gate. The suite reads only the synthetic fixtures
+in [fixtures/synthetic/](fixtures/synthetic/README.md), so a bare clone runs all
+of it; tests that call a paid API or need a Postgres DSN skip without one.
+Accuracy benchmarks live in womblex-benchmark, not here; the one maintainer-only
+`benchmark` module is described in [THIRD_PARTY_DATA.md](THIRD_PARTY_DATA.md).
 
 The commit hook runs a secret scan and the semgrep rules in `.semgrep/rules/`:
 

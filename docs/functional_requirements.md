@@ -496,7 +496,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - A layout model emits the Womblex `block_type` vocabulary, checked by a conformance test.
 - The layout model applies to redaction detection as well as extraction.
 - Changing the PII context model is supported. The docs state that `context_similarity_threshold` must be recalibrated when it changes.
-- With no plugin configured, `content_digest` is unchanged on every vendored fixture.
+- With no plugin configured, `content_digest` is unchanged on every synthetic fixture.
 - The model-plugin guide documents each slot's interface and how a package registers a model, with a minimal example.
 
 **Out of scope:** model provenance (26), `/v1` submission controls (a submitted config only selects stages; workers run under the operator's config), container-image packaging of plugins, and slots that need a Parquet schema change, each needing its own requirement (25 and 26, and the rest): the enrichment provider, AI chunking with a non-Isaacus model, graph-driven PII detection, link-stage candidates, `graph_refresh`, the enrichment token-budget tokeniser, per-page or per-element OCR engine recording, and the embedder provider (including any CPU embedding baseline).

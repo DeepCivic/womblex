@@ -1,10 +1,12 @@
-"""OCR accuracy benchmarks: WER and CER against fixture ground truth.
+"""OCR accuracy benchmarks: WER and CER against FUNSD, IAM-line and DocLayNet.
 
-Run with:
+Maintainer-only. The datasets are not in this repository: copy the
+womblex-benchmark fixture set to ``fixtures/fixtures/`` (git-ignored; see
+THIRD_PARTY_DATA.md), then run:
     uv run --extra dev pytest -m benchmark -s -v tests/test_bench_ocr_accuracy.py
 
 The -s flag is required to see the per-sample metric table printed to stdout.
-These tests are excluded from the normal test suite (no -m benchmark flag).
+CI deselects the module (``-m "not benchmark"``).
 
 Page sizes are computed to preserve each image's aspect ratio at a target
 width of 595 pt (A4 width), so OCR sees the same proportions as the source.
@@ -76,12 +78,15 @@ FUNSD_ANNOTATIONS = FIXTURES_DIR / "funsd" / "annotations"
 IAM_DIR = FIXTURES_DIR / "iam_line"
 DOCLAYNET_DIR = FIXTURES_DIR / "doclaynet"
 
-# Every benchmark here reads a real fixture image. Skip cleanly when the
-# fixtures repo is not cloned (e.g. CI). See THIRD_PARTY_DATA.md.
-pytestmark = pytest.mark.skipif(
-    not FIXTURES_DIR.exists(),
-    reason="womblex-benchmark not cloned (see THIRD_PARTY_DATA.md)",
-)
+# Every benchmark here reads a dataset image from a maintainer's copy of the
+# benchmark fixtures; without one the module skips. See THIRD_PARTY_DATA.md.
+pytestmark = [
+    pytest.mark.benchmark,
+    pytest.mark.skipif(
+        not FIXTURES_DIR.exists(),
+        reason="benchmark fixtures not at fixtures/fixtures/ (maintainer-only; see THIRD_PARTY_DATA.md)",
+    ),
+]
 
 # Standard page width in points — height is computed per image to preserve AR.
 _TARGET_W = 595

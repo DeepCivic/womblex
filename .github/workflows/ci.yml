@@ -9,6 +9,16 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # The job queue's tests need a real Postgres; without one they skip.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: womblex
+          POSTGRES_DB: womblex
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
     strategy:
       fail-fast: false
       matrix:
@@ -39,8 +49,14 @@ jobs:
       - name: Type-check (mypy)
         run: mypy src/
 
-      - name: Fast tests
-        run: python -m pytest tests/ -v
+      - name: Tests
+        # Every file input is the synthetic set in fixtures/synthetic/. The
+        # `benchmark` tests score against datasets this repository does not
+        # carry; maintainers run them locally. Tests that call a paid API
+        # (Isaacus, Bedrock) skip without credentials, which CI does not have.
+        env:
+          WOMBLEX_DB_DSN: postgresql://postgres:womblex@localhost:5432/womblex
+        run: python -m pytest tests/ -v -m "not benchmark"
 
   frontend:
     name: Console frontend (ui/)

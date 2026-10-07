@@ -9,7 +9,7 @@ module-responsibility table in [`../CLAUDE.md`](../CLAUDE.md).
 womblex/
 ├── configs/           # Dataset-specific configurations
 ├── docs/              # Architecture docs, ADRs, accuracy reports, the deployment-image audit, the consumer contract (contract.md), the service API (service-api.md), the egress bundle (egress.md)
-├── fixtures/          # Test fixtures (separate repo, see ../THIRD_PARTY_DATA.md)
+├── fixtures/synthetic/  # Generated test fixtures (generate.py + its committed output; see its README)
 ├── models/            # Locally pre-downloaded models, resolved by utils/models.py (see models.md)
 ├── sql/womblex_jobs.sql  # Postgres schema for the cloud job queue
 ├── ui/                # Console SPA frontend (SvelteKit), built into the console image by Dockerfile.ui

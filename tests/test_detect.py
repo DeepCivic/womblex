@@ -7,7 +7,10 @@ fixtures for integration tests.
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
+from tests._pdf_builders import PdfBuilder
+from tests._synthetic import SCANS_DIR
 from womblex.config import DetectionConfig
 from womblex.ingest.detect import (
     DocumentType,
@@ -15,6 +18,7 @@ from womblex.ingest.detect import (
     _has_table_structure,
     detect_document_type,
 )
+from womblex.ingest.pdf.types import Rect
 
 # ---------------------------------------------------------------------------
 # _has_table_structure
@@ -198,7 +202,9 @@ class TestDetectDocumentType:
         with pytest.raises((FileNotFoundError, RuntimeError)):
             detect_document_type(tmp_path / "nope.pdf")
 
-    def test_returns_document_profile(self, funsd_image_dir: Path) -> None:
-        """Detect type of a real FUNSD form image embedded in a PDF — smoke test."""
-        # This test validates the interface; real PDF fixtures will be added
-        # to fixtures/ for comprehensive detection coverage.
+    def test_returns_document_profile(self, tmp_path: Path) -> None:
+        """A scanned form embedded in a PDF profiles as an image-only scan."""
+        img = Image.open(SCANS_DIR / "form-koala-rescue-intake.png").convert("RGB")
+        pdf = PdfBuilder(tmp_path / "form.pdf").page().image(Rect(0, 0, 595, 842), img).save()
+        profile = detect_document_type(pdf)
+        assert profile.page_count == 1 and not profile.has_text_layer
