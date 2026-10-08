@@ -48,12 +48,14 @@ def read_polylines(
     *paths* pairs a path object with the transform from its own space to
     pdfium's user space (its matrix composed with its containers'); *origin* is
     the crop box's top-left corner in that space. A curve ends a run rather than
-    being approximated: a table's rules are straight.
+    being approximated: a table's rules are straight. A close returns to the
+    subpath's start, which a curve may have taken out of the run.
     """
     left, top = origin
     x, y = ctypes.c_float(0), ctypes.c_float(0)
     for obj, (a, b, c, d, e, f) in paths:
         run: Polyline = []
+        start: tuple[float, float] | None = None
         for i in range(pdfium_c.FPDFPath_CountSegments(obj)):
             segment = pdfium_c.FPDFPath_GetPathSegment(obj, i)
             if not segment or not pdfium_c.FPDFPathSegment_GetPoint(segment, ctypes.byref(x), ctypes.byref(y)):
@@ -63,17 +65,19 @@ def read_polylines(
             if kind == pdfium_c.FPDF_SEGMENT_MOVETO:
                 if len(run) > 1:
                     yield run
-                run = [point]
+                run, start = [point], point
             elif kind == pdfium_c.FPDF_SEGMENT_LINETO:
                 run.append(point)
             else:
                 if len(run) > 1:
                     yield run
                 run = [point]
-            if pdfium_c.FPDFPathSegment_GetClose(segment) and run:
-                run.append(run[0])
-                yield run
-                run = []
+            if pdfium_c.FPDFPathSegment_GetClose(segment) and start is not None:
+                if run[-1] != start:
+                    run.append(start)
+                if len(run) > 1:
+                    yield run
+                run = [start]
         if len(run) > 1:
             yield run
 

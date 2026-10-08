@@ -118,3 +118,24 @@ class TestEdges:
             raise AssertionError("edges read by the text strategy")
 
         assert _tables.find_tables("text", Rect(0, 0, 100, 100), list, boom) == []
+
+
+def test_close_after_a_curve_draws_no_phantom_rule(tmp_path) -> None:
+    """A curve from A down to C, a rule to D, then close: the only straight
+    runs are C to D and D back to A, never the curve's chord A to C."""
+    path = tmp_path / "curve.pdf"
+    canvas = Canvas(str(path), pagesize=(595, _HEIGHT))
+    shape = canvas.beginPath()
+    shape.moveTo(72, _HEIGHT - 100)
+    shape.curveTo(172, _HEIGHT - 120, 172, _HEIGHT - 180, 72, _HEIGHT - 200)
+    shape.lineTo(272, _HEIGHT - 200)
+    shape.close()
+    canvas.drawPath(shape, stroke=1, fill=0)
+    canvas.save()
+    with open_document(path, backend="pdfium") as doc:
+        page = doc[0]
+        runs = list(_tables.read_polylines(page._path_objects(), page._origin))
+    edges = _tables.edges_from_polylines(runs)
+    assert [(e["orientation"], round(e["x0"]), round(e["x1"]), round(e["top"])) for e in edges] == [
+        ("h", 72, 272, 200),
+    ]
