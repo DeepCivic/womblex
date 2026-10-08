@@ -69,8 +69,15 @@ _SHAPES = {
     "cell after, 6pt down": [(0, 0, "AAAA"), (50, -6, "BBBB")],
 }
 
+#: Axis-aligned only: how MuPDF joins an overprint and a line above is measured there.
+_AXIS_SHAPES = {
+    "overprinted line": [(0, 0, "AAAAAAAA"), (0, 3, "BBBB")],
+    "overprinted line, indented": [(0, 0, "AAAAAAAA"), (10, 3, "BBBB")],
+    "line above": [(0, 0, "AAAAAAAA"), (0, 8, "BBBB")],
+}
 
-@pytest.mark.parametrize("angle", [0, 5, 90])
+
+@pytest.mark.parametrize("angle", [0, 5, 90, 180, 270])
 @pytest.mark.parametrize("shape", _SHAPES)
 def test_header_shapes_group_as_mupdf_does(
     shape: str, angle: int, tmp_path: Path,
@@ -79,6 +86,24 @@ def test_header_shapes_group_as_mupdf_does(
     assert _lines_per_block(path, "pdfium") == _lines_per_block(path, "fitz")
 
 
+@pytest.mark.parametrize("angle", [0, 90, 180, 270])
+@pytest.mark.parametrize("shape", _AXIS_SHAPES)
+def test_overprints_and_lines_above_group_as_mupdf_does(shape: str, angle: int, tmp_path: Path) -> None:
+    path = _draw(tmp_path / "shape.pdf", _AXIS_SHAPES[shape], angle=angle)
+    assert _lines_per_block(path, "pdfium") == _lines_per_block(path, "fitz")
+
+
 def test_a_rotated_page_with_upright_text_is_grouped_in_the_unrotated_frame(tmp_path: Path) -> None:
     path = _draw(tmp_path / "rotated.pdf", _SHAPES["two-line header under the last cell"], angle=90, rotate_page=90)
     assert _lines_per_block(path, "pdfium") == _lines_per_block(path, "fitz")
+
+
+@pytest.mark.parametrize("angle", [90, 270])
+def test_vertical_text_keeps_content_order(angle: int, tmp_path: Path) -> None:
+    # Drawn out of position order: pdfium sorts vertical text by position, MuPDF does not.
+    path = _draw(tmp_path / "order.pdf", [(0, -9, "L0"), (0, -18, "L1"), (0, 0, "L2")], angle=angle)
+
+    def lines(backend: str) -> list[str]:
+        return ["".join(s.text for s in line.spans) for page in open_document(path, backend=backend) for b in page.text_dict() for line in b.lines]
+
+    assert lines("pdfium") == lines("fitz") == ["L0", "L1", "L2"]

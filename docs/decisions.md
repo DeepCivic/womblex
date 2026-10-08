@@ -867,24 +867,27 @@ be re-derivable, and the first pass's were not.
   cross-validation step (reject native low-conf tables where the layout model
   predicts no Table at the bbox).
 - **Block grouping on the pdfium backend follows MuPDF's measured rules.**
-  Measured with probe PDFs at 7pt and 10pt. Left-to-right text: a block starts
-  where the baseline pitch exceeds 1.5 of the new line's font size, or the line
-  starts right of the previous line's start (0 pt joins, 1 pt splits); a row's
-  fragments (table cells) stay in one block; a change of size or weight alone
-  never breaks one. Text running up the unrotated page (the rotated
-  spreadsheet-print index) continues a block only when the baseline offset sits
-  between -1.5 and +0.5 font sizes, with no start condition, which is why
-  `Subsection` / `code` and `Out of Scope` / `Exemption` split while the next
-  cell of the header row rejoins. Oblique text never continues by pitch. All of
-  it is applied in the unrotated frame the characters are already in
-  (`/Rotate` does not enter). `_same_block` in `_text.py` holds it;
-  `emu-spacing-variants.pdf` and `test_pdf_block_parity.py` pin it. Block line
-  counts and element kinds now equal PyMuPDF's on every synthetic PDF.
-  Known residue, outside the synthetic set: overprinted lines (MuPDF joins
-  lines that overlap vertically, pdfium splits them); upside-down and downward
-  text, measured for pitch only (MuPDF is far more lenient at 180 degrees);
-  and pdfium reorders downward-running characters, so content order differs
-  there.
+  Measured with probe PDFs at 7pt and 10pt, in the unrotated page frame the
+  characters are already in (`/Rotate` does not enter). Horizontal text, either
+  way up: a line on the previous line's row, overprints included, continues its
+  block; otherwise it continues within 1.5 font sizes of the baseline (above or
+  below) unless its origin lies more than 0.5pt right of the previous line's,
+  whichever way the text runs. Vertical text has no start condition, only a
+  baseline window that favours opposite sides: up-running text takes -1.5 to
+  +0.5 sizes, downward text -0.5 to +1.5 (so the rotated index's `Subsection` /
+  `code` and `Out of Scope` / `Exemption` split while the next header cell
+  rejoins). Oblique text continues only as the next cell of a row. A change of
+  size or weight alone never breaks a block. `_same_block` in `_text.py` holds
+  it; `emu-spacing-variants.pdf` and `test_pdf_block_parity.py` pin it, with
+  header, overprint and line-above shapes at 0, 90, 180 and 270 degrees.
+  Block line counts and element kinds equal PyMuPDF's on every synthetic PDF.
+  pdfium sorts vertical text by position where MuPDF keeps content order, so
+  `read_chars` restores it for vertical characters from the page's text objects
+  (matched by text and box); and it injects a stray space between overlapping
+  objects, which `_lines` drops when it lies off the row and the row carries on
+  across it. Not matched: oblique overprints and lines above (the row test uses
+  bounding boxes, crude at small angles), and characters pdfium reports
+  outside every text object's box.
 - **Handwriting is an OCR-engine ceiling.** The PaddleOCR ONNX backend cannot
   read handwriting; cross-cell handwritten forms and photographed/creased forms
   reach high CER. Out of scope without an HTR backend + dewarping.

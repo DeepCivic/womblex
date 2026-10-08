@@ -85,6 +85,7 @@ def _is_bold(weight: int, flags: int, font: str) -> bool:
 
 def read_chars(
     page: pdfium.PdfPage, to_rect: Callable[[tuple[float, float, float, float]], Rect], clip: Rect,
+    text_boxes: Callable[[pdfium.PdfTextPage], list[tuple[Rect, str]]] | None = None,
 ) -> list[Char]:
     """Every printable character of *page* that touches *clip*, in content order.
 
@@ -92,6 +93,10 @@ def read_chars(
     *clip* is the page: MuPDF drops each character lying off it. Control
     characters (pdfium's generated line breaks) are dropped: lines are rebuilt
     from geometry. A surrogate pair is one character, boxed by its first unit.
+
+    pdfium sorts vertical text by position, where MuPDF keeps content order.
+    *text_boxes* (the page's text objects with their text, in content order, read
+    only when needed) puts the vertical characters back in the order they were drawn.
     """
     textpage = page.get_textpage()
     try:
@@ -141,15 +146,57 @@ def read_chars(
                 direction=direction,
                 origin=origin,
             ))
+        if text_boxes is not None:
+            _restore_content_order(out, text_boxes(textpage))
         return out
     finally:
         textpage.close()
+
+
+def _restore_content_order(chars: list[Char], objects: list[tuple[Rect, str]]) -> None:
+    """Reorder the vertical characters in place by the text object that drew them.
+
+    Characters keep their slots among the horizontal ones; within the vertical
+    slots they sort by the text object, in content order, whose text has the
+    character and whose smallest box holds all of it (so text overprinting another's
+    box keeps its own object). One that no object holds takes the key of the
+    character before it.
+    """
+    slots = [i for i, c in enumerate(chars) if c.direction[0] == 0.0]
+    if len(slots) < 2:
+        return
+    keys: list[int] = []
+    last = 0
+    for i in slots:
+        char = chars[i]
+        slack = 0.3 * char.size
+        best = -1.0
+        for k, (box, content) in enumerate(objects):
+            if char.text in content and (
+                box.x0 - slack <= char.box.x0 and char.box.x1 <= box.x1 + slack
+                and box.y0 - slack <= char.box.y0 and char.box.y1 <= box.y1 + slack
+            ):
+                area = box.width * box.height
+                if best < 0 or area < best:
+                    best, last = area, k
+        keys.append(last)
+    ordered = [chars[i] for _, i in sorted(zip(keys, slots, strict=True), key=lambda kv: kv[0])]
+    for i, char in zip(slots, ordered, strict=True):
+        chars[i] = char
 
 
 def _extent(box: Rect, axis: tuple[float, float]) -> tuple[float, float]:
     """The interval *box* covers along *axis*."""
     ends = [x * axis[0] + y * axis[1] for x in (box.x0, box.x1) for y in (box.y0, box.y1)]
     return min(ends), max(ends)
+
+
+def _on_row(line: _Line, char: Char) -> bool:
+    """The character's box shares some of the line's row, measured across its direction."""
+    along = line.chars[-1].direction
+    across = (-along[1], along[0])
+    (a0, a1), (b0, b1) = _extent(line.box, across), _extent(char.box, across)
+    return min(a1, b1) >= max(a0, b0)
 
 
 def _same_line(line: _Line, char: Char) -> bool:
@@ -213,11 +260,23 @@ def _rejoin(lines: list[_Line], boxes: list[Rect], line: _Line, box: Rect) -> bo
 
 def _lines(chars: list[Char]) -> list[_Line]:
     runs: list[_Line] = []
+    pending: Char | None = None  # a space that did not abut: a word gap, or pdfium's stray separator
     for char in chars:
+        if runs and _same_line(runs[-1], char) and (pending is None or not _on_row(runs[-1], pending)):
+            runs[-1].chars.append(char)
+            pending = None  # the row carried on across a space lying off it: pdfium's stray one
+            continue
+        if pending is not None:
+            runs.append(_Line([pending]))
+            pending = None
         if runs and _same_line(runs[-1], char):
             runs[-1].chars.append(char)
+        elif char.text == " " and runs:
+            pending = char
         else:
             runs.append(_Line([char]))
+    if pending is not None:
+        runs.append(_Line([pending]))
     lines: list[_Line] = []
     boxes: list[Rect] = []
     for run in runs:
@@ -239,16 +298,18 @@ def _lines(chars: list[Char]) -> list[_Line]:
 #: 1.47 stays in the block and 1.64 breaks it, whatever the size or weight of the
 #: lines either side (a bold run-in label or a larger closing line set tight stays put).
 _MAX_PITCH = 1.5
-#: Text running up the page (in the unrotated frame) continues a block through a
-#: line this many font sizes *beyond* the baseline, in the direction MuPDF treats as
-#: the way back; probed at 3.5pt joining and 6pt splitting at 7pt.
+#: Vertical text continues a block through a line this many font sizes *ahead* of
+#: the baseline, on the side MuPDF treats as the way back (probed at 7pt: 3.5pt
+#: joins, 6pt splits). Up-running text takes it on one side of `_MAX_PITCH`'s
+#: window and downward text on the other.
 _MAX_AHEAD = 0.5
-#: Left-to-right text: a line starting this far (points) right of the previous
-#: line's start opens a block (MuPDF: 0 joins, 1 splits, at 7pt and at 10pt). Upside-down
-#: and downward text were measured for pitch only.
+#: Horizontal text: a line whose origin sits more than this many points right of
+#: the previous line's opens a block, whichever way the text runs (MuPDF: 0 joins,
+#: 1 splits, at 7pt and 10pt, at 0 and 180 degrees alike).
 _INDENT = 0.5
 _UP = (0.0, -1.0)
-_AXES = ((1.0, 0.0), (-1.0, 0.0), (0.0, 1.0))
+_DOWN = (0.0, 1.0)
+_HORIZONTAL = (_LTR, (-1.0, 0.0))
 
 
 def _origin(char: Char) -> tuple[float, float]:
@@ -256,35 +317,30 @@ def _origin(char: Char) -> tuple[float, float]:
 
 
 def _same_block(prev: _Line, line: _Line) -> bool:
-    """*line* continues *prev*'s block, measured in their shared writing direction.
+    """*line* continues *prev*'s block, as MuPDF measured in the unrotated page frame.
 
-    MuPDF's rules are written in the unrotated page frame, where the characters
-    already are. Across the baseline: axis-aligned text continues by pitch (left to
-    right also unless the line starts right of the previous one); text running up the page
-    continues inside a window that favours the opposite side; oblique text never
-    continues by pitch, only by sitting in the previous line's row.
+    Horizontal text (either way up): a line sharing the previous line's row, even
+    one overprinting it, continues; otherwise it continues within 1.5 sizes of the
+    baseline unless its origin lies right of the previous one's. Vertical text has
+    no start condition, only a baseline window that favours opposite sides for up
+    and down. Oblique text continues only as the next cell of a row.
     """
     first, last = prev.chars[0], line.chars[0]
     if first.direction != last.direction:
         return False
     along = first.direction
     across = (-along[1], along[0])
-    (a0, a1), (b0, b1) = _extent(prev.box, across), _extent(line.box, across)
-    c1 = _extent(prev.box, along)[1]
-    d0 = _extent(line.box, along)[0]
-    height = max(a1 - a0, b1 - b0)
-    if min(a1, b1) - max(a0, b0) > 0.5 * min(a1 - a0, b1 - b0):
-        # The next cell of a row: MuPDF keeps a row's fragments in one block.
-        return d0 >= c1
     (px, py), (qx, qy) = _origin(first), _origin(last)
     pitch = (qx - px) * across[0] + (qy - py) * across[1]
     if along == _UP:
         return -_MAX_PITCH * last.size <= pitch <= _MAX_AHEAD * last.size
-    if along not in _AXES:
-        return False
-    if along == _LTR and (qx - px) > _INDENT:
-        return False
-    return -0.5 * height <= b0 - a1 <= 0.7 * height and d0 < c1 and pitch <= _MAX_PITCH * last.size
+    if along == _DOWN:
+        return -_MAX_AHEAD * last.size <= pitch <= _MAX_PITCH * last.size
+    (a0, a1), (b0, b1) = _extent(prev.box, across), _extent(line.box, across)
+    if min(a1, b1) - max(a0, b0) > 0.5 * min(a1 - a0, b1 - b0):
+        # The same row: MuPDF keeps a row's fragments, and an overprint, in one block.
+        return along in _HORIZONTAL or _extent(line.box, along)[0] >= _extent(prev.box, along)[1]
+    return along in _HORIZONTAL and abs(pitch) <= _MAX_PITCH * last.size and qx - px <= _INDENT
 
 
 def segment(chars: list[Char]) -> list[list[_Line]]:
