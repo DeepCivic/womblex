@@ -101,6 +101,7 @@ def read_chars(
         name = ctypes.create_string_buffer(256)
         flags = ctypes.c_int(0)
         matrix = pdfium_c.FS_MATRIX()
+        ox, oy = ctypes.c_double(), ctypes.c_double()
         for i in range(textpage.count_chars()):
             code = pdfium_c.FPDFText_GetUnicode(raw, i)
             if 0xD800 <= code < 0xDC00:
@@ -117,12 +118,12 @@ def read_chars(
             if text in "\r\n\x00￾" or (ord(text) < 0x20 and text != "\t"):
                 continue
             box = to_rect(textpage.get_charbox(i, loose=True))
-            ox, oy = ctypes.c_double(), ctypes.c_double()
-            pdfium_c.FPDFText_GetCharOrigin(raw, i, ctypes.byref(ox), ctypes.byref(oy))
-            point = to_rect((ox.value, oy.value, ox.value, oy.value))
-            origin = (point.x0, point.y0)
             if not (box.x1 > clip.x0 and box.x0 < clip.x1 and box.y1 > clip.y0 and box.y0 < clip.y1):
                 continue
+            origin: tuple[float, float] | None = None
+            if pdfium_c.FPDFText_GetCharOrigin(raw, i, ctypes.byref(ox), ctypes.byref(oy)):
+                point = to_rect((ox.value, oy.value, ox.value, oy.value))
+                origin = (point.x0, point.y0)
             length = pdfium_c.FPDFText_GetFontInfo(raw, i, name, len(name), ctypes.byref(flags))
             font = _SUBSET_PREFIX.sub("", name.value.decode("latin-1")) if length > 0 else ""
             weight = pdfium_c.FPDFText_GetFontWeight(raw, i)
