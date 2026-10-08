@@ -1,7 +1,9 @@
-"""With no plugin configured, ``content_digest`` on vendored fixtures is pinned.
+"""With no plugin configured, ``content_digest`` on the synthetic fixtures is pinned.
 
-The pinned values were verified identical on the commit before the model
-registry landed, so they record that the registry changed no default output.
+The set covers every default extraction path: text, DOCX, CSV, XLSX, native
+PDFs (vector redactions, a ruled table) and an image-only PDF, which runs the
+layout step and OCR. The values were recorded when the synthetic set replaced
+the vendored documents, on unchanged extraction code.
 
 A change here means the default model group, or the extraction it drives, has
 changed output: regenerate the digests deliberately, never to get green.
@@ -12,34 +14,33 @@ the version they were recorded with (the one ``uv.lock`` pins).
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import fitz
 import pytest
 
+from tests._synthetic import SYNTHETIC_DIR
 from womblex.config import DatasetConfig, PathsConfig, WomblexConfig
 from womblex.ingest.detect import detect_file_type
 from womblex.ingest.extract import extract_text
 from womblex.ingest.layout_step import LayoutSettings
 from womblex.store.content_digest import content_digest
 
-_COLLECTION = Path(__file__).resolve().parent.parent / "fixtures" / "fixtures" / "womblex-collection"
-
 _PDF_PINNED_UNDER = "1.27.2.2"
 
 _PINNED = {
-    "_documents/Auditor-General_Report_2020-21_19_transcript-First-30-Pages.txt":
-        "b77c08bce6b08e4138e259cb4ca5ff5eaae2aae7db3ae41c1c27ca44b91c2e01",
-    "_documents/foreign-affairs-and-trade-2025-26-portfolio-budget-statements.docx":
-        "19b1aa947fb7f0d540eed941ae54c703300df71bfd8bd419e68d14d913273b00",
-    "_spreadsheets/Approved-providers-au-export_20260204.csv":
-        "068a1e6cc72e6b25558163c8cf3a2ee9640ee128575303f508b78dbd19c22215",
-    "_spreadsheets/mso-statistics-sept-qtr-2025.xlsx":
-        "75c55d96b43f33967745ca61c911eec767a7d43659c982e8d5fa1e3065b16f0b",
-    "_documents/00768-213A-270825-Throsby-Out-of-School-Care-Administrative-Decision-Other-Notice-and-Direction_Redacted.pdf":
-        "0753b31f3c251e00bc900fb3c505d05f41e1c7e81b5d6b2e7d039f9b1c6b099f",
-    "_documents/Auditor-General_Report_2020-21_19-First-30-Pages.pdf":
-        "45089a415a82caf3ba534a90d5727f6d6a79013be48d2333d0795dd4dce101ce",
+    "documents/koala-habitat-audit_transcript.txt":
+        "4e36c52f80a58d095c8c5cda3036332c1480778c0460c444b9554bb50c59fd66",
+    "documents/wombat-portfolio-budget-statements.docx":
+        "20edacc66c1f433618fd27e3d3877ff175c9eb8765547a0eb08cd1ce54930a1b",
+    "spreadsheets/platypus-sightings-register.csv":
+        "78f54d548b957076cdd2a360bd2862b32a32f01df6e4775cb2afcc3283707631",
+    "spreadsheets/echidna-population-statistics.xlsx":
+        "e8dcda866921d1b7144db7e5e5d7bcc7f84e06eef172af4c87195c75785cd4a1",
+    "documents/quokka-care-decision-notice_redacted.pdf":
+        "d16e3945836c8ec22c2c9ab25a5c350d3cd25fe4a86b3e85cdc77928f51cda08",
+    "documents/koala-habitat-audit.pdf":
+        "be8091e48559f7c91fedef45c83809780297c6c12299db61d74d465da593bc9b",
+    "documents/numbat-scanned-survey-page.pdf":
+        "54b024a1f64cfaab4653a55655a728957de6047becd65c8749113c298e01268f",
 }
 
 
@@ -51,9 +52,7 @@ _PINNED = {
     ],
 )
 def test_default_content_digest_is_pinned(rel: str) -> None:
-    path = _COLLECTION / rel
-    if not path.exists():
-        pytest.skip(f"fixture not present: {path}")
+    path = SYNTHETIC_DIR / rel
     if path.suffix == ".pdf" and fitz.VersionBind != _PDF_PINNED_UNDER:
         pytest.skip(f"PDF digests pinned under PyMuPDF {_PDF_PINNED_UNDER}, found {fitz.VersionBind}")
     # The layout step is part of default extraction: OCR pages read its regions.

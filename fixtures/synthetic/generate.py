@@ -22,15 +22,17 @@ import textwrap
 import zipfile
 from pathlib import Path
 
+import numpy as np
 from docx import Document
 from openpyxl import Workbook
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen.canvas import Canvas
 
 ROOT = Path(__file__).resolve().parent
 DOCUMENTS = ROOT / "documents"
 SPREADSHEETS = ROOT / "spreadsheets"
+SCANS = ROOT / "scans"
 _ZIP_EPOCH = (2025, 7, 1, 0, 0, 0)
 
 ANIMALS = [
@@ -298,6 +300,94 @@ def schedule_pdf(path: Path, *, n: int = 44) -> None:
     c.save()
 
 
+def _font(size: int) -> ImageFont.FreeTypeFont:
+    return ImageFont.load_default(size=size)
+
+
+def _scanned(img: Image.Image, seed: int) -> Image.Image:
+    """Grey paper, speckle noise and a slight skew, so the image reads as a scan."""
+    rng = np.random.default_rng(seed)
+    arr = np.asarray(img.convert("L"), dtype=np.int16) - 20
+    speckle = rng.random(arr.shape) < 0.004
+    arr[speckle] = rng.integers(60, 160, int(speckle.sum()))
+    return Image.fromarray(arr.clip(0, 255).astype(np.uint8)).rotate(0.4, fillcolor=235)
+
+
+def form_image(path: Path, title: str, fields: list[tuple[str, str]], seed: int) -> None:
+    """A filled-in paper form: a title, then labelled boxes holding typed values."""
+    img = Image.new("L", (1000, 1300), 255)
+    draw = ImageDraw.Draw(img)
+    draw.text((60, 50), title, font=_font(38), fill=0)
+    lines, y = [title], 140
+    for label, value in fields:
+        draw.text((60, y + 12), label, font=_font(24), fill=0)
+        draw.rectangle((380, y, 940, y + 52), outline=0, width=2)
+        draw.text((394, y + 12), value, font=_font(26), fill=0)
+        lines.append(f"{label} {value}")
+        y += 82
+    draw.rectangle((60, y + 20, 84, y + 44), outline=0, width=2)
+    draw.text((100, y + 18), "I declare the information above is correct.", font=_font(22), fill=0)
+    lines.append("I declare the information above is correct.")
+    _scanned(img, seed).save(path)
+    path.with_suffix(".gt.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def line_image(path: Path, text: str, seed: int) -> None:
+    """One line of field-note text, the shape of a single handwriting line."""
+    width = 40 + int(_font(40).getlength(text))
+    img = Image.new("L", (width, 110), 255)
+    ImageDraw.Draw(img).text((20, 30), text, font=_font(40), fill=20)
+    _scanned(img, seed).save(path)
+    path.with_suffix(".gt.txt").write_text(text + "\n", encoding="utf-8")
+
+
+def page_image(path: Path, kind: str, seed: int) -> None:
+    """A scanned report page: a heading, then prose, a table, or very little."""
+    rng = random.Random(seed)
+    img = Image.new("L", (1025, 1325), 255)
+    draw = ImageDraw.Draw(img)
+    animal = ANIMALS[seed % len(ANIMALS)]
+    heading = f"{animal[0].title()} survey results"
+    draw.text((70, 60), heading, font=_font(40), fill=0)
+    words, y = heading.split(), 140
+    paras = {"dense": 6, "table": 1, "sparse": 0}[kind]
+    for _ in range(paras):
+        for line in textwrap.wrap(_sentences(rng, animal, 3), 70):
+            draw.text((70, y), line, font=_font(22), fill=0)
+            words += line.split()
+            y += 32
+        y += 18
+    if kind == "sparse":
+        line = f"Prepared by the {animal[0]} recovery team."
+        draw.text((70, y), line, font=_font(22), fill=0)
+        words += line.split()
+    if kind in ("dense", "table"):
+        rows = [["Site", "Visits", "Animals", "Trend"]] + [
+            [f"Site {k}", str(rng.randint(2, 30)), str(rng.randint(5, 400)), rng.choice(["stable", "rising"])]
+            for k in range(1, 9 if kind == "table" else 6)
+        ]
+        cols, top = [70, 330, 560, 760, 955], y + 10
+        for i, row in enumerate(rows):
+            for j, cell in enumerate(row):
+                draw.text((cols[j] + 10, top + 44 * i + 10), cell, font=_font(22), fill=0)
+                words.append(cell)
+        for i in range(len(rows) + 1):
+            draw.line((cols[0], top + 44 * i, cols[-1], top + 44 * i), fill=0, width=2)
+        for x in cols:
+            draw.line((x, top, x, top + 44 * len(rows)), fill=0, width=2)
+    _scanned(img, seed).save(path)
+    path.with_suffix(".gt.txt").write_text(" ".join(words) + "\n", encoding="utf-8")
+
+
+def scanned_letter_pdf(path: Path, page: Path) -> None:
+    """An image-only PDF of one scanned page: no text layer, so it is OCR'd."""
+    img = Image.open(page)
+    size = (595, 595 * img.height / img.width)
+    c = Canvas(str(path), pagesize=size, invariant=1)
+    c.drawImage(ImageReader(img), 0, 0, *size)
+    c.save()
+
+
 def register_csv(path: Path) -> None:
     """A register export: one row per platypus sighting."""
     rng = random.Random(4)
@@ -352,6 +442,26 @@ def main() -> None:
     audit_pdf(DOCUMENTS / "koala-habitat-audit.pdf", DOCUMENTS / "koala-habitat-audit_transcript.txt")
     foi_index_pdf(DOCUMENTS / "bilby-foi-documents-index.pdf")
     schedule_pdf(DOCUMENTS / "bilby-schedule-of-documents.pdf")
+    SCANS.mkdir(parents=True, exist_ok=True)
+    form_image(SCANS / "form-bilby-sighting-report.png", "Bilby Sighting Report",
+               [("Observer name", "Jo Wattle"), ("Date of sighting", "14/03/2025"),
+                ("Location", "Currawinya National Park"), ("Number seen", "3")], seed=11)
+    form_image(SCANS / "form-wombat-burrow-permit.png", "Wombat Burrow Works Permit",
+               [("Applicant", "Bushland Fencing Pty Ltd"), ("Property", "Lot 12 Gundaroo Road"),
+                ("Burrows affected", "2"), ("Works start", "02/06/2025"), ("Works end", "20/06/2025"),
+                ("Ranger approval", "Pending")], seed=12)
+    form_image(SCANS / "form-koala-rescue-intake.png", "Koala Rescue Intake",
+               [("Rescuer", "Sam Gumtree"), ("Found at", "Port Macquarie"), ("Condition", "Dehydrated")],
+               seed=13)
+    for k, text in enumerate([
+        "Two echidnas crossed the track near the dam.",
+        "Quokka seen at dusk by the jetty.",
+        "Platypus burrow found on the eastern bank of the creek after the flood waters receded.",
+    ]):
+        line_image(SCANS / f"line-field-note-{k + 1}.png", text, seed=21 + k)
+    for kind, seed in [("dense", 31), ("table", 32), ("sparse", 33)]:
+        page_image(SCANS / f"page-{kind}.png", kind, seed=seed)
+    scanned_letter_pdf(DOCUMENTS / "numbat-scanned-survey-page.pdf", SCANS / "page-dense.png")
     register_csv(SPREADSHEETS / "platypus-sightings-register.csv")
     statistics_xlsx(SPREADSHEETS / "echidna-population-statistics.xlsx")
 

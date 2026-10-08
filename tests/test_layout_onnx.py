@@ -7,10 +7,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from tests._synthetic import SCANS_DIR
 from womblex.ingest.interfaces.protocols import LayoutAnalyzer
 from womblex.ingest.layout_onnx import LABEL_MAP, PPDocLayoutAnalyzer
 
-_FIXTURE = Path(__file__).parent.parent / "fixtures/fixtures/doclaynet/dense_text_548.png"
+_FIXTURE = SCANS_DIR / "page-table.png"
 
 
 def test_label_map_covers_model_labels() -> None:
@@ -38,8 +39,7 @@ def test_missing_model_names_the_path(tmp_path: Path) -> None:
         PPDocLayoutAnalyzer(tmp_path).analyze(np.zeros((64, 64, 3), dtype=np.uint8))
 
 
-@pytest.mark.skipif(not _FIXTURE.exists(), reason="DocLayNet fixture not present")
-def test_finds_table_in_real_page() -> None:
+def test_finds_table_in_a_scanned_page() -> None:
     import cv2
 
     img = cv2.cvtColor(cv2.imread(str(_FIXTURE)), cv2.COLOR_BGR2RGB)

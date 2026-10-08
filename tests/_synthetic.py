@@ -10,6 +10,7 @@ from pathlib import Path
 SYNTHETIC_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "synthetic"
 DOCUMENTS_DIR = SYNTHETIC_DIR / "documents"
 SPREADSHEETS_DIR = SYNTHETIC_DIR / "spreadsheets"
+SCANS_DIR = SYNTHETIC_DIR / "scans"  # images, each with a ``.gt.txt`` of its text
 
 BUDGET_DOCX = DOCUMENTS_DIR / "wombat-portfolio-budget-statements.docx"
 NOTICE_PDF = DOCUMENTS_DIR / "quokka-care-decision-notice_redacted.pdf"
@@ -17,5 +18,6 @@ AUDIT_PDF = DOCUMENTS_DIR / "koala-habitat-audit.pdf"
 AUDIT_TRANSCRIPT = DOCUMENTS_DIR / "koala-habitat-audit_transcript.txt"
 FOI_INDEX_PDF = DOCUMENTS_DIR / "bilby-foi-documents-index.pdf"
 SCHEDULE_PDF = DOCUMENTS_DIR / "bilby-schedule-of-documents.pdf"
+SCANNED_PDF = DOCUMENTS_DIR / "numbat-scanned-survey-page.pdf"
 REGISTER_CSV = SPREADSHEETS_DIR / "platypus-sightings-register.csv"
 STATISTICS_XLSX = SPREADSHEETS_DIR / "echidna-population-statistics.xlsx"
