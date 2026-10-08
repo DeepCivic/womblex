@@ -139,3 +139,14 @@ def test_close_after_a_curve_draws_no_phantom_rule(tmp_path) -> None:
     assert [(e["orientation"], round(e["x0"]), round(e["x1"]), round(e["top"])) for e in edges] == [
         ("h", 72, 272, 200),
     ]
+
+
+def test_rotated_page_finds_tables_in_the_displayed_frame() -> None:
+    """The FOI index is a landscape table on a rotated portrait page: its text
+    runs vertically in the unrotated frame, which once gave 39 columns for 11."""
+    from tests._synthetic import FOI_INDEX_PDF
+
+    with open_document(FOI_INDEX_PDF, backend="pdfium") as doc:
+        (table,) = doc[0].find_tables(strategy="text")
+    assert (table.row_count, table.col_count) == (78, 11)
+    assert table.rows[0][:3] == ("FOI referen", "ce", "FOI-2025-042")

@@ -182,10 +182,10 @@ class PdfiumPage:
         return _text.text_blocks(self._chars())
 
     def find_tables(self, *, strategy: TableStrategy = "lines") -> list[FoundTable]:
-        left, bottom, right, top = self._page.get_cropbox()
         return _tables.find_tables(
-            strategy, Rect(0.0, 0.0, right - left, top - bottom), self._chars,
+            strategy, self.rect, self._chars,
             lambda: _tables.read_polylines(self._path_objects(), self._origin),
+            rotation=self.rotation_matrix if self.rotation else None,
         )
 
     def render(self, *, dpi: int, clip: Rect | None = None) -> np.ndarray:

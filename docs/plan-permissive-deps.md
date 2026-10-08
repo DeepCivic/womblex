@@ -14,7 +14,6 @@ The layout stage (L3) has shipped; [`layout.md`](layout.md) documents it and [`d
 Benchmark-side merges (H-B, F1-B) also live in [`plan-post-gt-baseline.md`](plan-post-gt-baseline.md); F1 below waits on them.
 
 - **P8… (W).** Fidelity fixes driven by `BACKEND_PARITY.md`, repeated until the gates below hold. Known inputs:
-  - The text strategy's column count on `bilby-foi-documents-index` (39 against fitz's 11): pdfplumber's word segmentation against MuPDF's.
   - Multi-column reading order in the pdfium text engine: Phase 0's divergence tail (see `decisions.md`), left to P8 by P6.
   - MuPDF's `get_drawings` also reports annotation and widget appearance streams, which pdfium's page objects do not hold (`FPDFAnnot_GetObject` reaches them, in appearance space). No vendored fixture is affected.
   - Rotated spreadsheet-print pages: `Rect.transform` is double precision where fitz rounds to float32 (up to 1.5e-5 pt). The womblex-collection run through H-B is still owed.

@@ -17,6 +17,7 @@ pdfplumber's, so nothing is converted on the way in or out.
 from __future__ import annotations
 
 import ctypes
+from dataclasses import replace
 from itertools import pairwise
 from typing import TYPE_CHECKING, Any
 
@@ -104,6 +105,24 @@ def edges_from_polylines(polylines: Iterable[Polyline]) -> list[Edge]:
     return edges
 
 
+def rotate_chars(chars: Iterable[Char], matrix: Matrix) -> list[Char]:
+    """*chars* carried onto the rotated page: box through *matrix*, direction through its linear part."""
+    a, b, c, d, _, _ = matrix
+    return [
+        replace(ch, box=ch.box.transform(matrix), direction=(
+            round(a * ch.direction[0] + c * ch.direction[1], 2) + 0.0,
+            round(b * ch.direction[0] + d * ch.direction[1], 2) + 0.0,
+        ))
+        for ch in chars
+    ]
+
+
+def rotate_polylines(polylines: Iterable[Polyline], matrix: Matrix) -> Iterator[Polyline]:
+    a, b, c, d, e, f = matrix
+    for run in polylines:
+        yield [(a * x + c * y + e, b * x + d * y + f) for x, y in run]
+
+
 def char_dicts(chars: Iterable[Char]) -> list[dict[str, Any]]:
     """The keys pdfplumber's word and cell extraction read from a character."""
     return [
@@ -152,11 +171,20 @@ def find_tables(
     bbox: Rect,
     chars: Callable[[], list[Char]],
     polylines: Callable[[], Iterable[Polyline]],
+    rotation: Matrix | None = None,
 ) -> list[FoundTable]:
     """Tables on a page of size *bbox*, by "lines" (ruled edges) or "text"
-    (alignment). pdfplumber's defaults throughout — the engine is the feature."""
+    (alignment). pdfplumber's defaults throughout — the engine is the feature.
+
+    *rotation* carries the unrotated inputs onto the displayed page, where *bbox*
+    lives: MuPDF finds tables in that frame, so a landscape table on a rotated
+    portrait page reads as horizontal text rather than one column per glyph row."""
     from pdfplumber.table import TableFinder
 
+    if rotation is not None:
+        chars_unrotated, polylines_unrotated = chars, polylines
+        chars = lambda: rotate_chars(chars_unrotated(), rotation)
+        polylines = lambda: rotate_polylines(polylines_unrotated(), rotation)
     page = _PlumberPage(bbox, chars, polylines)
     settings = {"vertical_strategy": strategy, "horizontal_strategy": strategy}
     out: list[FoundTable] = []
