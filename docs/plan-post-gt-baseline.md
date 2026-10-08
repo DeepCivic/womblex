@@ -32,8 +32,18 @@ Moved here from [plan-permissive-deps.md](plan-permissive-deps.md). All are womb
   - The swap's findings (recorded in `decisions.md`) re-checked: table-class recall fell from 50% to 25%, and `dense_text_548` gave three table regions where the ground truth has one, with a `chart` box (mapped to `figure`) almost identical to the `table` box. `LABEL_MAP` and the 0.3 threshold are the knobs. The `dense_text_548` table must be found.
   - End-to-end tables emitted on the scanned fixtures checked by hand.
   - DocLayNet F1 recorded as the floor later merges must not drop below.
-- **F1-B (after F1 (W) is ready).** Regenerate `EXTRACTION`, `REDACTION_HANDLING`, `PII_CLEANING`, `READING_ORDER` and `CHUNKING`, plus the table and false-table suites, on the permissive backend. These are compared against this baseline under the F1 gates in [plan-permissive-deps.md](plan-permissive-deps.md).
+- **H-B, womblex-collection run.** Run both backends over the collection, including rotated spreadsheet-print pages, and reproduce the multi-column reading-order tail on the ASX pages (Phase 0's divergence; the synthetic two-column pages do not reproduce it). A divergence found becomes a P8 fix in Womblex, with a synthetic shape added to its generator.
+- **F1-B (after F1 (W) lands; it does not gate F1).** Regenerate `EXTRACTION`, `REDACTION_HANDLING`, `PII_CLEANING`, `READING_ORDER` and `CHUNKING`, plus the table and false-table suites, on the permissive backend, and compare against this baseline. A regression is fixed in Womblex.
+
+  | Measure | Required |
+  |---|---|
+  | Auditor-General transcript CER | Within 0.005 of this baseline |
+  | ACT-ECI CER | No strategy worse by more than 0.01 |
+  | Table-benchmark F1 | Drops by at most 0.01 |
+  | False-table cohort | Does not grow |
+  | FUNSD field counts | Equal |
+  | `CHUNKING`, `READING_ORDER`, `PII_CLEANING`, `REDACTION_HANDLING` | No regression from this baseline |
 
 ## What this run closes
 - L3c-B, L1-B and the transcript-CER half of H-B, as above.
-- Absolute thresholds in the F1 gates that were set from earlier reports (the DocLayNet layout F1, the Auditor-General transcript CER) are reset from this baseline in the same merge. Between-backend gates (fitz against pdfium) are unaffected.
+- Absolute thresholds in the F1-B checks that were set from earlier reports (the DocLayNet layout F1, the Auditor-General transcript CER) are reset from this baseline in the same merge. The between-backend F1 gates in [plan-permissive-deps.md](plan-permissive-deps.md) are measured in Womblex and are unaffected.

@@ -874,8 +874,8 @@ be re-derivable, and the first pass's were not.
   (`koala-habitat-audit`: 24 paragraphs under PyMuPDF; 6 paragraphs, 10 headings
   and 18 footers under pdfium), so element kinds, element counts and
   `content_digest` differ between backends. Plain-text order and content are
-  unaffected. The rule is deliberately not guessed from the synthetic set: it
-  waits on a real document from the collection, tracked under P8 in
+  unaffected. The rule is fixed from synthetic pages at varied leading and
+  paragraph spacing, not from the one-leading set alone, tracked under P8 in
   [plan-permissive-deps.md](plan-permissive-deps.md). Until then, do not compare
   element streams across backends, and do not flip the default.
 - **Handwriting is an OCR-engine ceiling.** The PaddleOCR ONNX backend cannot
