@@ -239,6 +239,16 @@ def _lines(chars: list[Char]) -> list[_Line]:
 #: 1.47 stays in the block and 1.64 breaks it, whatever the size or weight of the
 #: lines either side (a bold run-in label or a larger closing line set tight stays put).
 _MAX_PITCH = 1.5
+#: Text running up the page (in the unrotated frame) continues a block through a
+#: line this many font sizes *beyond* the baseline, in the direction MuPDF treats as
+#: the way back; probed at 3.5pt joining and 6pt splitting at 7pt.
+_MAX_AHEAD = 0.5
+#: Left-to-right text: a line starting this far (points) right of the previous
+#: line's start opens a block (MuPDF: 0 joins, 1 splits, at 7pt and at 10pt). Upside-down
+#: and downward text were measured for pitch only.
+_INDENT = 0.5
+_UP = (0.0, -1.0)
+_AXES = ((1.0, 0.0), (-1.0, 0.0), (0.0, 1.0))
 
 
 def _origin(char: Char) -> tuple[float, float]:
@@ -246,7 +256,14 @@ def _origin(char: Char) -> tuple[float, float]:
 
 
 def _same_block(prev: _Line, line: _Line) -> bool:
-    """*line* continues *prev*'s block, measured in their shared writing direction."""
+    """*line* continues *prev*'s block, measured in their shared writing direction.
+
+    MuPDF's rules are written in the unrotated page frame, where the characters
+    already are. Across the baseline: axis-aligned text continues by pitch (left to
+    right also unless the line starts right of the previous one); text running up the page
+    continues inside a window that favours the opposite side; oblique text never
+    continues by pitch, only by sitting in the previous line's row.
+    """
     first, last = prev.chars[0], line.chars[0]
     if first.direction != last.direction:
         return False
@@ -261,6 +278,12 @@ def _same_block(prev: _Line, line: _Line) -> bool:
         return d0 >= c1
     (px, py), (qx, qy) = _origin(first), _origin(last)
     pitch = (qx - px) * across[0] + (qy - py) * across[1]
+    if along == _UP:
+        return -_MAX_PITCH * last.size <= pitch <= _MAX_AHEAD * last.size
+    if along not in _AXES:
+        return False
+    if along == _LTR and (qx - px) > _INDENT:
+        return False
     return -0.5 * height <= b0 - a1 <= 0.7 * height and d0 < c1 and pitch <= _MAX_PITCH * last.size
 
 
