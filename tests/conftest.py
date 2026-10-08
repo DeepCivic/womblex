@@ -1,8 +1,8 @@
 """Shared test fixtures.
 
-All test data comes from real documents in ``fixtures/``. No synthetic
-data is generated — the curated fixture set represents the hardest
-extraction challenges from real government document releases.
+File inputs come from the synthetic fixture set (``tests/_synthetic.py``), so
+the suite runs on a bare checkout. Scoring against real documents is the
+benchmark's (``test_bench_ocr_accuracy`` here is maintainer-only).
 """
 
 import logging
@@ -13,8 +13,6 @@ from pathlib import Path
 import pytest
 
 from tests._synthetic import SPREADSHEETS_DIR
-
-FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "fixtures"
 
 # Load the local .env so real-service tests (Isaacus embed/enrich) can run
 # against the live API — the repo validates against real services locally, not
@@ -61,32 +59,8 @@ def tmp_dir(tmp_path: Path) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# Real fixture paths
+# Fixture paths
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def funsd_image_dir() -> Path:
-    """FUNSD form images directory."""
-    return FIXTURES_DIR / "funsd" / "images"
-
-
-@pytest.fixture
-def funsd_annotation_dir() -> Path:
-    """FUNSD annotation JSON directory."""
-    return FIXTURES_DIR / "funsd" / "annotations"
-
-
-@pytest.fixture
-def iam_line_dir() -> Path:
-    """IAM handwriting line images and ground truth."""
-    return FIXTURES_DIR / "iam_line"
-
-
-@pytest.fixture
-def doclaynet_dir() -> Path:
-    """DocLayNet layout pages and annotations."""
-    return FIXTURES_DIR / "doclaynet"
 
 
 @pytest.fixture

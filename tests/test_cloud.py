@@ -618,8 +618,11 @@ def test_process_job_publishes_the_log_even_when_the_batch_fails(tmp_path, monke
 # --- finalize (local store, no Postgres) -------------------------------------
 
 
-def test_finalize_consolidates_manifest(tmp_path):
+def test_finalize_consolidates_manifest(tmp_path, monkeypatch):
     """End-to-end finalize: real shards -> store -> consolidated manifest."""
+    # No queue: a DSN in the environment (CI's Postgres) would make finalize read it.
+    monkeypatch.delenv("WOMBLEX_DB_DSN", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     import argparse
 
     import pyarrow.parquet as pq

@@ -25,8 +25,8 @@ venv/
 # contributor creates stays out.
 .venv*/
 **/.venv*/
-# Benchmark fixtures are large and not needed in the runtime image.
-fixtures/fixtures/
+# Test fixtures (synthetic, and any local benchmark copy) are not needed at runtime.
+fixtures/
 docs/accuracy/
 *.egg-info/
 # A stamp left by a local `python -m build` names whatever commit that build

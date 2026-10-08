@@ -306,16 +306,16 @@ for page in doc:
 ```
 ## Testing Approach
 ### Unit tests
-- Detection logic with real benchmark images and programmatic PDFs
-- Extraction strategies exercised via real benchmark fixtures
-- Chunker output validated with ground-truth text from benchmark annotations
+- Detection logic with synthetic scans and programmatic PDFs
+- Extraction strategies exercised via the synthetic fixture set
+- Chunker output validated with the known text of the synthetic scans
 ### Integration tests
 - Full pipeline on small document set
 - Isaacus calls (mocked for CI, real for local validation)
 ### Test fixtures
-All test data comes from real documents resolved at `fixtures/fixtures/` (FUNSD, IAM-line, DocLayNet, womblex-collection). A minimal, redistributable subset is vendored in this repo so a bare clone runs most of the suite; the full benchmark set lives in a separate repository. See [THIRD_PARTY_DATA.md](THIRD_PARTY_DATA.md) for the vendored-vs-full split, the resolution path, and per-dataset attribution. Real PDF fixtures are added from the larger document collection as extraction quality improves.
+Every file a test reads comes from the synthetic set in `fixtures/synthetic/`: invented Australian-animal documents in the shapes real government releases take (a budget DOCX, redacted and scanned PDFs, a printed-spreadsheet manifest, register CSV and statistics XLSX, scanned forms, lines and pages each with a `.gt.txt`). `fixtures/synthetic/generate.py` writes them deterministically and they are committed, so source hashes and the `test_default_digest` pins are stable; tests reach them through `tests/_synthetic.py`. A shape the set lacks is added to the generator, never as a real document. See [fixtures/synthetic/README.md](fixtures/synthetic/README.md).
 
-The minimal set is vendored under `fixtures/fixtures/`, so a bare checkout runs most of the suite with no extra setup. The full benchmark set is optional and obtained per [THIRD_PARTY_DATA.md](THIRD_PARTY_DATA.md) (tests resolve fixtures at `fixtures/fixtures/`).
+No third-party data is in this repository. Real documents and the public datasets live in womblex-benchmark; the one module here that scores against them (`test_bench_ocr_accuracy.py`, marked `benchmark`) is maintainer-only and reads a local copy at `fixtures/fixtures/` (git-ignored). See [THIRD_PARTY_DATA.md](THIRD_PARTY_DATA.md).
 ### Running tests
 `pytest` lives in the `[dev]` extra, not the base deps, so install it first, then
 run via `uv run` (not bare `pytest`) to keep the project venv active:
@@ -326,13 +326,10 @@ run via `uv run` (not bare `pytest`) to keep the project venv active:
 # which every `test_api_app.py` test errors building the upload route.
 uv sync --extra dev --extra ui --extra api
 
-# Default run. NOTE: there is NO addopts filter — this runs the WHOLE suite,
-# including the OCR-fixture (`slow`) and VLM (`benchmark`) tests. On a bare
-# checkout most heavy tests skip (see below); with the full fixtures and an
-# Isaacus key they run, and the suite is slow (tens of minutes).
-uv run python -m pytest tests/ -v
+# What CI runs: everything except the maintainer-only `benchmark` module.
+uv run python -m pytest tests/ -v -m "not benchmark"
 
-# Fast subset — skip the OCR-fixture and VLM benchmark tests:
+# Fast subset — also skip the OCR (`slow`) tests:
 uv run python -m pytest tests/ -v -m "not slow and not benchmark"
 ```
 
@@ -341,7 +338,7 @@ green suite is not a green build:
 ```bash
 uv run ruff check src/ tests/
 uv run mypy src/          # src/ only; tests are not type-checked
-uv run python -m pytest tests/ -v
+uv run python -m pytest tests/ -v -m "not benchmark"   # with a Postgres service for the queue tests
 ```
 
 Accuracy benchmarks are **not** in this repository. They live in
@@ -353,19 +350,14 @@ uv run python -m pytest accuracy/ -v
 ```
 
 ### Expected conditional skips
-The skip count is environment-dependent (which optional deps, services, and
-fixtures are present) — none are on broken code. On a bare checkout (no Isaacus
-key, no AWS credentials, vendored fixtures only) a full `pytest tests/` reports
-~35 skips (fewer than before — the isaacus SDK is core now, so its wrapper tests
-run instead of skipping); on a dev box with the full fixtures, an Isaacus key,
-and AWS Bedrock access, far fewer skip.
+The skip count depends on credentials and services, never on fixtures — none
+are on broken code. On a bare checkout (no Isaacus key, no Postgres DSN)
+`pytest tests/ -m "not benchmark"` reports ~32 skips; CI, which runs a Postgres
+service, ~12.
 Run with `-rs` to see live reasons. The recurring ones:
 
-- **~15 — Mistral OCR VLM benchmark** (`test_bench_ocr_accuracy.py`): the
-  `mistral-ocr` engine invokes Mistral Pixtral Large via **AWS Bedrock**
-  (`bedrock-runtime`). boto3 is a core dependency (always installed), so the
-  skip is now purely about resolvable AWS credentials with Pixtral Large
-  model access enabled. Skips cleanly when absent.
+- **20 — job queue** (`test_cloud.py`): need a real Postgres
+  (`WOMBLEX_DB_DSN` / `DATABASE_URL`); CI provides one.
 - **geospatial** (`test_geospatial.py`): needs `geopandas` / `pyogrio`, which
   are not declared in `pyproject.toml` (no extra installs them); install them
   separately to run these tests.
@@ -378,12 +370,12 @@ Run with `-rs` to see live reasons. The recurring ones:
   without `ISAACUS_API_KEY` (these make real Kanon-2 calls — embed, enrich, and
   AI chunking — when a key is present).
 - **rapidocr** OCR paths (`test_fixtures.py`): `importorskip("rapidocr_onnxruntime")`.
-- **fixture-gated** tests (`test_text_extractor.py`, `test_extract.py`,
-  `test_spreadsheet_print.py`): skip when the specific
-  fixture (transcript / Excel / ACT FOI Index files / benchmark image) is not in
-  the fixtures clone.
+- **benchmark** (`test_bench_ocr_accuracy.py`, maintainer-only, deselected by
+  `-m "not benchmark"`): skips without the benchmark fixtures at
+  `fixtures/fixtures/`; its `mistral-ocr` cases also need AWS Bedrock
+  credentials with Pixtral Large access.
 
-Skips don't fail the build; CI sees the same set minus whatever it installs.
+Skips don't fail the build.
 
 ## Analysing Accuracy and Pipeline Performance
 When reviewing accuracy results or recommending improvements, use a systematic component-level analysis rather than jumping to isolated fixes. Walk through each layer of the pipeline and ask:
@@ -459,7 +451,7 @@ belongs on the orchestrator path, not here.
 - Create unnecessary files — edit existing files when possible
 - Add excessive docstrings — docstrings are concise, practical and only where needed
 - Add quality scoring — we don't understand the data well enough yet
-- Add a test here that scores library output against womblex-collection ground truth, or that writes a `docs/accuracy/` report. That suite belongs in womblex-benchmark, beside the ground truth it scores against; this repository receives the report. Reading a document out of the vendored `fixtures/fixtures/womblex-collection/` subset as ordinary test input is fine — publishing a report from here is not
+- Add a test here that scores library output against womblex-collection ground truth, or that writes a `docs/accuracy/` report. That suite belongs in womblex-benchmark, beside the ground truth it scores against; this repository receives the report. Reading the synthetic fixtures as ordinary test input is fine — publishing a report from here is not
 ## Do
 - Read files before modifying — use Read tool to understand existing code
 - Follow existing patterns — check similar files (e.g., other scrapers) before implementing
