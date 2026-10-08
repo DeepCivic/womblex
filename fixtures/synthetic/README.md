@@ -14,6 +14,7 @@ released under the repository's licence (Apache-2.0).
 | `documents/quokka-care-decision-notice_redacted.pdf` | Three-page native PDF, a logo image, six vector redactions on page one | A redacted FOI decision notice |
 | `documents/koala-habitat-audit.pdf` | Six-page native PDF, chapter headings, page footers, one ruled table | An audit report |
 | `documents/koala-habitat-audit_transcript.txt` | Plain text of the audit report | A report transcript |
+| `documents/emu-spacing-variants.pdf` | Six-page native PDF, each page at a different leading and paragraph gap, with a bold run-in label and a larger closing line | Native reports set at other leadings |
 | `documents/bilby-foi-documents-index.pdf` | A spreadsheet printed to PDF: four rotated pages (portrait MediaBox, `/Rotate 90`), a metadata block, two-line headers, 144 rows | An FOI manifest |
 | `documents/bilby-schedule-of-documents.pdf` | A one-page schedule printed from a spreadsheet, 44 rows | An FOI schedule of documents |
 | `documents/numbat-scanned-survey-page.pdf` | Image-only PDF of `scans/page-dense.png`: OCR and the layout step run on it | A scanned report page |

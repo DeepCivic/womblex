@@ -29,6 +29,19 @@ class TestSegment:
         chars = _chars("first", 72, 100) + _chars("second", 72, 160)
         assert [len(b) for b in _text.segment(chars)] == [1, 1]
 
+    def test_a_pitch_over_one_and_a_half_sizes_starts_a_block(self) -> None:
+        # A 6pt gap is inside the proximity band; the 1.6-size pitch breaks it.
+        chars = _chars("first", 72, 100) + _chars("second", 72, 116)
+        assert [len(b) for b in _text.segment(chars)] == [1, 1]
+
+    def test_a_weight_change_alone_does_not_start_a_block(self) -> None:
+        chars = _chars("Label", 72, 100, bold=True) + _chars("body text", 72, 100 + LINE)
+        assert [len(b) for b in _text.segment(chars)] == [2]
+
+    def test_a_row_across_a_gutter_stays_in_one_block(self) -> None:
+        chars = _chars("left", 72, 100) + _chars("right", 340, 100)
+        assert [[line.text for line in b] for b in _text.segment(chars)] == [["left", "right"]]
+
     def test_a_fragment_out_of_stream_order_rejoins_its_line(self) -> None:
         chars = _chars("alpha", 72, 100) + _chars("later", 72, 300) + _chars("beta", 112, 100)
         lines = [line.text for block in _text.segment(chars) for line in block]

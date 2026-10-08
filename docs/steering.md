@@ -48,7 +48,7 @@ Two `DocumentType` values are still unreachable:
 
 ### Layout Detection
 
-**Open (model): PP-DocLayout-M is the layout model** (#130, `ingest/layout_onnx.py`, registered default `pp-doclayout-m`), chosen for licence compatibility. In an uncontrolled run table-class recall fell from 50% to 25%, and `dense_text_548` gave three table regions where the ground truth has one, plus a `chart` box (mapped to `figure`) almost identical to the `table` box. Tuning is tracked in [plan-permissive-deps.md](plan-permissive-deps.md).
+**Open (model): PP-DocLayout-M is the layout model** (#130, `ingest/layout_onnx.py`, registered default `pp-doclayout-m`), chosen for licence compatibility. In an uncontrolled run table-class recall fell from 50% to 25%, and `dense_text_548` gave three table regions where the ground truth has one, plus a `chart` box (mapped to `figure`) almost identical to the `table` box. Tuning is tracked in [plan-post-gt-baseline.md](plan-post-gt-baseline.md).
 
 **Resolved (metric): the reported 25% table recall was largely a GT-aggregation artefact** (B0, 2026-07-28). `_aggregate_doclaynet_blocks` groups *consecutive* same-label word spans, so two stray 1-word Table-labelled footnote lines in `dense_text_548` split the real 397-word table run into three GT blocks, each unmatched stray charged as a separate false negative. GT Table blocks are now filtered by a minimum span count (`MIN_TABLE_GT_SPANS = 3`) before matching. Note also `table_0` contains no Table-labelled GT at all (196 Text, 2 Section-header, 1 Page-footer) — despite the name it is not a table fixture and serves as a false-table (no-GT) fixture instead.
 

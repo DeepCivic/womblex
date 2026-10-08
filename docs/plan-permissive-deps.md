@@ -1,6 +1,6 @@
 # Permissive dependencies — outstanding work
 
-*Status: in progress (2026-10). Outstanding: P8, F1, F2 (PyMuPDF). Everything shipped is recorded in [`CHANGELOG.md`](../CHANGELOG.md), [`architecture.md`](architecture.md), [`models.md`](models.md) and [`decisions.md`](decisions.md), not here. Every benchmark-side action (L3c-B, L1-B, H-B, F1-B) has moved to [`plan-post-gt-baseline.md`](plan-post-gt-baseline.md). Everything left here is deliverable now. Each merge updates this list as it lands, and the document is deleted once F2 ships.*
+*Status: in progress (2026-10). Outstanding: P8, F1, F2 (PyMuPDF). Everything shipped is recorded in [`CHANGELOG.md`](../CHANGELOG.md), [`architecture.md`](architecture.md), [`models.md`](models.md) and [`decisions.md`](decisions.md), not here. Every benchmark-side action (L3c-B, L1-B, H-B, F1-B, the womblex-collection runs and every gate scored in womblex-benchmark) lives in [`plan-post-gt-baseline.md`](plan-post-gt-baseline.md), and nothing here waits on it. Everything left here is deliverable now, gated on what this repository can measure. Each merge updates this list as it lands, and the document is deleted once F2 ships.*
 
 ## Context
 Womblex is Apache-2.0, so its dependencies must be licence-compatible. The remaining incompatible one is `pymupdf` (`import fitz`; opens every PDF and standalone image) and it is being replaced: every extractor already reads through the `ingest/pdf/` seam, `fitz` is imported only in `ingest/pdf/_fitz.py`, and the pdfium backend (`backend="pdfium"`) opens PDFs and images with geometry, rendering, images, drawings, widgets and text. Its `find_tables` is `_tables.py` (P7). The default backend is still fitz.
@@ -11,13 +11,12 @@ A merge is W (womblex) or B (womblex-benchmark, paired). An approval tag means t
 The layout stage (L3) has shipped; [`layout.md`](layout.md) documents it and [`decisions.md`](decisions.md) records why it is shaped as it is. The remaining layout work (L3c-B, L1-B) is benchmark-side and now lives in [`plan-post-gt-baseline.md`](plan-post-gt-baseline.md).
 
 ## PyMuPDF
-Benchmark-side merges (H-B, F1-B) also live in [`plan-post-gt-baseline.md`](plan-post-gt-baseline.md); F1 below waits on them.
+Benchmark-side merges (H-B, F1-B) live in [`plan-post-gt-baseline.md`](plan-post-gt-baseline.md). They do not gate anything here: a divergence they find comes back as a P8 fix.
 
-- **P8… (W).** Fidelity fixes driven by `BACKEND_PARITY.md`, repeated until the gates below hold. Known inputs:
-  - Multi-column reading order in the pdfium text engine: Phase 0's divergence tail (see `decisions.md`), left to P8 by P6. Two synthetic two-column pages, one with the columns in content order and one with their lines interleaved, give `plain_text` identical to fitz's, so the tail needs the ASX pages (H-B) to reproduce.
-  - Block grouping, found by running `extract_text` over the synthetic PDFs under each backend: `_same_block` in `_text.py` merges any lines within 0.7 line heights, so a heading and every paragraph after it become one block. `koala-habitat-audit` gives 24 paragraphs under fitz and 6 paragraphs, 10 headings and 18 footers under pdfium, and every native PDF's digest differs. On the synthetic PDFs a size or bold change between lines always starts a fitz block and a forward line pitch of 1.36 font sizes or less never does (1.56 or more always does); all of it comes from reportlab at one leading, so a real rule needs the collection's documents.
-  - The owed womblex-collection run through H-B, now also for rotated spreadsheet-print pages.
-- **F1 (W).** Pairs with F1-B in the baseline plan.
+- **P8… (W).** Fidelity fixes, measured by comparing the two backends over `fixtures/synthetic/` in this repository, repeated until the gates below hold. Block grouping has shipped (`decisions.md`): block line counts and element kinds match on every synthetic PDF except `bilby-foi-documents-index.pdf`. Known inputs:
+  - The rotated index: MuPDF starts a new block at the second line of a two-line column header (`Subsection` / `code`) and pdfium does not, so headings count 12 against 8. The rule is not derivable from the one synthetic page; vary the header shapes in the generator, or take it from the collection run in the baseline plan.
+  - Multi-column reading order: Phase 0's divergence tail (see `decisions.md`). Two synthetic two-column pages, one with the columns in content order and one with their lines interleaved, give `plain_text` identical to fitz's, so there is no reproducer here; the ASX-page investigation is in the baseline plan.
+- **F1 (W).** Lands when the gates below hold; F1-B in the baseline plan runs after it.
   - Flip `open_document`'s default to the permissive backend.
   - Re-pin `tests/test_default_digest.py` deliberately, and move its version guard from `fitz.VersionBind` to the pypdfium2 version.
 - **F2 (W, approval).**
@@ -57,7 +56,7 @@ Migration gates, not quality scores. They retire with this plan.
 |---|---|
 | Every merge | `uv run ruff check src/ tests/`, `uv run mypy src/` and `uv run python -m pytest tests/ -v` pass; `uv lock --check` passes on approval merges; touched files are under 750 lines (`wc -l`); `git diff --stat $(git merge-base HEAD origin/main)..HEAD` is within the cap |
 
-F1 flips the default only when all of these hold:
+F1 flips the default only when all of these hold, each measured between the two backends over `fixtures/synthetic/` (no ground truth):
 
 | Measure | Required |
 |---|---|
@@ -66,12 +65,9 @@ F1 flips the default only when all of these hold:
 | Per-page plan operation | ≥ 99% agreement |
 | `has_text_layer` | 100% agreement |
 | Native-text CER between backends | Median ≤ 0.01, p95 ≤ 0.03 |
-| Auditor-General transcript CER | Within 0.005 of the post-GT baseline |
-| ACT-ECI CER | No strategy worse by more than 0.01 |
 | Table count | Equal on ≥ 95% of table pages |
-| Table-benchmark F1 | Drops by at most 0.01 |
-| False-table cohort | Does not grow |
 | Vector-redaction counts | Identical |
-| AcroForm and FUNSD field counts | Equal |
-| `CHUNKING`, `READING_ORDER`, `PII_CLEANING`, `REDACTION_HANDLING` | No regression from the post-GT baseline |
+| AcroForm field counts | Equal |
 | Native extraction | ≤ 1.5× the fitz wall time |
+
+The gates scored against womblex-collection ground truth (transcript CER, table benchmark, false-table cohort, FUNSD fields, the `CHUNKING`, `READING_ORDER`, `PII_CLEANING` and `REDACTION_HANDLING` reports) are F1-B checks in the baseline plan, run after F1.

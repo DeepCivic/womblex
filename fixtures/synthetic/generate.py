@@ -222,6 +222,37 @@ def audit_pdf(path: Path, transcript: Path) -> None:
     transcript.write_text("\n\n".join(out) + "\n", encoding="utf-8")
 
 
+def spacing_pdf(path: Path) -> None:
+    """A native page per leading and paragraph spacing, with size and weight changes.
+
+    Every other native PDF here is set at one leading; block grouping needs
+    pages that vary it. Each page is a bold heading over paragraphs of four
+    lines, then a run of lines whose pitch grows step by step.
+    """
+    rng = random.Random(5)
+    c = Canvas(str(path), invariant=1)
+    cases = [(11, 12.5, 0), (11, 14, 6), (11, 14, 10), (10, 12, 4), (12, 18, 12), (11, 16, 0)]
+    for page_no, (size, leading, gap) in enumerate(cases, start=1):
+        animal = ANIMALS[page_no % len(ANIMALS)]
+        c.setFont("Helvetica-Bold", size + 3)
+        c.drawString(56, 790, f"Section {page_no}. Notes on {animal[0]} spacing")
+        y = 790 - (size + 3) - gap - 4
+        for _ in range(3):
+            c.setFont("Helvetica", size)
+            for line in textwrap.wrap(_sentences(rng, animal, 3), 90):
+                c.drawString(56, y, line)
+                y -= leading
+            y -= gap
+        c.setFont("Helvetica-Bold", size)
+        c.drawString(56, y, "Run-in label in bold")
+        c.setFont("Helvetica", size)
+        c.drawString(56, y - leading, "Body text of the same size directly beneath it")
+        c.setFont("Helvetica", size + 4)
+        c.drawString(56, y - 2 * leading - 6, "A larger line closing the page")
+        c.showPage()
+    c.save()
+
+
 INDEX_COLUMNS = [  # (header lines, x in landscape points, value maker)
     (["Unique ID"], 30, lambda r, i: f"{i:05d}"),
     (["Directorate"], 78, lambda r, i: r.choice(["NWS", "PKS", "ENV"])),
@@ -440,6 +471,7 @@ def main() -> None:
     budget_docx(DOCUMENTS / "wombat-portfolio-budget-statements.docx")
     redacted_notice_pdf(DOCUMENTS / "quokka-care-decision-notice_redacted.pdf")
     audit_pdf(DOCUMENTS / "koala-habitat-audit.pdf", DOCUMENTS / "koala-habitat-audit_transcript.txt")
+    spacing_pdf(DOCUMENTS / "emu-spacing-variants.pdf")
     foi_index_pdf(DOCUMENTS / "bilby-foi-documents-index.pdf")
     schedule_pdf(DOCUMENTS / "bilby-schedule-of-documents.pdf")
     SCANS.mkdir(parents=True, exist_ok=True)
