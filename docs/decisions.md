@@ -866,6 +866,18 @@ be re-derivable, and the first pass's were not.
   verbatim, so it is additive noise, not corruption. Closing it needs a
   cross-validation step (reject native low-conf tables where the layout model
   predicts no Table at the bbox).
+- **Paragraph and heading boundaries differ on the pdfium backend (known, not yet
+  fixed; the default backend is still PyMuPDF).** The pdfium text engine starts a
+  new block only when lines are more than 0.7 line heights apart, where MuPDF also
+  breaks at paragraph gaps and at a change of font size or weight. On the synthetic
+  PDFs this merges a heading and the paragraphs after it into one block
+  (`koala-habitat-audit`: 24 paragraphs under PyMuPDF; 6 paragraphs, 10 headings
+  and 18 footers under pdfium), so element kinds, element counts and
+  `content_digest` differ between backends. Plain-text order and content are
+  unaffected. The rule is deliberately not guessed from the synthetic set: it
+  waits on a real document from the collection, tracked under P8 in
+  [plan-permissive-deps.md](plan-permissive-deps.md). Until then, do not compare
+  element streams across backends, and do not flip the default.
 - **Handwriting is an OCR-engine ceiling.** The PaddleOCR ONNX backend cannot
   read handwriting; cross-cell handwritten forms and photographed/creased forms
   reach high CER. Out of scope without an HTR backend + dewarping.

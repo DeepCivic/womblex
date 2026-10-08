@@ -98,10 +98,11 @@ def _wide_string(fn: object, *args: object) -> str:
 class PdfiumPage:
     """One pypdfium2 page, presented as `types.Page`."""
 
-    def __init__(self, doc: PdfiumDocument, page: pdfium.PdfPage, number: int) -> None:
+    def __init__(self, doc: PdfiumDocument, page: pdfium.PdfPage, number: int, source: int) -> None:
         self._doc = doc
         self._page = page
         self._number = number
+        self._source = source
         left, _bottom, _right, top = page.get_cropbox()
         self._origin = (left, top)
         self._char_cache: list[_text.Char] | None = None
@@ -117,14 +118,14 @@ class PdfiumPage:
         left, top = self._origin
         return Rect.of((box[0] - left, top - box[3], box[2] - left, top - box[1]))
 
-    def _objects(self) -> Iterator[tuple[pdfium.PdfObject, Matrix]]:
+    def _objects(self, page: pdfium.PdfPage | None = None) -> Iterator[tuple[pdfium.PdfObject, Matrix]]:
         """Every object, form XObjects descended, with its container's transform.
 
         An object inside a form reports bounds in the form's space, so each
         level carries the composed matrices of the forms above it.
         """
         to_page: list[Matrix] = [_IDENTITY]
-        for obj in self._page.get_objects():
+        for obj in (page or self._page).get_objects():
             del to_page[obj.level + 1:]
             if obj.type == pdfium_c.FPDF_PAGEOBJ_FORM:
                 to_page.append(_compose(tuple(obj.get_matrix().get()), to_page[obj.level]))
@@ -182,10 +183,10 @@ class PdfiumPage:
         return _text.text_blocks(self._chars())
 
     def find_tables(self, *, strategy: TableStrategy = "lines") -> list[FoundTable]:
-        left, bottom, right, top = self._page.get_cropbox()
         return _tables.find_tables(
-            strategy, Rect(0.0, 0.0, right - left, top - bottom), self._chars,
+            strategy, self.rect, self._chars,
             lambda: _tables.read_polylines(self._path_objects(), self._origin),
+            rotation=self.rotation_matrix if self.rotation else None,
         )
 
     def render(self, *, dpi: int, clip: Rect | None = None) -> np.ndarray:
@@ -216,8 +217,15 @@ class PdfiumPage:
         ]
 
     def drawings(self) -> list[Drawing]:
+        """Page paths, and an annotation's appearance paths as MuPDF reports them.
+
+        pdfium's page objects leave annotations out, so a page that has any is
+        read again from a flattened scratch copy (the main document is never
+        flattened: that would put widget text into the text layer).
+        """
+        flat = self._doc.flattened(self._source) if pdfium_c.FPDFPage_GetAnnotCount(self._page) else None
         out: list[Drawing] = []
-        for obj, matrix in self._objects():
+        for obj, matrix in self._objects(flat):
             if obj.type != pdfium_c.FPDF_PAGEOBJ_PATH or (kind := _drawing_kind(obj)) is None:
                 continue
             points = _path_points(obj)
@@ -267,6 +275,7 @@ class PdfiumDocument:
         if self._pdf.get_formtype() != pdfium_c.FORMTYPE_NONE:
             self._pdf.init_forms()
         self._indices = list(range(len(self._pdf)))
+        self._scratch: pdfium.PdfDocument | None = None
 
     @property
     def forms(self) -> pdfium.PdfFormEnv | None:
@@ -285,7 +294,22 @@ class PdfiumDocument:
 
     def __getitem__(self, index: int) -> PdfiumPage:
         source = self._indices[index]
-        return PdfiumPage(self, self._pdf[source], index % self.page_count)
+        return PdfiumPage(self, self._pdf[source], index % self.page_count, source)
+
+    def flattened(self, source: int) -> pdfium.PdfPage:
+        """Page *source* of a scratch copy with its annotations flattened into content."""
+        if self._scratch is None:
+            self._scratch = pdfium.PdfDocument(self._name)
+        page = self._scratch[source]
+        # pdfium's display flatten skips Hidden but keeps NoView, which MuPDF does not draw.
+        for i in reversed(range(pdfium_c.FPDFPage_GetAnnotCount(page))):
+            annot = pdfium_c.FPDFPage_GetAnnot(page, i)
+            flags = pdfium_c.FPDFAnnot_GetFlags(annot)
+            pdfium_c.FPDFPage_CloseAnnot(annot)
+            if flags & pdfium_c.FPDF_ANNOT_FLAG_NOVIEW:
+                pdfium_c.FPDFPage_RemoveAnnot(page, i)
+        pdfium_c.FPDFPage_Flatten(page, pdfium_c.FLAT_NORMALDISPLAY)
+        return self._scratch[source]
 
     def __iter__(self) -> Iterator[PdfiumPage]:
         return (self[i] for i in range(self.page_count))
@@ -295,6 +319,8 @@ class PdfiumDocument:
 
     def close(self) -> None:
         # pypdfium2 closes the pages and form environment before the document.
+        if self._scratch is not None:
+            self._scratch.close()
         self._pdf.close()
 
     def __enter__(self) -> Self:

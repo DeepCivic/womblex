@@ -14,9 +14,9 @@ the page *is* the image, so callers render it.
 The page rect follows MuPDF's rule, measured in Phase 0 of
 `docs/plan-permissive-deps.md`: ``pixels * 72 / dpi`` on both axes from the
 horizontal resolution, rounded to a whole dpi; 96 when the file declares none;
-72 when the declared value is outside 72..4800. An undeclared JPEG 2000 is
-72dpi, as MuPDF measured it. Orientation tags are applied before measuring, as
-MuPDF does.
+72 when the declared value is outside 72..4800. A JPEG 2000 is always 72dpi,
+declared or not: MuPDF ignores its resolution box, and a PSD's is unread by
+both. Orientation tags are applied before measuring, as MuPDF does.
 """
 
 from __future__ import annotations
@@ -56,6 +56,9 @@ def _declared_dpi(image: Image.Image) -> float | None:
     with 72 for a JPEG whose EXIF lacks a resolution and with 1 for an untagged
     TIFF, where MuPDF sees no resolution at all.
     """
+    if image.format == "JPEG2000":
+        # MuPDF never reads the resolution box, so Pillow's value would split the page rect from it.
+        return None
     if image.format in ("JPEG", "MPO"):
         unit, density = image.info.get("jfif_unit"), image.info.get("jfif_density")
         if unit in (1, 2) and density:
@@ -193,7 +196,8 @@ class ImageDocument:
         return self.page_count
 
     def __getitem__(self, index: int) -> ImagePage:
-        self._image.seek(self._indices[index])
+        if self._image.format != "PSD":  # Pillow numbers PSD layers from 1; it opens on the composite
+            self._image.seek(self._indices[index])
         # The resolution is read before the frame is converted, which drops it.
         dpi = page_dpi(self._image)
         return ImagePage(self, _rgb(self._image), dpi, index % self.page_count)

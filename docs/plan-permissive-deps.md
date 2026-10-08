@@ -14,11 +14,9 @@ The layout stage (L3) has shipped; [`layout.md`](layout.md) documents it and [`d
 Benchmark-side merges (H-B, F1-B) also live in [`plan-post-gt-baseline.md`](plan-post-gt-baseline.md); F1 below waits on them.
 
 - **P8… (W).** Fidelity fixes driven by `BACKEND_PARITY.md`, repeated until the gates below hold. Known inputs:
-  - The text strategy's column count on `bilby-foi-documents-index` (39 against fitz's 11): pdfplumber's word segmentation against MuPDF's.
-  - Multi-column reading order in the pdfium text engine: Phase 0's divergence tail (see `decisions.md`), left to P8 by P6.
-  - MuPDF's `get_drawings` also reports annotation and widget appearance streams, which pdfium's page objects do not hold (`FPDFAnnot_GetObject` reaches them, in appearance space). No vendored fixture is affected.
-  - Rotated spreadsheet-print pages: `Rect.transform` is double precision where fitz rounds to float32 (up to 1.5e-5 pt). The womblex-collection run through H-B is still owed.
-  - A JPEG 2000 or PSD that declares a resolution is not yet checked against MuPDF's page rect.
+  - Multi-column reading order in the pdfium text engine: Phase 0's divergence tail (see `decisions.md`), left to P8 by P6. Two synthetic two-column pages, one with the columns in content order and one with their lines interleaved, give `plain_text` identical to fitz's, so the tail needs the ASX pages (H-B) to reproduce.
+  - Block grouping, found by running `extract_text` over the synthetic PDFs under each backend: `_same_block` in `_text.py` merges any lines within 0.7 line heights, so a heading and every paragraph after it become one block. `koala-habitat-audit` gives 24 paragraphs under fitz and 6 paragraphs, 10 headings and 18 footers under pdfium, and every native PDF's digest differs. On the synthetic PDFs a size or bold change between lines always starts a fitz block and a forward line pitch of 1.36 font sizes or less never does (1.56 or more always does); all of it comes from reportlab at one leading, so a real rule needs the collection's documents.
+  - The owed womblex-collection run through H-B, now also for rotated spreadsheet-print pages.
 - **F1 (W).** Pairs with F1-B in the baseline plan.
   - Flip `open_document`'s default to the permissive backend.
   - Re-pin `tests/test_default_digest.py` deliberately, and move its version guard from `fitz.VersionBind` to the pypdfium2 version.

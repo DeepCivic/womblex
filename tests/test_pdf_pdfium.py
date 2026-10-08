@@ -102,6 +102,54 @@ class TestGeometry:
         ]
 
 
+def _annotated_pdf(path, flags: int = 4) -> None:
+    """One page whose only black box is a Square annotation's appearance stream,
+    the shape of a fake redaction that never touches the page content."""
+    appearance = b"0 g 0 0 152 20 re f"
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 600] /Annots [4 0 R] >>",
+        b"<< /Type /Annot /Subtype /Square /Rect [48 500 200 520] /F %d /AP << /N 5 0 R >> >>" % flags,
+        b"<< /Type /XObject /Subtype /Form /BBox [0 0 152 20] /Length %d >>\nstream\n%s\nendstream"
+        % (len(appearance), appearance),
+    ]
+    body = b"%PDF-1.7\n"
+    offsets = []
+    for number, obj in enumerate(objects, start=1):
+        offsets.append(len(body))
+        body += b"%d 0 obj\n%s\nendobj\n" % (number, obj)
+    xref = len(body)
+    body += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    body += b"".join(b"%010d 00000 n \n" % offset for offset in offsets)
+    body += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objects) + 1, xref)
+    path.write_bytes(body)
+
+
+class TestAnnotations:
+    def test_an_annotation_appearance_is_a_drawing(self, tmp_path) -> None:
+        path = tmp_path / "annotated.pdf"
+        _annotated_pdf(path)
+        with _open(path) as doc:
+            [drawing] = doc[0].drawings()
+        assert drawing.filled and drawing.fill == (0.0, 0.0, 0.0)
+        assert _box(drawing.rect) == (48, 80, 200, 100)
+
+    def test_a_noview_annotation_is_not_drawn(self, tmp_path) -> None:
+        path = tmp_path / "noview.pdf"
+        _annotated_pdf(path, flags=32)  # NoView: MuPDF leaves it out, pdfium's flatten does not
+        with _open(path) as doc:
+            assert doc[0].drawings() == []
+
+    def test_reading_drawings_leaves_the_page_unflattened(self, pdf_path) -> None:
+        with _open(pdf_path) as doc:
+            page = doc[0]
+            first = page.drawings()
+            assert page.drawings() == first
+            assert "Papilio Barton" not in page.plain_text()
+            assert len(page.widgets()) == 1
+
+
 class TestRender:
     def test_shape_follows_the_render_box(self, pdf_path) -> None:
         clip = Rect(10.3, 20.7, 110.1, 70.9)

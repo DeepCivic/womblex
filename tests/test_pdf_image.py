@@ -148,3 +148,54 @@ def test_a_file_that_is_no_image_raises(tmp_path) -> None:
     path.write_text("not an image")
     with pytest.raises(UnidentifiedImageError):
         open_document(path, backend="pdfium")
+
+
+def _flat_psd(path, width: int = 40, height: int = 30, resolution_ppi: int | None = None) -> None:
+    """A layerless 8-bit RGB PSD: what a flattened Photoshop export is."""
+    import struct
+
+    resources = b""
+    if resolution_ppi is not None:
+        data = struct.pack(">IHHIHH", resolution_ppi << 16, 1, 1, resolution_ppi << 16, 1, 1)
+        resources = b"8BIM" + struct.pack(">H", 0x03ED) + b"\x00\x00" + struct.pack(">I", len(data)) + data
+    header = b"8BPS" + struct.pack(">H", 1) + bytes(6) + struct.pack(">HIIHH", 3, height, width, 8, 3)
+    body = struct.pack(">I", 0) + struct.pack(">I", len(resources)) + resources + struct.pack(">I", 0)
+    path.write_bytes(header + body + struct.pack(">H", 0) + bytes([200]) * (width * height * 3))
+
+
+def _jp2_with_resolution(path, pixels_per_metre: int) -> None:
+    """A JPEG 2000 whose header carries a capture-resolution box."""
+    import io
+    import struct
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (40, 30)).save(buffer, "JPEG2000")
+    data = bytearray(buffer.getvalue())
+    resc = struct.pack(">I4sHHHHBB", 18, b"resc", pixels_per_metre, 1, pixels_per_metre, 1, 0, 0)
+    box = struct.pack(">I4s", 8 + len(resc), b"res ") + resc
+    start = data.find(b"jp2h") - 4
+    length = struct.unpack(">I", data[start:start + 4])[0]
+    data[start:start + 4] = struct.pack(">I", length + len(box))
+    data[start + length:start + length] = box
+    path.write_bytes(bytes(data))
+
+
+def test_a_flat_psd_opens_as_its_composite(tmp_path) -> None:
+    path = tmp_path / "flat.psd"
+    _flat_psd(path)
+    with open_document(path, backend="pdfium") as doc:
+        assert len(doc) == 1
+        assert doc[0].rect.as_tuple() == (0.0, 0.0, 30.0, 22.5)  # 96 dpi: undeclared
+        assert doc[0].render(dpi=96).shape == (30, 40, 3)
+
+
+def test_a_psd_resolution_is_unread_as_under_mupdf(tmp_path) -> None:
+    path = tmp_path / "declared.psd"
+    _flat_psd(path, resolution_ppi=300)
+    assert _page_size(path) == (30.0, 22.5)
+
+
+def test_a_jpeg_2000_is_72_dpi_whatever_it_declares(tmp_path) -> None:
+    path = tmp_path / "declared.jp2"
+    _jp2_with_resolution(path, 11811)  # 300 dpi
+    assert _page_size(path) == (40.0, 30.0)
