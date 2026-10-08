@@ -15,7 +15,6 @@ Benchmark-side merges (H-B, F1-B) also live in [`plan-post-gt-baseline.md`](plan
 
 - **P8… (W).** Fidelity fixes driven by `BACKEND_PARITY.md`, repeated until the gates below hold. Known inputs:
   - Multi-column reading order in the pdfium text engine: Phase 0's divergence tail (see `decisions.md`), left to P8 by P6.
-  - MuPDF's `get_drawings` also reports annotation and widget appearance streams, which pdfium's page objects do not hold (`FPDFAnnot_GetObject` reaches them, in appearance space). No vendored fixture is affected.
   - Rotated spreadsheet-print pages: `Rect.transform` is double precision where fitz rounds to float32 (up to 1.5e-5 pt). The womblex-collection run through H-B is still owed.
   - A JPEG 2000 or PSD that declares a resolution is not yet checked against MuPDF's page rect.
 - **F1 (W).** Pairs with F1-B in the baseline plan.
