@@ -1,9 +1,9 @@
 # Permissive dependencies — outstanding work
 
-*Status: in progress (2026-10). Outstanding: P7, P8, F1, F2 (PyMuPDF). Everything shipped is recorded in [`CHANGELOG.md`](../CHANGELOG.md), [`architecture.md`](architecture.md), [`models.md`](models.md) and [`decisions.md`](decisions.md), not here. Every benchmark-side action (L3c-B, L1-B, H-B, F1-B) has moved to [`plan-post-gt-baseline.md`](plan-post-gt-baseline.md). Everything left here is deliverable now. Each merge updates this list as it lands, and the document is deleted once F2 ships.*
+*Status: in progress (2026-10). Outstanding: P8, F1, F2 (PyMuPDF). Everything shipped is recorded in [`CHANGELOG.md`](../CHANGELOG.md), [`architecture.md`](architecture.md), [`models.md`](models.md) and [`decisions.md`](decisions.md), not here. Every benchmark-side action (L3c-B, L1-B, H-B, F1-B) has moved to [`plan-post-gt-baseline.md`](plan-post-gt-baseline.md). Everything left here is deliverable now. Each merge updates this list as it lands, and the document is deleted once F2 ships.*
 
 ## Context
-Womblex is Apache-2.0, so its dependencies must be licence-compatible. The remaining incompatible one is `pymupdf` (`import fitz`; opens every PDF and standalone image) and it is being replaced: every extractor already reads through the `ingest/pdf/` seam, `fitz` is imported only in `ingest/pdf/_fitz.py`, and the pdfium backend (`backend="pdfium"`) opens PDFs and images with geometry, rendering, images, drawings, widgets and text. Its `find_tables` raises `NotImplementedError` until P7. The default backend is still fitz.
+Womblex is Apache-2.0, so its dependencies must be licence-compatible. The remaining incompatible one is `pymupdf` (`import fitz`; opens every PDF and standalone image) and it is being replaced: every extractor already reads through the `ingest/pdf/` seam, `fitz` is imported only in `ingest/pdf/_fitz.py`, and the pdfium backend (`backend="pdfium"`) opens PDFs and images with geometry, rendering, images, drawings, widgets and text. Its `find_tables` is `_tables.py` (P7). The default backend is still fitz.
 
 A merge is W (womblex) or B (womblex-benchmark, paired). An approval tag means the merge edits `pyproject.toml` and needs human sign-off.
 
@@ -13,8 +13,8 @@ The layout stage (L3) has shipped; [`layout.md`](layout.md) documents it and [`d
 ## PyMuPDF
 Benchmark-side merges (H-B, F1-B) also live in [`plan-post-gt-baseline.md`](plan-post-gt-baseline.md); F1 below waits on them.
 
-- **P7 (W).** `ingest/pdf/_tables.py`, an adapter onto pdfplumber's `TableFinder` (lines and text strategies). `page_profile` calls `find_tables` on every page, so time per page matters.
 - **P8… (W).** Fidelity fixes driven by `BACKEND_PARITY.md`, repeated until the gates below hold. Known inputs:
+  - The text strategy's column count on `bilby-foi-documents-index` (39 against fitz's 11): pdfplumber's word segmentation against MuPDF's.
   - Multi-column reading order in the pdfium text engine: Phase 0's divergence tail (see `decisions.md`), left to P8 by P6.
   - MuPDF's `get_drawings` also reports annotation and widget appearance streams, which pdfium's page objects do not hold (`FPDFAnnot_GetObject` reaches them, in appearance space). No vendored fixture is affected.
   - Rotated spreadsheet-print pages: `Rect.transform` is double precision where fitz rounds to float32 (up to 1.5e-5 pt). The womblex-collection run through H-B is still owed.

@@ -51,10 +51,6 @@ class TestDocument:
         with pytest.raises(ValueError, match="known backends: fitz, pdfium"):
             open_document(pdf_path, backend="nope")
 
-    def test_tables_wait_on_p7(self, pdf_path) -> None:
-        with _open(pdf_path) as doc, pytest.raises(NotImplementedError, match="P7"):
-            doc[0].find_tables()
-
 
 class TestGeometry:
     def test_rotated_page_rect_and_matrix(self, pdf_path) -> None:

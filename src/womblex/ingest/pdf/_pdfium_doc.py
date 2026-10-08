@@ -6,9 +6,8 @@ rect leaves this module through `PdfiumPage._rect`, which does that flip, so no
 caller sees pdfium's convention. Like MuPDF, objects are reported in unrotated
 page space while `rect` is the rotated page.
 
-Text is `_text.py` (P6 of `docs/plan-permissive-deps.md`); the table finder is
-P7 (`_tables.py`), and until it lands `find_tables` raises, so this backend is
-reachable only by naming it.
+Text is `_text.py` (P6 of `docs/plan-permissive-deps.md`) and the table finder
+is `_tables.py` (P7); this backend is still reachable only by naming it.
 
 PDFium is not thread-safe (see `docs/decisions.md`); nothing here locks, since
 extraction runs one document at a time per process.
@@ -26,7 +25,7 @@ import numpy as np
 import pypdfium2 as pdfium  # type: ignore[import-untyped]
 import pypdfium2.raw as pdfium_c  # type: ignore[import-untyped]
 
-from womblex.ingest.pdf import _image, _text
+from womblex.ingest.pdf import _image, _tables, _text
 from womblex.ingest.pdf.types import (
     Block,
     Drawing,
@@ -131,6 +130,12 @@ class PdfiumPage:
                 to_page.append(_compose(tuple(obj.get_matrix().get()), to_page[obj.level]))
             yield obj, to_page[obj.level]
 
+    def _path_objects(self) -> Iterator[tuple[pdfium.PdfObject, Matrix]]:
+        """Every visible path with its own space's transform to user space."""
+        for obj, matrix in self._objects():
+            if obj.type == pdfium_c.FPDF_PAGEOBJ_PATH and _drawing_kind(obj) is not None:
+                yield obj, _compose(tuple(obj.get_matrix().get()), matrix)
+
     @property
     def number(self) -> int:
         return self._number
@@ -177,7 +182,11 @@ class PdfiumPage:
         return _text.text_blocks(self._chars())
 
     def find_tables(self, *, strategy: TableStrategy = "lines") -> list[FoundTable]:
-        raise NotImplementedError("pdfium table finding arrives with P7 (_tables.py)")
+        left, bottom, right, top = self._page.get_cropbox()
+        return _tables.find_tables(
+            strategy, Rect(0.0, 0.0, right - left, top - bottom), self._chars,
+            lambda: _tables.read_polylines(self._path_objects(), self._origin),
+        )
 
     def render(self, *, dpi: int, clip: Rect | None = None) -> np.ndarray:
         x0, y0, x1, y1 = render_box(self.rect, dpi, clip)
