@@ -301,6 +301,13 @@ class PdfiumDocument:
         if self._scratch is None:
             self._scratch = pdfium.PdfDocument(self._name)
         page = self._scratch[source]
+        # pdfium's display flatten skips Hidden but keeps NoView, which MuPDF does not draw.
+        for i in reversed(range(pdfium_c.FPDFPage_GetAnnotCount(page))):
+            annot = pdfium_c.FPDFPage_GetAnnot(page, i)
+            flags = pdfium_c.FPDFAnnot_GetFlags(annot)
+            pdfium_c.FPDFPage_CloseAnnot(annot)
+            if flags & pdfium_c.FPDF_ANNOT_FLAG_NOVIEW:
+                pdfium_c.FPDFPage_RemoveAnnot(page, i)
         pdfium_c.FPDFPage_Flatten(page, pdfium_c.FLAT_NORMALDISPLAY)
         return self._scratch[source]
 

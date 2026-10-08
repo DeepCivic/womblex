@@ -15,8 +15,8 @@ The page rect follows MuPDF's rule, measured in Phase 0 of
 `docs/plan-permissive-deps.md`: ``pixels * 72 / dpi`` on both axes from the
 horizontal resolution, rounded to a whole dpi; 96 when the file declares none;
 72 when the declared value is outside 72..4800. A JPEG 2000 is always 72dpi,
-declared or not: MuPDF ignores its resolution box, and a PSD's is unread by both. Orientation tags are applied before measuring, as
-MuPDF does.
+declared or not: MuPDF ignores its resolution box, and a PSD's is unread by
+both. Orientation tags are applied before measuring, as MuPDF does.
 """
 
 from __future__ import annotations
@@ -196,7 +196,7 @@ class ImageDocument:
         return self.page_count
 
     def __getitem__(self, index: int) -> ImagePage:
-        if self._image.format != "PSD":  # a layerless PSD has no frame to seek to
+        if self._image.format != "PSD":  # Pillow numbers PSD layers from 1; it opens on the composite
             self._image.seek(self._indices[index])
         # The resolution is read before the frame is converted, which drops it.
         dpi = page_dpi(self._image)

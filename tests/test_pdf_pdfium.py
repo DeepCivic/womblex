@@ -102,7 +102,7 @@ class TestGeometry:
         ]
 
 
-def _annotated_pdf(path) -> None:
+def _annotated_pdf(path, flags: int = 4) -> None:
     """One page whose only black box is a Square annotation's appearance stream,
     the shape of a fake redaction that never touches the page content."""
     appearance = b"0 g 0 0 152 20 re f"
@@ -110,7 +110,7 @@ def _annotated_pdf(path) -> None:
         b"<< /Type /Catalog /Pages 2 0 R >>",
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
         b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 600] /Annots [4 0 R] >>",
-        b"<< /Type /Annot /Subtype /Square /Rect [48 500 200 520] /F 4 /AP << /N 5 0 R >> >>",
+        b"<< /Type /Annot /Subtype /Square /Rect [48 500 200 520] /F %d /AP << /N 5 0 R >> >>" % flags,
         b"<< /Type /XObject /Subtype /Form /BBox [0 0 152 20] /Length %d >>\nstream\n%s\nendstream"
         % (len(appearance), appearance),
     ]
@@ -134,6 +134,12 @@ class TestAnnotations:
             [drawing] = doc[0].drawings()
         assert drawing.filled and drawing.fill == (0.0, 0.0, 0.0)
         assert _box(drawing.rect) == (48, 80, 200, 100)
+
+    def test_a_noview_annotation_is_not_drawn(self, tmp_path) -> None:
+        path = tmp_path / "noview.pdf"
+        _annotated_pdf(path, flags=32)  # NoView: MuPDF leaves it out, pdfium's flatten does not
+        with _open(path) as doc:
+            assert doc[0].drawings() == []
 
     def test_reading_drawings_leaves_the_page_unflattened(self, pdf_path) -> None:
         with _open(pdf_path) as doc:
