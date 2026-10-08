@@ -19,9 +19,9 @@ if TYPE_CHECKING:
 #: Backend name to the module providing ``open_document(path)``.
 _BACKENDS = {"fitz": "womblex.ingest.pdf._fitz", "pdfium": "womblex.ingest.pdf._pdfium_doc"}
 
-#: The backend used when a caller names none. F1 in
-#: `docs/plan-permissive-deps.md` flips this to the permissive backend.
-DEFAULT_BACKEND = "fitz"
+#: The backend used when a caller names none: the permissive one. `fitz` stays
+#: selectable until F2 in `docs/plan-permissive-deps.md` deletes it.
+DEFAULT_BACKEND = "pdfium"
 
 
 def open_document(path: Path, *, backend: str | None = None) -> Document:

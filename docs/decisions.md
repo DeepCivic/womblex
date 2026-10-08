@@ -866,21 +866,25 @@ be re-derivable, and the first pass's were not.
   verbatim, so it is additive noise, not corruption. Closing it needs a
   cross-validation step (reject native low-conf tables where the layout model
   predicts no Table at the bbox).
-- **Block grouping on the pdfium backend follows MuPDF's measured rule, with one
-  rotated-page residue.** MuPDF starts a block where the baseline pitch exceeds
-  about 1.5 of the new line's font size, keeps a row's fragments (table cells)
-  in one block, and does not break on a change of size or weight alone: a bold
-  run-in label or a larger closing line set at normal leading stays in the
-  block. `_same_block` in `_text.py` applies that, measured along each line's
-  writing direction from the character origins, and `emu-spacing-variants.pdf`
-  varies leading and paragraph gap to pin it. Block line counts now equal
-  PyMuPDF's on every synthetic PDF but the rotated spreadsheet-print index, and
-  element kinds and counts equal it on all but that one. There MuPDF starts a
-  new block at the second line of a two-line column header (`Subsection` /
-  `code`) and pdfium does not, giving 12 headings under PyMuPDF and 8 under
-  pdfium. The cause is not derivable from the synthetic page; it is left to the
-  collection run (H-B in [plan-post-gt-baseline.md](plan-post-gt-baseline.md)).
-  Do not flip the default before that is understood.
+- **Block grouping on the pdfium backend follows MuPDF's measured rules.**
+  Measured with probe PDFs at 7pt and 10pt. Left-to-right text: a block starts
+  where the baseline pitch exceeds 1.5 of the new line's font size, or the line
+  starts right of the previous line's start (0 pt joins, 1 pt splits); a row's
+  fragments (table cells) stay in one block; a change of size or weight alone
+  never breaks one. Text running up the unrotated page (the rotated
+  spreadsheet-print index) continues a block only when the baseline offset sits
+  between -1.5 and +0.5 font sizes, with no start condition, which is why
+  `Subsection` / `code` and `Out of Scope` / `Exemption` split while the next
+  cell of the header row rejoins. Oblique text never continues by pitch. All of
+  it is applied in the unrotated frame the characters are already in
+  (`/Rotate` does not enter). `_same_block` in `_text.py` holds it;
+  `emu-spacing-variants.pdf` and `test_pdf_block_parity.py` pin it. Block line
+  counts and element kinds now equal PyMuPDF's on every synthetic PDF.
+  Known residue, outside the synthetic set: overprinted lines (MuPDF joins
+  lines that overlap vertically, pdfium splits them); upside-down and downward
+  text, measured for pitch only (MuPDF is far more lenient at 180 degrees);
+  and pdfium reorders downward-running characters, so content order differs
+  there.
 - **Handwriting is an OCR-engine ceiling.** The PaddleOCR ONNX backend cannot
   read handwriting; cross-cell handwritten forms and photographed/creased forms
   reach high CER. Out of scope without an HTR backend + dewarping.
@@ -990,7 +994,8 @@ be re-derivable, and the first pass's were not.
   dependency and PyMuPDF are not licence-compatible with Apache-2.0. Layout
   is now an Apache-2.0 PP-DocLayout ONNX model on `onnxruntime`; PyMuPDF goes
   behind a womblex-owned `ingest/pdf/` seam and is replaced by pypdfium2 +
-  pdfplumber once a backend-diff harness clears the parity gates. Plan and
+  pdfplumber once a backend-diff harness clears the parity gates (cleared on the
+  synthetic set at F1; pdfium is the default). Plan and
   merge sequence: [plan-permissive-deps.md](plan-permissive-deps.md).
   - **Layout measurements at the swap (uncontrolled, no like-for-like run).**
     PP-DocLayout-M is 23 MB and runs at about 65 ms per CPU page. Scored with
