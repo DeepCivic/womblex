@@ -866,18 +866,21 @@ be re-derivable, and the first pass's were not.
   verbatim, so it is additive noise, not corruption. Closing it needs a
   cross-validation step (reject native low-conf tables where the layout model
   predicts no Table at the bbox).
-- **Paragraph and heading boundaries differ on the pdfium backend (known, not yet
-  fixed; the default backend is still PyMuPDF).** The pdfium text engine starts a
-  new block only when lines are more than 0.7 line heights apart, where MuPDF also
-  breaks at paragraph gaps and at a change of font size or weight. On the synthetic
-  PDFs this merges a heading and the paragraphs after it into one block
-  (`koala-habitat-audit`: 24 paragraphs under PyMuPDF; 6 paragraphs, 10 headings
-  and 18 footers under pdfium), so element kinds, element counts and
-  `content_digest` differ between backends. Plain-text order and content are
-  unaffected. The rule is fixed from synthetic pages at varied leading and
-  paragraph spacing, not from the one-leading set alone, tracked under P8 in
-  [plan-permissive-deps.md](plan-permissive-deps.md). Until then, do not compare
-  element streams across backends, and do not flip the default.
+- **Block grouping on the pdfium backend follows MuPDF's measured rule, with one
+  rotated-page residue.** MuPDF starts a block where the baseline pitch exceeds
+  about 1.5 of the new line's font size, keeps a row's fragments (table cells)
+  in one block, and does not break on a change of size or weight alone: a bold
+  run-in label or a larger closing line set at normal leading stays in the
+  block. `_same_block` in `_text.py` applies that, measured along each line's
+  writing direction from the character origins, and `emu-spacing-variants.pdf`
+  varies leading and paragraph gap to pin it. Block line counts now equal
+  PyMuPDF's on every synthetic PDF but the rotated spreadsheet-print index, and
+  element kinds and counts equal it on all but that one. There MuPDF starts a
+  new block at the second line of a two-line column header (`Subsection` /
+  `code`) and pdfium does not, giving 12 headings under PyMuPDF and 8 under
+  pdfium. The cause is not derivable from the synthetic page; it is left to the
+  collection run (H-B in [plan-post-gt-baseline.md](plan-post-gt-baseline.md)).
+  Do not flip the default before that is understood.
 - **Handwriting is an OCR-engine ceiling.** The PaddleOCR ONNX backend cannot
   read handwriting; cross-cell handwritten forms and photographed/creased forms
   reach high CER. Out of scope without an HTR backend + dewarping.

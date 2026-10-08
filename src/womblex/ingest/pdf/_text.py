@@ -55,6 +55,8 @@ class Char:
     font: str
     bold: bool
     direction: tuple[float, float] = _LTR
+    #: The character's origin in page space; ``None`` falls back to its box's bottom-left.
+    origin: tuple[float, float] | None = None
 
 
 @dataclass
@@ -115,6 +117,10 @@ def read_chars(
             if text in "\r\n\x00￾" or (ord(text) < 0x20 and text != "\t"):
                 continue
             box = to_rect(textpage.get_charbox(i, loose=True))
+            ox, oy = ctypes.c_double(), ctypes.c_double()
+            pdfium_c.FPDFText_GetCharOrigin(raw, i, ctypes.byref(ox), ctypes.byref(oy))
+            point = to_rect((ox.value, oy.value, ox.value, oy.value))
+            origin = (point.x0, point.y0)
             if not (box.x1 > clip.x0 and box.x0 < clip.x1 and box.y1 > clip.y0 and box.y0 < clip.y1):
                 continue
             length = pdfium_c.FPDFText_GetFontInfo(raw, i, name, len(name), ctypes.byref(flags))
@@ -132,6 +138,7 @@ def read_chars(
                 font=font,
                 bold=_is_bold(weight, flags.value, font),
                 direction=direction,
+                origin=origin,
             ))
         return out
     finally:
@@ -226,12 +233,34 @@ def _lines(chars: list[Char]) -> list[_Line]:
     return [line for line in lines if line.chars]
 
 
+#: A line whose baseline is more than this many of its own font sizes below the
+#: previous one starts a new block. Measured on MuPDF over `fixtures/synthetic/`:
+#: 1.47 stays in the block and 1.64 breaks it, whatever the size or weight of the
+#: lines either side (a bold run-in label or a larger closing line set tight stays put).
+_MAX_PITCH = 1.5
+
+
+def _origin(char: Char) -> tuple[float, float]:
+    return (char.box.x0, char.box.y1) if char.origin is None else char.origin
+
+
 def _same_block(prev: _Line, line: _Line) -> bool:
-    if prev.chars[0].direction != _LTR or line.chars[0].direction != _LTR:
+    """*line* continues *prev*'s block, measured in their shared writing direction."""
+    first, last = prev.chars[0], line.chars[0]
+    if first.direction != last.direction:
         return False
-    a, b = prev.box, line.box
-    height = max(a.height, b.height)
-    return -0.5 * height <= b.y0 - a.y1 <= 0.7 * height and b.x0 < a.x1
+    along = first.direction
+    across = (-along[1], along[0])
+    (a0, a1), (b0, b1) = _extent(prev.box, across), _extent(line.box, across)
+    c1 = _extent(prev.box, along)[1]
+    d0 = _extent(line.box, along)[0]
+    height = max(a1 - a0, b1 - b0)
+    if min(a1, b1) - max(a0, b0) > 0.5 * min(a1 - a0, b1 - b0):
+        # The next cell of a row: MuPDF keeps a row's fragments in one block.
+        return d0 >= c1
+    (px, py), (qx, qy) = _origin(first), _origin(last)
+    pitch = (qx - px) * across[0] + (qy - py) * across[1]
+    return -0.5 * height <= b0 - a1 <= 0.7 * height and d0 < c1 and pitch <= _MAX_PITCH * last.size
 
 
 def segment(chars: list[Char]) -> list[list[_Line]]:
