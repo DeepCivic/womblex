@@ -1,35 +1,26 @@
 # Permissive dependencies — outstanding work
 
-*Status: in progress (2026-10). Outstanding: P7, P8, F1, F2 (PyMuPDF) and L3c-B, L1-B (layout). Everything shipped is recorded in [`CHANGELOG.md`](../CHANGELOG.md), [`architecture.md`](architecture.md), [`models.md`](models.md) and [`decisions.md`](decisions.md), not here. The ground-truth revision gates only L1-B, F1-B's regeneration and H-B's CER-against-transcripts half; their report regeneration runs once, as the fresh baseline in [`plan-post-gt-baseline.md`](plan-post-gt-baseline.md). Everything else is deliverable now. Each merge updates this list as it lands, and the document is deleted once F2 ships.*
+*Status: in progress (2026-10). Outstanding: P8, F1, F2 (PyMuPDF). Everything shipped is recorded in [`CHANGELOG.md`](../CHANGELOG.md), [`architecture.md`](architecture.md), [`models.md`](models.md) and [`decisions.md`](decisions.md), not here. Every benchmark-side action (L3c-B, L1-B, H-B, F1-B) has moved to [`plan-post-gt-baseline.md`](plan-post-gt-baseline.md). Everything left here is deliverable now. Each merge updates this list as it lands, and the document is deleted once F2 ships.*
 
 ## Context
-Womblex is Apache-2.0, so its dependencies must be licence-compatible. The remaining incompatible one is `pymupdf` (`import fitz`; opens every PDF and standalone image) and it is being replaced: every extractor already reads through the `ingest/pdf/` seam, `fitz` is imported only in `ingest/pdf/_fitz.py`, and the pdfium backend (`backend="pdfium"`) opens PDFs and images with geometry, rendering, images, drawings, widgets and text. Its `find_tables` raises `NotImplementedError` until P7. The default backend is still fitz.
+Womblex is Apache-2.0, so its dependencies must be licence-compatible. The remaining incompatible one is `pymupdf` (`import fitz`; opens every PDF and standalone image) and it is being replaced: every extractor already reads through the `ingest/pdf/` seam, `fitz` is imported only in `ingest/pdf/_fitz.py`, and the pdfium backend (`backend="pdfium"`) opens PDFs and images with geometry, rendering, images, drawings, widgets and text. Its `find_tables` is `_tables.py` (P7). The default backend is still fitz.
 
 A merge is W (womblex) or B (womblex-benchmark, paired). An approval tag means the merge edits `pyproject.toml` and needs human sign-off.
 
 ## Layout
-The layout stage (L3) has shipped; [`layout.md`](layout.md) documents it and [`decisions.md`](decisions.md) records why it is shaped as it is. What remains is benchmark-side.
-
-- **L3c-B (B).** Regenerate `REDACTION_HANDLING`: exclusion zones now come from the 200 dpi layout render. Runs in the post-GT baseline.
-
-- **L1-B (B). Waits on the ground-truth revision.** Scores PP-DocLayout-M against the revised ground truth.
-  - Make the DocLayNet layout-F1 test honour `--model` (it calls `get_layout_analyzer()` with no arguments today).
-  - Bring the `DOCLAYNET_TO_WOMBLEX` comment and any stale wording for the previous layout model in `accuracy_reports.py` in line with `LABEL_MAP`.
-  - The table benchmark and the false-table cohort feed ground-truth or whole-page rects to `reconstruct_table` and never run layout, so they are not layout gates. The layout gate on tables is end-to-end: tables emitted by `extract_text` on the FUNSD and DocLayNet scanned fixtures.
-  - Check the findings from the swap (recorded in `decisions.md`): table-class recall fell from 50% to 25%, and `dense_text_548` gave three table regions where the ground truth has one, with a `chart` box (mapped to `figure`) almost identical to the `table` box. `LABEL_MAP` and the 0.3 threshold are the knobs.
-  - Regenerate `EXTRACTION.md` and `REDACTION_HANDLING.md` (in the post-GT baseline), and spot-check exclusion area on the 02737-class scanned forms.
+The layout stage (L3) has shipped; [`layout.md`](layout.md) documents it and [`decisions.md`](decisions.md) records why it is shaped as it is. The remaining layout work (L3c-B, L1-B) is benchmark-side and now lives in [`plan-post-gt-baseline.md`](plan-post-gt-baseline.md).
 
 ## PyMuPDF
-- **H-B, remaining half (B).** CER between backends, now that P6 gives pdfium text to compare with fitz's; and CER against transcripts, which waits on the ground-truth revision. Until the harness runs pdfium as its second side, `BACKEND_PARITY.md` is a repeatability baseline of fitz against itself. PDFs are capped to 20 pages, and the DOCX/XLSX/CSV/XML/TXT fixtures never go through the PDF seam, so `tests/test_default_digest.py` gates them instead.
-- **P7 (W).** `ingest/pdf/_tables.py`, an adapter onto pdfplumber's `TableFinder` (lines and text strategies). `page_profile` calls `find_tables` on every page, so time per page matters.
+Benchmark-side merges (H-B, F1-B) also live in [`plan-post-gt-baseline.md`](plan-post-gt-baseline.md); F1 below waits on them.
+
 - **P8… (W).** Fidelity fixes driven by `BACKEND_PARITY.md`, repeated until the gates below hold. Known inputs:
+  - The text strategy's column count on `bilby-foi-documents-index` (39 against fitz's 11): pdfplumber's word segmentation against MuPDF's.
   - Multi-column reading order in the pdfium text engine: Phase 0's divergence tail (see `decisions.md`), left to P8 by P6.
   - MuPDF's `get_drawings` also reports annotation and widget appearance streams, which pdfium's page objects do not hold (`FPDFAnnot_GetObject` reaches them, in appearance space). No vendored fixture is affected.
   - Rotated spreadsheet-print pages: `Rect.transform` is double precision where fitz rounds to float32 (up to 1.5e-5 pt). The womblex-collection run through H-B is still owed.
   - A JPEG 2000 or PSD that declares a resolution is not yet checked against MuPDF's page rect.
-- **F1 (W) + F1-B (B).**
+- **F1 (W).** Pairs with F1-B in the baseline plan.
   - Flip `open_document`'s default to the permissive backend.
-  - Regenerate `EXTRACTION`, `REDACTION_HANDLING`, `PII_CLEANING`, `READING_ORDER` and `CHUNKING`, plus the table and false-table suites.
   - Re-pin `tests/test_default_digest.py` deliberately, and move its version guard from `fitz.VersionBind` to the pypdfium2 version.
 - **F2 (W, approval).**
   - Delete `_fitz.py` and the backend argument, and drop `pymupdf`, its mypy override and the `pymupdf_layout` warning filter.
@@ -67,8 +58,6 @@ Migration gates, not quality scores. They retire with this plan.
 | Merge | Gate |
 |---|---|
 | Every merge | `uv run ruff check src/ tests/`, `uv run mypy src/` and `uv run python -m pytest tests/ -v` pass; `uv lock --check` passes on approval merges; touched files are under 750 lines (`wc -l`); `git diff --stat $(git merge-base HEAD origin/main)..HEAD` is within the cap |
-| L3c-B | `REDACTION_HANDLING` checked by hand in the post-GT baseline; earlier reports are not a comparison |
-| L1-B | The `dense_text_548` table found; DocLayNet F1 recorded by the post-GT baseline, which later merges must not drop below; end-to-end tables emitted on the scanned fixtures checked by hand |
 
 F1 flips the default only when all of these hold:
 

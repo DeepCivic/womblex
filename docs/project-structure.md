@@ -45,7 +45,8 @@ womblex/
 │   │   │   ├── __init__.py      # open_document(path, backend=…) — the one entry point; imports its backend at call time
 │   │   │   ├── types.py         # Rect / Word / Span / Line / Block / FoundTable / Drawing / Widget / PageImage + the Page and Document protocols
 │   │   │   ├── _fitz.py         # The PyMuPDF backend — the only module in src/ that imports fitz
-│   │   │   ├── _pdfium_doc.py   # The pypdfium2 backend: document, page geometry, render, images, drawings, widgets (tables P7)
+│   │   │   ├── _pdfium_doc.py   # The pypdfium2 backend: document, page geometry, render, images, drawings, widgets
+│   │   │   ├── _tables.py       # pdfium table finder: pdfplumber's TableFinder fed pdfium path edges and character boxes
 │   │   │   ├── _text.py         # pdfium text engine: characters rebuilt into lines, blocks, spans, words; effective size, page clip, bold detection
 │   │   │   └── _image.py        # Raster images through Pillow as image-only pages, one per frame, MuPDF's page-rect rule
 │   │   ├── detect.py            # Doc-level type classification (non-PDF dispatch + summary type for PDFs)
