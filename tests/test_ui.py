@@ -530,23 +530,17 @@ def _write_checkpoint(run_dir: Path, stage: str, **counters: int) -> None:
 
 
 def _missing_jobs_table_error() -> Exception:
-    """The error Postgres raises when ``womblex_jobs`` does not exist.
+    """The error a database raises when the DBOS system tables do not exist.
 
-    A real ``psycopg.errors.UndefinedTable`` when psycopg is importable (the
-    normal case with a DSN configured), else a plain exception carrying the
-    same message the string-match fallback in ``dashboard._is_missing_jobs_table``
-    recognises.
+    Postgres names the ``workflow_status`` relation; the message is what
+    ``dashboard._is_missing_jobs_table`` recognises, since the driver error
+    arrives wrapped by SQLAlchemy.
     """
-    try:
-        import psycopg
-
-        return psycopg.errors.UndefinedTable('relation "womblex_jobs" does not exist')
-    except Exception:  # pragma: no cover - psycopg is present wherever a DSN is
-        return Exception('relation "womblex_jobs" does not exist')
+    return Exception('relation "dbos.workflow_status" does not exist')
 
 
 class _MissingTableQueue:
-    """A reachable ``JobQueue`` whose ``womblex_jobs`` table has not been created.
+    """A reachable ``RunBoard`` whose DBOS system tables have not been created.
 
     Connecting succeeds (a fresh Postgres before ``init``/enqueue); the first
     read raises ``UndefinedTable``. The dashboard must read this as an empty
@@ -563,9 +557,6 @@ class _MissingTableQueue:
 
     def __exit__(self, *exc: object) -> None:
         pass
-
-    def ensure_schema(self) -> None:
-        type(self).schema_ensured_count += 1
 
     def stats(self, _run_id: str | None = None) -> dict:
         raise _missing_jobs_table_error()
@@ -640,7 +631,7 @@ class TestDashboardApi:
         — `queue_error` stays None and the tiles render as zero. The console must
         not create the table (it is read-only; `init`/enqueue own creation).
         """
-        monkeypatch.setattr("womblex.cloud.queue.JobQueue", _MissingTableQueue)
+        monkeypatch.setattr("womblex.cloud.jobs.RunBoard", _MissingTableQueue)
         client = TestClient(create_app(output_root=tmp_path, db_dsn="postgresql://x/y"))
         body = client.get("/api/dashboard").json()
         assert body["queue_error"] is None
@@ -656,7 +647,14 @@ class TestDashboardApi:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The read path must not call ensure_schema — the console never mutates."""
-        monkeypatch.setattr("womblex.cloud.queue.JobQueue", _MissingTableQueue)
+        monkeypatch.setattr("womblex.cloud.jobs.RunBoard", _MissingTableQueue)
+        monkeypatch.setattr(
+            "womblex.cloud.dbos_app.ensure_schema",
+            lambda _dsn: setattr(
+                _MissingTableQueue, "schema_ensured_count",
+                _MissingTableQueue.schema_ensured_count + 1,
+            ),
+        )
         client = TestClient(create_app(output_root=tmp_path, db_dsn="postgresql://x/y"))
         client.get("/api/dashboard")
         assert _MissingTableQueue.schema_ensured_count == 0
@@ -665,7 +663,7 @@ class TestDashboardApi:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Only a missing table is swallowed; a genuine failure is not hidden."""
-        monkeypatch.setattr("womblex.cloud.queue.JobQueue", _BrokenQueue)
+        monkeypatch.setattr("womblex.cloud.jobs.RunBoard", _BrokenQueue)
         client = TestClient(create_app(output_root=tmp_path, db_dsn="postgresql://x/y"))
         body = client.get("/api/dashboard").json()
         assert body["queue"] is None
@@ -1205,7 +1203,7 @@ class TestComposerSavePresets:
 
 
 class _FakeQueue:
-    """A `JobQueue` stand-in — the execute happy path must not need Postgres.
+    """A `RunBoard` stand-in — the execute happy path must not need Postgres.
 
     Records what `enqueue_extraction` hands it (schema call, run_id, specs) so
     a test can assert the batching without a live database, and returns a
@@ -1213,10 +1211,10 @@ class _FakeQueue:
     """
 
     last: _FakeQueue | None = None
+    schema_ensured = False
 
     def __init__(self, dsn: str, **_kw: object) -> None:
         self.dsn = dsn
-        self.schema_ensured = False
         self.enqueued: tuple[str, list] | None = None
         _FakeQueue.last = self
 
@@ -1226,12 +1224,19 @@ class _FakeQueue:
     def __exit__(self, *exc: object) -> None:
         pass
 
-    def ensure_schema(self) -> None:
-        self.schema_ensured = True
-
     def enqueue(self, run_id: str, specs: list, *, owner: str | None = None) -> int:
         self.enqueued = (run_id, specs)
         return len(specs)
+
+
+@pytest.fixture(autouse=True)
+def _fake_schema(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Dispatch provisions the DBOS schema through a module function; record, don't run it."""
+    _FakeQueue.schema_ensured = False
+    monkeypatch.setattr(
+        "womblex.cloud.dispatch.ensure_schema",
+        lambda _dsn: setattr(_FakeQueue, "schema_ensured", True),
+    )
 
 
 def _seed_store_inputs(store_root: Path, prefix: str, names: list[str]) -> None:
@@ -1305,7 +1310,7 @@ class TestExecuteApi:
     ) -> None:
         """An empty ingest root is bad input (400), not a disabled console (403/409)."""
         pytest.importorskip("fsspec")
-        monkeypatch.setattr("womblex.cloud.queue.JobQueue", _FakeQueue)
+        monkeypatch.setattr("womblex.cloud.jobs.RunBoard", _FakeQueue)
         ingest_root = tmp_path / "inbox"
         _seed_store_inputs(ingest_root, "", ["notes.txt"])  # unsupported ext
         client = TestClient(create_app(
@@ -1321,7 +1326,7 @@ class TestExecuteApi:
         """List the whole ingest root (no prefix posted), batch, one idempotent
         row each, stamped with the ingest root."""
         pytest.importorskip("fsspec")
-        monkeypatch.setattr("womblex.cloud.queue.JobQueue", _FakeQueue)
+        monkeypatch.setattr("womblex.cloud.jobs.RunBoard", _FakeQueue)
         ingest_root = tmp_path / "inbox"
         _seed_store_inputs(ingest_root, "", [f"doc-{i}.pdf" for i in range(5)])
         client = TestClient(create_app(
@@ -1355,7 +1360,7 @@ class TestExecuteApi:
         The console refuses the same layout the local CLI does, as bad input,
         and nothing reaches the queue."""
         pytest.importorskip("fsspec")
-        monkeypatch.setattr("womblex.cloud.queue.JobQueue", _FakeQueue)
+        monkeypatch.setattr("womblex.cloud.jobs.RunBoard", _FakeQueue)
         _FakeQueue.last = None
         ingest_root = tmp_path / "inbox"
         _seed_store_inputs(ingest_root, "", ["top.pdf"])
@@ -1378,7 +1383,7 @@ class TestExecuteApi:
         press will run — the count the preflight reports for a prefix is the
         count that prefix enqueues, and the keys are scoped to it."""
         pytest.importorskip("fsspec")
-        monkeypatch.setattr("womblex.cloud.queue.JobQueue", _FakeQueue)
+        monkeypatch.setattr("womblex.cloud.jobs.RunBoard", _FakeQueue)
         ingest_root = tmp_path / "inbox"
         _seed_store_inputs(ingest_root, "2026-08", ["a.pdf", "b.pdf"])
         _seed_store_inputs(ingest_root, "2026-09", ["c.pdf"])
@@ -1404,7 +1409,7 @@ class TestExecuteApi:
         document's `source_relpath`, so a prefix spelled `./2026-08` must not
         publish provenance naming a key that only a local path would resolve."""
         pytest.importorskip("fsspec")
-        monkeypatch.setattr("womblex.cloud.queue.JobQueue", _FakeQueue)
+        monkeypatch.setattr("womblex.cloud.jobs.RunBoard", _FakeQueue)
         ingest_root = tmp_path / "inbox"
         _seed_store_inputs(ingest_root, "2026-08", ["a.pdf"])
         client = TestClient(create_app(
@@ -1424,7 +1429,7 @@ class TestExecuteApi:
         """Bad input (400), before any listing, and nothing reaches the queue —
         the treatment an unsafe run id already gets."""
         pytest.importorskip("fsspec")
-        monkeypatch.setattr("womblex.cloud.queue.JobQueue", _FakeQueue)
+        monkeypatch.setattr("womblex.cloud.jobs.RunBoard", _FakeQueue)
         _FakeQueue.last = None
         ingest_root = tmp_path / "inbox"
         _seed_store_inputs(ingest_root, "", ["top.pdf"])
@@ -1442,7 +1447,7 @@ class TestExecuteApi:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         pytest.importorskip("fsspec")
-        monkeypatch.setattr("womblex.cloud.queue.JobQueue", _FakeQueue)
+        monkeypatch.setattr("womblex.cloud.jobs.RunBoard", _FakeQueue)
         ingest_root = tmp_path / "inbox"
         _seed_store_inputs(ingest_root, "", ["doc-0.pdf"])
         client = TestClient(create_app(

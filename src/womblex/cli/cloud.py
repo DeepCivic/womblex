@@ -2,9 +2,9 @@
 the downstream stages), ``worker`` (process), ``jobs`` (status).
 
 Distributed counterpart to ``womblex run``. ``enqueue`` lists source documents
-in an object store, splits them into batches, and writes one queue row each;
-``worker`` claims and processes those rows; ``jobs`` reports progress. The queue
-replaces the local JSON checkpoint, so resuming is just re-running ``enqueue``
+in an object store, splits them into batches, and enqueues one DBOS workflow
+each; ``worker`` runs them; ``jobs`` reports progress. DBOS's progress records
+replace the local JSON checkpoint, so resuming is just re-running ``enqueue``
 (idempotent) and starting workers.
 
 Inputs and outputs live under one object-store base URI (``--store``), shared by
@@ -49,6 +49,12 @@ DISPATCHABLE_STAGES = (
 )
 
 
+_DSN_HELP = (
+    "DBOS system database URL, e.g. postgresql://… (or $WOMBLEX_DB_DSN / $DATABASE_URL). "
+    "Default: a local SQLite file, which only this host can see."
+)
+
+
 def _resolve_dsn(args: argparse.Namespace) -> str | None:
     return args.dsn or os.environ.get("WOMBLEX_DB_DSN") or os.environ.get("DATABASE_URL")
 
@@ -87,21 +93,21 @@ def _register_enqueue(p: argparse.ArgumentParser) -> None:
     )
     p.add_argument("--batch-size", type=int, default=None, help="Docs per batch (overrides config)")
     p.add_argument("--max-attempts", type=int, default=3, help="Retries per batch before 'failed'")
-    p.add_argument("--dsn", default=None, help="Postgres DSN (or $WOMBLEX_DB_DSN / $DATABASE_URL)")
-    p.add_argument("--create-schema", action="store_true", help="Create the jobs table first")
+    p.add_argument("--dsn", default=None, help=_DSN_HELP)
+    p.add_argument("--create-schema", action="store_true",
+                   help="Create the DBOS system tables first (enqueue always does; `jobs` "
+                        "only reads, so use this to provision an empty database)")
 
 
 def cmd_enqueue(args: argparse.Namespace) -> int:
-    from womblex.cloud.queue import JobQueue, JobSpec
+    from womblex.cloud.dbos_app import ensure_schema
+    from womblex.cloud.jobs import JobSpec, RunBoard
     from womblex.store.remote import RemoteStore, assert_disjoint_locations
     from womblex.store.retention import generate_run_id
 
     dsn = _resolve_dsn(args)
     store_uri = _resolve_store(args)
     ingest_uri = _resolve_ingest(args)
-    if not dsn:
-        logger.error("No Postgres DSN (pass --dsn or set WOMBLEX_DB_DSN / DATABASE_URL)")
-        return 1
     if not store_uri:
         logger.error("No store URI (pass --store or set WOMBLEX_STORE_URI)")
         return 1
@@ -169,22 +175,20 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
             input_keys=keys[i : i + batch_size],
             shard_prefix=shard_prefix,
             max_attempts=args.max_attempts,
-            ingest_root=ingest_uri,
+            ingest_root=ingest_uri or store_uri,
         )
         for batch_idx, i in enumerate(range(0, len(keys), batch_size), start=1)
     ]
 
-    with JobQueue(dsn) as queue:
-        if args.create_schema:
-            queue.ensure_schema()
-        inserted = queue.enqueue(run_id, specs)
+    ensure_schema(dsn)
+    with RunBoard(dsn) as board:
+        inserted = board.enqueue(run_id, specs)
 
     logger.info(
         "run_id=%s: %d document(s) -> %d batch(es), %d newly enqueued. Shards -> %s/%s",
         run_id, len(keys), len(specs), inserted, store_uri, shard_prefix,
     )
-    logger.info("Start workers with: womblex worker --store %s --run-id %s --config <cfg>",
-                store_uri, run_id)
+    logger.info("Start workers with: womblex worker --store %s --config <cfg>", store_uri)
     return 0
 
 
@@ -199,14 +203,13 @@ def _register_worker(p: argparse.ArgumentParser) -> None:
         help="Object-store base URI to read source documents from (or "
              "$WOMBLEX_INGEST_URI). Defaults to --store.",
     )
-    p.add_argument("--dsn", default=None, help="Postgres DSN (or $WOMBLEX_DB_DSN / $DATABASE_URL)")
-    p.add_argument("--run-id", default=None, help="Only claim jobs for this run (default: any)")
-    p.add_argument("--worker-id", default=None, help="Worker identity in locks (default: host:pid)")
-    p.add_argument("--poll-interval", type=float, default=5.0, help="Seconds between empty polls")
-    p.add_argument("--once", action="store_true", help="Process at most one job then exit")
+    p.add_argument("--dsn", default=None, help=_DSN_HELP)
+    p.add_argument("--worker-id", default=None,
+                   help="Executor id (default: host name). A restarted worker with the same id "
+                        "recovers the workflows its predecessor left unfinished.")
+    p.add_argument("--poll-interval", type=float, default=5.0, help="Seconds between status polls")
+    p.add_argument("--once", action="store_true", help="Exit after the first workflow completes")
     p.add_argument("--idle-timeout", type=float, default=None, help="Exit after N idle seconds")
-    p.add_argument("--stale-timeout", type=float, default=None,
-                   help="Requeue 'running' jobs locked longer than N seconds (crash recovery)")
     add_models_check_argument(p)
 
 
@@ -217,9 +220,6 @@ def cmd_worker(args: argparse.Namespace) -> int:
     dsn = _resolve_dsn(args)
     store_uri = _resolve_store(args)
     ingest_uri = _resolve_ingest(args)
-    if not dsn:
-        logger.error("No Postgres DSN (pass --dsn or set WOMBLEX_DB_DSN / DATABASE_URL)")
-        return 1
     if not store_uri:
         logger.error("No store URI (pass --store or set WOMBLEX_STORE_URI)")
         return 1
@@ -230,11 +230,9 @@ def cmd_worker(args: argparse.Namespace) -> int:
         dsn, store_uri, config,
         ingest_uri=ingest_uri,
         worker_id=args.worker_id,
-        run_id=args.run_id,
         poll_interval=args.poll_interval,
         once=args.once,
         idle_timeout=args.idle_timeout,
-        stale_timeout=args.stale_timeout,
     )
     logger.info("worker exiting: %d job(s) completed", completed)
     return 0
@@ -244,23 +242,22 @@ def cmd_worker(args: argparse.Namespace) -> int:
 
 
 def _register_jobs(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--dsn", default=None, help="Postgres DSN (or $WOMBLEX_DB_DSN / $DATABASE_URL)")
+    p.add_argument("--dsn", default=None, help=_DSN_HELP)
     p.add_argument("--run-id", default=None, help="Limit to one run (default: all runs)")
-    p.add_argument("--create-schema", action="store_true", help="Create the jobs table if missing")
+    p.add_argument("--create-schema", action="store_true",
+                   help="Create the DBOS system tables first (enqueue always does; `jobs` "
+                        "only reads, so use this to provision an empty database)")
 
 
 def cmd_jobs(args: argparse.Namespace) -> int:
-    from womblex.cloud.queue import JobQueue
+    from womblex.cloud.dbos_app import ensure_schema
+    from womblex.cloud.jobs import RunBoard
 
     dsn = _resolve_dsn(args)
-    if not dsn:
-        logger.error("No Postgres DSN (pass --dsn or set WOMBLEX_DB_DSN / DATABASE_URL)")
-        return 1
-
-    with JobQueue(dsn) as queue:
-        if args.create_schema:
-            queue.ensure_schema()
-        stats = queue.stats(args.run_id)
+    if args.create_schema:
+        ensure_schema(dsn)
+    with RunBoard(dsn) as board:
+        stats = board.stats(args.run_id)
 
     scope = f"run {args.run_id}" if args.run_id else "all runs"
     if not stats:
@@ -284,7 +281,7 @@ def _register_finalize(p: argparse.ArgumentParser) -> None:
              "Reads <output-prefix>/documents/*._manifest.parquet.",
     )
     p.add_argument("--dsn", default=None,
-                   help="Optional Postgres DSN — warn if jobs are still unfinished")
+                   help="Optional DBOS system database URL — warn if jobs are still unfinished")
 
 
 def cmd_finalize(args: argparse.Namespace) -> int:
@@ -311,10 +308,10 @@ def cmd_finalize(args: argparse.Namespace) -> int:
 
     dsn = _resolve_dsn(args)
     if dsn:
-        from womblex.cloud.queue import JobQueue
+        from womblex.cloud.jobs import RunBoard
 
-        with JobQueue(dsn) as queue:
-            stats = queue.stats(args.run_id)
+        with RunBoard(dsn) as board:
+            stats = board.stats(args.run_id)
         unfinished = stats.get("pending", 0) + stats.get("running", 0)
         if unfinished:
             logger.warning(
@@ -373,7 +370,7 @@ def _register_enqueue_stages(p: argparse.ArgumentParser) -> None:
                    help="Comma-separated override of the config-derived stage list. "
                         f"Choose from: {', '.join(DISPATCHABLE_STAGES)}.")
     p.add_argument("--max-attempts", type=int, default=3, help="Retries per stage before 'failed'")
-    p.add_argument("--dsn", default=None, help="Postgres DSN (or $WOMBLEX_DB_DSN / $DATABASE_URL)")
+    p.add_argument("--dsn", default=None, help=_DSN_HELP)
     p.add_argument("--dry-run", action="store_true", help="Print the stage list and exit")
 
 
@@ -393,15 +390,12 @@ def cmd_enqueue_stages(args: argparse.Namespace) -> int:
     `pii` and `quality` are never dispatched (`DOWNSTREAM_STAGES`); both stay
     available through `womblex run-stage --stage …`.
     """
-    from womblex.cloud.queue import JobQueue
+    from womblex.cloud.dbos_app import ensure_schema
+    from womblex.cloud.jobs import RunBoard
     from womblex.config import load_config
     from womblex.pipeline_order import enabled_downstream_stages, in_pipeline_order
 
     dsn = _resolve_dsn(args)
-    if not dsn and not args.dry_run:
-        logger.error("No Postgres DSN (pass --dsn or set WOMBLEX_DB_DSN / DATABASE_URL)")
-        return 1
-
     config = load_config(args.config)
     if args.stages:
         requested = [s.strip() for s in args.stages.split(",") if s.strip()]
@@ -424,14 +418,14 @@ def cmd_enqueue_stages(args: argparse.Namespace) -> int:
     if args.dry_run:
         return 0
 
-    assert dsn is not None  # guarded above; narrows for mypy
-    with JobQueue(dsn) as queue:
-        inserted = queue.enqueue_stages(
+    ensure_schema(dsn)
+    with RunBoard(dsn) as board:
+        inserted = board.enqueue_stages(
             args.run_id, list(stages), shard_prefix, max_attempts=args.max_attempts,
         )
     logger.info(
-        "%d of %d stage job(s) newly enqueued (the rest were already queued or done). "
-        "Workers claim them once run %s's batches settle.",
+        "%d of %d stage(s) newly dispatched (the rest were already dispatched). "
+        "Workers run them once run %s's batches settle.",
         inserted, len(stages), args.run_id,
     )
     return 0
@@ -463,7 +457,7 @@ def _register_run_stage(p: argparse.ArgumentParser) -> None:
                    help="Config YAML. Conditional inputs and declared outputs are "
                         "resolved from it (e.g. chunking_model, text_source).")
     p.add_argument("--dsn", default=None,
-                   help="Optional Postgres DSN — warn if extraction jobs are still draining")
+                   help="Optional DBOS system database URL — warn if extraction jobs are still draining")
     p.add_argument("--force", action="store_true",
                    help="Re-run bases whose declared outputs already exist")
     p.add_argument("--stage-checkpoints", action="store_true",
@@ -576,10 +570,10 @@ def _warn_if_draining(args: argparse.Namespace, run_id: str) -> None:
     dsn = _resolve_dsn(args)
     if not dsn:
         return
-    from womblex.cloud.queue import JobQueue
+    from womblex.cloud.jobs import RunBoard
 
-    with JobQueue(dsn) as queue:
-        stats = queue.stats(run_id)
+    with RunBoard(dsn) as board:
+        stats = board.stats(run_id)
     unfinished = stats.get("pending", 0) + stats.get("running", 0)
     if unfinished:
         logger.warning(

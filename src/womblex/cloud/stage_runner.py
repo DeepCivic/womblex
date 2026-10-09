@@ -331,6 +331,55 @@ def _run_unit(
         return _publish(contract, config, store, shard_prefix, stems, documents)
 
 
+class StageDiscoveryError(Exception):
+    """No batch bases under the shard prefix: a bad prefix, run id or an empty run."""
+
+
+def plan_units(
+    contract: StageContract, store: RemoteStore, shard_prefix: str, config: WomblexConfig,
+) -> list[list[str]]:
+    """The units *contract* runs over: one per base, or one run-wide unit.
+
+    Refuses before any unit is attempted when the config selects a strict input
+    some base lacks (:class:`InputContractError`), or when there is nothing to
+    run over (:class:`StageDiscoveryError`). Nothing is skipped here — a
+    workflow records each finished unit itself, so a re-run does not repeat it.
+    """
+    present = set(store.list_files(shard_prefix, "*.parquet"))
+    stems = remote_bases(sorted(present))
+    if not stems:
+        raise StageDiscoveryError(
+            f"No batch bases under {shard_prefix} — expected extraction siblings "
+            f"({', '.join(DISCOVERY_SUFFIXES)}). Downstream sidecars alone cannot drive discovery."
+        )
+    units = [stems] if contract.scope is StageScope.WHOLE_RUN else [[s] for s in stems]
+    gaps = _strict_input_gaps(contract, config, shard_prefix, units, present, True)
+    if gaps:
+        raise InputContractError(
+            f"{contract.name}: refusing before any base is processed — "
+            + "; ".join(f"{label}: {err}" for label, err in gaps)
+        )
+    return units
+
+
+def run_unit(
+    contract: StageContract, config: WomblexConfig, ctx: RunContext, store: RemoteStore,
+    shard_prefix: str, unit: list[str], ingest: RemoteStore,
+) -> list[str]:
+    """Run one unit and return the keys it published.
+
+    Raises :class:`NotReady` when an upstream sidecar is absent and
+    :class:`InputContractError` when a strict input the config selects is.
+    """
+    present = set(store.list_files(shard_prefix, "*.parquet"))
+    input_keys = _resolve_inputs(contract, config, shard_prefix, unit, present)
+    _run_unit(contract, config, ctx, store, shard_prefix, unit, input_keys, ingest)
+    return [
+        _key(shard_prefix, stem, suffix)
+        for stem in unit for suffix in contract.outputs(config)
+    ]
+
+
 def _source_fetcher(ingest: RemoteStore, scratch: Path) -> Callable[[dict], Path]:
     """A per-document fetcher for a source-document stage.
 
@@ -599,11 +648,14 @@ def prepare_stage_context(contract: StageContract, config: WomblexConfig) -> Run
 __all__ = [
     "InputContractError",
     "NotReady",
+    "StageDiscoveryError",
     "StagePreconditionError",
     "StageRunSummary",
     "checkpoint_prefix_for",
+    "plan_units",
     "prepare_stage_context",
     "remote_bases",
     "run_stage_local",
     "run_stage_remote",
+    "run_unit",
 ]

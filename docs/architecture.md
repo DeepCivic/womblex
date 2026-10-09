@@ -271,4 +271,4 @@ Later stages follow the same `<stage>_shards()` over a shard dir + `womblex <sta
 - **link** (`link/stage.py`) — record-linkage against a reference register, writes `*.entity_links.parquet`
 - **pii** (`pii/pii_stage.py`) — graph-driven PII masking, writes `*.pii_spans.parquet` + `*.clean_text.parquet`
 
-Distributed (cloud) runs execute the same stage bodies via `cloud/stage_runner.py` against a declarative `StageContract` per stage (`cloud/stage_contracts.py`), reading/writing an object store instead of local disk.
+Distributed (cloud) runs execute the same stage bodies against a declarative `StageContract` per stage (`cloud/stage_contracts.py`), reading/writing an object store instead of local disk. DBOS runs them: `cloud/workflows.py` makes a batch and each stage unit a recorded step, `cloud/worker.py` joins the queues a process can serve, and `cloud/jobs.py` is how dispatchers enqueue and read progress.

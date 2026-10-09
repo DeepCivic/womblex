@@ -11,7 +11,6 @@ womblex/
 ├── docs/              # Architecture docs, ADRs, accuracy reports, the deployment-image audit, the consumer contract (contract.md), the service API (service-api.md), the egress bundle (egress.md)
 ├── fixtures/synthetic/  # Generated test fixtures (generate.py + its committed output; see its README)
 ├── models/            # Locally pre-downloaded models, resolved by utils/models.py (see models.md)
-├── sql/womblex_jobs.sql  # Postgres schema for the cloud job queue
 ├── ui/                # Console SPA frontend (SvelteKit), built into the console image by Dockerfile.ui
 ├── src/womblex/
 │   ├── cli/                # CLI subpackage — per-topic modules
@@ -154,9 +153,11 @@ womblex/
 │   │   ├── retention.py     # run_id-based retention policy + describe_run() (doc count, stages, timestamps) + is_safe_run_id (run-root join containment)
 │   │   └── checkpoint.py    # Per-stage CheckpointManager — JSON checkpoints for resumable batch runs
 │   ├── cloud/                  # Distributed run support — `womblex enqueue` / `enqueue-stages` / `worker` / `jobs` / `finalize` / `run-stage` / `egress`
-│   │   ├── queue.py            # JobQueue — Postgres FOR UPDATE SKIP LOCKED batch queue; run `owner` scoping
+│   │   ├── dbos_app.py         # DBOS wiring — system database URL, queue/workflow names and ids, client
+│   │   ├── jobs.py             # RunBoard — enqueue + read runs over DBOS workflows; run `owner` scoping
+│   │   ├── workflows.py        # extract_batch / run_stage / run_downstream workflows
 │   │   ├── dispatch.py         # enqueue_extraction / enqueue_downstream_stages (owner=), downstream_stages gate + guard — shared by the console and the service API
-│   │   ├── worker.py           # run_worker() — claim/stage/process/publish loop
+│   │   ├── worker.py           # run_worker() — launch DBOS, join the queues this process can serve
 │   │   ├── stage_contracts.py  # Declarative StageContract per downstream stage (inputs/outputs/scope)
 │   │   └── stage_runner.py     # Execute a contract against an object store
 │   ├── api/                    # Service API (`womblex serve`)

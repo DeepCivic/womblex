@@ -83,8 +83,8 @@ def _mask_secret(value: str | None) -> str | None:
 def _mask_dsn(dsn: str | None) -> str | None:
     """*dsn* with its password blanked; everything else (host, db) is not a secret.
 
-    Covers both DSN forms psycopg accepts, because ``JobQueue`` passes
-    whatever the operator set straight through: the URI form
+    Covers both DSN forms an operator might set, because the board passes
+    whatever they set straight through: the URI form
     (``postgresql://user:pw@host/db``), whose password ``urlsplit`` finds,  # pragma: allowlist secret -- docstring example, not a real credential
     and libpq's keyword/value form (``host=… password=…``), which has no
     netloc at all and so would otherwise be returned verbatim — a full

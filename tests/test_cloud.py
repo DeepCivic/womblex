@@ -1,14 +1,13 @@
 """Tests for the cloud distributed-execution pieces.
 
 RemoteStore is exercised against the local filesystem (fsspec's local backend),
-so it needs no S3/MinIO. The JobQueue tests need a real Postgres and skip
-cleanly when ``WOMBLEX_DB_DSN`` / ``DATABASE_URL`` is unset.
+so it needs no S3/MinIO. The extraction body the DBOS workflow runs is called
+directly; the board and the workflows themselves are in ``test_run_board.py``
+and ``test_workflows.py``, on a SQLite system database.
 """
 
 from __future__ import annotations
 
-import os
-import uuid
 from pathlib import Path
 from typing import Self
 
@@ -24,36 +23,8 @@ from womblex.store.remote import (
     validate_location_uri,
 )
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-
 # RemoteStore reaches fsspec lazily; skip the whole module without the cloud extra.
 pytest.importorskip("fsspec")
-
-
-# --- schema artefact ---------------------------------------------------------
-
-
-def test_sql_schema_file_matches_the_queue_ddl():
-    """``sql/womblex_jobs.sql`` is the DBA-reviewable way to provision the one
-    table Womblex owns (e.g. into a shared/externally-managed DB via ``psql
-    -f``). It must be byte-for-byte the DDL ``ensure_schema`` runs, or an
-    operator who applies the file gets a table that differs from what
-    ``--create-schema`` would make. Compared on the executable statements only
-    — the file's leading ``--`` comment header is documentation.
-    """
-    from womblex.cloud.queue import _SCHEMA
-
-    def _ddl_only(text: str) -> str:
-        # Drop full-line SQL comments and blank lines; the file carries a
-        # documentation header the embedded ``_SCHEMA`` string does not.
-        lines = [
-            ln for ln in text.splitlines()
-            if ln.strip() and not ln.lstrip().startswith("--")
-        ]
-        return "\n".join(lines).strip()
-
-    sql_file = (REPO_ROOT / "sql" / "womblex_jobs.sql").read_text()
-    assert _ddl_only(sql_file) == _ddl_only(_SCHEMA)
 
 
 # --- RemoteStore (local backend) ---------------------------------------------
@@ -229,20 +200,6 @@ def test_same_location_ignores_spelling_that_opens_the_same_place():
     assert not same_location("s3://womblex/inbox", "s3://other/inbox")
 
 
-def test_worker_ingest_root_comparison_is_normalised():
-    """An enqueue and a worker configured from different places (a flag here,
-    a compose env var there) differ by a trailing slash routinely — that must
-    not refuse every job."""
-    from womblex.cloud.worker import _same_ingest
-
-    assert _same_ingest("s3://womblex/inbox", "s3://womblex/inbox/")
-    assert not _same_ingest("s3://womblex/inbox", "s3://wrong/inbox")
-    # An unparseable root falls back to an exact match; the refusal path
-    # itself must never raise.
-    assert not _same_ingest("s3:/broken", "s3://womblex/inbox")
-    assert _same_ingest("s3:/broken", "s3:/broken")
-
-
 def test_list_files_recursive_reaches_nested_prefixes(tmp_path):
     """Object stores have a flat keyspace: `inbox/2026-08/foo.pdf` is one key,
     not a folder. A non-recursive listing of the ingest root reports zero
@@ -385,7 +342,7 @@ def test_remote_store_list_dirs(tmp_path):
     assert store.list_dirs("missing") == []
 
 
-# --- worker: ingest as a distinct store (local, no Postgres) ----------------
+# --- extraction body: ingest as a distinct store (local, no database) -------
 
 
 def _minimal_config(tmp_path: Path):
@@ -407,212 +364,6 @@ def _minimal_config(tmp_path: Path):
         chunking=ChunkingConfig(enabled=False),
         redaction=RedactionConfig(enabled=False),
     )
-
-
-def test_process_job_downloads_from_a_second_ingest_store(tmp_path):
-    """The gap merge 1 closes: inputs and outputs can be different stores."""
-    from womblex.cloud.queue import Job
-    from womblex.cloud.worker import _process_job
-
-    ingest_store = RemoteStore.from_uri(str(tmp_path / "ingest"))
-    csv = tmp_path / "people.csv"
-    csv.write_text("name,role\nAlice,Director\n")
-    ingest_store.upload_file(csv, "people.csv")
-
-    output_store = RemoteStore.from_uri(str(tmp_path / "store"))
-    job = Job(
-        id=1, run_id="r1", batch_num=1, input_keys=["people.csv"],
-        shard_prefix="runs/r1/documents", attempts=1,
-    )
-
-    _process_job(job, _minimal_config(tmp_path), output_store, ingest_store)
-
-    assert output_store.list_files("runs/r1/documents", "*._manifest.parquet")
-    assert not output_store.exists("people.csv")  # never lands in the output tree
-    assert ingest_store.exists("people.csv")       # the source document is untouched
-
-
-def test_process_job_extracts_both_same_named_documents(tmp_path):
-    """A job's keys come from a recursive listing, so two prefixes routinely hold
-    a `people.csv` apiece. Flat staging landed them on one local file — one
-    document extracted twice, one not at all, and the recorded source path the
-    survivor's. Both are extracted, each under its own relpath."""
-    import pyarrow.parquet as pq
-
-    from womblex.cloud.queue import Job
-    from womblex.cloud.worker import _process_job
-
-    ingest_store = RemoteStore.from_uri(str(tmp_path / "ingest"))
-    for prefix, body in (
-        ("2026-07", "name,role\nAlice,Director\n"),
-        ("2026-08", "name,role\nBob,Assistant\n"),
-    ):
-        local = tmp_path / f"{prefix}.csv"
-        local.write_text(body)
-        ingest_store.upload_file(local, f"{prefix}/people.csv")
-
-    output_store = RemoteStore.from_uri(str(tmp_path / "store"))
-    job = Job(
-        id=1, run_id="r1", batch_num=1,
-        input_keys=["2026-07/people.csv", "2026-08/people.csv"],
-        shard_prefix="runs/r1/documents", attempts=1,
-        ingest_root="s3://bucket/inbox",
-    )
-
-    _process_job(job, _minimal_config(tmp_path), output_store, ingest_store)
-
-    manifest = pq.read_table(
-        str(tmp_path / "store" / "runs" / "r1" / "documents" / "batch-0001._manifest.parquet")
-    ).to_pylist()
-    assert len(manifest) == 2
-    assert len({row["source_hash"] for row in manifest}) == 2  # distinct documents
-    assert sorted(row["source_relpath"] for row in manifest) == [
-        "2026-07/people.csv",
-        "2026-08/people.csv",
-    ]
-
-
-# --- run logs ---------------------------------------------------------------
-
-
-def test_capture_batch_log_attaches_and_detaches_cleanly(tmp_path):
-    """The handler is added for the block and removed after — no leak that would
-    tee the next batch's records into this file."""
-    import logging
-
-    from womblex.utils.run_log import capture_batch_log
-
-    womblex_logger = logging.getLogger("womblex")
-    before = list(womblex_logger.handlers)
-    log_path = tmp_path / "batch.log"
-    with capture_batch_log(log_path):
-        assert len(womblex_logger.handlers) == len(before) + 1
-        logging.getLogger("womblex.some.module").error("a captured line")
-    assert womblex_logger.handlers == before  # detached
-    assert "a captured line" in log_path.read_text()
-
-
-def test_capture_batch_log_detaches_even_when_the_block_raises(tmp_path):
-    import logging
-
-    from womblex.utils.run_log import capture_batch_log
-
-    womblex_logger = logging.getLogger("womblex")
-    before = list(womblex_logger.handlers)
-    log_path = tmp_path / "batch.log"
-    with pytest.raises(RuntimeError), capture_batch_log(log_path):
-        logging.getLogger("womblex").error("before the raise")
-        raise RuntimeError("boom")
-    assert womblex_logger.handlers == before
-    # The file is complete and readable even though the block raised — the
-    # failing case is the one the operator needs.
-    assert "before the raise" in log_path.read_text()
-
-
-def test_process_job_publishes_the_batch_log_beside_the_shards(tmp_path):
-    """A successful batch leaves `runs/<run_id>/logs/batch-NNNN.log` in the store."""
-    from womblex.cloud.queue import Job
-    from womblex.cloud.worker import _process_job
-
-    ingest_store = RemoteStore.from_uri(str(tmp_path / "ingest"))
-    csv = tmp_path / "people.csv"
-    csv.write_text("name,role\nAlice,Director\n")
-    ingest_store.upload_file(csv, "people.csv")
-
-    output_store = RemoteStore.from_uri(str(tmp_path / "store"))
-    job = Job(
-        id=1, run_id="r1", batch_num=3, input_keys=["people.csv"],
-        shard_prefix="runs/r1/documents", attempts=1,
-    )
-
-    _process_job(job, _minimal_config(tmp_path), output_store, ingest_store)
-
-    assert output_store.exists("runs/r1/logs/batch-0003.log")
-
-
-def _publish_one_batch(tmp_path, run_id: str):
-    """Run one batch through the real worker; return the published shard's stamp."""
-    import pyarrow.parquet as pq
-
-    from womblex.cloud.queue import Job
-    from womblex.cloud.worker import _process_job
-    from womblex.store.run_stamp import read_footer_stamp
-
-    ingest_store = RemoteStore.from_uri(str(tmp_path / "ingest"))
-    csv = tmp_path / "people.csv"
-    csv.write_text("name,role\nAlice,Director\n")
-    ingest_store.upload_file(csv, "people.csv")
-
-    output_store = RemoteStore.from_uri(str(tmp_path / "store"))
-    job = Job(
-        id=1, run_id=run_id, batch_num=3, input_keys=["people.csv"],
-        shard_prefix=f"runs/{run_id}/documents", attempts=1,
-    )
-    _process_job(job, _minimal_config(tmp_path), output_store, ingest_store)
-
-    shard = (
-        tmp_path / "store" / "runs" / run_id / "documents" / "batch-0003.elements.parquet"
-    )
-    return csv, read_footer_stamp(pq.read_metadata(str(shard)).metadata)
-
-
-def test_a_published_shard_stamps_the_same_run_a_local_batch_would(tmp_path):
-    """Local and distributed agree, stage and write timestamp aside: the worker
-    declares from the job row's run id and the same config, and where the
-    documents were staged is not in the digest."""
-    from womblex.batch import process_batch
-    from womblex.store.run_stamp import RunStamp, read_footer_stamp
-
-    csv, published = _publish_one_batch(tmp_path, "r1")
-
-    local_dir = tmp_path / "local"
-    local_dir.mkdir()
-    config = _minimal_config(tmp_path)
-    process_batch(
-        [csv], config, batch_num=3, shard_dir=local_dir,
-        stamp=RunStamp.declare("r1", config, stage="extract"),
-    )
-    import pyarrow.parquet as pq
-    local = read_footer_stamp(
-        pq.read_metadata(str(local_dir / "batch-0003.elements.parquet")).metadata,
-    )
-    assert published == local
-    assert published["run_id"] == "r1"
-
-
-def test_a_row_naming_no_run_is_published_unstamped_not_failed(tmp_path):
-    """A malformed row loses its stamp, not its extraction — the same terms an
-    undeclared ingest root is already on."""
-    _, stamp = _publish_one_batch(tmp_path, "")
-    assert stamp == {}
-
-
-def test_process_job_publishes_the_log_even_when_the_batch_fails(tmp_path, monkeypatch):
-    """The failing case is the one that matters: the log is uploaded outside the
-    try, so a job that raises still leaves its `batch-NNNN.log` in the store, and
-    the original error is what propagates."""
-    from womblex.cloud import worker as worker_mod
-    from womblex.cloud.queue import Job
-
-    ingest_store = RemoteStore.from_uri(str(tmp_path / "ingest"))
-    csv = tmp_path / "people.csv"
-    csv.write_text("name,role\nAlice,Director\n")
-    ingest_store.upload_file(csv, "people.csv")
-    output_store = RemoteStore.from_uri(str(tmp_path / "store"))
-
-    def _boom(*_a, **_kw):
-        raise RuntimeError("processing exploded")
-
-    monkeypatch.setattr(worker_mod, "process_batch", _boom)
-    job = Job(
-        id=1, run_id="r1", batch_num=1, input_keys=["people.csv"],
-        shard_prefix="runs/r1/documents", attempts=1,
-    )
-
-    with pytest.raises(RuntimeError, match="processing exploded"):
-        worker_mod._process_job(job, _minimal_config(tmp_path), output_store, ingest_store)
-
-    assert output_store.exists("runs/r1/logs/batch-0001.log")
 
 
 # --- finalize (local store, no Postgres) -------------------------------------
@@ -743,437 +494,6 @@ def test_egress_exports_local_run_to_bundle(tmp_path, monkeypatch):
     assert rc == 1
 
 
-# --- JobQueue (needs Postgres) -----------------------------------------------
-
-
-def _dsn() -> str | None:
-    return os.environ.get("WOMBLEX_DB_DSN") or os.environ.get("DATABASE_URL")
-
-
-@pytest.fixture()
-def queue():
-    dsn = _dsn()
-    if not dsn:
-        pytest.skip("no Postgres DSN (set WOMBLEX_DB_DSN / DATABASE_URL)")
-    pytest.importorskip("psycopg")
-    from womblex.cloud.queue import JobQueue
-
-    q = JobQueue(dsn)
-    q.ensure_schema()
-    run_id = f"test-{uuid.uuid4().hex[:8]}"
-    yield q, run_id
-    # Clean up this run's rows.
-    with q.conn.transaction():
-        q.conn.execute("DELETE FROM womblex_jobs WHERE run_id = %s", (run_id,))
-    q.close()
-
-
-def test_enqueue_idempotent(queue):
-    from womblex.cloud.queue import JobSpec
-
-    q, run_id = queue
-    specs = [JobSpec(batch_num=1, input_keys=["a.pdf"], shard_prefix="runs/x/documents")]
-    assert q.enqueue(run_id, specs) == 1
-    assert q.enqueue(run_id, specs) == 0  # ON CONFLICT DO NOTHING
-    assert q.stats(run_id) == {"pending": 1}
-
-
-def test_claim_complete_and_fail(queue):
-    from womblex.cloud.queue import JobSpec
-
-    q, run_id = queue
-    q.enqueue(run_id, [
-        JobSpec(batch_num=1, input_keys=["a.pdf"], shard_prefix="p", max_attempts=1),
-        JobSpec(batch_num=2, input_keys=["b.pdf"], shard_prefix="p", max_attempts=2),
-    ])
-
-    job1 = q.claim("w1", run_id)
-    assert job1 is not None and job1.batch_num == 1
-    q.complete(job1.id)
-
-    job2 = q.claim("w1", run_id)
-    assert job2 is not None and job2.batch_num == 2
-    q.fail(job2.id, "boom")  # max_attempts=2, attempts now 1 -> back to pending
-
-    stats = q.stats(run_id)
-    assert stats.get("done") == 1
-    assert stats.get("pending") == 1
-
-    job2b = q.claim("w1", run_id)
-    assert job2b is not None and job2b.batch_num == 2
-    q.fail(job2b.id, "boom again")  # attempts now 2 == max -> failed
-    assert q.stats(run_id).get("failed") == 1
-
-
-def test_worker_releases_a_batch_whose_extraction_models_failed_the_check(queue, tmp_path):
-    """A model this worker lacks is a refusal, not a failure: the row goes back
-    to pending with its attempts intact and the reason on it."""
-    from womblex.cloud.queue import JobSpec
-    from womblex.cloud.worker import run_worker
-
-    q, run_id = queue
-    q.enqueue(run_id, [
-        JobSpec(batch_num=1, input_keys=["a.pdf"], shard_prefix="runs/x/documents"),
-    ])
-    config = _minimal_config(tmp_path)
-    config.extraction.ocr.engine = "no-such-engine"
-    store = tmp_path / "store"
-    store.mkdir()
-
-    completed = run_worker(_dsn(), str(store), config, run_id=run_id, once=True)
-
-    assert completed == 0
-    assert q.stats(run_id) == {"pending": 1}
-    (row,) = q.list_jobs(run_id)
-    assert row.attempts == 0
-    assert "model check failed on this worker" in row.error
-    assert "no-such-engine" in row.error
-
-
-def test_worker_refuses_a_job_whose_ingest_root_mismatches(queue, tmp_path):
-    """A job enqueued against one ingest root and claimed by a worker reading
-    from another is refused immediately, not failed per file.
-    """
-    from womblex.cloud.queue import JobSpec
-    from womblex.cloud.worker import run_worker
-
-    q, run_id = queue
-    q.enqueue(run_id, [
-        JobSpec(
-            batch_num=1, input_keys=["a.pdf"], shard_prefix="runs/x/documents",
-            ingest_root="s3://right-bucket/inbox",
-        ),
-    ])
-
-    store = tmp_path / "store"
-    store.mkdir()
-    completed = run_worker(
-        _dsn(), str(store), _minimal_config(tmp_path),
-        ingest_uri="s3://wrong-bucket/inbox", run_id=run_id, once=True,
-    )
-    assert completed == 0
-
-    # Released, not failed: the batch is fine, this worker is the wrong one
-    # for it, so it waits for a correctly-wired one with its retries intact.
-    assert q.stats(run_id) == {"pending": 1}
-    rows = q.list_jobs(run_id)
-    assert rows[0].attempts == 0
-    assert "s3://right-bucket/inbox" in rows[0].error
-    assert "s3://wrong-bucket/inbox" in rows[0].error
-
-
-def test_release_returns_a_job_without_consuming_an_attempt(queue):
-    """`fail` burns the retry budget; `release` is for a refusal that says
-    nothing about the job itself."""
-    from womblex.cloud.queue import JobSpec
-
-    q, run_id = queue
-    q.enqueue(run_id, [
-        JobSpec(batch_num=1, input_keys=["a.pdf"], shard_prefix=f"runs/{run_id}/documents"),
-    ])
-    job = q.claim("w1", run_id)
-    assert job is not None and job.attempts == 1
-
-    q.release(job.id, "wrong worker")
-    assert q.stats(run_id) == {"pending": 1}
-    assert q.list_jobs(run_id)[0].attempts == 0
-
-    # Still claimable, with the full budget.
-    again = q.claim("w2", run_id)
-    assert again is not None and again.attempts == 1
-
-
-def test_worker_ingest_root_none_falls_back_to_the_store(queue, tmp_path):
-    """A legacy job (ingest_root NULL) is accepted by any worker — no
-    mismatch, since NULL means 'use the worker's own root'. Also today's
-    single-store behaviour: no --ingest means inputs and outputs share the
-    one --store.
-    """
-    from womblex.cloud.queue import JobSpec
-    from womblex.cloud.worker import run_worker
-
-    q, run_id = queue
-    store = RemoteStore.from_uri(str(tmp_path / "store"))
-    csv = tmp_path / "people.csv"
-    csv.write_text("name,role\nAlice,Director\n")
-    store.upload_file(csv, "people.csv")
-
-    q.enqueue(run_id, [
-        JobSpec(batch_num=1, input_keys=["people.csv"], shard_prefix=f"runs/{run_id}/documents"),
-    ])
-
-    completed = run_worker(
-        _dsn(), str(tmp_path / "store"), _minimal_config(tmp_path),
-        run_id=run_id, once=True,
-    )
-    assert completed == 1
-    assert q.stats(run_id) == {"done": 1}
-
-
-# --- the dashboard's read-only views (docs/ui-plan.md merge 8) ----------------
-
-
-def test_list_jobs_and_fleet(queue):
-    """The job list and the fleet view are the queue table and `locked_by`."""
-    from womblex.cloud.queue import JobSpec
-
-    q, run_id = queue
-    q.enqueue(run_id, [
-        JobSpec(batch_num=1, input_keys=["a.pdf"], shard_prefix="p"),
-        JobSpec(batch_num=2, input_keys=["b.pdf"], shard_prefix="p"),
-    ])
-    claimed = q.claim("worker-1", run_id)
-    assert claimed is not None
-
-    rows = q.list_jobs(run_id)
-    assert {r.batch_num for r in rows} == {1, 2}
-    running = next(r for r in rows if r.status == "running")
-    assert running.locked_by == "worker-1"
-    assert running.locked_at is not None  # ISO string, not a datetime
-    assert running.attempts == 1
-
-    # Status filter and run scoping both narrow rather than re-query.
-    assert [r.batch_num for r in q.list_jobs(run_id, status="pending")] == [2]
-    assert q.list_jobs("no-such-run") == []
-
-    fleet = q.workers(run_id)
-    assert [(w.worker_id, w.running) for w in fleet] == [("worker-1", 1)]
-    assert fleet[0].oldest_locked_at is not None
-
-
-def test_stale_jobs_matches_requeue_stale(queue):
-    """The read-only twin must name exactly the rows `requeue_stale` recovers."""
-    from womblex.cloud.queue import JobSpec
-
-    q, run_id = queue
-    q.enqueue(run_id, [JobSpec(batch_num=1, input_keys=["a.pdf"], shard_prefix="p")])
-    claimed = q.claim("worker-1", run_id)
-    assert claimed is not None
-
-    # A just-claimed job is not stale; the same job against a zero threshold is.
-    assert q.stale_jobs(3600, run_id) == []
-    assert [j.id for j in q.stale_jobs(0, run_id)] == [claimed.id]
-    # Unscoped, the read names exactly the rows the recovery acts on.
-    assert len(q.stale_jobs(0)) == q.requeue_stale(0)
-    assert q.stale_jobs(0, run_id) == []  # no longer running, so no longer stale
-
-
-def test_throughput_counts_completions_in_the_window(queue):
-    from womblex.cloud.queue import JobSpec
-
-    q, run_id = queue
-    q.enqueue(run_id, [JobSpec(batch_num=1, input_keys=["a.pdf"], shard_prefix="p")])
-    claimed = q.claim("worker-1", run_id)
-    assert claimed is not None
-    q.complete(claimed.id)
-
-    recent = q.throughput(run_id, window_seconds=3600)
-    assert recent.completed == 1
-    assert recent.per_minute == pytest.approx(1 / 60)
-    assert recent.last_completed_at is not None
-    # Scoped: another run's completions are not this run's throughput.
-    assert q.throughput("no-such-run").completed == 0
-
-
-# --- stage jobs (issue 5 part 2) --------------------------------------------
-
-
-def test_stage_jobs_wait_for_extraction_then_claim_in_pipeline_order(queue):
-    """The gate this merge adds: a stage row is claimable only once nothing
-    earlier in its run is still pending or running — all of extraction, then
-    each stage below it in `PIPELINE_ORDER`."""
-    from womblex.cloud.queue import JobSpec
-
-    q, run_id = queue
-    q.enqueue(run_id, [JobSpec(batch_num=1, input_keys=["a.pdf"], shard_prefix="runs/x/documents")])
-    assert q.enqueue_stages(run_id, ["embed", "enrich", "chunk"], "runs/x/documents") == 3
-    assert q.enqueue_stages(run_id, ["enrich"], "runs/x/documents") == 0  # idempotent per stage
-
-    batch = q.claim("w1", run_id)
-    assert batch is not None and batch.kind == "batch" and batch.batch_num == 1
-    # Extraction is running: no stage is due, even with three of them pending.
-    assert q.claim("w2", run_id) is None
-    q.complete(batch.id)
-
-    first = q.claim("w1", run_id)
-    assert first is not None and first.kind == "stage" and first.stage == "enrich"
-    assert first.input_keys == []
-    # enrich is running, so chunk waits on it — one stage of a run at a time.
-    assert q.claim("w2", run_id) is None
-    q.complete(first.id)
-
-    rest = []
-    while (job := q.claim("w1", run_id)) is not None:
-        rest.append(job.stage)
-        q.complete(job.id)
-    assert rest == ["chunk", "embed"]
-
-
-def test_a_failed_stage_does_not_wedge_the_ones_behind_it(queue):
-    """A settled-as-failed row records the failure; the stages behind it still
-    run and surface the gap as not-ready bases, rather than the operator finding
-    a run stuck on rows that will never resolve."""
-    q, run_id = queue
-    q.enqueue_stages(run_id, ["enrich", "chunk"], "runs/x/documents", max_attempts=1)
-
-    enrich = q.claim("w1", run_id)
-    assert enrich is not None and enrich.stage == "enrich"
-    q.fail(enrich.id, "boom")
-    assert q.stats(run_id).get("failed") == 1
-
-    chunk = q.claim("w1", run_id)
-    assert chunk is not None and chunk.stage == "chunk"
-
-
-def test_stage_rows_are_ordered_past_every_batch(queue):
-    """`batch_num` doubles as the queue position, which is what makes
-    `ORDER BY batch_num` drain extraction first with no second sort column."""
-    from womblex.cloud.queue import STAGE_SEQ_BASE
-
-    q, run_id = queue
-    q.enqueue_stages(run_id, ["money"], "runs/x/documents")
-    row = q.list_jobs(run_id)[0]
-    assert row.kind == "stage"
-    assert row.stage == "money"
-    assert row.batch_num > STAGE_SEQ_BASE
-
-
-def test_stage_jobs_of_other_runs_are_not_gated_by_this_one(queue):
-    """The gate is per-run: another run's undrained extraction must not hold
-    back this run's stages."""
-    from womblex.cloud.queue import JobSpec
-
-    q, run_id = queue
-    other = f"{run_id}-other"
-    try:
-        q.enqueue(other, [JobSpec(batch_num=1, input_keys=["a.pdf"], shard_prefix="p")])
-        q.enqueue_stages(run_id, ["money"], "runs/x/documents")
-
-        stage = q.claim("w1", run_id)
-        assert stage is not None and stage.kind == "stage" and stage.stage == "money"
-    finally:
-        with q.conn.transaction():
-            q.conn.execute("DELETE FROM womblex_jobs WHERE run_id = %s", (other,))
-
-
-def test_the_stage_columns_are_added_to_an_existing_table_in_place(queue):
-    """A live deployment's `womblex_jobs` predates `kind`/`stage`. The additive
-    ALTERs upgrade it with its rows intact, and those rows read as batches —
-    there is no migration step for the operator to run."""
-    q, run_id = queue
-    with q.conn.transaction():
-        q.conn.execute("ALTER TABLE womblex_jobs DROP COLUMN IF EXISTS kind")
-        q.conn.execute("ALTER TABLE womblex_jobs DROP COLUMN IF EXISTS stage")
-        q.conn.execute(
-            "INSERT INTO womblex_jobs (run_id, batch_num, input_keys, shard_prefix) "
-            "VALUES (%s, 1, %s, 'p')",
-            (run_id, '["a.pdf"]'),
-        )
-
-    q.ensure_schema()  # idempotent, and the ALTERs land here
-
-    row = q.list_jobs(run_id)[0]
-    assert (row.kind, row.stage) == ("batch", None)
-    assert q.enqueue_stages(run_id, ["money"], "runs/x/documents") == 1
-
-
-def test_process_job_runs_the_stage_contract_and_publishes_its_log(tmp_path, monkeypatch):
-    """A stage row hands the run's shard prefix to the same `run_stage_remote`
-    `womblex run-stage` calls — the queue is a second dispatcher for it, not a
-    second implementation."""
-    from womblex.cloud import stage_runner as sr
-    from womblex.cloud.queue import STAGE_SEQ_BASE, Job
-    from womblex.cloud.worker import _process_job
-
-    seen = {}
-
-    def _fake_run(contract, store, shard_prefix, config, **kwargs):
-        seen.update(stage=contract.name, prefix=shard_prefix,
-                    checkpoint_prefix=kwargs.get("checkpoint_prefix"))
-        return sr.StageRunSummary(stage=contract.name, processed=1, bases=1)
-
-    monkeypatch.setattr(sr, "prepare_stage_context", lambda contract, config: sr.RunContext())
-    monkeypatch.setattr(sr, "run_stage_remote", _fake_run)
-
-    store = RemoteStore.from_uri(str(tmp_path / "store"))
-    job = Job(
-        id=1, run_id="r1", batch_num=STAGE_SEQ_BASE + 7, input_keys=[],
-        shard_prefix="runs/r1/documents", attempts=1, kind="stage", stage="money",
-    )
-    _process_job(job, _minimal_config(tmp_path), store, store)
-
-    assert seen == {
-        "stage": "money",
-        "prefix": "runs/r1/documents",
-        # Staged, so a crashed stage resumes: the claim gate means no
-        # concurrent runner of the same run can clobber it.
-        "checkpoint_prefix": "runs/r1/.money-checkpoint",
-    }
-    assert store.exists("runs/r1/logs/stage-money.log")
-
-
-def _stage_job(**over):
-    from womblex.cloud.queue import Job
-
-    return Job(
-        id=1, run_id="r1", batch_num=1, input_keys=[], shard_prefix="runs/r1/documents",
-        attempts=1, kind="stage", stage=over.pop("stage", "chunk"), **over,
-    )
-
-
-def _patch_stage_run(monkeypatch, summary_kwargs):
-    from womblex.cloud import stage_runner as sr
-
-    monkeypatch.setattr(sr, "prepare_stage_context", lambda contract, config: sr.RunContext())
-    monkeypatch.setattr(
-        sr, "run_stage_remote",
-        lambda contract, store, prefix, config, **kw: sr.StageRunSummary(
-            stage=contract.name, **summary_kwargs,
-        ),
-    )
-
-
-def test_a_stage_that_publishes_nothing_fails_its_row(tmp_path, monkeypatch):
-    """A non-zero summary must not read as done — the row records it and retries."""
-    from womblex.cloud.worker import StageJobFailed, _process_job
-
-    _patch_stage_run(monkeypatch, {"bases": 2, "failed": 2})
-
-    store = RemoteStore.from_uri(str(tmp_path / "store"))
-    with pytest.raises(StageJobFailed):
-        _process_job(_stage_job(), _minimal_config(tmp_path), store, store)
-    # The log is still published — that is the case the operator most needs it.
-    assert store.exists("runs/r1/logs/stage-chunk.log")
-
-
-def test_a_stage_blocked_on_an_absent_upstream_is_not_ready_not_failed(tmp_path, monkeypatch):
-    """Every base awaiting a sidecar upstream has not written yet is "early",
-    not "broken" — a distinct exception so the loop releases instead of
-    spending an attempt (which would land the stage terminally failed on a
-    slow-draining run)."""
-    from womblex.cloud.worker import StageJobFailed, StageNotReady, _process_job
-
-    _patch_stage_run(monkeypatch, {
-        "bases": 2, "not_ready": 2, "not_ready_missing": {".enrichment_doc.parquet"},
-    })
-
-    store = RemoteStore.from_uri(str(tmp_path / "store"))
-    with pytest.raises(StageNotReady, match=r"\.enrichment_doc\.parquet"):
-        _process_job(_stage_job(), _minimal_config(tmp_path), store, store)
-    assert not issubclass(StageNotReady, StageJobFailed)
-    assert store.exists("runs/r1/logs/stage-chunk.log")
-
-
-def test_a_partially_blocked_stage_still_succeeds(tmp_path, monkeypatch):
-    """Not-ready under the base count is a still-draining fleet: exit 0, done."""
-    from womblex.cloud.worker import _process_job
-
-    _patch_stage_run(monkeypatch, {"bases": 3, "processed": 2, "not_ready": 1, "published": 2})
-
-    store = RemoteStore.from_uri(str(tmp_path / "store"))
-    _process_job(_stage_job(), _minimal_config(tmp_path), store, store)
-
-
 def test_prepare_stage_context_refuses_a_stage_isaacus_cannot_serve(monkeypatch, tmp_path):
     """Without it `chunk_shards` warns, writes nothing and returns cleanly —
     a remote no-op a queue would record as a completed job.
@@ -1245,7 +565,7 @@ def test_read_parquet_footer_reports_an_unreadable_object_rather_than_raising(tm
 
 
 class _CapturingQueue:
-    """A `JobQueue` stand-in that records the specs `cmd_enqueue` builds."""
+    """A `RunBoard` stand-in that records the specs `cmd_enqueue` builds."""
 
     keys: list[str] | None = None
 
@@ -1256,9 +576,6 @@ class _CapturingQueue:
         return self
 
     def __exit__(self, *_exc: object) -> None:
-        pass
-
-    def ensure_schema(self) -> None:
         pass
 
     def enqueue(self, _run_id: str, specs: list) -> int:
@@ -1282,10 +599,12 @@ def test_enqueue_queues_one_key_however_the_prefix_was_typed(tmp_path, monkeypat
     """A queued key is downloaded by the worker and recorded as the document's
     `source_relpath`, and an object store has no path semantics to collapse a
     `.` segment, so every spelling has to scope identically here."""
-    import womblex.cloud.queue as queue_module
+    import womblex.cloud.jobs as jobs_module
     from womblex.cli import cloud
+    from womblex.cloud import dbos_app
 
-    monkeypatch.setattr(queue_module, "JobQueue", _CapturingQueue)
+    monkeypatch.setattr(jobs_module, "RunBoard", _CapturingQueue)
+    monkeypatch.setattr(dbos_app, "ensure_schema", lambda _dsn: None)
     (tmp_path / "inbox" / "2026-08").mkdir(parents=True)
     (tmp_path / "inbox" / "2026-08" / "a.pdf").write_bytes(b"%PDF-1.4\n")
 
@@ -1300,105 +619,15 @@ def test_a_prefix_scoping_to_nothing_is_not_a_licence_to_list_the_whole_store(
     """`--input-prefix ./` is truthy but scopes to nothing. Without `--ingest`
     that would enqueue the store root — the run's own output included — so the
     guard reads the normalised prefix, not the string typed."""
-    import womblex.cloud.queue as queue_module
+    import womblex.cloud.jobs as jobs_module
     from womblex.cli import cloud
+    from womblex.cloud import dbos_app
 
-    monkeypatch.setattr(queue_module, "JobQueue", _CapturingQueue)
+    monkeypatch.setattr(jobs_module, "RunBoard", _CapturingQueue)
+    monkeypatch.setattr(dbos_app, "ensure_schema", lambda _dsn: None)
     (tmp_path / "store").mkdir()
     (tmp_path / "store" / "stray.pdf").write_bytes(b"%PDF-1.4\n")
 
     _CapturingQueue.keys = None
     assert cloud.cmd_enqueue(_enqueue_args(tmp_path, "./", ingest=False)) == 1
     assert _CapturingQueue.keys is None
-
-
-# --- run ownership (needs Postgres) ------------------------------------------
-
-
-def test_enqueue_refuses_a_run_owned_by_someone_else(queue):
-    from womblex.cloud.queue import JobSpec, RunOwnedError
-
-    q, run_id = queue
-
-    def spec(n: int) -> JobSpec:
-        return JobSpec(batch_num=n, input_keys=["a.pdf"], shard_prefix="p")
-
-    assert q.enqueue(run_id, [spec(1)], owner="alice") == 1
-    with pytest.raises(RunOwnedError):
-        q.enqueue(run_id, [spec(2)], owner="bob")
-    with pytest.raises(RunOwnedError):
-        q.enqueue_stages(run_id, ["chunk"], "p", owner="bob")
-    assert q.enqueue(run_id, [spec(2)], owner="alice") == 1  # the owner resumes freely
-
-
-def test_an_unowned_run_is_refused_to_a_named_owner(queue):
-    from womblex.cloud.queue import JobSpec, RunOwnedError
-
-    q, run_id = queue
-    q.enqueue(run_id, [JobSpec(batch_num=1, input_keys=["a"], shard_prefix="p")])
-    with pytest.raises(RunOwnedError):
-        q.enqueue(run_id, [JobSpec(batch_num=2, input_keys=["b"], shard_prefix="p")],
-                  owner="alice")
-
-
-def test_an_unscoped_enqueue_inherits_the_runs_owner(queue):
-    from womblex.cloud.queue import JobSpec
-
-    q, run_id = queue
-    q.enqueue(run_id, [JobSpec(batch_num=1, input_keys=["a"], shard_prefix="p")], owner="alice")
-    q.enqueue_stages(run_id, ["chunk"], "p")  # admin dispatch, no owner named
-    assert {r.run_id: r.owner for r in q.runs()}[run_id] == "alice"
-    assert q.stats(run_id, owner="alice") == {"pending": 2}
-
-
-def test_views_are_scoped_by_owner(queue):
-    from womblex.cloud.queue import JobSpec
-
-    q, run_id = queue
-    q.enqueue(run_id, [JobSpec(batch_num=1, input_keys=["a"], shard_prefix="p")], owner="alice")
-    job = q.claim("w1", run_id)
-    assert job is not None
-
-    assert q.stats(run_id, owner="alice") == {"running": 1}
-    assert q.stats(run_id, owner="bob") == {}
-    assert len(q.list_jobs(run_id, owner="alice")) == 1
-    assert q.list_jobs(run_id, owner="bob") == []
-    assert [w.worker_id for w in q.workers(run_id, owner="alice")] == ["w1"]
-    assert q.workers(run_id, owner="bob") == []
-    assert q.stale_jobs(-1.0, run_id, owner="bob") == []
-    q.complete(job.id)
-    assert q.throughput(run_id, owner="alice").completed == 1
-    assert q.throughput(run_id, owner="bob").completed == 0
-
-
-def test_runs_rolls_up_status_per_run(queue):
-    from womblex.cloud.queue import JobSpec
-
-    q, run_id = queue
-    q.enqueue(run_id, [
-        JobSpec(batch_num=1, input_keys=["a"], shard_prefix="p"),
-        JobSpec(batch_num=2, input_keys=["b"], shard_prefix="p"),
-    ], owner="alice")
-    job = q.claim("w1", run_id)
-    assert job is not None
-    q.complete(job.id)
-
-    (summary,) = [r for r in q.runs(owner="alice") if r.run_id == run_id]
-    assert summary.owner == "alice"
-    assert summary.counts == {"done": 1, "pending": 1}
-    assert summary.total == 2
-    assert not [r for r in q.runs(owner="bob") if r.run_id == run_id]
-    assert [r.run_id for r in q.runs(run_id=run_id)] == [run_id]
-    assert q.runs(owner="bob", run_id=run_id) == []
-
-
-def test_ensure_schema_migrates_a_table_without_owner(queue):
-    q, _ = queue
-    with q.conn.transaction():
-        q.conn.execute("DROP INDEX IF EXISTS womblex_jobs_owner_idx")
-        q.conn.execute("ALTER TABLE womblex_jobs DROP COLUMN owner")
-    q.ensure_schema()
-    cols = {r[0] for r in q.conn.execute(
-        "SELECT column_name FROM information_schema.columns WHERE table_name='womblex_jobs'"
-    ).fetchall()}
-    assert "owner" in cols

@@ -26,6 +26,7 @@ from pathlib import PurePosixPath
 from typing import Literal, cast
 
 import psycopg
+import sqlalchemy.exc
 from fastapi import Depends, FastAPI, HTTPException, Response, UploadFile
 
 from womblex.api import readers
@@ -47,7 +48,7 @@ from womblex.api.models import (
 from womblex.cli._shared import SUPPORTED_EXTENSIONS, normalise_prefix, select_supported
 from womblex.cloud import dispatch
 from womblex.cloud.dispatch import QUEUE_CONNECT_TIMEOUT
-from womblex.cloud.queue import JobQueue, RunSummary
+from womblex.cloud.jobs import RunBoard, RunSummary
 from womblex.store.contract import read_footer_contract
 from womblex.store.remote import RemoteStore
 from womblex.store.retention import generate_run_id
@@ -155,16 +156,16 @@ def create_api_app(
     can_submit = require_scope(get_caller, "submit")
 
     @contextmanager
-    def queue() -> Iterator[JobQueue]:
+    def queue() -> Iterator[RunBoard]:
         try:
-            q = JobQueue(db_dsn, connect_timeout=QUEUE_CONNECT_TIMEOUT)
+            q = RunBoard(db_dsn, connect_timeout=QUEUE_CONNECT_TIMEOUT)
         except Exception as e:
             logger.warning("api: queue unreachable: %s", e)
             raise HTTPException(status_code=503, detail="job queue unreachable") from e
         with q:
             yield q
 
-    def find_run(q: JobQueue, caller: Caller, run_id: str) -> RunSummary:
+    def find_run(q: RunBoard, caller: Caller, run_id: str) -> RunSummary:
         found = q.runs(caller.owner, run_id=run_id, limit=1)
         if found:
             return found[0]
@@ -214,7 +215,7 @@ def create_api_app(
             raise HTTPException(status_code=503, detail=e.detail) from e
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
-        except psycopg.Error as e:
+        except (psycopg.Error, sqlalchemy.exc.SQLAlchemyError) as e:
             # Batch rows already committed are not rolled back: name the run so
             # an operator can find it (or a caller can re-list it) after the outage.
             logger.warning(

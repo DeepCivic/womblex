@@ -2,9 +2,9 @@
 
 Two sources, both already written by the pipeline:
 
-- **The job queue**, when a DSN is configured. Queue counts are exact, the
-  job list is ``womblex_jobs`` itself, the fleet is ``locked_by`` on running
-  rows, and throughput is derived from ``updated_at`` — no new columns.
+- **The run board**, when a DSN is configured. Counts are exact, the job list
+  is the DBOS workflow rows, the fleet is the executor holding each running
+  workflow, and throughput is derived from completion times.
 - **Per-stage checkpoints**, always. Every shard stage writes its
   ``CheckpointState`` to a dot-directory *inside the run*
   (``<run>/.chunk-checkpoint/`` and friends), which ``STAGE_CONTRACTS``
@@ -35,9 +35,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-#: Default staleness threshold, in seconds. A ``running`` row locked longer
-#: than this is what ``requeue_stale`` recovers, so the dashboard names the
-#: same rows a worker's ``--stale-timeout`` would act on.
+#: Default staleness threshold, in seconds. A ``running`` workflow with no
+#: update for longer than this is named on the dashboard; DBOS recovers it when
+#: its executor restarts.
 DEFAULT_STALE_AFTER = 900.0
 
 #: Default trailing window for the throughput tile, in seconds.
@@ -64,7 +64,7 @@ def _EMPTY_QUEUE_SECTION(window_seconds: float) -> dict:
 
     Same shape a live read returns with zero rows, so the frontend renders the
     tiles/lists as empty rather than special-casing it. Used when the
-    ``womblex_jobs`` table does not exist yet (a fresh Postgres before ``init``
+    DBOS system tables do not exist yet (a fresh database before ``init``
     or the first enqueue) — an empty queue, not a fault.
     """
     return {
@@ -83,21 +83,17 @@ def _EMPTY_QUEUE_SECTION(window_seconds: float) -> dict:
 
 
 def _is_missing_jobs_table(exc: Exception) -> bool:
-    """Whether *exc* is Postgres saying ``womblex_jobs`` does not exist.
+    """Whether *exc* says the DBOS system tables do not exist yet.
 
-    Matched on psycopg's ``UndefinedTable`` (SQLSTATE 42P01) when psycopg is
-    importable, else on the message — a reachable connection whose schema the
-    console does not create. Anything else (a real connection failure, a
-    permissions error) is not swallowed; it propagates to the ``queue_error``.
+    A reachable database no worker or dispatcher has written to has no schema,
+    and the console does not create it. Matched on the message because the
+    driver error arrives wrapped (SQLAlchemy over psycopg or sqlite): Postgres
+    says the ``workflow_status`` relation does not exist, SQLite that there is
+    no such table. Anything else (a real connection failure, a permissions
+    error) is not swallowed; it propagates to the ``queue_error``.
     """
-    try:
-        import psycopg
-
-        if isinstance(exc, psycopg.errors.UndefinedTable):
-            return True
-    except Exception:  # pragma: no cover - psycopg always present with a DSN configured
-        pass
-    return "womblex_jobs" in str(exc) and "exist" in str(exc).lower()
+    text = str(exc).lower()
+    return "workflow_status" in text and ("exist" in text or "no such table" in text)
 
 
 def get_dashboard(
@@ -143,7 +139,7 @@ def queue_section(
     unreachable" next to live checkpoint progress has more to go on than a
     500.
 
-    A *reachable* queue whose ``womblex_jobs`` table does not exist yet is not
+    A *reachable* database whose DBOS system tables do not exist yet is not
     an error: it is a fresh Postgres that ``init`` (or the first enqueue) has
     not created the schema in, and its honest state is an empty queue. Reading
     it as "unreachable" was a reported symptom — the console gates the whole
@@ -159,15 +155,15 @@ def queue_section(
     if not settings.db_dsn:
         return None, None
     try:
-        from womblex.cloud.queue import JobQueue
+        from womblex.cloud.jobs import RunBoard
 
-        with JobQueue(settings.db_dsn, connect_timeout=QUEUE_CONNECT_TIMEOUT) as queue:
+        with RunBoard(settings.db_dsn, connect_timeout=QUEUE_CONNECT_TIMEOUT) as board:
             try:
-                stats = queue.stats(run_id)
-                jobs = queue.list_jobs(run_id, limit=job_limit)
-                workers = queue.workers(run_id)
-                stale = queue.stale_jobs(stale_after, run_id)
-                throughput = queue.throughput(run_id, window_seconds=window_seconds)
+                stats = board.stats(run_id)
+                jobs = board.list_jobs(run_id, limit=job_limit)
+                workers = board.workers(run_id)
+                stale = board.stale_jobs(stale_after, run_id)
+                throughput = board.throughput(run_id, window_seconds=window_seconds)
             except Exception as e:
                 if _is_missing_jobs_table(e):
                     return _EMPTY_QUEUE_SECTION(window_seconds), None

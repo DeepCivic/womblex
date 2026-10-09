@@ -1,6 +1,6 @@
 # Trust baseline and recipes — plan
 
-*Status: in progress (2026-10). Phase 1 item 1 has shipped; D1 to D11 are decided. Phase 0 (DBOS) runs before the rest of Phase 1. Each phase is a branch of sequential merges under the 500-line cap. Each merge updates this document as it lands, and the document is retired into `decisions.md` once its last phase ships.*
+*Status: in progress (2026-10). Phase 0 (DBOS) and Phase 1 item 1 have shipped; D1 to D11 are decided. Each phase is a branch of sequential merges under the 500-line cap. Each merge updates this document as it lands, and the document is retired into `decisions.md` once its last phase ships.*
 
 ## Context
 A business-analyst requirements set proposed five themes: high-integrity extraction, recipe-based workflow authoring, destinations and delivery, agent-friendly operation, and safety and operability. Its labels (FR-1.1 to FR-5.2) are kept below so this plan can be read against it. It was written without knowledge of the repository, so this plan maps each theme onto what Womblex already has, records what is out of scope, and orders the remaining gaps.
@@ -72,15 +72,16 @@ Because `womblex run` extracts only, options B and C both need a **local multi-s
 
 ## Phases
 
-### Phase 0 — DBOS foundation (branch, first)
-DBOS replaces the job system outright (D9), and goes first because every later phase builds on it.
+### Phase 0 — DBOS foundation (shipped)
+DBOS replaced the job system outright (D9), and went first because every later phase builds on it. Shipped as one change because the queue, worker, stage runner and every reader moved together; the 500-line cap was waived for it by the maintainer. What differs from the bullets below: `cloud/stage_runner.py` stays as the stage engine (`plan_units`, `run_unit`, and `run_stage_remote` for `run-stage --store`) rather than being deleted; the order is one coordinator workflow per dispatch, with a child workflow per stage; owner scoping is a workflow attribute filtered client-side; `womblex worker` lost `--run-id` and `--stale-timeout`; DBOS keeps its default pickle serialiser, since the portable JSON one is not configured. Rationale is in `decisions.md`.
 - **Dependency approved (2026-10).** `dbos` is added to `pyproject.toml`, bringing `sqlalchemy` and `websockets` into the lockfile, in its own dependency-scoped merge.
 - **Replace, don't wrap.** `cloud/queue.py`, `cloud/worker.py` and `cloud/stage_runner.py` are rewritten on DBOS workflows and deleted as they are replaced: an extraction batch and a downstream stage unit are each a workflow, and the order `pipeline_order` declares becomes the workflow's step order rather than queue-row positioning.
 - **Completion moves to DBOS's progress records.** Today a stage unit counts as done when all its declared outputs are published (skip-by-published-output, all-or-none publish). Under DBOS the publish is the unit's last step, so a recorded step is the done signal, and a re-run skips it. Step results are storage keys, never data, under DBOS's portable JSON serialiser, not its default pickle.
 - **Kept as Womblex code:** owner scoping of runs (`RunOwnedError`, owner-filtered views), stage contracts and their preflight, stage-in/stage-out through `store/remote.py`, and the shared `batch.process_batch`, so local and distributed runs stay byte-identical.
 - **Local runs** use DBOS's SQLite system database, so the core install still runs without a database server.
 - **Carried over:** `enqueue` / `enqueue-stages` / `worker` / `jobs` / `finalize` / `run-stage` keep their CLI surface; the console and `/v1` API read run status from DBOS instead of the `womblex_jobs` table. Runs queued under the old table are drained or re-enqueued, not migrated.
-- **Retires** the "Distributed execution" decision's queue-as-checkpoint half in `decisions.md`, which is rewritten in the merge that deletes `cloud/queue.py`. Ships as sequential merges under the 500-line cap, each leaving the suite green.
+- **Retires** the "Distributed execution" decision's queue-as-checkpoint half in `decisions.md`, rewritten in the same change that deletes `cloud/queue.py`.
+- **Follow-up: retry a failed stage.** Re-dispatching a stage that failed returns its recorded failure, as the old queue did. DBOS's `resume_workflow` does not restart a failed workflow, but `fork_workflow` does: it starts a copy from a chosen step and keeps the steps before it, so only the failed unit and those after it run again. The copy has a new workflow id and the failed original stays on the board, so the follow-up decides how a run's status counts the original once its retry succeeds. Its own merge, after Phase 0.
 
 ### Phase 1 — trust baseline (branch)
 1. **Strict `text_source`.** *Shipped.* A missing overlay the config selected refuses on both the local and object-store paths, before any base is processed (`require_overlays` / `MissingOverlayError` locally; an up-front pass in `run_stage_remote`).

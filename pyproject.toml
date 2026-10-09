@@ -71,6 +71,10 @@ dependencies = [
     "fsspec>=2024.0",
     "s3fs>=2024.0",
     "psycopg[binary]>=3.1",
+    # Durable workflows (Phase 0 of docs/plan-trust-and-recipes.md): replaces
+    # the cloud/ queue, worker and stage runner. SQLite system database on a
+    # local run, so the base install still needs no database server.
+    "dbos>=3.2.0",
 ]
 
 [project.optional-dependencies]
