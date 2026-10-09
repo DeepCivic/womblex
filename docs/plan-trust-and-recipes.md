@@ -1,6 +1,6 @@
 # Trust baseline and recipes — plan
 
-*Status: in progress (2026-10). Phase 1 item 1 has shipped; D1 to D8 and D10 are decided. Each phase is a branch of sequential merges under the 500-line cap. Each merge updates this document as it lands, and the document is retired into `decisions.md` once its last phase ships.*
+*Status: in progress (2026-10). Phase 1 item 1 has shipped; D1 to D8, D10 and D11 are decided. Each phase is a branch of sequential merges under the 500-line cap. Each merge updates this document as it lands, and the document is retired into `decisions.md` once its last phase ships.*
 
 ## Context
 A business-analyst requirements set proposed five themes: high-integrity extraction, recipe-based workflow authoring, destinations and delivery, agent-friendly operation, and safety and operability. Its labels (FR-1.1 to FR-5.2) are kept below so this plan can be read against it. It was written without knowledge of the repository, so this plan maps each theme onto what Womblex already has, records what is out of scope, and orders the remaining gaps.
@@ -92,7 +92,7 @@ Because `womblex run` extracts only, options B and C both need a **local multi-s
 - The workflow digest stamped beside the config digest.
 
 ### Phase 3 — integration (branch)
-- Destinations as delivery targets beside egress, each with its own status and bounded retries.
+- Destinations as delivery targets beside egress, each with its own status and bounded retries: object storage, Postgres with pgvector, and webhooks (D11).
 - Delivery attempts and webhook events recorded in the existing queue, unless the DBOS decision above goes the other way.
 - An OpenLineage-shaped export of the run record.
 
@@ -113,9 +113,9 @@ Each is settled before the merge it gates starts, and recorded here when taken. 
 | D6 | Phase 1 items 6 and 7 | Whether the evidence reference replaces or sits beside each sidecar's anchor columns | **Decided 2026-10:** replace (a major contract bump), with reader migration as its own scope item. Where the span check runs is settled in the item 6 merge |
 | D7 | Phase 1 item 8 | Cell bbox coordinate space, sources with no page geometry, and branch split | **Answered.** `BBox` is normalised 0–1 with a top-left origin, and `Element.bbox` is already optional; cells follow both, so DOCX and spreadsheet cells carry null. The column is additive, a minor bump (`contract.md`). The merge cap requires splitting items 6 to 8 into sequential merges; whether they form a separately named Phase 1b is labelling only |
 | D8 | Phase 2 | Workflow model, and the condition language's scope | **Decided 2026-10:** option B, a stored workflow object. Condition scope as Phase 2 states |
-| D9 | Phase 3 | DBOS against the existing queue for delivery retries and events | **Open.** Trade-off detail requested before deciding. `decisions.md` makes the Postgres queue the distributed checkpoint; DBOS also runs on Postgres, so that rule does not rule it out |
+| D9 | Phase 3 | DBOS against the existing queue for delivery retries and events | **Open.** DBOS Transact 3.2.0 (2026-09) is MIT, runs on Postgres or SQLite, and has cron schedules, step retries with backoff, rate-limited queues and workflow events. `decisions.md` makes the Postgres queue the distributed checkpoint; DBOS also runs on Postgres, so that rule does not rule it out |
 | D10 | Phase 3 | Whether the egress decision changes once per-step destinations exist | **Confirmed 2026-10.** Bundles may hold unredacted sources; access control is the host's responsibility (`egress.md`) |
-| D11 | Phase 3 | Which destinations come first | **Open.** Suggestions requested |
+| D11 | Phase 3 | Which destinations come first | **Decided 2026-10:** object storage (S3, built on egress), Postgres with pgvector, and webhook notifications. Declaring `httpx` for webhooks needs approval |
 
 ## Conventions this plan holds to
 - No quality or confidence scoring, and no scoring against ground truth in this repository.

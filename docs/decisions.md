@@ -1177,8 +1177,8 @@ be re-derivable, and the first pass's were not.
   PII has only the opt-in backstop and AI chunking falls back to token splitting.
   A config-selected local provider (spaCy / fine-tuned NER) populating
   `EnrichmentResult` would serve both offline, at lower quality. *Wanted
-  (2026-10)*, to be built later; a straightforward interim option may be
-  proposed for approval.
+  (2026-10)*: a GLiNER-based provider is in development by the maintainer, so
+  no interim provider is added.
 
 - **Downstream text-cleaning op (#B/#D)** — *v1 shipped* as `womblex normalise
   --shards` (`process/normalise.py` transforms + `process/normalise_stage.py`
