@@ -22,7 +22,7 @@ checkpoint dirname) and wants that mapping ordered, not replaced.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from womblex.config import WomblexConfig
@@ -69,10 +69,8 @@ PIPELINE_ORDER: tuple[str, ...] = (
 #: would be a worse failure than putting it at the end.
 _RANK: dict[str, int] = {name: i for i, name in enumerate(PIPELINE_ORDER)}
 
-_V = TypeVar("_V")
 
-
-def sort_by_pipeline(mapping: Mapping[str, _V]) -> dict[str, _V]:
+def sort_by_pipeline[V](mapping: Mapping[str, V]) -> dict[str, V]:
     """*mapping*, re-keyed in `PIPELINE_ORDER`. Values are untouched."""
     return {k: mapping[k] for k in sorted(mapping, key=stage_rank)}
 

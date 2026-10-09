@@ -3,7 +3,7 @@ name = "womblex"
 version = "0.5.12"
 description = "Document extraction pipeline for Australian government documents"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12,<3.13"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "DeepCivic" }]
@@ -22,7 +22,6 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Text Processing",
     "Topic :: Scientific/Engineering :: Information Analysis",
@@ -185,7 +184,7 @@ log_file_format = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 
 [tool.ruff]
 line-length = 120
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 # These three are off because the codebase deliberately does what they flag,
@@ -203,10 +202,9 @@ ignore = [
 ]
 
 [tool.mypy]
-# No python_version pin: each CI matrix leg checks at its own interpreter
-# version. Pinning 3.11 broke the 3.12 leg — numpy >= 2.5 (3.12-only) ships
-# PEP 695 `type` statements in its stubs, which mypy rejects under a 3.11
-# target.
+# 3.12 only: rapidocr-onnxruntime declares <3.13, and numpy >= 2.5 ships
+# PEP 695 `type` statements in its stubs, which a 3.11 target rejects.
+python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 

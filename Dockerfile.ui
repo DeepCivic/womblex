@@ -17,7 +17,7 @@ RUN npm ci
 COPY ui/ .
 RUN npm run build
 
-FROM python:3.11-slim AS base
+FROM python:3.12-slim AS base
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -48,7 +48,7 @@ COPY --from=frontend-builder /app/ui/build /app/ui/build
 # used to depend on `[cloud]` carrying s3fs, so any build that dropped the
 # extra 500'd on `s3://` with "Install s3fs to access S3".
 ARG EXTRAS=ui
-# Upgrade pip first: the stock pip on python:3.11-slim is old enough that its
+# Upgrade pip first: the stock pip on python:3.12-slim is old enough that its
 # resolver stalls/fails on the boto stack (s3fs -> aiobotocore pins a narrow
 # botocore range that must co-resolve with boto3's own botocore pin). The
 # newer resolver finds the compatible set. Baked in here rather than patched

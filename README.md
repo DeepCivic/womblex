@@ -7,7 +7,7 @@ independent stages clean, chunk, annotate, enrich and mask the corpus, each one
 writing its own sidecar file beside the extraction output.
 
 It runs on a laptop with no network access, and the same code scales out to a
-fleet of workers over object storage and a Postgres job queue. The models
+fleet of workers over object storage and a DBOS-backed Postgres queue. The models
 behind each step are swappable without changing any output schema.
 
 What Womblex must do is specified in
@@ -70,7 +70,7 @@ typed Parquet or GeoParquet directly and bypass the text stages.
 
 ## Installation
 
-Requires Python 3.11 or later.
+Requires Python 3.12. `rapidocr-onnxruntime`, the OCR engine, does not install on 3.13 or later.
 
 ```bash
 pip install womblex          # the whole pipeline, CPU-only
@@ -78,7 +78,7 @@ pip install womblex[api]     # + the /v1 service API (womblex serve)
 pip install womblex[ui]      # + the admin console (womblex ui)
 ```
 
-Object-storage staging, the Postgres job queue and the SDKs for the hosted
+Object-storage staging, the DBOS workflow engine and the SDKs for the hosted
 models are all in the base install. They stay dormant until configured: with
 no credentials or endpoints set, nothing calls out. `[local]` and `[cloud]` are
 accepted but empty.

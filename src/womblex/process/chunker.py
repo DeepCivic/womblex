@@ -61,7 +61,7 @@ import bisect
 import logging
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, TypeVar, cast
+from typing import Any, cast
 
 import semchunk
 
@@ -659,8 +659,6 @@ def build_chunk_input(
 # Document order
 # ---------------------------------------------------------------------------
 
-_Row = TypeVar("_Row", bound=Mapping[str, Any])
-
 
 def _table_anchor(elem_order: int, spans: Sequence[tuple[int, int, int]]) -> int:
     """Narrative offset a table element sits at: where the next element begins.
@@ -694,9 +692,9 @@ def _document_order_key(
     return (_table_anchor(elem_order, spans), 0, elem_order, row["start_char"])
 
 
-def chunks_in_document_order(
-    chunks: Sequence[_Row], spans: Sequence[tuple[int, int, int]],
-) -> list[_Row]:
+def chunks_in_document_order[Row: Mapping[str, Any]](
+    chunks: Sequence[Row], spans: Sequence[tuple[int, int, int]],
+) -> list[Row]:
     """Sort chunk rows into document order — narrative and tables interleaved.
 
     The two chunk projections carry their positions in two coordinate
