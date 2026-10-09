@@ -3,9 +3,8 @@
 MuPDF starts a block where the baseline pitch exceeds about 1.5 font sizes, keeps a
 row's fragments (table cells) together, and does not break on a size or weight
 change alone. The expected values below were measured on PyMuPDF 1.27.2.2 before
-it was removed: lines per block, summarised per page as {lines: blocks}. The
-spacing fixture varies leading and paragraph gap so the rule is held at more than
-one pitch.
+it was removed: lines per block, per page, in block order. The spacing fixture
+varies leading and paragraph gap so the rule is held at more than one pitch.
 """
 
 from __future__ import annotations
@@ -20,19 +19,17 @@ from womblex.ingest.detect import detect_file_type
 from womblex.ingest.extract import extract_text
 from womblex.ingest.pdf import open_document
 
-_FOI_PAGE = {1: 1, 5: 1, 7: 1, 11: 36}
+_FOI_PAGE = [7, 5, 1] + [11] * 36
 
-#: Lines per block, per page, as {lines: blocks}.
+#: Lines per block, per page, in block order.
 PARITY = {
     AUDIT_PDF: [
-        {1: 2, 4: 3}, {1: 2, 4: 3}, {1: 2, 4: 10}, {1: 2, 4: 3}, {1: 2, 3: 1, 4: 2}, {1: 2, 3: 2, 4: 1},
+        [1, 4, 4, 4, 1], [1, 4, 4, 4, 1], [1] + [4] * 10 + [1], [1, 4, 4, 4, 1], [1, 4, 3, 4, 1], [1, 3, 4, 3, 1],
     ],
-    SPACING_PDF: [
-        {1: 1, 12: 1}, {1: 1, 3: 3, 4: 1}, {1: 1, 3: 4}, {1: 1, 3: 4}, {1: 1, 3: 4}, {1: 1, 12: 1},
-    ],
-    NOTICE_PDF: [{1: 2, 3: 2, 6: 1}, {1: 1, 4: 5}, {1: 1, 4: 5}],
-    SCHEDULE_PDF: [{1: 2, 9: 45}],
-    FOI_INDEX_PDF: [{1: 1, 2: 2, 5: 1, 7: 1, 11: 36}, _FOI_PAGE, _FOI_PAGE, _FOI_PAGE],
+    SPACING_PDF: [[1, 12], [1, 4, 3, 3, 3], [1, 3, 3, 3, 3], [1, 3, 3, 3, 3], [1, 3, 3, 3, 3], [1, 12]],
+    NOTICE_PDF: [[1, 6, 3, 1, 3], [1, 4, 4, 4, 4, 4], [1, 4, 4, 4, 4, 4]],
+    SCHEDULE_PDF: [[1, 1] + [9] * 45],
+    FOI_INDEX_PDF: [[2, 2, 7, 5, 1] + [11] * 36, _FOI_PAGE, _FOI_PAGE, _FOI_PAGE],
 }
 
 #: Element kinds and counts over the whole extraction.
@@ -47,13 +44,9 @@ def _lines_per_block(path: Path) -> list[list[int]]:
     return [[len(b.lines) for b in page.text_dict()] for page in open_document(path)]
 
 
-def _summary(path: Path) -> list[dict[int, int]]:
-    return [dict(collections.Counter(lines)) for lines in _lines_per_block(path)]
-
-
 @pytest.mark.parametrize("path", PARITY, ids=lambda p: p.name)
 def test_blocks_hold_the_same_lines_as_mupdf(path: Path) -> None:
-    assert _summary(path) == PARITY[path]
+    assert _lines_per_block(path) == PARITY[path]
 
 
 @pytest.mark.parametrize("path", KINDS, ids=lambda p: p.name)
@@ -132,5 +125,8 @@ def test_a_rotated_page_with_upright_text_is_grouped_in_the_unrotated_frame(tmp_
 def test_vertical_text_keeps_content_order(angle: int, tmp_path: Path) -> None:
     # Drawn out of position order: pdfium sorts vertical text by position, MuPDF does not.
     path = _draw(tmp_path / "order.pdf", [(0, -9, "L0"), (0, -18, "L1"), (0, 0, "L2")], angle=angle)
-    lines = ["".join(s.text for s in line.spans) for page in open_document(path) for b in page.text_dict() for line in b.lines]
+    lines = [
+        "".join(s.text for s in line.spans)
+        for page in open_document(path) for b in page.text_dict() for line in b.lines
+    ]
     assert lines == ["L0", "L1", "L2"]
