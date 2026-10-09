@@ -28,12 +28,12 @@ Verified against the code at the time of writing.
 
 ## Findings
 - **The PII stage can label unmasked text `masked`.** The PII stage treats the enrichment entities sidecar as optional (`strict=False` in `cloud/stage_contracts.py`). When it is absent, `pii/pii_stage.py` finds no graph spans, logs nothing, and still writes `*.clean_text.parquet`, which `store/contract.py` labels `masked`. With the regex backstop off (the default) that file is the raw chunk text under the label that says it is safe to hand onward.
-- **A missing `text_source` overlay changes the evidence layer silently on a local run.** This is the open Requirement 3 TO-DO in `functional_requirements.md`. Downstream offsets then index a different text layer than the config selected.
-- **Unknown config keys are ignored.** No model under `config/` sets `extra="forbid"`, so a misspelt key in a YAML config validates and is dropped.
+- **A missing `text_source` overlay changes the evidence layer silently on a local run.** This is the open Requirement 3 TO-DO in `docs/functional_requirements.md` (its second bullet; the first is the missing up-front ordering check). Downstream offsets then index a different text layer than the config selected.
+- **Unknown config keys are ignored.** No model under `config/` sets `extra="forbid"`, so a misspelt key in a YAML config validates and is dropped. The only rejection today is the `_reject_removed` validators in `config/__init__.py`, which refuse retired sections by name.
 - **Table cells cannot be located on the page.** `Cell` carries no `bbox`, so a cell value is locatable only to its parent table element. Most of the corpus's monetary amounts live in table cells.
 - **Each annotation sidecar defines its own anchor columns.** There is no shared shape for "where in the source this came from".
 - **Output files carry no file-level checksum.** `content_digest` covers a document's elements; nothing records the bytes of each output file.
-- **`graph-refresh` rewrites files in place** (`MutationMode.IN_PLACE`), which is the one exception to write-once sidecars.
+- **Two stages rewrite files in place** (`MutationMode.IN_PLACE`), the exceptions to write-once sidecars. `graph-refresh` rewrites the entity and edge sidecars. `layout` replaces the extraction batch's `*.layout_regions.parquet`, but only when the config's layout fingerprint differs from the file's, and all-or-nothing per batch.
 - **The local stage sequence lives in comments.** `womblex run` extracts only; the per-stage order for a full pipeline is documented in comments in `configs/default-isaacus.yaml` and run by hand.
 - **Egress copies unredacted material by design.** `docs/egress.md` makes access control the responsibility of whoever runs egress and hosts the bundle. FR-5.1's "masked outputs need an explicit policy before delivery" contradicts that decision; it is listed under open questions, not as a defect.
 
@@ -73,10 +73,10 @@ Because `womblex run` extracts only, options B and C both need a **local multi-s
 ## Phases
 
 ### Phase 1 — trust baseline (branch)
-1. **Strict `text_source`.** A missing overlay the config selected refuses on both the local and object-store paths, before any base is processed. Closes part of the Requirement 3 TO-DO.
+1. **Strict `text_source`.** A missing overlay the config selected refuses on both the local and object-store paths, before any base is processed. Closes the Requirement 3 TO-DO's second bullet.
 2. **No false `masked` label.** The PII stage refuses, or writes no `clean_text`, when it has neither enrichment entities nor the regex backstop. Which of the two is an open question.
-3. **Strict config.** `extra="forbid"` on the config models, with presets and shipped configs checked against it.
-4. **Up-front ordering check.** Verify the whole stage sequence's required inputs before processing, with stable error codes shared by the CLI and the API. Closes the rest of the Requirement 3 TO-DO.
+3. **Strict config.** `extra="forbid"` on the config models, with presets and shipped configs checked against it. The merge states whether it supersedes the `_reject_removed` validators or keeps them for their named messages, and records in `CHANGELOG.md` that a saved preset or user config with a stray key now fails validation.
+4. **Up-front ordering check.** Verify the whole stage sequence's required inputs before processing, with stable error codes shared by the CLI and the API. Closes the Requirement 3 TO-DO's first bullet.
 5. **File checksums.** A SHA-256 per output file in the run record.
 6. **Evidence reference.** One shared anchor shape (source hash, element order, page, bbox, character span, text layer) adopted by the money, entity-link and PII sidecars, plus a check that each span's text equals the source text at its offsets.
 7. **Cell bbox.** Add `bbox` to `Cell` and the table-cells sidecar: an additive column and a minor contract-version bump.
@@ -95,7 +95,7 @@ Because `womblex run` extracts only, options B and C both need a **local multi-s
 
 ### Phase 4 — operation (branch)
 - Run status in plain language, consistent with events and lineage.
-- `graph-refresh` writing a new versioned sidecar instead of rewriting in place.
+- `graph-refresh` writing a new versioned sidecar instead of rewriting in place. `layout` keeps its in-place replace: the file is a derived cache of the source document, its fingerprint records which model and settings produced it, and the replace is all-or-nothing per batch.
 - Option B, only if standing triggers are needed.
 
 ## Open questions
@@ -106,5 +106,5 @@ Because `womblex run` extracts only, options B and C both need a **local multi-s
 ## Conventions this plan holds to
 - No quality or confidence scoring, and no scoring against ground truth in this repository.
 - Extraction text stays verbatim; every new artefact is a sidecar.
-- Each merge stays under 500 changed lines and updates `docs/architecture.md`, `docs/project-structure.md` and `functional_requirements.md` where it changes them.
+- Each merge stays under 500 changed lines and updates `docs/architecture.md`, `docs/project-structure.md` and `docs/functional_requirements.md` where it changes them.
 - No dependency is added without approval.
