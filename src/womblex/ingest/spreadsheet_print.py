@@ -4,7 +4,7 @@ Government FOI releases frequently distribute manifests, schedules, and
 indexes as native PDFs that were printed from a spreadsheet (CSV/Excel).
 The native text layer is intact but the row/column structure lives only
 in **consistent x-positions of text spans across many y-bands** — there
-are no ruled cell borders. PyMuPDF's `find_tables(strategy="text")` is
+are no ruled cell borders. The page's `find_tables(strategy="text")` is
 too conservative for this layout: it sees the columns but won't commit
 to row groupings, so it returns headers-as-cells and 0–1-row tables.
 

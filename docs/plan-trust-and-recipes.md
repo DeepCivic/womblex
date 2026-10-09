@@ -46,7 +46,7 @@ Assessed against the repository's rules: thin adapters only, delete Womblex code
 | OpenLineage (`openlineage-python`) | Apache-2.0 | No dependency | Emit spec-conformant JSON from the run record and test it against the published schema. An optional extra only if pushing to a lineage server becomes a requirement |
 | Docling (full converter) | MIT | Reject for core | Brings torch and its own layout models. Now that layout is its own stage ([`layout.md`](layout.md)), its layout model could be a `womblex.models.layout` plugin installed outside core and judged by the benchmark |
 | docling-core | MIT | Optional egress format, later | Light, pydantic-based. Useful only as an output format for consumers that want Docling's schema |
-| docling-parse | MIT | Hold | A fallback for the PyMuPDF replacement if pypdfium2 + pdfplumber miss their parity gates |
+| docling-parse | MIT | Hold | A fallback if pypdfium2 + pdfplumber miss their parity gates |
 | Docling Graph | MIT | Reject; borrow the idea | Its deterministic provenance ledger informs the evidence reference below; the package brings full Docling plus LLM clients |
 | Pydantic AI | MIT | Reject | Field extraction is out of scope; a future topic annotation would go through Isaacus |
 | Unstructured | Apache-2.0 | Reject | Heavy, torch-based inference; duplicates the existing extractors |

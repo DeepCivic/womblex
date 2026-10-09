@@ -47,9 +47,9 @@ def test_unknown_attribute_raises() -> None:
         womblex.not_a_thing  # noqa: B018
 
 
-#: Every PDF backend the seam can sit on. `import womblex` must load none of
-#: them — which backend opens a document is `ingest/pdf`'s call, made per call.
-PDF_BACKENDS = ("fitz", "pypdfium2", "pdfplumber", "pdfminer")
+#: The PDF libraries the seam sits on. `import womblex` must load none of
+#: them — the backend loads when a document is opened.
+PDF_BACKENDS = ("pypdfium2", "pdfplumber", "pdfminer")
 
 
 def test_import_does_not_load_the_heavy_modules() -> None:

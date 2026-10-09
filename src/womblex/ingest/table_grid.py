@@ -5,7 +5,7 @@ docs/decisions.md “Table-cell reconstruction on OCR pages”) so the OCR
 table feeder (``ingest/ocr_tables.py``) and the spreadsheet-print
 extractor consume the
 same row/column inference rather than growing a fourth table algorithm.
-Pure geometry over ``Span`` — no PyMuPDF, no OCR types.
+Pure geometry over ``Span`` — no PDF library, no OCR types.
 
 Coordinate space is the caller's: spreadsheet-print feeds PDF points
 (``page.get_text("dict")`` coords), the OCR feeder image pixels at its

@@ -18,7 +18,7 @@ Womblex, womblex-benchmark and the ground truth have all changed substantially: 
 4. **Land the baseline.** One Womblex merge with the regenerated reports (they do not count towards the merge cap), stating in the PR body that they are a new baseline, not comparable with earlier reports.
 
 ## Benchmark-side actions
-Moved here from [plan-permissive-deps.md](plan-permissive-deps.md). All are womblex-benchmark merges (B), paired with the Womblex merge that lands the baseline reports.
+Moved here from the permissive-dependencies plan, retired when PyMuPDF was removed (F2). That removal also deleted the `fitz` backend and `open_document`'s `backend` argument, so any between-backend comparison below needs a pre-F2 womblex checkout for the fitz side. All are womblex-benchmark merges (B), paired with the Womblex merge that lands the baseline reports.
 
 - **L1-B code changes (before step 2).**
   - Make the DocLayNet layout-F1 test honour `--model` (it calls `get_layout_analyzer()` with no arguments today).
@@ -46,4 +46,4 @@ Moved here from [plan-permissive-deps.md](plan-permissive-deps.md). All are womb
 
 ## What this run closes
 - L3c-B, L1-B and the transcript-CER half of H-B, as above.
-- Absolute thresholds in the F1-B checks that were set from earlier reports (the DocLayNet layout F1, the Auditor-General transcript CER) are reset from this baseline in the same merge. The between-backend F1 gates in [plan-permissive-deps.md](plan-permissive-deps.md) are measured in Womblex and are unaffected.
+- Absolute thresholds in the F1-B checks that were set from earlier reports (the DocLayNet layout F1, the Auditor-General transcript CER) are reset from this baseline in the same merge. The between-backend F1 gates were measured in Womblex and are unaffected.

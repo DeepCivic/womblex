@@ -699,7 +699,7 @@ Womblex serves other software two ways: a versioned on-disk contract
   corpus).
 
 ### Permissive-dependencies Phase 0 — pypdfium2 over pdfminer for the text engine
-`docs/plan-permissive-deps.md`'s Phase 0 spike (scratch only, measured against
+The permissive-dependencies Phase 0 spike (scratch only, measured against
 the womblex-collection fixture PDFs) settled the text-engine choice for P6 and
 the plan's three unverified mechanism claims — two as stated, one the other way
 round. The spike's scripts were not retained, so each figure below carries the
@@ -859,8 +859,9 @@ be re-derivable, and the first pass's were not.
 
 ## Known limitations (library-general)
 
-- **Residual low-confidence native-text table fabrication.** PyMuPDF's
-  text-strategy `find_tables` can synthesise a spurious `kind='table'`
+- **Residual low-confidence native-text table fabrication.** The
+  text-strategy `find_tables` (measured under PyMuPDF; not re-measured under
+  pdfplumber) can synthesise a spurious `kind='table'`
   (`confidence=0.60`, `text_len=0`) when large redaction blocks carve prose into
   whitespace-aligned columns. Text-bearing elements still capture the prose
   verbatim, so it is additive noise, not corruption. Closing it needs a
@@ -880,7 +881,8 @@ be re-derivable, and the first pass's were not.
   size or weight alone never breaks a block. `_same_block` in `_text.py` holds
   it; `emu-spacing-variants.pdf` and `test_pdf_block_parity.py` pin it, with
   header, overprint and line-above shapes at 0, 90, 180 and 270 degrees.
-  Block line counts and element kinds equal PyMuPDF's on every synthetic PDF.
+  Block line counts and element kinds equal MuPDF's on every synthetic PDF
+  (measured on PyMuPDF 1.27.2.2 before its removal and pinned in the tests).
   pdfium sorts vertical text by position where MuPDF keeps content order, so
   `read_chars` restores it for vertical characters from the page's text objects
   (matched by text and box); and it injects a stray space between overlapping
@@ -891,7 +893,7 @@ be re-derivable, and the first pass's were not.
 - **Handwriting is an OCR-engine ceiling.** The PaddleOCR ONNX backend cannot
   read handwriting; cross-cell handwritten forms and photographed/creased forms
   reach high CER. Out of scope without an HTR backend + dewarping.
-- **Redaction-induced paragraph breaks (native pages).** PyMuPDF returns text
+- **Redaction-induced paragraph breaks (native pages).** The PDF text layer returns text
   either side of a mid-paragraph redaction as separate blocks; joined with
   `\n\n` they emerge as two paragraphs. Belongs to a downstream cleaning op.
 - **Native-text footer whitespace artefacts.** Sub-glyph kerning yields
@@ -992,14 +994,30 @@ be re-derivable, and the first pass's were not.
   file with a local multi-stage runner, then destinations. No quality scoring
   and no field extraction. Plan, dependency assessment and phases:
   [plan-trust-and-recipes.md](plan-trust-and-recipes.md).
-- **Permissive dependencies — Apache-2.0 compatibility.** *In progress
-  2026-10; layout swap (#130) and layout stage (L3) shipped.* The previous layout model's
-  dependency and PyMuPDF are not licence-compatible with Apache-2.0. Layout
-  is now an Apache-2.0 PP-DocLayout ONNX model on `onnxruntime`; PyMuPDF goes
-  behind a womblex-owned `ingest/pdf/` seam and is replaced by pypdfium2 +
-  pdfplumber once a backend-diff harness clears the parity gates (cleared on the
-  synthetic set at F1; pdfium is the default). Plan and
-  merge sequence: [plan-permissive-deps.md](plan-permissive-deps.md).
+- **Permissive dependencies — Apache-2.0 compatibility.** *Shipped 2026-10
+  (layout swap #130, layout stage L3, pdfium default F1, PyMuPDF removed F2).*
+  The previous layout model's dependency and PyMuPDF were not licence-compatible
+  with Apache-2.0. Layout is an Apache-2.0 PP-DocLayout ONNX model on
+  `onnxruntime`; PDFs and images open through a womblex-owned `ingest/pdf/` seam
+  onto pypdfium2 + pdfplumber. The between-backend parity gates cleared on the
+  synthetic set at F1, and the MuPDF values they measured are pinned in
+  `tests/test_pdf_block_parity.py` and `tests/test_pdf_text.py`. Left open:
+  multi-column reading order, Phase 0's divergence tail, which no synthetic page
+  reproduces (the ASX-page investigation is in
+  [plan-post-gt-baseline.md](plan-post-gt-baseline.md)).
+  - **Behaviour changes from the swap.** Calling `extract_text` directly can no
+    longer open XPS, EPUB, MOBI, CBZ or SVG, nor an image format MuPDF decodes
+    and Pillow does not; PDF and the common image formats remain, and WebP and
+    AVIF are new. None of the dropped formats was reachable through the CLI or
+    API. `content_digest` moved at F1 (text stays verbatim but comes from a
+    different producer). Paragraph segmentation, dehyphenation and bold-based
+    heading detection may shift slightly; `image_count` may count drawn images
+    only, which moves the sub-page OCR gate; rendering anti-aliasing differs, so
+    OCR output differs slightly; the table pass may be slower.
+  - **The PDF library version is not in the run stamp.** `content_digest`
+    depends on it, but the womblex version and `uv.lock` pin the library.
+  - **Out of scope, kept for parity:** the unrotated-text versus rotated
+    `page.rect` mismatch outside `spreadsheet_print`.
   - **Layout measurements at the swap (uncontrolled, no like-for-like run).**
     PP-DocLayout-M is 23 MB and runs at about 65 ms per CPU page. Scored with
     the benchmark's DocLayNet scorer: layout F1 0.297; the one real
@@ -1014,8 +1032,8 @@ be re-derivable, and the first pass's were not.
     region's kind: on a successful page the non-table regions collapse into
     one OCR text block.
   - **No PDF-backend registry slot.** The registry is for swappable models;
-    a backend slot would be the toggle the plan rules out. Backend selection
-    is a private `open_document` argument used by the parity harness.
+    a backend slot would be a toggle. `open_document` takes a path and nothing
+    else.
   - **Layout is its own stage (L3, shipped 2026-10)**, so a layout model can
     be tuned and measured on its own ([layout.md](layout.md)). One model
     (`layout:`) runs once per selected page in the extraction batch, after

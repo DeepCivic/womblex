@@ -110,9 +110,9 @@ def _normalise_bbox(
 def _count_blocks_in_bbox(page: Page, bbox: Rect) -> int:
     """Count `text_dict` text blocks whose centre falls inside ``bbox``.
 
-    Used as a cross-check against PyMuPDF's `find_tables` over-firing: a
+    Used as a cross-check against the page's `find_tables` over-firing: a
     real table has at least one natural text block per row (each cell row
-    is its own paragraph in PyMuPDF's decomposition), while a prose-as-
+    is its own paragraph in the page's block decomposition), while a prose-as-
     table over-claims rows by carving sub-block whitespace into pseudo-
     rows. The block count here is therefore a structural ceiling on how
     many real rows the table region can contain.
@@ -133,7 +133,7 @@ def _find_native_tables(
     """Detect tables and return ``(TableData, bbox_rect, cells)`` per hit.
 
     The bbox lets the caller exclude table regions from prose emission;
-    the raw ``cells`` (PyMuPDF ``tbl.extract()`` output, including the
+    the raw ``cells`` (the found table's rows, including the
     header row) lets the caller emit column-major if the prose path
     would otherwise collapse cells row-major.
 
@@ -143,7 +143,7 @@ def _find_native_tables(
     ruled rules-of-the-Law table that should be captured here.
 
     Cross-check gate: a candidate is rejected when fewer natural text
-    blocks fall inside its bbox than the row count it claims. PyMuPDF
+    blocks fall inside its bbox than the row count it claims. The finder
     over-fires on prose-with-indents (text strategy) and on redaction
     boxes / form rules (lines strategy); both failure modes inflate row
     count by carving sub-block whitespace into pseudo-rows. Real tables
@@ -211,7 +211,7 @@ def _find_native_tables(
 
 
 def _extract_tables_from_page(page: Page) -> list[TableData]:
-    """Extract tables from a page using PyMuPDF's table finder.
+    """Extract tables from a page using the page's table finder.
 
     Backward-compatible thin wrapper around `_find_native_tables` —
     callers that only need the structured table data (e.g. the OCR-side
@@ -366,7 +366,7 @@ def get_extractor(profile: DocumentProfile) -> PathExtractionStrategy:
     Only SPREADSHEET, DOCX, TEXT and MARKDOWN reach here — exactly the set
     ``extract_text`` routes to this function. Everything else, **IMAGE
     included**, is opened through the PDF seam and dispatched through
-    ``extract_pdf_with_plan`` (per-page profile + orchestrator): PyMuPDF
+    ``extract_pdf_with_plan`` (per-page profile + orchestrator): the PDF seam
     opens a standalone image as a one-page document, the profiler marks
     that page as needing OCR, and ``_apply_ocr_page`` handles it with the
     same layout pass, table reconstruction and form extraction a scanned
@@ -424,8 +424,8 @@ def extract_text(
     types, and recorded as not applicable on the path-based formats. Omitted,
     no layout is run or recorded and OCR pages fall back to whole-page text.
     """
-    # The path-based formats keep the legacy strategy switch: `fitz` cannot
-    # open them, so there are no pages to profile. Everything it *can* open
+    # The path-based formats keep the legacy strategy switch: the PDF seam
+    # cannot open them, so there are no pages to profile. Everything it *can* open
     # falls through to the orchestrator below — images included, since a
     # standalone image opens as a one-page document.
     if profile.doc_type in (

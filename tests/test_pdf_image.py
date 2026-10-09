@@ -1,7 +1,7 @@
 """Raster images through the pdfium backend's Pillow path: MuPDF's page rects.
 
-Each expected rect is what MuPDF reported for the same file (Phase 0 of
-`docs/plan-permissive-deps.md`, re-measured for P5): ``pixels * 72 / dpi``
+Each expected rect is what MuPDF reported for the same file (Phase 0 of the
+permissive-dependencies work, re-measured for P5): ``pixels * 72 / dpi``
 from the horizontal resolution, 96 when undeclared, 72 when out of range.
 """
 
@@ -22,7 +22,7 @@ def _image(mode: str = "RGB", colour: object = (0, 0, 255)) -> Image.Image:
 
 
 def _page_size(path) -> tuple[float, float]:
-    with open_document(path, backend="pdfium") as doc:
+    with open_document(path) as doc:
         rect = doc[0].rect
     return round(rect.width, 2), round(rect.height, 2)
 
@@ -65,7 +65,7 @@ def test_exif_orientation_is_applied(tmp_path) -> None:
 def test_multi_frame_tiff_is_one_page_per_frame(tmp_path) -> None:
     path = tmp_path / "frames.tif"
     _image().save(path, save_all=True, append_images=[_image().rotate(90, expand=True)], dpi=(200, 200))
-    with open_document(path, backend="pdfium") as doc:
+    with open_document(path) as doc:
         sizes = [(page.number, round(page.rect.width), round(page.rect.height)) for page in doc]
         doc.select([1])
         assert doc.page_count == 1 and doc[0].rect.height == 72
@@ -79,7 +79,7 @@ def test_every_frame_is_a_page(tmp_path, name, fmt) -> None:
     """MuPDF gave only the first frame of these."""
     path = tmp_path / name
     _image().save(path, format=fmt, save_all=True, append_images=[_image(colour=(255, 0, 0))])
-    with open_document(path, backend="pdfium") as doc:
+    with open_document(path) as doc:
         assert doc.page_count == 2 and doc[1].rect.width == 150
         r, g, b = doc[1].render(dpi=96)[40, 100].astype(int)  # lossy formats drift a little
         assert r > 240 and g < 15 and b < 15
@@ -104,14 +104,14 @@ def test_mupdfs_other_formats_and_webp_open(tmp_path, name, save_kwargs, expecte
 def test_16_bit_grey_is_scaled_not_clipped(tmp_path, name) -> None:
     path = tmp_path / name
     Image.fromarray(np.full(_SIZE[::-1], 0x8000, dtype=np.uint16)).save(path)
-    with open_document(path, backend="pdfium") as doc:
+    with open_document(path) as doc:
         assert (doc[0].render(dpi=96) == 128).all()
 
 
 def test_an_image_page_has_nothing_but_pixels(tmp_path) -> None:
     path = tmp_path / "plain.png"
     _image().save(path)
-    with open_document(path, backend="pdfium") as doc:
+    with open_document(path) as doc:
         page = doc[0]
         assert page.plain_text() == "" and page.words() == [] and page.text_dict() == []
         assert page.images() == [] and page.drawings() == [] and page.widgets() == []
@@ -121,7 +121,7 @@ def test_an_image_page_has_nothing_but_pixels(tmp_path) -> None:
 def test_render_resamples_to_the_render_box(tmp_path) -> None:
     path = tmp_path / "blue.png"
     _image().save(path)
-    with open_document(path, backend="pdfium") as doc:
+    with open_document(path) as doc:
         full = doc[0].render(dpi=300)
         clipped = doc[0].render(dpi=150, clip=doc[0].rect.of((10.3, 5.2, 50.7, 40.1)))
     assert full.shape == (313, 625, 3) and full.dtype == np.uint8
@@ -132,7 +132,7 @@ def test_render_resamples_to_the_render_box(tmp_path) -> None:
 def test_alpha_is_composited_onto_white(tmp_path) -> None:
     path = tmp_path / "clear.png"
     _image("RGBA", (255, 0, 0, 0)).save(path)
-    with open_document(path, backend="pdfium") as doc:
+    with open_document(path) as doc:
         assert (doc[0].render(dpi=96) == 255).all()
 
 
@@ -140,14 +140,14 @@ def test_an_unsupported_image_format_is_refused(tmp_path) -> None:
     path = tmp_path / "icon.ico"
     _image().save(path)
     with pytest.raises(ValueError, match="unsupported image format 'ICO'"):
-        open_document(path, backend="pdfium")
+        open_document(path)
 
 
 def test_a_file_that_is_no_image_raises(tmp_path) -> None:
     path = tmp_path / "notes.png"
     path.write_text("not an image")
     with pytest.raises(UnidentifiedImageError):
-        open_document(path, backend="pdfium")
+        open_document(path)
 
 
 def _flat_psd(path, width: int = 40, height: int = 30, resolution_ppi: int | None = None) -> None:
@@ -183,7 +183,7 @@ def _jp2_with_resolution(path, pixels_per_metre: int) -> None:
 def test_a_flat_psd_opens_as_its_composite(tmp_path) -> None:
     path = tmp_path / "flat.psd"
     _flat_psd(path)
-    with open_document(path, backend="pdfium") as doc:
+    with open_document(path) as doc:
         assert len(doc) == 1
         assert doc[0].rect.as_tuple() == (0.0, 0.0, 30.0, 22.5)  # 96 dpi: undeclared
         assert doc[0].render(dpi=96).shape == (30, 40, 3)

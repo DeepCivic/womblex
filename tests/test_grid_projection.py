@@ -26,7 +26,7 @@ from womblex.ingest.pdf.types import Document
 
 
 def _word(x0: float, y0: float, x1: float, y1: float, text: str) -> tuple:
-    """Build a PyMuPDF-compatible word tuple."""
+    """Build a word tuple."""
     return (x0, y0, x1, y1, text, 0, 0, 0)
 
 

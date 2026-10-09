@@ -65,9 +65,6 @@ typed Parquet or GeoParquet directly and bypass the text stages.
 
 ## Support status
 
-- **Licensing is in transition.** Womblex is Apache-2.0, but PDF handling still
-  depends on PyMuPDF (AGPL-3.0). The plan above replaces it with permissively
-  licensed libraries.
 - **Alpha.** Schemas are versioned by the data contract (below), but the Python
   surface outside `womblex.__all__` may change between minor releases.
 
@@ -332,11 +329,11 @@ Contributor conventions (file and merge size caps, what belongs in core) are in
 
 ## Licence
 
-Apache-2.0. See the support status above for the PyMuPDF dependency.
+Apache-2.0.
 
 ## Acknowledgements
 
-- [PyMuPDF](https://pymupdf.readthedocs.io/) for PDF handling
+- [pypdfium2](https://github.com/pypdfium2-team/pypdfium2) and [pdfplumber](https://github.com/jsvine/pdfplumber) for PDF handling
 - [RapidOCR](https://github.com/RapidAI/RapidOCR) for OCR, running PaddleOCR ONNX models
 - [PP-DocLayout](https://huggingface.co/PaddlePaddle/PP-DocLayout-M) for layout detection
 - [semchunk](https://github.com/isaacus-dev/semchunk) for chunking

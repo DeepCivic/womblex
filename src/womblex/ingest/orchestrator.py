@@ -226,7 +226,7 @@ def _apply_ocr_page(
 
     # Scanned-machinewritten table-grid fallback (parity with the legacy
     # ScannedMachinewrittenExtractor): if layout pass produced no tables
-    # and the page rendered as a grid, retry via PyMuPDF.
+    # and the page rendered as a grid, retry via the native table finder.
     if (
         not page_tables
         and doc_type == DocumentType.SCANNED_MACHINEWRITTEN

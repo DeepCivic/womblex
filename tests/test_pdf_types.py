@@ -88,6 +88,6 @@ def test_the_seam_imports_no_pdf_backend() -> None:
     """The point of the package: vocabulary without a library behind it."""
     code = (
         "import sys, womblex.ingest.pdf, womblex.ingest.pdf.types as t; "
-        "sys.exit(int('fitz' in sys.modules or 'pypdfium2' in sys.modules or t.Rect is None))"
+        "sys.exit(int('pypdfium2' in sys.modules or t.Rect is None))"
     )
     assert subprocess.run([sys.executable, "-c", code], check=False).returncode == 0

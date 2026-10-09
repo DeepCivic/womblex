@@ -1,5 +1,5 @@
 """The pdfium text engine: segmentation on synthetic characters, and the page
-methods against pages the builder draws, checked against the fitz backend."""
+methods against pages the builder draws."""
 
 from __future__ import annotations
 
@@ -120,46 +120,55 @@ def pdf_path(tmp_path_factory: pytest.TempPathFactory):
 
 
 class TestPage:
-    def test_plain_text_matches_fitz(self, pdf_path) -> None:
-        with open_document(pdf_path, backend="fitz") as fitz_doc, open_document(pdf_path, backend="pdfium") as doc:
-            assert doc[0].plain_text() == fitz_doc[0].plain_text()
+    """Expected values were measured on PyMuPDF 1.27.2.2 before it was removed."""
 
-    def test_words_match_fitz_text_and_order(self, pdf_path) -> None:
-        with open_document(pdf_path, backend="fitz") as fitz_doc, open_document(pdf_path, backend="pdfium") as doc:
-            got, want = doc[0].words(), fitz_doc[0].words()
-            assert [w.text for w in got] == [w.text for w in want]
-            assert [(w.block_no, w.line_no, w.word_no) for w in got] == [
-                (w.block_no, w.line_no, w.word_no) for w in want
+    def test_plain_text_matches_mupdf(self, pdf_path) -> None:
+        with open_document(pdf_path) as doc:
+            assert doc[0].plain_text() == (
+                "Heading\nA body line of ordinary text\nthat carries on below it.\nFar below\n"
+            )
+
+    def test_words_match_mupdf_text_and_order(self, pdf_path) -> None:
+        # (text, block, line, word, x0); y1 sits within 3pt of MuPDF's.
+        want = [
+            ("Heading", 0, 0, 0, 72.0), ("A", 1, 0, 0, 72.0), ("body", 1, 0, 1, 82.4),
+            ("line", 1, 0, 2, 109.3), ("of", 1, 0, 3, 129.5), ("ordinary", 1, 0, 4, 141.7),
+            ("text", 1, 0, 5, 184.5), ("that", 1, 1, 0, 72.0), ("carries", 1, 1, 1, 93.4),
+            ("on", 1, 1, 2, 129.5), ("below", 1, 1, 3, 144.8), ("it.", 1, 1, 4, 176.5),
+            ("Far", 2, 0, 0, 72.0), ("below", 2, 0, 1, 91.6),
+        ]
+        y1 = [104.9] + [133.3] * 6 + [147.3] * 5 + [403.3] * 2
+        with open_document(pdf_path) as doc:
+            got = doc[0].words()
+        assert [(w.text, w.block_no, w.line_no, w.word_no) for w in got] == [t[:4] for t in want]
+        for w, (*_, x0), top in zip(got, want, y1, strict=True):
+            assert w.x0 == pytest.approx(x0, abs=1) and w.y1 == pytest.approx(top, abs=3)
+
+    def test_blocks_group_like_mupdf(self, pdf_path) -> None:
+        with open_document(pdf_path) as doc:
+            assert [b.text for b in doc[0].text_blocks()] == [
+                "Heading\n", "A body line of ordinary text\nthat carries on below it.\n", "Far below\n",
             ]
-            for a, b in zip(got, want, strict=True):
-                assert a.x0 == pytest.approx(b.x0, abs=1) and a.y1 == pytest.approx(b.y1, abs=3)
-
-    def test_blocks_group_like_fitz(self, pdf_path) -> None:
-        with open_document(pdf_path, backend="fitz") as fitz_doc, open_document(pdf_path, backend="pdfium") as doc:
-            assert [b.text for b in doc[0].text_blocks()] == [b.text for b in fitz_doc[0].text_blocks()]
 
     def test_dict_reports_size_font_and_bold(self, pdf_path) -> None:
-        with open_document(pdf_path, backend="pdfium") as doc:
+        with open_document(pdf_path) as doc:
             spans = [s for b in doc[0].text_dict() for line in b.lines for s in line.spans]
         heading = spans[0]
         assert (heading.text, heading.size, heading.bold) == ("Heading", 16.0, True)
         assert heading.font == "Helvetica-Bold"
         assert not spans[1].bold and spans[1].size == 11.0
 
-    def test_a_line_end_hyphen_matches_fitz(self, tmp_path) -> None:
+    def test_a_line_end_hyphen_matches_mupdf(self, tmp_path) -> None:
         builder = PdfBuilder(tmp_path / "h.pdf").page()
         builder.text(72, 100, "the Auditor-").text(72, 113, "General reported")
-        with open_document(builder.save(), backend="fitz") as fitz_doc, \
-                open_document(builder.path, backend="pdfium") as doc:
-            assert doc[0].plain_text() == fitz_doc[0].plain_text() == "the Auditor-\nGeneral reported\n"
+        with open_document(builder.save()) as doc:
+            assert doc[0].plain_text() == "the Auditor-\nGeneral reported\n"
 
-    def test_text_off_the_page_is_clipped_like_fitz(self, tmp_path) -> None:
+    def test_text_off_the_page_is_clipped_like_mupdf(self, tmp_path) -> None:
         builder = PdfBuilder(tmp_path / "off.pdf").page(400, 400)
         builder.text(50, -20, "Above the page").text(50, 100, "On the page").text(350, 200, "Straddles the edge")
-        with open_document(builder.save(), backend="fitz") as fitz_doc, \
-                open_document(builder.path, backend="pdfium") as doc:
+        with open_document(builder.save()) as doc:
             got = doc[0].plain_text()
-            assert got == fitz_doc[0].plain_text()
             assert got.startswith("On the page\nStraddles") and "Above" not in got and "edge" not in got
 
     def test_size_scaled_by_the_text_matrix(self, tmp_path) -> None:
@@ -180,8 +189,8 @@ class TestPage:
             text.moveCursor(stringWidth(word, "Helvetica", 1) + 0.4, 0)
         canvas.drawText(text)
         canvas.save()
-        with open_document(path, backend="fitz") as fitz_doc, open_document(path, backend="pdfium") as doc:
-            assert doc[0].plain_text() == fitz_doc[0].plain_text() == "Kerned scaled words\n"
+        with open_document(path) as doc:
+            assert doc[0].plain_text() == "Kerned scaled words\n"
             (span, *_) = [s for b in doc[0].text_dict() for line in b.lines for s in line.spans]
             assert span.size == pytest.approx(12.0)
 

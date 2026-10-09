@@ -1,7 +1,6 @@
 """The pdfium table finder: pdfplumber's `TableFinder` fed from pdfium.
 
-Pages are drawn at known coordinates so the expected grid is the one drawn; the
-fitz backend is checked on the same pages where it is installed.
+Pages are drawn at known coordinates so the expected grid is the one drawn.
 """
 
 from __future__ import annotations
@@ -61,7 +60,7 @@ def _prose(path) -> None:
 
 
 def _find(path, strategy):
-    with open_document(path, backend="pdfium") as doc:
+    with open_document(path) as doc:
         return doc[0].find_tables(strategy=strategy)
 
 
@@ -88,17 +87,6 @@ def test_prose_is_not_a_ruled_table(tmp_path) -> None:
     path = tmp_path / "prose.pdf"
     _prose(path)
     assert _find(path, "lines") == []
-
-
-def test_matches_fitz_on_the_ruled_grid(tmp_path) -> None:
-    pytest.importorskip("fitz")
-    path = tmp_path / "grid.pdf"
-    _grid(path, one_path=False)
-    with open_document(path, backend="fitz") as doc:
-        (expected,) = doc[0].find_tables(strategy="lines")
-    (table,) = _find(path, "lines")
-    assert (table.row_count, table.col_count) == (expected.row_count, expected.col_count)
-    assert table.rows == expected.rows
 
 
 class TestEdges:
@@ -132,7 +120,7 @@ def test_close_after_a_curve_draws_no_phantom_rule(tmp_path) -> None:
     shape.close()
     canvas.drawPath(shape, stroke=1, fill=0)
     canvas.save()
-    with open_document(path, backend="pdfium") as doc:
+    with open_document(path) as doc:
         page = doc[0]
         runs = list(_tables.read_polylines(page._path_objects(), page._origin))
     edges = _tables.edges_from_polylines(runs)
@@ -146,7 +134,7 @@ def test_rotated_page_finds_tables_in_the_displayed_frame() -> None:
     runs vertically in the unrotated frame, which once gave 39 columns for 11."""
     from tests._synthetic import FOI_INDEX_PDF
 
-    with open_document(FOI_INDEX_PDF, backend="pdfium") as doc:
+    with open_document(FOI_INDEX_PDF) as doc:
         (table,) = doc[0].find_tables(strategy="text")
     assert (table.row_count, table.col_count) == (78, 11)
     assert table.rows[0][:3] == ("FOI referen", "ce", "FOI-2025-042")
