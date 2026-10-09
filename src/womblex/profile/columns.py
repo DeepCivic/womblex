@@ -307,7 +307,7 @@ def _try_parse(value: str, formats: tuple[str, ...], *, allow_iso: bool) -> bool
             continue
     if allow_iso:
         try:
-            datetime.fromisoformat(value)  # handles a trailing `Z` on 3.11+
+            datetime.fromisoformat(value)  # handles a trailing `Z`
             return True
         except ValueError:
             return False

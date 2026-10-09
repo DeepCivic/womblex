@@ -191,7 +191,7 @@ A corpus exists to mature Womblex capability, not host custom code. Corpus-side 
 
 ## Coding Conventions
 ### Style
-- Python 3.11+
+- Python 3.12 (`rapidocr-onnxruntime` declares `<3.13`)
 - Type hints everywhere
 - Dataclasses for structured data
 - Pydantic for config/validation

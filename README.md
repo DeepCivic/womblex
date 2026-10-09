@@ -70,7 +70,7 @@ typed Parquet or GeoParquet directly and bypass the text stages.
 
 ## Installation
 
-Requires Python 3.11 or later.
+Requires Python 3.12. `rapidocr-onnxruntime`, the OCR engine, does not install on 3.13 or later.
 
 ```bash
 pip install womblex          # the whole pipeline, CPU-only

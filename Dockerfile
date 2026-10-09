@@ -10,7 +10,7 @@
 # compose service runs on the same image as the workers. The other extras are
 # `[ui]` (the console, its own image) and `[dev]` (test/lint); override at
 # build time, e.g. --build-arg EXTRAS="api,dev".
-FROM python:3.11-slim AS base
+FROM python:3.12-slim AS base
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -32,7 +32,7 @@ COPY . /app
 # `.` installs the core deps (S3 + queue included); a worker needs nothing
 # more. `[api]` is fastapi + uvicorn + python-multipart, for `womblex serve`.
 ARG EXTRAS="api"
-# Upgrade pip first: the stock pip on python:3.11-slim is old enough that its
+# Upgrade pip first: the stock pip on python:3.12-slim is old enough that its
 # resolver stalls/fails on the boto stack (s3fs -> aiobotocore pins a narrow
 # botocore range that must co-resolve with boto3's own botocore pin). The
 # newer resolver finds the compatible set. Baked in here rather than patched

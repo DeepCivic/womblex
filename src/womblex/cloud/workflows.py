@@ -19,7 +19,7 @@ import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any
 
 from dbos import DBOS, SetWorkflowAttributes, SetWorkflowID, StepOptions
 
@@ -43,8 +43,6 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from womblex.store.remote import RemoteStore
 
 logger = logging.getLogger(__name__)
-
-T = TypeVar("T")
 
 #: Seconds between looks at whether a run's extraction has settled.
 SETTLE_POLL_SECONDS = 30.0
@@ -96,7 +94,7 @@ def _output_prefix(shard_prefix: str) -> str:
     return shard_prefix.rsplit("/", 1)[0]
 
 
-def _logged(
+def _logged[T](
     name: str, run_id: str, shard_prefix: str, stage: str | None,
     body: Callable[[Path], T],
 ) -> T:
