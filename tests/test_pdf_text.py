@@ -77,6 +77,12 @@ class TestSegment:
         ]
         assert [line.text for block in _text.segment(up) for line in block] == ["Part 2"]
 
+    def test_text_objects_are_read_only_for_vertical_text(self) -> None:
+        def unread() -> list[tuple[Rect, str]]:
+            raise AssertionError("text objects read for a page without vertical text")
+
+        _text._restore_content_order(_chars("across", 72, 100), unread)
+
     def test_upward_text_continues_only_on_the_side_mupdf_favours(self) -> None:
         def column(x: float, text: str) -> list[_text.Char]:
             return [

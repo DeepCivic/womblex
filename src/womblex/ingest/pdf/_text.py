@@ -147,13 +147,13 @@ def read_chars(
                 origin=origin,
             ))
         if text_boxes is not None:
-            _restore_content_order(out, text_boxes(textpage))
+            _restore_content_order(out, lambda: text_boxes(textpage))
         return out
     finally:
         textpage.close()
 
 
-def _restore_content_order(chars: list[Char], objects: list[tuple[Rect, str]]) -> None:
+def _restore_content_order(chars: list[Char], text_boxes: Callable[[], list[tuple[Rect, str]]]) -> None:
     """Reorder the vertical characters in place by the text object that drew them.
 
     Characters keep their slots among the horizontal ones; within the vertical
@@ -165,6 +165,7 @@ def _restore_content_order(chars: list[Char], objects: list[tuple[Rect, str]]) -
     slots = [i for i, c in enumerate(chars) if c.direction[0] == 0.0]
     if len(slots) < 2:
         return
+    objects = text_boxes()
     keys: list[int] = []
     last = 0
     for i in slots:

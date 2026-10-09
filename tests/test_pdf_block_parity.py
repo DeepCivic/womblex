@@ -13,13 +13,13 @@ from pathlib import Path
 
 import pytest
 
-from tests._synthetic import AUDIT_PDF, NOTICE_PDF, SCHEDULE_PDF, SPACING_PDF
+from tests._synthetic import AUDIT_PDF, FOI_INDEX_PDF, NOTICE_PDF, SCHEDULE_PDF, SPACING_PDF
 from womblex.ingest import pdf
 from womblex.ingest.detect import detect_file_type
 from womblex.ingest.extract import extract_text
 from womblex.ingest.pdf import open_document
 
-PARITY = [AUDIT_PDF, SPACING_PDF, NOTICE_PDF, SCHEDULE_PDF]
+PARITY = [AUDIT_PDF, SPACING_PDF, NOTICE_PDF, SCHEDULE_PDF, FOI_INDEX_PDF]
 
 
 def _lines_per_block(path: Path, backend: str) -> list[list[int]]:
@@ -38,7 +38,7 @@ def test_blocks_hold_the_same_lines_as_mupdf(path: Path) -> None:
     assert _lines_per_block(path, "pdfium") == _lines_per_block(path, "fitz")
 
 
-@pytest.mark.parametrize("path", [AUDIT_PDF, SPACING_PDF], ids=lambda p: p.name)
+@pytest.mark.parametrize("path", [AUDIT_PDF, SPACING_PDF, FOI_INDEX_PDF], ids=lambda p: p.name)
 def test_element_kinds_and_counts_match_mupdf(path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert _kinds(path, "pdfium", monkeypatch) == _kinds(path, "fitz", monkeypatch)
 
