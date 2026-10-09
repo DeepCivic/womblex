@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from womblex.cloud.queue import Job
 from womblex.config import WomblexConfig
 from womblex.store.run_stamp import (
     MODEL_CHECK_KEY,
@@ -342,58 +341,28 @@ class TestRunStopsBeforeTheFirstDocument:
 
 
 class TestWorkerRefusal:
-    def test_a_job_is_refused_only_for_the_models_it_needs(self) -> None:
-        from womblex.cloud.worker import _model_refusal
+    def test_a_queue_is_joined_only_if_its_models_pass(self) -> None:
+        from womblex.cloud import dbos_app
+        from womblex.cloud.worker import served_queues
 
-        batch = Job(1, "r", 1, ["a.pdf"], "p", 1)
-        chunk = Job(2, "r", 0, [], "p", 1, kind="stage", stage="chunk")
-        money = Job(3, "r", 0, [], "p", 1, kind="stage", stage="money")
+        root = "s3://bucket/inbox"
+        extraction = dbos_app.extract_queue(root)
+        chunk, money = dbos_app.stage_queue("chunk"), dbos_app.stage_queue("money")
 
-        extraction_down = _failed("ocr", SCOPE_EXTRACT)
-        assert "not found" in (_model_refusal(batch, extraction_down) or "")
-        assert _model_refusal(chunk, extraction_down) is None
+        extraction_down = served_queues(_failed("ocr", SCOPE_EXTRACT), root)
+        assert extraction not in extraction_down
+        assert chunk in extraction_down and money in extraction_down
 
-        tokenizer_down = _failed("tokenizer", SCOPE_CHUNK)
-        assert _model_refusal(batch, tokenizer_down) is None
-        assert "tokenizer model" in (_model_refusal(chunk, tokenizer_down) or "")
-        assert _model_refusal(money, tokenizer_down) is None
+        tokenizer_down = served_queues(_failed("tokenizer", SCOPE_CHUNK), root)
+        assert extraction in tokenizer_down
+        assert chunk not in tokenizer_down and money in tokenizer_down
 
-    def test_the_loop_releases_a_refused_job_without_running_it(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
-    ) -> None:
-        from womblex.cloud import worker
+    def test_coordinators_are_always_served(self) -> None:
+        from womblex.cloud import dbos_app
+        from womblex.cloud.worker import served_queues
 
-        released: list[tuple[int, str]] = []
-
-        class FakeQueue:
-            def __init__(self, dsn: str) -> None:
-                self._jobs = [Job(7, "r", 1, ["a.pdf"], "runs/r/documents", 1)]
-
-            def claim(self, worker_id: str, run_id: str | None) -> Job | None:
-                return self._jobs.pop() if self._jobs else None
-
-            def release(self, job_id: int, error: str) -> None:
-                released.append((job_id, error))
-
-            def close(self) -> None:
-                pass
-
-        def must_not_run(*_: object, **__: object) -> None:
-            raise AssertionError("a refused job must not run")
-
-        monkeypatch.setattr(worker, "JobQueue", FakeQueue)
-        monkeypatch.setattr(worker, "check_models", lambda config: _failed("ocr", SCOPE_EXTRACT))
-        monkeypatch.setattr(worker, "_process_job", must_not_run)
-        store = tmp_path / "store"
-        store.mkdir()
-
-        completed = worker.run_worker(
-            "dsn", str(store), _config(), run_id="r", once=True, poll_interval=0,
-        )
-
-        assert completed == 0
-        assert len(released) == 1 and released[0][0] == 7
-        assert "model check failed on this worker" in released[0][1]
+        queues = served_queues(_failed("ocr", SCOPE_EXTRACT), "s3://bucket/inbox")
+        assert dbos_app.DOWNSTREAM_QUEUE in queues
 
 
 class TestStagePreflight:

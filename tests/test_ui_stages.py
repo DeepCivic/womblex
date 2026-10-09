@@ -24,13 +24,13 @@ from womblex.ui.app import create_app
 
 
 class _FakeQueue:
-    """A `JobQueue` stand-in: the dispatch path must not need Postgres."""
+    """A `RunBoard` stand-in: the dispatch path must not need Postgres."""
 
     last: _FakeQueue | None = None
+    schema_ensured = False
 
     def __init__(self, dsn: str, **_kw: object) -> None:
         self.dsn = dsn
-        self.schema_ensured = False
         self.staged: tuple[str, list[str], str, int] | None = None
         _FakeQueue.last = self
 
@@ -40,15 +40,22 @@ class _FakeQueue:
     def __exit__(self, *exc: object) -> None:
         pass
 
-    def ensure_schema(self) -> None:
-        self.schema_ensured = True
-
     def enqueue_stages(
         self, run_id: str, stages: list[str], shard_prefix: str, *, max_attempts: int = 3,
         owner: str | None = None,
     ) -> int:
         self.staged = (run_id, stages, shard_prefix, max_attempts)
         return len(stages)
+
+
+@pytest.fixture(autouse=True)
+def _fake_schema(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Dispatch provisions the DBOS schema through a module function; record, don't run it."""
+    _FakeQueue.schema_ensured = False
+    monkeypatch.setattr(
+        "womblex.cloud.dispatch.ensure_schema",
+        lambda _dsn: setattr(_FakeQueue, "schema_ensured", True),
+    )
 
 
 def _client(tmp_path: Path, **kw: object) -> TestClient:
@@ -93,7 +100,7 @@ class TestStageDispatchGuards:
         A run whose ingest location has since been unset (or was never set on
         this console) must still be finishable — hence `_guard(needs_ingest=False)`.
         """
-        monkeypatch.setattr("womblex.cloud.queue.JobQueue", _FakeQueue)
+        monkeypatch.setattr("womblex.cloud.jobs.RunBoard", _FakeQueue)
         resp = _client(tmp_path).post(
             "/api/execute/stages", json={"run_id": "run-1", "config": _CONFIG},
         )
@@ -103,7 +110,7 @@ class TestStageDispatchGuards:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """`is_safe_run_id` keeps the `runs/<id>/documents` join contained."""
-        monkeypatch.setattr("womblex.cloud.queue.JobQueue", _FakeQueue)
+        monkeypatch.setattr("womblex.cloud.jobs.RunBoard", _FakeQueue)
         _FakeQueue.last = None
         resp = _client(tmp_path).post(
             "/api/execute/stages", json={"run_id": "../../etc", "config": _CONFIG},
@@ -124,7 +131,7 @@ class TestStageDispatchPlan:
     def test_dispatches_the_enabled_stages_in_pipeline_order(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr("womblex.cloud.queue.JobQueue", _FakeQueue)
+        monkeypatch.setattr("womblex.cloud.jobs.RunBoard", _FakeQueue)
         resp = _client(tmp_path).post(
             "/api/execute/stages",
             json={"run_id": "run-exec", "config": _CONFIG, "max_attempts": 5},
@@ -145,7 +152,7 @@ class TestStageDispatchPlan:
     def test_a_disabled_stage_is_not_dispatched(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr("womblex.cloud.queue.JobQueue", _FakeQueue)
+        monkeypatch.setattr("womblex.cloud.jobs.RunBoard", _FakeQueue)
         body = _client(tmp_path).post(
             "/api/execute/stages",
             json={
@@ -160,7 +167,7 @@ class TestStageDispatchPlan:
     ) -> None:
         """Masking is irreversible: it must not run off a flag left on in a
         copied config. The bound is `DOWNSTREAM_STAGES`, so no request widens it."""
-        monkeypatch.setattr("womblex.cloud.queue.JobQueue", _FakeQueue)
+        monkeypatch.setattr("womblex.cloud.jobs.RunBoard", _FakeQueue)
         body = _client(tmp_path).post(
             "/api/execute/stages",
             json={
@@ -181,7 +188,7 @@ class TestStageDispatchPlan:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A press that silently dispatched nothing reads as a broken button."""
-        monkeypatch.setattr("womblex.cloud.queue.JobQueue", _FakeQueue)
+        monkeypatch.setattr("womblex.cloud.jobs.RunBoard", _FakeQueue)
         resp = _client(tmp_path).post(
             "/api/execute/stages",
             json={
@@ -195,7 +202,7 @@ class TestStageDispatchPlan:
     def test_an_invalid_config_is_a_400_carrying_pydantics_errors(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr("womblex.cloud.queue.JobQueue", _FakeQueue)
+        monkeypatch.setattr("womblex.cloud.jobs.RunBoard", _FakeQueue)
         resp = _client(tmp_path).post(
             "/api/execute/stages",
             json={"run_id": "run-1", "config": {"chunking": {"chunk_size": "not-a-number"}}},
@@ -215,7 +222,7 @@ def test_dispatch_bounds_the_queue_connect(
             seen.update(kw)
             super().__init__(dsn, **kw)
 
-    monkeypatch.setattr("womblex.cloud.queue.JobQueue", _Capturing)
+    monkeypatch.setattr("womblex.cloud.jobs.RunBoard", _Capturing)
     resp = _client(tmp_path).post(
         "/api/execute/stages", json={"run_id": "run-1", "config": _CONFIG},
     )

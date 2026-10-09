@@ -1,377 +1,141 @@
-"""Worker loop: claim a job, run it, publish what it produced.
+"""Worker: launch DBOS, listen to the queues this process can serve, run until drained.
 
-Each iteration claims one row from the queue. An **extraction batch** pulls its
-input documents from object storage into a throwaway scratch dir, runs the
-shared ``womblex.batch.process_batch`` body (identical to ``womblex run``), then
-pushes the resulting ``batch-NNNN.*.parquet`` shards back. A **stage** job needs
-no staging of its own — its inputs are already in the store — so it hands the
-run's shard prefix to ``stage_runner.run_stage_remote``, which stages one base
-at a time and publishes each stage's sidecars.
+DBOS dequeues and runs the workflows in :mod:`womblex.cloud.workflows`; this
+module decides which queues a process may listen to and when it stops. A worker
+does not claim a job and hand it back: it simply never listens to a queue whose
+work it cannot do. An extraction queue is named for the ingest root it reads,
+so a worker wired to another root never sees that batch, and a stage queue is
+joined only when the models the stage needs pass this worker's model check.
 
-The same worker serves both: execution stays on the fleet, and a dispatcher
-(the CLI, or the console) only ever writes rows. A per-job failure marks the row
-(with retry) and moves on — one bad document never stops the fleet, the same
-contract the local runner honours.
+A stopped worker's unfinished workflows are recovered by DBOS when an executor
+with the same id launches again, which is why the default id is the host name
+and not the process id.
 """
 
 from __future__ import annotations
 
 import logging
-import os
 import socket
-import tempfile
 import time
-from pathlib import Path
 
-from womblex.batch import process_batch
-from womblex.cloud.queue import Job, JobQueue
+from womblex.cloud import dbos_app
+from womblex.cloud.stage_contracts import STAGE_CONTRACTS
 from womblex.config import WomblexConfig
-from womblex.store.remote import RemoteStore, same_location
-from womblex.store.run_stamp import RunStamp
-from womblex.store.source_provenance import IngestProvenance
-from womblex.utils.log_format import log_context
+from womblex.store.remote import RemoteStore
 from womblex.utils.model_check import SCOPE_EXTRACT, ModelCheckResult, check_models
-from womblex.utils.run_log import capture_batch_log
 
 logger = logging.getLogger(__name__)
 
 
 def default_worker_id() -> str:
-    return f"{socket.gethostname()}:{os.getpid()}"
+    return socket.gethostname()
 
 
-def _model_refusal(job: Job, check: ModelCheckResult) -> str | None:
-    """Why a failed model check rules this worker out for *job*, or ``None``.
+def served_queues(check: ModelCheckResult, ingest_root: str) -> dict[str, int]:
+    """Queue name -> concurrency for the queues this worker's models can serve.
 
-    Only the models the job needs count: a batch needs the extraction models, a
-    stage job needs that stage's, so a worker whose tokeniser is broken still
-    serves OCR batches.
+    Only the models a queue's work needs count: a worker whose tokeniser is
+    broken still serves OCR batches. Coordinators are light and always served.
     """
-    scope = job.stage if job.kind == "stage" and job.stage else SCOPE_EXTRACT
-    bad = check.failures_for((scope,))
-    return f"model check failed on this worker: {check.message(bad)}" if bad else None
+    queues = {dbos_app.DOWNSTREAM_QUEUE: 4}
+    if check.failures_for((SCOPE_EXTRACT,)):
+        logger.error("model check failed for extraction on this worker: %s", check.message())
+    else:
+        queues[dbos_app.extract_queue(ingest_root)] = 1
+    for stage in STAGE_CONTRACTS:
+        bad = check.failures_for((stage,))
+        if bad:
+            logger.error("not serving stage %s: model check failed: %s", stage, check.message(bad))
+        else:
+            queues[dbos_app.stage_queue(stage)] = 1
+    return queues
 
 
-def _same_ingest(a: str, b: str) -> bool:
-    """Whether two ingest roots name the same location.
+def _outstanding(queues: list[str]) -> int:
+    from dbos import DBOS
 
-    Normalised, not compared as strings: an enqueue and a worker configured
-    from different places (a flag here, a compose env var there) routinely
-    differ by a trailing slash while naming the same bucket and prefix. An
-    unparseable root on either side falls back to an exact match rather than
-    raising — the refusal path must not itself throw.
-    """
-    if a == b:
-        return True
-    try:
-        return same_location(a, b)
-    except (ValueError, ImportError):
-        return False
+    return len(DBOS.list_workflows(
+        queue_name=queues, status=["ENQUEUED", "DELAYED", "PENDING"],
+        load_input=False, load_output=False,
+    ))
 
 
-def _output_prefix(job: Job) -> str:
-    """The run's output dir — ``shard_prefix`` (``…/documents``) less its leaf."""
-    return job.shard_prefix.rsplit("/", 1)[0]
+def _completed(queues: list[str]) -> int:
+    from dbos import DBOS
 
-
-def _log_name(job: Job) -> str:
-    return f"stage-{job.stage}" if job.kind == "stage" else f"batch-{job.batch_num:04d}"
-
-
-def _log_key(job: Job) -> str:
-    """Where this job's log lands, a ``logs/`` sibling of the run's shards.
-
-    ``shard_prefix`` is ``runs/<run_id>/documents``; the log goes to
-    ``runs/<run_id>/logs/batch-NNNN.log`` (or ``logs/stage-<name>.log``), so the
-    reader can list a run's logs without knowing the batch numbering ahead of
-    time.
-    """
-    return f"{_output_prefix(job)}/logs/{_log_name(job)}.log"
-
-
-class StageJobFailed(Exception):
-    """A stage job ran but its summary reported a non-zero exit."""
-
-
-class StageNotReady(Exception):
-    """Every base of a stage job is blocked on an upstream input that is absent.
-
-    Distinct from :class:`StageJobFailed` because nothing went wrong: the stage
-    was claimed before the sidecar it reads existed. Treated like the
-    ingest-root refusal — released, not failed — so the attempt is not consumed.
-    """
-
-
-def _process_job(
-    job: Job,
-    config: WomblexConfig,
-    store: RemoteStore,
-    ingest: RemoteStore,
-    ingest_root: str = "",
-) -> None:
-    """Run one claimed job, capturing and publishing its log either way.
-
-    ``ingest_root`` is the location this worker reads documents from, which
-    ``run_worker`` always knows and a job row may not (it is NULL when the
-    inputs live under the store itself). It reaches the shards as provenance.
-
-    The log is captured for the whole run and published in a ``finally``, so a
-    failed job still leaves its ``batch-NNNN.log`` / ``stage-<name>.log`` in the
-    store — that is the case the operator most needs it. A failed *upload* of
-    the log never masks the original error: it is logged and swallowed.
-    """
-    with tempfile.TemporaryDirectory(prefix="womblex-job-") as tmp:
-        root = Path(tmp)
-        log_path = root / f"{_log_name(job)}.log"
-        try:
-            with log_context(run_id=job.run_id, job_id=job.id, stage=job.stage), \
-                    capture_batch_log(log_path):
-                if job.kind == "stage":
-                    _run_stage(job, config, store, ingest)
-                else:
-                    _run_batch(job, config, store, ingest, root, ingest_root)
-        finally:
-            # Outside the capture (the file is now closed and complete) but
-            # inside the temp dir; publish on success and failure alike.
-            try:
-                store.upload_file(log_path, _log_key(job))
-            except Exception:  # publishing the log must never mask the job's own error
-                logger.exception("[%s] failed to publish job log", job.label)
-
-
-def _run_batch(
-    job: Job,
-    config: WomblexConfig,
-    store: RemoteStore,
-    ingest: RemoteStore,
-    root: Path,
-    ingest_root: str = "",
-) -> None:
-    """Stage this batch's inputs, extract them, publish the shards.
-
-    The staged scratch paths say nothing about where the documents came from,
-    so provenance is built from what the job already carries: the root it was
-    enqueued against (or this worker's, when the row names none) and the store
-    keys it named, zipped in the download order ``download_to_dir`` preserves.
-    With neither root the shards go unstamped rather than carrying a root
-    invented from the scratch directory.
-
-    Staging is nested, because a job's keys come from a recursive listing of an
-    ingest prefix: two documents under different prefixes routinely share a
-    basename, and staging flat would land them on one local file.
-
-    The run stamp comes off the job row, which has always carried the run id —
-    so a distributed shard's stamp matches the local run's for the same config
-    and corpus, the stage and the write timestamp aside. A row naming no run is
-    published unstamped, on the same terms as an undeclared root: a malformed
-    row is not a reason to lose the batch's extraction.
-    """
-    inputs_dir = root / "inputs"
-    shards_dir = root / "shards"
-    shards_dir.mkdir(parents=True, exist_ok=True)
-    files = ingest.download_to_dir(job.input_keys, inputs_dir, nested=True)
-    declared = ingest_root or job.ingest_root or ""
-    provenance = (
-        IngestProvenance.declare(
-            declared,
-            config.dataset.name,
-            relpaths=dict(zip(files, job.input_keys, strict=True)),
-        )
-        if declared
-        else None
-    )
-    stamp = (
-        RunStamp.declare(job.run_id, config, stage="extract") if job.run_id.strip() else None
-    )
-    outcome = process_batch(
-        files, config, batch_num=job.batch_num, shard_dir=shards_dir, provenance=provenance,
-        stamp=stamp,
-    )
-    # Glob off the shard path the batch reported, so the naming scheme lives
-    # only in womblex.batch.
-    store.upload_glob(shards_dir, f"{outcome.shard_path.stem}.*", job.shard_prefix)
-    logger.info(
-        "[batch %d] %d ok, %d failed -> %s",
-        job.batch_num, outcome.batch.succeeded, outcome.batch.failed, job.shard_prefix,
-    )
-
-
-def _run_stage(
-    job: Job, config: WomblexConfig, store: RemoteStore, ingest: RemoteStore | None = None,
-) -> None:
-    """Run one downstream stage over the run's shard prefix.
-
-    The same call ``womblex run-stage --store`` makes, with the same
-    preconditions — the queue is a second dispatcher for it, not a second
-    implementation. Checkpoints are staged: the claim gate lets only one stage
-    of a run run at a time, so there is no concurrent runner to clobber them,
-    and a crashed stage resumes where it stopped instead of re-doing the run.
-
-    A non-zero summary is raised rather than returned, so the row records the
-    failure and retries — a stage that published nothing must not read as done.
-    Two shapes of non-zero, though: a stage whose every base is blocked on an
-    absent upstream sidecar raises :class:`StageNotReady` instead, because the
-    caller must release it rather than spend an attempt on work that has not
-    become runnable yet.
-    """
-    from womblex.cloud.stage_contracts import STAGE_CONTRACTS
-    from womblex.cloud.stage_runner import (
-        checkpoint_prefix_for,
-        prepare_stage_context,
-        run_stage_remote,
-    )
-
-    contract = STAGE_CONTRACTS[job.stage or ""]
-    ctx = prepare_stage_context(contract, config)
-    summary = run_stage_remote(
-        contract, store, job.shard_prefix, config, ctx=ctx,
-        checkpoint_prefix=checkpoint_prefix_for(contract, _output_prefix(job)),
-        ingest=ingest,
-    )
-    summary.log()
-    if summary.exit_code == 0:
-        return
-    detail = (
-        f"stage {contract.name}: {summary.failed} failed, "
-        f"{summary.not_ready} not-ready of {summary.bases} base(s)"
-    )
-    blocked_only = (
-        not summary.failed
-        and not summary.discovery_failed
-        and summary.bases
-        and summary.not_ready == summary.bases
-    )
-    if blocked_only:
-        missing = ", ".join(sorted(summary.not_ready_missing)) or "an upstream sidecar"
-        raise StageNotReady(f"{detail} — every base awaits {missing}")
-    raise StageJobFailed(detail)
+    return len(DBOS.list_workflows(
+        queue_name=queues, status="SUCCESS", load_input=False, load_output=False,
+    ))
 
 
 def run_worker(
-    dsn: str,
+    dsn: str | None,
     store_uri: str,
     config: WomblexConfig,
     *,
     ingest_uri: str | None = None,
     worker_id: str | None = None,
-    run_id: str | None = None,
     poll_interval: float = 5.0,
     once: bool = False,
     idle_timeout: float | None = None,
-    stale_timeout: float | None = None,
 ) -> int:
-    """Run the claim→process→publish loop until drained or interrupted.
+    """Run workflows from the served queues until drained or interrupted.
 
-    Serves both row kinds: extraction batches and, once a run's batches have
-    settled, the downstream stage jobs a dispatcher enqueued for it. Returns the
-    number of jobs completed by this worker.
-
-    ``ingest_uri`` names a second store to download source documents from;
-    ``None`` keeps today's single-store behaviour (inputs and outputs share
-    ``store_uri``). ``once`` processes at most one job then exits (handy for
-    one-shot container/CronJob execution). ``idle_timeout`` exits after that
-    many seconds with no work (auto-scale-to-zero). ``stale_timeout`` requeues
-    ``running`` rows orphaned by crashed workers before each claim.
+    Returns the number of workflows this worker completed. ``ingest_uri`` names
+    a second store to download source documents from; ``None`` keeps the
+    single-store behaviour. ``once`` exits after the first completion;
+    ``idle_timeout`` exits after that many seconds with nothing outstanding on
+    the served queues (auto-scale-to-zero).
     """
+    from dbos import DBOS
+
+    from womblex.cloud import workflows
+
     worker_id = worker_id or default_worker_id()
-    queue = JobQueue(dsn)
     store = RemoteStore.from_uri(store_uri)
     ingest = RemoteStore.from_uri(ingest_uri) if ingest_uri else store
-    worker_ingest_root = ingest_uri or store_uri
-    logger.info(
-        "worker %s started (store=%s, ingest=%s, run=%s)",
-        worker_id, store_uri, worker_ingest_root, run_id or "ALL",
-    )
+    ingest_root = ingest_uri or store_uri
+    logger.info("worker %s started (store=%s, ingest=%s)", worker_id, store_uri, ingest_root)
 
-    # Before the first claim, so a model this worker lacks is known up front. A
-    # failure does not stop the worker: it refuses the jobs that need the model
-    # (below) and serves the rest, and the reason is on each refused row.
-    model_check = check_models(config)
-    if model_check.failures:
-        logger.error(
-            "worker %s: model check failed; jobs needing these models will be "
-            "refused: %s", worker_id, model_check.message(),
-        )
+    # Before launch, so a model this worker lacks is known up front: the queues
+    # that need it are simply not joined.
+    served = served_queues(check_models(config), ingest_root)
+    workflows.set_context(workflows.WorkerContext(config, store, ingest, ingest_root))
 
-    completed = 0
+    DBOS(config={
+        "name": dbos_app.APP_NAME,
+        "system_database_url": dbos_app.system_database_url(dsn),
+        "executor_id": worker_id,
+        "run_migrations": True,
+    })
+    DBOS.listen_queues(list(served))
+    DBOS.launch()
+    for name, concurrency in served.items():
+        DBOS.register_queue(name, worker_concurrency=concurrency, on_conflict="never_update")
+
+    names = list(served)
+    baseline = _completed(names)
     idle_since: float | None = None
     try:
         while True:
-            if stale_timeout:
-                queue.requeue_stale(stale_timeout)
-
-            job = queue.claim(worker_id, run_id)
-            if job is None:
-                if once:
-                    break
-                now = time.monotonic()
-                idle_since = idle_since or now
-                if idle_timeout is not None and now - idle_since >= idle_timeout:
-                    logger.info("worker %s idle for %.0fs — exiting", worker_id, idle_timeout)
-                    break
-                time.sleep(poll_interval)
+            time.sleep(poll_interval)
+            done = _completed(names) - baseline
+            if once and done:
+                break
+            if _outstanding(names):
+                idle_since = None
                 continue
-
-            logger.info("worker %s claimed job %d (%s, attempt %d)",
-                        worker_id, job.id, job.label, job.attempts)
-            # Stage jobs read the store, never the ingest, so the guard is
-            # batch-only — `ingest_root` is NULL on a stage row regardless.
-            error = _model_refusal(job, model_check)
-            if job.ingest_root and not _same_ingest(job.ingest_root, worker_ingest_root):
-                error = (
-                    f"ingest root mismatch: job enqueued against "
-                    f"{job.ingest_root!r}, this worker reads from "
-                    f"{worker_ingest_root!r}"
-                )
-            if error is not None:
-                logger.error("job %d (%s) refused: %s", job.id, job.label, error)
-                # Released, not failed: the batch is fine, this worker is the
-                # wrong one for it, by ingest root or by a model it lacks.
-                # Failing here would burn the retry budget and, since the row
-                # returns to pending, re-claim it in a tight loop until the job
-                # died. A refusal is "no work for me", so it backs off and ages
-                # towards idle_timeout like an empty claim rather than holding
-                # a mis-wired worker up forever.
-                queue.release(job.id, error)
-                if once:
-                    break
-                idle_since = idle_since or time.monotonic()
-                time.sleep(poll_interval)
-                continue
-
-            idle_since = None
-            try:
-                _process_job(job, config, store, ingest, worker_ingest_root)
-                queue.complete(job.id)
-                completed += 1
-            except StageNotReady as e:
-                # Released, not failed, for the same reason as the ingest
-                # mismatch above: the stage is fine, it is just early. Failing
-                # here spends an attempt per poll on a stage whose upstream has
-                # not published yet, so a slow-draining run exhausts the retry
-                # budget and lands the stage terminally failed — the operator
-                # then sees "failed" for a pipeline that was merely in order.
-                logger.warning("job %d (%s) released: %s", job.id, job.label, e)
-                queue.release(job.id, str(e))
-                if once:
-                    break
-                idle_since = time.monotonic()
-                time.sleep(poll_interval)
-                continue
-            except Exception as e:  # one bad job must not kill the worker
-                logger.exception("job %d (%s) failed", job.id, job.label)
-                queue.fail(
-                    job.id,
-                    f"{type(e).__name__}: {e} — worker ingest root {worker_ingest_root}",
-                )
-
-            if once:
+            idle_since = idle_since or time.monotonic()
+            if idle_timeout is not None and time.monotonic() - idle_since >= idle_timeout:
+                logger.info("worker %s idle for %.0fs — exiting", worker_id, idle_timeout)
                 break
     except KeyboardInterrupt:  # pragma: no cover - interactive
-        logger.info("worker %s interrupted; %d job(s) done", worker_id, completed)
+        logger.info("worker %s interrupted", worker_id)
     finally:
-        queue.close()
+        completed = _completed(names) - baseline
+        DBOS.destroy()
+        workflows.set_context(None)
     return completed
 
 
-__all__ = ["StageJobFailed", "StageNotReady", "default_worker_id", "run_worker"]
+__all__ = ["default_worker_id", "run_worker", "served_queues"]

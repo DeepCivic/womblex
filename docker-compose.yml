@@ -49,7 +49,7 @@
 #     # s3fs gets the store creds above. If the S3 store is reachable by the
 #     # SAME instance role (real AWS S3, not MinIO), leave the store vars unset
 #     # too and s3fs uses the role as well.
-#     docker compose run --rm init                     # create womblex_jobs in the external DSN
+#     docker compose run --rm init                     # create the DBOS system tables in the external DSN
 #     docker compose up --scale worker=4 worker
 #   See the README "Cloud deployment" section for the full walk-through.
 #
@@ -190,11 +190,11 @@ services:
       mc mb --ignore-existing local/womblex
       "
 
-  # One-shot: create the womblex_jobs table in whatever WOMBLEX_DB_DSN names
+  # One-shot: create the DBOS system tables in whatever WOMBLEX_DB_DSN names
   # (bundled Postgres locally, the external DSN in cloud mode). `required:
   # false` so cloud mode does not wait on a bundled Postgres that was never
   # started — the health gate only binds when the `local`-profile postgres is
-  # up. Equivalent to `psql "$WOMBLEX_DB_DSN" -f sql/womblex_jobs.sql`.
+  # up. DBA-provisioned databases can run `dbos migrate` instead.
   init:
     image: ${WOMBLEX_PIPELINE_IMAGE:-ghcr.io/deepcivic/womblex:latest}
     depends_on:
@@ -223,7 +223,7 @@ services:
   # Depends on the two one-shots (`init` creates the table, `createbuckets`
   # the bucket) only when they run — both are `required: false`, so a cloud
   # deployment whose table/bucket are provisioned externally (run `init` once
-  # against the external DSN, or apply sql/womblex_jobs.sql; the bucket is
+  # against the external DSN, or `dbos migrate`; the bucket is
   # created out-of-band) does not wait on the bundled one-shots.
   worker:
     image: ${WOMBLEX_PIPELINE_IMAGE:-ghcr.io/deepcivic/womblex:latest}
@@ -238,7 +238,7 @@ services:
     volumes:
       - ./configs:/app/configs
     command: ["worker", "--config", "configs/example.yaml",
-              "--poll-interval", "5", "--stale-timeout", "900"]
+              "--poll-interval", "5"]
 
   # One-shot, opt-in: publish the vendored sample corpus (run-throsby-demo)
   # into the bucket so a fresh console shows a browsable run instead of

@@ -12,8 +12,8 @@ from fastapi.testclient import TestClient
 from womblex.api import app as api_app
 from womblex.api.app import create_api_app, run_state
 from womblex.api.auth import hash_token, parse_registry
-from womblex.cloud import queue as queue_mod
-from womblex.cloud.queue import RunSummary, Throughput, WorkerState
+from womblex.cloud import jobs as queue_mod
+from womblex.cloud.jobs import RunSummary, Throughput, WorkerState
 from womblex.store.contract import CONTRACT_VERSION_KEY, SENSITIVITY_KEY
 
 RUNS = {
@@ -27,9 +27,6 @@ class FakeQueue:
     written: ClassVar[list[tuple]] = []
 
     def __init__(self, dsn: str, **_kw: object) -> None:
-        pass
-
-    def ensure_schema(self) -> None:
         pass
 
     def enqueue(self, run_id, specs, *, owner=None):
@@ -64,8 +61,9 @@ class FakeQueue:
 
 @pytest.fixture
 def client(tmp_path: Path, monkeypatch) -> TestClient:
-    monkeypatch.setattr(api_app, "JobQueue", FakeQueue)
-    monkeypatch.setattr(queue_mod, "JobQueue", FakeQueue)
+    monkeypatch.setattr(api_app, "RunBoard", FakeQueue)
+    monkeypatch.setattr(queue_mod, "RunBoard", FakeQueue)
+    monkeypatch.setattr("womblex.cloud.dispatch.ensure_schema", lambda _dsn: None)
     FakeQueue.written = []
     for owner in ("alice", "bob"):
         (tmp_path / "ingest" / owner / "up1").mkdir(parents=True)
@@ -211,7 +209,8 @@ def test_preset_and_config_together_are_refused(client):
 
 
 def test_submit_without_an_ingest_location_is_503(tmp_path, monkeypatch):
-    monkeypatch.setattr(queue_mod, "JobQueue", FakeQueue)
+    monkeypatch.setattr(queue_mod, "RunBoard", FakeQueue)
+    monkeypatch.setattr("womblex.cloud.dispatch.ensure_schema", lambda _dsn: None)
     app = create_api_app(store_uri=str(tmp_path), db_dsn="postgresql://x/y", registry=None)
     resp = TestClient(app).post("/v1/runs", json={"input_prefix": "x"})
     assert resp.status_code == 503
@@ -223,7 +222,7 @@ def test_submit_with_the_queue_down_is_503(client, monkeypatch):
     def refuse(*_a, **_kw):
         raise psycopg.OperationalError("connection refused")
 
-    monkeypatch.setattr(queue_mod, "JobQueue", refuse)
+    monkeypatch.setattr(queue_mod, "RunBoard", refuse)
     resp = client.post("/v1/runs", headers=auth("ta"), json={"input_prefix": "alice/up1"})
     assert resp.status_code == 503 and resp.json()["detail"] == "job queue unreachable"
 

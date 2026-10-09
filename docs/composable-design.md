@@ -149,9 +149,11 @@ the surface depends on the path:
   `NotReady` — logged with the producing stage and skipped, a non-zero exit only
   when every base is blocked — and a base missing a strict conditional input
   raises `InputContractError`, counted as failed while the other bases continue.
-- **Queue worker** (`cloud/worker.py`): a stage job whose every base is
-  `NotReady` raises `StageNotReady` and is **released** rather than failed, so a
-  stage claimed before its upstream has published does not spend a retry.
+- **Stage workflows** (`cloud/workflows.py`): `plan_units` refuses a strict
+  input gap before any unit runs, and a unit missing an upstream sidecar raises
+  `StageNotReady` (naming the producing stage), which is not retried. The
+  coordinator runs stages in pipeline order, so this means the stage was
+  dispatched out of order or an earlier stage failed; it ends the coordinator.
 
 The register-ingest rows are structural impossibilities: their output has no
 extraction sidecars, so shard discovery finds no batch bases.

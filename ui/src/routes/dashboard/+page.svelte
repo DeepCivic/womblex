@@ -314,7 +314,7 @@
 					</div>
 				{/if}
 
-				<!-- Job list: `womblex_jobs` itself, newest activity first. Stale
+				<!-- Job list: the run board's workflows, newest activity first. Stale
 				     rows are flagged inline rather than repeated. -->
 				<div class="overflow-auto rounded-md border border-border bg-surface-raised">
 					<table class="w-full text-left text-xs">

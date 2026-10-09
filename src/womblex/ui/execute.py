@@ -6,7 +6,7 @@ service API, and are re-exported here. What stays is the console-only read: the
 ingest preflight behind the composer's "N documents ready" line.
 
 "Log streaming" is the queue's own job-status transitions
-(:meth:`JobQueue.list_jobs`) plus the per-stage checkpoints
+(`RunBoard.list_jobs`) plus the per-stage checkpoints
 :mod:`womblex.ui.dashboard` already reads — a batch-granular feed, labelled
 as such, not a fabricated line-by-line log the pipeline does not emit.
 """

@@ -241,7 +241,7 @@ The backend follows from what you pass: `--store` takes a local path or an
 womblex enqueue  --store s3://bucket --ingest s3://bucket/inbox \
                  --config configs/example.yaml --create-schema
 womblex worker   --store s3://bucket --ingest s3://bucket/inbox \
-                 --config configs/example.yaml --stale-timeout 900
+                 --config configs/example.yaml
 womblex jobs     --run-id <run_id>
 womblex finalize --store s3://bucket --run-id <run_id>    # consolidate the manifest
 
@@ -251,16 +251,18 @@ womblex run-stage --stage chunk --store s3://bucket --run-id <run_id> --config <
 womblex enqueue-stages --run-id <run_id> --config <yaml>
 ```
 
-Workers claim batches with `FOR UPDATE SKIP LOCKED`, so you can add or remove
-them mid-run. A crashed worker's batch returns to the queue after
-`--stale-timeout`. `enqueue-stages` never dispatches `pii` (masking is
+Work runs as DBOS workflows, so you can add or remove workers mid-run. A
+stopped worker's unfinished workflows are recovered when a worker with the same
+`--worker-id` (default: the host name) starts again, and a batch or stage unit
+that finished is not run twice. `enqueue-stages` never dispatches `pii` (masking is
 irreversible) or `quality` (run-scoped); run those with `run-stage`.
 
 Connections come from `WOMBLEX_STORE_URI`, `WOMBLEX_INGEST_URI` and
 `WOMBLEX_DB_DSN`. S3 credentials go on `WOMBLEX_S3_ACCESS_KEY_ID`,
 `WOMBLEX_S3_SECRET_ACCESS_KEY` and `WOMBLEX_S3_ENDPOINT` (MinIO works as an S3
-endpoint). Womblex owns one table, `womblex_jobs` (schema in
-`sql/womblex_jobs.sql`), and writes no vectors to the database.
+endpoint). `WOMBLEX_DB_DSN` is the DBOS system database (a Postgres URL);
+without it a local SQLite file is used. Womblex writes no vectors to the
+database.
 
 ### Docker Compose
 

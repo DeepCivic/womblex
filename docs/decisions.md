@@ -116,17 +116,30 @@ claim*. Two deliberate choices:
   gain over copying a handful of files at the job boundary. fsspec's local
   backend means the air-gapped/CPU default exercises the *same* code path with
   no S3 dependency touched.
-- **A Postgres `FOR UPDATE SKIP LOCKED` queue is the distributed checkpoint, not
-  a second mechanism alongside the JSON `CheckpointManager`.** Concurrent
-  workers writing one checkpoint file would race; distinct rows under
-  `SKIP LOCKED` do not. So the worker path does **not** use `CheckpointManager`
-  — the job `status` carries resumability, and re-running `enqueue` (idempotent
-  on `(run_id, batch_num)`) is the resume. *Rejected:* Redis/Celery (new
-  infra, against the single-datastore goal) and an in-app file lock (no
-  multi-host safety). One Postgres table, no broker.
-  *Being superseded (2026-10):* DBOS replaces the queue, worker and stage
-  runner (Phase 0 of [plan-trust-and-recipes.md](plan-trust-and-recipes.md));
-  this half is rewritten when `cloud/queue.py` is deleted.
+- **DBOS workflows are the distributed checkpoint, not a second mechanism
+  alongside the JSON `CheckpointManager`** (2026-10; D9 of
+  [plan-trust-and-recipes.md](plan-trust-and-recipes.md)). Concurrent workers
+  writing one checkpoint file would race, so the worker path does **not** use
+  `CheckpointManager`. An extraction batch and a downstream stage are DBOS
+  workflows on queues; a batch, and each stage unit, run as a recorded step, so
+  a unit that finished is not run again after a crash, and re-running `enqueue`
+  (deterministic workflow ids, `<run>:batch:NNNN`) is the resume. Step results
+  are storage keys, never data. The system database is Postgres for a fleet and
+  a SQLite file for a local run. *Replaced:* a hand-rolled Postgres
+  `FOR UPDATE SKIP LOCKED` table (`womblex_jobs`) with its own claim, retry and
+  stale-recovery code. *Rejected:* Redis/Celery (new infra), Temporal/Prefect/
+  Hatchet (a separate server), Procrastinate/PgQueuer (no durable steps).
+  *Behaviour that moved with it:* a worker no longer claims a job and hands it
+  back — it joins only the queues it can serve (an extraction queue is named for
+  the ingest root, a stage queue for the stage, joined only if the stage's
+  models pass the model check). A failed stage ends its run's coordinator
+  instead of letting later stages report "not ready". `--run-id` and
+  `--stale-timeout` left `womblex worker`: DBOS has no per-run claim filter and
+  recovers a stopped worker's workflows when its executor id restarts. Owner
+  scoping is a workflow attribute, filtered client-side because attribute
+  filtering is Postgres-only; two submitters racing to create one run can both
+  pass the owner check (the advisory lock is gone) and the first row written
+  names the owner.
 
 The load-bearing invariant: `cmd_run` and the worker call **one** shared
 `batch.process_batch`, so local and distributed runs produce byte-identical

@@ -53,7 +53,7 @@ identity system.
 
 ## Run ownership
 
-Runs are known to the job queue (`womblex_jobs.owner`) and scoped to the client
+Runs are known to the run board (the `owner` attribute on each DBOS workflow) and scoped to the client
 that submitted them.
 
 - A run owned by another client answers 404, as an unknown run does.

@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from typing import cast
 
 from womblex.cli._shared import normalise_prefix, select_supported
+from womblex.cloud.dbos_app import ensure_schema
 from womblex.store.retention import generate_run_id, is_safe_run_id
 from womblex.ui.deps import UISettings
 
@@ -157,7 +158,7 @@ class EnqueueResult:
     """The outcome of an enqueue, for the screen to report and then poll.
 
     ``newly_enqueued`` distinguishes a fresh run from a resume: enqueue is
-    idempotent on ``(run_id, batch_num)`` (:meth:`JobQueue.enqueue`), so
+    idempotent on ``(run_id, batch_num)`` (`RunBoard.enqueue`), so
     re-dispatching a run that partly ran inserts only its missing batches and
     this counts them. ``run_id`` is what the Dashboard and Corpus Inspector
     are then pointed at to watch it drain.
@@ -200,7 +201,7 @@ def enqueue_extraction(
     enqueues that count.
 
     *owner* is the service caller the run belongs to (``None`` for the CLI
-    and console); see :meth:`JobQueue.enqueue`.
+    and console); see `RunBoard.enqueue`.
 
     Raises :class:`ExecutionDisabled` when the console cannot dispatch (the
     route maps it to 409) and ``ValueError`` on bad input (→ 400) — an unsafe
@@ -213,7 +214,7 @@ def enqueue_extraction(
     if not is_safe_run_id(resolved_run_id):
         raise ValueError(f"unsafe run_id: {resolved_run_id!r}")
 
-    from womblex.cloud.queue import JobQueue, JobSpec
+    from womblex.cloud.jobs import JobSpec, RunBoard
 
     ingest_uri = cast(str, settings.ingest_uri)
     location, keys = _supported_under(settings, normalise_prefix(input_prefix))
@@ -233,9 +234,9 @@ def enqueue_extraction(
         for batch_idx, i in enumerate(range(0, len(keys), batch_size), start=1)
     ]
 
-    with JobQueue(cast(str, settings.db_dsn), connect_timeout=QUEUE_CONNECT_TIMEOUT) as queue:
-        queue.ensure_schema()
-        newly = queue.enqueue(resolved_run_id, specs, owner=owner)
+    ensure_schema(settings.db_dsn)
+    with RunBoard(settings.db_dsn, connect_timeout=QUEUE_CONNECT_TIMEOUT) as board:
+        newly = board.enqueue(resolved_run_id, specs, owner=owner)
 
     logger.info(
         "console enqueue: run_id=%s, %d doc(s) -> %d batch(es), %d newly enqueued",
@@ -291,7 +292,7 @@ class StageDispatchResult:
     thought embedding was off) should be visible on the screen that pressed it.
 
     ``newly_enqueued`` separates a first press from a repeat the same way
-    :class:`EnqueueResult` does: :meth:`JobQueue.enqueue_stages` is idempotent
+    :class:`EnqueueResult` does: `RunBoard.enqueue_stages` is idempotent
     per ``(run_id, stage)``, so pressing twice re-dispatches nothing and this
     reads 0.
     """
@@ -333,7 +334,7 @@ def enqueue_downstream_stages(
     budget on enrich and embed either. The operator enqueues, watches it drain,
     looks at it, then presses this.
 
-    *owner* is checked against the run's owner as in :meth:`JobQueue.enqueue_stages`.
+    *owner* is checked against the run's owner as in `RunBoard.enqueue_stages`.
 
     ``pii`` and ``quality`` are never dispatched — that bound lives in
     ``DOWNSTREAM_STAGES``, not here, so the console cannot widen it. Both stay
@@ -348,7 +349,7 @@ def enqueue_downstream_stages(
     if not is_safe_run_id(run_id):
         raise ValueError(f"unsafe run_id: {run_id!r}")
 
-    from womblex.cloud.queue import JobQueue
+    from womblex.cloud.jobs import RunBoard
 
     stages = downstream_stages(settings, config)
     if not stages:
@@ -358,9 +359,9 @@ def enqueue_downstream_stages(
         )
 
     shard_prefix = f"runs/{run_id}/documents"
-    with JobQueue(cast(str, settings.db_dsn), connect_timeout=QUEUE_CONNECT_TIMEOUT) as queue:
-        queue.ensure_schema()
-        newly = queue.enqueue_stages(
+    ensure_schema(settings.db_dsn)
+    with RunBoard(settings.db_dsn, connect_timeout=QUEUE_CONNECT_TIMEOUT) as board:
+        newly = board.enqueue_stages(
             run_id, list(stages), shard_prefix, max_attempts=max_attempts, owner=owner,
         )
 

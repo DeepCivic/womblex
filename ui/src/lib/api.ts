@@ -391,7 +391,7 @@ export async function testQueueConnection(
 // `store/checkpoint.py`'s `CheckpointProgress` (`asdict()` is what the API
 // serialises), so a renamed column surfaces as a type error here.
 
-// One `womblex_jobs` row (`JobRow`): the job list's grain. Timestamps are
+// One workflow row on the run board (`JobRow`): the job list's grain. Timestamps are
 // ISO-8601 strings, converted once server-side.
 export interface JobRow {
 	id: number;
