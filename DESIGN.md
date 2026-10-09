@@ -99,10 +99,13 @@ WCAG 2.1 relative-luminance ratios, computed against the dark page surface
 
 ### The one rule that makes status legible in both themes
 
-**A status pill or dot is always a solid `--status-*` fill with near-black
-`#18182a` text.** Near-black on all five fills computes to 4.6:1 (failed) through
-13.1:1 (running) — so the pill is identical in light and dark mode and needs no
-per-theme override. Do not render status colours as text on a page surface.
+**A status pill or dot is always a solid `--status-*` fill with
+`--status-foreground` text, which flips per theme.** Dark mode: near-black
+`#18182a` on all five fills, 4.6:1 (failed) through 13.1:1 (running). Light
+mode: white on pending, done, failed and warning, 4.9:1 through 11.9:1. The
+lime running fill takes near-black in both themes (13.2:1;
+`--status-running-foreground`). Do not render status colours as text on a page
+surface.
 
 ---
 

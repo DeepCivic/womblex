@@ -24,7 +24,7 @@ Where the pipeline is today, what to work on next, and why. Updated as changes l
 | 11 | Redaction threshold tuning for signature blocks | Low | 3/7 GT redactions missed on page 2 Throsby; aspect-ratio filter likely culprit | |
 | 12 | Replace the general-purpose detection model with a document-specific layout model | High | A general model has no document layout classes and produced 0 predictions on all DocLayNet fixtures | **Done — document-specific layout model, 2026-05-25; since replaced by PP-DocLayout-M (#130)** |
 | 13 | ~~Layout class coverage (heading, footer, caption, figure)~~ | — | Subsumed by #12 — entire layout pipeline needs a document-trained model | **Merged into #12** |
-| 14 | Per-document-type config overrides | High | Enables type-specific DPI, thresholds | |
+| 14 | Per-document-type config overrides | High | Enables type-specific DPI, thresholds | Confirmed core to Womblex's usefulness (2026-10); not yet scheduled |
 | 15 | End-to-end task metrics (Isaacus integration) | High | Measures actual application success | **In progress — I6-I10 landed (enrich/link/embed + graph-driven PII); end-to-end coverage metrics still pending** |
 | 16 | Handwriting via dedicated HTR model | High | Only if handwritten docs are in scope | |
 | 17 | Table-cell reconstruction for OCR'd pages | Medium | Unblocks every structural consumer on scanned documents. Measured: a scanned money table yields 1 amount of ~35 today, 30 with cells | **Done** |
