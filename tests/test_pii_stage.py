@@ -18,7 +18,11 @@ from womblex.config import PIIConfig
 from womblex.pii.cleaner import PIICleaner
 from womblex.pii.pii_stage import pii_shards
 from womblex.store.checkpoint import CheckpointManager
-from womblex.store.enrichment_output import ENTITY_SCHEMA, enrichment_entities_path_for
+from womblex.store.enrichment_output import (
+    ENTITY_SCHEMA,
+    enrichment_entities_path_for,
+    enrichment_meta_path_for,
+)
 from womblex.store.output import MANIFEST_SCHEMA, write_chunks
 from womblex.store.pii_output import (
     CLEAN_TEXT_SCHEMA,
@@ -182,6 +186,47 @@ class TestPiiShards:
         assert second.batches_written == 0  # all docs checkpointed → skipped
 
 
+class TestMaskStatus:
+    def _statuses(self, d: Path) -> list[str | None]:
+        rows = sorted(read_clean_text(d).to_pylist(), key=lambda r: r["chunk_index"])
+        return [r["mask_status"] for r in rows]
+
+    def _chunks(self) -> list[dict]:
+        return [_chunk_row(0, _NARRATIVE, "narrative"), _chunk_row(1, _TABLE, "table")]
+
+    def test_masked_and_uncovered_table(self, tmp_path, monkeypatch):
+        _no_context_model(monkeypatch)
+        s = _NARRATIVE.index("Jane Doe")
+        d = tmp_path / "documents"
+        _build_shard(d, chunk_rows=self._chunks(), entity_rows=[_entity_row(s, s + 8, "natural")])
+        pii_shards(d, PIIConfig(use_regex_backstop=False))
+        assert self._statuses(d) == ["masked", "not_masked"]
+
+    def test_no_enrichment_is_not_masked(self, tmp_path, monkeypatch):
+        _no_context_model(monkeypatch)
+        d = tmp_path / "documents"
+        _build_shard(d, chunk_rows=self._chunks(), entity_rows=[])
+        pii_shards(d, PIIConfig(use_regex_backstop=False))
+        assert self._statuses(d) == ["not_masked", "not_masked"]
+
+    def test_enriched_doc_with_no_pii_is_no_entity(self, tmp_path, monkeypatch):
+        _no_context_model(monkeypatch)
+        d = tmp_path / "documents"
+        base = _build_shard(d, chunk_rows=self._chunks(), entity_rows=[])
+        pq.write_table(
+            pa.table({"source_hash": [DOC]}), str(enrichment_meta_path_for(base)),
+        )
+        pii_shards(d, PIIConfig(use_regex_backstop=False))
+        assert self._statuses(d) == ["no_entity", "not_masked"]
+
+    def test_regex_backstop_covers_every_chunk(self, tmp_path, monkeypatch):
+        _no_context_model(monkeypatch)
+        d = tmp_path / "documents"
+        _build_shard(d, chunk_rows=[_chunk_row(0, "Nothing here.", "table")], entity_rows=[])
+        pii_shards(d, PIIConfig(use_regex_backstop=True))
+        assert self._statuses(d) == ["no_entity"]
+
+
 class TestPiiSpansIO:
     def test_round_trip(self, tmp_path):
         base = tmp_path / "batch-0001.parquet"
@@ -209,11 +254,22 @@ class TestPiiSpansIO:
         rows = [{
             "source_hash": DOC, "chunk_index": 0, "content_type": "narrative",
             "text": "The officer <PERSON_1> signed it.", "n_masked": 1,
+            "mask_status": "masked",
         }]
         write_clean_text(rows, base)
         table = read_clean_text(base)
         assert table.schema.names == [f.name for f in CLEAN_TEXT_SCHEMA]
         assert table.to_pylist()[0]["n_masked"] == 1
+
+    def test_older_file_without_mask_status_is_backfilled(self, tmp_path):
+        base = tmp_path / "batch-0004.parquet"
+        old = pa.table({
+            "source_hash": [DOC, DOC], "chunk_index": pa.array([0, 1], pa.int32()),
+            "content_type": ["narrative", "table"], "text": ["a", "b"],
+            "n_masked": pa.array([2, 0], pa.int32()),
+        })
+        pq.write_table(old, str(tmp_path / "batch-0004.clean_text.parquet"))
+        assert read_clean_text(base).column("mask_status").to_pylist() == ["masked", None]
 
 
 class TestCmdPii:

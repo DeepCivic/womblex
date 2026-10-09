@@ -7,7 +7,7 @@ column-level schemas are in [extraction.md](extraction.md).
 
 ## Contract version
 
-`womblex.contract_version` (currently `1.1`, `store/contract.CONTRACT_VERSION`)
+`womblex.contract_version` (currently `1.2`, `store/contract.CONTRACT_VERSION`)
 is in the footer of every pipeline Parquet and in `egress_manifest.json`. It is
 versioned apart from the package: a release that changes no schema leaves it
 alone.
@@ -39,7 +39,7 @@ the single source). An unknown role reads as `raw`.
 | `enrichment_meta` | `source_hash` | none |
 | `entity_links` | `(source_hash, mention_start, mention_end)` to `enrichment_entities`; its `entity_id` is the reference-register id | raw |
 | `pii_spans` | `(source_hash, chunk_index)`; `entity_id` to `enrichment_entities` | raw |
-| `clean_text` | `(source_hash, chunk_index)` | masked |
+| `clean_text` | `(source_hash, chunk_index)`; `mask_status` is `masked`, `no_entity` or `not_masked` (verbatim, no candidate source covered the chunk); files written before contract 1.2 read back as `masked` where `n_masked` is above zero, null otherwise | masked |
 | `money_spans`, `money_columns` | `source_hash` plus the locus anchor (`start_char` / `elem_order` / `parent_elem_order`) | none |
 | `layout_regions` | `(source_hash, page)`; boxes are normalised like element `bbox` ([layout.md](layout.md)) | none |
 | `redactions`, `source_index` | `source_hash` | none |
