@@ -283,3 +283,8 @@ def test_extract_publishes_the_log_even_when_the_batch_fails(tmp_path, monkeypat
         _extract(_minimal_config(tmp_path), output_store, ingest_store, keys=["people.csv"])
 
     assert output_store.exists("runs/r1/logs/batch-0001.log")
+
+
+def test_a_stage_run_out_of_order_is_not_retried():
+    assert not workflows._not_a_failure_to_retry(workflows.StageNotReady("chunk: missing"))
+    assert workflows._not_a_failure_to_retry(OSError("transient"))

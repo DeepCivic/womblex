@@ -107,3 +107,10 @@ def test_list_jobs_reads_the_row_the_dashboard_shows(board):
     assert all(r.kind == "batch" and r.max_attempts == 3 and r.locked_by is None for r in rows)
     assert board.list_jobs("run-a", status="running") == []
     assert board.list_jobs("no-such-run") == []
+
+
+def test_reads_on_a_database_no_writer_has_migrated_are_empty(tmp_path, monkeypatch):
+    monkeypatch.setenv("WOMBLEX_DBOS_PATH", str(tmp_path / "fresh.sqlite"))
+    with RunBoard(None) as b:
+        assert b.stats("run-a") == {}
+        assert b.runs() == [] and b.list_jobs() == []

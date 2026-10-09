@@ -81,7 +81,7 @@ def _context() -> WorkerContext:
 
 def _not_a_failure_to_retry(e: BaseException) -> bool:
     """A missing input is a wiring fact, not a transient fault: retrying cannot fix it."""
-    return not isinstance(e, NotReady | InputContractError)
+    return not isinstance(e, NotReady | StageNotReady | InputContractError)
 
 
 def _retry(name: str, max_attempts: int) -> StepOptions:
@@ -243,8 +243,11 @@ def run_downstream(
                                  "max_attempts": max_attempts}
         if owner is not None:
             attrs["owner"] = owner
-        queue = DBOS.register_queue(dbos_app.stage_queue(stage), on_conflict="never_update")
+        # Enqueued by name, not registered: the workers that serve the stage
+        # own the queue's settings.
         with SetWorkflowID(dbos_app.stage_id(run_id, stage)), SetWorkflowAttributes(attrs):
-            handle = queue.enqueue(run_stage, run_id, stage, shard_prefix, max_attempts)
+            handle = DBOS.enqueue_workflow(
+                dbos_app.stage_queue(stage), run_stage, run_id, stage, shard_prefix, max_attempts,
+            )
         results.append(handle.get_result())
     return results

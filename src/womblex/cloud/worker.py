@@ -60,11 +60,13 @@ def _outstanding(queues: list[str]) -> int:
     ))
 
 
-def _completed(queues: list[str]) -> int:
+def _completed(queues: list[str], worker_id: str) -> int:
+    """Successes on *queues* run by this executor, not by the rest of the fleet."""
     from dbos import DBOS
 
     return len(DBOS.list_workflows(
-        queue_name=queues, status="SUCCESS", load_input=False, load_output=False,
+        queue_name=queues, status="SUCCESS", executor_id=worker_id,
+        load_input=False, load_output=False,
     ))
 
 
@@ -111,15 +113,16 @@ def run_worker(
     DBOS.listen_queues(list(served))
     DBOS.launch()
     for name, concurrency in served.items():
-        DBOS.register_queue(name, worker_concurrency=concurrency, on_conflict="never_update")
+        # Queue settings live in the system database: the serving worker's win.
+        DBOS.register_queue(name, worker_concurrency=concurrency, on_conflict="always_update")
 
     names = list(served)
-    baseline = _completed(names)
+    baseline = _completed(names, worker_id)
     idle_since: float | None = None
     try:
         while True:
             time.sleep(poll_interval)
-            done = _completed(names) - baseline
+            done = _completed(names, worker_id) - baseline
             if once and done:
                 break
             if _outstanding(names):
@@ -132,7 +135,7 @@ def run_worker(
     except KeyboardInterrupt:  # pragma: no cover - interactive
         logger.info("worker %s interrupted", worker_id)
     finally:
-        completed = _completed(names) - baseline
+        completed = _completed(names, worker_id) - baseline
         DBOS.destroy()
         workflows.set_context(None)
     return completed

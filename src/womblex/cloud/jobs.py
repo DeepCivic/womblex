@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Self
 
+import sqlalchemy.exc
+
 from womblex.cloud import dbos_app
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -128,6 +130,12 @@ def _error_text(error: BaseException | None) -> str | None:
     return f"{error}{last}"[:2000]
 
 
+def _schema_missing(e: Exception) -> bool:
+    """The DBOS system tables have not been created yet (Postgres or SQLite)."""
+    orig = getattr(e, "orig", None)
+    return getattr(orig, "sqlstate", None) in ("42P01", "3F000") or "no such table" in str(orig)
+
+
 def _board_status(status: WorkflowStatus) -> str:
     return _STATUS.get(status.status, "failed")
 
@@ -176,7 +184,13 @@ class RunBoard:
         kwargs.setdefault("load_output", False)
         if run_id:
             kwargs["workflow_id_prefix"] = dbos_app.run_prefix(run_id)
-        rows = self._client.list_workflows(status=status, **kwargs)
+        try:
+            rows = self._client.list_workflows(status=status, **kwargs)
+        except sqlalchemy.exc.DBAPIError as e:
+            # Readers do not migrate: a database no writer has touched holds no runs.
+            if not _schema_missing(e):
+                raise
+            return []
         # Filtered here, not by DBOS: filtering on attributes is Postgres-only.
         return rows if owner is None else [s for s in rows if _attr(s, "owner") == owner]
 
