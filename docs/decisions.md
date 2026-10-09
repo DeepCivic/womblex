@@ -128,7 +128,8 @@ claim*. Two deliberate choices:
   a SQLite file for a local run. *Replaced:* a hand-rolled Postgres
   `FOR UPDATE SKIP LOCKED` table (`womblex_jobs`) with its own claim, retry and
   stale-recovery code. *Rejected:* Redis/Celery (new infra), Temporal/Prefect/
-  Hatchet (a separate server), Procrastinate/PgQueuer (no durable steps).
+  Hatchet (a separate server), Procrastinate/PgQueuer (no durable steps or
+  events), Absurd (pre-1.0, no schedules in the Python SDK), Dramatiq (LGPL).
   *Behaviour that moved with it:* a worker no longer claims a job and hands it
   back — it joins only the queues it can serve (an extraction queue is named for
   the ingest root, a stage queue for the stage, joined only if the stage's
@@ -530,6 +531,15 @@ There is no separate detector and **no second enrichment pass**.
   the raw chunks that feed Isaacus. Embeddings are computed on raw text and are
   treated as an internal substrate; if embeddings are ever published, re-embed
   the masked `clean_text` instead.
+- **`clean_text` says whether masking could have found anything** (2026-10;
+  D1 of [plan-trust-and-recipes.md](plan-trust-and-recipes.md)). Each row
+  carries `mask_status`: `masked`, `no_entity` (a candidate source covered the
+  chunk and found nothing) or `not_masked` (none did, so the text is verbatim).
+  *Rejected:* refusing the stage with a typed error when a chunk has no
+  candidate source (with the backstop off, the default, every table chunk has
+  none, so every run would refuse), and omitting
+  `clean_text` rows for uncovered chunks (readers lose the chunk silently). The
+  column is additive, so existing readers keep working.
 - **Coverage is PERSON and ADDRESS.** ORGANISATION, URL, phone and email are
   not detected.
 
