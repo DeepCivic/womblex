@@ -41,7 +41,8 @@
 	--status-done: #15803d; /* console */
 	--status-failed: #c44536; /* console */
 	--status-warning: #b45309; /* console */
-	--status-foreground: #18182a; /* console: near-black text on every status fill */
+	--status-foreground: #ffffff; /* light fills are tuned for white text (4.9:1 to 11.9:1) */
+	--status-running-foreground: #18182a; /* lime takes near-black in both themes */
 }
 
 :root[data-theme='dark'] {
@@ -87,6 +88,7 @@
 	--color-status-failed: var(--status-failed);
 	--color-status-warning: var(--status-warning);
 	--color-status-foreground: var(--status-foreground);
+	--color-status-running-foreground: var(--status-running-foreground);
 }
 
 body {

@@ -29,3 +29,15 @@ export const STATUS_BG: Record<Status, string> = {
 	// carries the distinction (DESIGN.md).
 	skipped: 'bg-status-pending'
 };
+
+// Text on each fill. Light fills take white and dark fills near-black
+// (`--status-foreground` flips per theme); the lime running fill takes
+// near-black in both.
+export const STATUS_FG: Record<Status, string> = {
+	pending: 'text-status-foreground',
+	running: 'text-status-running-foreground',
+	done: 'text-status-foreground',
+	failed: 'text-status-foreground',
+	warning: 'text-status-foreground',
+	skipped: 'text-status-foreground'
+};

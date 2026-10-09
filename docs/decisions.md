@@ -124,6 +124,9 @@ claim*. Two deliberate choices:
   on `(run_id, batch_num)`) is the resume. *Rejected:* Redis/Celery (new
   infra, against the single-datastore goal) and an in-app file lock (no
   multi-host safety). One Postgres table, no broker.
+  *Being superseded (2026-10):* DBOS replaces the queue, worker and stage
+  runner (Phase 0 of [plan-trust-and-recipes.md](plan-trust-and-recipes.md));
+  this half is rewritten when `cloud/queue.py` is deleted.
 
 The load-bearing invariant: `cmd_run` and the worker call **one** shared
 `batch.process_batch`, so local and distributed runs produce byte-identical
@@ -928,8 +931,9 @@ be re-derivable, and the first pass's were not.
     the same near-black gives pending 1.47:1, warning 3.48:1, done 3.48:1,
     failed 3.53:1 — only running passes. Those light values are tuned for
     **white** text (4.94:1 to 11.88:1), so the pill does need a per-theme
-    text colour, contrary to the rule. `StatusPill` should either flip its
-    text colour per theme or use the dark fills in both.
+    text colour, contrary to the rule. *Resolved 2026-10:* the text colour
+    flips per theme (white on the light fills, near-black on the dark ones),
+    with lime running near-black in both; `DESIGN.md` states the revised rule.
   - **Lime cannot be an active-nav *text* colour in light mode.** "Active
     item takes a lime left rule + lime icon" works on the dark nav
     (`#c8ef35` on `#22222e` = 11.86:1) but not the light one, where
@@ -1175,7 +1179,9 @@ be re-derivable, and the first pass's were not.
 - **Local enrichment fallback.** Without Isaacus there are no graph spans, so
   PII has only the opt-in backstop and AI chunking falls back to token splitting.
   A config-selected local provider (spaCy / fine-tuned NER) populating
-  `EnrichmentResult` would serve both offline, at lower quality.
+  `EnrichmentResult` would serve both offline, at lower quality. *Wanted
+  (2026-10)*: a GLiNER-based provider is in development by the maintainer, so
+  no interim provider is added.
 
 - **Downstream text-cleaning op (#B/#D)** — *v1 shipped* as `womblex normalise
   --shards` (`process/normalise.py` transforms + `process/normalise_stage.py`
@@ -1339,7 +1345,9 @@ alike, rather than producing output under a layer it did not apply.
   reader to pull `*.elements.parquet` per `source_hash` (local *and* remote
   paths) and to know the run's `text_source` — a separate change.
 
-  **(a) remains open, and is a cost decision rather than an engineering one.**
+  **(a) is not pursued (decided 2026-10).** Search relevance is to be raised
+  by other roadmap items, not by folding tables into the enrichment input. The
+  cost analysis below is kept as the record of why it was weighed.
   Folding tables into `reassemble_narrative` would change the coordinate space
   for all four of its consumers at once (`chunk_stage`, `enrich_stage`,
   `money_stage`, plus the byte-identity claim in `records.py`), which means:
@@ -1363,7 +1371,7 @@ alike, rather than producing output under a layer it did not apply.
   what it was waiting on: it needs tables *positioned*, not tables folded into
   the enrichment input.
 
-### Modality routing — prose / tabular / register as the primary fork — *proposed (2026-06), not yet implemented*
+### Modality routing — prose / tabular / register as the primary fork — *proposed (2026-06), long-range; out of scope of the trust-and-recipes plan (2026-10)*
 Extraction currently makes its coarsest cut by *format* (`extract_text` splits
 non-PDF SPREADSHEET/DOCX/TEXT vs PDF, `extract.py`), and the prose-vs-tabular
 decision for a **spreadsheet trapped in a PDF** is made *late and inside* the
