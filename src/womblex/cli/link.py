@@ -49,6 +49,7 @@ def cmd_enrich(args: argparse.Namespace) -> int:
     """Enrich a shard directory via the Kanon-2 enrichment API (per-stage)."""
     from womblex.analyse.enrich_stage import enrich_shards
     from womblex.config import EnrichmentConfig, load_config
+    from womblex.process.text_overlay import MissingOverlayError
     from womblex.store.checkpoint import CheckpointManager
     from womblex.store.enrichment_output import ENRICHMENT_ENTITIES_SUFFIX
     from womblex.store.shard_audit import reconcile_stage_checkpoint_with_shards
@@ -111,9 +112,13 @@ def cmd_enrich(args: argparse.Namespace) -> int:
     logger.info("enrich --shards: dir=%s model=%s text_source=%s overflow=%s persist_doc=%s",
                 shard_dir, enrichment_config.model, text_source,
                 enrichment_config.overflow_strategy, persist_document)
-    result = enrich_shards(shard_dir, enrichment_config, client=client,
-                           text_source=text_source, persist_document=persist_document,
-                           checkpoint_mgr=ckpt)
+    try:
+        result = enrich_shards(shard_dir, enrichment_config, client=client,
+                               text_source=text_source, persist_document=persist_document,
+                               checkpoint_mgr=ckpt)
+    except MissingOverlayError as e:
+        logger.error("enrich --shards: refused: %s", e)
+        return 1
     logger.info(
         "Done: %d batches written, %d docs enriched, %d entities",
         result.batches_written, result.docs_enriched, result.total_entities,

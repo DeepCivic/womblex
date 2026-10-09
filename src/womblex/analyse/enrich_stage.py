@@ -44,7 +44,7 @@ from womblex.config import EnrichmentConfig
 from womblex.ingest.elements import Element
 from womblex.process.chunk_stage import _batch_bases
 from womblex.process.chunker import TextChunk, reassemble_narrative
-from womblex.process.text_overlay import apply_overlay, load_overlay
+from womblex.process.text_overlay import apply_overlay, load_overlay, require_overlays
 from womblex.store.checkpoint import CheckpointManager
 from womblex.store.enrichment_doc import (
     enrichment_doc_path_for,
@@ -103,6 +103,7 @@ def enrich_shards(
     if not bases:
         logger.warning("enrich_shards: no batches found in %s", shard_dir)
         return EnrichStageResult(0, 0, 0)
+    require_overlays(bases, text_source)
 
     counter = token_counter or TokenCounter(enrichment_config.tokenizer)
 
@@ -295,7 +296,7 @@ def _load_narratives(
             text=row["text"],
         ))
 
-    overrides = load_overlay(base_path, text_source)
+    overrides = load_overlay(base_path, text_source, required=True)
     narratives: dict[str, str] = {}
     for src, elems in by_hash.items():
         elems.sort(key=lambda e: e.order)

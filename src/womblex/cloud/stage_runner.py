@@ -41,6 +41,7 @@ from womblex.cloud.stage_contracts import (
     StageContract,
     StageScope,
 )
+from womblex.process.text_overlay import MissingOverlayError
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from womblex.config import WomblexConfig
@@ -100,9 +101,9 @@ class InputContractError(Exception):
     """Config selects an input that is absent, and running anyway would be wrong.
 
     Distinct from :class:`NotReady`: that one is a fine, expected state on a
-    draining fleet. This one means the stage *would* run and *would* publish —
-    just from the wrong text layer — so it is a failure, but an actionable one
-    rather than a crash, and is logged without a traceback.
+    draining fleet. This one means the stage would build its output from the
+    wrong text layer — a failure, but an actionable one rather than a crash,
+    logged without a traceback.
     """
 
 
@@ -138,6 +139,41 @@ def _key(shard_prefix: str, stem: str, suffix: str) -> str:
     return f"{shard_prefix}/{stem}{suffix}"
 
 
+def _skippable(
+    contract: StageContract, config: WomblexConfig, shard_prefix: str,
+    unit: list[str], present: set[str], force: bool,
+) -> bool:
+    # Skip is only sound for sidecar producers: graph-refresh's outputs are a
+    # subset of its inputs, so output-exists can never fire.
+    return (
+        not force
+        and contract.mutation is MutationMode.SIDECAR
+        and _outputs_present(contract, config, shard_prefix, unit, present)
+    )
+
+
+def _strict_input_gaps(
+    contract: StageContract, config: WomblexConfig, shard_prefix: str,
+    units: list[list[str]], present: set[str], force: bool,
+) -> list[tuple[str, InputContractError]]:
+    """Every unit that would be refused for a missing strict input, checked up front.
+
+    A unit still waiting on a required input is left to the loop's ``NotReady``
+    handling — an upstream that is still draining is not a contract error.
+    """
+    gaps: list[tuple[str, InputContractError]] = []
+    for unit in units:
+        if _skippable(contract, config, shard_prefix, unit, present, force):
+            continue
+        try:
+            _resolve_inputs(contract, config, shard_prefix, unit, present)
+        except NotReady:
+            continue
+        except InputContractError as e:
+            gaps.append((unit[0] if len(unit) == 1 else f"{len(unit)} base(s)", e))
+    return gaps
+
+
 # ---------------------------------------------------------------------------
 # Per-unit execution
 # ---------------------------------------------------------------------------
@@ -151,9 +187,7 @@ def _resolve_inputs(
 
     ``NotReady`` means an upstream stage has not written a required sidecar yet.
     ``InputContractError`` means config selected a *strict* conditional input that
-    is absent — running anyway would silently produce a sidecar built from the
-    wrong text layer, because ``load_overlay`` falls back to verbatim and only
-    warns.
+    is absent — running anyway would build a sidecar from the wrong text layer.
     """
     keys: list[str] = []
     for suffix in contract.required_inputs:
@@ -173,7 +207,7 @@ def _resolve_inputs(
                     f"{cond.reason} selects {cond.suffix} but {key} is absent. "
                     f"Run `womblex run-stage --stage "
                     f"{PRODUCER_OF.get(cond.suffix, '<upstream>')}` first — "
-                    "proceeding would silently fall back to verbatim element text."
+                    "the stage never falls back to verbatim element text."
                 )
             else:
                 logger.debug("%s: %s absent for %s (%s) — stage falls back",
@@ -410,17 +444,21 @@ def run_stage_remote(
                 contract, store, checkpoint_prefix, checkpoint_dataset, ckpt_dir)
             stack.callback(_stage_checkpoint_out, store, checkpoint_prefix, ctx.checkpoint_mgr)
 
+        refused = _strict_input_gaps(contract, config, shard_prefix, units, present, force)
+        if refused:
+            for label, err in refused:
+                logger.error("%s: %s refused: %s", contract.name, label, err)
+            logger.error(
+                "%s: refusing the stage before any base is processed — %d base(s) "
+                "lack a strict input the config selects.", contract.name, len(refused),
+            )
+            summary.failed = len(refused)
+            return summary
+
         for unit in units:
             label = unit[0] if len(unit) == 1 else f"{len(unit)} base(s)"
             try:
-                # Skip is only sound for sidecar producers: graph-refresh's
-                # outputs are a subset of its inputs, so output-exists can
-                # never fire.
-                if (
-                    not force
-                    and contract.mutation is MutationMode.SIDECAR
-                    and _outputs_present(contract, config, shard_prefix, unit, present)
-                ):
+                if _skippable(contract, config, shard_prefix, unit, present, force):
                     logger.info("%s: %s already complete — skipping", contract.name, label)
                     summary.skipped += 1
                     continue
@@ -484,7 +522,13 @@ def run_stage_local(
     """
     ctx = ctx or RunContext()
     summary = StageRunSummary(stage=contract.name)
-    contract.run(shard_dir, config, ctx)
+    try:
+        contract.run(shard_dir, config, ctx)
+    except MissingOverlayError as e:
+        # Actionable, not a crash — no traceback.
+        logger.error("%s: refused: %s", contract.name, e)
+        summary.failed = 1
+        return summary
     summary.processed = 1
     summary.bases = 1
     return summary

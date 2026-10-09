@@ -91,11 +91,9 @@ class MutationMode(Enum):
 class ConditionalInput:
     """An input the stage reads only under some configurations.
 
-    ``strict`` marks the case where absence is silently wrong rather than
-    merely degraded: ``load_overlay`` falls back to verbatim element text and
-    only logs a warning, so a missing overlay would publish a sidecar built
-    from the wrong text layer with a zero exit code. The runner refuses to run
-    the base instead.
+    ``strict`` marks the case where absence is wrong rather than merely
+    degraded: running anyway would build a sidecar from a text layer the config
+    did not select. The runner refuses the stage before any base runs.
     """
 
     suffix: str

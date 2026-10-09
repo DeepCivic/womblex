@@ -13,12 +13,15 @@ from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pytest
 
 from womblex.config import MoneyConfig
 from womblex.process.money_stage import money_shards
+from womblex.process.text_overlay import MissingOverlayError
 from womblex.store.checkpoint import CheckpointManager
 from womblex.store.money_output import (
     MONEY_SPANS_SCHEMA,
+    money_spans_path_for,
     quantise,
     read_money_columns,
     read_money_spans,
@@ -110,6 +113,16 @@ def test_narrative_offsets_follow_text_source(tmp_path: Path):
     row = read_money_spans(base).to_pylist()[0]
     assert row["text_source"] == "normalised"
     assert cleaned[row["start_char"]:row["end_char"]] == "$33.1 million"
+
+
+def test_missing_declared_overlay_refuses_before_writing(tmp_path: Path):
+    """A declared layer that is absent is never silently replaced by verbatim text."""
+    base = _build_shard(tmp_path, [_element(0, "paragraph", text="It cost $5.")])
+
+    with pytest.raises(MissingOverlayError, match="batch-0001"):
+        money_shards(tmp_path, MoneyConfig(), text_source="normalised")
+
+    assert not money_spans_path_for(base).exists()
 
 
 def test_narrative_can_be_disabled(tmp_path: Path):
@@ -423,3 +436,15 @@ def test_exactly_one_anchor_group_per_row(tmp_path: Path):
 def test_quantise_drops_unstorable_values():
     assert quantise(Decimal("1.23456")) == Decimal("1.2346")
     assert quantise(Decimal(10) ** 40) is None
+
+
+def test_cli_reports_a_missing_overlay_as_a_refusal(tmp_path: Path):
+    import argparse
+
+    from womblex.cli.money import _register_money, cmd_money
+
+    _build_shard(tmp_path, [_element(0, "paragraph", text="It cost $5.")])
+    p = argparse.ArgumentParser()
+    _register_money(p)
+    args = p.parse_args(["--shards", str(tmp_path), "--text-source", "normalised"])
+    assert cmd_money(args) == 1

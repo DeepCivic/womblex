@@ -107,14 +107,15 @@ dependency (the contract marks it non-strict): run out of order or without the
 sidecar and `chunk` self-enriches — as it does for a document enrich had to split,
 whose Document is never persisted.
 
-The `text_source` overlay is different. The contracts mark it **strict**, and the
-object-store runner refuses a base whose selected overlay is absent
-(`InputContractError`). The local per-stage commands do not: `load_overlay` warns
-and reassembly proceeds on verbatim text. The render path (`build_ground_truth`)
-declares its `text_source` — no default — and calls `load_overlay(..., required=True)`:
-a declared non-`elements` overlay that is missing raises rather than baselining
-verbatim text, so a ground-truth baseline is never silently produced under a
-declared cleaning layer it did not apply.
+The `text_source` overlay is different. The contracts mark it **strict**, and a
+missing selected overlay refuses the whole stage before any base is processed.
+The object-store runner checks every base that is ready to run up front
+(`InputContractError`); a base still waiting on a required input is `NotReady`,
+not refused. Locally, chunk, enrich and money call `require_overlays` over every
+batch and load with `required=True` (`MissingOverlayError`). The render path
+(`build_ground_truth`) declares its `text_source` — no default — and also loads
+with `required=True`, so no sidecar or baseline is built from verbatim text under
+a declared cleaning layer it did not apply.
 
 ### Invalid Compositions (precondition violations)
 

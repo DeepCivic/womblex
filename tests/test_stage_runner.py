@@ -11,6 +11,7 @@ local/remote parity checks.
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -27,8 +28,9 @@ from womblex.cloud.stage_contracts import (
     StageContract,
     StageScope,
 )
-from womblex.cloud.stage_runner import remote_bases, run_stage_remote
+from womblex.cloud.stage_runner import remote_bases, run_stage_local, run_stage_remote
 from womblex.config import WomblexConfig
+from womblex.process.text_overlay import MissingOverlayError
 from womblex.store.remote import RemoteStore
 
 MANIFEST = "._manifest.parquet"
@@ -673,3 +675,49 @@ def test_run_context_carries_the_client_to_the_stage():
     assert {n for n, c in STAGE_CONTRACTS.items() if c.needs_client} == {"enrich", "embed"}
     assert {n for n, c in STAGE_CONTRACTS.items() if c.needs_isaacus_api} == {
         "chunk", "enrich", "embed"}
+
+
+def test_strict_gap_on_a_later_base_refuses_before_any_publish(tmp_path):
+    """A missing overlay on batch 2 must not leave batch 1 published from it."""
+    store = RemoteStore.from_uri(str(tmp_path / "store"))
+    prefix = "runs/r/documents"
+    _seed(store, tmp_path, prefix, [
+        f"batch-0001{MANIFEST}", "batch-0001.normalised_text.parquet", f"batch-0002{MANIFEST}",
+    ])
+    contract = _fake_contract(
+        written=(".chunks.parquet",),
+        conditional=(ConditionalInput(
+            ".normalised_text.parquet", strict=True, reason="text_source='normalised'"),),
+    )
+
+    summary = run_stage_remote(contract, store, prefix, _config())
+    assert (summary.processed, summary.failed) == (0, 1)
+    assert summary.exit_code == 1
+    assert not store.exists(f"{prefix}/batch-0001.chunks.parquet")
+
+
+def test_a_draining_base_is_not_a_strict_gap(tmp_path):
+    """A base still waiting on its required input is NotReady, not refused."""
+    store = RemoteStore.from_uri(str(tmp_path / "store"))
+    prefix = "runs/r/documents"
+    _seed(store, tmp_path, prefix, [
+        f"batch-0001{MANIFEST}", "batch-0001.chunks.parquet",
+        "batch-0001.normalised_text.parquet", f"batch-0002{MANIFEST}",
+    ])
+    contract = _fake_contract(
+        written=(".embeddings.parquet",), required=(".chunks.parquet", MANIFEST),
+        conditional=(ConditionalInput(
+            ".normalised_text.parquet", strict=True, reason="text_source='normalised'"),),
+    )
+
+    summary = run_stage_remote(contract, store, prefix, _config())
+    assert (summary.processed, summary.not_ready, summary.failed) == (1, 1, 0)
+
+
+def test_local_missing_overlay_is_a_refusal_not_a_crash(tmp_path):
+    def run(_shard_dir, _config, _ctx) -> None:
+        raise MissingOverlayError("normalised_text missing")
+
+    contract = replace(_fake_contract(written=()), run=run)
+    summary = run_stage_local(contract, tmp_path, _config())
+    assert (summary.processed, summary.failed, summary.exit_code) == (0, 1, 1)

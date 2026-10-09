@@ -414,6 +414,7 @@ def cmd_chunk(args: argparse.Namespace) -> int:
 def _cmd_chunk_shards(args: argparse.Namespace) -> int:
     from womblex.config import ChunkingConfig, load_config
     from womblex.process.chunk_stage import chunk_shards
+    from womblex.process.text_overlay import MissingOverlayError
     from womblex.store.checkpoint import CheckpointManager
     from womblex.store.shard_audit import reconcile_chunk_checkpoint_with_shards
 
@@ -456,7 +457,12 @@ def _cmd_chunk_shards(args: argparse.Namespace) -> int:
         shard_dir, chunking_config.tokenizer, chunking_config.chunk_size,
         chunking_config.processes, text_source,
     )
-    result = chunk_shards(shard_dir, chunking_config, text_source=text_source, checkpoint_mgr=ckpt)
+    try:
+        result = chunk_shards(
+            shard_dir, chunking_config, text_source=text_source, checkpoint_mgr=ckpt)
+    except MissingOverlayError as e:
+        logger.error("chunk --shards: refused: %s", e)
+        return 1
     logger.info(
         "Done: %d batches written, %d docs chunked, %d total chunks",
         result.batches_written, result.docs_chunked, result.total_chunks,
