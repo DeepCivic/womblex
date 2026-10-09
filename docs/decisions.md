@@ -678,8 +678,9 @@ Womblex serves other software two ways: a versioned on-disk contract
 - **Static service tokens.** This is a trusted-subsystem deployment on a
   private network, not a public cloud service, so a hashed YAML registry is
   enough; no identity provider.
-- **Runs are owner-scoped in the queue.** Ownership lives on `womblex_jobs`,
-  the existing source of truth for what runs exist, rather than a new store.
+- **Runs are owner-scoped on the run board.** Ownership is an attribute of the
+  DBOS workflows, the existing source of truth for what runs exist, rather than
+  a new store.
 - **Determinism is an accuracy target, not a blocker.** The contract
   guarantees *content* stability (`content_digest`) for the same version,
   config and models, not file bytes. Drift is detectable, not prevented.
@@ -1010,7 +1011,8 @@ be re-derivable, and the first pass's were not.
   - **Prerequisite — shipped.** `config.py` (920 lines) was split
     mechanically into the `config/` package (#132).
 
-- **Trust baseline and recipes.** *Proposed 2026-10.* Maps an external
+- **Trust baseline and recipes.** *In progress 2026-10; Phase 0 (DBOS), strict
+  `text_source` and `mask_status` shipped.* Maps an external
   requirements set onto what exists: evidence anchoring for existing
   annotations, strict config and ordering checks, file checksums, a recipe
   file with a local multi-stage runner, then destinations. No quality scoring

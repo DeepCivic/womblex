@@ -29,14 +29,14 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 **I want** to scale the pipeline to a cluster and move stages between local and cloud environments,
 **so that** I gain throughput without rewriting jobs or re-extracting documents.
 
-**Given** a configured object store and a transactional queue
+**Given** a configured object store and a DBOS system database (Postgres, or a local SQLite file)
 **When** the operator enqueues work and starts additional workers
 **Then** workers claim batches concurrently without duplication, writing the standard shard layout.
 
 **Acceptance criteria:**
 
 - Cloud workers and local runs use identical batch-processing logic and output identical shard layouts.
-- Workers coordinate via a transactional queue lock so a batch is never double-processed, and workers can scale dynamically.
+- Work runs as DBOS workflows, so a batch is never double-processed, a unit that finished is not run again, and workers can scale dynamically.
 - Distributed run shards can be synced locally and consumed unchanged by local per-stage commands.
 - A stage can execute in-place over object storage using the exact same contract as local file execution.
 - The pipeline natively resolves standard local and cloud storage URIs.
@@ -70,7 +70,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 
 **TO-DO:**
 
-- **A missing required input is not a fail-fast, before-processing error (re: "Invalid compositions … naming the producing stage").** `stage_runner.run_stage_remote` (`cloud/stage_runner.py`) resolves required inputs *per base* and raises `NotReady`, which is caught and logged as a warning; the run still exits `0` unless the count of not-ready bases equals the total discovered bases (`StageRunSummary.exit_code`). This is deliberate — a still-draining fleet must not read as a stage-ordering error — but it means a genuinely mis-ordered composition over a *partially* processed run neither raises immediately nor fails the run, and the operator only sees a per-base warning. Decide whether to (a) add an explicit up-front composition check (verify the whole DAG's required-input edges against what the store already holds before processing any base, distinguishing "upstream still draining" from "upstream will never run" via the dispatched-stage set), or (b) document the per-base `NotReady`/warning behaviour as the intended contract and soften the acceptance criterion accordingly. **Partly resolved on the queue side:** a *stage job* whose every base is blocked now raises `StageNotReady` (`cloud/worker.py`), which the worker loop **releases** instead of failing — the attempt is not consumed, so a stage claimed ahead of its upstream no longer burns its retry budget and lands terminally failed. That fixes the queue semantics; the up-front whole-DAG composition check above is still open.
+- **A missing required input is not a fail-fast, before-processing error (re: "Invalid compositions … naming the producing stage").** `stage_runner.run_stage_remote` (`cloud/stage_runner.py`) resolves required inputs *per base* and raises `NotReady`, which is caught and logged as a warning; the run still exits `0` unless the count of not-ready bases equals the total discovered bases (`StageRunSummary.exit_code`). This is deliberate — a still-draining fleet must not read as a stage-ordering error — but it means a genuinely mis-ordered composition over a *partially* processed run neither raises immediately nor fails the run, and the operator only sees a per-base warning. Decide whether to (a) add an explicit up-front composition check (verify the whole DAG's required-input edges against what the store already holds before processing any base, distinguishing "upstream still draining" from "upstream will never run" via the dispatched-stage set), or (b) document the per-base `NotReady`/warning behaviour as the intended contract and soften the acceptance criterion accordingly. On the DBOS path a stage whose upstream sidecar is missing fails without step retries, as retrying cannot produce it; the up-front whole-DAG composition check above is still open (workflow plan, Phase 2).
 
 ## 4. File Profiling, Detection, and Routing
 
@@ -228,7 +228,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 
 **Acceptance criteria:**
 
-- On the per-stage path (`womblex pii`), candidates are the enrichment graph's person and address entities, mapped onto narrative chunks. The regex/context backstop runs only when `pii.use_regex_backstop` is set (default `false`); with no enrichment and the backstop off, nothing is detected.
+- On the per-stage path (`womblex pii`), candidates are the enrichment graph's person and address entities, mapped onto narrative chunks. The regex/context backstop runs only when `pii.use_regex_backstop` is set (default `false`); with no enrichment and the backstop off, nothing is detected. Each `*.clean_text.parquet` row carries `mask_status`: `masked` (a span was replaced), `no_entity` (a candidate source covered the chunk and found nothing) or `not_masked` (no candidate source covered it, so the text is verbatim), so unmasked text is never labelled masked.
 - The stage is terminal: it runs after enrich and embed, never rewrites `*.chunks.parquet`, and writes the masked layer as a separate `*.clean_text.parquet` (when `pii.write_clean_text`, the default).
 - The in-memory PII operation runs at a configurable point (`pii.pipeline_point`): before enrichment it uses the regex/context detector, and after enrichment it merges graph spans with it.
 - Identified PII spans in the clean-text layer are replaced with normalised typed tags (e.g., `<PERSON_1>`).
@@ -306,7 +306,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - The console binds to exactly one run source at construction (local output root or store URI) so no endpoint can be steered to read an unmounted directory.
 - A persistent top bar (global search, run selector, execution controls) and a side-nav rail route between the Dashboard, Corpus Inspector, Semantic Chunk Inspector, Pipeline Composer, and Resources Console.
 - The console is a reader over persisted artefacts and never edits a stage output; its only writable surfaces are dispatch and preset saving.
-- Dispatch requires a store, an ingest location, and a job queue to be configured; a console missing any of these still serves the full inspection surface (it simply cannot enqueue work).
+- Dispatch requires a store, an ingest location, and a workflow system database to be configured; a console missing any of these still serves the full inspection surface (it simply cannot enqueue work).
 - A bare install with no SvelteKit build still serves the read API; the SPA is mounted only when a build exists alongside it.
 
 ## 16. Dashboard — Queue and Stage Progress
@@ -322,8 +322,8 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 **Acceptance criteria:**
 
 - Queue and stage state are read from sources the pipeline already writes (the job queue and per-stage checkpoints); with no queue configured, the dashboard falls back to checkpoints.
-- Job status is rendered with the exact values the system writes (`pending` / `running` / `done` / `failed`), plus `stale` for a running row past its lock timeout and `skipped`.
-- The dashboard only *names* a stalled job for a worker to recover; it never requeues, cancels, or claims work itself.
+- Job status is rendered with the exact values the system writes (`pending` / `running` / `done` / `failed`), plus `stale` for a running workflow with no update past the staleness threshold, and `skipped`.
+- The dashboard only *names* a stalled job; DBOS recovers it when its executor restarts, and the dashboard never requeues, cancels, or claims work itself.
 - Polling is paused while the browser tab is hidden so a backgrounded console stops hitting the queue.
 - Per-stage progress renders in the declared pipeline order rather than an ad-hoc frontend ordering.
 - Batch and stage logs for the run are listed newest-first and are individually viewable.

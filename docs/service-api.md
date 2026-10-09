@@ -20,7 +20,7 @@ and names it when missing. It binds to `127.0.0.1:8081` by default.
 | Flag | Env | Purpose |
 |---|---|---|
 | `--store` | `WOMBLEX_STORE_URI` | Object store holding run output |
-| `--dsn` | `WOMBLEX_DB_DSN` / `DATABASE_URL` | Postgres job queue |
+| `--dsn` | `WOMBLEX_DB_DSN` / `DATABASE_URL` | DBOS system database (Postgres; a local SQLite file when omitted) |
 | `--ingest` | `WOMBLEX_INGEST_URI` | Where uploads land and runs are enqueued from; without it, uploads and run submission answer 503 |
 | `--max-upload-mb` | — | Largest upload request, default 256 |
 | `--host`, `--port` | — | Bind address |
