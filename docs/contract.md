@@ -39,7 +39,7 @@ the single source). An unknown role reads as `raw`.
 | `enrichment_meta` | `source_hash` | none |
 | `entity_links` | `(source_hash, mention_start, mention_end)` to `enrichment_entities`; its `entity_id` is the reference-register id | raw |
 | `pii_spans` | `(source_hash, chunk_index)`; `entity_id` to `enrichment_entities` | raw |
-| `clean_text` | `(source_hash, chunk_index)`; `mask_status` is `masked`, `no_entity` or `not_masked` (verbatim, no candidate source covered the chunk); null on files written before contract 1.2 | masked |
+| `clean_text` | `(source_hash, chunk_index)`; `mask_status` is `masked`, `no_entity` or `not_masked` (verbatim, no candidate source covered the chunk); files written before contract 1.2 read back as `masked` where `n_masked` is above zero, null otherwise | masked |
 | `money_spans`, `money_columns` | `source_hash` plus the locus anchor (`start_char` / `elem_order` / `parent_elem_order`) | none |
 | `layout_regions` | `(source_hash, page)`; boxes are normalised like element `bbox` ([layout.md](layout.md)) | none |
 | `redactions`, `source_index` | `source_hash` | none |

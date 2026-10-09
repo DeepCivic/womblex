@@ -8,6 +8,8 @@ siblings per batch:
 - ``*.clean_text.parquet`` — the masked, publishable text layer (one row per
   chunk; masked where spans were found, verbatim passthrough otherwise), a
   drop-in for ``*.chunks.parquet``. Gated by ``PIIConfig.write_clean_text``.
+  ``mask_status`` records whether a candidate source covered each chunk, so
+  verbatim text is never read as masked.
 
 **Terminal stage — runs AFTER enrich + embed.** The Kanon-2 graph (built on raw
 text) is the primary entity source; masking never rewrites the raw chunks that
@@ -207,12 +209,9 @@ def _mask_status(masked: bool, covered: bool) -> str:
 def _enriched_docs(base_path: Path) -> set[str]:
     """Documents the batch's enrichment sidecars cover, including those with no entities."""
     docs: set[str] = set()
-    ent = enrichment_entities_path_for(base_path)
-    if ent.exists():
-        docs.update(read_enrichment_entities(ent).column("source_hash").to_pylist())
-    meta = enrichment_meta_path_for(base_path)
-    if meta.exists():
-        docs.update(pq.read_table(str(meta), columns=["source_hash"]).column(0).to_pylist())
+    for path in (enrichment_entities_path_for(base_path), enrichment_meta_path_for(base_path)):
+        if path.exists():
+            docs.update(pq.read_table(str(path), columns=["source_hash"]).column(0).to_pylist())
     return docs
 
 
