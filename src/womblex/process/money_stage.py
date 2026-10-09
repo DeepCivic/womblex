@@ -46,7 +46,7 @@ from womblex.process.money_columns import (
     extract_column,
     fold_header_continuation,
 )
-from womblex.process.text_overlay import apply_overlay, load_overlay
+from womblex.process.text_overlay import apply_overlay, load_overlay, require_overlays
 from womblex.store.checkpoint import CheckpointManager
 from womblex.store.money_output import (
     money_spans_path_for,
@@ -89,6 +89,7 @@ def money_shards(
         return MoneyStageResult(0, 0, 0, 0)
 
     layer = config.text_source or text_source
+    require_overlays(bases, layer)
     opts = MoneyOptions(
         default_currency=config.default_currency,
         international_numbers=config.international_numbers,
@@ -150,7 +151,7 @@ def _annotate_batch(
 ) -> tuple[list[dict], list[dict]]:
     """Return ``(span_rows, column_rows)`` for one batch."""
     elements_by_hash = _load_elements(base_path)
-    overrides = load_overlay(base_path, text_source)
+    overrides = load_overlay(base_path, text_source, required=True)
 
     span_rows: list[dict] = []
     column_rows: list[dict] = []

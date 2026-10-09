@@ -158,12 +158,12 @@ Decisions inside it:
   output-exists skip fire on an incomplete set, or refuse a keyless offline
   chunk run.
 - **A selected-but-absent overlay is a hard failure, not a fallback.**
-  `load_overlay` warns and returns `None`, so locally a missing
-  `*.normalised_text.parquet` degrades to verbatim text with a zero exit code.
-  Remotely that would publish a sidecar built from the wrong text layer and look
-  like success, so the runner refuses the base instead. The
-  `spellfix → normalised` chain is exempt: it passes `warn_if_missing=False`, so
-  absence there is legitimate.
+  Falling back to verbatim would publish a sidecar built from the wrong text
+  layer and look like success. Both paths check every batch before processing
+  any, so a gap in a late batch cannot leave earlier ones published: the
+  runner refuses the stage, and locally chunk, enrich and money raise
+  `MissingOverlayError`. The `spellfix → normalised` chain is exempt: it
+  passes `warn_if_missing=False`, so absence there is legitimate.
 - **Discovery is separate from required inputs.** Bases come from
   extraction-role siblings only; `*.form_fields.parquet` makes a base
   discoverable but is read by no stage, so it is never downloaded. A
@@ -1251,12 +1251,9 @@ resolved by `process/text_overlay.py` and applied before reassembly at *both*
 sites (`chunk_stage`, `enrich_stage`). It is deliberately one knob, not per-stage:
 divergent layers would desync the Kanon-2 mention↔chunk offset mapping. Embeddings
 and PII then inherit the repaired text for free (chunks derive from the same
-overlaid elements). At these transform sites a missing overlay falls back to
-verbatim, so stage *ordering* is the only requirement, not a hard dependency.
-The fallback is a transform-stage convenience, not universal: the render path
-(`build_ground_truth`) resolves the same setting with `load_overlay(...,
-required=True)`, so a declared non-`elements` overlay that is missing fails
-loudly rather than baselining verbatim text under a layer it did not apply.
+overlaid elements). A declared non-`elements` overlay that is missing fails
+loudly at these transform sites and at the render path (`build_ground_truth`)
+alike, rather than producing output under a layer it did not apply.
 - **Inline-per-span source redactions (#C).** Page-prefix `<REDACTED>` is in
   place; inline-per-span placement needs bbox-to-text character mapping (raster
   path now has per-word bboxes; native path needs a text-to-bbox map).

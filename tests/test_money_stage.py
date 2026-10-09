@@ -13,12 +13,15 @@ from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pytest
 
 from womblex.config import MoneyConfig
 from womblex.process.money_stage import money_shards
+from womblex.process.text_overlay import MissingOverlayError
 from womblex.store.checkpoint import CheckpointManager
 from womblex.store.money_output import (
     MONEY_SPANS_SCHEMA,
+    money_spans_path_for,
     quantise,
     read_money_columns,
     read_money_spans,
@@ -110,6 +113,16 @@ def test_narrative_offsets_follow_text_source(tmp_path: Path):
     row = read_money_spans(base).to_pylist()[0]
     assert row["text_source"] == "normalised"
     assert cleaned[row["start_char"]:row["end_char"]] == "$33.1 million"
+
+
+def test_missing_declared_overlay_refuses_before_writing(tmp_path: Path):
+    """A declared layer that is absent is never silently replaced by verbatim text."""
+    base = _build_shard(tmp_path, [_element(0, "paragraph", text="It cost $5.")])
+
+    with pytest.raises(MissingOverlayError, match="batch-0001"):
+        money_shards(tmp_path, MoneyConfig(), text_source="normalised")
+
+    assert not money_spans_path_for(base).exists()
 
 
 def test_narrative_can_be_disabled(tmp_path: Path):

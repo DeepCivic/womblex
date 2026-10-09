@@ -1,6 +1,6 @@
 # Trust baseline and recipes — plan
 
-*Status: proposed (2026-10). No merge has shipped. Each phase is a branch of sequential merges under the 500-line cap. Each merge updates this document as it lands, and the document is retired into `decisions.md` once its last phase ships.*
+*Status: in progress (2026-10). Phase 1 item 1 has shipped. Each phase is a branch of sequential merges under the 500-line cap. Each merge updates this document as it lands, and the document is retired into `decisions.md` once its last phase ships.*
 
 ## Context
 A business-analyst requirements set proposed five themes: high-integrity extraction, recipe-based workflow authoring, destinations and delivery, agent-friendly operation, and safety and operability. Its labels (FR-1.1 to FR-5.2) are kept below so this plan can be read against it. It was written without knowledge of the repository, so this plan maps each theme onto what Womblex already has, records what is out of scope, and orders the remaining gaps.
@@ -27,8 +27,8 @@ Verified against the code at the time of writing.
 | Sensitive data (FR-5.1) | The `sensitivity` footer key; the API reads the masked layer by default and gates raw layers behind `read_raw` |
 
 ## Findings
-- **The PII stage can label unmasked text `masked`.** The PII stage treats the enrichment entities sidecar as optional (`strict=False` in `cloud/stage_contracts.py`). When it is absent, `pii/pii_stage.py` finds no graph spans, logs nothing, and still writes `*.clean_text.parquet`, which `store/contract.py` labels `masked`. With the regex backstop off (the default) that file is the raw chunk text under the label that says it is safe to hand onward.
-- **A missing `text_source` overlay changes the evidence layer silently on a local run.** This is the open Requirement 3 TO-DO in `docs/functional_requirements.md` (its second bullet; the first is the missing up-front ordering check). Downstream offsets then index a different text layer than the config selected.
+- **The PII stage can label unmasked text `masked`.** The PII stage treats the enrichment entities sidecar as optional (`strict=False` in `cloud/stage_contracts.py`). When it is absent, `pii/pii_stage.py` finds no graph spans, logs nothing, and still writes `*.clean_text.parquet`, which `store/contract.py` labels `masked`. With the regex backstop off (the default) that file is the raw chunk text under the label that says it is safe to hand onward. Table chunks are in that state on every run: enrichment covers the reassembled narrative only, and `pii_stage` passes graph spans to narrative chunks only.
+- **A missing `text_source` overlay changes the evidence layer silently on a local run.** Downstream offsets then index a different text layer than the config selected. *Fixed by Phase 1 item 1.*
 - **Unknown config keys are ignored.** No model under `config/` sets `extra="forbid"`, so a misspelt key in a YAML config validates and is dropped. The only rejection today is the `_reject_removed` validators in `config/__init__.py`, which refuse retired sections by name.
 - **Table cells cannot be located on the page.** `Cell` carries no `bbox`, so a cell value is locatable only to its parent table element. Most of the corpus's monetary amounts live in table cells.
 - **Each annotation sidecar defines its own anchor columns.** There is no shared shape for "where in the source this came from".
@@ -73,8 +73,8 @@ Because `womblex run` extracts only, options B and C both need a **local multi-s
 ## Phases
 
 ### Phase 1 — trust baseline (branch)
-1. **Strict `text_source`.** A missing overlay the config selected refuses on both the local and object-store paths, before any base is processed. Closes the Requirement 3 TO-DO's second bullet.
-2. **No false `masked` label.** The PII stage refuses, or writes no `clean_text`, when it has neither enrichment entities nor the regex backstop. Which of the two is an open question.
+1. **Strict `text_source`.** *Shipped.* A missing overlay the config selected refuses on both the local and object-store paths, before any base is processed (`require_overlays` / `MissingOverlayError` locally; an up-front pass in `run_stage_remote`).
+2. **No false `masked` label.** Covers both a batch with no enrichment entities and table chunks with the backstop off. Blocked on decision D1.
 3. **Strict config.** `extra="forbid"` on the config models, with presets and shipped configs checked against it. The merge states whether it supersedes the `_reject_removed` validators or keeps them for their named messages, and records in `CHANGELOG.md` that a saved preset or user config with a stray key now fails validation.
 4. **Up-front ordering check.** Verify the whole stage sequence's required inputs before processing, with stable error codes shared by the CLI and the API. Closes the Requirement 3 TO-DO's first bullet.
 5. **File checksums.** A SHA-256 per output file in the run record.
@@ -98,10 +98,22 @@ Because `womblex run` extracts only, options B and C both need a **local multi-s
 - `graph-refresh` writing a new versioned sidecar instead of rewriting in place. `layout` keeps its in-place replace: the file is a derived cache of the source document, its fingerprint records which model and settings produced it, and the replace is all-or-nothing per batch.
 - Option B, only if standing triggers are needed.
 
-## Open questions
-- Should the PII stage refuse outright, or skip writing `clean_text`, when it has no candidate source?
-- Does the egress decision (unredacted material, access control left to the host) change once per-step destinations exist?
-- Which destinations come first: object storage only, or a database target as well?
+## Decisions pending
+Each is settled before the merge it gates starts, and recorded here when taken. "Repo answer" is what existing conventions already settle; only the remainder is open.
+
+| # | Gates | Decision | Repo answer |
+|---|---|---|---|
+| D1 | Phase 1 item 2 | With no PII candidate source for a chunk (no enrichment entities for the batch; any table chunk with the backstop off), the PII stage (a) refuses with a typed error, (b) omits `clean_text` for the affected batch or chunks, or (c) writes the row with a per-row masked / unmasked column | **Partly.** `decisions.md` (PII) records that narrative graph spans never apply to table chunks, but not that their `clean_text` rows are labelled `masked`. Option (c) is an additive column, so a minor contract bump with a reader back-fill (`contract.md`). The choice is open |
+| D2 | Phase 1 item 2 | Whether table chunks get a candidate source of their own, or stay outside masking under D1's rule | **Partly.** `decisions.md` (PII) settles that recall is raised by enrichment granularity, not a second detector, and keeps the backstop opt-in for its low precision. That rules out turning the backstop on for table chunks by default; enriching table text, or leaving tables outside masking, is open |
+| D3 | Phase 1 item 3 | Whether `extra="forbid"` supersedes the `_reject_removed` validators, and how a saved preset with a stray key is treated | **Answered.** Retired keys are refused naming their replacement (`CHANGELOG.md`, L3b and L3c), which a generic extra-field error cannot do, so the validators stay. `ui/presets.parse_saved_preset` skips a saved preset that will not validate rather than failing the list, so a stray key hides that preset; the merge adds a log line naming it |
+| D4 | Phase 1 item 4 | Whether the up-front ordering check ships in Phase 1 for the object-store path, or moves to Phase 2 with the recipe | **Partly.** Local and cloud parity is the design invariant (`decisions.md`, nested corpora), so a remote-only check runs against it. The Requirement 3 TO-DO leaves open (a) a check against the dispatched-stage set or (b) documenting per-base `NotReady` as the contract |
+| D5 | Phase 1 item 5 | Where file checksums are computed: at write time, or when the run record is built | **Partly.** `utils/checksum.md5_file` is the shared checksum helper for the register ingests, and stage publish is all-or-none per unit, which makes write time the natural point. The run record reads remote footers in place without downloading files. Hashing at write time follows from those; where the hash is stored (footer or manifest) is open |
+| D6 | Phase 1 item 6 | Whether the evidence reference replaces each sidecar's anchor columns or is added beside them, and where the span check runs | **Partly.** `contract.md` fixes the cost: adding is a minor bump with a reader back-fill; replacing is a major bump with a reader shim kept for the old major. The choice and the check's location are open |
+| D7 | Phase 1 item 7 | Cell bbox coordinate space, sources with no page geometry, and branch split | **Answered.** `BBox` is normalised 0–1 with a top-left origin, and `Element.bbox` is already optional; cells follow both, so DOCX and spreadsheet cells carry null. The column is additive, a minor bump (`contract.md`). The merge cap requires splitting items 6 and 7 into sequential merges; whether they form a separately named Phase 1b is labelling only |
+| D8 | Phase 2 | Workflow model option C (recipe file), and the condition language's scope | **Open.** Proposed in this plan, not decided |
+| D9 | Phase 3 | DBOS against the existing queue for delivery retries and events | **Partly.** `decisions.md` makes the Postgres queue the distributed checkpoint and rejects new infrastructure beyond one datastore. DBOS also runs on Postgres, so that rule does not rule it out. Open |
+| D10 | Phase 3 | Whether the egress decision changes once per-step destinations exist | **Answered for now.** `egress.md`: bundles may hold unredacted sources and access control is the host's responsibility. Revisit only if destinations change who holds the bundle |
+| D11 | Phase 3 | Which destinations come first | **Open.** Nothing in the repository answers it |
 
 ## Conventions this plan holds to
 - No quality or confidence scoring, and no scoring against ground truth in this repository.

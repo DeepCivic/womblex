@@ -43,7 +43,7 @@ from womblex.process.chunker import (
     create_chunker,
     resolve_tokenizer,
 )
-from womblex.process.text_overlay import apply_overlay, load_overlay
+from womblex.process.text_overlay import apply_overlay, load_overlay, require_overlays
 from womblex.store.checkpoint import CheckpointManager
 from womblex.store.enrichment_doc import read_enrichment_docs
 from womblex.store.output import (
@@ -98,6 +98,7 @@ def chunk_shards(
     if not bases:
         logger.warning("chunk_shards: no batches found in %s", shard_dir)
         return ChunkStageResult(0, 0, 0)
+    require_overlays(bases, text_source)
 
     # Resolved first so an unknown tokeniser name is an error either way.
     tokenizer = resolve_tokenizer(
@@ -258,7 +259,7 @@ def _build_inputs_for_batch(
     ))
 
     elements_by_hash = _load_elements(base_path)
-    overrides = load_overlay(base_path, text_source)
+    overrides = load_overlay(base_path, text_source, required=True)
     inputs = []
     for source_hash, elements in elements_by_hash.items():
         apply_overlay(source_hash, elements, overrides)
