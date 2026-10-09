@@ -165,9 +165,19 @@ class PdfiumPage:
     def doc_name(self) -> str:
         return self._doc.name
 
+    def _text_boxes(self, textpage: pdfium.PdfTextPage) -> list[tuple[Rect, str]]:
+        """Each text object's box in top-left page space and its text, in content order."""
+        return [
+            (self._rect(obj.get_bounds(), matrix), _wide_string(pdfium_c.FPDFTextObj_GetText, obj.raw, textpage.raw))
+            for obj, matrix in self._objects()
+            if obj.type == pdfium_c.FPDF_PAGEOBJ_TEXT
+        ]
+
     def _chars(self) -> list[_text.Char]:
         if self._char_cache is None:
-            self._char_cache = _text.read_chars(self._page, self._flip, self._rect(self._page.get_cropbox()))
+            self._char_cache = _text.read_chars(
+                self._page, self._flip, self._rect(self._page.get_cropbox()), self._text_boxes,
+            )
         return self._char_cache
 
     def plain_text(self, *, dehyphenate: bool = True) -> str:

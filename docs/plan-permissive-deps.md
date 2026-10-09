@@ -1,9 +1,9 @@
 # Permissive dependencies — outstanding work
 
-*Status: in progress (2026-10). Outstanding: P8, F1, F2 (PyMuPDF). Everything shipped is recorded in [`CHANGELOG.md`](../CHANGELOG.md), [`architecture.md`](architecture.md), [`models.md`](models.md) and [`decisions.md`](decisions.md), not here. Every benchmark-side action (L3c-B, L1-B, H-B, F1-B, the womblex-collection runs and every gate scored in womblex-benchmark) lives in [`plan-post-gt-baseline.md`](plan-post-gt-baseline.md), and nothing here waits on it. Everything left here is deliverable now, gated on what this repository can measure. Each merge updates this list as it lands, and the document is deleted once F2 ships.*
+*Status: in progress (2026-10). Outstanding: F2 (PyMuPDF). P8 and F1 have shipped; pdfium is the default backend. Everything shipped is recorded in [`CHANGELOG.md`](../CHANGELOG.md), [`architecture.md`](architecture.md), [`models.md`](models.md) and [`decisions.md`](decisions.md), not here. Every benchmark-side action (L3c-B, L1-B, H-B, F1-B, the womblex-collection runs and every gate scored in womblex-benchmark) lives in [`plan-post-gt-baseline.md`](plan-post-gt-baseline.md), and nothing here waits on it. Everything left here is deliverable now, gated on what this repository can measure. Each merge updates this list as it lands, and the document is deleted once F2 ships.*
 
 ## Context
-Womblex is Apache-2.0, so its dependencies must be licence-compatible. The remaining incompatible one is `pymupdf` (`import fitz`; opens every PDF and standalone image) and it is being replaced: every extractor already reads through the `ingest/pdf/` seam, `fitz` is imported only in `ingest/pdf/_fitz.py`, and the pdfium backend (`backend="pdfium"`) opens PDFs and images with geometry, rendering, images, drawings, widgets and text. Its `find_tables` is `_tables.py` (P7). The default backend is still fitz.
+Womblex is Apache-2.0, so its dependencies must be licence-compatible. The remaining incompatible one is `pymupdf` (`import fitz`; opens every PDF and standalone image) and it is being replaced: every extractor already reads through the `ingest/pdf/` seam, `fitz` is imported only in `ingest/pdf/_fitz.py`, and the pdfium backend (`backend="pdfium"`) opens PDFs and images with geometry, rendering, images, drawings, widgets and text. Its `find_tables` is `_tables.py` (P7). The default backend is pdfium (F1); `fitz` stays selectable until F2.
 
 A merge is W (womblex) or B (womblex-benchmark, paired). An approval tag means the merge edits `pyproject.toml` and needs human sign-off.
 
@@ -13,12 +13,7 @@ The layout stage (L3) has shipped; [`layout.md`](layout.md) documents it and [`d
 ## PyMuPDF
 Benchmark-side merges (H-B, F1-B) live in [`plan-post-gt-baseline.md`](plan-post-gt-baseline.md). They do not gate anything here: a divergence they find comes back as a P8 fix.
 
-- **P8… (W).** Fidelity fixes, measured by comparing the two backends over `fixtures/synthetic/` in this repository, repeated until the gates below hold. Block grouping has shipped (`decisions.md`): block line counts and element kinds match on every synthetic PDF except `bilby-foi-documents-index.pdf`. Known inputs:
-  - The rotated index: MuPDF starts a new block at the second line of a two-line column header (`Subsection` / `code`) and pdfium does not, so headings count 12 against 8. The rule is not derivable from the one synthetic page; vary the header shapes in the generator, or take it from the collection run in the baseline plan.
-  - Multi-column reading order: Phase 0's divergence tail (see `decisions.md`). Two synthetic two-column pages, one with the columns in content order and one with their lines interleaved, give `plain_text` identical to fitz's, so there is no reproducer here; the ASX-page investigation is in the baseline plan.
-- **F1 (W).** Lands when the gates below hold; F1-B in the baseline plan runs after it.
-  - Flip `open_document`'s default to the permissive backend.
-  - Re-pin `tests/test_default_digest.py` deliberately, and move its version guard from `fitz.VersionBind` to the pypdfium2 version.
+- **Open from P8:** multi-column reading order, Phase 0's divergence tail (see `decisions.md`). No synthetic page reproduces it, so the ASX-page investigation stays in the baseline plan, and a divergence it finds comes back here as a fix.
 - **F2 (W, approval).**
   - Delete `_fitz.py` and the backend argument, and drop `pymupdf`, its mypy override and the `pymupdf_layout` warning filter.
   - Simplify the CI fitz-notice workaround and the Dockerfile comments.
@@ -56,7 +51,7 @@ Migration gates, not quality scores. They retire with this plan.
 |---|---|
 | Every merge | `uv run ruff check src/ tests/`, `uv run mypy src/` and `uv run python -m pytest tests/ -v` pass; `uv lock --check` passes on approval merges; touched files are under 750 lines (`wc -l`); `git diff --stat $(git merge-base HEAD origin/main)..HEAD` is within the cap |
 
-F1 flips the default only when all of these hold, each measured between the two backends over `fixtures/synthetic/` (no ground truth):
+F1 flipped the default because all of these held, each measured between the two backends over `fixtures/synthetic/` (no ground truth):
 
 | Measure | Required |
 |---|---|

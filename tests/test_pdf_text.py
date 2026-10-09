@@ -42,6 +42,24 @@ class TestSegment:
         chars = _chars("left", 72, 100) + _chars("right", 340, 100)
         assert [[line.text for line in b] for b in _text.segment(chars)] == [["left", "right"]]
 
+    def test_a_line_starting_right_of_the_previous_one_starts_a_block(self) -> None:
+        # MuPDF: a start 1pt right of the previous line's start opens a block.
+        chars = _chars("first line", 72, 100) + _chars("second", 76, 100 + LINE)
+        assert [len(b) for b in _text.segment(chars)] == [1, 1]
+
+    def test_a_line_starting_left_of_the_previous_one_stays(self) -> None:
+        chars = _chars("first line", 72, 100) + _chars("second", 60, 100 + LINE)
+        assert [len(b) for b in _text.segment(chars)] == [2]
+
+    def test_oblique_lines_never_continue_by_pitch(self) -> None:
+        def slanted(y: float) -> list[_text.Char]:
+            return [
+                _text.Char(c, Rect(72 + i * 4, y, 76 + i * 4, y + 10), 10, "Helv", False, (0.94, -0.34), (72 + i * 4, y + 10))
+                for i, c in enumerate("slanted")
+            ]
+
+        assert [len(b) for b in _text.segment(slanted(100) + slanted(100 + LINE))] == [1, 1]
+
     def test_a_fragment_out_of_stream_order_rejoins_its_line(self) -> None:
         chars = _chars("alpha", 72, 100) + _chars("later", 72, 300) + _chars("beta", 112, 100)
         lines = [line.text for block in _text.segment(chars) for line in block]
@@ -58,6 +76,27 @@ class TestSegment:
             for i, ch in enumerate("Part 2")
         ]
         assert [line.text for block in _text.segment(up) for line in block] == ["Part 2"]
+
+    def test_text_objects_are_read_only_for_vertical_text(self) -> None:
+        def unread() -> list[tuple[Rect, str]]:
+            raise AssertionError("text objects read for a page without vertical text")
+
+        _text._restore_content_order(_chars("across", 72, 100), unread)
+
+    def test_upward_text_continues_only_on_the_side_mupdf_favours(self) -> None:
+        def column(x: float, text: str) -> list[_text.Char]:
+            return [
+                _text.Char(
+                    ch, Rect(x, 500 - (i + 1) * 5, x + 10, 500 - i * 5), 10, "Helv", False,
+                    (0.0, -1.0), (x + 8, 500 - i * 5),
+                )
+                for i, ch in enumerate(text)
+            ]
+
+        # Across the baseline of upward text is +x: the next column to the right splits,
+        # the one 12pt to the left (the "way back") continues.
+        assert [len(b) for b in _text.segment(column(100, "first") + column(112, "next"))] == [1, 1]
+        assert [len(b) for b in _text.segment(column(100, "first") + column(88, "next"))] == [2]
 
     def test_spans_split_on_font_and_bold(self) -> None:
         chars = _chars("plain ", 72, 100) + _chars("heavy", 102, 100, font="Helv-Bold", bold=True)
