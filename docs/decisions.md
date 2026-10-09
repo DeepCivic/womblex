@@ -133,7 +133,12 @@ claim*. Two deliberate choices:
   back — it joins only the queues it can serve (an extraction queue is named for
   the ingest root, a stage queue for the stage, joined only if the stage's
   models pass the model check). A failed stage ends its run's coordinator
-  instead of letting later stages report "not ready". `--run-id` and
+  instead of letting later stages report "not ready"; re-dispatching it returns
+  the recorded failure (a retry is a plan follow-up). A stage whose upstream
+  sidecar is missing fails without step retries, as retrying cannot produce it.
+  Queue settings are stored in the system database and set by the workers that
+  serve the queue; the coordinator enqueues a stage by queue name only. A reader
+  of a database no writer has migrated sees no runs. `--run-id` and
   `--stale-timeout` left `womblex worker`: DBOS has no per-run claim filter and
   recovers a stopped worker's workflows when its executor id restarts. Owner
   scoping is a workflow attribute, filtered client-side because attribute

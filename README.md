@@ -261,7 +261,9 @@ Connections come from `WOMBLEX_STORE_URI`, `WOMBLEX_INGEST_URI` and
 `WOMBLEX_DB_DSN`. S3 credentials go on `WOMBLEX_S3_ACCESS_KEY_ID`,
 `WOMBLEX_S3_SECRET_ACCESS_KEY` and `WOMBLEX_S3_ENDPOINT` (MinIO works as an S3
 endpoint). `WOMBLEX_DB_DSN` is the DBOS system database (a Postgres URL);
-without it a local SQLite file is used. Womblex writes no vectors to the
+without it a local SQLite file is used: `.womblex/dbos.sqlite` under the
+working directory, or `WOMBLEX_DBOS_PATH`. Every process in a run (`enqueue`,
+`worker`, `jobs`) must point at the same database. Womblex writes no vectors to the
 database.
 
 ### Docker Compose

@@ -9,7 +9,7 @@ extraction to settle, then runs the requested stages in pipeline order.
 
 Step results are storage keys, never data. The worker's config and stores are
 process state (:func:`set_context`), not workflow arguments: arguments are
-stored with the workflow and must stay portable JSON.
+stored with the workflow, so they stay plain JSON-shaped values.
 """
 
 from __future__ import annotations
