@@ -124,6 +124,9 @@ claim*. Two deliberate choices:
   on `(run_id, batch_num)`) is the resume. *Rejected:* Redis/Celery (new
   infra, against the single-datastore goal) and an in-app file lock (no
   multi-host safety). One Postgres table, no broker.
+  *Being superseded (2026-10):* DBOS replaces the queue, worker and stage
+  runner (Phase 0 of [plan-trust-and-recipes.md](plan-trust-and-recipes.md));
+  this half is rewritten when `cloud/queue.py` is deleted.
 
 The load-bearing invariant: `cmd_run` and the worker call **one** shared
 `batch.process_batch`, so local and distributed runs produce byte-identical
