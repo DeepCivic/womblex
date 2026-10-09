@@ -78,8 +78,8 @@ def load_overlay(
     chaining off a normalise layer that may not have been run).
 
     ``required=True`` refuses that silent fallback: a declared non-``elements``
-    overlay that is missing raises :class:`FileNotFoundError` rather than
-    returning ``None``, so the caller renders the declared text layer or fails.
+    overlay that is missing raises :class:`MissingOverlayError` rather than
+    returning ``None``, so the caller uses the declared text layer or fails.
     ``text_source='elements'`` still returns ``None`` under ``required`` —
     verbatim *is* the declared layer there, not a fallback.
     """
@@ -90,8 +90,7 @@ def load_overlay(
         if required:
             raise MissingOverlayError(
                 f"text_source={text_source!r} declared but {path.name} is missing; "
-                f"run the {text_source} stage first. This caller renders the declared "
-                f"text layer and never falls back to verbatim."
+                f"run the {text_source} stage first. This caller never falls back to verbatim."
             )
         if warn_if_missing:
             logger.warning(

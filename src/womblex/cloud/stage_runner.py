@@ -101,9 +101,9 @@ class InputContractError(Exception):
     """Config selects an input that is absent, and running anyway would be wrong.
 
     Distinct from :class:`NotReady`: that one is a fine, expected state on a
-    draining fleet. This one means the stage *would* run and *would* publish —
-    just from the wrong text layer — so it is a failure, but an actionable one
-    rather than a crash, and is logged without a traceback.
+    draining fleet. This one means the stage would build its output from the
+    wrong text layer — a failure, but an actionable one rather than a crash,
+    logged without a traceback.
     """
 
 
@@ -187,9 +187,7 @@ def _resolve_inputs(
 
     ``NotReady`` means an upstream stage has not written a required sidecar yet.
     ``InputContractError`` means config selected a *strict* conditional input that
-    is absent — running anyway would silently produce a sidecar built from the
-    wrong text layer, because ``load_overlay`` falls back to verbatim and only
-    warns.
+    is absent — running anyway would build a sidecar from the wrong text layer.
     """
     keys: list[str] = []
     for suffix in contract.required_inputs:
@@ -209,7 +207,7 @@ def _resolve_inputs(
                     f"{cond.reason} selects {cond.suffix} but {key} is absent. "
                     f"Run `womblex run-stage --stage "
                     f"{PRODUCER_OF.get(cond.suffix, '<upstream>')}` first — "
-                    "proceeding would silently fall back to verbatim element text."
+                    "the stage never falls back to verbatim element text."
                 )
             else:
                 logger.debug("%s: %s absent for %s (%s) — stage falls back",

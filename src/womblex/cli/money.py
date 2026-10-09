@@ -49,6 +49,7 @@ def cmd_money(args: argparse.Namespace) -> int:
     """Annotate monetary amounts over a shard directory (per-stage, offline)."""
     from womblex.config import MoneyConfig, load_config
     from womblex.process.money_stage import money_shards
+    from womblex.process.text_overlay import MissingOverlayError
     from womblex.store.checkpoint import CheckpointManager
     from womblex.store.money_output import MONEY_SPANS_SUFFIX
     from womblex.store.shard_audit import reconcile_stage_checkpoint_with_shards
@@ -98,7 +99,11 @@ def cmd_money(args: argparse.Namespace) -> int:
         shard_dir, config.text_source or text_source, config.narrative,
         config.columns.enabled, config.implicit_context, config.international_numbers,
     )
-    result = money_shards(shard_dir, config, text_source=text_source, checkpoint_mgr=ckpt)
+    try:
+        result = money_shards(shard_dir, config, text_source=text_source, checkpoint_mgr=ckpt)
+    except MissingOverlayError as e:
+        logger.error("money --shards: refused: %s", e)
+        return 1
     logger.info(
         "Done: %d batches written, %d amounts annotated "
         "(%d columns classified, %d money columns)",

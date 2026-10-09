@@ -436,3 +436,15 @@ def test_exactly_one_anchor_group_per_row(tmp_path: Path):
 def test_quantise_drops_unstorable_values():
     assert quantise(Decimal("1.23456")) == Decimal("1.2346")
     assert quantise(Decimal(10) ** 40) is None
+
+
+def test_cli_reports_a_missing_overlay_as_a_refusal(tmp_path: Path):
+    import argparse
+
+    from womblex.cli.money import _register_money, cmd_money
+
+    _build_shard(tmp_path, [_element(0, "paragraph", text="It cost $5.")])
+    p = argparse.ArgumentParser()
+    _register_money(p)
+    args = p.parse_args(["--shards", str(tmp_path), "--text-source", "normalised"])
+    assert cmd_money(args) == 1
