@@ -16,10 +16,10 @@ read a run's artefacts:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, get_args
+from typing import Any
 
 import yaml
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 
 from womblex.cloud.stage_contracts import (
     DISCOVERY_SUFFIXES,
@@ -140,44 +140,6 @@ def get_stage_graph() -> dict[str, Any]:
     }
 
 
-def _nested_model(annotation: Any) -> type[BaseModel] | None:
-    """The `BaseModel` in *annotation*, seeing through `X | None`.
-
-    Returns `None` for a plain container — `normalise.substitutions` is a
-    free-form `dict[str, str]` of letterhead replacements, and recursing into
-    it would report every one of an operator's own substitution keys as an
-    unrecognised config field.
-    """
-    for candidate in get_args(annotation) or (annotation,):
-        if isinstance(candidate, type) and issubclass(candidate, BaseModel):
-            return candidate
-    return None
-
-
-def unknown_keys(
-    raw: dict[str, Any], model: type[BaseModel] = WomblexConfig, prefix: str = ""
-) -> list[str]:
-    """Dotted paths in *raw* that no field of *model* claims.
-
-    Pydantic ignores unrecognised keys, which for a *config editor* is the
-    worst failure mode available: `chunkng:` for `chunking:` validates clean
-    and then vanishes from the rendered YAML, leaving a file that does not
-    do what the operator typed and no signal anything was dropped. Naming
-    them keeps that visible without making the composer stricter than the
-    CLI (see `validate_config`).
-    """
-    found: list[str] = []
-    for key, value in raw.items():
-        field = model.model_fields.get(key)
-        if field is None:
-            found.append(f"{prefix}{key}")
-            continue
-        nested = _nested_model(field.annotation)
-        if nested is not None and isinstance(value, dict):
-            found.extend(unknown_keys(value, nested, f"{prefix}{key}."))
-    return found
-
-
 def get_config_schema() -> dict[str, Any]:
     """`WomblexConfig`'s JSON Schema — the composer form's field list, straight
     from Pydantic. No hand-typed mirror of `config.py` to fall out of sync.
@@ -243,20 +205,15 @@ def validate_config(raw: dict[str, Any], settings: UISettings) -> dict[str, Any]
     locations are injected before constructing the model, the same
     `WomblexConfig(**raw)` construction `load_config` uses.
 
-    `unknown_keys` is reported *beside* `valid` rather than folded into it,
-    for exactly that reason: the CLI loads a config with a stray key without
-    complaint, so failing it here would make the composer reject configs that
-    run fine. It is a warning the operator has almost certainly made a typo,
-    not a verdict on the config.
+    An unrecognised key is a validation error: the config models forbid extras.
     """
-    unknown = unknown_keys(raw)
     paths, _ = deployment_paths(settings)
     try:
         WomblexConfig(**{**raw, "paths": paths})
     except ValidationError as e:
         errors = e.errors(include_url=False, include_context=False, include_input=False)
-        return {"valid": False, "errors": errors, "unknown_keys": unknown}
-    return {"valid": True, "errors": [], "unknown_keys": unknown}
+        return {"valid": False, "errors": errors}
+    return {"valid": True, "errors": []}
 
 
 def render_yaml(raw: dict[str, Any], settings: UISettings) -> str:
@@ -268,10 +225,6 @@ def render_yaml(raw: dict[str, Any], settings: UISettings) -> str:
     `womblex run --config <this file>` would actually see, not whatever the
     browser happened to send. `paths` comes from this deployment's ingest/
     output locations, injected the same way `validate_config` does.
-
-    Dropped keys are recorded as a YAML comment at the top of the file, since
-    the downloaded file is what gets committed and mailed around. Comments
-    are inert to `yaml.safe_load`, so `load_config` reads it unchanged.
 
     When ingest/output are object-store URIs, `paths.input_root`/
     `output_root` in the body are a placeholder rather than a mangled
@@ -285,15 +238,8 @@ def render_yaml(raw: dict[str, Any], settings: UISettings) -> str:
     paths, env_vars = deployment_paths(settings)
     config = WomblexConfig(**{**raw, "paths": paths})
     body = str(yaml.safe_dump(config.model_dump(mode="json"), sort_keys=False))
-    unknown = unknown_keys(raw)
 
     header_lines: list[str] = []
-    if unknown:
-        header_lines += [
-            f"# WARNING: {len(unknown)} submitted key(s) are not in the Womblex config",
-            "# schema and were dropped from this file (likely typos):",
-            *(f"#   {key}" for key in unknown),
-        ]
     if env_vars:
         header_lines += [
             "# paths.input_root/output_root above are placeholders — this deployment's "

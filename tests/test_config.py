@@ -404,3 +404,52 @@ def test_models_check_defaults_to_load() -> None:
         paths={"input_root": "/i", "output_root": "/o", "checkpoint_dir": "/c"},
     )
     assert cfg.processing.models_check == "load"
+
+
+# ---------------------------------------------------------------------------
+# Strict config: an unknown key is refused, not dropped
+# ---------------------------------------------------------------------------
+
+
+class TestStrictConfig:
+    def _raw(self) -> dict:
+        return {
+            "dataset": {"name": "t"},
+            "paths": {"input_root": ".", "output_root": ".", "checkpoint_dir": "."},
+        }
+
+    def test_unknown_top_level_key_refused(self) -> None:
+        from pydantic import ValidationError
+
+        raw = self._raw()
+        raw["chunkng"] = {"chunk_size": 100}
+        with pytest.raises(ValidationError, match="chunkng"):
+            WomblexConfig(**raw)
+
+    def test_unknown_nested_key_refused(self) -> None:
+        from pydantic import ValidationError
+
+        raw = self._raw()
+        raw["chunking"] = {"chunk_sise": 100}
+        with pytest.raises(ValidationError, match="chunk_sise"):
+            WomblexConfig(**raw)
+
+    def test_removed_key_keeps_its_named_message(self) -> None:
+        raw = self._raw()
+        raw["redaction"] = {"layout_model": "x"}
+        with pytest.raises(ValueError, match="use layout.model"):
+            WomblexConfig(**raw)
+
+    @pytest.mark.parametrize("name", ["example.yaml", "default-isaacus.yaml"])
+    def test_shipped_configs_load(self, name: str) -> None:
+        load_config(Path(__file__).resolve().parent.parent / "configs" / name)
+
+    def test_saved_preset_with_stray_key_is_logged_by_name(self, caplog) -> None:
+        import json
+
+        from womblex.ui.presets import parse_saved_preset
+
+        body = json.dumps({"config": {"chunking": {"nope": 1}}})
+        with caplog.at_level("WARNING"):
+            assert parse_saved_preset("my-old-preset", body) is None
+        assert "my-old-preset" in caplog.text

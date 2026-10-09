@@ -36,12 +36,15 @@ that file's stage toggles and settings; keep the two in step.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from womblex.config import DatasetConfig, PathsConfig, WomblexConfig
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -275,7 +278,8 @@ def parse_saved_preset(name: str, raw_bytes: str) -> Preset | None:
     try:
         raw = json.loads(raw_bytes)
         _validate_overlay(raw.get("config", {}))
-    except Exception:
+    except Exception as exc:
+        logger.warning("saved preset %r skipped: %s", name, exc)
         return None
     return Preset(
         name=name,

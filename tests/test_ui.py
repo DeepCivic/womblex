@@ -918,7 +918,6 @@ class TestComposerApi:
         resp = client.post("/api/composer/validate", json=merged)
         body = resp.json()
         assert body["valid"] is True
-        assert body["unknown_keys"] == []
 
     def test_unknown_preset_404s(self, client: TestClient) -> None:
         assert client.get("/api/composer/presets/nope").status_code == 404
@@ -967,23 +966,20 @@ class TestComposerApi:
 
     def test_validate_accepts_a_minimal_config(self, client: TestClient) -> None:
         resp = client.post("/api/composer/validate", json=_MINIMAL_CONFIG)
-        assert resp.json() == {"valid": True, "errors": [], "unknown_keys": []}
+        assert resp.json() == {"valid": True, "errors": []}
 
-    def test_validate_names_typos_the_schema_would_silently_drop(
-        self, client: TestClient
-    ) -> None:
-        """Pydantic ignores unrecognised keys, so a typo validates clean and then
-        vanishes from the download. The composer must say so."""
+    def test_validate_refuses_typos(self, client: TestClient) -> None:
+        """The config models forbid extras, so a typo is an error naming the key."""
         resp = client.post("/api/composer/validate", json={
             **_MINIMAL_CONFIG,
             "chunkng": {"chunk_size": 99},            # typo'd section
             "chunking": {"chnk_size": 99},            # typo'd field in a real section
         })
         body = resp.json()
-        # Still valid: the CLI loads this file too, so failing it would make the
-        # composer stricter than the thing it configures.
-        assert body["valid"] is True
-        assert sorted(body["unknown_keys"]) == ["chunking.chnk_size", "chunkng"]
+        assert body["valid"] is False
+        assert sorted(tuple(err["loc"]) for err in body["errors"]) == [
+            ("chunking", "chnk_size"), ("chunkng",),
+        ]
 
     def test_validate_does_not_mistake_free_form_dict_values_for_typos(
         self, client: TestClient
@@ -994,25 +990,18 @@ class TestComposerApi:
             **_MINIMAL_CONFIG,
             "normalise": {"substitutions": {"Depatment": "Department", "AB C": "ABC"}},
         })
-        assert resp.json()["unknown_keys"] == []
+        assert resp.json()["valid"] is True
 
-    def test_validate_walks_through_an_optional_nested_model(
+    def test_validate_refuses_a_stray_key_in_an_optional_nested_model(
         self, client: TestClient
     ) -> None:
-        """`linking.reference` is `ReferenceConfig | None` — a union, still walkable."""
         resp = client.post("/api/composer/validate", json={
             **_MINIMAL_CONFIG,
             "linking": {"reference": {"path": "r.csv", "nonsense_key": 1}},
         })
-        assert resp.json()["unknown_keys"] == ["linking.reference.nonsense_key"]
-
-    def test_validate_reports_unknown_keys_on_an_invalid_config_too(
-        self, client: TestClient
-    ) -> None:
-        resp = client.post("/api/composer/validate", json={"chunkng": {}})
         body = resp.json()
         assert body["valid"] is False
-        assert body["unknown_keys"] == ["chunkng"]
+        assert any("nonsense_key" in err["loc"] for err in body["errors"])
 
     def test_validate_reports_pydantic_errors_for_a_missing_field(self, client: TestClient) -> None:
         resp = client.post("/api/composer/validate", json=_NO_DATASET)
@@ -1047,20 +1036,14 @@ class TestComposerApi:
         from womblex.config import WomblexConfig
 
         assert WomblexConfig(**parsed).dataset.name == "t"
-        assert not resp.text.startswith("#")  # nothing dropped, so no warning header
+        assert not resp.text.startswith("#")
 
-    def test_yaml_download_records_the_keys_it_dropped(self, client: TestClient) -> None:
-        """The warning rides on the artefact, not only the /validate response — the
-        file is what gets committed and mailed around."""
+    def test_yaml_download_422s_on_a_stray_key(self, client: TestClient) -> None:
         resp = client.post("/api/composer/yaml", json={
             **_MINIMAL_CONFIG, "chunkng": {"chunk_size": 99},
         })
-        assert resp.status_code == 200
-        assert "chunkng" in resp.text.partition("\n\n")[0]
-        assert "WARNING" in resp.text
-        # Comments are inert: the file still loads, and the typo is genuinely gone.
-        parsed = yaml.safe_load(resp.text)
-        assert "chunkng" not in parsed
+        assert resp.status_code == 422
+        assert any(err["loc"] == ["chunkng"] for err in resp.json()["detail"])
 
     def test_yaml_download_422s_on_an_invalid_config(self, client: TestClient) -> None:
         resp = client.post("/api/composer/yaml", json=_NO_DATASET)
