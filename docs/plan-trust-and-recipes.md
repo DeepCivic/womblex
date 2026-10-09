@@ -1,6 +1,6 @@
 # Trust baseline and recipes — plan
 
-*Status: in progress (2026-10). Phase 1 item 1 has shipped; D1 to D8, D10 and D11 are decided. Each phase is a branch of sequential merges under the 500-line cap. Each merge updates this document as it lands, and the document is retired into `decisions.md` once its last phase ships.*
+*Status: in progress (2026-10). Phase 1 item 1 has shipped; D1 to D11 are decided. Each phase is a branch of sequential merges under the 500-line cap. Each merge updates this document as it lands, and the document is retired into `decisions.md` once its last phase ships.*
 
 ## Context
 A business-analyst requirements set proposed five themes: high-integrity extraction, recipe-based workflow authoring, destinations and delivery, agent-friendly operation, and safety and operability. Its labels (FR-1.1 to FR-5.2) are kept below so this plan can be read against it. It was written without knowledge of the repository, so this plan maps each theme onto what Womblex already has, records what is out of scope, and orders the remaining gaps.
@@ -42,7 +42,7 @@ Assessed against the repository's rules: thin adapters only, delete Womblex code
 
 | Candidate | Licence | Verdict | Reason |
 |---|---|---|---|
-| DBOS Transact | MIT | Defer to Phase 3 | Overlaps `cloud/queue.py`, the worker, the stage runner and checkpoints, all working. Adoption means deleting those, and stores step results in its database while Womblex's checkpoint unit is a Parquet shard in object storage. Phase 3 is the decision point: delivery retries and events in the existing queue, or DBOS replacing it |
+| DBOS Transact | MIT | Adopt (D9) | 3.2.0 (2026-09) covers schedules, step retries with backoff, rate-limited queues and workflow events on Postgres or SQLite. Adds `sqlalchemy` and `websockets` to the lockfile; the `pyproject.toml` change still goes to review. It overlaps `cloud/queue.py`, the worker, the stage runner and checkpoints, and stores step results in its database while Womblex's checkpoint unit is a Parquet shard in object storage, so which of those it replaces is settled before the adopting merge |
 | OpenLineage (`openlineage-python`) | Apache-2.0 | No dependency | Emit spec-conformant JSON from the run record and test it against the published schema. An optional extra only if pushing to a lineage server becomes a requirement |
 | Docling (full converter) | MIT | Reject for core | Brings torch and its own layout models. Now that layout is its own stage ([`layout.md`](layout.md)), its layout model could be a `womblex.models.layout` plugin installed outside core and judged by the benchmark |
 | docling-core | MIT | Optional egress format, later | Light, pydantic-based. Useful only as an output format for consumers that want Docling's schema |
@@ -93,7 +93,7 @@ Because `womblex run` extracts only, options B and C both need a **local multi-s
 
 ### Phase 3 — integration (branch)
 - Destinations as delivery targets beside egress, each with its own status and bounded retries: object storage, Postgres with pgvector, and webhooks (D11).
-- Delivery attempts and webhook events recorded in the existing queue, unless the DBOS decision above goes the other way.
+- Delivery retries and webhook events run as DBOS workflows (D9).
 - An OpenLineage-shaped export of the run record.
 
 ### Phase 4 — operation (branch)
@@ -113,7 +113,7 @@ Each is settled before the merge it gates starts, and recorded here when taken. 
 | D6 | Phase 1 items 6 and 7 | Whether the evidence reference replaces or sits beside each sidecar's anchor columns | **Decided 2026-10:** replace (a major contract bump), with reader migration as its own scope item. Where the span check runs is settled in the item 6 merge |
 | D7 | Phase 1 item 8 | Cell bbox coordinate space, sources with no page geometry, and branch split | **Answered.** `BBox` is normalised 0–1 with a top-left origin, and `Element.bbox` is already optional; cells follow both, so DOCX and spreadsheet cells carry null. The column is additive, a minor bump (`contract.md`). The merge cap requires splitting items 6 to 8 into sequential merges; whether they form a separately named Phase 1b is labelling only |
 | D8 | Phase 2 | Workflow model, and the condition language's scope | **Decided 2026-10:** option B, a stored workflow object. Condition scope as Phase 2 states |
-| D9 | Phase 3 | DBOS against the existing queue for delivery retries and events | **Open.** DBOS Transact 3.2.0 (2026-09) is MIT, runs on Postgres or SQLite, and has cron schedules, step retries with backoff, rate-limited queues and workflow events. `decisions.md` makes the Postgres queue the distributed checkpoint; DBOS also runs on Postgres, so that rule does not rule it out |
+| D9 | Phase 3 | DBOS against the existing queue for delivery retries and events | **Decided 2026-10:** DBOS. Alternatives checked: Procrastinate and PgQueuer (scheduling and retries, no durable steps or events), Absurd (pre-1.0, no schedules in the Python SDK); Hatchet, Temporal and Prefect need a separate server; Dramatiq is LGPL |
 | D10 | Phase 3 | Whether the egress decision changes once per-step destinations exist | **Confirmed 2026-10.** Bundles may hold unredacted sources; access control is the host's responsibility (`egress.md`) |
 | D11 | Phase 3 | Which destinations come first | **Decided 2026-10:** object storage (S3, built on egress), Postgres with pgvector, and webhook notifications. Declaring `httpx` for webhooks needs approval |
 
