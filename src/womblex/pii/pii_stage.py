@@ -27,16 +27,22 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
+import pyarrow.parquet as pq
+
 from womblex.config import PIIConfig
 from womblex.pii.cleaner import PIICleaner
 from womblex.process.chunk_stage import _batch_bases
 from womblex.store.checkpoint import CheckpointManager
 from womblex.store.enrichment_output import (
     enrichment_entities_path_for,
+    enrichment_meta_path_for,
     read_enrichment_entities,
 )
 from womblex.store.output import read_chunks, read_manifest
 from womblex.store.pii_output import (
+    MASK_MASKED,
+    MASK_NO_ENTITY,
+    MASK_NOT_MASKED,
     pii_spans_path_for,
     write_clean_text,
     write_pii_spans,
@@ -88,6 +94,7 @@ def pii_shards(
             continue
 
         known_by_doc = _known_spans_by_doc(base, person_types, entities)
+        enriched_docs = _enriched_docs(base)
 
         # Group chunks per doc, in chunk_index order, so <ENTITY_n> numbering is
         # stable across a document (a doc's chunks all live in this one batch).
@@ -101,6 +108,7 @@ def pii_shards(
         for source_hash, chunks in by_doc.items():
             chunks.sort(key=lambda c: c["chunk_index"])
             known = known_by_doc.get(source_hash)
+            doc_enriched = source_hash in enriched_docs
             numbering: dict[tuple[str, str], int] = {}
             counters: dict[str, int] = {}
 
@@ -146,6 +154,9 @@ def pii_shards(
                         "content_type": c["content_type"],
                         "text": _apply_mask(text, placed),
                         "n_masked": len(placed),
+                        "mask_status": _mask_status(
+                            bool(placed), use_regex or (is_narrative and doc_enriched),
+                        ),
                     })
                     if placed:
                         chunks_masked += 1
@@ -170,12 +181,39 @@ def pii_shards(
             "pii_shards: %s wrote %d spans, %d masked chunks",
             base.stem, len(span_rows), sum(1 for r in clean_rows if r["n_masked"]),
         )
+        uncovered = sum(1 for r in clean_rows if r["mask_status"] == MASK_NOT_MASKED)
+        if uncovered:
+            logger.warning(
+                "pii_shards: %s has %d chunk(s) no PII candidate source covered; "
+                "their clean_text is verbatim (mask_status=%s)",
+                base.stem, uncovered, MASK_NOT_MASKED,
+            )
 
     return PIIStageResult(
         batches_written=batches_written,
         spans_written=spans_written,
         chunks_masked=chunks_masked,
     )
+
+
+def _mask_status(masked: bool, covered: bool) -> str:
+    """``masked`` if a span was replaced, else ``no_entity`` when a candidate
+    source covered the chunk, else ``not_masked``."""
+    if masked:
+        return MASK_MASKED
+    return MASK_NO_ENTITY if covered else MASK_NOT_MASKED
+
+
+def _enriched_docs(base_path: Path) -> set[str]:
+    """Documents the batch's enrichment sidecars cover, including those with no entities."""
+    docs: set[str] = set()
+    ent = enrichment_entities_path_for(base_path)
+    if ent.exists():
+        docs.update(read_enrichment_entities(ent).column("source_hash").to_pylist())
+    meta = enrichment_meta_path_for(base_path)
+    if meta.exists():
+        docs.update(pq.read_table(str(meta), columns=["source_hash"]).column(0).to_pylist())
+    return docs
 
 
 def _apply_mask(text: str, placed: list[tuple[int, int, str]]) -> str:

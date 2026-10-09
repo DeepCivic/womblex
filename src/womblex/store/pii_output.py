@@ -42,13 +42,25 @@ PII_SPANS_SCHEMA = pa.schema([
 # One row per chunk (masked where PII spans were found, verbatim passthrough
 # otherwise) so it is a drop-in replacement for `*.chunks.parquet`. Join back on
 # (source_hash, chunk_index). `n_masked` = spans replaced in this chunk.
+# `mask_status` says whether masking could have found anything: `masked` (at
+# least one span replaced), `no_entity` (a candidate source covered the chunk and
+# found nothing) or `not_masked` (no candidate source covered it, so the text is
+# verbatim). Null only on files written before the column existed.
+MASK_MASKED = "masked"
+MASK_NO_ENTITY = "no_entity"
+MASK_NOT_MASKED = "not_masked"
+
 CLEAN_TEXT_SCHEMA = pa.schema([
     ("source_hash", pa.string()),
     ("chunk_index", pa.int32()),
     ("content_type", pa.string()),
     ("text", pa.string()),
     ("n_masked", pa.int32()),
+    ("mask_status", pa.string()),
 ])
+
+# Columns an older clean_text file may lack; see `_read_clean_text_shard`.
+_CLEAN_TEXT_NULL_BACKFILL = ("mask_status",)
 
 
 def pii_spans_path_for(base_path: Path) -> Path:
@@ -129,17 +141,27 @@ def read_clean_text(path: Path) -> pa.Table:
 
 def _read_clean_text_shard(path: Path) -> pa.Table:
     raw = pq.read_table(str(path))
-    missing = [f.name for f in CLEAN_TEXT_SCHEMA if f.name not in raw.schema.names]
+    missing = [
+        f.name for f in CLEAN_TEXT_SCHEMA
+        if f.name not in raw.schema.names and f.name not in _CLEAN_TEXT_NULL_BACKFILL
+    ]
     if missing:
         raise ValueError(
             f"clean_text shard {path} missing columns {missing}; schema bump without compat shim?"
         )
+    if "mask_status" not in raw.schema.names:
+        # Older files never recorded coverage: masked rows are known, the rest are not.
+        status = [MASK_MASKED if (n or 0) > 0 else None for n in raw.column("n_masked").to_pylist()]
+        raw = raw.append_column("mask_status", pa.array(status, type=pa.string()))
     return raw.select([f.name for f in CLEAN_TEXT_SCHEMA]).cast(CLEAN_TEXT_SCHEMA)
 
 
 __all__ = [
     "CLEAN_TEXT_SCHEMA",
     "CLEAN_TEXT_SUFFIX",
+    "MASK_MASKED",
+    "MASK_NOT_MASKED",
+    "MASK_NO_ENTITY",
     "PII_SPANS_SCHEMA",
     "PII_SPANS_SUFFIX",
     "clean_text_path_for",
