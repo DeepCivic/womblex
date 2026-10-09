@@ -27,9 +27,10 @@ ENV PYTHONUNBUFFERED=1 \
     WOMBLEX_MODELS_DIR=/app/models
 
 # The console imports `store/` readers, which reach `ingest.extract` for
-# `ExtractionResult` and so import PyMuPDF and numpy at module load. Verified
-# by import trace: fitz, numpy and semchunk load; torch,
-# sentence-transformers and cv2 do not. libglib/libGL are what PyMuPDF needs.
+# `ExtractionResult` and so import numpy at module load; no PDF library loads
+# until a document is opened. Verified by import trace: numpy and semchunk
+# load; torch, sentence-transformers and cv2 do not. libglib/libGL are kept
+# from when PyMuPDF needed them.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libglib2.0-0 libgl1 \
     && rm -rf /var/lib/apt/lists/*

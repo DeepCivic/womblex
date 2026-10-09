@@ -1,9 +1,8 @@
 """Build test PDFs on reportlab and read them back through the PDF seam.
 
-Coordinates are top-left in points, as in `ingest.pdf.types.Rect` and the fitz
-calls these replace; the y-flip to reportlab's bottom-left happens here only.
-Defaults follow fitz's: A4 pages and 11pt Helvetica. `open()` goes through
-`open_document` without naming a backend, so the tests follow the default.
+Coordinates are top-left in points, as in `ingest.pdf.types.Rect`; the y-flip to
+reportlab's bottom-left happens here only. Defaults are A4 pages and 11pt
+Helvetica. `open()` goes through `open_document`.
 """
 
 from __future__ import annotations

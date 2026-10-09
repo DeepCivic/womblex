@@ -12,7 +12,7 @@ no text, tables, drawings or widgets, and — as under MuPDF — no `images()`:
 the page *is* the image, so callers render it.
 
 The page rect follows MuPDF's rule, measured in Phase 0 of
-`docs/plan-permissive-deps.md`: ``pixels * 72 / dpi`` on both axes from the
+the permissive-dependencies work: ``pixels * 72 / dpi`` on both axes from the
 horizontal resolution, rounded to a whole dpi; 96 when the file declares none;
 72 when the declared value is outside 72..4800. A JPEG 2000 is always 72dpi,
 declared or not: MuPDF ignores its resolution box, and a PSD's is unread by

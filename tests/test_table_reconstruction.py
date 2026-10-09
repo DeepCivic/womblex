@@ -609,7 +609,7 @@ class TestReconstructedTableDownstream:
         el = tables[0]
         assert el.header_rows == [0]
         assert [c.value for c in el.cells if c.row == 0] == ["H1", "H2", "H3", "H4"]
-        # Lineage: distinguishable from a PyMuPDF-fallback table in the parquet,
+        # Lineage: distinguishable from a native-finder table in the parquet,
         # via the existing context_* → meta copy, with no schema change.
         assert el.meta["context_producer"] == "table_grid"
 
@@ -648,7 +648,7 @@ class TestImageDocumentsRouteThroughTheOrchestrator:
     """A4, as resolved: standalone images were never a separate path.
 
     ``extract_text`` sends every non-(SPREADSHEET|DOCX|TEXT) document —
-    ``IMAGE`` included — to ``extract_pdf_with_plan``, because PyMuPDF opens
+    ``IMAGE`` included — to ``extract_pdf_with_plan``, because the PDF seam opens
     an image as a one-page document. The legacy ``ImageExtractor`` that A4
     was written to fix was unreachable, so it was deleted instead of wired
     up. These tests pin the routing, so a future change that reintroduces a

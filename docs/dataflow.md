@@ -24,7 +24,7 @@ Raw files (PDF / DOCX / MD / CSV / XLSX)
 ┌───────────────────┐
 │   extract_text    │  → list[ExtractionResult]  (single-element list per source)
 │  (ingest/extract) │    PDFs route via orchestrator (per-page dispatch);
-│                   │    images too (fitz opens one as a 1-page doc);
+│                   │    images too (the PDF seam opens one as a 1-page doc);
 │                   │    only DOCX / spreadsheet / text via get_extractor.
 └───────────────────┘
         │
@@ -107,7 +107,7 @@ For each file processed via the `operations` package:
       └── spreadsheets also populate DocumentProfile.sheet_meta: list[SheetInfo]
 
 2. get_extractor(profile) → SpreadsheetExtractor | DocxExtractor | TextExtractor | MarkdownExtractor
-      (path-based formats only; every fitz-openable input goes to the orchestrator)
+      (path-based formats only; every seam-openable input goes to the orchestrator)
 
 3. extract_text(path, profile) → list[ExtractionResult]  (single-element list per source)
       ├── PDF / image → orchestrator: per-page PageProfile → native or OCR page

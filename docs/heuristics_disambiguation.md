@@ -68,7 +68,7 @@ This doc covers the CV2/NumPy mechanism, which is that fallback path.
 | `womblex.ingest.morphology` | `_analyze_stroke_width_variance` | Measure stroke width consistency via distance transform |
 | `womblex.ingest.morphology` | `_has_handwriting_signals` | Composite handwriting detection (combines above) |
 | `womblex.ingest.detect` | `_has_table_structure` | Regex-based table detection in extracted text |
-| `womblex.ingest.detect` | `_has_structural_tables` | PyMuPDF table finder (min cell count) |
+| `womblex.ingest.detect` | `_has_structural_tables` | Table finder (min cell count) |
 | `womblex.ingest.detect` | `_has_form_structure` | Detect form widgets and label-like text blocks |
 | `womblex.ingest.morphology` | `_sample_ocr_confidence` | PaddleOCR confidence sampling (fallback) |
 | `womblex.redact.detector` | `RedactionDetector` | CV2-based redaction detection and masking |

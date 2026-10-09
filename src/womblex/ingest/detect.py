@@ -107,7 +107,7 @@ def _table_signals(
 ) -> tuple[bool, bool]:
     """Compute ``(has_structural_table, has_manifest_table)`` in one scan.
 
-    PyMuPDF ``find_tables(strategy="text")`` does a full layout analysis and
+    ``find_tables(strategy="text")`` does a full layout analysis and
     costs ~2-3 s on dense pages *regardless of whether it finds a table*.
     ``_has_structural_tables`` and ``_has_manifest_table`` each scan with two
     strategies, so calling both — as the per-page profiler does on every
@@ -155,7 +155,7 @@ def _table_signals(
 
 
 def _has_structural_tables(page: Page, min_cells: int = 4) -> bool:
-    """Detect tables using PyMuPDF's structural table finder.
+    """Detect tables using the page's structural table finder.
 
     Tries strategy="lines" first (ruled cells), falls back to strategy="text"
     (text-block alignment) so whitespace-aligned columnar layouts like the

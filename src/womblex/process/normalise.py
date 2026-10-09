@@ -28,7 +28,7 @@ v1 scope (intra-element):
   hardcoded into core.
 
 Deferred (cross-element, needs a reassembly join-hint): re-joining
-redaction-induced paragraph breaks — PyMuPDF returns text either side of
+redaction-induced paragraph breaks — the PDF text layer returns text either side of
 a mid-paragraph redaction bar as separate blocks. See
 ``docs/decisions.md`` "Deferred / backlog".
 """

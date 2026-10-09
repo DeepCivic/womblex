@@ -52,8 +52,8 @@ into the orchestrator's per-page operations
 (`_apply_native_page`, `_apply_ocr_page`).
 
 `get_extractor()` only handles the path-based formats (DOCX, SPREADSHEET,
-TEXT). Everything `fitz` can open — PDFs **and standalone images** —
-routes through `extract_text()` → `extract_pdf_with_plan()`; PyMuPDF
+TEXT). Everything the PDF seam can open — PDFs **and standalone images** —
+routes through `extract_text()` → `extract_pdf_with_plan()`; the seam
 opens an image as a one-page document, so it gets the same per-page OCR
 dispatch a scanned PDF page does. There is no separate image extractor.
 
@@ -89,11 +89,11 @@ A corpus exists to mature Womblex capability, not host custom code. Corpus-side 
 | `ingest/detect.py` | Doc-level type classification + non-PDF dispatch (DOCX, spreadsheet, text, image) | Per-page routing or final extracted text |
 | `ingest/page_profile.py` | Per-page `PageProfile` (text layer, table signal, form signal, blur, image count); cheap qualifier for spreadsheet-print | Run any extraction operation |
 | `ingest/orchestrator.py` | Walk per-page profiles, dispatch native or OCR operations, merge results into one `ExtractionResult` | Hold any extractor logic — calls primitives in `extract.py` and `strategies_scanned.py` |
-| `ingest/pdf/__init__.py` + `ingest/pdf/_fitz.py` | `open_document(path, backend=…)` — the seam's one entry point, resolving its backend at call time so no import loads a PDF library; `_fitz.py` adapts PyMuPDF onto the protocols | Hold extraction logic (callers do), or let a backend's shapes escape the adapter |
+| `ingest/pdf/__init__.py` | `open_document(path)` — the seam's one entry point, importing the pdfium backend at call time so no import loads a PDF library | Hold extraction logic (callers do), or let a backend's shapes escape the adapter |
 | `ingest/pdf/types.py` | The PDF seam's backend-neutral vocabulary: `Rect`, `Word` (tuple-shaped for `grid_projection`), `Span`/`Line`/`Block`, `FoundTable`, `Drawing`, `Widget`, `PageImage`, the `Page`/`Document` protocols, and `render_box` (MuPDF's render pixel-box rule, shared by every backend so a render's shape is backend-independent). No third-party imports at runtime | Open a document, import a PDF library, or hold adapter logic (a backend's `_*.py` does) |
 | `ingest/pdf/_text.py` | The pdfium text engine: `read_chars` (the only pdfium-touching part), then pure segmentation of `Char`s into lines / blocks / spans / words along each character's writing direction; effective font size (the `Tf` size scaled by the character matrix), characters clipped to the page and no hyphen join, as the locked MuPDF; bold from font weight, ForceBold or name | Reorder columns (content order, as MuPDF); find tables; hold backend state (the page caches its characters) |
 | `ingest/pdf/_tables.py` | The pdfium table finder: `find_tables(strategy, bbox, chars, polylines)` → `FoundTable`s via pdfplumber's `TableFinder`; `read_polylines` (the only pdfium-touching part) turns path segments into straight runs, `edges_from_polylines` / `char_dicts` build pdfplumber's inputs lazily | Hold the engine (pdfplumber does), open a document, or reorder text |
-| `ingest/pdf/_pdfium_doc.py` + `ingest/pdf/_image.py` | The permissive backend (`backend="pdfium"`): pypdfium2 pages converted to top-left space — geometry, `render` (MuPDF's round-out `render_box`), image objects, filled paths with fill colour, widgets, form XObjects composed to page space; a non-PDF file opens through Pillow (MuPDF's image formats plus WebP/AVIF, one page per frame, MuPDF's page-rect rule) | Segment text or find tables (`_text.py` / `_tables.py` do) |
+| `ingest/pdf/_pdfium_doc.py` + `ingest/pdf/_image.py` | The PDF backend: pypdfium2 pages converted to top-left space — geometry, `render` (MuPDF's round-out `render_box`), image objects, filled paths with fill colour, widgets, form XObjects composed to page space; a non-PDF file opens through Pillow (MuPDF's image formats plus WebP/AVIF, one page per frame, MuPDF's page-rect rule) | Segment text or find tables (`_text.py` / `_tables.py` do) |
 | `ingest/elements.py` | Canonical `Element`, `Cell`, `FieldEntry`, `BBox`; kind enumeration | Touch extractor logic or parquet I/O |
 | `ingest/extract.py` | Page-level primitives (text, blocks, tables, images), `ExtractionResult` with `elements` stream + derived views, `extract_text()` entry point | Document-level routing (orchestrator does that); post-processing of text |
 | `ingest/forms.py` | Form-pair extraction: AcroForm widgets, spatial label-value pairs from `page.get_text("dict")`, line-based pairs from OCR'd text | Know about document types |
@@ -222,7 +222,7 @@ approval rather than quietly exceeding it.
 - Store error status in output for review
 
 ### Dependencies
-- PyMuPDF (`fitz`) for PDF handling
+- pypdfium2 + pdfplumber for PDF handling, behind the `ingest/pdf/` seam (pdfium reads characters, paths, images and renders; pdfplumber's `TableFinder` finds tables)
 - rapidocr-onnxruntime for OCR (runs PaddleOCR ONNX det/rec/cls models, no PaddlePaddle framework: bundled v5 under `_models/paddleocr-v5` when present, else the wheel's v4)
 - boto3 (core dependency) for the `mistral-ocr` engine — Mistral Pixtral Large via AWS Bedrock (Converse API) — and for the `isaacus-sagemaker` HTTP client's SigV4 signing. Imported lazily at its use sites (`ingest/llm_ocr.py:_ensure_client` → `boto3.client("bedrock-runtime")`; `utils/isaacus_client.py` for the SageMaker session); nothing on the *default* extraction path touches it, which is why the whole suite runs without AWS credentials and only the VLM benchmark / live SageMaker paths skip
 - **Isaacus SDK (`isaacus`, `isaacus-sagemaker`) and boto3 are core, not extras.** Every real deployment uses enrichment/embeddings and (often) hosted OCR or SageMaker; they are tiny next to the vision/ML stack, and gating them behind extras only produced misconfiguration (a missing SDK surfaced as "no API key"). They stay dormant until configured — no key / no `ISAACUS_SAGEMAKER_ENDPOINTS` / no `mistral-ocr` engine means nothing calls out. Remaining extras are deployment-shaped: `[local]` (empty — the base install), `[cloud]` (empty — object-storage staging via fsspec + s3fs and the psycopg3 job queue are now core deps, so `s3://` and `--dsn` work on any install; the extra is retained only as a self-documenting marker and so existing `pip install womblex[cloud]` invocations keep resolving), `[ui]` (fastapi + uvicorn), `[dev]`
@@ -237,9 +237,12 @@ approval rather than quietly exceeding it.
 - Local models in `_models/` (bundled) and `models/` are resolved automatically by `utils/models.py` — no network access required at runtime. Every model is outlined in `docs/models.md`
 
 ## Common Pitfalls
-### PyMuPDF import
+### Open PDFs through the seam
+Never import a PDF library outside `ingest/pdf/`; call `open_document(path)` and read the `Page` / `Document` protocols in `ingest/pdf/types.py`:
 ```python
-import fitz  # Not `import pymupdf`
+from womblex.ingest.pdf import open_document
+with open_document(path) as doc:
+    text = doc[0].plain_text()
 ```
 ### semchunk tokeniser loading
 Pass a HuggingFace identifier or a callable to `create_chunker`:
@@ -256,11 +259,8 @@ client.embeddings.create(..., task="retrieval/document")
 # For search queries
 client.embeddings.create(..., task="retrieval/query")
 ```
-### Native PDF text extraction needs dehyphenation
-Always pass `TEXT_DEHYPHENATE` when extracting from native text layers to avoid split words across line breaks:
-```python
-text = page.get_text("text", flags=fitz.TEXT_DEHYPHENATE)
-```
+### Native PDF text keeps line-end hyphens
+The pdfium text engine joins no line-end hyphen, as the MuPDF it replaced did under `TEXT_DEHYPHENATE`. The `dehyphenate` flag on `Page` text methods is accepted and changes nothing; a systematic fix belongs in a downstream cleaning stage, not the extractor.
 ### Text policy at the extraction boundary is verbatim
 `_normalise_text` no longer runs in the extraction hot path. Whatever the producing extractor (native text layer, PaddleOCR, DOCX, spreadsheet-print, …) emits is what lands on the element's `text` field, and the parquet writer serialises `elements` — so on-disk content stays extraction-time verbatim. PII and redaction stages may still rewrite `pages[i].text` in place for their own internal use; the parquet is unaffected.
 
@@ -411,7 +411,7 @@ For new shapes that fit within the existing native/OCR dispatch:
    into `extract_text()` → `extract_pdf_with_plan()`
 
 ### Adding a new non-PDF document type
-Only for formats `fitz` cannot open — anything it can (images included)
+Only for formats the PDF seam cannot open — anything it can (images included)
 belongs on the orchestrator path, not here.
 1. Add enum value to `DocumentType`
 2. Add detection logic to `detect.py`

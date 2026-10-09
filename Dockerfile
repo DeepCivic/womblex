@@ -21,7 +21,7 @@ ENV PYTHONUNBUFFERED=1 \
     # replacing it: utils.models searches every root per artefact.
     WOMBLEX_MODELS_DIR=/app/models
 
-# OpenCV (headless) + PyMuPDF need libglib/libGL at import time.
+# OpenCV (headless) needs libglib/libGL at import time.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libglib2.0-0 libgl1 \
     && rm -rf /var/lib/apt/lists/*

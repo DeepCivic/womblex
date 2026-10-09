@@ -42,9 +42,8 @@ womblex/
 │   ├── profile/            # womblex profile subcommand — column schema inference
 │   ├── ingest/
 │   │   ├── pdf/                 # The PDF seam — backend-neutral types the extractors are written against
-│   │   │   ├── __init__.py      # open_document(path, backend=…) — the one entry point; imports its backend at call time
+│   │   │   ├── __init__.py      # open_document(path) — the one entry point; imports the backend at call time
 │   │   │   ├── types.py         # Rect / Word / Span / Line / Block / FoundTable / Drawing / Widget / PageImage + the Page and Document protocols
-│   │   │   ├── _fitz.py         # The PyMuPDF backend — the only module in src/ that imports fitz
 │   │   │   ├── _pdfium_doc.py   # The pypdfium2 backend: document, page geometry, render, images, drawings, widgets
 │   │   │   ├── _tables.py       # pdfium table finder: pdfplumber's TableFinder fed pdfium path edges and character boxes
 │   │   │   ├── _text.py         # pdfium text engine: characters rebuilt into lines, blocks, spans, words; effective size, page clip, bold detection
@@ -62,7 +61,7 @@ womblex/
 │   │   ├── records.py           # Pre-extracted text records → element shards that feed the NLP pipeline
 │   │   ├── morphology.py        # Page-image morphology helpers (handwriting / glyph regularity), over `Page.render`
 │   │   ├── grid_projection.py   # Column-aware text reconstruction (block-aware paragraph emission)
-│   │   ├── strategies.py        # Re-export shim — path-based (non-fitz) extractors
+│   │   ├── strategies.py        # Re-export shim — path-based (non-PDF) extractors
 │   │   ├── strategies_scanned.py # OCR primitives (_ocr_page, _layout_blocks_and_tables)
 │   │   ├── strategies_file.py   # Non-PDF extractors (DOCX, plain text, non-textual)
 │   │   ├── markdown.py          # Markdown extractor — headings/lists/tables via markdown-it-py

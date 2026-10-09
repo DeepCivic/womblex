@@ -32,7 +32,7 @@ classifiers = [
 # hosted-VLM (Bedrock) OCR, the AWS SDK, object-storage staging (fsspec + s3fs)
 # and the Postgres job queue (psycopg) are all part of the base install.
 # Every real deployment uses them, and they are comparatively tiny next to the
-# vision/ML stack already here (pymupdf, onnxruntime, sentence-transformers) —
+# vision/ML stack already here (onnxruntime, sentence-transformers) —
 # gating them behind extras only produced misconfiguration (a missing SDK read
 # as "no API key", and a cloud deployment 500ing on `s3://` because the image
 # was built without `[cloud]`). rapidocr-onnxruntime is the bundled CPU OCR
@@ -43,10 +43,8 @@ classifiers = [
 # them — so shipping them costs a CPU-only box nothing but keeps `s3://`
 # working the moment it is asked for, on any install.
 dependencies = [
-    "pymupdf>=1.24",
-    # The permissive PDF backend (docs/plan-permissive-deps.md) that replaces
-    # pymupdf at F1/F2. pdfplumber is pinned exactly: its TableFinder is the
-    # table engine and its output moves with the release.
+    # The PDF backend (ingest/pdf/_pdfium_doc.py). pdfplumber is pinned exactly:
+    # its TableFinder is the table engine and its output moves with the release.
     "pypdfium2>=4.30",
     "pdfplumber==0.11.10",
     "pillow>=10.0",
@@ -131,7 +129,7 @@ dev = [
     # Starlette's TestClient transport, for the [ui] route tests. Test-only:
     # the console itself never makes an HTTP request, so this stays out of [ui].
     "httpx>=0.27",
-    # Builds the test PDFs once the fitz-based builders are ported (P4).
+    # Builds the test PDFs (tests/_pdf_builders.py).
     "reportlab>=4.0",
 ]
 
@@ -210,8 +208,6 @@ warn_unused_configs = true
 
 [[tool.mypy.overrides]]
 module = [
-    "fitz",
-    "fitz.*",
     "rapidocr_onnxruntime",
     "rapidocr_onnxruntime.*",
     "onnxruntime",

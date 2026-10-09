@@ -187,7 +187,7 @@ def reconstruct_table(
 
     # Lineage, not defaults: confidence from the constituent regions
     # (capped by the detector's), producer marker so reconstructed tables
-    # are distinguishable from PyMuPDF-fallback ones in the parquet.
+    # are distinguishable from native-finder ones in the parquet.
     mean_conf = sum(r.confidence for r in inside) / len(inside)
     confidence = min(mean_conf, conf) if conf > 0 else mean_conf
 

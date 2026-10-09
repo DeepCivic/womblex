@@ -56,7 +56,7 @@ def project_to_columns(
     """Segment words into vertical columns by projecting onto an x-axis histogram.
 
     Args:
-        words: PyMuPDF word tuples ``(x0, y0, x1, y1, text, ...)``.
+        words: word tuples ``(x0, y0, x1, y1, text, ...)``.
         page_width: Page width in PDF points.
         min_gutter_width: Minimum gutter width as a fraction of page width to
             qualify as a column boundary (0.02 ≈ 12 pt on letter-size pages).
@@ -185,7 +185,7 @@ def extract_page_text(
 ) -> str:
     """Extract page text, using grid projection for multi-column layouts.
 
-    For single-column or sparse pages, emits PyMuPDF blocks joined with
+    For single-column or sparse pages, emits the page's blocks joined with
     blank lines so paragraph breaks survive — `page.get_text("text")`
     flat-joins blocks with single newlines and loses paragraph structure
     that the block_type classifier later needs.

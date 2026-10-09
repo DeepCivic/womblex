@@ -136,7 +136,7 @@ class TestExtractionResult:
 class TestFindNativeTablesGate:
     """Cross-classifier gate inside ``_find_native_tables``.
 
-    Real tables decompose into ≥1 PyMuPDF dict-block per row; prose-as-
+    Real tables decompose into ≥1 text block per row; prose-as-
     table over-claims rows by carving sub-block whitespace into pseudo-
     rows. The gate rejects candidates where block count < row count.
     """
@@ -432,8 +432,8 @@ class TestGetExtractor:
         )
 
     def test_image_is_not_handled_here(self) -> None:
-        """Images route through the orchestrator, like every other fitz-openable
-        input — PyMuPDF opens one as a single-page document."""
+        """Images route through the orchestrator, like every other seam-openable
+        input — the seam opens one as a single-page document."""
         with pytest.raises(ValueError, match="SPREADSHEET/DOCX/TEXT"):
             get_extractor(self._make_profile(DocumentType.IMAGE))
 

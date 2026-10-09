@@ -1,7 +1,6 @@
 """The pdfium backend behind the seam: PDFium's bottom-left space in, top-left out.
 
-Expected values are the coordinates the builder drew at, so these hold without
-fitz as an oracle; `_fitz.py` is checked to the same values in `test_pdf_fitz`.
+Expected values are the coordinates the builder drew at.
 """
 
 from __future__ import annotations
@@ -17,7 +16,7 @@ from womblex.ingest.pdf.types import Rect, render_box
 
 
 def _open(path):
-    return open_document(path, backend="pdfium")
+    return open_document(path)
 
 
 def _box(rect: Rect) -> tuple[float, ...]:
@@ -46,10 +45,6 @@ class TestDocument:
             assert [page.number for page in doc] == [0, 1]
             doc.select([1])
             assert doc.page_count == 1 and doc[0].rotation == 90
-
-    def test_registered_beside_fitz(self, pdf_path) -> None:
-        with pytest.raises(ValueError, match="known backends: fitz, pdfium"):
-            open_document(pdf_path, backend="nope")
 
 
 class TestGeometry:

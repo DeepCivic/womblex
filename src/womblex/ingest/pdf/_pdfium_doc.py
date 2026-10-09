@@ -6,8 +6,7 @@ rect leaves this module through `PdfiumPage._rect`, which does that flip, so no
 caller sees pdfium's convention. Like MuPDF, objects are reported in unrotated
 page space while `rect` is the rotated page.
 
-Text is `_text.py` (P6 of `docs/plan-permissive-deps.md`) and the table finder
-is `_tables.py` (P7); this backend is still reachable only by naming it.
+Text is `_text.py` and the table finder is `_tables.py`.
 
 PDFium is not thread-safe (see `docs/decisions.md`); nothing here locks, since
 extraction runs one document at a time per process.

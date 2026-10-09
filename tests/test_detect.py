@@ -196,9 +196,8 @@ class TestClassify:
 
 class TestDetectDocumentType:
     def test_nonexistent_file_raises(self, tmp_path: Path) -> None:
-        # PyMuPDF raises its own FileNotFoundError, which subclasses
-        # RuntimeError rather than the builtin — accept either, so the test
-        # survives a change of extractor without going blind.
+        # A backend may raise its own error rather than the builtin; accept
+        # either so the test survives a change of extractor without going blind.
         with pytest.raises((FileNotFoundError, RuntimeError)):
             detect_document_type(tmp_path / "nope.pdf")
 
