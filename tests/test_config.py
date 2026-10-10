@@ -440,9 +440,12 @@ class TestStrictConfig:
         with pytest.raises(ValueError, match="use layout.model"):
             WomblexConfig(**raw)
 
-    @pytest.mark.parametrize("name", ["example.yaml", "default-isaacus.yaml"])
-    def test_shipped_configs_load(self, name: str) -> None:
-        load_config(Path(__file__).resolve().parent.parent / "configs" / name)
+    @pytest.mark.parametrize(
+        "path", sorted((Path(__file__).resolve().parent.parent / "configs").glob("*.yaml")),
+        ids=lambda p: p.name,
+    )
+    def test_shipped_configs_load(self, path: Path) -> None:
+        load_config(path)
 
     def test_saved_preset_with_stray_key_is_logged_by_name(self, caplog) -> None:
         import json
