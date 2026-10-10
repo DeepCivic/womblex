@@ -327,6 +327,24 @@ class RunBoard:
         jobs = [_job_row(s) for s in rows]
         return [j for j in jobs if status is None or j.status == status][:limit]
 
+    def file_checksums(self, run_id: str) -> dict[str, str]:
+        """Every file the run's finished workflows published, key -> SHA-256.
+
+        Read from the workflow outputs the publish steps returned, oldest
+        first, so a key a later workflow rewrote (an in-place stage, a
+        re-dispatched stage) carries the newest digest. A workflow recorded
+        before checksums existed has none to contribute.
+        """
+        done = [s for s in self._rows(run_id, None, load_output=True)
+                if _board_status(s) == "done"]
+        done.sort(key=lambda s: s.created_at or 0)
+        checksums: dict[str, str] = {}
+        for s in done:
+            published = s.output.get("checksums") if isinstance(s.output, dict) else None
+            if isinstance(published, dict):
+                checksums.update(published)
+        return checksums
+
     def stale_jobs(
         self, older_than_seconds: float, run_id: str | None = None, *,
         owner: str | None = None,

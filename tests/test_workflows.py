@@ -288,3 +288,36 @@ def test_extract_publishes_the_log_even_when_the_batch_fails(tmp_path, monkeypat
 def test_a_stage_run_out_of_order_is_not_retried():
     assert not workflows._not_a_failure_to_retry(workflows.StageNotReady("chunk: missing"))
     assert workflows._not_a_failure_to_retry(OSError("transient"))
+
+
+def test_finalize_records_the_checksum_of_every_published_file(fleet):
+    """The publish step returns each key with its digest; finalize writes them into
+    the run record, and they equal the SHA-256 of the bytes now in the store."""
+    import argparse
+    import hashlib
+
+    from womblex.cli.cloud import cmd_finalize
+    from womblex.store.run_manifest import read_run_record
+
+    store_root, ingest, tmp = fleet
+    with RunBoard(None) as board:
+        board.enqueue("r1", [batch(ingest)])
+        board.enqueue_stages("r1", ["normalise"], "runs/r1/documents")
+        work(fleet, idle_timeout=2)
+        checksums = board.file_checksums("r1")
+
+    assert "runs/r1/documents/batch-0001.elements.parquet" in checksums
+    assert "runs/r1/documents/batch-0001.normalised_text.parquet" in checksums
+    for key, digest in checksums.items():
+        assert hashlib.sha256((store_root / key).read_bytes()).hexdigest() == digest
+
+    rc = cmd_finalize(argparse.Namespace(
+        store=str(store_root), run_id="r1", output_prefix=None,
+        dsn=f"sqlite:///{tmp / 'dbos.sqlite'}",
+    ))
+    assert rc == 0
+    record = read_run_record(store_root / "runs" / "r1" / "manifest.parquet")
+    assert {f["key"]: f["sha256"] for f in record["files"]} == {
+        k.removeprefix("runs/r1/"): v for k, v in checksums.items()
+    }
+    assert not any("file checksums" in gap for gap in record["partial"])

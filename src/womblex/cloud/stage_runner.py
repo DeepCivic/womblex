@@ -42,6 +42,7 @@ from womblex.cloud.stage_contracts import (
     StageScope,
 )
 from womblex.process.text_overlay import MissingOverlayError
+from womblex.utils.checksum import sha256_file
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from womblex.config import WomblexConfig
@@ -238,8 +239,10 @@ _STAGING_DIRNAME = ".staging"
 def _publish(
     contract: StageContract, config: WomblexConfig, store: RemoteStore,
     shard_prefix: str, stems: list[str], local_dir: Path,
-) -> int:
+) -> dict[str, str]:
     """Verify every declared output exists locally, then publish them all.
+
+    Returns each published key with the SHA-256 of the bytes uploaded.
 
     SIDECAR stages publish straight to their live keys: their outputs are new
     siblings disjoint from their inputs, so a transport failure part-way through
@@ -269,12 +272,13 @@ def _publish(
                 )
             pending.append((local, _key(shard_prefix, stem, suffix)))
 
+    checksums = {key: sha256_file(local) for local, key in pending}
     if contract.mutation is MutationMode.IN_PLACE:
         _publish_atomic(store, shard_prefix, pending)
     else:
         for local, key in pending:
             store.upload_file(local, key)
-    return len(pending)
+    return checksums
 
 
 def _publish_atomic(
@@ -320,8 +324,8 @@ def _run_unit(
     contract: StageContract, config: WomblexConfig, ctx: RunContext,
     store: RemoteStore, shard_prefix: str, stems: list[str], input_keys: list[str],
     ingest: RemoteStore,
-) -> int:
-    """Stage in, run the unchanged ``*_shards()``, publish. Returns files published."""
+) -> dict[str, str]:
+    """Stage in, run the unchanged ``*_shards()``, publish. Returns key -> SHA-256 published."""
     with tempfile.TemporaryDirectory(prefix="womblex-stage-") as tmp:
         documents = Path(tmp) / "documents"
         store.download_to_dir(input_keys, documents)
@@ -365,19 +369,15 @@ def plan_units(
 def run_unit(
     contract: StageContract, config: WomblexConfig, ctx: RunContext, store: RemoteStore,
     shard_prefix: str, unit: list[str], ingest: RemoteStore,
-) -> list[str]:
-    """Run one unit and return the keys it published.
+) -> dict[str, str]:
+    """Run one unit and return the keys it published, each with its SHA-256.
 
     Raises :class:`NotReady` when an upstream sidecar is absent and
     :class:`InputContractError` when a strict input the config selects is.
     """
     present = set(store.list_files(shard_prefix, "*.parquet"))
     input_keys = _resolve_inputs(contract, config, shard_prefix, unit, present)
-    _run_unit(contract, config, ctx, store, shard_prefix, unit, input_keys, ingest)
-    return [
-        _key(shard_prefix, stem, suffix)
-        for stem in unit for suffix in contract.outputs(config)
-    ]
+    return _run_unit(contract, config, ctx, store, shard_prefix, unit, input_keys, ingest)
 
 
 def _source_fetcher(ingest: RemoteStore, scratch: Path) -> Callable[[dict], Path]:
@@ -513,10 +513,10 @@ def run_stage_remote(
                     continue
 
                 input_keys = _resolve_inputs(contract, config, shard_prefix, unit, present)
-                summary.published += _run_unit(
+                summary.published += len(_run_unit(
                     contract, config, ctx, store, shard_prefix, unit, input_keys,
                     ingest or store,
-                )
+                ))
                 summary.processed += 1
             except NotReady as nr:
                 producer = PRODUCER_OF.get(nr.suffix, "the upstream stage")

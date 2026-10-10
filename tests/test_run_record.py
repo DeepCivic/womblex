@@ -137,6 +137,25 @@ class TestWhereItLives:
         assert pq.read_table(str(manifest)).num_rows == 1
 
 
+class TestFileChecksums:
+    def test_supplied_checksums_are_listed_sorted(self, tmp_path, extraction):
+        shards = _extracted(tmp_path, extraction)
+        manifest = write_run_manifest(
+            shards, checksums={"documents/b.parquet": "bb", "documents/a.parquet": "aa"},
+        )
+        record = read_run_record(manifest)
+        assert record["files"] == [
+            {"key": "documents/a.parquet", "sha256": "aa"},
+            {"key": "documents/b.parquet", "sha256": "bb"},
+        ]
+        assert not any("file checksums" in gap for gap in record["partial"])
+
+    def test_a_record_without_them_names_the_gap(self, tmp_path, extraction):
+        record = read_run_record(write_run_manifest(_extracted(tmp_path, extraction)))
+        assert "files" not in record
+        assert any("file checksums" in gap for gap in record["partial"])
+
+
 class TestRegeneration:
     def test_the_shard_directory_alone_regenerates_the_record(self, tmp_path, extraction):
         """No configuration is consulted — `womblex manifest` gets a directory."""

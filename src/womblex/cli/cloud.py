@@ -307,11 +307,16 @@ def cmd_finalize(args: argparse.Namespace) -> int:
     store = RemoteStore.from_uri(store_uri)
 
     dsn = _resolve_dsn(args)
+    checksums: dict[str, str] | None = None
     if dsn:
         from womblex.cloud.jobs import RunBoard
 
         with RunBoard(dsn) as board:
             stats = board.stats(args.run_id)
+            published = board.file_checksums(args.run_id)
+        # Run-relative, so the record reads the same wherever the store is mounted.
+        # An empty board read is a run recorded before checksums, not a run of no files.
+        checksums = {k.removeprefix(f"{output_prefix}/"): v for k, v in published.items()} or None
         unfinished = stats.get("pending", 0) + stats.get("running", 0)
         if unfinished:
             logger.warning(
@@ -321,6 +326,9 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         if stats.get("failed"):
             logger.warning("run %s has %d failed job(s); their docs are absent",
                            args.run_id, stats["failed"])
+    else:
+        logger.warning("no --dsn: the run record will carry no file checksums "
+                       "(they are read from the workflow outputs)")
 
     manifest_keys = store.list_files(shard_prefix, "*._manifest.parquet")
     if not manifest_keys:
@@ -344,7 +352,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
     with tempfile.TemporaryDirectory(prefix="womblex-finalize-") as tmp:
         docs = Path(tmp) / "documents"
         store.download_to_dir(manifest_keys, docs)
-        local_manifest = write_run_manifest(docs, footers=footers)
+        local_manifest = write_run_manifest(docs, footers=footers, checksums=checksums)
         store.upload_file(local_manifest, f"{output_prefix}/{RUN_MANIFEST_FILENAME}")
 
     logger.info(
