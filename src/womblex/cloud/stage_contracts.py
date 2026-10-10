@@ -234,11 +234,15 @@ def _spellfix_conditional(_config: WomblexConfig) -> tuple[ConditionalInput, ...
 
 def _pii_conditional(_config: WomblexConfig) -> tuple[ConditionalInput, ...]:
     # Optional in code, load-bearing in practice — the Kanon-2 graph is the
-    # primary candidate source; without it only the opt-in backstop fires.
+    # primary candidate source; without it only the opt-in backstop fires. The
+    # elements and cells let a table chunk be matched to its table's mentions.
     return (
         ConditionalInput(
             ENRICHMENT_ENTITIES_SUFFIX, strict=False, reason="graph is the primary PII source",
         ),
+    ) + tuple(
+        ConditionalInput(suffix, strict=False, reason="matches table chunks to their table")
+        for suffix in (ELEMENTS_SUFFIX, TABLE_CELLS_SUFFIX)
     )
 
 

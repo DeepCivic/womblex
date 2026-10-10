@@ -70,3 +70,19 @@ def table_markdown(base: Path) -> str:
     from womblex.process.chunk_stage import _load_elements
 
     return table_texts(_load_elements(base)[DOC])[0].markdown
+
+
+NARRATIVE = "Contact Jane Doe about the $5,000 grant.\n\nSigned by the delegate."
+
+
+def write_contact_chunks(base: Path, markdown: str, *, table_start: int = 0) -> None:
+    """Chunks for the contact shard: its narrative, and its table (from ``table_start``)."""
+    from womblex.store.output import write_chunks
+
+    common = {"source_hash": DOC, "has_redaction": False, "page_start": 1, "page_end": 1}
+    write_chunks([
+        {**common, "chunk_index": 0, "text": NARRATIVE, "start_char": 0,
+         "end_char": len(NARRATIVE), "content_type": "narrative", "elem_order": None},
+        {**common, "chunk_index": 1, "text": markdown[table_start:], "start_char": table_start,
+         "end_char": len(markdown), "content_type": "table", "elem_order": 1},
+    ], base)

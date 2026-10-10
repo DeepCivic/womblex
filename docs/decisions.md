@@ -547,7 +547,13 @@ There is no separate detector and **no second enrichment pass**.
   and a table mention's offsets share a coordinate space with the table's
   chunks. Its mentions carry `text_layer='table_markdown'`, the table's
   `elem_order` (or `sheet`) and `t<n>:`-namespaced entity ids (each result
-  restarts at `p1`). *Grounds*, from the Isaacus enrichment docs: batch
+  restarts at `p1`). The PII stage maps them onto the table's chunks by
+  `chunk.start_char`, as for the narrative, when the chunk's text is the
+  markdown's slice at its offsets; a chunk that does not line up (repaired or
+  stale) or whose table cannot be found takes no table spans and reads
+  `not_masked`, because offset masking there would be unsafe. A table chunk
+  counts as covered when its document's meta row records `table_count > 0`.
+  *Grounds*, from the Isaacus enrichment docs: batch
   composition does not change any document's results; the returned `doc.text`
   is identical to the input, with spans as code-point offsets into it; entity
   ids are unique within a document, so a whole table keeps one id per person
