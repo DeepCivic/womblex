@@ -309,11 +309,11 @@
 		error = null;
 		try {
 			yamlText = await renderConfigYaml(config);
-			result = { valid: true, errors: [], unknown_keys: [] };
+			result = { valid: true, errors: [] };
 		} catch (err) {
 			yamlText = null;
 			if (err instanceof ConfigInvalid) {
-				result = { valid: false, errors: err.errors, unknown_keys: [] };
+				result = { valid: false, errors: err.errors };
 			} else {
 				error = message(err);
 			}

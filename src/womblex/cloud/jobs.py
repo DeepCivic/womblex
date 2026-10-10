@@ -18,7 +18,7 @@ import logging
 from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, Self, TypeGuard
 
 import sqlalchemy.exc
 
@@ -156,6 +156,22 @@ def _job_row(s: WorkflowStatus) -> JobRow:
         updated_at=_iso(s.updated_at),
         kind=_attr(s, "kind", "batch"),
         stage=_attr(s, "stage"),
+    )
+
+
+@dataclass(frozen=True)
+class FileChecksums:
+    """A run's published files with their digests, and the workflows that may
+    have published files without one (failed, unfinished, or recorded before
+    checksums existed)."""
+
+    checksums: dict[str, str]
+    undigested: list[str]
+
+
+def _is_digest_map(value: Any) -> TypeGuard[dict[str, str]]:
+    return isinstance(value, dict) and all(
+        isinstance(k, str) and isinstance(v, str) for k, v in value.items()
     )
 
 
@@ -326,6 +342,38 @@ class RunBoard:
         rows.sort(key=lambda s: s.updated_at or 0, reverse=True)
         jobs = [_job_row(s) for s in rows]
         return [j for j in jobs if status is None or j.status == status][:limit]
+
+    def file_checksums(self, run_id: str) -> FileChecksums:
+        """Every file the run's extraction and stage workflows published, key -> SHA-256.
+
+        A finished workflow's digests come from its output; one that failed or
+        has not finished contributes the steps it completed. Read oldest first,
+        so a key a later workflow rewrote (an in-place stage, a re-dispatched
+        stage) carries the newest digest.
+        """
+        rows = [s for s in self._rows(run_id, None, load_output=True)
+                if _attr(s, "kind", dbos_app.KIND_BATCH) != dbos_app.KIND_DOWNSTREAM]
+        rows.sort(key=lambda s: s.created_at or 0)
+        checksums: dict[str, str] = {}
+        undigested: list[str] = []
+        for s in rows:
+            digests: dict[str, str] = {}
+            if _board_status(s) == "done":
+                out = s.output if isinstance(s.output, dict) else {}
+                if _is_digest_map(recorded := out.get("checksums")):
+                    digests = recorded
+                # A list output, or a count above the digests, is a workflow
+                # recorded before checksums: its files carry none.
+                if not isinstance(s.output, dict) or out.get("published", 0) > len(digests):
+                    undigested.append(s.workflow_id)
+            else:
+                for step in self._client.list_workflow_steps(s.workflow_id):
+                    if step["error"] is None and _is_digest_map(output := step["output"]):
+                        digests.update(output)
+                # A step that stopped part-way may have published without returning.
+                undigested.append(s.workflow_id)
+            checksums.update(digests)
+        return FileChecksums(checksums, sorted(undigested))
 
     def stale_jobs(
         self, older_than_seconds: float, run_id: str | None = None, *,

@@ -3,10 +3,16 @@
 import re
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-class ChunkingConfig(BaseModel):
+class StrictModel(BaseModel):
+    """Config base: an unknown key is an error, not a silently ignored setting."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ChunkingConfig(StrictModel):
 
     """Chunking configuration for semchunk.
 
@@ -129,7 +135,7 @@ class ChunkingConfig(BaseModel):
     )
 
 
-class NormaliseConfig(BaseModel):
+class NormaliseConfig(StrictModel):
     """Downstream text-cleaning op (``womblex normalise``).
 
     Applies verbatim-policy-respecting cleanup *after* extraction and writes
@@ -161,7 +167,7 @@ class NormaliseConfig(BaseModel):
     )
 
 
-class SpellfixConfig(BaseModel):
+class SpellfixConfig(StrictModel):
     """Dictionary-gated OCR character-confusion repair (``womblex spellfix``).
 
     A separate, opt-in cleaning op (distinct from ``normalise``, which is
@@ -193,7 +199,7 @@ class SpellfixConfig(BaseModel):
     )
 
 
-class SegmentationConfig(BaseModel):
+class SegmentationConfig(StrictModel):
     """Ground-truth segmentation of an element stream into reviewable units.
 
     Cuts a document's elements into contiguous ranges a human can correct in
@@ -223,7 +229,7 @@ class SegmentationConfig(BaseModel):
     )
 
 
-class QualityConfig(BaseModel):
+class QualityConfig(StrictModel):
     """Chunk-quality annotation op (``womblex quality``).
 
     Reads ``*.chunks.parquet`` and writes a ``*.chunk_quality.parquet`` sidecar
@@ -261,7 +267,7 @@ class QualityConfig(BaseModel):
         return self
 
 
-class MoneyColumnsConfig(BaseModel):
+class MoneyColumnsConfig(StrictModel):
     """Column-evidenced half of the money op — bare cells in a money column."""
 
     enabled: bool = Field(default=True, description="Classify table/sheet columns.")
@@ -286,7 +292,7 @@ class MoneyColumnsConfig(BaseModel):
     )
 
 
-class MoneyConfig(BaseModel):
+class MoneyConfig(StrictModel):
     """Monetary amount annotation op (``womblex money``).
 
     Reads ``*.elements.parquet`` + ``*.table_cells.parquet`` and writes

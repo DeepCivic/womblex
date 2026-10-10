@@ -125,11 +125,11 @@ def _logged[T](
 
 def _extract(
     run_id: str, batch_num: int, input_keys: list[str], shard_prefix: str, ingest_root: str,
-) -> list[str]:
-    """Stage this batch's inputs, extract them, publish the shards; return the keys."""
+) -> dict[str, str]:
+    """Stage this batch's inputs, extract them, publish the shards; return key -> SHA-256."""
     ctx = _context()
 
-    def body(root: Path) -> list[str]:
+    def body(root: Path) -> dict[str, str]:
         shards_dir = root / "shards"
         shards_dir.mkdir(parents=True, exist_ok=True)
         # Nested: a job's keys come from a recursive listing, so two documents
@@ -164,11 +164,18 @@ def _extract(
 def extract_batch(
     run_id: str, batch_num: int, input_keys: list[str], shard_prefix: str,
     ingest_root: str, max_attempts: int,
-) -> list[str]:
-    return DBOS.run_step(
+) -> dict[str, Any]:
+    recorded = DBOS.run_step(
         _retry("extract", max_attempts), _extract,
         run_id, batch_num, input_keys, shard_prefix, ingest_root,
     )
+    return {"published": len(recorded), "checksums": _digests(recorded)}
+
+
+def _digests(recorded: Any) -> dict[str, str]:
+    """A step's published keys with digests; one recorded before checksums
+    returned a key list, so its files carry none (the board names that gap)."""
+    return recorded if isinstance(recorded, dict) else {}
 
 
 # --- stages ------------------------------------------------------------------
@@ -179,12 +186,12 @@ def _plan(stage: str, shard_prefix: str) -> list[list[str]]:
     return plan_units(STAGE_CONTRACTS[stage], ctx.store, shard_prefix, ctx.config)
 
 
-def _unit(stage: str, run_id: str, shard_prefix: str, unit: list[str]) -> list[str]:
+def _unit(stage: str, run_id: str, shard_prefix: str, unit: list[str]) -> dict[str, str]:
     ctx = _context()
     contract = STAGE_CONTRACTS[stage]
     label = unit[0] if len(unit) == 1 else f"{len(unit)}-bases"
 
-    def body(_root: Path) -> list[str]:
+    def body(_root: Path) -> dict[str, str]:
         # Built per unit: the client holds a connection, and a recovered
         # workflow resumes in a process that has none.
         run_ctx = prepare_stage_context(contract, ctx.config)
@@ -203,13 +210,15 @@ def _unit(stage: str, run_id: str, shard_prefix: str, unit: list[str]) -> list[s
 def run_stage(run_id: str, stage: str, shard_prefix: str, max_attempts: int) -> dict[str, Any]:
     units = DBOS.run_step({"name": "plan"}, _plan, stage, shard_prefix)
     published = 0
+    checksums: dict[str, str] = {}
     for unit in units:
         label = unit[0] if len(unit) == 1 else "run"
-        keys = DBOS.run_step(
+        recorded = DBOS.run_step(
             _retry(f"unit:{label}", max_attempts), _unit, stage, run_id, shard_prefix, unit,
         )
-        published += len(keys)
-    return {"stage": stage, "units": len(units), "published": published}
+        published += len(recorded)
+        checksums.update(_digests(recorded))
+    return {"stage": stage, "units": len(units), "published": published, "checksums": checksums}
 
 
 # --- coordinator -------------------------------------------------------------

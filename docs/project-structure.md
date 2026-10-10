@@ -186,7 +186,7 @@ womblex/
 │       ├── model_check.py   # Pre-run model check: off/load/smoke per slot and scope, one minimal request per Isaacus model / service-backed model, remembered for the footer and run record
 │       ├── model_registry.py # Named model registry per slot (OCR, layout, PII context, tokeniser, spellfix dictionary): built-in names + `womblex.models.<slot>` entry-point plugins; records which entry each slot actually built, with its distribution and version
 │       ├── models.py        # Local model path resolution (WOMBLEX_MODELS_DIR, _models/, models/ + HF snapshot layout) + load record with byte digests
-│       ├── checksum.py      # Shared streamed MD5 helper for the standalone register ingests
+│       ├── checksum.py      # Streamed MD5 (register ingests) and SHA-256 (published run files) helpers
 │       ├── isaacus_client.py # Build the Isaacus SDK client (hosted API or private SageMaker)
 │       ├── run_log.py       # capture_batch_log() — tee a batch's womblex log lines to a file beside its shards
 │       ├── money_metrics.py # Money recall / precision / scale accuracy against typed transcript tags

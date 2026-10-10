@@ -24,6 +24,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, cast
 
+from womblex.utils.checksum import sha256_file
+
 logger = logging.getLogger(__name__)
 
 _REMOTE_PROTOCOLS = ("s3://", "gs://", "gcs://", "az://", "abfs://")
@@ -394,12 +396,17 @@ class RemoteStore:
             raise ValueError(f"store key {rel!r} does not stage under {local_dir}")
         return target
 
-    def upload_glob(self, local_dir: Path, glob: str, remote_rel_dir: str) -> list[str]:
-        """Push every file in *local_dir* matching *glob* under *remote_rel_dir*."""
-        uploaded: list[str] = []
+    def upload_glob(self, local_dir: Path, glob: str, remote_rel_dir: str) -> dict[str, str]:
+        """Push every file in *local_dir* matching *glob* under *remote_rel_dir*.
+
+        Returns each published key with the SHA-256 of the bytes uploaded,
+        hashed from the local file before it leaves.
+        """
+        uploaded: dict[str, str] = {}
         for p in sorted(local_dir.glob(glob)):
             if p.is_file():
-                uploaded.append(self.upload_file(p, f"{remote_rel_dir.strip('/')}/{p.name}"))
+                digest = sha256_file(p)
+                uploaded[self.upload_file(p, f"{remote_rel_dir.strip('/')}/{p.name}")] = digest
         logger.info("Published %d shard file(s) -> %s/%s", len(uploaded), self.root, remote_rel_dir)
         return uploaded
 

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from womblex.config.process import (
     ChunkingConfig,
@@ -16,10 +16,11 @@ from womblex.config.process import (
     QualityConfig,
     SegmentationConfig,
     SpellfixConfig,
+    StrictModel,
 )
 
 
-class PathsConfig(BaseModel):
+class PathsConfig(StrictModel):
 
     """Filesystem paths for input, output, and checkpoints."""
 
@@ -64,7 +65,7 @@ def _reject_removed(data: Any, section: str) -> Any:
 
 
 
-class DetectionConfig(BaseModel):
+class DetectionConfig(StrictModel):
 
     """Thresholds for document type detection."""
 
@@ -79,7 +80,7 @@ class DetectionConfig(BaseModel):
 
 
 
-class OCRConfig(BaseModel):
+class OCRConfig(StrictModel):
 
     """OCR engine settings.
 
@@ -125,7 +126,7 @@ class OCRConfig(BaseModel):
 
 
 
-class RedactionConfig(BaseModel):
+class RedactionConfig(StrictModel):
 
     """Redaction pipeline settings.
 
@@ -184,7 +185,7 @@ class RedactionConfig(BaseModel):
 
 
 
-class LayoutConfig(BaseModel):
+class LayoutConfig(StrictModel):
 
     """Layout analysis: which model finds page regions, and on which pages.
 
@@ -213,7 +214,7 @@ class LayoutConfig(BaseModel):
 
 
 
-class PIIConfig(BaseModel):
+class PIIConfig(StrictModel):
 
     """PII cleaning pipeline settings.
 
@@ -333,7 +334,7 @@ class PIIConfig(BaseModel):
 
 
 
-class SpreadsheetPrintConfig(BaseModel):
+class SpreadsheetPrintConfig(StrictModel):
     """Spreadsheet-printed-to-PDF extractor settings.
 
     Triggered when a doc has a native text layer + table signal + either a
@@ -343,13 +344,13 @@ class SpreadsheetPrintConfig(BaseModel):
     """
 
     metadata_location: str = "both"  # "both" | "table" | "document"
-    filename_hints: list[str] = [
+    filename_hints: list[str] = Field(default_factory=lambda: [
         "schedule", "index", "manifest", "register",
         "list-of", "table-of", "appendix",
-    ]
+    ])
 
 
-class NativeExtractionConfig(BaseModel):
+class NativeExtractionConfig(StrictModel):
 
     """Native text extraction settings."""
 
@@ -359,7 +360,7 @@ class NativeExtractionConfig(BaseModel):
 
 
 
-class ExtractionConfig(BaseModel):
+class ExtractionConfig(StrictModel):
 
     """Top-level extraction settings."""
 
@@ -370,7 +371,7 @@ class ExtractionConfig(BaseModel):
 
 
 
-class EnrichmentConfig(BaseModel):
+class EnrichmentConfig(StrictModel):
 
     """Isaacus enrichment settings."""
 
@@ -448,7 +449,7 @@ class EnrichmentConfig(BaseModel):
 
 
 
-class DatasetConfig(BaseModel):
+class DatasetConfig(StrictModel):
 
     """Dataset metadata."""
 
@@ -465,7 +466,7 @@ class DatasetConfig(BaseModel):
 
 
 
-class RetentionConfig(BaseModel):
+class RetentionConfig(StrictModel):
     """Run-output retention policy.
 
     Controls whether older run directories under ``<output_root>/`` are
@@ -485,7 +486,7 @@ class RetentionConfig(BaseModel):
     )
 
 
-class ProcessingConfig(BaseModel):
+class ProcessingConfig(StrictModel):
 
     """Batch processing settings."""
 
@@ -526,7 +527,7 @@ class ProcessingConfig(BaseModel):
         return v
 
 
-class ReferenceConfig(BaseModel):
+class ReferenceConfig(StrictModel):
     """Declares how a corpus reference register maps onto the generic matcher.
 
     The library knows nothing about specific registers; the corpus declares
@@ -568,7 +569,7 @@ class ReferenceConfig(BaseModel):
     )
 
 
-class LinkingConfig(BaseModel):
+class LinkingConfig(StrictModel):
     """Entity-link stage settings. Generic; corpus supplies the reference."""
 
     enabled: bool = Field(default=False, description="Run the entity-link stage")
@@ -589,7 +590,7 @@ class LinkingConfig(BaseModel):
     )
 
 
-class EmbeddingConfig(BaseModel):
+class EmbeddingConfig(StrictModel):
     """Isaacus embedding settings (kanon-2-embedder). Thin pass-through."""
 
     enabled: bool = Field(default=False, description="Run the embed stage")
@@ -605,7 +606,7 @@ class EmbeddingConfig(BaseModel):
     retry_base_delay: float = Field(default=2.0, ge=0.0)
 
 
-class WomblexConfig(BaseModel):
+class WomblexConfig(StrictModel):
     """Complete configuration for Womblex operations."""
 
     dataset: DatasetConfig

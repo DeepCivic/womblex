@@ -1,4 +1,4 @@
-"""File checksum helpers shared by the standalone register ingests."""
+"""File checksum helpers: MD5 for the register ingests, SHA-256 for published run files."""
 
 from __future__ import annotations
 
@@ -13,5 +13,14 @@ def md5_file(path: Path) -> str:
     h = hashlib.md5(usedforsecurity=False)
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def sha256_file(path: Path) -> str:
+    """SHA-256 hex digest of a file, streamed in 1 MB chunks."""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
     return h.hexdigest()

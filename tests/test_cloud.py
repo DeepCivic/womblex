@@ -8,6 +8,7 @@ and ``test_workflows.py``, on a SQLite system database.
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Self
 
@@ -289,9 +290,9 @@ def test_remote_store_download_to_dir_and_upload_glob(tmp_path):
     (shards / "other.txt").write_bytes(b"skip")
 
     uploaded = store.upload_glob(shards, "batch-0001.*", "runs/r1/documents")
-    assert set(uploaded) == {
-        "runs/r1/documents/batch-0001.elements.parquet",
-        "runs/r1/documents/batch-0001._manifest.parquet",
+    assert uploaded == {
+        "runs/r1/documents/batch-0001.elements.parquet": hashlib.sha256(b"e").hexdigest(),
+        "runs/r1/documents/batch-0001._manifest.parquet": hashlib.sha256(b"m").hexdigest(),
     }
     assert store.exists("runs/r1/documents/batch-0001.elements.parquet")
     assert not store.exists("runs/r1/documents/other.txt")

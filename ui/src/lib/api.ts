@@ -625,10 +625,6 @@ export interface ConfigError {
 export interface ValidationResult {
 	valid: boolean;
 	errors: ConfigError[];
-	// Keys the schema does not claim. Always empty for a config this form
-	// built — its fields *are* the schema — so no screen renders them; the
-	// field is here because the endpoint reports it.
-	unknown_keys: string[];
 }
 
 const JSON_POST = { method: 'POST', headers: { 'content-type': 'application/json' } };
