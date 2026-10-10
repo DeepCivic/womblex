@@ -7,7 +7,7 @@ column-level schemas are in [extraction.md](extraction.md).
 
 ## Contract version
 
-`womblex.contract_version` (currently `1.2`, `store/contract.CONTRACT_VERSION`)
+`womblex.contract_version` (currently `1.3`, `store/contract.CONTRACT_VERSION`)
 is in the footer of every pipeline Parquet and in `egress_manifest.json`. It is
 versioned apart from the package: a release that changes no schema leaves it
 alone.
@@ -28,7 +28,7 @@ the single source). An unknown role reads as `raw`.
 | Role (`*.<role>.parquet`) | Joins on | Sensitivity |
 |---|---|---|
 | `elements` | `(source_hash, elem_order)` | raw |
-| `table_cells`, `form_fields` | `(source_hash, parent_elem_order)` to `elements` | raw |
+| `table_cells`, `form_fields` | `(source_hash, parent_elem_order)` to `elements`; `table_cells.bbox` (1.3) locates a cell on the page, null where the producer has no cell geometry | raw |
 | `_manifest` / run-root `manifest` | `source_hash` | none |
 | `normalised_text`, `spellfix_text`, `spellfix_corrections` | `(source_hash, elem_order)` | raw |
 | `chunks` | `(source_hash, chunk_index)`; table chunks anchor on `elem_order` | raw |

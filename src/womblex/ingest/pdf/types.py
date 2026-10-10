@@ -174,6 +174,7 @@ class FoundTable:
     row_count: int
     col_count: int
     rows: tuple[tuple[str | None, ...], ...] = ()
+    cell_boxes: tuple[tuple[Rect | None, ...], ...] = ()
 
 
 @dataclass(frozen=True)

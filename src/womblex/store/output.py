@@ -114,6 +114,7 @@ TABLE_CELLS_SCHEMA = pa.schema([
     ("rowspan", pa.int32()),
     ("colspan", pa.int32()),
     ("value_type", pa.string()),
+    ("bbox", _BBOX_TYPE),
 ])
 
 FORM_FIELDS_SCHEMA = pa.schema([
@@ -155,6 +156,10 @@ _MANIFEST_BACKFILL: tuple[str, ...] = ("ingest_root", "source_relpath")
 # `content_digest` back-fills as null, not "": a shard written before it has no
 # digest to compare, which is unknown rather than an empty document's digest.
 _MANIFEST_NULL_BACKFILL: tuple[str, ...] = ("content_digest",)
+
+# `table_cells.bbox` (contract 1.3) back-fills as null: a cell written before it
+# has no recorded geometry.
+_TABLE_CELLS_NULL_BACKFILL: tuple[str, ...] = ("bbox",)
 
 CHUNKS_SCHEMA = pa.schema([
     ("source_hash", pa.string()),
@@ -323,6 +328,7 @@ def write_results(
                         "rowspan": c.rowspan,
                         "colspan": c.colspan,
                         "value_type": c.value_type,
+                        "bbox": _bbox_dict(c.bbox),
                     })
                     tc_count += 1
             elif e.kind == "form" and e.fields:
@@ -528,12 +534,17 @@ def _read_shard(shard_path: Path, role: str) -> pa.Table:
         raw = raw.append_column("doc_id", derived)
         missing.remove("doc_id")
     backfill = _MANIFEST_BACKFILL + _MANIFEST_NULL_BACKFILL if role == "manifest" else ()
+    if role == "table_cells":
+        backfill = _TABLE_CELLS_NULL_BACKFILL
     hard = [name for name in missing if name not in backfill]
     if hard:
         raise ValueError(
             f"shard {shard_path} missing columns {hard}; schema bump without compat shim?"
         )
     for name in missing:
+        if name in _TABLE_CELLS_NULL_BACKFILL and role == "table_cells":
+            raw = raw.append_column(name, pa.nulls(raw.num_rows, type=schema.field(name).type))
+            continue
         fill = None if name in _MANIFEST_NULL_BACKFILL else ""
         raw = raw.append_column(name, pa.array([fill] * raw.num_rows, type=pa.string()))
     return raw.select([f.name for f in schema]).cast(schema)

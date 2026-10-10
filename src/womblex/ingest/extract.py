@@ -30,7 +30,7 @@ from womblex.ingest.views import (  # re-exported for back-compat
 
 if TYPE_CHECKING:
     from womblex.ingest.layout_step import LayoutSettings
-    from womblex.ingest.pdf.types import Document, Page, Rect
+    from womblex.ingest.pdf.types import Document, FoundTable, Page, Rect
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +92,16 @@ def _normalise_rect(rect: Rect, page_width: float, page_height: float) -> Positi
         width=(rect.x1 - rect.x0) / page_width if page_width else 0.0,
         height=(rect.y1 - rect.y0) / page_height if page_height else 0.0,
     )
+
+
+def _cell_boxes(tbl: FoundTable, page_width: float, page_height: float) -> dict[tuple[int, int], Position]:
+    """The finder's per-cell rectangles, normalised, keyed by (row, col)."""
+    return {
+        (r, c): _normalise_rect(box, page_width, page_height)
+        for r, row in enumerate(tbl.cell_boxes)
+        for c, box in enumerate(row)
+        if box is not None
+    }
 
 
 def _normalise_bbox(
@@ -183,7 +193,10 @@ def _find_native_tables(
             rows = [[str(c) if c else "" for c in row] for row in extracted[1:]] if len(extracted) > 1 else []
             pos = _normalise_rect(rect, pw, ph)
             found.append((
-                TableData(headers=headers, rows=rows, position=pos, confidence=0.8),
+                TableData(
+                    headers=headers, rows=rows, position=pos, confidence=0.8,
+                    cell_boxes=_cell_boxes(tbl, pw, ph),
+                ),
                 rect,
                 extracted,
             ))
@@ -200,7 +213,10 @@ def _find_native_tables(
             rows = [[str(c) if c else "" for c in row] for row in extracted[1:]] if len(extracted) > 1 else []
             pos = _normalise_rect(rect, pw, ph)
             found.append((
-                TableData(headers=headers, rows=rows, position=pos, confidence=0.6),
+                TableData(
+                    headers=headers, rows=rows, position=pos, confidence=0.6,
+                    cell_boxes=_cell_boxes(tbl, pw, ph),
+                ),
                 rect,
                 extracted,
             ))

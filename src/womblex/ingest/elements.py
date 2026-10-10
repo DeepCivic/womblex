@@ -69,7 +69,11 @@ class BBox:
 
 @dataclass(slots=True)
 class Cell:
-    """One cell of a table element. Verbatim; value_type is a hint, not a coercion."""
+    """One cell of a table element. Verbatim; value_type is a hint, not a coercion.
+
+    ``bbox`` is normalised like ``Element.bbox``; null where the producer has no
+    cell geometry (DOCX, OCR-reconstructed and spreadsheet-print tables).
+    """
 
     row: int
     col: int
@@ -77,6 +81,7 @@ class Cell:
     rowspan: int = 1
     colspan: int = 1
     value_type: str = "text"
+    bbox: BBox | None = None
 
 
 @dataclass(slots=True)

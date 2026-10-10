@@ -321,6 +321,12 @@ def _load_narrative_overrides(
 # ---------------------------------------------------------------------------
 
 
+def _bbox_from_row(raw: dict | None) -> BBox | None:
+    if raw is None:
+        return None
+    return BBox(x=raw["x"], y=raw["y"], width=raw["width"], height=raw["height"])
+
+
 def _load_elements(base_path: Path) -> dict[str, list[Element]]:
     """Read elements + table_cells from a shard and return per-source elements.
 
@@ -344,18 +350,12 @@ def _load_elements(base_path: Path) -> dict[str, list[Element]]:
             rowspan=row["rowspan"] or 1,
             colspan=row["colspan"] or 1,
             value_type=row["value_type"] or "text",
+            bbox=_bbox_from_row(row.get("bbox")),
         ))
 
     out: dict[str, list[Element]] = defaultdict(list)
     for row in elem_table.to_pylist():
-        bbox_raw = row.get("bbox")
-        bbox = (
-            BBox(
-                x=bbox_raw["x"], y=bbox_raw["y"],
-                width=bbox_raw["width"], height=bbox_raw["height"],
-            )
-            if bbox_raw is not None else None
-        )
+        bbox = _bbox_from_row(row.get("bbox"))
         elem = Element(
             order=row["elem_order"],
             kind=row["kind"],
