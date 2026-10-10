@@ -24,6 +24,12 @@ them), mirroring the corpus-wide "individual document failures shouldn't stop
 the batch" policy. The downstream :mod:`womblex.link.stage` consumes the
 entities sidecar.
 
+Tables are enriched on their own: each table's markdown (the string the chunker
+reads, via :func:`womblex.process.chunker.table_texts`) is a separate request
+text, so narrative offsets do not move and a table mention's offsets index that
+table's markdown (``text_layer='table_markdown'``). ``enrichment.include_tables``
+switches the pass off.
+
 Split documents are not persisted for AI-chunking reuse (no single ILGS
 Document spans the full narrative); the chunk stage self-enriches those few
 long-tail docs. All other docs persist normally when ``persist_document``.
@@ -36,14 +42,16 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
+import pyarrow.parquet as pq
+
 from womblex.analyse.enrich import enrich_documents_raw
 from womblex.analyse.enrich_merge import merge_segment_results
 from womblex.analyse.graph import build_document_graph
 from womblex.analyse.models import EnrichmentResult
 from womblex.config import EnrichmentConfig
 from womblex.ingest.elements import Element
-from womblex.process.chunk_stage import _batch_bases
-from womblex.process.chunker import TextChunk, reassemble_narrative
+from womblex.process.chunk_stage import _batch_bases, _load_elements
+from womblex.process.chunker import TableText, TextChunk, reassemble_narrative, table_texts
 from womblex.process.text_overlay import apply_overlay, load_overlay, require_overlays
 from womblex.store.checkpoint import CheckpointManager
 from womblex.store.enrichment_doc import (
@@ -51,7 +59,10 @@ from womblex.store.enrichment_doc import (
     write_enrichment_doc_shard,
 )
 from womblex.store.enrichment_output import (
+    TABLES_ENRICHED_KEY,
+    TableEnrichment,
     enrichment_entities_path_for,
+    enrichment_meta_path_for,
     graph_edges_path_for,
     write_enrichment_entities_shard,
     write_enrichment_meta_shard,
@@ -73,6 +84,8 @@ class EnrichStageResult:
     batches_written: int
     docs_enriched: int
     total_entities: int
+    narrative_tokens: int = 0
+    table_tokens: int = 0
 
 
 def enrich_shards(
@@ -110,10 +123,13 @@ def enrich_shards(
     batches_written = 0
     docs_enriched = 0
     total_entities = 0
+    narrative_tokens = 0
+    table_tokens = 0
 
     for base in bases:
         if checkpoint_mgr is not None and _all_docs_checkpointed(
             base, checkpoint_mgr, persist_document=persist_document,
+            include_tables=enrichment_config.include_tables,
         ):
             logger.info("enrich_shards: skipping %s (all docs checkpointed)", base.stem)
             continue
@@ -123,20 +139,32 @@ def enrich_shards(
         packable = [
             (h, t) for h, t in narratives.items() if len(t.strip()) >= min_chars
         ]
+        tables = _load_tables(base) if enrichment_config.include_tables else {}
+        table_items = [
+            (_table_key(h, i), t.markdown)
+            for h, ts in tables.items() for i, t in enumerate(ts)
+        ]
+        narrative_tokens += sum(counter.count_batch([t for _, t in packable]))
+        table_tokens += sum(counter.count_batch([t for _, t in table_items]))
 
-        results, doc_rows, errored = _enrich_packed(
-            packable, client, enrichment_config, counter,
+        all_results, doc_rows, errored_keys = _enrich_packed(
+            packable + table_items, client, enrichment_config, counter,
             text_source=text_source, persist_document=persist_document,
             doc_ids_by_hash=doc_ids_by_hash,
         )
+        results = [(k, r) for k, r in all_results if _SEP not in k]
+        doc_rows = [row for row in doc_rows if _SEP not in row[0]]
+        table_results = _table_enrichments(all_results, tables)
+        errored = {k.split(_SEP)[0] for k in errored_keys}
         for _src, enr in results:
-            total_entities += (
-                len(enr.persons) + len(enr.locations)
-                + len(enr.terms) + len(enr.external_documents)
-            )
+            total_entities += _entity_total(enr)
+        total_entities += sum(_entity_total(t.result) for t in table_results)
 
-        write_enrichment_entities_shard(results, base)
-        write_enrichment_meta_shard(results, base)
+        write_enrichment_entities_shard(
+            results, base, text_layer=text_source, tables=table_results)
+        write_enrichment_meta_shard(results, base, table_counts={
+            h: len(ts) for h, ts in tables.items() if h not in errored
+        } if enrichment_config.include_tables else None)
         chunks_by_hash = _load_chunks(base)
         write_graph_edges_shard(
             [
@@ -161,19 +189,22 @@ def enrich_shards(
             if resolved_doc_ids:
                 checkpoint_mgr.update(
                     doc_ids=resolved_doc_ids,
-                    succeeded=len(results),
+                    succeeded=len([h for h, _ in results if h not in errored]),
                     failed=len(errored),
                     batch_num=int(base.stem.replace("batch-", "") or 0),
                 )
 
         logger.info(
-            "enrich_shards: %s enriched %d docs", base.stem, len(results),
+            "enrich_shards: %s enriched %d docs, %d table(s)",
+            base.stem, len(results), len(table_results),
         )
 
     return EnrichStageResult(
         batches_written=batches_written,
         docs_enriched=docs_enriched,
         total_entities=total_entities,
+        narrative_tokens=narrative_tokens,
+        table_tokens=table_tokens,
     )
 
 
@@ -230,7 +261,7 @@ def _enrich_packed(
         except Exception as e:  # transient (network/429-exhausted) — leave for retry
             logger.error(
                 "enrich_shards: enrichment failed for %s: %s",
-                [doc_ids_by_hash.get(k, k) for k in keys], e,
+                [doc_ids_by_hash.get(k.split(_SEP)[0], k) for k in keys], e,
             )
             errored.update(keys)
             continue
@@ -306,6 +337,37 @@ def _load_narratives(
     return narratives, src_to_doc
 
 
+_SEP = "\x1f"
+
+
+def _table_key(source_hash: str, ordinal: int) -> str:
+    """Request key for one table: a table shares its document's ``source_hash``."""
+    return f"{source_hash}{_SEP}{ordinal}"
+
+
+def _load_tables(base_path: Path) -> dict[str, list[TableText]]:
+    """Per-document table markdowns — the strings the chunker reads."""
+    out = {src: table_texts(elems) for src, elems in _load_elements(base_path).items()}
+    return {src: ts for src, ts in out.items() if ts}
+
+
+def _table_enrichments(
+    results: list[tuple[str, EnrichmentResult]], tables: dict[str, list[TableText]],
+) -> list[TableEnrichment]:
+    out: list[TableEnrichment] = []
+    for key, enr in results:
+        if _SEP not in key:
+            continue
+        src, ordinal = key.split(_SEP)
+        t = tables[src][int(ordinal)]
+        out.append(TableEnrichment(src, int(ordinal), t.elem_order, t.sheet, enr))
+    return out
+
+
+def _entity_total(enr: EnrichmentResult) -> int:
+    return len(enr.persons) + len(enr.locations) + len(enr.terms) + len(enr.external_documents)
+
+
 def _load_chunks(base_path: Path) -> dict[str, list[TextChunk]]:
     """Narrative chunks per source_hash from the batch's chunks sidecar, if present.
 
@@ -336,6 +398,7 @@ def _load_chunks(base_path: Path) -> dict[str, list[TextChunk]]:
 
 def _all_docs_checkpointed(
     base_path: Path, mgr: CheckpointManager, *, persist_document: bool = False,
+    include_tables: bool = False,
 ) -> bool:
     """True if the entities sidecar exists and every manifest doc is checkpointed.
 
@@ -343,6 +406,9 @@ def _all_docs_checkpointed(
     shipping landed is re-enriched on resume so it gains its
     ``*.graph_edges.parquet`` (mirroring ``persist_document``: the graph is
     only buildable from the live EnrichmentResult).
+
+    When ``include_tables`` is on, the meta sidecar's footer must record that
+    tables were sent — a batch enriched without them is re-enriched on resume.
 
     When ``persist_document`` is requested, the doc sidecar must also exist —
     otherwise a batch enriched before the flag was enabled would be skipped on
@@ -354,6 +420,10 @@ def _all_docs_checkpointed(
         return False
     if persist_document and not enrichment_doc_path_for(base_path).exists():
         return False
+    if include_tables:
+        meta = enrichment_meta_path_for(base_path)
+        if not meta.exists() or TABLES_ENRICHED_KEY not in (pq.read_schema(str(meta)).metadata or {}):
+            return False
     try:
         m = read_manifest(base_path)
     except Exception:

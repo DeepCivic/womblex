@@ -227,6 +227,7 @@ Wrappers in `analyse/` call the Isaacus SDK:
 
 - `enrich.py` — calls `kanon-2-enricher` to produce structured ILGS Documents containing segments, entities, and relationships. Handles 429 rate-limit errors with exponential backoff.
 - `graph.py` — builds a `DocumentGraph` from enrichment results, mapping entities (persons, locations, terms, external documents) to graph nodes and relationships (cross-references, contact info, dates) to edges. Chunk-level mention links are computed from span offsets.
+- `enrich_stage.py` — per shard directory, sends the narrative and each table's markdown (`enrichment.include_tables`) as separate request texts in the same token-budgeted requests; a table mention's offsets index that table's markdown (`text_layer = table_markdown`).
 - `models.py` — ILGS data models: `Span`, `Segment`, `Person`, `Location`, `Term`, `ExternalDocument`, `Quote`, `DateInfo`, `CrossReference`, `EnrichmentResult`, and contact info types.
 
 ### 10. Store — Output

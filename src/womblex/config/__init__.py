@@ -429,6 +429,14 @@ class EnrichmentConfig(StrictModel):
                     "observed 429 failure zone; 100K leaves margin.",
     )
 
+    include_tables: bool = Field(
+        default=True,
+        description="Also send each table's markdown to the enricher, separately from "
+                    "the narrative, so table chunks have PII candidates of their own. "
+                    "Adds Kanon-2 token spend in proportion to table text; tables ignore "
+                    "skip_short_documents.",
+    )
+
     skip_short_documents: int = Field(
 
         default=0, ge=0,

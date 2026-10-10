@@ -11,6 +11,7 @@ documents Parquet via ``enrichment_metadata_columns()``.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,7 @@ import pyarrow.parquet as pq
 
 from womblex.analyse.graph import DocumentGraph
 from womblex.analyse.models import EnrichmentResult
+from womblex.store.evidence import TABLE_LAYER
 from womblex.store.output import _write_rows
 from womblex.store.run_stamp import sidecar_footer
 
@@ -39,7 +41,22 @@ ENTITY_SCHEMA = pa.schema([
     ("mention_start", pa.int32()),
     ("mention_end", pa.int32()),
     ("chunk_index", pa.int32()),         # -1 if not mapped to a chunk
+    # Which text the offsets index: the narrative under its element-text layer
+    # (elements | normalised | spellfix), or ``table_markdown`` for a table
+    # enriched on its own. Null on files written before the table pass.
+    ("text_layer", pa.string()),
+    ("elem_order", pa.int32()),          # table element a table_markdown mention lies in
+    ("sheet", pa.string()),              # spreadsheet sheet a table_markdown mention lies in
 ])
+
+# Columns an older file may lack; read back as null.
+_ENTITY_NULL_BACKFILL = ("text_layer", "elem_order", "sheet")
+_META_NULL_BACKFILL = ("table_count",)
+
+#: Meta footer key set when the batch's tables were sent to the enricher — the
+#: resume guard's marker, since a null ``table_count`` cannot tell "tables off"
+#: from "no tables".
+TABLES_ENRICHED_KEY = b"womblex.tables_enriched"
 
 # ---------------------------------------------------------------------------
 # Graph edge schema (for relationship reconstruction)
@@ -71,6 +88,9 @@ ENRICHMENT_META_SCHEMA = pa.schema([
     ("date_count", pa.int32()),
     ("heading_count", pa.int32()),
     ("junk_span_count", pa.int32()),
+    # Tables sent to the enricher on their own; null where none were (or the
+    # file predates the table pass) and for a document with a table that failed.
+    ("table_count", pa.int32()),
 ])
 
 
@@ -83,8 +103,19 @@ def _entity_mentions_from_enrichment(
     source_hash: str,
     enrichment: EnrichmentResult,
     chunks: list[object] | None = None,
+    *,
+    text_layer: str | None = None,
+    elem_order: int | None = None,
+    sheet: str | None = None,
+    id_prefix: str = "",
 ) -> list[dict[str, Any]]:
-    """Extract flat entity mention rows from an enrichment result."""
+    """Extract flat entity mention rows from an enrichment result.
+
+    ``text_layer`` / ``elem_order`` / ``sheet`` say which text the offsets index;
+    ``id_prefix`` namespaces entity ids when several results share a
+    ``source_hash`` (one per enriched table), which would otherwise all restart
+    at the same ids.
+    """
     from womblex.analyse.graph import _find_chunks_for_span
 
     rows: list[dict[str, Any]] = []
@@ -158,6 +189,11 @@ def _entity_mentions_from_enrichment(
                 "chunk_index": chunk_indices[0] if chunk_indices else -1,
             })
 
+    for row in rows:
+        row.update(
+            entity_id=f"{id_prefix}{row['entity_id']}",
+            text_layer=text_layer, elem_order=elem_order, sheet=sheet,
+        )
     return rows
 
 
@@ -219,6 +255,7 @@ def _enrichment_meta_row(
         "date_count": len(enrichment.dates),
         "heading_count": len(enrichment.headings),
         "junk_span_count": len(enrichment.junk),
+        "table_count": None,
     }
 
 
@@ -333,17 +370,37 @@ def enrichment_meta_path_for(base_path: Path) -> Path:
     return base_path.parent / f"{base_path.stem}{ENRICHMENT_META_SUFFIX}"
 
 
+@dataclass(frozen=True)
+class TableEnrichment:
+    """One table's enrichment result, with the handle that locates the table."""
+
+    source_hash: str
+    ordinal: int           # position among the document's tables; namespaces entity ids
+    elem_order: int | None
+    sheet: str | None
+    result: EnrichmentResult
+
+
 def write_enrichment_entities_shard(
     results: list[tuple[str, EnrichmentResult]], base_path: Path,
+    *, text_layer: str | None = None, tables: list[TableEnrichment] | None = None,
 ) -> Path:
     """Write a batch's entity mentions to ``<base>.enrichment_entities.parquet``.
 
-    ``results`` is ``(source_hash, EnrichmentResult)``. Empty input produces an
-    empty-but-schema-correct file so downstream globs are safe.
+    ``results`` is ``(source_hash, EnrichmentResult)`` over the document
+    narrative, whose offsets index the ``text_layer`` narrative. ``tables`` are
+    per-table results, whose offsets index that table's markdown: their entity
+    ids are namespaced ``t<ordinal>:`` and they carry ``TABLE_LAYER``. Empty
+    input produces an empty-but-schema-correct file so downstream globs are safe.
     """
     rows: list[dict[str, Any]] = []
     for source_hash, enrichment in results:
-        rows.extend(_entity_mentions_from_enrichment(source_hash, enrichment, None))
+        rows.extend(_entity_mentions_from_enrichment(
+            source_hash, enrichment, None, text_layer=text_layer))
+    for t in tables or []:
+        rows.extend(_entity_mentions_from_enrichment(
+            t.source_hash, t.result, None, text_layer=TABLE_LAYER,
+            elem_order=t.elem_order, sheet=t.sheet, id_prefix=f"t{t.ordinal}:"))
     target = enrichment_entities_path_for(base_path)
     target.parent.mkdir(parents=True, exist_ok=True)
     _write_enrichment_rows(rows, target, ENTITY_SCHEMA,
@@ -354,13 +411,31 @@ def write_enrichment_entities_shard(
 
 def write_enrichment_meta_shard(
     results: list[tuple[str, EnrichmentResult]], base_path: Path,
+    *, table_counts: dict[str, int] | None = None,
 ) -> Path:
-    """Write a batch's per-doc enrichment metadata to ``<base>.enrichment_meta.parquet``."""
+    """Write a batch's per-doc enrichment metadata to ``<base>.enrichment_meta.parquet``.
+
+    ``table_counts`` is tables sent to the enricher per document, ``None`` when
+    the table pass was off. A document with tables but no narrative result
+    still gets a row (all counts zero), so the table coverage is not lost.
+    """
+    counts = table_counts or {}
     rows = [_enrichment_meta_row(src, enr) for src, enr in results]
+    for r in rows:
+        r["table_count"] = counts.get(r["source_hash"])
+    seen = {r["source_hash"] for r in rows}
+    for src, n in counts.items():
+        if src not in seen:
+            rows.append({f.name: 0 for f in ENRICHMENT_META_SCHEMA} | {
+                "source_hash": src, "doc_type_enriched": "", "jurisdiction": "",
+                "title": "", "table_count": n,
+            })
+    footer = sidecar_footer(base_path, "enrich") or {}
+    if table_counts is not None:
+        footer[TABLES_ENRICHED_KEY] = b"true"
     target = enrichment_meta_path_for(base_path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    _write_enrichment_rows(rows, target, ENRICHMENT_META_SCHEMA,
-                          metadata=sidecar_footer(base_path, "enrich"))
+    _write_enrichment_rows(rows, target, ENRICHMENT_META_SCHEMA, metadata=footer)
     return target
 
 
@@ -466,6 +541,11 @@ def _read_enrichment_shard(path: Path, schema: pa.Schema) -> pa.Table:
         raw = raw.rename_columns([
             "source_hash" if n == LEGACY_HASH_COLUMN else n for n in raw.schema.names
         ])
+    backfill = _ENTITY_NULL_BACKFILL if schema is ENTITY_SCHEMA else (
+        _META_NULL_BACKFILL if schema is ENRICHMENT_META_SCHEMA else ())
+    for name in backfill:
+        if name not in raw.schema.names:
+            raw = raw.append_column(name, pa.nulls(raw.num_rows, schema.field(name).type))
     missing = [f.name for f in schema if f.name not in raw.schema.names]
     if missing:
         raise ValueError(
