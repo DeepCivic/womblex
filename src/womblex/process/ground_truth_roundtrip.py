@@ -117,7 +117,8 @@ def _correct(elem: Element, block: str) -> Element:
         return replace(elem, text=block)
     if elem.kind == "table":
         headers, rows = _parse_grid(block)
-        return replace(elem, cells=_grid_to_cells(headers, rows), header_rows=[0] if headers else [])
+        cells = _carry_boxes(_grid_to_cells(headers, rows), elem.cells or [])
+        return replace(elem, cells=cells, header_rows=[0] if headers else [])
     if elem.kind == "form":
         return replace(elem, fields=_parse_fields(block, elem.fields or []))
     return elem  # unreachable: a slot is always narrative, table or form
@@ -158,6 +159,23 @@ def _grid_to_cells(headers: list[str], rows: list[list[str]]) -> list[Cell]:
     for r, row in enumerate(rows, start=start):
         cells.extend(Cell(row=r, col=col, value=value) for col, value in enumerate(row))
     return cells
+
+
+def _carry_boxes(cells: list[Cell], original: list[Cell]) -> list[Cell]:
+    """Carry each original cell's ``bbox`` onto the corrected cell at its (row, col).
+
+    Only when the corrected grid keeps the original's row and column count: a
+    reviewer who adds or drops a row or column shifts positions, and a box
+    carried by position would then locate the wrong value.
+    """
+    boxes = {(c.row, c.col): c.bbox for c in original if c.bbox is not None}
+    if not boxes or _grid_shape(cells) != _grid_shape(original):
+        return cells
+    return [replace(c, bbox=boxes.get((c.row, c.col))) for c in cells]
+
+
+def _grid_shape(cells: list[Cell]) -> tuple[int, int]:
+    return (max((c.row for c in cells), default=-1) + 1, max((c.col for c in cells), default=-1) + 1)
 
 
 def _parse_fields(block: str, original: list[FieldEntry]) -> list[FieldEntry]:

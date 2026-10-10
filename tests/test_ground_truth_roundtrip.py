@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from womblex.ingest.elements import Cell, Element, FieldEntry
+from womblex.ingest.elements import BBox, Cell, Element, FieldEntry
 from womblex.process.ground_truth_roundtrip import (
     RoundTripError,
     apply_corrections,
@@ -195,3 +195,25 @@ def test_empty_render_roundtrips_to_no_blocks() -> None:
     assert render_elements(elements) == ""
     assert split_rendered(elements, "") == []
     assert apply_corrections(elements, "") == elements
+
+
+def _boxed_table() -> Element:
+    elem = table(0)
+    for c in elem.cells or []:
+        c.bbox = BBox(x=0.1 * c.col, y=0.1 * c.row, width=0.1, height=0.1)
+    return elem
+
+
+def test_table_correction_keeps_cell_boxes_when_the_grid_shape_holds() -> None:
+    elements = [_boxed_table()]
+    edited = render_elements(elements).replace("r1c1", "corrected")
+    corrected = apply_corrections(elements, edited)[0]
+    assert [c.bbox for c in corrected.cells or []] == [c.bbox for c in elements[0].cells or []]
+
+
+def test_table_correction_drops_cell_boxes_when_a_row_is_added() -> None:
+    elements = [_boxed_table()]
+    edited = render_elements(elements) + "\n| new | row |"
+    corrected = apply_corrections(elements, edited)[0]
+    assert len(corrected.cells or []) == 6
+    assert all(c.bbox is None for c in corrected.cells or [])
