@@ -272,4 +272,6 @@ Later stages follow the same `<stage>_shards()` over a shard dir + `womblex <sta
 - **link** (`link/stage.py`) — record-linkage against a reference register, writes `*.entity_links.parquet`
 - **pii** (`pii/pii_stage.py`) — graph-driven PII masking, writes `*.pii_spans.parquet` + `*.clean_text.parquet`
 
+The money, link and pii sidecars will locate every span with one **evidence reference** (`store/evidence.py`): the element, page and box, the sheet and cell for a cell, and `char_start` / `char_end` into the text named by `text_layer`, labelled by `anchor_level` (`span`, `element`, `chunk` or `document`). `process/evidence.py` builds the reference from the elements and checks each level at its own precision.
+
 Distributed (cloud) runs execute the same stage bodies against a declarative `StageContract` per stage (`cloud/stage_contracts.py`), reading/writing an object store instead of local disk. DBOS runs them: `cloud/workflows.py` makes a batch and each stage unit a recorded step, `cloud/worker.py` joins the queues a process can serve, and `cloud/jobs.py` is how dispatchers enqueue and read progress.

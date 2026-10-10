@@ -47,10 +47,13 @@ ENTITY_SCHEMA = pa.schema([
     ("text_layer", pa.string()),
     ("elem_order", pa.int32()),          # table element a table_markdown mention lies in
     ("sheet", pa.string()),              # spreadsheet sheet a table_markdown mention lies in
+    # The text of this mention (``name`` is the entity's, the same for every mention).
+    # Null on files written before contract 1.5.
+    ("mention_text", pa.string()),
 ])
 
 # Columns an older file may lack; read back as null.
-_ENTITY_NULL_BACKFILL = ("text_layer", "elem_order", "sheet")
+_ENTITY_NULL_BACKFILL = ("text_layer", "elem_order", "sheet", "mention_text")
 _META_NULL_BACKFILL = ("table_count",)
 
 #: Meta footer key set when the batch's tables were sent to the enricher — the
@@ -135,6 +138,7 @@ def _entity_mentions_from_enrichment(
                 "role": per.role,
                 "mention_start": mention.start,
                 "mention_end": mention.end,
+                "mention_text": mention.decode(enrichment.text),
                 "chunk_index": chunk_indices[0] if chunk_indices else -1,
             })
 
@@ -152,6 +156,7 @@ def _entity_mentions_from_enrichment(
                 "role": "",
                 "mention_start": mention.start,
                 "mention_end": mention.end,
+                "mention_text": mention.decode(enrichment.text),
                 "chunk_index": chunk_indices[0] if chunk_indices else -1,
             })
 
@@ -169,6 +174,7 @@ def _entity_mentions_from_enrichment(
                 "role": "",
                 "mention_start": mention.start,
                 "mention_end": mention.end,
+                "mention_text": mention.decode(enrichment.text),
                 "chunk_index": chunk_indices[0] if chunk_indices else -1,
             })
 
@@ -186,6 +192,7 @@ def _entity_mentions_from_enrichment(
                 "role": "",
                 "mention_start": mention.start,
                 "mention_end": mention.end,
+                "mention_text": mention.decode(enrichment.text),
                 "chunk_index": chunk_indices[0] if chunk_indices else -1,
             })
 
