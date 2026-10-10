@@ -39,6 +39,7 @@ from womblex.config import PIIConfig
 from womblex.pii.cleaner import PIICleaner
 from womblex.process.chunk_stage import _batch_bases, _load_elements
 from womblex.process.chunker import TableText, table_texts
+from womblex.process.text_overlay import require_overlays
 from womblex.store.checkpoint import CheckpointManager
 from womblex.store.enrichment_output import (
     enrichment_entities_path_for,
@@ -70,9 +71,14 @@ def pii_shards(
     shard_dir: Path,
     config: PIIConfig,
     *,
+    text_source: str = "elements",
     checkpoint_mgr: CheckpointManager | None = None,
 ) -> PIIStageResult:
-    """Detect + mask PII for every batch's chunks; write spans + clean_text siblings."""
+    """Detect + mask PII for every batch's chunks; write spans + clean_text siblings.
+
+    ``text_source`` is the element-text layer the chunks and the enrichment were
+    produced under; a declared layer missing from any batch refuses the stage.
+    """
     if not shard_dir.is_dir():
         raise FileNotFoundError(f"shard directory not found: {shard_dir}")
 
@@ -81,6 +87,7 @@ def pii_shards(
         logger.warning("pii_shards: no batches found in %s", shard_dir)
         return PIIStageResult(0, 0, 0)
 
+    require_overlays(bases, text_source)
     cleaner = PIICleaner(
         entities=config.entities,
         model=config.model,

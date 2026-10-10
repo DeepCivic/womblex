@@ -153,6 +153,7 @@ def cmd_link(args: argparse.Namespace) -> int:
     """Match enrichment candidates to a reference register (per-stage, offline)."""
     from womblex.config import load_config
     from womblex.link.stage import link_shards
+    from womblex.process.text_overlay import MissingOverlayError
     from womblex.store.checkpoint import CheckpointManager
     from womblex.store.entity_links_output import ENTITY_LINKS_SUFFIX
     from womblex.store.shard_audit import reconcile_stage_checkpoint_with_shards
@@ -168,7 +169,8 @@ def cmd_link(args: argparse.Namespace) -> int:
         )
         return 1
 
-    linking_config = load_config(args.config).linking
+    full_config = load_config(args.config)
+    linking_config = full_config.linking
     if linking_config.reference is None:
         logger.error("config `linking.reference` is required to run the link stage")
         return 1
@@ -187,7 +189,14 @@ def cmd_link(args: argparse.Namespace) -> int:
                                "entity_links shards; they will be re-linked.", len(dropped))
 
     logger.info("link --shards: dir=%s reference=%s", shard_dir, linking_config.reference.path)
-    result = link_shards(shard_dir, linking_config, checkpoint_mgr=ckpt)
+    try:
+        result = link_shards(
+            shard_dir, linking_config,
+            text_source=full_config.processing.text_source, checkpoint_mgr=ckpt,
+        )
+    except MissingOverlayError as e:
+        logger.error("link --shards: refused: %s", e)
+        return 1
     logger.info(
         "Done: %d batches written, %d docs linked, %d/%d link rows matched",
         result.batches_written, result.docs_linked, result.matched_links, result.total_links,

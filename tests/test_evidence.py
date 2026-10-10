@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import logging
+
 import pyarrow as pa
 import pytest
 
 from tests._shard import DOC, NARRATIVE, contact_shard, table_markdown
-from womblex.process.evidence import EvidenceIndexes
-from womblex.store.evidence import EVIDENCE_COLUMNS, backfill_evidence, evidence
+from womblex.process.evidence import EvidenceIndexes, EvidenceReport, assert_evidence, check_rows
+from womblex.store.evidence import EVIDENCE_COLUMNS, EvidenceError, backfill_evidence, evidence
 
 
 @pytest.fixture
@@ -110,3 +112,113 @@ def test_backfill_adds_the_columns_a_file_lacks_with_one_level():
     assert (row["cell_col"], row["anchor_level"], row["char_start"]) == (3, "chunk", None)
     with pytest.raises(ValueError):
         backfill_evidence(table, level="exact")
+
+
+# ---------------------------------------------------------------------------
+# Checking rows at each receipt's own precision
+# ---------------------------------------------------------------------------
+
+
+def _row(text: str, ref: dict | None) -> dict:
+    return {"source_hash": DOC, "text": text, **(ref or {})}
+
+
+def _rows(tmp_path):
+    base = contact_shard(tmp_path)
+    indexes = EvidenceIndexes(base)
+    index = indexes.get(DOC)
+    assert index is not None
+    start = NARRATIVE.index("Jane Doe")
+    span = index.narrative_ref(start, start + 8)
+    rows = [
+        _row("Jane Doe", span),
+        _row("the delegate", index.element_ref(2)),
+        _row("Ann Roe", index.document_ref()),
+    ]
+    return base, indexes, rows
+
+
+def test_receipts_at_every_level_but_chunk_hold_against_the_source(tmp_path):
+    base, indexes, rows = _rows(tmp_path)
+
+    report = assert_evidence(rows, indexes.get, text_key="text", label="pii_spans", base=base)
+
+    assert (report.checked, report.unchecked, report.ok) == (3, 0, True)
+
+
+def test_a_receipt_that_fails_its_own_check_refuses_the_batch(tmp_path):
+    base, indexes, rows = _rows(tmp_path)
+    rows[0]["text"] = "Jane Roe"          # span: slice is "Jane Doe"
+    rows[1]["text"] = "Jane Doe"          # element 2 does not hold it
+    rows[2]["text"] = "Nobody Here"       # not in the document
+
+    with pytest.raises(EvidenceError, match="3 of 3 receipt"):
+        assert_evidence(rows, indexes.get, text_key="text", label="pii_spans", base=base)
+
+
+def test_a_chunk_receipt_is_checked_against_the_chunk_text(tmp_path):
+    _, indexes, _ = _rows(tmp_path)
+    holds = _row("Jane Doe", evidence("chunk", page=1))
+    fails = _row("John Citizen", evidence("chunk", page=1))
+
+    report = check_rows(
+        [holds, fails], indexes.get, text_key="text", label="pii_spans",
+        chunk_text=lambda _row: "Contact Jane Doe about the grant.")
+
+    assert (report.checked, report.n_mismatched) == (2, 1)
+
+
+def test_a_receipt_whose_source_is_absent_is_written_unchecked_and_warned(tmp_path, caplog):
+    base, _, rows = _rows(tmp_path)
+    rows.append(_row("Jane Doe", evidence("chunk", page=1)))  # no chunk text to hand
+
+    with caplog.at_level(logging.WARNING):
+        report = assert_evidence(rows, lambda *_: None, text_key="text", label="pii_spans", base=base)
+
+    assert (report.checked, report.unchecked, report.ok) == (0, 4, True)
+    assert "written unchecked" in caplog.text
+
+
+def test_a_row_without_text_is_unchecked_not_passed(tmp_path):
+    _, indexes, rows = _rows(tmp_path)
+    for row in rows:
+        row["text"] = None
+    rows.append(_row("", evidence("chunk", page=1)))
+
+    report = check_rows(rows, indexes.get, text_key="text", label="entity_links",
+                        chunk_text=lambda _row: "Contact Jane Doe about the grant.")
+
+    assert (report.checked, report.unchecked, report.ok) == (0, 4, True)
+
+
+def test_merged_reports_keep_the_named_rows_capped():
+    a = EvidenceReport(checked=4, n_mismatched=4, mismatches=["a"] * 4)
+    a.merge(EvidenceReport(checked=4, n_mismatched=4, mismatches=["b"] * 4))
+
+    assert (a.checked, a.n_mismatched, len(a.mismatches)) == (8, 8, 5)
+
+
+def test_a_null_receipt_is_refused(tmp_path):
+    base, indexes, _ = _rows(tmp_path)
+
+    with pytest.raises(EvidenceError):
+        assert_evidence([_row("Jane Doe", None)], indexes.get, text_key="text",
+                        label="money_spans", base=base)
+
+
+def test_pii_and_link_stage_the_elements_cells_and_declared_text_layer(tmp_path):
+    from tests.test_cloud import _minimal_config
+    from womblex.cloud.stage_contracts import (
+        ELEMENTS_SUFFIX,
+        NORMALISED_TEXT_SUFFIX,
+        STAGE_CONTRACTS,
+        TABLE_CELLS_SUFFIX,
+    )
+
+    config = _minimal_config(tmp_path)
+    config.processing.text_source = "normalised"
+
+    for stage in ("pii", "link"):
+        needed = {c.suffix: c.strict for c in STAGE_CONTRACTS[stage].conditional_inputs(config)}
+        assert needed[NORMALISED_TEXT_SUFFIX] is True
+        assert needed[ELEMENTS_SUFFIX] is False and needed[TABLE_CELLS_SUFFIX] is False

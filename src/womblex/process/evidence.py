@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import bisect
 import logging
-from collections.abc import Mapping
-from dataclasses import replace
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -24,10 +24,12 @@ from womblex.process.chunker import TableText, element_spans, reassemble_narrati
 from womblex.process.text_overlay import apply_overlay, load_overlay
 from womblex.store.evidence import (
     CELL_LAYER,
+    CHUNK,
     DOCUMENT,
     ELEMENT,
     SPAN,
     TABLE_LAYER,
+    EvidenceError,
     evidence,
 )
 
@@ -235,3 +237,101 @@ class EvidenceIndexes:
             apply_overlay(source_hash, elems, self._overlays[layer])
             self._cache[key] = EvidenceIndex(elems, layer)
         return self._cache[key]
+
+
+#: Rows named in a refusal; the counts are always complete.
+_REPORT_LIMIT = 5
+
+#: ``(source_hash, text_layer)`` -> that document's index, or ``None`` if its elements are absent.
+IndexLookup = Callable[[str, str | None], EvidenceIndex | None]
+#: A ``chunk`` row's chunk text, or ``None`` if the chunk is not to hand.
+ChunkText = Callable[[Mapping[str, Any]], str | None]
+
+
+@dataclass
+class EvidenceReport:
+    """Outcome of checking receipts against their sources.
+
+    ``unchecked`` counts receipts whose source is absent: written and warned
+    about, never refused.
+    """
+
+    checked: int = 0
+    unchecked: int = 0
+    n_mismatched: int = 0
+    mismatches: list[str] = field(default_factory=list)
+
+    @property
+    def ok(self) -> bool:
+        return self.n_mismatched == 0
+
+    def merge(self, other: EvidenceReport) -> None:
+        self.checked += other.checked
+        self.unchecked += other.unchecked
+        self.n_mismatched += other.n_mismatched
+        self.mismatches.extend(other.mismatches[: _REPORT_LIMIT - len(self.mismatches)])
+
+
+def check_rows(
+    rows: Iterable[Mapping[str, Any]], lookup: IndexLookup, *, text_key: str, label: str,
+    chunk_text: ChunkText | None = None,
+) -> EvidenceReport:
+    """Check each row's receipt at its own precision against ``row[text_key]``.
+
+    A row without a valid ``anchor_level`` is a null receipt and fails. A
+    ``chunk`` receipt is checked against ``chunk_text(row)``; every other level
+    against the document's index. A missing source makes the row unchecked, as
+    does a missing text (e.g. ``mention_text`` on files before contract 1.5):
+    empty text lies in any source, so it cannot pass a check.
+    """
+    report = EvidenceReport()
+    for row in rows:
+        text = row[text_key] or ""
+        level = row.get("anchor_level")
+        verdict: bool | None
+        if not text and level in (SPAN, ELEMENT, CHUNK, DOCUMENT):
+            verdict = None
+        elif level not in (SPAN, ELEMENT, CHUNK, DOCUMENT):
+            verdict = False
+        elif level == CHUNK:
+            source = chunk_text(row) if chunk_text is not None else None
+            verdict = None if source is None else text in source
+        else:
+            index = lookup(row["source_hash"], row.get("text_layer"))
+            verdict = None if index is None else index.holds(row, text)
+        if verdict is None:
+            report.unchecked += 1
+            continue
+        report.checked += 1
+        if not verdict:
+            report.n_mismatched += 1
+            if len(report.mismatches) < _REPORT_LIMIT:
+                report.mismatches.append(
+                    f"{label} {row['source_hash'][:12]} [{level}:{row.get('text_layer')}:"
+                    f"{row.get('char_start')}-{row.get('char_end')}] {text[:40]!r}"
+                )
+    return report
+
+
+def assert_evidence(
+    rows: list[dict[str, Any]], lookup: IndexLookup, *, text_key: str, label: str, base: Path,
+    chunk_text: ChunkText | None = None,
+) -> EvidenceReport:
+    """Refuse a batch with a receipt that fails its own check; warn about unchecked ones.
+
+    Called before the sidecar is written, so a refusal publishes nothing.
+    """
+    report = check_rows(rows, lookup, text_key=text_key, label=label, chunk_text=chunk_text)
+    if report.unchecked:
+        logger.warning(
+            "%s: %s has %d receipt(s) whose source or text is absent, so they are written"
+            " unchecked",
+            label, base.stem, report.unchecked,
+        )
+    if not report.ok:
+        raise EvidenceError(
+            f"{label}: {base.stem} has {report.n_mismatched} of {report.checked + report.unchecked}"
+            f" receipt(s) that fail their own check; nothing written. First: "
+            + "; ".join(report.mismatches)
+        )
+    return report

@@ -38,6 +38,8 @@ _SUFFIX = {
     "normalised": NORMALISED_TEXT_SUFFIX,
     "spellfix": SPELLFIX_TEXT_SUFFIX,
 }
+#: The stage that writes each overlay, for the "run it first" messages.
+_STAGE = {"normalised": "normalise", "spellfix": "spellfix"}
 
 
 class MissingOverlayError(FileNotFoundError):
@@ -63,7 +65,7 @@ def require_overlays(bases: list[Path], text_source: str) -> None:
         raise MissingOverlayError(
             f"text_source={text_source!r} declared but {_SUFFIX[text_source]} is missing "
             f"for {len(missing)} of {len(bases)} batch(es): {', '.join(missing)}. "
-            f"Run the {text_source} stage first."
+            f"Run the {_STAGE[text_source]} stage first."
         )
 
 
@@ -90,12 +92,12 @@ def load_overlay(
         if required:
             raise MissingOverlayError(
                 f"text_source={text_source!r} declared but {path.name} is missing; "
-                f"run the {text_source} stage first. This caller never falls back to verbatim."
+                f"run the {_STAGE[text_source]} stage first. This caller never falls back to verbatim."
             )
         if warn_if_missing:
             logger.warning(
                 "text_source=%r selected but %s missing — using verbatim element text. "
-                "Run the %s stage first.", text_source, path.name, text_source,
+                "Run the %s stage first.", text_source, path.name, _STAGE[text_source],
             )
         return None
 
