@@ -179,7 +179,8 @@ def pii_shards(
                         "source_hash": source_hash,
                         "chunk_index": c["chunk_index"],
                         "content_type": c["content_type"],
-                        **_receipt(index, table, c, aligned, start + s.start, start + s.end),
+                        **_receipt(index, table, c, aligned, start + s.start, start + s.end,
+                                   text[s.start:s.end]),
                         "text": text[s.start:s.end],
                         "entity_type": s.entity_type,
                         "entity_id": s.entity_id,
@@ -290,17 +291,21 @@ def _chunk_text(texts: dict[tuple[str, int], str], row: Mapping[str, Any]) -> st
 
 def _receipt(
     index: EvidenceIndex | None, table: object, c: dict, aligned: bool, start: int, end: int,
+    span_text: str,
 ) -> dict:
     """The span's evidence at the most precise level that is reliable.
 
     ``span`` where the chunk lines up with its source; ``document`` where it
-    does not (the span is still in the document); ``chunk`` where the elements,
-    or the chunk's table, are not to hand. A position is never searched for.
+    does not but the span's text is in the document; ``chunk`` where it is not
+    (the chunk has moved on from the elements), or where the elements, or the
+    chunk's table, are not to hand. A position is never searched for.
     """
+    chunk_ref = evidence(CHUNK, elem_order=c["elem_order"], page=c["page_start"])
     if index is None or (table is None and c["content_type"] != "narrative"):
-        return evidence(CHUNK, elem_order=c["elem_order"], page=c["page_start"])
+        return chunk_ref
     if not aligned:
-        return index.document_ref()
+        doc_ref = index.document_ref()
+        return doc_ref if index.holds(doc_ref, span_text) else chunk_ref
     ref = (index.narrative_ref(start, end) if c["content_type"] == "narrative"
            else index.table_ref(table, start, end))  # type: ignore[arg-type]
     return ref or index.document_ref()

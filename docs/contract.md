@@ -68,8 +68,9 @@ how the stage checked it before writing (a failed check refuses the batch,
 
 A source that is absent (no elements sidecar) leaves the row written and
 unchecked, with a warning. A position is never searched for: a PII span in a
-chunk that is not the source's slice at its offsets is located to the document,
-one whose elements or table are missing to the chunk. Masking never depends on
+chunk that is not the source's slice at its offsets is located to the document
+when its text is in the document and to the chunk when it is not, and one whose
+elements or table are missing to the chunk. Masking never depends on
 the receipt. The text a `span` row is checked against is `text` (`mention_text`
 on `entity_links`).
 
