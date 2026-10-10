@@ -609,6 +609,21 @@ def element_spans(elements: list[Element]) -> list[tuple[int, int, int]]:
     return [(e.order, start, end) for e, _piece, start, end in _narrative_pieces(elements)]
 
 
+def collect_tables_from_elements(
+    elements: list[Element],
+) -> list[tuple[int | None, int | None, str]]:
+    """Materialise ``(page, elem_order, markdown)`` per table for :func:`chunk_batch`.
+
+    Mirrors :pyattr:`ExtractionResult.tables`: one entry per
+    ``kind='table'`` element followed by one synthetic entry per
+    spreadsheet sheet. ``page`` and ``elem_order`` are both ``None`` for
+    sheets — a sheet aggregates many ``sheet_cell`` elements rather than
+    sitting at one position, and a spreadsheet has no narrative to be
+    ordered against, so the anchor would be meaningless there.
+    """
+    return [(t.page, t.elem_order, t.markdown) for t in table_texts(elements)]
+
+
 @dataclass(frozen=True)
 class TableText:
     """One table's markdown with the handle that locates it in the source.
@@ -642,21 +657,6 @@ def table_texts(elements: list[Element]) -> list[TableText]:
         if md.strip():
             out.append(TableText(None, None, sheet_td.context.get("sheet"), md))
     return out
-
-
-def collect_tables_from_elements(
-    elements: list[Element],
-) -> list[tuple[int | None, int | None, str]]:
-    """Materialise ``(page, elem_order, markdown)`` per table for :func:`chunk_batch`.
-
-    Mirrors :pyattr:`ExtractionResult.tables`: one entry per
-    ``kind='table'`` element followed by one synthetic entry per
-    spreadsheet sheet. ``page`` and ``elem_order`` are both ``None`` for
-    sheets — a sheet aggregates many ``sheet_cell`` elements rather than
-    sitting at one position, and a spreadsheet has no narrative to be
-    ordered against, so the anchor would be meaningless there.
-    """
-    return [(t.page, t.elem_order, t.markdown) for t in table_texts(elements)]
 
 
 def build_chunk_input(

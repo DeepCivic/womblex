@@ -16,6 +16,8 @@ from pathlib import Path
 
 import pyarrow.parquet as pq
 
+from womblex.store.evidence import TABLE_LAYER
+
 logger = logging.getLogger(__name__)
 
 
@@ -120,7 +122,7 @@ def pii_spans_from_mentions(
         (m.mention_start, m.mention_end, m.entity_label)
         for m in mentions
         if m.source_hash == source_hash
-        and m.text_layer != "table_markdown"
+        and m.text_layer != TABLE_LAYER
         and m.entity_label in labels
         and m.mention_start >= 0
         and m.mention_end > m.mention_start

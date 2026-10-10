@@ -562,7 +562,8 @@ There is no separate detector and **no second enrichment pass**.
   block, so nothing to cut on). *Not done:* tables folded into the narrative
   (moves every narrative offset), and graph edges for table results (their ids
   and offsets are not in the narrative's space). With `include_tables` on, a
-  batch whose meta file lacks `table_count` is enriched again on resume; the
+  batch whose meta footer lacks `womblex.tables_enriched` (enriched with the
+  pass off, or by an older release) is enriched again on resume; the
   narrative is re-sent and re-billed along with its tables. *Measured spend* (kanon-2
   tokeniser, synthetic set, 28 documents, 6 with tables): 16,584 narrative
   tokens and 22,832 table tokens, so the table pass adds ~138% — the set is

@@ -83,23 +83,21 @@ def test_graph_refresh_leaves_table_mentions_alone(tmp_path):
     assert [r["chunk_index"] for r in rows if r["text_layer"] == "elements"] == [0]
 
 
-def test_a_batch_enriched_before_tables_were_sent_is_re_enriched_on_resume(tmp_path):
+def test_a_batch_enriched_without_tables_is_re_enriched_on_resume(tmp_path):
     from womblex.store.checkpoint import CheckpointManager
 
-    base = contact_shard(tmp_path)
+    contact_shard(tmp_path)
     ckpt = CheckpointManager(tmp_path / ".enrich-ckpt", "t_enrich")
     ckpt.load()
+    enrich_shards(tmp_path, EnrichmentConfig(include_tables=False), client=_FakeClient(),
+                  token_counter=_FakeCounter(), checkpoint_mgr=ckpt)
+
+    # Same as a file from an older release: no footer says tables were sent.
+    redo = _FakeClient()
     cfg = EnrichmentConfig()
-    enrich_shards(tmp_path, cfg, client=_FakeClient(), token_counter=_FakeCounter(),
-                  checkpoint_mgr=ckpt)
+    enrich_shards(tmp_path, cfg, client=redo, token_counter=_FakeCounter(), checkpoint_mgr=ckpt)
+    assert redo.calls, "tables were never sent for this batch, so it must run again"
 
     again = _FakeClient()
     enrich_shards(tmp_path, cfg, client=again, token_counter=_FakeCounter(), checkpoint_mgr=ckpt)
     assert again.calls == []
-
-    # The same sidecar as an older release wrote it: no table_count column.
-    meta = enrichment_meta_path_for(base)
-    pq.write_table(pq.read_table(str(meta)).drop(["table_count"]), str(meta))
-    redo = _FakeClient()
-    enrich_shards(tmp_path, cfg, client=redo, token_counter=_FakeCounter(), checkpoint_mgr=ckpt)
-    assert redo.calls, "tables were never sent for this batch, so it must run again"

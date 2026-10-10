@@ -53,6 +53,11 @@ ENTITY_SCHEMA = pa.schema([
 _ENTITY_NULL_BACKFILL = ("text_layer", "elem_order", "sheet")
 _META_NULL_BACKFILL = ("table_count",)
 
+#: Meta footer key set when the batch's tables were sent to the enricher — the
+#: resume guard's marker, since a null ``table_count`` cannot tell "tables off"
+#: from "no tables".
+TABLES_ENRICHED_KEY = b"womblex.tables_enriched"
+
 # ---------------------------------------------------------------------------
 # Graph edge schema (for relationship reconstruction)
 # ---------------------------------------------------------------------------
@@ -410,9 +415,9 @@ def write_enrichment_meta_shard(
 ) -> Path:
     """Write a batch's per-doc enrichment metadata to ``<base>.enrichment_meta.parquet``.
 
-    ``table_counts`` is tables sent to the enricher per document. A document
-    with tables but no narrative result still gets a row (all counts zero), so
-    the table coverage it records is not lost.
+    ``table_counts`` is tables sent to the enricher per document, ``None`` when
+    the table pass was off. A document with tables but no narrative result
+    still gets a row (all counts zero), so the table coverage is not lost.
     """
     counts = table_counts or {}
     rows = [_enrichment_meta_row(src, enr) for src, enr in results]
@@ -425,10 +430,12 @@ def write_enrichment_meta_shard(
                 "source_hash": src, "doc_type_enriched": "", "jurisdiction": "",
                 "title": "", "table_count": n,
             })
+    footer = sidecar_footer(base_path, "enrich") or {}
+    if table_counts is not None:
+        footer[TABLES_ENRICHED_KEY] = b"true"
     target = enrichment_meta_path_for(base_path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    _write_enrichment_rows(rows, target, ENRICHMENT_META_SCHEMA,
-                          metadata=sidecar_footer(base_path, "enrich"))
+    _write_enrichment_rows(rows, target, ENRICHMENT_META_SCHEMA, metadata=footer)
     return target
 
 

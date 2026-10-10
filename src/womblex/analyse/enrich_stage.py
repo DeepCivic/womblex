@@ -59,6 +59,7 @@ from womblex.store.enrichment_doc import (
     write_enrichment_doc_shard,
 )
 from womblex.store.enrichment_output import (
+    TABLES_ENRICHED_KEY,
     TableEnrichment,
     enrichment_entities_path_for,
     enrichment_meta_path_for,
@@ -161,9 +162,9 @@ def enrich_shards(
 
         write_enrichment_entities_shard(
             results, base, text_layer=text_source, tables=table_results)
-        write_enrichment_meta_shard(
-            results, base, table_counts={
-                h: len(ts) for h, ts in tables.items() if h not in errored})
+        write_enrichment_meta_shard(results, base, table_counts={
+            h: len(ts) for h, ts in tables.items() if h not in errored
+        } if enrichment_config.include_tables else None)
         chunks_by_hash = _load_chunks(base)
         write_graph_edges_shard(
             [
@@ -188,7 +189,7 @@ def enrich_shards(
             if resolved_doc_ids:
                 checkpoint_mgr.update(
                     doc_ids=resolved_doc_ids,
-                    succeeded=len(results),
+                    succeeded=len([h for h, _ in results if h not in errored]),
                     failed=len(errored),
                     batch_num=int(base.stem.replace("batch-", "") or 0),
                 )
@@ -260,7 +261,7 @@ def _enrich_packed(
         except Exception as e:  # transient (network/429-exhausted) — leave for retry
             logger.error(
                 "enrich_shards: enrichment failed for %s: %s",
-                [doc_ids_by_hash.get(k, k) for k in keys], e,
+                [doc_ids_by_hash.get(k.split(_SEP)[0], k) for k in keys], e,
             )
             errored.update(keys)
             continue
@@ -406,8 +407,8 @@ def _all_docs_checkpointed(
     ``*.graph_edges.parquet`` (mirroring ``persist_document``: the graph is
     only buildable from the live EnrichmentResult).
 
-    When ``include_tables`` is on, the meta sidecar must carry ``table_count`` —
-    a batch enriched before tables were sent is re-enriched on resume.
+    When ``include_tables`` is on, the meta sidecar's footer must record that
+    tables were sent — a batch enriched without them is re-enriched on resume.
 
     When ``persist_document`` is requested, the doc sidecar must also exist —
     otherwise a batch enriched before the flag was enabled would be skipped on
@@ -421,7 +422,7 @@ def _all_docs_checkpointed(
         return False
     if include_tables:
         meta = enrichment_meta_path_for(base_path)
-        if not meta.exists() or "table_count" not in pq.read_schema(str(meta)).names:
+        if not meta.exists() or TABLES_ENRICHED_KEY not in (pq.read_schema(str(meta)).metadata or {}):
             return False
     try:
         m = read_manifest(base_path)
