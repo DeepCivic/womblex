@@ -101,3 +101,14 @@ def test_a_skipped_narrative_stays_uncovered_beside_enriched_tables(tmp_path):
 
     assert (clean["narrative"]["mask_status"], clean["table"]["mask_status"]) == (
         "not_masked", "masked")
+
+
+def test_a_declared_text_layer_missing_from_the_batch_refuses_the_stage(tmp_path):
+    import pytest
+
+    from womblex.process.text_overlay import MissingOverlayError
+
+    _enriched(tmp_path)
+
+    with pytest.raises(MissingOverlayError):
+        pii_shards(tmp_path, PIIConfig(use_regex_backstop=False), text_source="normalised")

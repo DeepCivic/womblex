@@ -17,6 +17,7 @@ from womblex.config import LinkingConfig
 from womblex.link.matcher import Candidate, Link, resolve
 from womblex.link.reference import load_reference
 from womblex.process.chunk_stage import _batch_bases
+from womblex.process.text_overlay import require_overlays
 from womblex.store.checkpoint import CheckpointManager
 from womblex.store.enrichment_output import (
     read_enrichment_entities,
@@ -40,9 +41,14 @@ def link_shards(
     shard_dir: Path,
     linking_config: LinkingConfig,
     *,
+    text_source: str = "elements",
     checkpoint_mgr: CheckpointManager | None = None,
 ) -> LinkStageResult:
-    """Link every batch's enrichment candidates and write entity_links siblings."""
+    """Link every batch's enrichment candidates and write entity_links siblings.
+
+    ``text_source`` is the element-text layer the enrichment ran over; a declared
+    layer missing from any batch refuses the stage.
+    """
     if not shard_dir.is_dir():
         raise FileNotFoundError(f"shard directory not found: {shard_dir}")
     if linking_config.reference is None:
@@ -53,6 +59,7 @@ def link_shards(
         logger.warning("link_shards: no batches found in %s", shard_dir)
         return LinkStageResult(0, 0, 0, 0)
 
+    require_overlays(bases, text_source)
     reference = load_reference(linking_config.reference)
     logger.info("link_shards: reference loaded — %d entities, %d aliases",
                 len(reference.entities), len(reference.aliases))

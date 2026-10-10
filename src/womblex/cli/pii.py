@@ -91,7 +91,11 @@ def cmd_pii(args: argparse.Namespace) -> int:
         shard_dir, pii_config.entities, pii_config.use_regex_backstop,
         pii_config.write_clean_text,
     )
-    result = pii_shards(shard_dir, pii_config, checkpoint_mgr=ckpt)
+    result = pii_shards(
+        shard_dir, pii_config,
+        text_source=full.processing.text_source if full else "elements",
+        checkpoint_mgr=ckpt,
+    )
     logger.info(
         "Done: %d batches written, %d PII spans, %d chunks masked",
         result.batches_written, result.spans_written, result.chunks_masked,
