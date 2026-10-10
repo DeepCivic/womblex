@@ -195,5 +195,9 @@ def find_tables(
             row_count=len(table.rows),
             col_count=len(table.columns),
             rows=rows,
+            cell_boxes=tuple(
+                tuple(None if box is None else Rect.of(box) for box in row.cells)
+                for row in table.rows
+            ),
         ))
     return out

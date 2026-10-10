@@ -39,6 +39,8 @@ class TableData:
     position: Position
     confidence: float
     context: dict[str, str] = field(default_factory=dict)
+    cell_boxes: dict[tuple[int, int], Position] = field(default_factory=dict)
+    """Normalised cell boxes by (row, col) in the headers-then-rows grid; absent where unknown."""
 
 
 @dataclass
@@ -87,11 +89,14 @@ def table_to_element(
     below, so both directions of the view↔element mapping are in one file.
     """
     cells: list[Cell] = []
+    boxes = t.cell_boxes
     for col_idx in range(len(t.headers)):
-        cells.append(Cell(row=0, col=col_idx, value=t.headers[col_idx]))
+        cells.append(Cell(row=0, col=col_idx, value=t.headers[col_idx], bbox=boxes.get((0, col_idx))))
     for row_idx, row in enumerate(t.rows, start=1):
         for col_idx in range(len(row)):
-            cells.append(Cell(row=row_idx, col=col_idx, value=row[col_idx]))
+            cells.append(Cell(
+                row=row_idx, col=col_idx, value=row[col_idx], bbox=boxes.get((row_idx, col_idx)),
+            ))
     return Element(
         order=order, kind="table", extractor=extractor,
         page=page, bbox=t.position,

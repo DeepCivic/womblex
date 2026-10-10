@@ -117,6 +117,14 @@ matching `(source_hash, elem_order)` with `kind='table'`.
 | `parent_elem_order` | int32 |
 | `row`, `col`, `rowspan`, `colspan` | int32 |
 | `value`, `value_type` | string |
+| `bbox` | struct&lt;x, y, width, height&gt; (float32), nullable |
+
+`bbox` locates the cell on its page, normalised 0–1 with a top-left origin
+like `elements.bbox`. It is set for tables the native PDF finder (pdfplumber
+`TableFinder`) produced, from the finder's own cell rectangles; a merged-away
+cell the finder reports as absent, DOCX cells, OCR-reconstructed tables and
+spreadsheet-print tables carry null. Files written before contract `1.3`
+read back with a null `bbox`.
 
 ### form_fields.parquet
 

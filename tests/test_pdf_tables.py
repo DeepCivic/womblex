@@ -138,3 +138,54 @@ def test_rotated_page_finds_tables_in_the_displayed_frame() -> None:
         (table,) = doc[0].find_tables(strategy="text")
     assert (table.row_count, table.col_count) == (78, 11)
     assert table.rows[0][:3] == ("FOI referen", "ce", "FOI-2025-042")
+
+
+def _header_merged_grid(builder) -> None:
+    """Two rows by three columns; the header's first two cells are one merged cell."""
+    ys, xs = (200, 220, 240), (72, 172, 272, 372)
+    for y in ys:
+        builder.line(xs[0], y, xs[-1], y)
+    for x in xs:
+        builder.line(x, 220 if x == 172 else 200, x, 240)
+    builder.text(80, 214, "head").text(280, 214, "r0c2")
+    for col in range(3):
+        builder.text(80 + col * 100, 234, f"r1c{col}")
+
+
+def _rounded(table) -> list[list[tuple[int, ...] | None]]:
+    return [[None if b is None else tuple(round(v) for v in b.as_tuple()) for b in row] for row in table.cell_boxes]
+
+
+def test_merged_cell_box_spans_and_merged_away_cell_has_none(tmp_path) -> None:
+    from tests._pdf_builders import PdfBuilder
+
+    builder = PdfBuilder(tmp_path / "merged.pdf").page()
+    _header_merged_grid(builder)
+    with builder.open() as doc:
+        (table,) = doc[0].find_tables(strategy="lines")
+    assert table.rows[0] == ("head", None, "r0c2")
+    assert _rounded(table) == [
+        [(72, 200, 272, 220), None, (272, 200, 372, 220)],
+        [(72, 220, 172, 240), (172, 220, 272, 240), (272, 220, 372, 240)],
+    ]
+
+
+def test_rotated_page_cell_boxes_are_in_the_displayed_frame(tmp_path) -> None:
+    """On a /Rotate 90 page the grid turns with the text: cell boxes share the
+    displayed frame of the table bbox, not the unrotated drawing frame."""
+    from tests._pdf_builders import PdfBuilder
+
+    builder = PdfBuilder(tmp_path / "rotated.pdf").page(rotation=90)
+    _header_merged_grid(builder)
+    with builder.open() as doc:
+        (table,) = doc[0].find_tables(strategy="lines")
+    assert table.rows == (("r1c0", "head"), ("r1c1", None), ("r1c2", "r0c2"))
+    assert _rounded(table) == [
+        [(602, 72, 622, 172), (622, 72, 642, 272)],
+        [(602, 172, 622, 272), None],
+        [(602, 272, 622, 372), (622, 272, 642, 372)],
+    ]
+    t = table.bbox
+    for row in table.cell_boxes:
+        for b in row:
+            assert b is None or (t.x0 <= b.x0 and t.y0 <= b.y0 and b.x1 <= t.x1 and b.y1 <= t.y1)
