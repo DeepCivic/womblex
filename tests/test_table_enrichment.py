@@ -12,7 +12,11 @@ from tests.test_enrich_packing import _FakeClient, _FakeCounter
 from womblex.analyse.enrich_stage import enrich_shards
 from womblex.config import EnrichmentConfig, PIIConfig
 from womblex.pii.pii_stage import _known_spans_by_doc
-from womblex.store.enrichment_output import enrichment_meta_path_for, read_enrichment_entities
+from womblex.store.enrichment_output import (
+    enrichment_entities_path_for,
+    enrichment_meta_path_for,
+    read_enrichment_entities,
+)
 
 
 def _enrich(d, **config) -> _FakeClient:
@@ -93,3 +97,25 @@ def test_a_batch_enriched_without_tables_is_re_enriched_on_resume(tmp_path):
     again = _FakeClient()
     enrich_shards(tmp_path, cfg, client=again, token_counter=_FakeCounter(), checkpoint_mgr=ckpt)
     assert again.calls == []
+
+
+def test_each_mention_carries_its_own_text(tmp_path):
+    base = contact_shard(tmp_path)
+    markdown = table_markdown(base)
+    _enrich(tmp_path)
+
+    rows = read_enrichment_entities(base).to_pylist()
+
+    assert {r["text_layer"] for r in rows} == {"elements", "table_markdown"}
+    for r in rows:
+        source = markdown if r["text_layer"] == "table_markdown" else NARRATIVE
+        assert r["mention_text"] == source[r["mention_start"]:r["mention_end"]] != ""
+
+
+def test_an_entities_file_written_before_mention_text_reads_it_as_null(tmp_path):
+    base = contact_shard(tmp_path)
+    _enrich(tmp_path)
+    path = enrichment_entities_path_for(base)
+    pq.write_table(pq.read_table(str(path)).drop(["mention_text"]), str(path))
+
+    assert {r["mention_text"] for r in read_enrichment_entities(base).to_pylist()} == {None}
