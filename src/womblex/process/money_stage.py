@@ -162,8 +162,8 @@ def _annotate_batch(
     indexes: dict[str, EvidenceIndex] = {}
     for source_hash, elements in elements_by_hash.items():
         apply_overlay(source_hash, elements, overrides)
-        index = indexes[source_hash] = EvidenceIndex(elements, text_source)
         try:
+            index = indexes[source_hash] = EvidenceIndex(elements, text_source)
             if config.narrative:
                 span_rows.extend(_narrative_rows(source_hash, index, opts))
             if config.columns.enabled:

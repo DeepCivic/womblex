@@ -51,6 +51,7 @@ def cmd_money(args: argparse.Namespace) -> int:
     from womblex.process.money_stage import money_shards
     from womblex.process.text_overlay import MissingOverlayError
     from womblex.store.checkpoint import CheckpointManager
+    from womblex.store.evidence import EvidenceError
     from womblex.store.money_output import MONEY_SPANS_SUFFIX
     from womblex.store.shard_audit import reconcile_stage_checkpoint_with_shards
 
@@ -101,7 +102,7 @@ def cmd_money(args: argparse.Namespace) -> int:
     )
     try:
         result = money_shards(shard_dir, config, text_source=text_source, checkpoint_mgr=ckpt)
-    except MissingOverlayError as e:
+    except (MissingOverlayError, EvidenceError) as e:
         logger.error("money --shards: refused: %s", e)
         return 1
     logger.info(

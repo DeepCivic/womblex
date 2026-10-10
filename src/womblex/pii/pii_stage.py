@@ -44,6 +44,7 @@ import pyarrow.parquet as pq
 from womblex.config import PIIConfig
 from womblex.pii.cleaner import PIICleaner
 from womblex.process.chunk_stage import _batch_bases
+from womblex.process.chunker import TableText
 from womblex.process.evidence import EvidenceIndex, EvidenceIndexes, assert_evidence
 from womblex.process.text_overlay import require_overlays
 from womblex.store.checkpoint import CheckpointManager
@@ -290,7 +291,7 @@ def _chunk_text(texts: dict[tuple[str, int], str], row: Mapping[str, Any]) -> st
 
 
 def _receipt(
-    index: EvidenceIndex | None, table: object, c: dict, aligned: bool, start: int, end: int,
+    index: EvidenceIndex | None, table: TableText | None, c: dict, aligned: bool, start: int, end: int,
     span_text: str,
 ) -> dict:
     """The span's evidence at the most precise level that is reliable.
@@ -306,8 +307,8 @@ def _receipt(
     if not aligned:
         doc_ref = index.document_ref()
         return doc_ref if index.holds(doc_ref, span_text) else chunk_ref
-    ref = (index.narrative_ref(start, end) if c["content_type"] == "narrative"
-           else index.table_ref(table, start, end))  # type: ignore[arg-type]
+    ref = (index.table_ref(table, start, end) if table is not None
+           else index.narrative_ref(start, end))
     return ref or index.document_ref()
 
 
