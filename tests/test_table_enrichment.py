@@ -7,15 +7,12 @@ from __future__ import annotations
 
 import pyarrow.parquet as pq
 
-from tests._shard import DOC, contact_shard, table_markdown
+from tests._shard import DOC, NARRATIVE, contact_shard, table_markdown, write_contact_chunks
 from tests.test_enrich_packing import _FakeClient, _FakeCounter
 from womblex.analyse.enrich_stage import enrich_shards
 from womblex.config import EnrichmentConfig, PIIConfig
 from womblex.pii.pii_stage import _known_spans_by_doc
 from womblex.store.enrichment_output import enrichment_meta_path_for, read_enrichment_entities
-from womblex.store.output import write_chunks
-
-NARRATIVE = "Contact Jane Doe about the $5,000 grant.\n\nSigned by the delegate."
 
 
 def _enrich(d, **config) -> _FakeClient:
@@ -53,13 +50,14 @@ def test_include_tables_off_sends_only_the_narrative(tmp_path):
     assert pq.read_table(str(enrichment_meta_path_for(base))).to_pylist()[0]["table_count"] is None
 
 
-def test_narrative_consumers_ignore_table_mentions(tmp_path):
+def test_table_mentions_are_kept_apart_from_the_narrative_spans(tmp_path):
     base = contact_shard(tmp_path)
     _enrich(tmp_path)
 
-    known = _known_spans_by_doc(base, {"natural"}, set(PIIConfig().entities))
+    known, in_tables = _known_spans_by_doc(base, {"natural"}, set(PIIConfig().entities))
 
     assert {e for _s, _e, _t, e in known[DOC]} == {"p1"}
+    assert {e for _s, _e, _t, e in in_tables[(DOC, 1, None)]} == {"t0:p1"}
 
 
 def test_graph_refresh_leaves_table_mentions_alone(tmp_path):
@@ -68,13 +66,7 @@ def test_graph_refresh_leaves_table_mentions_alone(tmp_path):
     base = contact_shard(tmp_path)
     markdown = table_markdown(base)
     _enrich(tmp_path)
-    common = {"source_hash": DOC, "has_redaction": False, "page_start": 1, "page_end": 1}
-    write_chunks([
-        {**common, "chunk_index": 0, "text": NARRATIVE, "start_char": 0,
-         "end_char": len(NARRATIVE), "content_type": "narrative", "elem_order": None},
-        {**common, "chunk_index": 1, "text": markdown, "start_char": 0,
-         "end_char": len(markdown), "content_type": "table", "elem_order": 1},
-    ], base)
+    write_contact_chunks(base, markdown)
 
     refresh_graph_edges(tmp_path)
 

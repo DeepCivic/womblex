@@ -27,7 +27,6 @@ Verified against the code at the time of writing.
 | Sensitive data (FR-5.1) | The `sensitivity` footer key; the API reads the masked layer by default and gates raw layers behind `read_raw` |
 
 ## Findings
-- **Table chunks have no PII candidate source.** Enrichment covers the reassembled narrative only, and `pii/pii_stage.py` passes graph spans to narrative chunks only, so every table chunk's `clean_text` row is `not_masked` (verbatim, honestly labelled since Phase 1 item 2) on every run.
 - **Only native PDF tables have cell boxes.** DOCX, OCR-reconstructed and spreadsheet-print tables carry a null cell `bbox`; OCR tables could take one from the `table_grid` bands and columns if a consumer needs it.
 - **Each annotation sidecar defines its own anchor columns.** There is no shared shape for "where in the source this came from".
 - **Two stages rewrite files in place** (`MutationMode.IN_PLACE`), the exceptions to write-once sidecars. `graph-refresh` rewrites the entity and edge sidecars. `layout` replaces the extraction batch's `*.layout_regions.parquet`, but only when the config's layout fingerprint differs from the file's, and all-or-nothing per batch.
@@ -74,7 +73,7 @@ Re-dispatching a stage that failed returns its recorded failure. DBOS's `resume_
 ### Phase 1 — trust baseline (branch)
 Items 1 (strict `text_source`), 2 (`mask_status`), 4 (strict config), 5 (file checksums) and 8 (cell bbox, contract `1.3`) have shipped.
 
-3. **Table chunks get candidates.** Each table's markdown is sent to the enricher as its own text (folding tables into the narrative is not pursued, see `decisions.md`), so narrative offsets do not move. The enrichment side has shipped (`enrichment.include_tables`, contract `1.4`; the spend is measured in D2); the PII stage using the result is next. Further entity-recognition, embedding and graph providers are planned and must fit beside Isaacus as alternatives.
+3. **Table chunks get candidates.** Each table's markdown is sent to the enricher as its own text (folding tables into the narrative is not pursued, see `decisions.md`), so narrative offsets do not move. This has shipped (`enrichment.include_tables`, contract `1.4`; the spend is measured in D2). Further entity-recognition, embedding and graph providers are planned and must fit beside Isaacus as alternatives.
 6. **Evidence reference.** One shared anchor shape (source hash, element order, page, bbox, character span, text layer) *replaces* the anchor columns of the money, entity-link and PII sidecars, plus a check that each span's text equals the source text at its offsets. The check runs at write time, where a mismatch refuses the batch's publish, and as an on-demand verify command over finished runs, beside shard integrity verification. A major contract bump (D6).
 7. **Reader migration.** Every reader of those sidecars moves to the new anchor shape in the same branch as item 6: `api/readers.py`, `ui/readers.py`, the benchmark's suites, and the reader shim `contract.md` requires for the old major.
 
