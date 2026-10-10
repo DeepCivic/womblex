@@ -32,6 +32,7 @@ class EntityMention:
     mention_start: int
     mention_end: int
     chunk_index: int
+    text_layer: str | None = None  # 'table_markdown' when the offsets index a table, not the narrative
 
 
 @dataclass
@@ -48,6 +49,7 @@ class Edge:
 def load_entity_mentions(path: Path) -> list[EntityMention]:
     """Load entity mentions from a Parquet file."""
     table = pq.read_table(str(path))
+    layers = table.column("text_layer") if "text_layer" in table.schema.names else None
     return [
         EntityMention(
             source_hash=table.column("source_hash")[i].as_py(),
@@ -59,6 +61,7 @@ def load_entity_mentions(path: Path) -> list[EntityMention]:
             mention_start=table.column("mention_start")[i].as_py(),
             mention_end=table.column("mention_end")[i].as_py(),
             chunk_index=table.column("chunk_index")[i].as_py(),
+            text_layer=layers[i].as_py() if layers is not None else None,
         )
         for i in range(len(table))
     ]
@@ -107,13 +110,17 @@ def edges_for_document(
 def pii_spans_from_mentions(
     mentions: list[EntityMention], source_hash: str, *, labels: set[str] | None = None,
 ) -> list[tuple[int, int, str]]:
-    """Extract PII-relevant (start, end, label) spans for masking."""
+    """Extract PII-relevant (start, end, label) spans of the narrative for masking.
+
+    Table mentions index their own markdown, not the narrative, and are skipped.
+    """
     if labels is None:
         labels = {"person", "location"}
     spans = [
         (m.mention_start, m.mention_end, m.entity_label)
         for m in mentions
         if m.source_hash == source_hash
+        and m.text_layer != "table_markdown"
         and m.entity_label in labels
         and m.mention_start >= 0
         and m.mention_end > m.mention_start

@@ -516,7 +516,7 @@ There is no separate detector and **no second enrichment pass**.
 - **Detection runs on chunks; the graph is the entity source.** Graph mentions
   (full-narrative offsets) map into `narrative` chunks via `chunk.start_char`.
   `table` chunks carry a different offset space, so narrative graph spans are
-  never applied to them.
+  never applied to them; a table's own enrichment supplies theirs (below).
 - **Recall is flexed by enrichment *duration*, not by a second detector.**
   Higher recall comes from finer enrichment granularity (e.g. per-chunk) and
   `overflow_strategy` for long documents — both trade compute for recall while
@@ -536,10 +536,39 @@ There is no separate detector and **no second enrichment pass**.
   carries `mask_status`: `masked`, `no_entity` (a candidate source covered the
   chunk and found nothing) or `not_masked` (none did, so the text is verbatim).
   *Rejected:* refusing the stage with a typed error when a chunk has no
-  candidate source (with the backstop off, the default, every table chunk has
-  none, so every run would refuse), and omitting
+  candidate source (a table chunk has none when `enrichment.include_tables` is
+  off or its document was not enriched, so such runs would refuse), and omitting
   `clean_text` rows for uncovered chunks (readers lose the chunk silently). The
   column is additive, so existing readers keep working.
+- **Each table's markdown is enriched as its own text** (2026-10; D2 of the
+  plan). The string is the one `chunker.table_texts` hands the chunker, sent as
+  a separate request text beside the narrative in the same requests
+  (`enrichment.include_tables`, default on), so narrative offsets do not move
+  and a table mention's offsets share a coordinate space with the table's
+  chunks. Its mentions carry `text_layer='table_markdown'`, the table's
+  `elem_order` (or `sheet`) and `t<n>:`-namespaced entity ids (each result
+  restarts at `p1`). *Grounds*, from the Isaacus enrichment docs: batch
+  composition does not change any document's results; the returned `doc.text`
+  is identical to the input, with spans as code-point offsets into it; entity
+  ids are unique within a document, so a whole table keeps one id per person
+  across its chunks; tables are a native `figure`/`table` segment; billing is
+  input tokens plus overhead per text, at US$3.50 per million;
+  `overflow_strategy: auto` handles text over 16,384 tokens; and per-chunk
+  enrichment would need a second enrichment pass, which the PII decision above
+  rules out. *Limits:* a person in both the narrative and a table gets two
+  different mask numbers; the model sees a table without its caption or heading
+  context; a sheet, which has no element position, is matched to its chunks by
+  text; a table over the 100K split ceiling is sent whole (one blank-line
+  block, so nothing to cut on). *Not done:* tables folded into the narrative
+  (moves every narrative offset), and graph edges for table results (their ids
+  and offsets are not in the narrative's space). With `include_tables` on, a
+  batch whose meta file lacks `table_count` is enriched again on resume; the
+  narrative is re-sent and re-billed along with its tables. *Measured spend* (kanon-2
+  tokeniser, synthetic set, 28 documents, 6 with tables): 16,584 narrative
+  tokens and 22,832 table tokens, so the table pass adds ~138% — the set is
+  register-heavy (the sightings register alone is 12,716 table tokens), and a
+  corpus of prose reports will add far less. `include_tables: false` switches
+  it off, and table chunks are then `not_masked`.
 - **Coverage is PERSON and ADDRESS.** ORGANISATION, URL, phone and email are
   not detected.
 

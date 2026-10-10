@@ -22,6 +22,7 @@ from womblex.store.enrichment_output import (
     read_enrichment_entities,
 )
 from womblex.store.entity_links_output import entity_links_path_for, write_entity_links
+from womblex.store.evidence import TABLE_LAYER
 from womblex.store.output import read_manifest
 
 logger = logging.getLogger(__name__)
@@ -127,8 +128,8 @@ def _candidates_for_batch(
     kinds = set(candidate_kinds)
     out: dict[str, list[Candidate]] = defaultdict(list)
     for r in table.to_pylist():
-        if r["entity_type"] not in kinds:
-            continue
+        if r["entity_type"] not in kinds or r["text_layer"] == TABLE_LAYER:
+            continue  # table offsets index that table's markdown, not the narrative
         out[r["source_hash"]].append(Candidate(
             text=r["name"] or "",
             kind=r["entity_type"],

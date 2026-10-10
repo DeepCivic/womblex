@@ -7,7 +7,7 @@ column-level schemas are in [extraction.md](extraction.md).
 
 ## Contract version
 
-`womblex.contract_version` (currently `1.3`, `store/contract.CONTRACT_VERSION`)
+`womblex.contract_version` (currently `1.4`, `store/contract.CONTRACT_VERSION`)
 is in the footer of every pipeline Parquet and in `egress_manifest.json`. It is
 versioned apart from the package: a release that changes no schema leaves it
 alone.
@@ -33,10 +33,10 @@ the single source). An unknown role reads as `raw`.
 | `normalised_text`, `spellfix_text`, `spellfix_corrections` | `(source_hash, elem_order)` | raw |
 | `chunks` | `(source_hash, chunk_index)`; table chunks anchor on `elem_order` | raw |
 | `embeddings`, `chunk_quality` | `(source_hash, chunk_index)` | none |
-| `enrichment_entities` | `(source_hash, entity_id)`; carries `chunk_index` to `chunks` | raw |
+| `enrichment_entities` | `(source_hash, entity_id)`; carries `chunk_index` to `chunks` (narrative mentions only; table mentions are `-1`). `text_layer` names the text `mention_start` / `mention_end` index: the narrative under its element-text layer, or `table_markdown` with the table named by `elem_order` or `sheet` (1.4; null on older files, read as narrative) | raw |
 | `graph_edges` | `source_hash` + `source_id` / `target_id` to `enrichment_entities.entity_id` | raw |
 | `enrichment_doc` | `source_hash` (one row per document) | raw |
-| `enrichment_meta` | `source_hash` | none |
+| `enrichment_meta` | `source_hash`; `table_count` is tables sent to the enricher on their own, null where none were (1.4) | none |
 | `entity_links` | `(source_hash, mention_start, mention_end)` to `enrichment_entities`; its `entity_id` is the reference-register id | raw |
 | `pii_spans` | `(source_hash, chunk_index)`; `entity_id` to `enrichment_entities` | raw |
 | `clean_text` | `(source_hash, chunk_index)`; `mask_status` is `masked`, `no_entity` or `not_masked` (verbatim, no candidate source covered the chunk); files written before contract 1.2 read back as `masked` where `n_masked` is above zero, null otherwise | masked |

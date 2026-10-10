@@ -40,6 +40,7 @@ from womblex.store.enrichment_output import (
     enrichment_meta_path_for,
     read_enrichment_entities,
 )
+from womblex.store.evidence import TABLE_LAYER
 from womblex.store.output import read_chunks, read_manifest
 from womblex.store.pii_output import (
     MASK_MASKED,
@@ -254,6 +255,8 @@ def _known_spans_by_doc(
             continue
         if r["mention_start"] < 0 or r["mention_end"] <= r["mention_start"]:
             continue
+        if r["text_layer"] == TABLE_LAYER:
+            continue  # indexes that table's markdown, not the narrative
         out.setdefault(r["source_hash"], []).append(
             (r["mention_start"], r["mention_end"], tag, r["entity_id"] or "")
         )
