@@ -459,14 +459,17 @@ With an approximation qualifier:
 ### As built
 
 `*.money_spans.parquet` is that record, flattened, with the anchor made
-explicit. One row per amount; `locus` discriminates which anchor group is
-populated, and **exactly one group is non-null per row**:
+explicit by the shared evidence reference (`store/evidence.py`, contract 2.0).
+One row per amount, located to the span in its text; `locus` says which text:
 
-| Locus | Non-null anchor columns |
+| Locus | Evidence columns |
 |---|---|
-| `narrative` | `text_source`, `start_char`, `end_char`, `page` |
-| `table_cell` | `parent_elem_order`, `row`, `col` |
-| `sheet_cell` | `sheet`, `row`, `col`, `elem_order` |
+| `narrative` | `elem_order`, `page`, `bbox`, `char_start` / `char_end` into the narrative under `text_layer` (`elements` / `normalised` / `spellfix`) |
+| `table_cell` | `elem_order` (the table), `cell_row`, `cell_col`, `char_start` / `char_end` into the cell value, `text_layer = cell` |
+| `sheet_cell` | `elem_order` (the `sheet_cell`), `sheet`, `cell_row`, `cell_col`, offsets into the cell value, `text_layer = cell` |
+
+Before the sidecar is written the stage checks each row: the source text at
+`char_start:char_end` must equal `text`, or the batch is refused (`EvidenceError`).
 
 Beyond the JSON above the row also carries `evidence` (`p1`–`p7`, `p9`–`p11`
 for the narrative patterns — pattern 8 has no code; its qualifier lands in
@@ -541,12 +544,12 @@ extraction path, which this design explicitly rejects.
 | Locus | Anchor |
 |---|---|
 | `narrative` | character offset into the reassembled narrative — the same space enrichment mentions use, so they join, and map to chunks as `graph_refresh` does |
-| `sheet_cell` | `(sheet, row, col)` |
-| `table_cell` | `(parent_elem_order, row, col)` on the `table_cells` sidecar |
+| `sheet_cell` | the `sheet_cell` element with `(sheet, cell_row, cell_col)` |
+| `table_cell` | the table element with `(cell_row, cell_col)` on the `table_cells` sidecar |
 
 The narrative offsets index whichever element-text layer was selected
 (`processing.text_source`: `elements` / `normalised` / `spellfix`), so that
-choice is recorded alongside the spans and the space stays self-describing.
+choice is recorded alongside the spans (`text_layer`) and the space stays self-describing.
 
 **Output** is a `*.money_spans.parquet` sidecar per batch (plus the
 `*.money_columns.parquet` verdict audit), joinable on `source_hash`, with a

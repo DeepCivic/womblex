@@ -579,6 +579,35 @@ There is no separate detector and **no second enrichment pass**.
 - **Coverage is PERSON and ADDRESS.** ORGANISATION, URL, phone and email are
   not detected.
 
+### The evidence reference
+One anchor shape replaces the per-sidecar anchors of `money_spans`,
+`entity_links` and `pii_spans` (2026-10; D6, contract 2.0): ten columns, ending in
+`anchor_level` (`docs/contract.md`).
+
+- **No null receipts.** A row carries the most precise location that is reliable
+  and a label for it (`span`, `element`, `chunk`, `document`); each level is
+  checked at its own precision, and a receipt that fails its own check refuses the
+  batch. A source that is absent leaves the receipt written, counted unchecked and
+  warned about. *Rejected:* null evidence for a span that cannot be placed (it
+  reads as "no evidence", and for PII a refusal would mean dropping the mask).
+- **A position is never searched for.** Offsets are carried from where they were
+  computed or the row is given a coarser level; a search would hand back a
+  plausible position for the wrong occurrence.
+- **Offsets are in the space of the text `text_layer` names, not element-relative.**
+  A narrative span crossing two elements is still one row, and the join to chunks
+  (`start_char`) and to enrichment mentions stays an overlap test.
+- **Masking never depends on anchoring.** A table chunk that does not line up with
+  its table takes no table spans and reads `not_masked` (offset masking there
+  would be unsafe), and its span rows are located to the document or the chunk.
+- **A link is checked against the enricher's text for the mention** (`mention_text`),
+  not its `candidate_text`: `name` is the entity's, the same for every mention, so
+  it differs from a mention's own text ("the Minister" against "Jane Doe").
+- **Replaced, not duplicated.** The old columns are gone and older files read through
+  a shim. *Rejected:* keeping the old columns beside the new (two anchors that can
+  disagree). The womblex-benchmark suites that read these sidecars need the paired
+  change.
+- **`money_columns` is not a span sidecar** and keeps its own column keys.
+
 ### PII / redaction marker convention
 House style is **Presidio-style typed angle-bracket tags**. PII person masks are
 `<PERSON_n>` — typed **and** numbered, keyed to the graph entity (within-doc
