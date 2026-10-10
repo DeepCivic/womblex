@@ -165,11 +165,17 @@ def extract_batch(
     run_id: str, batch_num: int, input_keys: list[str], shard_prefix: str,
     ingest_root: str, max_attempts: int,
 ) -> dict[str, Any]:
-    checksums = DBOS.run_step(
+    recorded = DBOS.run_step(
         _retry("extract", max_attempts), _extract,
         run_id, batch_num, input_keys, shard_prefix, ingest_root,
     )
-    return {"published": len(checksums), "checksums": checksums}
+    return {"published": len(recorded), "checksums": _digests(recorded)}
+
+
+def _digests(recorded: Any) -> dict[str, str]:
+    """A step's published keys with digests; one recorded before checksums
+    returned a key list, so its files carry none (the board names that gap)."""
+    return recorded if isinstance(recorded, dict) else {}
 
 
 # --- stages ------------------------------------------------------------------
@@ -203,16 +209,16 @@ def _unit(stage: str, run_id: str, shard_prefix: str, unit: list[str]) -> dict[s
 @DBOS.workflow(name=dbos_app.STAGE_WORKFLOW)
 def run_stage(run_id: str, stage: str, shard_prefix: str, max_attempts: int) -> dict[str, Any]:
     units = DBOS.run_step({"name": "plan"}, _plan, stage, shard_prefix)
+    published = 0
     checksums: dict[str, str] = {}
     for unit in units:
         label = unit[0] if len(unit) == 1 else "run"
-        checksums.update(DBOS.run_step(
+        recorded = DBOS.run_step(
             _retry(f"unit:{label}", max_attempts), _unit, stage, run_id, shard_prefix, unit,
-        ))
-    return {
-        "stage": stage, "units": len(units), "published": len(checksums),
-        "checksums": checksums,
-    }
+        )
+        published += len(recorded)
+        checksums.update(_digests(recorded))
+    return {"stage": stage, "units": len(units), "published": published, "checksums": checksums}
 
 
 # --- coordinator -------------------------------------------------------------

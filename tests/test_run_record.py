@@ -150,6 +150,16 @@ class TestFileChecksums:
         ]
         assert not any("file checksums" in gap for gap in record["partial"])
 
+    def test_jobs_that_may_have_published_undigested_files_are_named(
+        self, tmp_path, extraction,
+    ):
+        manifest = write_run_manifest(
+            _extracted(tmp_path, extraction),
+            checksums={"documents/a.parquet": "aa"}, undigested=["r1:stage:chunk"],
+        )
+        gaps = [g for g in read_run_record(manifest)["partial"] if "file checksums" in g]
+        assert len(gaps) == 1 and "r1:stage:chunk" in gaps[0]
+
     def test_a_record_without_them_names_the_gap(self, tmp_path, extraction):
         record = read_run_record(write_run_manifest(_extracted(tmp_path, extraction)))
         assert "files" not in record

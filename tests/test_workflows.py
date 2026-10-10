@@ -304,7 +304,10 @@ def test_finalize_records_the_checksum_of_every_published_file(fleet):
         board.enqueue("r1", [batch(ingest)])
         board.enqueue_stages("r1", ["normalise"], "runs/r1/documents")
         work(fleet, idle_timeout=2)
-        checksums = board.file_checksums("r1")
+        result = board.file_checksums("r1")
+    checksums = result.checksums
+
+    assert result.undigested == []
 
     assert "runs/r1/documents/batch-0001.elements.parquet" in checksums
     assert "runs/r1/documents/batch-0001.normalised_text.parquet" in checksums
@@ -321,3 +324,56 @@ def test_finalize_records_the_checksum_of_every_published_file(fleet):
         k.removeprefix("runs/r1/"): v for k, v in checksums.items()
     }
     assert not any("file checksums" in gap for gap in record["partial"])
+
+
+class _Row:
+    def __init__(self, wid, status, output, kind="batch", created_at=0):
+        self.workflow_id, self.status, self.output = wid, status, output
+        self.attributes, self.created_at = {"run_id": "r1", "kind": kind}, created_at
+
+
+class _Client:
+    def __init__(self, rows, steps):
+        self.rows, self.steps = rows, steps
+
+    def list_workflows(self, **_kw):
+        return self.rows
+
+    def list_workflow_steps(self, wid):
+        return self.steps.get(wid, [])
+
+
+def _board(rows, steps=None) -> RunBoard:
+    board = RunBoard.__new__(RunBoard)
+    board._client = _Client(rows, steps or {})
+    return board
+
+
+def test_a_failed_stage_keeps_its_finished_units_digests_and_is_named():
+    """Units that finished before the stage failed published their files; their
+    digests are read from the recorded steps, and the stage is named as a gap."""
+    steps = {"r1:stage:chunk": [
+        {"function_id": 1, "output": [["b1"], ["b2"]], "error": None},
+        {"function_id": 2, "output": {"k/b1.chunks.parquet": "aa"}, "error": None},
+        {"function_id": 3, "output": None, "error": RuntimeError("boom")},
+    ]}
+    result = _board([_Row("r1:stage:chunk", "ERROR", None, kind="stage")], steps).file_checksums("r1")
+    assert result.checksums == {"k/b1.chunks.parquet": "aa"}
+    assert result.undigested == ["r1:stage:chunk"]
+
+
+def test_a_workflow_recorded_before_checksums_is_named_not_counted():
+    rows = [
+        _Row("r1:batch:0001", "SUCCESS", ["k/b1.elements.parquet"]),
+        _Row("r1:stage:chunk", "SUCCESS", {"published": 2, "checksums": {"k/a": "aa"}},
+             kind="stage", created_at=1),
+        _Row("r1:downstream:x", "SUCCESS", [{"stage": "chunk"}], kind="downstream"),
+    ]
+    result = _board(rows).file_checksums("r1")
+    assert result.checksums == {"k/a": "aa"}
+    assert result.undigested == ["r1:batch:0001", "r1:stage:chunk"]
+
+
+def test_a_step_recorded_as_a_key_list_resumes_without_digests():
+    assert workflows._digests(["k/a", "k/b"]) == {}
+    assert workflows._digests({"k/a": "aa"}) == {"k/a": "aa"}

@@ -120,7 +120,7 @@ def _footer_from_columns(table: pa.Table) -> dict[bytes, bytes] | None:
 
 def _merged_footer(
     shard_dir: Path, table: pa.Table, footers: FooterList | None = None,
-    checksums: dict[str, str] | None = None,
+    checksums: dict[str, str] | None = None, undigested: list[str] | None = None,
 ) -> dict[bytes, bytes] | None:
     """Where the corpus came from, which run, and the record of what that run did.
 
@@ -138,7 +138,9 @@ def _merged_footer(
     stamp = stamp_from_footers(sorted(shard_dir.glob("*._manifest.parquet")), "manifest")
     record = {
         RUN_RECORD_KEY.encode(): json.dumps(
-            build_run_record(shard_dir, table, footers=footers, checksums=checksums),
+            build_run_record(
+                shard_dir, table, footers=footers, checksums=checksums, undigested=undigested,
+            ),
             sort_keys=True,
         ).encode(),
     }
@@ -457,7 +459,7 @@ def _partial(
 
 def build_run_record(
     shard_dir: Path, table: pa.Table, *, footers: FooterList | None = None,
-    checksums: dict[str, str] | None = None,
+    checksums: dict[str, str] | None = None, undigested: list[str] | None = None,
 ) -> dict:
     """Assemble the run record for *shard_dir*, whose rows are *table*.
 
@@ -472,7 +474,9 @@ def build_run_record(
     *checksums* maps each published file's run-relative key to the SHA-256
     taken when it was written. The record lists them under ``files`` so a whole
     run is auditable without opening every file; a record built without them
-    has no ``files`` key and names the gap in ``partial``.
+    has no ``files`` key and names the gap in ``partial``. *undigested* names the
+    jobs that may have published files without a digest (failed, unfinished, or
+    recorded before checksums); ``partial`` names them too.
 
     Deterministic apart from ``generated_at``: every collection is sorted, the
     stages by pipeline position and the rest by name, so re-running over an
@@ -524,6 +528,12 @@ def build_run_record(
             "file checksums: none were supplied, so the output files carry no "
             "digest taken at write time",
         )
+    if undigested:
+        record["partial"].append(
+            f"file checksums: {len(undigested)} job(s) failed, had not finished or "
+            f"predate checksums, so files they published may carry no digest: "
+            f"{', '.join(sorted(undigested))}",
+        )
     return record
 
 
@@ -556,6 +566,7 @@ def write_run_manifest(
     *,
     footers: FooterList | None = None,
     checksums: dict[str, str] | None = None,
+    undigested: list[str] | None = None,
 ) -> Path:
     """Consolidate all ``*._manifest.parquet`` in ``shard_dir`` into one parquet.
 
@@ -563,11 +574,11 @@ def write_run_manifest(
     returns the path written. An empty shard directory still produces an
     empty-but-schema-correct file so downstream reads are safe.
 
-    *footers* and *checksums* are passed through to :func:`build_run_record` for
+    *footers*, *checksums* and *undigested* are passed through to :func:`build_run_record` for
     a caller whose shards are not all in *shard_dir* — see that function.
     """
     table = read_manifest(shard_dir)
-    footer = _merged_footer(shard_dir, table, footers, checksums)
+    footer = _merged_footer(shard_dir, table, footers, checksums, undigested)
     target = output_path or run_manifest_path_for(shard_dir)
     table = table.replace_schema_metadata({**(footer or {}), **contract_footer(target, role="manifest")})
     target.parent.mkdir(parents=True, exist_ok=True)
