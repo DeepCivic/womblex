@@ -39,6 +39,7 @@ from womblex.store.enrichment_output import (
     write_enrichment_entities_rows,
     write_graph_edges_rows,
 )
+from womblex.store.evidence import TABLE_LAYER
 from womblex.store.output import chunks_path_for, read_chunks, read_manifest
 
 logger = logging.getLogger(__name__)
@@ -142,6 +143,10 @@ def _relink_mentions(
     docs_with_edges: set[str] = set()
 
     for row in entity_rows:
+        if row.get("text_layer") == TABLE_LAYER:
+            # Offsets index a table's own markdown, not the narrative chunks are cut from.
+            refreshed.append(dict(row))
+            continue
         source_hash = row["source_hash"]
         chunks = chunks_by_hash.get(source_hash, [])
         overlaps = _overlapping_chunks(row["mention_start"], row["mention_end"], chunks)

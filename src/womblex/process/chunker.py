@@ -609,6 +609,41 @@ def element_spans(elements: list[Element]) -> list[tuple[int, int, int]]:
     return [(e.order, start, end) for e, _piece, start, end in _narrative_pieces(elements)]
 
 
+@dataclass(frozen=True)
+class TableText:
+    """One table's markdown with the handle that locates it in the source.
+
+    ``elem_order`` names a ``kind='table'`` element; ``sheet`` names a
+    spreadsheet sheet (which aggregates many ``sheet_cell`` elements and has
+    no single position). Exactly one of the two is set. ``markdown`` is the
+    string the chunker budgets and the enricher reads, so offsets into a table
+    chunk and into an enriched table share this coordinate space.
+    """
+
+    page: int | None
+    elem_order: int | None
+    sheet: str | None
+    markdown: str
+
+
+def table_texts(elements: list[Element]) -> list[TableText]:
+    """One :class:`TableText` per non-empty table element, then per spreadsheet sheet."""
+    out: list[TableText] = []
+    for e in elements:
+        if e.kind != "table":
+            continue
+        td = _element_to_table_data(e)
+        md = table_to_markdown(td.headers, td.rows)
+        if md.strip():
+            out.append(TableText(e.page, e.order, None, md))
+
+    for sheet_td in _sheets_to_table_data(elements):
+        md = table_to_markdown(sheet_td.headers, sheet_td.rows)
+        if md.strip():
+            out.append(TableText(None, None, sheet_td.context.get("sheet"), md))
+    return out
+
+
 def collect_tables_from_elements(
     elements: list[Element],
 ) -> list[tuple[int | None, int | None, str]]:
@@ -621,21 +656,7 @@ def collect_tables_from_elements(
     sitting at one position, and a spreadsheet has no narrative to be
     ordered against, so the anchor would be meaningless there.
     """
-    out: list[tuple[int | None, int | None, str]] = []
-    for e in elements:
-        if e.kind != "table":
-            continue
-        td = _element_to_table_data(e)
-        md = table_to_markdown(td.headers, td.rows)
-        if md.strip():
-            out.append((e.page, e.order, md))
-
-    for sheet_td in _sheets_to_table_data(elements):
-        md = table_to_markdown(sheet_td.headers, sheet_td.rows)
-        if md.strip():
-            out.append((None, None, md))
-
-    return out
+    return [(t.page, t.elem_order, t.markdown) for t in table_texts(elements)]
 
 
 def build_chunk_input(

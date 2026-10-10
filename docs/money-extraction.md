@@ -459,14 +459,19 @@ With an approximation qualifier:
 ### As built
 
 `*.money_spans.parquet` is that record, flattened, with the anchor made
-explicit. One row per amount; `locus` discriminates which anchor group is
-populated, and **exactly one group is non-null per row**:
+explicit by the shared evidence reference (`store/evidence.py`, contract 2.0).
+One row per amount; `locus` says which text the offsets index:
 
-| Locus | Non-null anchor columns |
+| Locus | Evidence columns |
 |---|---|
-| `narrative` | `text_source`, `start_char`, `end_char`, `page` |
-| `table_cell` | `parent_elem_order`, `row`, `col` |
-| `sheet_cell` | `sheet`, `row`, `col`, `elem_order` |
+| `narrative` | `elem_order`, `page`, `bbox`, `char_start` / `char_end` into the narrative under `text_layer` (`elements` / `normalised` / `spellfix`) |
+| `table_cell` | `elem_order` (the table), `cell_row`, `cell_col`, `char_start` / `char_end` into the cell value, `text_layer = cell` |
+| `sheet_cell` | `elem_order` (the `sheet_cell`), `sheet`, `cell_row`, `cell_col`, offsets into the cell value, `text_layer = cell` |
+
+Before the sidecar is written the stage checks each row: the source text at
+`char_start:char_end` must equal `text`, or the batch is refused
+(`EvidenceError`). `womblex verify-evidence` repeats the check over a finished
+run.
 
 Beyond the JSON above the row also carries `evidence` (`p1`–`p7`, `p9`–`p11`
 for the narrative patterns — pattern 8 has no code; its qualifier lands in
@@ -491,7 +496,8 @@ Two departures from the pipeline sketch below, both consequences of the
   already the `normalise` / `spellfix` overlays' job, and re-doing them inside
   this op would put spans in a private coordinate space that no longer joins to
   enrichment mentions or chunks. The op selects an existing element-text layer
-  (`processing.text_source`) and records which one on every narrative row.
+  (`processing.text_source`) and records which one on every narrative row
+  (`text_layer`).
 - **Step 6's "surrounding sentence" is a capped character window**
   (`context_chars`, default 160), not a parsed sentence. The offsets recover
   anything wider.
@@ -541,8 +547,8 @@ extraction path, which this design explicitly rejects.
 | Locus | Anchor |
 |---|---|
 | `narrative` | character offset into the reassembled narrative — the same space enrichment mentions use, so they join, and map to chunks as `graph_refresh` does |
-| `sheet_cell` | `(sheet, row, col)` |
-| `table_cell` | `(parent_elem_order, row, col)` on the `table_cells` sidecar |
+| `sheet_cell` | the `sheet_cell` element with `(sheet, cell_row, cell_col)` |
+| `table_cell` | the table element with `(cell_row, cell_col)` on the `table_cells` sidecar |
 
 The narrative offsets index whichever element-text layer was selected
 (`processing.text_source`: `elements` / `normalised` / `spellfix`), so that

@@ -4,17 +4,19 @@ Two siblings per batch, self-contained like :mod:`womblex.store.quality_output`:
 
 - ``*.money_spans.parquet`` — one row per extracted amount, joinable on
   ``source_hash``. Three loci share the file and are discriminated by
-  ``locus``; **exactly one anchor group is non-null per row**:
+  ``locus``; each is located by the shared evidence reference
+  (:mod:`womblex.store.evidence`):
 
   =============  =========================================================
-  ``narrative``  ``start_char`` / ``end_char`` (+ ``page``) — character
-                 offsets into the reassembled narrative, the same space
-                 enrichment mentions use, so the two join and map to chunks
-                 the way ``graph_refresh`` does. ``text_source`` records
-                 which element-text layer those offsets index.
-  ``table_cell`` ``parent_elem_order`` / ``row`` / ``col`` on the
-                 ``*.table_cells.parquet`` sidecar.
-  ``sheet_cell`` ``sheet`` / ``row`` / ``col`` (+ ``elem_order``).
+  ``narrative``  ``char_start`` / ``char_end`` index the reassembled
+                 narrative under ``text_layer`` — the space enrichment
+                 mentions use, so the two join and map to chunks the way
+                 ``graph_refresh`` does.
+  ``table_cell`` ``elem_order`` is the table element; ``cell_row`` /
+                 ``cell_col`` address the cell on ``*.table_cells.parquet``,
+                 and the offsets index that cell's value.
+  ``sheet_cell`` ``elem_order`` is the ``sheet_cell`` element, with
+                 ``sheet`` / ``cell_row`` / ``cell_col``.
   =============  =========================================================
 
 - ``*.money_columns.parquet`` — the column-classification audit: one row per
@@ -37,8 +39,10 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
 
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
+from womblex.store.evidence import EVIDENCE_FIELDS, backfill_evidence
 from womblex.store.output import _write_rows
 from womblex.store.run_stamp import sidecar_footer
 
@@ -55,15 +59,7 @@ _MAX_VALUE = Decimal(10) ** 34
 MONEY_SPANS_SCHEMA = pa.schema([
     ("source_hash", pa.string()),
     ("locus", pa.string()),            # narrative | table_cell | sheet_cell
-    ("text_source", pa.string()),      # elements | normalised | spellfix (narrative)
-    ("start_char", pa.int32()),        # narrative anchor
-    ("end_char", pa.int32()),
-    ("page", pa.int32()),
-    ("elem_order", pa.int32()),        # sheet_cell anchor
-    ("parent_elem_order", pa.int32()),  # table_cell anchor
-    ("sheet", pa.string()),
-    ("row", pa.int32()),
-    ("col", pa.int32()),
+    *EVIDENCE_FIELDS,                  # where the amount is, and which text layer
     ("text", pa.string()),             # original — never lost
     ("value", VALUE_TYPE),
     ("currency", pa.string()),         # nullable — money-marked, currency unresolved
@@ -167,8 +163,32 @@ def _empty(schema: pa.Schema) -> pa.Table:
     return pa.table({f.name: pa.array([], type=f.type) for f in schema}, schema=schema)
 
 
+def money_spans_from_legacy(raw: pa.Table) -> pa.Table:
+    """Contract 1.x money spans carried their own anchors; keep what maps unchanged.
+
+    A cell's table element, row, column and sheet carry over; a narrative span's
+    offsets and the page do too, but a narrative span's element and the cell
+    offsets were never recorded and stay null (re-run ``money`` to recover them).
+    """
+    names = raw.schema.names
+    if "text_layer" in names or "start_char" not in names:
+        return raw
+    narrative = pc.equal(raw["locus"], "narrative")
+    nulls = pa.nulls(raw.num_rows, pa.int32())
+    elem = pc.coalesce(raw["parent_elem_order"], raw["elem_order"])
+    raw = raw.set_column(names.index("elem_order"), "elem_order", elem)
+    raw = raw.append_column("cell_row", pc.if_else(narrative, nulls, raw["row"]))
+    raw = raw.append_column("cell_col", pc.if_else(narrative, nulls, raw["col"]))
+    raw = raw.append_column("char_start", pc.if_else(narrative, raw["start_char"], nulls))
+    raw = raw.append_column("char_end", pc.if_else(narrative, raw["end_char"], nulls))
+    return raw.append_column(
+        "text_layer", pc.if_else(narrative, raw["text_source"], pa.scalar("cell")))
+
+
 def _read_shard(path: Path, schema: pa.Schema) -> pa.Table:
     raw = pq.read_table(str(path))
+    if schema is MONEY_SPANS_SCHEMA:
+        raw = backfill_evidence(money_spans_from_legacy(raw))
     missing = [f.name for f in schema if f.name not in raw.schema.names]
     if missing:
         raise ValueError(
@@ -184,6 +204,7 @@ __all__ = [
     "MONEY_SPANS_SUFFIX",
     "VALUE_TYPE",
     "money_columns_path_for",
+    "money_spans_from_legacy",
     "money_spans_path_for",
     "quantise",
     "read_money_columns",

@@ -516,7 +516,7 @@ There is no separate detector and **no second enrichment pass**.
 - **Detection runs on chunks; the graph is the entity source.** Graph mentions
   (full-narrative offsets) map into `narrative` chunks via `chunk.start_char`.
   `table` chunks carry a different offset space, so narrative graph spans are
-  never applied to them.
+  never applied to them; a table's own enrichment supplies theirs (below).
 - **Recall is flexed by enrichment *duration*, not by a second detector.**
   Higher recall comes from finer enrichment granularity (e.g. per-chunk) and
   `overflow_strategy` for long documents — both trade compute for recall while
@@ -536,12 +536,59 @@ There is no separate detector and **no second enrichment pass**.
   carries `mask_status`: `masked`, `no_entity` (a candidate source covered the
   chunk and found nothing) or `not_masked` (none did, so the text is verbatim).
   *Rejected:* refusing the stage with a typed error when a chunk has no
-  candidate source (with the backstop off, the default, every table chunk has
-  none, so every run would refuse), and omitting
+  candidate source (a table chunk has none when `enrichment.include_tables` is
+  off or its document was not enriched, so such runs would refuse), and omitting
   `clean_text` rows for uncovered chunks (readers lose the chunk silently). The
   column is additive, so existing readers keep working.
+- **Table chunks get candidates from the table's own enrichment** (2026-10; D2
+  of the plan). Each table's markdown — the string `chunker.table_texts` hands
+  the chunker — is a separate request text beside the narrative, so narrative
+  offsets do not move; its mentions carry `text_layer='table_markdown'`, the
+  table's `elem_order` (or `sheet`) and `t<n>:`-namespaced entity ids (each
+  result restarts at `p1`). The PII stage maps them onto the table's chunks by
+  `chunk.start_char`, as for the narrative, and a table chunk counts as covered
+  (`no_entity` / `masked`, not `not_masked`) when its document's meta row records
+  `table_count > 0`. *Departure from the plan's wording:* it sent each table
+  *chunk's* text, which would need `chunk` to precede `enrich`; the pipeline runs
+  enrich first so AI chunking reuses the persisted Document, and a table's chunk
+  boundaries do not depend on enrichment. Enriching the table markdown keeps
+  the order and maps by offset; a sheet, which has no element position, is found
+  by the sheet whose markdown holds the chunk's text. *Not done:* tables
+  folded into the narrative (moves every narrative offset), and graph edges for
+  table results (their ids and offsets are not in the narrative's space).
+  *Measured spend* (kanon-2 tokeniser, synthetic set, 28 documents, 6 with
+  tables): 16,584 narrative tokens and 22,832 table tokens, so the table pass
+  adds ~138% — the set is register-heavy (the sightings register alone is 12,716
+  table tokens), and a corpus of prose reports will add far less.
+  `enrichment.include_tables: false` switches it off.
 - **Coverage is PERSON and ADDRESS.** ORGANISATION, URL, phone and email are
   not detected.
+
+### The evidence reference
+One anchor shape replaces the per-sidecar anchors of `money_spans`,
+`entity_links` and `pii_spans` (2026-10; D6, contract 2.0): `elem_order`,
+`page`, `bbox`, `sheet`, `cell_row`, `cell_col`, `char_start`, `char_end`,
+`text_layer` (`docs/contract.md`).
+
+- **Offsets are in the space of the text named by `text_layer`, not element-relative.**
+  A narrative span's offsets index the reassembled narrative, so the join to
+  chunks (`start_char`) and enrichment mentions stays an overlap test and a span
+  crossing two elements is still one row (`elem_order` is the element it starts
+  in). Element-relative offsets would have split such spans and broken both joins.
+- **The check runs where the rows are built and again on demand.** Each stage
+  asserts `source[char_start:char_end] == text` before writing and refuses the
+  batch (`EvidenceError`); `womblex verify-evidence` repeats it over finished
+  runs. A span the stage cannot anchor (no elements sidecar, a chunk repaired so
+  it no longer equals its source slice) is written with null evidence, counted and
+  warned about — never refused, because for PII a refusal would mean dropping the
+  mask.
+- **Replaced, not duplicated.** The old columns are gone and older files read
+  through a shim: money keeps what maps unchanged, PII spans and links read
+  with null evidence because their old offsets cannot be re-expressed without the
+  elements. *Rejected:* keeping the old columns beside the new (two anchors that
+  can disagree).
+- **`money_columns` is not a span sidecar** and keeps its own column keys.
+- The benchmark's suites read these sidecars; they need the paired change.
 
 ### PII / redaction marker convention
 House style is **Presidio-style typed angle-bracket tags**. PII person masks are

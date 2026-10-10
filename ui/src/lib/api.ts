@@ -102,8 +102,24 @@ export interface EntityMention {
 	chunk_index: number;
 }
 
-// One detected PII span, located within a chunk: slice `chunk.text[start:end]`.
-export interface PiiSpan {
+// The evidence reference every span sidecar carries (store/evidence.py): the
+// element a span lies in, its page and box, and character offsets into the text
+// named by `text_layer`. All null when the span could not be anchored.
+export interface Evidence {
+	elem_order: number | null;
+	page: number | null;
+	bbox: { x: number; y: number; width: number; height: number } | null;
+	sheet: string | null;
+	cell_row: number | null;
+	cell_col: number | null;
+	char_start: number | null;
+	char_end: number | null;
+	text_layer: string | null;
+}
+
+// One detected PII span. `start` / `end` are derived by the reader from the
+// evidence offsets: the span's position in its chunk, `-1` when unanchored.
+export interface PiiSpan extends Evidence {
 	source_hash: string;
 	chunk_index: number;
 	content_type: string;
@@ -121,13 +137,9 @@ export interface PiiSpan {
 // `locus === 'narrative'` spans (the others anchor to cells with no chunk
 // offset) and sends `value` as a string — `decimal128(38,4)` is exact by
 // contract and a float would lose that.
-export interface MoneySpan {
+export interface MoneySpan extends Evidence {
 	source_hash: string;
 	locus: string;
-	text_source: string;
-	start_char: number;
-	end_char: number;
-	page: number | null;
 	text: string;
 	value: string | null;
 	currency: string | null;

@@ -1,8 +1,9 @@
-"""Verify CLI subcommands: ``verify-shards`` and ``resolve-source``.
+"""Verify CLI subcommands: ``verify-shards``, ``verify-evidence`` and ``resolve-source``.
 
-Both inspect a finished run without changing it — one audits the shards'
-internal integrity, the other resolves the rows back out to the corpus they
-were extracted from.
+All inspect a finished run without changing it — one audits the shards'
+internal integrity, one checks each annotated span still selects its text in
+the source, the other resolves the rows back out to the corpus they were
+extracted from.
 """
 from __future__ import annotations
 
@@ -167,12 +168,43 @@ def cmd_resolve_source(args: argparse.Namespace) -> int:
     return 0
 
 
+def _register_verify_evidence(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "run_dir", type=Path,
+        help="Run root (containing 'documents/') or a shard directory.",
+    )
+
+
+def cmd_verify_evidence(args: argparse.Namespace) -> int:
+    """Check every money, entity-link and PII span reproduces its text in the source."""
+    from womblex.process.evidence import verify_shards
+
+    shard_dir = _resolve_shard_dir(args.run_dir)
+    if shard_dir is None:
+        logger.error("not a run root or shard directory: %s", args.run_dir)
+        return 1
+    report = verify_shards(shard_dir)
+    print(
+        f"evidence: {report.checked} span(s) checked, {report.n_mismatched} mismatched, "
+        f"{report.unanchored} unanchored"
+    )
+    for line in report.mismatches:
+        print(f"  mismatch: {line}")
+    return 0 if report.ok else 2
+
+
 COMMANDS = [
     Command(
         "verify-shards",
         "Audit shard directory integrity; optionally diff across runs",
         _register_verify_shards,
         cmd_verify_shards,
+    ),
+    Command(
+        "verify-evidence",
+        "Check annotated spans against the source text they point at",
+        _register_verify_evidence,
+        cmd_verify_evidence,
     ),
     Command(
         "resolve-source",

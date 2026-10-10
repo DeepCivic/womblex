@@ -4,7 +4,9 @@ Consumes ``*.chunks.parquet`` + ``*.enrichment_entities.parquet`` and writes two
 siblings per batch:
 
 - ``*.pii_spans.parquet`` — one row per detected PII span (audit/reversible),
-  with the graph ``entity_id`` and the ``<PERSON_n>`` replacement it maps to.
+  with the graph ``entity_id`` and the ``<PERSON_n>`` replacement it maps to,
+  located by the shared evidence reference (:mod:`womblex.store.evidence`) and
+  checked against the source before the batch is written.
 - ``*.clean_text.parquet`` — the masked, publishable text layer (one row per
   chunk; masked where spans were found, verbatim passthrough otherwise), a
   drop-in for ``*.chunks.parquet``. Gated by ``PIIConfig.write_clean_text``.
@@ -14,7 +16,9 @@ siblings per batch:
 **Terminal stage — runs AFTER enrich + embed.** The Kanon-2 graph (built on raw
 text) is the primary entity source; masking never rewrites the raw chunks that
 feed Isaacus. Graph person/address mentions (full-narrative offsets) map into
-``narrative`` chunks via ``chunk.start_char``; the regex/context backstop
+``narrative`` chunks via ``chunk.start_char``; mentions from a table enriched on
+its own (offsets into that table's markdown) map into that table's ``table``
+chunks the same way; the regex/context backstop
 (``use_regex_backstop``, default off) covers all chunks when enabled. Replacement
 tags are typed + numbered per document off the graph ``entity_id``
 (``<PERSON_1>``, …) — Presidio-style, distinct per entity for downstream utility.
@@ -34,12 +38,15 @@ import pyarrow.parquet as pq
 from womblex.config import PIIConfig
 from womblex.pii.cleaner import PIICleaner
 from womblex.process.chunk_stage import _batch_bases
+from womblex.process.evidence import EvidenceIndex, EvidenceIndexes, assert_evidence
+from womblex.process.text_overlay import require_overlays
 from womblex.store.checkpoint import CheckpointManager
 from womblex.store.enrichment_output import (
     enrichment_entities_path_for,
     enrichment_meta_path_for,
     read_enrichment_entities,
 )
+from womblex.store.evidence import TABLE_LAYER, no_evidence
 from womblex.store.output import read_chunks, read_manifest
 from womblex.store.pii_output import (
     MASK_MASKED,
@@ -64,9 +71,14 @@ def pii_shards(
     shard_dir: Path,
     config: PIIConfig,
     *,
+    text_source: str = "elements",
     checkpoint_mgr: CheckpointManager | None = None,
 ) -> PIIStageResult:
-    """Detect + mask PII for every batch's chunks; write spans + clean_text siblings."""
+    """Detect + mask PII for every batch's chunks; write spans + clean_text siblings.
+
+    ``text_source`` is the element-text layer the chunks and the enrichment were
+    produced under; the evidence references index it.
+    """
     if not shard_dir.is_dir():
         raise FileNotFoundError(f"shard directory not found: {shard_dir}")
 
@@ -75,6 +87,7 @@ def pii_shards(
         logger.warning("pii_shards: no batches found in %s", shard_dir)
         return PIIStageResult(0, 0, 0)
 
+    require_overlays(bases, text_source)
     cleaner = PIICleaner(
         entities=config.entities,
         model=config.model,
@@ -95,8 +108,9 @@ def pii_shards(
             logger.info("pii_shards: skipping %s (all docs checkpointed)", base.stem)
             continue
 
-        known_by_doc = _known_spans_by_doc(base, person_types, entities)
-        enriched_docs = _enriched_docs(base)
+        known_by_doc, table_known = _known_spans_by_doc(base, person_types, entities)
+        enriched_docs, table_docs = _enriched_docs(base)
+        indexes = EvidenceIndexes(base, text_source)
 
         # Group chunks per doc, in chunk_index order, so <ENTITY_n> numbering is
         # stable across a document (a doc's chunks all live in this one batch).
@@ -111,18 +125,34 @@ def pii_shards(
             chunks.sort(key=lambda c: c["chunk_index"])
             known = known_by_doc.get(source_hash)
             doc_enriched = source_hash in enriched_docs
+            index = indexes.get(source_hash)
             numbering: dict[tuple[str, str], int] = {}
             counters: dict[str, int] = {}
 
             for c in chunks:
                 text = c["text"] or ""
                 is_narrative = c["content_type"] == "narrative"
+                cs = c["start_char"] or 0
+                table = None if is_narrative or index is None else index.resolve_table(
+                    elem_order=c["elem_order"], chunk_text=text, start=cs)
+                # A chunk lines up with its source when its text is the source's slice.
+                # A narrative chunk is masked off the graph either way (evidence is
+                # simply unanchored when it does not line up); a table chunk can only
+                # take table spans through the markdown it must line up with.
+                aligned = _aligned(index, table, is_narrative, text, cs)
+                chunk_known = (
+                    known if is_narrative
+                    else table_known.get((source_hash, table.elem_order, table.sheet))
+                    if table is not None and aligned else None
+                )
+                covered = use_regex or (
+                    doc_enriched if is_narrative else aligned and source_hash in table_docs)
                 spans = []
                 if text.strip():
                     spans = cleaner.detect_spans(
                         text,
-                        known_spans=known if is_narrative else None,
-                        text_offset=c["start_char"] if is_narrative else 0,
+                        known_spans=chunk_known,
+                        text_offset=cs,
                         use_regex=use_regex,
                     )
                 placed: list[tuple[int, int, str]] = []
@@ -139,7 +169,7 @@ def pii_shards(
                         "source_hash": source_hash,
                         "chunk_index": c["chunk_index"],
                         "content_type": c["content_type"],
-                        "start": s.start, "end": s.end,
+                        **_evidence(index, table, aligned, is_narrative, cs + s.start, cs + s.end),
                         "text": text[s.start:s.end],
                         "entity_type": s.entity_type,
                         "entity_id": s.entity_id,
@@ -156,13 +186,14 @@ def pii_shards(
                         "content_type": c["content_type"],
                         "text": _apply_mask(text, placed),
                         "n_masked": len(placed),
-                        "mask_status": _mask_status(
-                            bool(placed), use_regex or (is_narrative and doc_enriched),
-                        ),
+                        "mask_status": _mask_status(bool(placed), covered),
                     })
                     if placed:
                         chunks_masked += 1
 
+        assert_evidence(
+            span_rows, indexes.get, text_key="text", label="pii_spans", base=base,
+        )
         write_pii_spans(span_rows, base)
         if write_clean:
             write_clean_text(clean_rows, base)
@@ -206,13 +237,50 @@ def _mask_status(masked: bool, covered: bool) -> str:
     return MASK_NO_ENTITY if covered else MASK_NOT_MASKED
 
 
-def _enriched_docs(base_path: Path) -> set[str]:
-    """Documents the batch's enrichment sidecars cover, including those with no entities."""
+def _enriched_docs(base_path: Path) -> tuple[set[str], set[str]]:
+    """``(documents the enrichment sidecars cover, documents whose tables were enriched)``.
+
+    The first includes documents with no entities. A document's tables count as
+    covered when its meta row records at least one table sent to the enricher.
+    """
     docs: set[str] = set()
-    for path in (enrichment_entities_path_for(base_path), enrichment_meta_path_for(base_path)):
-        if path.exists():
-            docs.update(pq.read_table(str(path), columns=["source_hash"]).column(0).to_pylist())
-    return docs
+    table_docs: set[str] = set()
+    entities = enrichment_entities_path_for(base_path)
+    if entities.exists():
+        docs.update(pq.read_table(str(entities), columns=["source_hash"]).column(0).to_pylist())
+    meta = enrichment_meta_path_for(base_path)
+    if meta.exists():
+        names = pq.read_schema(str(meta)).names
+        cols = ["source_hash"] + (["table_count"] if "table_count" in names else [])
+        for row in pq.read_table(str(meta), columns=cols).to_pylist():
+            docs.add(row["source_hash"])
+            if (row.get("table_count") or 0) > 0:
+                table_docs.add(row["source_hash"])
+    return docs, table_docs
+
+
+def _aligned(
+    index: EvidenceIndex | None, table: object, is_narrative: bool, text: str, start: int,
+) -> bool:
+    """True when the chunk text is the source's slice at its own offsets."""
+    if index is None:
+        return False
+    if is_narrative:
+        return index.narrative[start:start + len(text)] == text
+    markdown = getattr(table, "markdown", None)
+    return markdown is not None and markdown[start:start + len(text)] == text
+
+
+def _evidence(
+    index: EvidenceIndex | None, table: object, aligned: bool, is_narrative: bool,
+    start: int, end: int,
+) -> dict:
+    """The span's evidence reference; unanchored (all null) when the chunk is misaligned."""
+    if index is None or not aligned:
+        return no_evidence()
+    if is_narrative:
+        return index.narrative_ref(start, end) or no_evidence()
+    return index.table_ref(table, start, end) or no_evidence()  # type: ignore[arg-type]
 
 
 def _apply_mask(text: str, placed: list[tuple[int, int, str]]) -> str:
@@ -229,19 +297,26 @@ def _known_spans_by_doc(
     base_path: Path,
     person_types: set[str],
     entities: set[str],
-) -> dict[str, list[tuple[int, int, str, str]]]:
-    """Build ``source_hash -> [(start, end, PII_TYPE, entity_id)]`` from enrichment.
+) -> tuple[
+    dict[str, list[tuple[int, int, str, str]]],
+    dict[tuple[str, int | None, str | None], list[tuple[int, int, str, str]]],
+]:
+    """Build ``(narrative, table)`` known spans from enrichment.
 
     Maps the Kanon-2 taxonomy onto PII tags: ``entity_type ∈ person_types`` →
     ``PERSON``; ``entity_type == 'address'`` → ``ADDRESS`` (each gated by
-    ``entities``). Offsets are full-narrative coordinates (the space narrative
-    chunks index into); ``entity_id`` carries the graph grouping for numbering.
+    ``entities``). Narrative spans are ``source_hash -> [(start, end, PII_TYPE,
+    entity_id)]`` in full-narrative coordinates (the space narrative chunks index
+    into); table spans are keyed ``(source_hash, elem_order, sheet)`` and index
+    that table's markdown (the space its chunks index into). ``entity_id`` carries
+    the graph grouping for numbering.
     """
     path = enrichment_entities_path_for(base_path)
     if not path.exists():
-        return {}
+        return {}, {}
     table = read_enrichment_entities(path)
-    out: dict[str, list[tuple[int, int, str, str]]] = {}
+    narrative: dict[str, list[tuple[int, int, str, str]]] = {}
+    in_tables: dict[tuple[str, int | None, str | None], list[tuple[int, int, str, str]]] = {}
     want_person = "PERSON" in entities
     want_address = "ADDRESS" in entities
     for r in table.to_pylist():
@@ -254,10 +329,12 @@ def _known_spans_by_doc(
             continue
         if r["mention_start"] < 0 or r["mention_end"] <= r["mention_start"]:
             continue
-        out.setdefault(r["source_hash"], []).append(
-            (r["mention_start"], r["mention_end"], tag, r["entity_id"] or "")
-        )
-    return out
+        span = (r["mention_start"], r["mention_end"], tag, r["entity_id"] or "")
+        if r["text_layer"] == TABLE_LAYER:
+            in_tables.setdefault((r["source_hash"], r["elem_order"], r["sheet"]), []).append(span)
+        else:
+            narrative.setdefault(r["source_hash"], []).append(span)
+    return narrative, in_tables
 
 
 def _doc_ids(base_path: Path) -> list[str]:

@@ -17,11 +17,14 @@ from womblex.config import LinkingConfig
 from womblex.link.matcher import Candidate, Link, resolve
 from womblex.link.reference import load_reference
 from womblex.process.chunk_stage import _batch_bases
+from womblex.process.evidence import EvidenceIndex, EvidenceIndexes, assert_evidence
+from womblex.process.text_overlay import require_overlays
 from womblex.store.checkpoint import CheckpointManager
 from womblex.store.enrichment_output import (
     read_enrichment_entities,
 )
 from womblex.store.entity_links_output import entity_links_path_for, write_entity_links
+from womblex.store.evidence import TABLE_LAYER, no_evidence
 from womblex.store.output import read_manifest
 
 logger = logging.getLogger(__name__)
@@ -39,9 +42,15 @@ def link_shards(
     shard_dir: Path,
     linking_config: LinkingConfig,
     *,
+    text_source: str = "elements",
     checkpoint_mgr: CheckpointManager | None = None,
 ) -> LinkStageResult:
-    """Link every batch's enrichment candidates and write entity_links siblings."""
+    """Link every batch's enrichment candidates and write entity_links siblings.
+
+    ``text_source`` is the element-text layer the enrichment ran over; each
+    link's evidence reference indexes it and is checked against the source
+    before the batch is written.
+    """
     if not shard_dir.is_dir():
         raise FileNotFoundError(f"shard directory not found: {shard_dir}")
     if linking_config.reference is None:
@@ -52,6 +61,7 @@ def link_shards(
         logger.warning("link_shards: no batches found in %s", shard_dir)
         return LinkStageResult(0, 0, 0, 0)
 
+    require_overlays(bases, text_source)
     reference = load_reference(linking_config.reference)
     logger.info("link_shards: reference loaded — %d entities, %d aliases",
                 len(reference.entities), len(reference.aliases))
@@ -67,6 +77,7 @@ def link_shards(
             continue
 
         candidates_by_hash = _candidates_for_batch(base, linking_config.candidate_kinds)
+        indexes = EvidenceIndexes(base, text_source)
         rows: list[dict] = []
         linked_now = 0
         for source_hash, cands in candidates_by_hash.items():
@@ -77,12 +88,16 @@ def link_shards(
                     k for k in linking_config.candidate_kinds if k == "address"
                 ) or ("address",),
             )
-            rows.extend(_link_to_row(source_hash, lk) for lk in links)
+            index = indexes.get(source_hash)
+            rows.extend(_link_to_row(source_hash, lk, index) for lk in links)
             if any(lk.matched for lk in links):
                 linked_now += 1
             matched_links += sum(1 for lk in links if lk.matched)
             total_links += len(links)
 
+        assert_evidence(
+            rows, indexes.get, text_key="mention_text", label="entity_links", base=base,
+        )
         write_entity_links(rows, base)
         batches_written += 1
         docs_linked += linked_now
@@ -135,18 +150,35 @@ def _candidates_for_batch(
             source_hash=r["source_hash"],
             mention_start=r["mention_start"] if r["mention_start"] is not None else -1,
             mention_end=r["mention_end"] if r["mention_end"] is not None else -1,
+            text_layer=r["text_layer"], elem_order=r["elem_order"], sheet=r["sheet"],
         ))
     return dict(out)
 
 
-def _link_to_row(source_hash: str, link: Link) -> dict:
+def _mention_evidence(index: EvidenceIndex | None, cand: Candidate) -> tuple[dict, str | None]:
+    """The mention's evidence reference and the source text it selects."""
+    start, end = cand.mention_start, cand.mention_end
+    if index is None or start < 0 or end <= start:
+        return no_evidence(), None
+    if cand.text_layer == TABLE_LAYER:
+        table = index.resolve_table(elem_order=cand.elem_order, sheet=cand.sheet)
+        ref = index.table_ref(table, start, end) if table is not None else None
+    else:
+        ref = index.narrative_ref(start, end)
+    if ref is None:
+        return no_evidence(), None
+    return ref, (index.source_text(ref) or "")[start:end]
+
+
+def _link_to_row(source_hash: str, link: Link, index: EvidenceIndex | None = None) -> dict:
     e = link.entity
+    evidence, mention_text = _mention_evidence(index, link.candidate)
     return {
         "source_hash": source_hash,
         "candidate_text": link.candidate.text,
         "candidate_kind": link.candidate.kind,
-        "mention_start": link.candidate.mention_start,
-        "mention_end": link.candidate.mention_end,
+        **evidence,
+        "mention_text": mention_text,
         "entity_id": e.entity_id if e else "",
         "entity_type": e.entity_type if e else "",
         "canonical_name": e.name if e else "",

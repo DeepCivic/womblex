@@ -7,7 +7,7 @@ column-level schemas are in [extraction.md](extraction.md).
 
 ## Contract version
 
-`womblex.contract_version` (currently `1.3`, `store/contract.CONTRACT_VERSION`)
+`womblex.contract_version` (currently `2.0`, `store/contract.CONTRACT_VERSION`)
 is in the footer of every pipeline Parquet and in `egress_manifest.json`. It is
 versioned apart from the package: a release that changes no schema leaves it
 alone.
@@ -33,20 +33,51 @@ the single source). An unknown role reads as `raw`.
 | `normalised_text`, `spellfix_text`, `spellfix_corrections` | `(source_hash, elem_order)` | raw |
 | `chunks` | `(source_hash, chunk_index)`; table chunks anchor on `elem_order` | raw |
 | `embeddings`, `chunk_quality` | `(source_hash, chunk_index)` | none |
-| `enrichment_entities` | `(source_hash, entity_id)`; carries `chunk_index` to `chunks` | raw |
+| `enrichment_entities` | `(source_hash, entity_id)`; carries `chunk_index` to `chunks` (narrative mentions only; table mentions are `-1`). `text_layer` names the text `mention_start` / `mention_end` index: the narrative under its element-text layer, or `table_markdown` with the table named by `elem_order` or `sheet` (2.0; null on older files, read as narrative) | raw |
 | `graph_edges` | `source_hash` + `source_id` / `target_id` to `enrichment_entities.entity_id` | raw |
 | `enrichment_doc` | `source_hash` (one row per document) | raw |
-| `enrichment_meta` | `source_hash` | none |
-| `entity_links` | `(source_hash, mention_start, mention_end)` to `enrichment_entities`; its `entity_id` is the reference-register id | raw |
-| `pii_spans` | `(source_hash, chunk_index)`; `entity_id` to `enrichment_entities` | raw |
+| `enrichment_meta` | `source_hash`; `table_count` is tables sent to the enricher on their own, null where none were (2.0) | none |
+| `entity_links` | `source_hash` plus the evidence reference; its `entity_id` is the reference-register id and `mention_text` the source text at the evidence span | raw |
+| `pii_spans` | `(source_hash, chunk_index)` plus the evidence reference; `entity_id` to `enrichment_entities` | raw |
 | `clean_text` | `(source_hash, chunk_index)`; `mask_status` is `masked`, `no_entity` or `not_masked` (verbatim, no candidate source covered the chunk); files written before contract 1.2 read back as `masked` where `n_masked` is above zero, null otherwise | masked |
-| `money_spans`, `money_columns` | `source_hash` plus the locus anchor (`start_char` / `elem_order` / `parent_elem_order`) | none |
+| `money_spans` | `source_hash` plus the evidence reference | none |
+| `money_columns` | `source_hash` plus `column_id` (`parent_elem_order` / `sheet`) | none |
 | `layout_regions` | `(source_hash, page)`; boxes are normalised like element `bbox` ([layout.md](layout.md)) | none |
 | `redactions`, `source_index` | `source_hash` | none |
 | `provenance` | `source_hash` | raw |
 
 `none` is a claim about text, not derivation: embeddings come from unmasked
 chunks but carry no text.
+
+### Evidence reference (2.0)
+
+`money_spans`, `entity_links` and `pii_spans` locate each span with the same
+nine columns (`store/evidence.py`), in place of the anchors each carried
+before: `elem_order` (the element the span starts in — the table for a table
+cell, the `sheet_cell` for a spreadsheet cell), `page`, `bbox` (that element's
+box; the cell's where known), `sheet`, `cell_row`, `cell_col`, `char_start`,
+`char_end` and `text_layer`. `text_layer` says what the offsets index:
+
+| `text_layer` | Offsets index |
+|---|---|
+| `elements`, `normalised`, `spellfix` | the document narrative under that element-text layer — the space chunks (`start_char`) and enrichment mentions use |
+| `table_markdown` | the markdown of the table `elem_order` (or the sheet `sheet`) — the space table chunks and table mentions use |
+| `cell` | one cell's value |
+
+The text at `char_start:char_end` equals the row's span text (`text`;
+`mention_text` on `entity_links`). Stages check this before writing and refuse
+a batch that fails (`EvidenceError`); `womblex verify-evidence <run>` checks
+finished runs. Every column is null for a span the stage could not anchor.
+
+The major bump removed `start_char` / `end_char` / `page` / `parent_elem_order`
+/ `row` / `col` / `text_source` from `money_spans`, `start` / `end` (chunk-relative)
+from `pii_spans` and `mention_start` / `mention_end` from `entity_links`.
+Readers back-fill an older file (`backfill_evidence`, `money_spans_from_legacy`):
+a money span keeps its narrative offsets, page and layer and its cell's table
+element, row, column and sheet; a PII span or link has no evidence, since their
+old offsets cannot be re-expressed without the elements. Re-run the stage to
+recover it. A PII span's position in its chunk is
+`char_start - chunk.start_char`.
 
 ## Determinism
 

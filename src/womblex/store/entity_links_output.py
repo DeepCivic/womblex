@@ -15,6 +15,7 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from womblex.store.evidence import EVIDENCE_FIELDS, backfill_evidence
 from womblex.store.output import _write_rows
 from womblex.store.run_stamp import sidecar_footer
 
@@ -32,8 +33,8 @@ ENTITY_LINKS_SCHEMA = pa.schema([
     ("source_hash", pa.string()),
     ("candidate_text", pa.string()),    # surface form extracted from the doc
     ("candidate_kind", pa.string()),    # enrichment kind that produced it (e.g. corporate, address)
-    ("mention_start", pa.int32()),      # char offset into the enrichment text (-1 if unknown)
-    ("mention_end", pa.int32()),
+    *EVIDENCE_FIELDS,                   # where the mention is in the source
+    ("mention_text", pa.string()),      # the source text at the evidence span
     ("entity_id", pa.string()),         # canonical reference id (e.g. PR-/SE-); "" if unmatched
     ("entity_type", pa.string()),       # reference entity type (provider | service | ...)
     ("canonical_name", pa.string()),    # reference display name; "" if unmatched
@@ -93,7 +94,11 @@ def read_entity_links(path: Path, *, grain: str = "span") -> pa.Table:
 
 
 def _read_entity_links_shard(path: Path) -> pa.Table:
-    raw = pq.read_table(str(path))
+    # Contract 1.x links carried `mention_start` / `mention_end` into the enrichment
+    # text; the evidence columns replace them and read null on an older file.
+    raw = backfill_evidence(pq.read_table(str(path)))
+    if "mention_text" not in raw.schema.names:
+        raw = raw.append_column("mention_text", pa.nulls(raw.num_rows, pa.string()))
     missing = [f.name for f in ENTITY_LINKS_SCHEMA if f.name not in raw.schema.names]
     if missing:
         raise ValueError(

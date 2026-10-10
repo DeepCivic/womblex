@@ -156,6 +156,8 @@ enrichment:
   model: kanon-2-enricher
   overflow_strategy: auto       # auto/chunk = internal chunk+stitch (>16k tokens); drop_end | null
   # skip_short_documents: 0     # skip docs shorter than N chars (0 = enrich all)
+  # include_tables: true        # also enrich each table's markdown on its own, so table
+  #                             # chunks have PII candidates; adds Kanon-2 token spend
   # persist_document: false     # write *.enrichment_doc.parquet (raw ILGS Document) for
   #                             # AI-chunking reuse. Auto-enabled when chunking.chunking_model
   #                             # is set; off otherwise (the blob is large).

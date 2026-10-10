@@ -233,8 +233,10 @@ element's `elem_order` as a document-order anchor (see below).
 | `name` | Resolved entity name |
 | `entity_type` | Entity subtype (`natural`, `corporate`, `politic`, `country`, `state`, etc.) |
 | `role` | Person role (`seller`, `buyer`, `other`, …); empty for non-person entities |
-| `mention_start`, `mention_end` | Offset of this single mention in the document text |
-| `chunk_index` | Chunk this mention falls in; `-1` if not mapped to a chunk |
+| `mention_start`, `mention_end` | Offset of this single mention in the text named by `text_layer` |
+| `chunk_index` | Narrative chunk this mention falls in; `-1` if not mapped to a chunk, and always `-1` for a table mention |
+| `text_layer` | The text the offsets index: the narrative under its element-text layer (`elements` / `normalised` / `spellfix`), or `table_markdown` for a table enriched on its own. Null on files written before contract 2.0 (narrative) |
+| `elem_order`, `sheet` | The table element, or the spreadsheet sheet, a `table_markdown` mention lies in; null for narrative mentions |
 
 **graph_edges.parquet** — one row per relationship edge *property* (from enrichment)
 
@@ -258,6 +260,7 @@ element's `elem_order` as a document-order anchor (see below).
 | `location_count` | Number of locations identified |
 | `term_count` | Number of defined terms |
 | `external_doc_count`, `date_count`, `heading_count`, `junk_span_count` | Further per-document enrichment counts |
+| `table_count` | Tables sent to the enricher on their own; null when none were, when `enrichment.include_tables` is off, and for a document with a table that failed. A document with tables but no narrative still gets a row |
 
 ## G-NAF Standalone Ingest
 

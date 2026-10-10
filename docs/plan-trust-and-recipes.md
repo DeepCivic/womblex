@@ -1,6 +1,6 @@
 # Trust baseline and recipes — plan
 
-*Status: in progress (2026-10). Outstanding work only: what has shipped (Phase 0 DBOS, Phase 1 items 1, 2, 4, 5 and 8) is recorded in `CHANGELOG.md`, `decisions.md` and the enduring docs. Each phase is a branch of sequential merges under the 500-line cap. Each merge updates this document as it lands, and the document is retired into `decisions.md` once its last phase ships.*
+*Status: in progress (2026-10). Outstanding work only: what has shipped (Phase 0 DBOS; all of Phase 1, the trust baseline) is recorded in `CHANGELOG.md`, `decisions.md` and the enduring docs. Each phase is a branch of sequential merges under the 500-line cap. Each merge updates this document as it lands, and the document is retired into `decisions.md` once its last phase ships.*
 
 ## Context
 A business-analyst requirements set proposed five themes: high-integrity extraction, recipe-based workflow authoring, destinations and delivery, agent-friendly operation, and safety and operability. Its labels (FR-1.1 to FR-5.2) are kept below so this plan can be read against it. It was written without knowledge of the repository, so this plan maps each theme onto what Womblex already has, records what is out of scope, and orders the remaining gaps.
@@ -8,7 +8,7 @@ A business-analyst requirements set proposed five themes: high-integrity extract
 **Decisions taken:**
 - **No confidence or quality scoring.** FR-1.2 (accepted / flagged / rejected verdicts) is out. Measuring quality is the benchmark's job; the contributor guidance's rule against quality scoring stands.
 - **No schema-driven field extraction.** Requests such as "extract invoices" or "summarise contracts" are not Womblex features. FR-1.1 applies only to the annotations Womblex already produces (money spans, enrichment mentions, entity links, PII spans).
-- **Topic annotation of elements is a later roadmap item**, not part of this plan. When it lands it is one more annotation sidecar and inherits the evidence rules below.
+- **Topic annotation of elements is a later roadmap item**, not part of this plan. When it lands it is one more annotation sidecar and inherits the evidence reference ([contract.md](contract.md)).
 - **New dependencies go to review.** The assessment is below; nothing is added without approval.
 - **The merge cap stays.** Phases ship as branches of sequential merges.
 
@@ -27,9 +27,7 @@ Verified against the code at the time of writing.
 | Sensitive data (FR-5.1) | The `sensitivity` footer key; the API reads the masked layer by default and gates raw layers behind `read_raw` |
 
 ## Findings
-- **Table chunks have no PII candidate source.** Enrichment covers the reassembled narrative only, and `pii/pii_stage.py` passes graph spans to narrative chunks only, so every table chunk's `clean_text` row is `not_masked` (verbatim, honestly labelled since Phase 1 item 2) on every run.
 - **Only native PDF tables have cell boxes.** DOCX, OCR-reconstructed and spreadsheet-print tables carry a null cell `bbox`; OCR tables could take one from the `table_grid` bands and columns if a consumer needs it.
-- **Each annotation sidecar defines its own anchor columns.** There is no shared shape for "where in the source this came from".
 - **Two stages rewrite files in place** (`MutationMode.IN_PLACE`), the exceptions to write-once sidecars. `graph-refresh` rewrites the entity and edge sidecars. `layout` replaces the extraction batch's `*.layout_regions.parquet`, but only when the config's layout fingerprint differs from the file's, and all-or-nothing per batch.
 - **The local stage sequence lives in comments.** `womblex run` extracts only; the per-stage order for a full pipeline is documented in comments in `configs/default-isaacus.yaml` and run by hand.
 - **Egress copies unredacted material by design.** `docs/egress.md` makes access control the responsibility of whoever runs egress and hosts the bundle. FR-5.1's "masked outputs need an explicit policy before delivery" contradicts that decision; it is listed under open questions, not as a defect.
@@ -71,13 +69,6 @@ Because `womblex run` extracts only, options B and C both need a **local multi-s
 ### Phase 0 follow-up: retry a failed stage
 Re-dispatching a stage that failed returns its recorded failure. DBOS's `resume_workflow` does not restart a failed workflow, but `fork_workflow` does: it starts a copy from a chosen step and keeps the steps before it, so only the failed unit and those after it run again. The copy has a new workflow id and the failed original stays on the board, so this merge decides how a run's status counts the original once its retry succeeds. Its own merge.
 
-### Phase 1 — trust baseline (branch)
-Items 1 (strict `text_source`), 2 (`mask_status`), 4 (strict config), 5 (file checksums) and 8 (cell bbox, contract `1.3`) have shipped.
-
-3. **Table chunks get candidates.** Each table chunk's own text is sent to the enricher, separately from the narrative (folding tables into the narrative is not pursued, see `decisions.md`), so narrative offsets do not move and a table chunk's spans index its own text. The Kanon-2 token spend this adds is measured and recorded (D2). Further entity-recognition, embedding and graph providers are planned and must fit beside Isaacus as alternatives.
-6. **Evidence reference.** One shared anchor shape (source hash, element order, page, bbox, character span, text layer) *replaces* the anchor columns of the money, entity-link and PII sidecars, plus a check that each span's text equals the source text at its offsets. The check runs at write time, where a mismatch refuses the batch's publish, and as an on-demand verify command over finished runs, beside shard integrity verification. A major contract bump (D6).
-7. **Reader migration.** Every reader of those sidecars moves to the new anchor shape in the same branch as item 6: `api/readers.py`, `ui/readers.py`, the benchmark's suites, and the reader shim `contract.md` requires for the old major.
-
 ### Phase 2 — workflows (branch)
 - Stored workflow object (preset reference, input binding, ordered steps, conditions, destinations, triggers): a new table with its migration in the database DBOS uses (Postgres, or SQLite on a local run), owner scoping as runs have, validated by the same code path as configs.
 - Local multi-stage runner executing a workflow's steps through the existing stage functions.
@@ -97,13 +88,11 @@ Items 1 (strict `text_source`), 2 (`mask_status`), 4 (strict config), 5 (file ch
 - `graph-refresh` writing a new versioned sidecar instead of rewriting in place. `layout` keeps its in-place replace: the file is a derived cache of the source document, its fingerprint records which model and settings produced it, and the replace is all-or-nothing per batch.
 
 ## Decisions
-All settled (2026-10); nothing in this plan waits on a decision. Decisions whose work has shipped (D1 `mask_status`, D9 DBOS) are in `decisions.md` and `CHANGELOG.md`. "Repo answer" records what existing conventions settled and what was decided.
+All settled (2026-10); nothing in this plan waits on a decision. Decisions whose work has shipped (D1 `mask_status`, D2 table-chunk enrichment, D6 the evidence reference, D9 DBOS) are in `decisions.md` and `CHANGELOG.md`. "Repo answer" records what existing conventions settled and what was decided.
 
 | # | Gates | Decision | Repo answer |
 |---|---|---|---|
-| D2 | Phase 1 item 3 | Whether table chunks get a candidate source of their own | **Decided 2026-10:** send table text to the enricher; the added spend is measured. Other entity-recognition, embedding and graph options come later |
 | D4 | Phase 2 | When the up-front ordering check ships | **Decided 2026-10:** with workflows in Phase 2, so local and object-store runs get it at once |
-| D6 | Phase 1 items 6 and 7 | Whether the evidence reference replaces or sits beside each sidecar's anchor columns, and where the span check runs | **Decided 2026-10:** replace (a major contract bump), with reader migration as its own scope item. The span check runs both at write time and as an on-demand verify command |
 | D8 | Phase 2 | Workflow model, and the condition language's scope | **Decided 2026-10:** option B, a stored workflow object. Condition scope as Phase 2 states |
 | D10 | Phase 3 | Whether the egress decision changes once per-step destinations exist | **Confirmed 2026-10.** Bundles may hold unredacted sources; access control is the host's responsibility (`egress.md`) |
 | D11 | Phase 3 | Which destinations come first | **Decided 2026-10:** object storage (S3, built on egress), Postgres with pgvector, and webhook notifications. `httpx` approved for webhooks |

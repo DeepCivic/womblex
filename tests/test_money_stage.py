@@ -84,15 +84,15 @@ def test_narrative_spans_anchor_to_reassembled_offsets(tmp_path: Path):
     assert len(rows) == 1
     row = rows[0]
     assert row["locus"] == "narrative"
-    assert row["text_source"] == "elements"
+    assert row["text_layer"] == "elements"
     assert row["value"] == Decimal("33100000.0000")
     assert row["currency"] == "AUD"
     assert row["evidence"] == "p6"
-    assert row["page"] == 1
-    assert text[row["start_char"]:row["end_char"]] == row["text"] == "$33.1 million"
+    assert row["page"] == 1 and row["elem_order"] == 0
+    assert text[row["char_start"]:row["char_end"]] == row["text"] == "$33.1 million"
     assert "appropriation" in row["context"]
     # Cell anchors stay null on a narrative row.
-    assert row["sheet"] is None and row["row"] is None and row["parent_elem_order"] is None
+    assert row["sheet"] is None and row["cell_row"] is None and row["cell_col"] is None
 
 
 def test_narrative_offsets_follow_text_source(tmp_path: Path):
@@ -111,8 +111,8 @@ def test_narrative_offsets_follow_text_source(tmp_path: Path):
     money_shards(tmp_path, MoneyConfig(), text_source="normalised")
 
     row = read_money_spans(base).to_pylist()[0]
-    assert row["text_source"] == "normalised"
-    assert cleaned[row["start_char"]:row["end_char"]] == "$33.1 million"
+    assert row["text_layer"] == "normalised"
+    assert cleaned[row["char_start"]:row["char_end"]] == "$33.1 million"
 
 
 def test_missing_declared_overlay_refuses_before_writing(tmp_path: Path):
@@ -158,14 +158,15 @@ def test_table_column_evidence_and_anchors(tmp_path: Path):
     money_shards(tmp_path, MoneyConfig())
 
     rows = [r for r in read_money_spans(base).to_pylist() if r["locus"] == "table_cell"]
-    assert {r["col"] for r in rows} == {1}, "only the expenditure column is money"
-    by_row = {r["row"]: r for r in rows}
+    assert {r["cell_col"] for r in rows} == {1}, "only the expenditure column is money"
+    by_row = {r["cell_row"]: r for r in rows}
     assert by_row[1]["value"] == Decimal("1500000.0000")   # $'000 header scale
     assert by_row[2]["value"] == Decimal("-300000.0000")   # brackets = negative
     assert 3 not in by_row                                  # em-dash is absent
-    assert by_row[1]["parent_elem_order"] == 1
+    assert by_row[1]["elem_order"] == 1
     assert by_row[1]["column_id"] == "elem1:col1"
-    assert by_row[1]["start_char"] is None                  # not a narrative anchor
+    assert by_row[1]["text_layer"] == "cell"                # offsets index the cell value
+    assert (by_row[1]["char_start"], by_row[1]["char_end"]) == (0, len(by_row[1]["text"]))
 
     columns = read_money_columns(base).to_pylist()
     verdicts = {c["col"]: c for c in columns if c["locus"] == "table_cell"}
@@ -194,7 +195,7 @@ def test_wrapped_header_row_is_recovered(tmp_path: Path):
         Decimal("16631300000.0000"), Decimal("9108900000.0000"),
         Decimal("6291800000.0000"), Decimal("78699200000.0000")]
     assert all(r["multiplier"] == "million" for r in rows)
-    assert 1 not in {r["row"] for r in rows}, "the folded header row is not an amount"
+    assert 1 not in {r["cell_row"] for r in rows}, "the folded header row is not an amount"
 
     verdict = next(c for c in read_money_columns(base).to_pylist() if c["col"] == 1)
     assert verdict["header_text"] == "Approved Budget $m"
@@ -259,7 +260,7 @@ def test_sheet_column_classified_from_number_format(tmp_path: Path):
         Decimal("50000.0000"), Decimal("125000.0000"),
         Decimal("7500.0000"), Decimal("0.0000")]
     assert {r["sheet"] for r in rows} == {"Awards"}
-    assert {r["col"] for r in rows} == {1}
+    assert {r["cell_col"] for r in rows} == {1}
     assert rows[0]["currency_source"] == "number_format"
     assert rows[0]["elem_order"] is not None
 
@@ -421,16 +422,16 @@ def test_exactly_one_anchor_group_per_row(tmp_path: Path):
     rows = read_money_spans(base).to_pylist()
     assert {r["locus"] for r in rows} == {"narrative", "table_cell", "sheet_cell"}
     for r in rows:
-        narrative = r["start_char"] is not None
-        cell = r["row"] is not None
-        assert narrative != cell, f"row mixes anchor groups: {r}"
+        assert r["char_start"] is not None and r["elem_order"] is not None
         if r["locus"] == "narrative":
-            assert r["text_source"] == "elements"
-            assert r["sheet"] is None and r["parent_elem_order"] is None
+            assert r["text_layer"] == "elements"
+            assert r["sheet"] is None and r["cell_row"] is None
+        else:
+            assert r["text_layer"] == "cell" and r["cell_row"] is not None
         if r["locus"] == "table_cell":
-            assert r["parent_elem_order"] is not None and r["sheet"] is None
+            assert r["sheet"] is None
         if r["locus"] == "sheet_cell":
-            assert r["sheet"] is not None and r["parent_elem_order"] is None
+            assert r["sheet"] is not None
 
 
 def test_quantise_drops_unstorable_values():

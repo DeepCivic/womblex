@@ -35,6 +35,11 @@ class Candidate:
     source_hash: str
     mention_start: int = -1
     mention_end: int = -1
+    # Which text the mention offsets index (see store/evidence.py): the narrative
+    # under its text layer, or a table's markdown (named by elem_order or sheet).
+    text_layer: str | None = None
+    elem_order: int | None = None
+    sheet: str | None = None
 
 
 @dataclass

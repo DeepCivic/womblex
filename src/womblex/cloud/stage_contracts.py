@@ -232,14 +232,26 @@ def _spellfix_conditional(_config: WomblexConfig) -> tuple[ConditionalInput, ...
     )
 
 
-def _pii_conditional(_config: WomblexConfig) -> tuple[ConditionalInput, ...]:
+def _evidence_inputs(config: WomblexConfig) -> tuple[ConditionalInput, ...]:
+    """What anchoring a span to its source needs: the elements, cells and text layer.
+
+    Absent elements leave the spans unanchored (evidence null, warned); a declared
+    text layer that is missing refuses the stage, as it does for chunk and enrich.
+    """
+    return _overlay_input(config.processing.text_source) + tuple(
+        ConditionalInput(suffix, strict=False, reason="anchors spans to the source (evidence)")
+        for suffix in (ELEMENTS_SUFFIX, TABLE_CELLS_SUFFIX)
+    )
+
+
+def _pii_conditional(config: WomblexConfig) -> tuple[ConditionalInput, ...]:
     # Optional in code, load-bearing in practice — the Kanon-2 graph is the
     # primary candidate source; without it only the opt-in backstop fires.
     return (
         ConditionalInput(
             ENRICHMENT_ENTITIES_SUFFIX, strict=False, reason="graph is the primary PII source",
         ),
-    )
+    ) + _evidence_inputs(config)
 
 
 def _no_conditional(_config: WomblexConfig) -> tuple[ConditionalInput, ...]:
@@ -362,13 +374,19 @@ def _run_embed(shard_dir: Path, config: WomblexConfig, ctx: RunContext) -> None:
 def _run_link(shard_dir: Path, config: WomblexConfig, ctx: RunContext) -> None:
     from womblex.link.stage import link_shards
 
-    link_shards(shard_dir, config.linking, checkpoint_mgr=ctx.checkpoint_mgr)
+    link_shards(
+        shard_dir, config.linking,
+        text_source=config.processing.text_source, checkpoint_mgr=ctx.checkpoint_mgr,
+    )
 
 
 def _run_pii(shard_dir: Path, config: WomblexConfig, ctx: RunContext) -> None:
     from womblex.pii.pii_stage import pii_shards
 
-    pii_shards(shard_dir, config.pii, checkpoint_mgr=ctx.checkpoint_mgr)
+    pii_shards(
+        shard_dir, config.pii,
+        text_source=config.processing.text_source, checkpoint_mgr=ctx.checkpoint_mgr,
+    )
 
 
 def _run_layout(shard_dir: Path, config: WomblexConfig, ctx: RunContext) -> None:
@@ -493,7 +511,7 @@ STAGE_CONTRACTS: dict[str, StageContract] = {
         scope=StageScope.PER_BATCH,
         mutation=MutationMode.SIDECAR,
         required_inputs=(ENRICHMENT_ENTITIES_SUFFIX, MANIFEST_SUFFIX),
-        conditional_inputs=_no_conditional,
+        conditional_inputs=_evidence_inputs,
         outputs=lambda _c: (ENTITY_LINKS_SUFFIX,),
         run=_run_link,
         checkpoint_dirname=".link-checkpoint",

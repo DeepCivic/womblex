@@ -107,6 +107,7 @@ womblex/
 │   │   ├── money_columns.py # Column-evidenced money — classify_column + per-cell parsing
 │   │   ├── layout_stage.py  # layout_shards() — drives `run-stage layout --shards`; fingerprint-aware rerun of *.layout_regions.parquet from the source documents
 │   │   ├── money_stage.py   # money_shards() — drives `womblex money --shards`; writes *.money_spans.parquet + *.money_columns.parquet
+│   │   ├── evidence.py      # EvidenceIndex / EvidenceIndexes — build an evidence reference from the elements; assert_evidence (write-time span check) and verify_shards (`womblex verify-evidence`)
 │   │   └── text_overlay.py  # Shared overlay read/merge helper for the offline text layers
 │   ├── link/
 │   │   ├── matcher.py       # Generic record-linkage: alias / address-exact / token-set name-fuzzy (stdlib difflib)
@@ -128,6 +129,7 @@ womblex/
 │   │   ├── shard_audit.py   # Directory-level shard integrity + chunks-side audit + reconcile-with-checkpoint
 │   │   ├── enrichment_output.py  # Enrichment-specific output
 │   │   ├── enrichment_doc.py     # *.enrichment_doc.parquet — raw ILGS Document, for AI-chunking reuse
+│   │   ├── evidence.py      # The shared evidence-reference columns (money / link / pii sidecars), EvidenceError, legacy back-fill
 │   │   ├── pii_output.py    # pii_spans + clean_text parquet schemas + IO
 │   │   ├── normalise_output.py   # *.normalised_text.parquet schema + IO
 │   │   ├── spellfix_output.py    # *.spellfix_text.parquet + *.spellfix_corrections.parquet schemas + IO

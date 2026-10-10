@@ -21,7 +21,11 @@ from womblex.store.enrichment_output import (
     ENTITY_SCHEMA,
     LEGACY_HASH_COLUMN,
 )
-from womblex.store.money_output import MONEY_SPANS_SCHEMA, MONEY_SPANS_SUFFIX
+from womblex.store.money_output import (
+    MONEY_SPANS_SCHEMA,
+    MONEY_SPANS_SUFFIX,
+    money_spans_from_legacy,
+)
 from womblex.store.output import (
     _SHARD_SUFFIX,
     CHUNKS_SCHEMA,
@@ -399,6 +403,8 @@ def _read_filtered(
                 table = table.rename_columns(
                     ["source_hash" if n == column else n for n in table.schema.names]
                 )
+            if schema is MONEY_SPANS_SCHEMA:
+                table = money_spans_from_legacy(table)
             rows.extend(_conform(table, schema).to_pylist())
         except Exception as e:
             logger.warning("chunk-detail: skipping unreadable sidecar %s: %s", p, e)
@@ -438,12 +444,31 @@ def _chunk_detail(
     # Only narrative-locus money anchors to chunk text; table_cell / sheet_cell
     # spans anchor to the cell sidecars and have no offset to overlay here.
     detail["money_spans"] = [r for r in detail["money_spans"] if r["locus"] == "narrative"]
+    _chunk_relative_pii(detail)
     # `value` is decimal128(38,4) — exact by contract. FastAPI's encoder turns
     # a Decimal into a float, which silently loses that exactness, so it goes
     # over the wire as a string.
     for span in detail["money_spans"]:
         span["value"] = None if span["value"] is None else str(span["value"])
     return detail
+
+
+def _chunk_relative_pii(detail: dict) -> None:
+    """Give each PII span its position in its chunk's text.
+
+    A span's evidence offsets index the source (narrative or table markdown); the
+    inspector slices a chunk, so it needs them relative to the chunk's
+    ``start_char``. A span with no evidence, or one outside its chunk, gets
+    ``-1`` so the front end skips it rather than slicing at ``null``.
+    """
+    starts = {c["chunk_index"]: c["start_char"] for c in detail["chunks"]}
+    for span in detail["pii_spans"]:
+        origin = starts.get(span["chunk_index"])
+        cs, ce = span["char_start"], span["char_end"]
+        if origin is None or cs is None or ce is None:
+            span["start"] = span["end"] = -1
+        else:
+            span["start"], span["end"] = cs - origin, ce - origin
 
 
 def _scan_stage_presence(shard_dir: Path, suffix: str) -> list[str]:

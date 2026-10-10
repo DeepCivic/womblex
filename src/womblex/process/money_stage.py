@@ -8,13 +8,16 @@ ordering dependency on enrich, and it never rewrites element or chunk text.
 Its input is the extraction parquet, never the source files — a second reader
 would be a parallel extraction path, which ``docs/money-extraction.md`` rejects.
 
-Three loci, two coordinate spaces, never mixed:
+Three loci, each located by the shared evidence reference
+(:mod:`womblex.store.evidence`) and checked against the source before the
+sidecar is written:
 
 - ``narrative`` — character offsets into the reassembled narrative, in the
-  element-text layer named by ``text_source`` (stamped on every row), so the
-  spans share enrichment's coordinate space;
-- ``table_cell`` — ``(parent_elem_order, row, col)`` on the table_cells sidecar;
-- ``sheet_cell`` — ``(sheet, row, col)``.
+  element-text layer named by ``text_source`` (``text_layer`` on every row), so
+  the spans share enrichment's coordinate space;
+- ``table_cell`` — the table element, ``(cell_row, cell_col)`` and offsets
+  within that cell's value;
+- ``sheet_cell`` — the ``sheet_cell`` element, ``sheet`` and ``(cell_row, cell_col)``.
 
 Mirrors :mod:`womblex.process.normalise_stage`: per-stage ``CheckpointManager``,
 skip-existing on resume, batch-level isolation.
@@ -31,7 +34,7 @@ from pathlib import Path
 from womblex.config import MoneyConfig
 from womblex.ingest.elements import Element
 from womblex.process.chunk_stage import _batch_bases, _load_elements
-from womblex.process.chunker import reassemble_narrative
+from womblex.process.evidence import EvidenceIndex, assert_evidence
 from womblex.process.money import (
     MoneyOptions,
     MoneySpan,
@@ -48,6 +51,7 @@ from womblex.process.money_columns import (
 )
 from womblex.process.text_overlay import apply_overlay, load_overlay, require_overlays
 from womblex.store.checkpoint import CheckpointManager
+from womblex.store.evidence import EVIDENCE_COLUMNS, no_evidence
 from womblex.store.money_output import (
     money_spans_path_for,
     quantise,
@@ -155,20 +159,26 @@ def _annotate_batch(
 
     span_rows: list[dict] = []
     column_rows: list[dict] = []
+    indexes: dict[str, EvidenceIndex] = {}
     for source_hash, elements in elements_by_hash.items():
         apply_overlay(source_hash, elements, overrides)
+        index = indexes[source_hash] = EvidenceIndex(elements, text_source)
         try:
             if config.narrative:
-                span_rows.extend(_narrative_rows(source_hash, elements, opts, text_source))
+                span_rows.extend(_narrative_rows(source_hash, index, opts))
             if config.columns.enabled:
-                s, c = _table_rows(source_hash, elements, opts, col_opts)
+                s, c = _table_rows(source_hash, elements, index, opts, col_opts)
                 span_rows.extend(s)
                 column_rows.extend(c)
-                s, c = _sheet_rows(source_hash, elements, opts, col_opts)
+                s, c = _sheet_rows(source_hash, elements, index, opts, col_opts)
                 span_rows.extend(s)
                 column_rows.extend(c)
         except Exception as e:  # one document must not stop the batch
             logger.warning("money_shards: %s failed (%s)", source_hash, e)
+    assert_evidence(
+        span_rows, lambda h, _layer: indexes.get(h), text_key="text",
+        label="money_spans", base=base_path,
+    )
     return span_rows, column_rows
 
 
@@ -177,10 +187,8 @@ def _annotate_batch(
 # ---------------------------------------------------------------------------
 
 
-def _narrative_rows(
-    source_hash: str, elements: list[Element], opts: MoneyOptions, text_source: str,
-) -> list[dict]:
-    text, page_breaks = reassemble_narrative(elements)
+def _narrative_rows(source_hash: str, index: EvidenceIndex, opts: MoneyOptions) -> list[dict]:
+    text = index.narrative
     if not text:
         return []
     rows = []
@@ -193,20 +201,11 @@ def _narrative_rows(
             )
             continue
         rows.append(_span_row(
-            source_hash, span, value, locus="narrative", text_source=text_source,
-            start_char=span.start, end_char=span.end,
-            page=_page_for(span.start, page_breaks),
+            source_hash, span, value, locus="narrative",
+            evidence=index.narrative_ref(span.start, span.end) or no_evidence(),
             context=context_for(text, span, opts.context_chars),
         ))
     return rows
-
-
-def _page_for(offset: int, page_breaks: list[tuple[int, int]]) -> int | None:
-    """Resolve a narrative offset to its page via ``reassemble_narrative`` spans."""
-    for end, page in page_breaks:
-        if offset < end:
-            return page
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -215,7 +214,8 @@ def _page_for(offset: int, page_breaks: list[tuple[int, int]]) -> int | None:
 
 
 def _table_rows(
-    source_hash: str, elements: list[Element], opts: MoneyOptions, col_opts: ColumnOptions,
+    source_hash: str, elements: list[Element], index: EvidenceIndex,
+    opts: MoneyOptions, col_opts: ColumnOptions,
 ) -> tuple[list[dict], list[dict]]:
     """Column-evidenced + self-evidencing amounts in ``kind='table'`` elements."""
     span_rows: list[dict] = []
@@ -246,7 +246,7 @@ def _table_rows(
                                         header_text="", cells_total=len(body))
             column_id = f"elem{elem.order}:col{col}"
             extracted = _cell_spans(
-                source_hash, body, verdict, opts, col_opts, column_id,
+                source_hash, body, verdict, opts, col_opts, column_id, index,
                 locus="table_cell", parent_elem_order=elem.order, col=col,
             )
             span_rows.extend(extracted)
@@ -260,7 +260,8 @@ def _table_rows(
 
 
 def _sheet_rows(
-    source_hash: str, elements: list[Element], opts: MoneyOptions, col_opts: ColumnOptions,
+    source_hash: str, elements: list[Element], index: EvidenceIndex,
+    opts: MoneyOptions, col_opts: ColumnOptions,
 ) -> tuple[list[dict], list[dict]]:
     """Column-evidenced + self-evidencing amounts in spreadsheet ``sheet_cell``s.
 
@@ -292,7 +293,7 @@ def _sheet_rows(
             column_id = f"sheet:{sheet}:col{col}"
             extracted = _cell_spans(
                 source_hash, [(r, v) for r, v, _ in body], verdict, opts, col_opts,
-                column_id, locus="sheet_cell", sheet=sheet, col=col,
+                column_id, index, locus="sheet_cell", sheet=sheet, col=col,
                 orders={r: o for r, _, o in body},
             )
             span_rows.extend(extracted)
@@ -310,6 +311,7 @@ def _cell_spans(
     opts: MoneyOptions,
     col_opts: ColumnOptions,
     column_id: str,
+    index: EvidenceIndex,
     *,
     locus: str,
     col: int,
@@ -326,21 +328,27 @@ def _cell_spans(
     whatever its header says.
     """
     rows: list[dict] = []
+
+    def where(row_idx: int, start: int, end: int) -> dict:
+        order = parent_elem_order if locus == "table_cell" else (orders or {}).get(row_idx)
+        ref = order is not None and index.cell_ref(
+            order, start, end, cell=(row_idx, col), sheet=sheet)
+        return ref or no_evidence()
+
     if verdict.is_money:
         values = [v for _, v in body]
         for idx, value, negative in extract_column(values, verdict, options=col_opts):
             stored = quantise(value)
             if stored is None:
                 continue
-            row_idx = body[idx][0]
+            row_idx, cell_text = body[idx]
             rows.append(_cell_row(
-                source_hash, locus=locus, text=body[idx][1], value=stored,
+                source_hash, locus=locus, text=cell_text, value=stored,
                 currency=verdict.currency, currency_source=(
                     "number_format" if verdict.evidence == "number_format" else "column_header"),
                 evidence=verdict.evidence, confidence=verdict.confidence,
                 negative=negative, multiplier=verdict.scale, column_id=column_id,
-                row=row_idx, col=col, parent_elem_order=parent_elem_order, sheet=sheet,
-                elem_order=(orders or {}).get(row_idx),
+                where=where(row_idx, 0, len(cell_text)),
             ))
         return rows
 
@@ -356,8 +364,7 @@ def _cell_spans(
                 currency=span.currency, currency_source=span.currency_source,
                 evidence=span.evidence, confidence=span.confidence,
                 negative=span.negative, multiplier=span.multiplier, column_id=None,
-                row=row_idx, col=col, parent_elem_order=parent_elem_order, sheet=sheet,
-                elem_order=(orders or {}).get(row_idx), modifier=span.modifier,
+                where=where(row_idx, span.start, span.end), modifier=span.modifier,
                 context=text[:200],
             ))
     return rows
@@ -404,8 +411,7 @@ def _dominant_format(formats: list[str | None]) -> str | None:
 
 
 _EMPTY_ROW: dict[str, object] = {f: None for f in (
-    "source_hash", "locus", "text_source", "start_char", "end_char", "page",
-    "elem_order", "parent_elem_order", "sheet", "row", "col", "text", "value",
+    "source_hash", "locus", *EVIDENCE_COLUMNS, "text", "value",
     "currency", "currency_source", "evidence", "modifier", "multiplier",
     "negative", "confidence", "range_group", "range_role", "column_id", "context",
 )}
@@ -413,12 +419,12 @@ _EMPTY_ROW: dict[str, object] = {f: None for f in (
 
 def _span_row(
     source_hash: str, span: MoneySpan, value: Decimal, *, locus: str,
-    text_source: str, start_char: int, end_char: int, page: int | None, context: str,
+    evidence: dict, context: str,
 ) -> dict:
     row = dict(_EMPTY_ROW)
+    row.update(evidence)
     row.update({
-        "source_hash": source_hash, "locus": locus, "text_source": text_source,
-        "start_char": start_char, "end_char": end_char, "page": page,
+        "source_hash": source_hash, "locus": locus,
         "text": span.text, "value": value, "currency": span.currency,
         "currency_source": span.currency_source, "evidence": span.evidence,
         "modifier": span.modifier, "multiplier": span.multiplier,
@@ -432,18 +438,17 @@ def _span_row(
 def _cell_row(
     source_hash: str, *, locus: str, text: str, value: Decimal,
     currency: str | None, currency_source: str, evidence: str, confidence: float,
-    negative: bool, multiplier: str | None, column_id: str | None,
-    row: int, col: int, parent_elem_order: int | None, sheet: str | None,
-    elem_order: int | None, modifier: str | None = None, context: str | None = None,
+    negative: bool, multiplier: str | None, column_id: str | None, where: dict,
+    modifier: str | None = None, context: str | None = None,
 ) -> dict:
     out = dict(_EMPTY_ROW)
+    out.update(where)
     out.update({
         "source_hash": source_hash, "locus": locus, "text": text, "value": value,
         "currency": currency, "currency_source": currency_source,
         "evidence": evidence, "confidence": confidence, "negative": negative,
-        "multiplier": multiplier, "column_id": column_id, "row": row, "col": col,
-        "parent_elem_order": parent_elem_order, "sheet": sheet,
-        "elem_order": elem_order, "modifier": modifier, "context": context,
+        "multiplier": multiplier, "column_id": column_id,
+        "modifier": modifier, "context": context,
     })
     return out
 
