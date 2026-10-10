@@ -231,34 +231,43 @@ def _mask_status(masked: bool, covered: bool) -> str:
 
 
 def _enriched_docs(base_path: Path) -> tuple[set[str], set[str]]:
-    """``(documents the enrichment sidecars cover, documents whose tables were enriched)``.
+    """``(documents whose narrative was enriched, documents whose tables were enriched)``.
 
-    The first includes documents with no entities. A document's tables count as
-    covered when its meta row records at least one table sent to the enricher.
+    The first includes documents with no entities, and leaves out a document
+    whose narrative was skipped but whose tables were sent: its table mentions
+    and its placeholder meta row (empty ``doc_type_enriched``) cover no
+    narrative. A document's tables count as covered when its meta row records
+    at least one table sent to the enricher.
     """
     docs: set[str] = set()
     table_docs: set[str] = set()
     entities = enrichment_entities_path_for(base_path)
     if entities.exists():
-        docs.update(pq.read_table(str(entities), columns=["source_hash"]).column(0).to_pylist())
+        docs.update(
+            r["source_hash"] for r in read_enrichment_entities(entities)
+            .select(["source_hash", "text_layer"]).to_pylist()
+            if r["text_layer"] != TABLE_LAYER
+        )
     meta = enrichment_meta_path_for(base_path)
     if meta.exists():
         names = pq.read_schema(str(meta)).names
-        cols = ["source_hash"] + (["table_count"] if "table_count" in names else [])
+        cols = ["source_hash"] + [c for c in ("doc_type_enriched", "table_count") if c in names]
         for row in pq.read_table(str(meta), columns=cols).to_pylist():
-            docs.add(row["source_hash"])
+            if row.get("doc_type_enriched") != "":
+                docs.add(row["source_hash"])
             if (row.get("table_count") or 0) > 0:
                 table_docs.add(row["source_hash"])
     return docs, table_docs
 
 
 def _tables_by_doc(base_path: Path) -> dict[str, list[TableText]]:
-    """Each document's table markdowns; empty when the batch has no elements sidecar."""
+    """Each document's table markdowns; empty when the batch lacks its elements or cells."""
     try:
         return {src: table_texts(elems) for src, elems in _load_elements(base_path).items()}
     except FileNotFoundError:
         logger.warning(
-            "pii_shards: %s has no elements sidecar; table chunks cannot take table spans",
+            "pii_shards: %s has no elements or table-cells sidecar; "
+            "table chunks cannot take table spans",
             base_path.stem,
         )
         return {}

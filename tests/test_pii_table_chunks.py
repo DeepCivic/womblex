@@ -91,3 +91,13 @@ def test_a_table_chunk_that_does_not_line_up_takes_no_table_spans(tmp_path):
     table = _pii(tmp_path)["table"]
 
     assert table["mask_status"] == "not_masked" and table["n_masked"] == 0
+
+
+def test_a_skipped_narrative_stays_uncovered_beside_enriched_tables(tmp_path):
+    base = _enriched(tmp_path, skip_short_documents=10_000)
+    write_contact_chunks(base, table_markdown(base))
+
+    clean = _pii(tmp_path)
+
+    assert (clean["narrative"]["mask_status"], clean["table"]["mask_status"]) == (
+        "not_masked", "masked")
