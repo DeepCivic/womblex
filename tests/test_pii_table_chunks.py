@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pytest
 
 from tests._shard import contact_shard, table_markdown, write_contact_chunks
 from tests.test_enrich_packing import _FakeClient, _FakeCounter
@@ -104,11 +105,15 @@ def test_a_skipped_narrative_stays_uncovered_beside_enriched_tables(tmp_path):
 
 
 def test_a_declared_text_layer_missing_from_the_batch_refuses_the_stage(tmp_path):
-    import pytest
-
+    from womblex.config import LinkingConfig, ReferenceConfig
+    from womblex.link.stage import link_shards
     from womblex.process.text_overlay import MissingOverlayError
 
     _enriched(tmp_path)
+    reference = ReferenceConfig(path=tmp_path / "register.csv", id_col="id", name_col="name")
 
     with pytest.raises(MissingOverlayError):
         pii_shards(tmp_path, PIIConfig(use_regex_backstop=False), text_source="normalised")
+    with pytest.raises(MissingOverlayError):
+        link_shards(tmp_path, LinkingConfig(enabled=True, reference=reference),
+                    text_source="normalised")

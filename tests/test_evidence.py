@@ -8,7 +8,7 @@ import pyarrow as pa
 import pytest
 
 from tests._shard import DOC, NARRATIVE, contact_shard, table_markdown
-from womblex.process.evidence import EvidenceIndexes, assert_evidence, check_rows
+from womblex.process.evidence import EvidenceIndexes, EvidenceReport, assert_evidence, check_rows
 from womblex.store.evidence import EVIDENCE_COLUMNS, EvidenceError, backfill_evidence, evidence
 
 
@@ -177,6 +177,25 @@ def test_a_receipt_whose_source_is_absent_is_written_unchecked_and_warned(tmp_pa
 
     assert (report.checked, report.unchecked, report.ok) == (0, 4, True)
     assert "written unchecked" in caplog.text
+
+
+def test_a_row_without_text_is_unchecked_not_passed(tmp_path):
+    _, indexes, rows = _rows(tmp_path)
+    for row in rows:
+        row["text"] = None
+    rows.append(_row("", evidence("chunk", page=1)))
+
+    report = check_rows(rows, indexes.get, text_key="text", label="entity_links",
+                        chunk_text=lambda _row: "Contact Jane Doe about the grant.")
+
+    assert (report.checked, report.unchecked, report.ok) == (0, 4, True)
+
+
+def test_merged_reports_keep_the_named_rows_capped():
+    a = EvidenceReport(checked=4, n_mismatched=4, mismatches=["a"] * 4)
+    a.merge(EvidenceReport(checked=4, n_mismatched=4, mismatches=["b"] * 4))
+
+    assert (a.checked, a.n_mismatched, len(a.mismatches)) == (8, 8, 5)
 
 
 def test_a_null_receipt_is_refused(tmp_path):

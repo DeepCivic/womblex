@@ -47,6 +47,7 @@ def cmd_pii(args: argparse.Namespace) -> int:
     """Detect PII spans over a shard directory (per-stage, offline)."""
     from womblex.config import PIIConfig, load_config
     from womblex.pii.pii_stage import pii_shards
+    from womblex.process.text_overlay import MissingOverlayError
     from womblex.store.checkpoint import CheckpointManager
     from womblex.store.pii_output import PII_SPANS_SUFFIX
     from womblex.store.shard_audit import reconcile_stage_checkpoint_with_shards
@@ -91,11 +92,15 @@ def cmd_pii(args: argparse.Namespace) -> int:
         shard_dir, pii_config.entities, pii_config.use_regex_backstop,
         pii_config.write_clean_text,
     )
-    result = pii_shards(
-        shard_dir, pii_config,
-        text_source=full.processing.text_source if full else "elements",
-        checkpoint_mgr=ckpt,
-    )
+    try:
+        result = pii_shards(
+            shard_dir, pii_config,
+            text_source=full.processing.text_source if full else "elements",
+            checkpoint_mgr=ckpt,
+        )
+    except MissingOverlayError as e:
+        logger.error("pii --shards: refused: %s", e)
+        return 1
     logger.info(
         "Done: %d batches written, %d PII spans, %d chunks masked",
         result.batches_written, result.spans_written, result.chunks_masked,

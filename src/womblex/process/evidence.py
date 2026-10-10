@@ -269,7 +269,7 @@ class EvidenceReport:
         self.checked += other.checked
         self.unchecked += other.unchecked
         self.n_mismatched += other.n_mismatched
-        self.mismatches.extend(other.mismatches)
+        self.mismatches.extend(other.mismatches[: _REPORT_LIMIT - len(self.mismatches)])
 
 
 def check_rows(
@@ -280,14 +280,18 @@ def check_rows(
 
     A row without a valid ``anchor_level`` is a null receipt and fails. A
     ``chunk`` receipt is checked against ``chunk_text(row)``; every other level
-    against the document's index. A missing source makes the row unchecked.
+    against the document's index. A missing source makes the row unchecked, as
+    does a missing text (e.g. ``mention_text`` on files before contract 1.5):
+    empty text lies in any source, so it cannot pass a check.
     """
     report = EvidenceReport()
     for row in rows:
         text = row[text_key] or ""
         level = row.get("anchor_level")
         verdict: bool | None
-        if level not in (SPAN, ELEMENT, CHUNK, DOCUMENT):
+        if not text and level in (SPAN, ELEMENT, CHUNK, DOCUMENT):
+            verdict = None
+        elif level not in (SPAN, ELEMENT, CHUNK, DOCUMENT):
             verdict = False
         elif level == CHUNK:
             source = chunk_text(row) if chunk_text is not None else None
@@ -320,7 +324,8 @@ def assert_evidence(
     report = check_rows(rows, lookup, text_key=text_key, label=label, chunk_text=chunk_text)
     if report.unchecked:
         logger.warning(
-            "%s: %s has %d receipt(s) whose source is absent, so they are written unchecked",
+            "%s: %s has %d receipt(s) whose source or text is absent, so they are written"
+            " unchecked",
             label, base.stem, report.unchecked,
         )
     if not report.ok:
