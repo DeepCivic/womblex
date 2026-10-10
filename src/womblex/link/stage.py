@@ -17,13 +17,14 @@ from womblex.config import LinkingConfig
 from womblex.link.matcher import Candidate, Link, resolve
 from womblex.link.reference import load_reference
 from womblex.process.chunk_stage import _batch_bases
+from womblex.process.evidence import EvidenceIndexes, assert_evidence
 from womblex.process.text_overlay import require_overlays
 from womblex.store.checkpoint import CheckpointManager
 from womblex.store.enrichment_output import (
     read_enrichment_entities,
 )
 from womblex.store.entity_links_output import entity_links_path_for, write_entity_links
-from womblex.store.evidence import TABLE_LAYER
+from womblex.store.evidence import DOCUMENT, SPAN, TABLE_LAYER, evidence
 from womblex.store.output import read_manifest
 
 logger = logging.getLogger(__name__)
@@ -75,6 +76,7 @@ def link_shards(
             continue
 
         candidates_by_hash = _candidates_for_batch(base, linking_config.candidate_kinds)
+        indexes = EvidenceIndexes(base, text_source)
         rows: list[dict] = []
         linked_now = 0
         for source_hash, cands in candidates_by_hash.items():
@@ -85,12 +87,15 @@ def link_shards(
                     k for k in linking_config.candidate_kinds if k == "address"
                 ) or ("address",),
             )
-            rows.extend(_link_to_row(source_hash, lk) for lk in links)
+            rows.extend(_link_to_row(source_hash, lk, indexes) for lk in links)
             if any(lk.matched for lk in links):
                 linked_now += 1
             matched_links += sum(1 for lk in links if lk.matched)
             total_links += len(links)
 
+        assert_evidence(
+            rows, indexes.get, text_key="mention_text", label="entity_links", base=base,
+        )
         write_entity_links(rows, base)
         batches_written += 1
         docs_linked += linked_now
@@ -135,26 +140,51 @@ def _candidates_for_batch(
     kinds = set(candidate_kinds)
     out: dict[str, list[Candidate]] = defaultdict(list)
     for r in table.to_pylist():
-        if r["entity_type"] not in kinds or r["text_layer"] == TABLE_LAYER:
-            continue  # table offsets index that table's markdown, not the narrative
+        if r["entity_type"] not in kinds:
+            continue
         out[r["source_hash"]].append(Candidate(
             text=r["name"] or "",
             kind=r["entity_type"],
             source_hash=r["source_hash"],
             mention_start=r["mention_start"] if r["mention_start"] is not None else -1,
             mention_end=r["mention_end"] if r["mention_end"] is not None else -1,
+            text_layer=r["text_layer"], elem_order=r["elem_order"], sheet=r["sheet"],
+            mention_text=r["mention_text"],
         ))
     return dict(out)
 
 
-def _link_to_row(source_hash: str, link: Link) -> dict:
+def _mention_evidence(indexes: EvidenceIndexes, source_hash: str, cand: Candidate) -> dict:
+    """The mention's evidence reference: its span where it can be placed, else the document.
+
+    A mention the provider gave no offsets for is located to the document; so is
+    one whose offsets fall outside the source. Without the elements the span
+    is written as the enrichment gave it, unchecked.
+    """
+    start, end = cand.mention_start, cand.mention_end
+    index = indexes.get(source_hash, cand.text_layer)
+    if end <= start or start < 0:
+        return index.document_ref() if index else evidence(DOCUMENT, text_layer=cand.text_layer)
+    if index is None:
+        return evidence(
+            SPAN, elem_order=cand.elem_order, sheet=cand.sheet,
+            char_start=start, char_end=end, text_layer=cand.text_layer or indexes.text_source)
+    if cand.text_layer == TABLE_LAYER:
+        table = index.resolve_table(elem_order=cand.elem_order, sheet=cand.sheet)
+        ref = index.table_ref(table, start, end) if table is not None else None
+    else:
+        ref = index.narrative_ref(start, end)
+    return ref or index.document_ref()
+
+
+def _link_to_row(source_hash: str, link: Link, indexes: EvidenceIndexes) -> dict:
     e = link.entity
     return {
         "source_hash": source_hash,
         "candidate_text": link.candidate.text,
         "candidate_kind": link.candidate.kind,
-        "mention_start": link.candidate.mention_start,
-        "mention_end": link.candidate.mention_end,
+        **_mention_evidence(indexes, source_hash, link.candidate),
+        "mention_text": link.candidate.mention_text,
         "entity_id": e.entity_id if e else "",
         "entity_type": e.entity_type if e else "",
         "canonical_name": e.name if e else "",

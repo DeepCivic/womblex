@@ -4,7 +4,10 @@ Consumes ``*.chunks.parquet`` + ``*.enrichment_entities.parquet`` and writes two
 siblings per batch:
 
 - ``*.pii_spans.parquet`` — one row per detected PII span (audit/reversible),
-  with the graph ``entity_id`` and the ``<PERSON_n>`` replacement it maps to.
+  with the graph ``entity_id`` and the ``<PERSON_n>`` replacement it maps to,
+  located by the shared evidence reference (:mod:`womblex.store.evidence`) at
+  the most precise level that is reliable and checked before the batch is
+  written.
 - ``*.clean_text.parquet`` — the masked, publishable text layer (one row per
   chunk; masked where spans were found, verbatim passthrough otherwise), a
   drop-in for ``*.chunks.parquet``. Gated by ``PIIConfig.write_clean_text``.
@@ -30,15 +33,18 @@ skip-existing on resume, batch-level isolation.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
+from typing import Any
 
 import pyarrow.parquet as pq
 
 from womblex.config import PIIConfig
 from womblex.pii.cleaner import PIICleaner
-from womblex.process.chunk_stage import _batch_bases, _load_elements
-from womblex.process.chunker import TableText, table_texts
+from womblex.process.chunk_stage import _batch_bases
+from womblex.process.evidence import EvidenceIndex, EvidenceIndexes, assert_evidence
 from womblex.process.text_overlay import require_overlays
 from womblex.store.checkpoint import CheckpointManager
 from womblex.store.enrichment_output import (
@@ -46,7 +52,7 @@ from womblex.store.enrichment_output import (
     enrichment_meta_path_for,
     read_enrichment_entities,
 )
-from womblex.store.evidence import TABLE_LAYER
+from womblex.store.evidence import CHUNK, TABLE_LAYER, evidence
 from womblex.store.output import read_chunks, read_manifest
 from womblex.store.pii_output import (
     MASK_MASKED,
@@ -110,14 +116,16 @@ def pii_shards(
 
         known_by_doc, table_known = _known_spans_by_doc(base, person_types, entities)
         enriched_docs, table_docs = _enriched_docs(base)
-        tables_by_doc = _tables_by_doc(base)
-        unplaced = 0
+        indexes = EvidenceIndexes(base, text_source)
+        off_source = 0
 
         # Group chunks per doc, in chunk_index order, so <ENTITY_n> numbering is
         # stable across a document (a doc's chunks all live in this one batch).
         by_doc: dict[str, list[dict]] = {}
+        chunk_texts: dict[tuple[str, int], str] = {}
         for c in read_chunks(base).to_pylist():
             by_doc.setdefault(c["source_hash"], []).append(c)
+            chunk_texts[(c["source_hash"], c["chunk_index"])] = c["text"] or ""
 
         span_rows: list[dict] = []
         clean_rows: list[dict] = []
@@ -126,6 +134,7 @@ def pii_shards(
             chunks.sort(key=lambda c: c["chunk_index"])
             known = known_by_doc.get(source_hash)
             doc_enriched = source_hash in enriched_docs
+            index = indexes.get(source_hash)
             numbering: dict[tuple[str, str], int] = {}
             counters: dict[str, int] = {}
 
@@ -133,13 +142,16 @@ def pii_shards(
                 text = c["text"] or ""
                 is_narrative = c["content_type"] == "narrative"
                 start = c["start_char"] or 0
+                table = None if is_narrative or index is None else index.resolve_table(
+                    elem_order=c["elem_order"], chunk_text=text, start=start)
+                # A chunk lines up with its source when its text is the source's slice
+                # at its offsets; only then is a span's offset a position in the source.
+                source = index.narrative if is_narrative and index else (
+                    table.markdown if table else None)
+                aligned = source is not None and source[start:start + len(text)] == text
+                off_source += index is not None and not aligned
                 chunk_known, covered = known, doc_enriched
                 if not is_narrative:
-                    table = _table_for_chunk(
-                        tables_by_doc.get(source_hash, []), c["elem_order"], text, start)
-                    aligned = table is not None and (
-                        table.markdown[start:start + len(text)] == text)
-                    unplaced += not aligned
                     chunk_known = (
                         table_known.get((source_hash, table.elem_order, table.sheet))
                         if table is not None and aligned else None
@@ -167,7 +179,7 @@ def pii_shards(
                         "source_hash": source_hash,
                         "chunk_index": c["chunk_index"],
                         "content_type": c["content_type"],
-                        "start": s.start, "end": s.end,
+                        **_receipt(index, table, c, aligned, start + s.start, start + s.end),
                         "text": text[s.start:s.end],
                         "entity_type": s.entity_type,
                         "entity_id": s.entity_id,
@@ -189,6 +201,10 @@ def pii_shards(
                     if placed:
                         chunks_masked += 1
 
+        assert_evidence(
+            span_rows, indexes.get, text_key="text", label="pii_spans", base=base,
+            chunk_text=partial(_chunk_text, chunk_texts),
+        )
         write_pii_spans(span_rows, base)
         if write_clean:
             write_clean_text(clean_rows, base)
@@ -209,10 +225,11 @@ def pii_shards(
             "pii_shards: %s wrote %d spans, %d masked chunks",
             base.stem, len(span_rows), sum(1 for r in clean_rows if r["n_masked"]),
         )
-        if unplaced:
+        if off_source:
             logger.warning(
-                "pii_shards: %s has %d table chunk(s) that do not line up with their "
-                "table's markdown; they take no table spans", base.stem, unplaced,
+                "pii_shards: %s has %d chunk(s) that do not line up with their source text; "
+                "their spans are located to the document or chunk, and a table chunk takes "
+                "no table spans", base.stem, off_source,
             )
         uncovered = sum(1 for r in clean_rows if r["mask_status"] == MASK_NOT_MASKED)
         if uncovered:
@@ -267,30 +284,26 @@ def _enriched_docs(base_path: Path) -> tuple[set[str], set[str]]:
     return docs, table_docs
 
 
-def _tables_by_doc(base_path: Path) -> dict[str, list[TableText]]:
-    """Each document's table markdowns; empty when the batch lacks its elements or cells."""
-    try:
-        return {src: table_texts(elems) for src, elems in _load_elements(base_path).items()}
-    except FileNotFoundError:
-        logger.warning(
-            "pii_shards: %s has no elements or table-cells sidecar; "
-            "table chunks cannot take table spans",
-            base_path.stem,
-        )
-        return {}
+def _chunk_text(texts: dict[tuple[str, int], str], row: Mapping[str, Any]) -> str | None:
+    return texts.get((row["source_hash"], row["chunk_index"]))
 
 
-def _table_for_chunk(
-    tables: list[TableText], elem_order: int | None, text: str, start: int,
-) -> TableText | None:
-    """The table a chunk belongs to: by ``elem_order``, else the sheet holding its text."""
-    for t in tables:
-        if elem_order is not None:
-            if t.elem_order == elem_order:
-                return t
-        elif t.elem_order is None and t.markdown[start:start + len(text)] == text:
-            return t
-    return None
+def _receipt(
+    index: EvidenceIndex | None, table: object, c: dict, aligned: bool, start: int, end: int,
+) -> dict:
+    """The span's evidence at the most precise level that is reliable.
+
+    ``span`` where the chunk lines up with its source; ``document`` where it
+    does not (the span is still in the document); ``chunk`` where the elements,
+    or the chunk's table, are not to hand. A position is never searched for.
+    """
+    if index is None or (table is None and c["content_type"] != "narrative"):
+        return evidence(CHUNK, elem_order=c["elem_order"], page=c["page_start"])
+    if not aligned:
+        return index.document_ref()
+    ref = (index.narrative_ref(start, end) if c["content_type"] == "narrative"
+           else index.table_ref(table, start, end))  # type: ignore[arg-type]
+    return ref or index.document_ref()
 
 
 def _apply_mask(text: str, placed: list[tuple[int, int, str]]) -> str:

@@ -65,10 +65,10 @@
 	// A span belongs to the chunk whose [start_char, end_char) range contains
 	// its start — the same overlap test `graph_refresh` uses to map mentions to
 	// chunks. Narrative-only by the time it reaches us (the reader drops cell
-	// loci), so every span has a `start_char` to place.
+	// loci), so every span has a `char_start` to place.
 	function moneyForChunk(chunk: { start_char: number; end_char: number }): MoneySpan[] {
 		return (detail?.money_spans ?? []).filter(
-			(m) => m.start_char >= chunk.start_char && m.start_char < chunk.end_char
+			(m) => m.char_start !== null && m.char_start >= chunk.start_char && m.char_start < chunk.end_char
 		);
 	}
 

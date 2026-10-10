@@ -7,7 +7,7 @@ column-level schemas are in [extraction.md](extraction.md).
 
 ## Contract version
 
-`womblex.contract_version` (currently `1.5`, `store/contract.CONTRACT_VERSION`)
+`womblex.contract_version` (currently `2.0`, `store/contract.CONTRACT_VERSION`)
 is in the footer of every pipeline Parquet and in `egress_manifest.json`. It is
 versioned apart from the package: a release that changes no schema leaves it
 alone.
@@ -37,16 +37,49 @@ the single source). An unknown role reads as `raw`.
 | `graph_edges` | `source_hash` + `source_id` / `target_id` to `enrichment_entities.entity_id` | raw |
 | `enrichment_doc` | `source_hash` (one row per document) | raw |
 | `enrichment_meta` | `source_hash`; `table_count` is tables sent to the enricher on their own, null where none were (1.4) | none |
-| `entity_links` | `(source_hash, mention_start, mention_end)` to `enrichment_entities`; its `entity_id` is the reference-register id | raw |
-| `pii_spans` | `(source_hash, chunk_index)`; `entity_id` to `enrichment_entities` | raw |
+| `entity_links` | `source_hash` plus the evidence reference; its `entity_id` is the reference-register id and `mention_text` the enricher's text for the mention (null where the provider gave none) | raw |
+| `pii_spans` | `(source_hash, chunk_index)` plus the evidence reference; `entity_id` to `enrichment_entities` | raw |
 | `clean_text` | `(source_hash, chunk_index)`; `mask_status` is `masked`, `no_entity` or `not_masked` (verbatim, no candidate source covered the chunk); files written before contract 1.2 read back as `masked` where `n_masked` is above zero, null otherwise | masked |
-| `money_spans`, `money_columns` | `source_hash` plus the locus anchor (`start_char` / `elem_order` / `parent_elem_order`) | none |
+| `money_spans` | `source_hash` plus the evidence reference | none |
+| `money_columns` | `source_hash` plus `column_id` (`parent_elem_order` / `sheet`) | none |
 | `layout_regions` | `(source_hash, page)`; boxes are normalised like element `bbox` ([layout.md](layout.md)) | none |
 | `redactions`, `source_index` | `source_hash` | none |
 | `provenance` | `source_hash` | raw |
 
 `none` is a claim about text, not derivation: embeddings come from unmasked
 chunks but carry no text.
+
+### Evidence reference (2.0)
+
+`money_spans`, `entity_links` and `pii_spans` locate each span with the same ten
+columns (`store/evidence.py`), in place of the anchors each carried before:
+`elem_order`, `page`, `bbox`, `sheet`, `cell_row`, `cell_col`, `char_start`,
+`char_end`, `text_layer` and `anchor_level`. A row is never unlocated: it carries
+the most precise location that is reliable, and `anchor_level` says which, and
+how the stage checked it before writing (a failed check refuses the batch,
+`EvidenceError`):
+
+| `anchor_level` | Located to | Check |
+|---|---|---|
+| `span` | `char_start:char_end` of the text `text_layer` names: the narrative under an element-text layer (`elements` / `normalised` / `spellfix`, the space chunks and mentions use), a table's markdown (`table_markdown`, with `elem_order` or `sheet`), or one cell's value (`cell`) | the source slice equals the text |
+| `element` | the element, or the cell (`cell_row` / `cell_col`, or `sheet`) | the text lies in it |
+| `chunk` | the chunk (`chunk_index` on `pii_spans`), its page and, for a table chunk, `elem_order` | the text lies in the chunk |
+| `document` | the document | the text lies in its narrative or a table markdown |
+
+A source that is absent (no elements sidecar) leaves the row written and
+unchecked, with a warning. A position is never searched for: a PII span in a
+chunk that is not the source's slice at its offsets is located to the document,
+one whose elements or table are missing to the chunk. Masking never depends on
+the receipt. The text a `span` row is checked against is `text` (`mention_text`
+on `entity_links`).
+
+The major bump removed `start_char` / `end_char` / `text_source` / `parent_elem_order`
+/ `row` / `col` from `money_spans` (now `char_start`, `char_end`, `text_layer`,
+`elem_order`, `cell_row`, `cell_col`), `start` / `end` (chunk-relative) from
+`pii_spans`, and `mention_start` / `mention_end` from `entity_links`. Readers
+back-fill an older file: a money span keeps its narrative offsets (`span`) or its
+cell (`element`); a PII span reads as `chunk`; a link reads as `document`. A PII
+span's position in its chunk is `char_start - chunk.start_char` for a `span` row.
 
 ## Determinism
 
