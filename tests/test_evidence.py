@@ -46,6 +46,8 @@ def test_table_and_cell_spans_resolve_to_their_text(tmp_path):
     assert cell is not None and (cell["cell_row"], cell["cell_col"], cell["text_layer"]) == (
         1, 1, "cell")
     assert index.holds(cell, "1,200") is True and index.holds(cell, "1,201") is False
+    assert index.cell_ref(1, 0, 99, cell=(1, 1)) is None   # past the cell's value
+    assert index.cell_ref(1, 0, 1, cell=(9, 9)) is None    # no such cell
 
 
 def test_an_element_receipt_holds_when_the_text_lies_in_that_element_or_cell(index):
@@ -59,6 +61,7 @@ def test_an_element_receipt_holds_when_the_text_lies_in_that_element_or_cell(ind
     assert index.holds(paragraph, "Jane Doe") is False  # in another element
     assert index.holds(cell, "Mary Major") is True and index.holds(cell, "John Citizen") is False
     assert index.holds(table, "John Citizen") is True
+    assert index.element_ref(1, cell=(9, 9)) is None
 
 
 def test_a_document_receipt_holds_when_the_text_lies_anywhere_in_the_document(index):
@@ -72,6 +75,13 @@ def test_a_document_receipt_holds_when_the_text_lies_anywhere_in_the_document(in
 
 def test_a_chunk_receipt_cannot_be_checked_without_the_chunk(index):
     assert index.holds(evidence("chunk", page=1), "Jane Doe") is None
+
+
+def test_a_receipt_under_another_text_layer_is_not_checked_against_this_one(index):
+    ref = {**index.narrative_ref(0, 4), "text_layer": "spellfix"}
+
+    assert index.holds(ref, index.narrative[:4]) is None
+    assert index.holds({**index.document_ref(), "text_layer": "spellfix"}, "Jane Doe") is None
 
 
 def test_a_document_without_elements_has_no_index(tmp_path):
@@ -98,3 +108,5 @@ def test_backfill_adds_the_columns_a_file_lacks_with_one_level():
     assert set(EVIDENCE_COLUMNS) <= set(out.schema.names)
     row = out.to_pylist()[0]
     assert (row["cell_col"], row["anchor_level"], row["char_start"]) == (3, "chunk", None)
+    with pytest.raises(ValueError):
+        backfill_evidence(table, level="exact")

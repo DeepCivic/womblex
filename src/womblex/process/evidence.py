@@ -94,10 +94,11 @@ class EvidenceIndex:
         self, elem_order: int, start: int, end: int, *,
         cell: tuple[int, int] | None = None, sheet: str | None = None,
     ) -> dict[str, Any] | None:
-        """Span evidence for ``[start:end]`` of one cell's value."""
-        elem = self._by_order.get(elem_order)
-        if elem is None:
+        """Span evidence for ``[start:end]`` of one cell's value; ``None`` outside it."""
+        value = self._cell_text(elem_order, cell)
+        if value is None or not 0 <= start <= end <= len(value):
             return None
+        elem = self._by_order[elem_order]
         return self._located(
             SPAN, elem, sheet=sheet, cell=cell, bbox=self._cell_box(elem, cell),
             char_start=start, char_end=end, text_layer=CELL_LAYER)
@@ -107,7 +108,7 @@ class EvidenceIndex:
     ) -> dict[str, Any] | None:
         """Element evidence: the span lies somewhere in this element (or one of its cells)."""
         elem = self._by_order.get(elem_order)
-        if elem is None:
+        if elem is None or (cell is not None and self._cell_text(elem_order, cell) is None):
             return None
         return self._located(
             ELEMENT, elem, sheet=sheet, cell=cell, bbox=self._cell_box(elem, cell))
@@ -145,17 +146,15 @@ class EvidenceIndex:
             t = self.resolve_table(elem_order=ref.get("elem_order"), sheet=ref.get("sheet"))
             return t.markdown if t is not None else None
         if layer == CELL_LAYER:
-            return self._cell_text(ref)
+            return self._cell_text(ref.get("elem_order"), (ref.get("cell_row"), ref.get("cell_col")))
         return self.narrative
 
-    def _cell_text(self, ref: Mapping[str, Any]) -> str | None:
-        order = ref.get("elem_order")
+    def _cell_text(self, order: int | None, cell: tuple[Any, Any] | None) -> str | None:
         elem = self._by_order.get(order) if order is not None else None
         if elem is None:
             return None
         if elem.kind == "sheet_cell":
             return elem.value or ""
-        cell = (ref.get("cell_row"), ref.get("cell_col"))
         return next((c.value or "" for c in elem.cells or () if (c.row, c.col) == cell), None)
 
     def _element_text(self, ref: Mapping[str, Any]) -> str | None:
@@ -165,7 +164,7 @@ class EvidenceIndex:
         if elem is None:
             return None
         if ref.get("cell_row") is not None:
-            return self._cell_text({**ref, "text_layer": CELL_LAYER})
+            return self._cell_text(order, (ref.get("cell_row"), ref.get("cell_col")))
         if elem.kind == "table":
             t = self.resolve_table(elem_order=elem.order)
             return t.markdown if t is not None else None
@@ -179,9 +178,13 @@ class EvidenceIndex:
         ``span``: the source slice equals ``text``. ``element``: ``text`` lies in
         that element or cell. ``document``: ``text`` lies in the narrative or a
         table markdown. A ``chunk`` receipt needs the chunk's text, which this
-        index does not hold, so it is ``None`` here.
+        index does not hold, so it is ``None`` here; so is a narrative offset or
+        document receipt under another element-text layer than this index's.
         """
         level = ref.get("anchor_level")
+        layer = ref.get("text_layer")
+        if layer not in (None, TABLE_LAYER, CELL_LAYER) and layer != self.text_layer:
+            return None
         if level == SPAN:
             source = self.source_text(ref)
             start, end = ref.get("char_start"), ref.get("char_end")

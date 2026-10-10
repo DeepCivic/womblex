@@ -69,7 +69,7 @@ def evidence(level: str, **fields: Any) -> dict[str, Any]:
 
 
 def backfill_evidence(
-    raw: pa.Table, columns: dict[str, str] | None = None, *, level: str | None = None,
+    raw: pa.Table, columns: dict[str, str] | None = None, *, level: str,
 ) -> pa.Table:
     """Add the evidence columns a pre-evidence file lacks.
 
@@ -78,6 +78,8 @@ def backfill_evidence(
     else is null, and ``anchor_level`` is ``level`` for every row. Offsets of
     the old shape are not re-expressed here: that needs the elements.
     """
+    if level not in (SPAN, ELEMENT, CHUNK, DOCUMENT):
+        raise ValueError(f"bad evidence level: {level!r}")
     columns = columns or {}
     for field in EVIDENCE_FIELDS:
         if field.name in raw.schema.names:
@@ -85,7 +87,7 @@ def backfill_evidence(
         legacy = columns.get(field.name)
         if legacy is not None and legacy in raw.schema.names:
             raw = raw.append_column(field.name, raw.column(legacy).cast(field.type))
-        elif field.name == "anchor_level" and level is not None:
+        elif field.name == "anchor_level":
             raw = raw.append_column(field.name, pa.array([level] * raw.num_rows, field.type))
         else:
             raw = raw.append_column(field.name, pa.nulls(raw.num_rows, field.type))
