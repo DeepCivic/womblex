@@ -454,7 +454,7 @@ belongs on the orchestrator path, not here.
 - Create unnecessary files — edit existing files when possible
 - Add excessive docstrings — docstrings are concise, practical and only where needed
 - Add quality scoring — we don't understand the data well enough yet
-- Add a check that fails, refuses or halts a run, stage or batch once work (above all paid calls) has started. Trust comes from the output being honest about its state — label each row (`mask_status`, `evidence_check`), count it in the footer or log, and warn — never from blocking completion
+- Add a check that fails, refuses or halts a run, stage or batch once work (above all paid calls) has started. Trust comes from the output being honest about its state — label each row (`mask_status`, `evidence_check`), count it in the footer or log, and warn — never from blocking completion. This does not touch the pre-run checks, which stay and must keep refusing: before any work starts, every configured stage must have the resources it needs (the model check in `utils/model_check.py`, `unserved_models`, the Isaacus-need gate in the stage contracts, `require_overlays`), so a run that cannot complete is stopped before it spends anything
 - Add a test here that scores library output against womblex-collection ground truth, or that writes a `docs/accuracy/` report. That suite belongs in womblex-benchmark, beside the ground truth it scores against; this repository receives the report. Reading the synthetic fixtures as ordinary test input is fine — publishing a report from here is not
 ## Do
 - Read files before modifying — use Read tool to understand existing code
