@@ -67,9 +67,9 @@ def stage_id(run_id: str, stage: str) -> str:
     return f"{run_id}:stage:{stage}"
 
 
-def downstream_id(run_id: str, stages: list[str]) -> str:
-    """Identifies one dispatch; the same stage list is the same coordinator."""
-    digest = hashlib.sha256(",".join(stages).encode()).hexdigest()[:8]
+def downstream_id(run_id: str, stages: list[str], workflow_digest: str | None = None) -> str:
+    """Identifies one dispatch; the same stage list (under the same workflow) is the same coordinator."""
+    digest = hashlib.sha256(",".join([*stages, workflow_digest or ""]).encode()).hexdigest()[:8]
     return f"{run_id}:downstream:{digest}"
 
 

@@ -17,7 +17,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from womblex.cloud.stage_contracts import STAGE_CONTRACTS, RunContext
 from womblex.cloud.stage_runner import (
@@ -116,6 +116,23 @@ class WorkflowRunResult:
                     self.workflow_id, self.digest, len(self.steps), len(failed), failed or "")
 
 
+def config_from_overlay(
+    preset_name: str, overlay: dict[str, Any], paths: dict[str, Any] | None = None,
+) -> WomblexConfig:
+    """The config a workflow's resolved *overlay* stands for: `dataset.name` is the preset name.
+
+    The one construction the local runner and a fleet worker share, so a stage runs under
+    byte-identical settings in both. *paths* is the worker's own; a local run has none.
+    """
+    from womblex.config import WomblexConfig
+
+    return WomblexConfig.model_validate({
+        "dataset": {"name": preset_name},
+        "paths": paths or {"input_root": ".", "output_root": ".", "checkpoint_dir": "."},
+        **overlay,
+    })
+
+
 def resolve_workflow_config(
     stored: StoredWorkflow, resolve_preset: Callable[[str], Preset | None],
 ) -> WomblexConfig:
@@ -125,8 +142,6 @@ def resolve_workflow_config(
     preset name, so run stamps record the recipe. Raises `WorkflowRefusedError` for an
     unknown preset or a combination that does not load.
     """
-    from womblex.config import WomblexConfig
-
     spec = stored.spec
     preset = resolve_preset(spec.preset)
     if preset is None:
@@ -135,11 +150,7 @@ def resolve_workflow_config(
         )
     overlay = combine_config(preset.config, spec.config)
     try:
-        return WomblexConfig.model_validate({
-            "dataset": {"name": spec.preset},
-            "paths": {"input_root": ".", "output_root": ".", "checkpoint_dir": "."},
-            **overlay,
-        })
+        return config_from_overlay(spec.preset, overlay)
     except ValueError as e:
         raise WorkflowRefusedError(
             f"workflow {stored.id!r}: preset {spec.preset!r} with the workflow's config does not load: {e}",
@@ -286,6 +297,7 @@ __all__ = [
     "WorkflowRefusedError",
     "WorkflowRunResult",
     "check_workflow",
+    "config_from_overlay",
     "not_acted_on",
     "prepare_workflow",
     "resolve_workflow_config",

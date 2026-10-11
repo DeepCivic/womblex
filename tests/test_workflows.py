@@ -377,3 +377,31 @@ def test_a_workflow_recorded_before_checksums_is_named_not_counted():
 def test_a_step_recorded_as_a_key_list_resumes_without_digests():
     assert workflows._digests(["k/a", "k/b"]) == {}
     assert workflows._digests({"k/a": "aa"}) == {"k/a": "aa"}
+
+
+def test_a_dispatched_workflow_runs_its_stages_under_its_own_config_and_digest(fleet):
+    """The overlay, not the worker's config, sizes the chunks; its digest rides the files."""
+    import pyarrow.parquet as pq
+
+    store, ingest, _ = fleet
+    wf = {"id": "wf", "digest": "sha256:feed", "preset": "recipe",
+          "config": {"chunking": {"chunk_size": 8}}}
+    with RunBoard(None) as board:
+        for run in ("r1", "r2"):
+            board.enqueue(run, [JobSpec(batch_num=1, input_keys=["people.csv"],
+                                        shard_prefix=f"runs/{run}/documents", ingest_root=ingest)])
+        board.enqueue_stages("r1", ["chunk"], "runs/r1/documents")
+        board.enqueue_stages("r2", ["chunk"], "runs/r2/documents", workflow=wf)
+        work(fleet, idle_timeout=3)
+        coordinators = [r for r in board.list_jobs("r2") if r.kind == "downstream"]
+    assert coordinators and all(r.status == "done" for r in coordinators)
+    out = Path(str(store))
+
+    def chunks(run: str):
+        return pq.read_table(out / f"runs/{run}/documents/batch-0001.chunks.parquet")
+
+    assert chunks("r2").num_rows > chunks("r1").num_rows  # chunk_size 8 splits what the default keeps
+    meta = pq.read_metadata(str(out / "runs/r2/documents/batch-0001.chunks.parquet")).metadata
+    assert meta[b"womblex.workflow_digest"] == b"sha256:feed"
+    base = pq.read_metadata(str(out / "runs/r1/documents/batch-0001.chunks.parquet")).metadata
+    assert b"womblex.workflow_digest" not in base

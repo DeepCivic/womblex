@@ -268,9 +268,13 @@ class RunBoard:
 
     def enqueue_stages(
         self, run_id: str, stages: list[str], shard_prefix: str, *,
-        max_attempts: int = 3, owner: str | None = None,
+        max_attempts: int = 3, owner: str | None = None, workflow: dict[str, Any] | None = None,
     ) -> int:
         """Enqueue the coordinator that runs *stages* in pipeline order for *run_id*.
+
+        *workflow* (`id`, `digest`, `preset`, `config`: the resolved overlay) makes the fleet
+        run the stages under that config and stamp its digest on what they write, rather
+        than under the worker's own config; it is part of the coordinator's identity.
 
         Order is not taken from the list: the coordinator sorts by
         ``stage_rank``, so an out-of-order list still runs in pipeline order and
@@ -288,14 +292,17 @@ class RunBoard:
                                  "max_attempts": max_attempts}
         if row_owner is not None:
             attrs["owner"] = row_owner
+        if workflow is not None:
+            attrs["workflow_digest"] = workflow["digest"]
         options: EnqueueOptions = {
             "workflow_name": dbos_app.DOWNSTREAM_WORKFLOW,
             "queue_name": dbos_app.DOWNSTREAM_QUEUE,
-            "workflow_id": dbos_app.downstream_id(run_id, ordered),
+            "workflow_id": dbos_app.downstream_id(
+                run_id, ordered, workflow["digest"] if workflow else None),
             "attributes": attrs,
         }
         fresh = self._enqueue(
-            [(options, (run_id, ordered, shard_prefix, max_attempts, row_owner))],
+            [(options, (run_id, ordered, shard_prefix, max_attempts, row_owner, workflow))],
         )
         newly = len(ordered) if fresh else 0
         logger.info("Enqueued %d new stage job(s) for run %s (of %d submitted)",

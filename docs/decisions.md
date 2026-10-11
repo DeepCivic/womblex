@@ -178,6 +178,9 @@ Phase 2 merge 5 (`cloud/workflow_plan.py`).
 ### The workflow digest is a contextvar, observed in the record
 Phase 2 merge 6. `sidecar_footer` is the one place every stage's writer already takes its stamp, so the digest rides it through `workflow_context` rather than a parameter on a dozen writers. A contextvar, not a global, so two workflows in one worker process cannot stamp each other's files. It is written even where the shard is unstamped (it is a fact about the write; the run id is not claimed). The run record lists workflows *observed* in files, like stages, never those merely stored.
 
+### A dispatched workflow's config travels as a workflow argument
+Phase 2 merge 7a. A worker's config is process state, so a stored workflow dispatched to the fleet would otherwise run under whatever config each worker was started with. The resolved overlay (`combine_config(preset, spec.config)`) goes to the coordinator and each stage as a plain-JSON argument, and the worker builds the config with the same `config_from_overlay` the local runner uses (recipe sections from the overlay, schema defaults elsewhere, the worker's own `paths`), so local and fleet stages run under identical settings. Not the worker's config merged under the overlay: that would make a stage's behaviour depend on which worker claimed it. The workflow digest is part of the coordinator id; stage ids stay `run:stage`, so re-dispatching a *changed* workflow over a run whose stage already finished returns the recorded result (7b refuses that case up front).
+
 ### The remote shard-stage runner generalises `finalize`
 Extraction went distributed in 2026-06; everything downstream of it stopped at
 the local filesystem, so a store-backed run had to be pulled down before any

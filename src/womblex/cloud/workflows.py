@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import tempfile
 from collections.abc import Callable
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -33,7 +34,7 @@ from womblex.cloud.stage_runner import (
     prepare_stage_context,
     run_unit,
 )
-from womblex.store.run_stamp import RunStamp
+from womblex.store.run_stamp import RunStamp, workflow_context
 from womblex.store.source_provenance import IngestProvenance
 from womblex.utils.log_format import log_context
 from womblex.utils.run_log import capture_batch_log
@@ -181,22 +182,43 @@ def _digests(recorded: Any) -> dict[str, str]:
 # --- stages ------------------------------------------------------------------
 
 
-def _plan(stage: str, shard_prefix: str) -> list[list[str]]:
+def _stage_config(workflow: dict[str, Any] | None) -> WomblexConfig:
+    """The config a stage runs under: the worker's own, or a dispatched workflow's recipe.
+
+    A workflow's overlay is built exactly as the local runner builds it
+    (`config_from_overlay`), keeping this worker's `paths`.
+    """
     ctx = _context()
-    return plan_units(STAGE_CONTRACTS[stage], ctx.store, shard_prefix, ctx.config)
+    if workflow is None:
+        return ctx.config
+    from womblex.cloud.workflow_runner import config_from_overlay
+
+    return config_from_overlay(
+        workflow["preset"], workflow["config"], ctx.config.paths.model_dump(mode="json"),
+    )
 
 
-def _unit(stage: str, run_id: str, shard_prefix: str, unit: list[str]) -> dict[str, str]:
+def _plan(stage: str, shard_prefix: str, workflow: dict[str, Any] | None = None) -> list[list[str]]:
     ctx = _context()
+    return plan_units(STAGE_CONTRACTS[stage], ctx.store, shard_prefix, _stage_config(workflow))
+
+
+def _unit(
+    stage: str, run_id: str, shard_prefix: str, unit: list[str],
+    workflow: dict[str, Any] | None = None,
+) -> dict[str, str]:
+    ctx = _context()
+    config = _stage_config(workflow)
     contract = STAGE_CONTRACTS[stage]
     label = unit[0] if len(unit) == 1 else f"{len(unit)}-bases"
 
     def body(_root: Path) -> dict[str, str]:
         # Built per unit: the client holds a connection, and a recovered
         # workflow resumes in a process that has none.
-        run_ctx = prepare_stage_context(contract, ctx.config)
+        run_ctx = prepare_stage_context(contract, config)
         try:
-            return run_unit(contract, ctx.config, run_ctx, ctx.store, shard_prefix, unit, ctx.ingest)
+            with workflow_context(workflow["digest"]) if workflow else nullcontext():
+                return run_unit(contract, config, run_ctx, ctx.store, shard_prefix, unit, ctx.ingest)
         except NotReady as nr:
             producer = PRODUCER_OF.get(nr.suffix, "the upstream stage")
             raise StageNotReady(
@@ -207,14 +229,18 @@ def _unit(stage: str, run_id: str, shard_prefix: str, unit: list[str]) -> dict[s
 
 
 @DBOS.workflow(name=dbos_app.STAGE_WORKFLOW)
-def run_stage(run_id: str, stage: str, shard_prefix: str, max_attempts: int) -> dict[str, Any]:
-    units = DBOS.run_step({"name": "plan"}, _plan, stage, shard_prefix)
+def run_stage(
+    run_id: str, stage: str, shard_prefix: str, max_attempts: int,
+    workflow: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    units = DBOS.run_step({"name": "plan"}, _plan, stage, shard_prefix, workflow)
     published = 0
     checksums: dict[str, str] = {}
     for unit in units:
         label = unit[0] if len(unit) == 1 else "run"
         recorded = DBOS.run_step(
             _retry(f"unit:{label}", max_attempts), _unit, stage, run_id, shard_prefix, unit,
+            workflow,
         )
         published += len(recorded)
         checksums.update(_digests(recorded))
@@ -234,6 +260,7 @@ def _unsettled_batches(run_id: str) -> int:
 @DBOS.workflow(name=dbos_app.DOWNSTREAM_WORKFLOW)
 def run_downstream(
     run_id: str, stages: list[str], shard_prefix: str, max_attempts: int, owner: str | None,
+    workflow: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Run *stages* over the run once its extraction has settled, in the order given.
 
@@ -250,11 +277,14 @@ def run_downstream(
                                  "max_attempts": max_attempts}
         if owner is not None:
             attrs["owner"] = owner
+        if workflow is not None:
+            attrs["workflow_digest"] = workflow["digest"]
         # Enqueued by name, not registered: the workers that serve the stage
         # own the queue's settings.
         with SetWorkflowID(dbos_app.stage_id(run_id, stage)), SetWorkflowAttributes(attrs):
             handle = DBOS.enqueue_workflow(
                 dbos_app.stage_queue(stage), run_stage, run_id, stage, shard_prefix, max_attempts,
+                workflow,
             )
         results.append(handle.get_result())
     return results
