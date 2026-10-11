@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from dataclasses import replace
 from pathlib import Path
 
@@ -27,7 +28,7 @@ from womblex.cloud.workflow_store import (
 )
 from womblex.config import DatasetConfig, PathsConfig, WomblexConfig
 from womblex.process.text_overlay import MissingOverlayError
-from womblex.ui.presets import Preset
+from womblex.ui.presets import Preset, build_preset_record, preset_filename, serialise_preset_record
 
 _PRESET = Preset(
     name="saved-offline", description="", formats=(), source="saved",
@@ -94,9 +95,8 @@ def test_save_refuses_an_unchecked_spec(tmp_path: Path) -> None:
     with WorkflowStore(dsn) as store:
         with pytest.raises(ValueError, match="unknown stage"):
             store.save("wf", unchecked)
-        bad_overlay = StoredWorkflowSpec(
-            preset="p", config={"chunking": {"nope": 1}}, steps=(WorkflowStep(stage="chunk"),),
-        )
+        bad_overlay = StoredWorkflowSpec(preset="p", config={"chunking": {"nope": 1}},
+                                         steps=(WorkflowStep(stage="chunk"),))
         with pytest.raises(ValidationError):
             store.save("wf", bad_overlay)
         assert store.get("wf") is None
@@ -114,11 +114,8 @@ def test_runs_real_stages_in_list_order(shards: Path) -> None:
 
 def test_refuses_before_any_step_runs(shards: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     ran: list[str] = []
-
-    def run(_dir, _config, _ctx) -> None:
-        ran.append("normalise")
-
-    monkeypatch.setitem(STAGE_CONTRACTS, "normalise", replace(STAGE_CONTRACTS["normalise"], run=run))
+    monkeypatch.setitem(STAGE_CONTRACTS, "normalise", replace(
+        STAGE_CONTRACTS["normalise"], run=lambda *_: ran.append("normalise")))
 
     def refuse(_config) -> None:
         raise RuntimeError("no resource")
@@ -185,6 +182,9 @@ def test_cli_exit_codes(shards: Path, tmp_path: Path, monkeypatch: pytest.Monkey
     assert cmd_run_workflow(args("missing")) == 1
     # "saved-offline" is not a built-in and no presets dir holds it: refused, exit 1.
     assert cmd_run_workflow(args("good")) == 1
-    monkeypatch.setattr("womblex.ui.readers.get_any_preset", lambda _settings, _name: _PRESET)
-    assert cmd_run_workflow(args("good")) == 0
+    record, _ = build_preset_record(name=_PRESET.name, description="", formats=(), config=_PRESET.config)
+    (tmp_path / preset_filename(_PRESET.name)).write_text(serialise_preset_record(record))
+    for mod in ("fastapi", "womblex.ui.deps", "womblex.ui.readers"):  # base install: no [ui] extra
+        monkeypatch.setitem(sys.modules, mod, None)
+    assert cmd_run_workflow(args("good", presets_dir=tmp_path)) == 0
     assert list(shards.glob("*.normalised_text.parquet"))
