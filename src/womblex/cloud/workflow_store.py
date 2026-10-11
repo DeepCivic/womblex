@@ -109,13 +109,24 @@ def _check_triggers(spec: StoredWorkflowSpec) -> None:
 
 
 def combine_config(preset_config: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
-    """A preset's config with a workflow's own `config` laid over it, per top-level section.
+    """A preset's config with a workflow's own `config` laid over it, merged key by key.
 
-    A section named in *overlay* replaces the preset's whole section (`enrichment: {...}` does not
-    merge into the preset's `enrichment`). `dataset` and `paths` are run identity, not recipe, and
-    are dropped. The one combination rule: the save-time check and the runner both use it.
+    Mappings merge recursively, so `enrichment: {model: x}` changes the model and keeps what the
+    preset set; a list or scalar replaces the preset's. `null` drops the key, so the field takes
+    its schema default (not a literal `None`). `dataset` and `paths` are run identity, not recipe,
+    and are dropped. The one combination rule: the save-time check and the runner both use it.
     """
-    return {k: v for k, v in {**preset_config, **overlay}.items() if k not in {"dataset", "paths"}}
+    def merge(base: dict[str, Any], top: dict[str, Any]) -> dict[str, Any]:
+        out = dict(base)
+        for k, v in top.items():
+            b = out.get(k)
+            if v is None:
+                out.pop(k, None)
+            else:
+                out[k] = merge(b, v) if isinstance(b, dict) and isinstance(v, dict) else v
+        return out
+
+    return {k: v for k, v in merge(preset_config, overlay).items() if k not in {"dataset", "paths"}}
 
 
 def _check_config_overlay(spec: StoredWorkflowSpec) -> None:

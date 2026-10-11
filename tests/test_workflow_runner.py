@@ -62,10 +62,15 @@ def shards(tmp_path: Path) -> Path:
 # --- configuration -----------------------------------------------------------
 
 
-def test_combine_config_replaces_whole_sections_and_drops_identity() -> None:
-    base = {"chunking": {"chunk_size": 100, "overlap": 0.1}, "dataset": {"name": "x"}}
-    combined = combine_config(base, {"chunking": {"chunk_size": 50}, "paths": {}, "money": {}})
-    assert combined == {"chunking": {"chunk_size": 50}, "money": {}}
+def test_combine_config_merges_keys_and_drops_identity() -> None:
+    base = {"chunking": {"chunk_size": 100, "overlap": 0.1, "tags": ["a"]}, "dataset": {"name": "x"}}
+    combined = combine_config(
+        base, {"chunking": {"chunk_size": 50, "overlap": None, "tags": ["b"]}, "paths": {}, "money": {}},
+    )
+    # A named key replaces, null drops it (schema default), a list is replaced whole.
+    assert combined == {"chunking": {"chunk_size": 50, "tags": ["b"]}, "money": {}}
+    assert combine_config(base, {"chunking": {"chunk_size": 50}})["chunking"]["overlap"] == 0.1
+    assert base["chunking"]["chunk_size"] == 100  # the preset is not mutated
 
 
 def test_resolver_combines_preset_and_workflow_config() -> None:
