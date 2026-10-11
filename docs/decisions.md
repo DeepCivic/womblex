@@ -152,6 +152,13 @@ The load-bearing invariant: `cmd_run` and the worker call **one** shared
 shards by construction — the same reasoning as "per-stage and E2E feed the same
 engines".
 
+### A stored workflow runs locally: validate on save and load, refuse before work, record after
+Phase 2 merge 2 (`cloud/workflow_runner.py`). Three calls the merge-1 review left open.
+
+- **Validation sits at both ends.** `WorkflowStore.save` runs `check_spec` so a spec built without `validate_workflow_spec` cannot be stored unchecked, and the runner runs it again on load, because a row can outlive the rule it passed (a stage renamed or removed). The cost is a few dictionary checks. An unknown preset name still passes the save-time check: it may be an operator-saved preset the store cannot read, so the runner resolves it and refuses there.
+- **A preset and a workflow's `config` combine per top-level section.** A section the workflow names replaces the preset's whole section, the rule the save-time overlay check already used, now one function (`combine_config`) for both. It is predictable and needs no merge semantics for lists, but `enrichment: {model: x}` resets the rest of `enrichment` to its defaults, so a workflow that changes one field writes the whole section. `POST /v1/runs` is different and stays so: its preset replaces the request's config outright, with no workflow overlay. The combination is validated as a full config, with `dataset.name` set to the preset name so the run stamp records the recipe.
+- **A failed step does not stop the steps after it.** Everything that can refuse does so before the first step: spec, preset, config, and each step's preflight, Isaacus availability and model check (`prepare_stage_context`), so a workflow that cannot complete spends nothing. Once a step has run, halting would discard paid work, so it does not: a failed step (a `MissingOverlayError` refusal, which `run_stage_local` logs and counts, or any exception) is recorded with its error, later steps still run, and each carries `ran_after_failed` naming the failed steps whose output its inputs may lack. The result and a non-zero exit code are the account, as `mask_status` and `evidence_check` are for rows. Steps run in list order; checking that order across the whole list is merge 3.
+
 ### The remote shard-stage runner generalises `finalize`
 Extraction went distributed in 2026-06; everything downstream of it stopped at
 the local filesystem, so a store-backed run had to be pulled down before any

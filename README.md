@@ -133,6 +133,7 @@ config, never in code.
 | `verify-evidence` | Re-check every money, entity-link and PII span against the source text it points at |
 | `resolve-source` | Map output rows back to their source files, verified by content hash |
 | `egress` | Export a finished run as a bundle |
+| `run-workflow` | Run a stored workflow's steps over a local shard directory |
 | `ground-truth`, `score` | Build review baselines from a run, and score corrected ones |
 | `profile` | Print the inferred column schema of a tabular file |
 | `api-token`, `serve` | Mint service tokens; run the service API |
