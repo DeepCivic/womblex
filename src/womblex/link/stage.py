@@ -17,7 +17,7 @@ from womblex.config import LinkingConfig
 from womblex.link.matcher import Candidate, Link, resolve
 from womblex.link.reference import load_reference
 from womblex.process.chunk_stage import _batch_bases
-from womblex.process.evidence import EvidenceIndexes, assert_evidence
+from womblex.process.evidence import EvidenceIndexes, stamp_evidence
 from womblex.process.text_overlay import require_overlays
 from womblex.store.checkpoint import CheckpointManager
 from womblex.store.enrichment_output import (
@@ -93,7 +93,7 @@ def link_shards(
             matched_links += sum(1 for lk in links if lk.matched)
             total_links += len(links)
 
-        assert_evidence(
+        stamp_evidence(
             rows, indexes.get, text_key="mention_text", label="entity_links", base=base,
         )
         write_entity_links(rows, base)
@@ -158,8 +158,9 @@ def _mention_evidence(indexes: EvidenceIndexes, source_hash: str, cand: Candidat
     """The mention's evidence reference: its span where it can be placed, else the document.
 
     A mention the provider gave no offsets for is located to the document; so is
-    one whose offsets fall outside the source. Without the elements the span
-    is written as the enrichment gave it, unchecked.
+    one whose offsets fall outside the source or whose slice is not the
+    enricher's text for it. Without the elements the span is written as the
+    enrichment gave it, unchecked.
     """
     start, end = cand.mention_start, cand.mention_end
     index = indexes.get(source_hash, cand.text_layer)
@@ -174,6 +175,10 @@ def _mention_evidence(indexes: EvidenceIndexes, source_hash: str, cand: Candidat
         ref = index.table_ref(table, start, end) if table is not None else None
     else:
         ref = index.narrative_ref(start, end)
+    # Offsets whose slice is not the enricher's text for the mention are out of
+    # step with the source; the mention is located to the document instead.
+    if ref is not None and cand.mention_text and index.holds(ref, cand.mention_text) is False:
+        ref = None
     return ref or index.document_ref()
 
 

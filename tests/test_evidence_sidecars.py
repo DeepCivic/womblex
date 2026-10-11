@@ -24,7 +24,7 @@ from womblex.store.enrichment_output import (
     read_enrichment_entities,
 )
 from womblex.store.entity_links_output import read_entity_links
-from womblex.store.evidence import EVIDENCE_COLUMNS, EvidenceError
+from womblex.store.evidence import EVIDENCE_COLUMNS
 from womblex.store.money_output import MONEY_SPANS_SCHEMA, read_money_spans
 from womblex.store.pii_output import read_pii_spans
 
@@ -130,10 +130,20 @@ def test_a_mention_the_provider_gave_no_offsets_for_is_located_to_the_document(
     assert all(r["char_start"] is None for r in rows)
 
 
-def test_a_link_whose_mention_text_is_not_in_the_source_refuses_the_batch(tmp_path, reference):
-    with pytest.raises(EvidenceError, match="entity_links"):
-        _links(tmp_path, reference,
-               edit=lambda r: {**r, "mention_text": "not the source text"})
+def test_a_link_whose_slice_is_not_its_mention_is_located_to_the_document(tmp_path, reference):
+    rows = _links(tmp_path, reference, edit=lambda r: {**r, "mention_end": r["mention_end"] - 1})
+
+    assert {(r["anchor_level"], r["evidence_check"]) for r in rows} == {("document", "holds")}
+
+
+def test_a_link_whose_mention_text_is_not_in_the_source_is_written_labelled_fails(
+    tmp_path, reference,
+):
+    rows = _links(tmp_path, reference,
+                  edit=lambda r: {**r, "mention_text": "not the source text"})
+
+    assert rows and {(r["anchor_level"], r["evidence_check"]) for r in rows} == {
+        ("document", "fails")}
 
 
 # ---------------------------------------------------------------------------

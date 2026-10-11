@@ -581,15 +581,19 @@ There is no separate detector and **no second enrichment pass**.
 
 ### The evidence reference
 One anchor shape replaces the per-sidecar anchors of `money_spans`,
-`entity_links` and `pii_spans` (2026-10; D6, contract 2.0): ten columns, ending in
-`anchor_level` (`docs/contract.md`).
+`entity_links` and `pii_spans` (2026-10; D6, contract 2.0): eleven columns, ending in
+`anchor_level` and `evidence_check` (`docs/contract.md`).
 
 - **No null receipts.** A row carries the most precise location that is reliable
   and a label for it (`span`, `element`, `chunk`, `document`); each level is
-  checked at its own precision, and a receipt that fails its own check refuses the
-  batch. A source that is absent leaves the receipt written, counted unchecked and
-  warned about. *Rejected:* null evidence for a span that cannot be placed (it
+  checked at its own precision and labelled `holds`, `fails` or `unchecked` in
+  `evidence_check`; the last two are warned about with a count. *Rejected:* null evidence for a span that cannot be placed (it
   reads as "no evidence", and for PII a refusal would mean dropping the mask).
+- **A failed check never refuses the batch.** It is written and labelled `fails`.
+  *Rejected:* refusing the batch's publish (the first cut of this item). A refusal
+  stops the stage part way, after paid enrichment, and blocks the run from
+  completing over one receipt; trust comes from the output saying what it could
+  not verify, not from withholding the rest.
 - **A position is never searched for.** Offsets are carried from where they were
   computed or the row is given a coarser level; a search would hand back a
   plausible position for the wrong occurrence.

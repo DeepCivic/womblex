@@ -49,7 +49,6 @@ def cmd_pii(args: argparse.Namespace) -> int:
     from womblex.pii.pii_stage import pii_shards
     from womblex.process.text_overlay import MissingOverlayError
     from womblex.store.checkpoint import CheckpointManager
-    from womblex.store.evidence import EvidenceError
     from womblex.store.pii_output import PII_SPANS_SUFFIX
     from womblex.store.shard_audit import reconcile_stage_checkpoint_with_shards
 
@@ -99,7 +98,7 @@ def cmd_pii(args: argparse.Namespace) -> int:
             text_source=full.processing.text_source if full else "elements",
             checkpoint_mgr=ckpt,
         )
-    except (MissingOverlayError, EvidenceError) as e:
+    except MissingOverlayError as e:
         logger.error("pii --shards: refused: %s", e)
         return 1
     logger.info(

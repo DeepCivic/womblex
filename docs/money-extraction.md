@@ -469,7 +469,8 @@ One row per amount, located to the span in its text; `locus` says which text:
 | `sheet_cell` | `elem_order` (the `sheet_cell`), `sheet`, `cell_row`, `cell_col`, offsets into the cell value, `text_layer = cell` |
 
 Before the sidecar is written the stage checks each row: the source text at
-`char_start:char_end` must equal `text`, or the batch is refused (`EvidenceError`).
+`char_start:char_end` must equal `text`, and `evidence_check` records the outcome
+(`holds`, `fails`, `unchecked`). A row that fails is written and labelled, not refused.
 
 Beyond the JSON above the row also carries `evidence` (`p1`–`p7`, `p9`–`p11`
 for the narrative patterns — pattern 8 has no code; its qualifier lands in

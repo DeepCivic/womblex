@@ -34,7 +34,7 @@ from pathlib import Path
 from womblex.config import MoneyConfig
 from womblex.ingest.elements import Element
 from womblex.process.chunk_stage import _batch_bases, _load_elements
-from womblex.process.evidence import EvidenceIndex, assert_evidence
+from womblex.process.evidence import EvidenceIndex, stamp_evidence
 from womblex.process.money import (
     MoneyOptions,
     MoneySpan,
@@ -175,7 +175,7 @@ def _annotate_batch(
                 column_rows.extend(c)
         except Exception as e:  # one document must not stop the batch
             logger.warning("money_shards: %s failed (%s)", source_hash, e)
-    assert_evidence(
+    stamp_evidence(
         span_rows, lambda h, _layer: indexes.get(h), text_key="text",
         label="money_spans", base=base_path,
     )

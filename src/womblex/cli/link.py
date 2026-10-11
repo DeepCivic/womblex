@@ -156,7 +156,6 @@ def cmd_link(args: argparse.Namespace) -> int:
     from womblex.process.text_overlay import MissingOverlayError
     from womblex.store.checkpoint import CheckpointManager
     from womblex.store.entity_links_output import ENTITY_LINKS_SUFFIX
-    from womblex.store.evidence import EvidenceError
     from womblex.store.shard_audit import reconcile_stage_checkpoint_with_shards
 
     shard_dir: Path = args.shards
@@ -195,7 +194,7 @@ def cmd_link(args: argparse.Namespace) -> int:
             shard_dir, linking_config,
             text_source=full_config.processing.text_source, checkpoint_mgr=ckpt,
         )
-    except (MissingOverlayError, EvidenceError) as e:
+    except MissingOverlayError as e:
         logger.error("link --shards: refused: %s", e)
         return 1
     logger.info(

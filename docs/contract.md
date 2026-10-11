@@ -51,13 +51,12 @@ chunks but carry no text.
 
 ### Evidence reference (2.0)
 
-`money_spans`, `entity_links` and `pii_spans` locate each span with the same ten
+`money_spans`, `entity_links` and `pii_spans` locate each span with the same eleven
 columns (`store/evidence.py`), in place of the anchors each carried before:
 `elem_order`, `page`, `bbox`, `sheet`, `cell_row`, `cell_col`, `char_start`,
-`char_end`, `text_layer` and `anchor_level`. A row is never unlocated: it carries
-the most precise location that is reliable, and `anchor_level` says which, and
-how the stage checked it before writing (a failed check refuses the batch,
-`EvidenceError`):
+`char_end`, `text_layer`, `anchor_level` and `evidence_check`. A row is never
+unlocated: it carries the most precise location that is reliable, and
+`anchor_level` says which and how the stage checked it before writing:
 
 | `anchor_level` | Located to | Check |
 |---|---|---|
@@ -66,11 +65,15 @@ how the stage checked it before writing (a failed check refuses the batch,
 | `chunk` | the chunk (`chunk_index` on `pii_spans`), its page and, for a table chunk, `elem_order` | the text lies in the chunk |
 | `document` | the document | the text lies in its narrative or a table markdown |
 
-A source that is absent (no elements sidecar) leaves the row written and
-unchecked, with a warning. A position is never searched for: a PII span in a
+`evidence_check` is the outcome of that check: `holds`, `fails`, or `unchecked`
+(no elements sidecar or chunk text to check against, no text to check, or a file
+written before contract 2.0). Nothing is refused: a `fails` or `unchecked` row is
+written with its label and the stage warns with a count, so a run always
+completes and says what it could not verify. A position is never searched for: a PII span in a
 chunk that is not the source's slice at its offsets is located to the document
 when its text is in the document and to the chunk when it is not, and one whose
-elements or table are missing to the chunk. Masking never depends on
+elements or table are missing to the chunk. An entity link whose slice is not
+the enricher's text for the mention is located to the document. Masking never depends on
 the receipt. The text a `span` row is checked against is `text` (`mention_text`
 on `entity_links`).
 

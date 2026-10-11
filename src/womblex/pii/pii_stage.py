@@ -45,7 +45,7 @@ from womblex.config import PIIConfig
 from womblex.pii.cleaner import PIICleaner
 from womblex.process.chunk_stage import _batch_bases
 from womblex.process.chunker import TableText
-from womblex.process.evidence import EvidenceIndex, EvidenceIndexes, assert_evidence
+from womblex.process.evidence import EvidenceIndex, EvidenceIndexes, stamp_evidence
 from womblex.process.text_overlay import require_overlays
 from womblex.store.checkpoint import CheckpointManager
 from womblex.store.enrichment_output import (
@@ -203,7 +203,7 @@ def pii_shards(
                     if placed:
                         chunks_masked += 1
 
-        assert_evidence(
+        stamp_evidence(
             span_rows, indexes.get, text_key="text", label="pii_spans", base=base,
             chunk_text=partial(_chunk_text, chunk_texts),
         )

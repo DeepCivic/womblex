@@ -8,8 +8,8 @@ import pyarrow as pa
 import pytest
 
 from tests._shard import DOC, NARRATIVE, contact_shard, table_markdown
-from womblex.process.evidence import EvidenceIndexes, EvidenceReport, assert_evidence, check_rows
-from womblex.store.evidence import EVIDENCE_COLUMNS, EvidenceError, backfill_evidence, evidence
+from womblex.process.evidence import EvidenceIndexes, EvidenceReport, check_rows, stamp_evidence
+from womblex.store.evidence import EVIDENCE_COLUMNS, backfill_evidence, evidence
 
 
 @pytest.fixture
@@ -141,19 +141,24 @@ def _rows(tmp_path):
 def test_receipts_at_every_level_but_chunk_hold_against_the_source(tmp_path):
     base, indexes, rows = _rows(tmp_path)
 
-    report = assert_evidence(rows, indexes.get, text_key="text", label="pii_spans", base=base)
+    report = stamp_evidence(rows, indexes.get, text_key="text", label="pii_spans", base=base)
 
     assert (report.checked, report.unchecked, report.ok) == (3, 0, True)
+    assert {r["evidence_check"] for r in rows} == {"holds"}
 
 
-def test_a_receipt_that_fails_its_own_check_refuses_the_batch(tmp_path):
+def test_a_receipt_that_fails_its_own_check_is_written_labelled_fails(tmp_path, caplog):
     base, indexes, rows = _rows(tmp_path)
     rows[0]["text"] = "Jane Roe"          # span: slice is "Jane Doe"
     rows[1]["text"] = "Jane Doe"          # element 2 does not hold it
     rows[2]["text"] = "Nobody Here"       # not in the document
 
-    with pytest.raises(EvidenceError, match="3 of 3 receipt"):
-        assert_evidence(rows, indexes.get, text_key="text", label="pii_spans", base=base)
+    with caplog.at_level(logging.WARNING):
+        report = stamp_evidence(rows, indexes.get, text_key="text", label="pii_spans", base=base)
+
+    assert (report.n_mismatched, report.ok) == (3, False)
+    assert {r["evidence_check"] for r in rows} == {"fails"}
+    assert "3 of 3 receipt(s) that fail" in caplog.text
 
 
 def test_a_chunk_receipt_is_checked_against_the_chunk_text(tmp_path):
@@ -173,10 +178,11 @@ def test_a_receipt_whose_source_is_absent_is_written_unchecked_and_warned(tmp_pa
     rows.append(_row("Jane Doe", evidence("chunk", page=1)))  # no chunk text to hand
 
     with caplog.at_level(logging.WARNING):
-        report = assert_evidence(rows, lambda *_: None, text_key="text", label="pii_spans", base=base)
+        report = stamp_evidence(rows, lambda *_: None, text_key="text", label="pii_spans", base=base)
 
     assert (report.checked, report.unchecked, report.ok) == (0, 4, True)
-    assert "written unchecked" in caplog.text
+    assert {r["evidence_check"] for r in rows} == {"unchecked"}
+    assert "written as unchecked" in caplog.text
 
 
 def test_a_row_without_text_is_unchecked_not_passed(tmp_path):
@@ -198,12 +204,13 @@ def test_merged_reports_keep_the_named_rows_capped():
     assert (a.checked, a.n_mismatched, len(a.mismatches)) == (8, 8, 5)
 
 
-def test_a_null_receipt_is_refused(tmp_path):
+def test_a_null_receipt_fails(tmp_path):
     base, indexes, _ = _rows(tmp_path)
+    rows = [_row("Jane Doe", None)]
 
-    with pytest.raises(EvidenceError):
-        assert_evidence([_row("Jane Doe", None)], indexes.get, text_key="text",
-                        label="money_spans", base=base)
+    report = stamp_evidence(rows, indexes.get, text_key="text", label="money_spans", base=base)
+
+    assert (report.n_mismatched, rows[0]["evidence_check"]) == (1, "fails")
 
 
 def test_pii_and_link_stage_the_elements_cells_and_declared_text_layer(tmp_path):

@@ -129,7 +129,7 @@ womblex/
 │   │   ├── shard_audit.py   # Directory-level shard integrity + chunks-side audit + reconcile-with-checkpoint
 │   │   ├── enrichment_output.py  # Enrichment-specific output
 │   │   ├── enrichment_doc.py     # *.enrichment_doc.parquet — raw ILGS Document, for AI-chunking reuse
-│   │   ├── evidence.py      # The shared evidence-reference columns, anchor levels, `evidence()` builder, `EvidenceError`, legacy back-fill
+│   │   ├── evidence.py      # The shared evidence-reference columns, anchor levels, `evidence_check` labels, `evidence()` builder, legacy back-fill
 │   │   ├── pii_output.py    # pii_spans + clean_text parquet schemas + IO
 │   │   ├── normalise_output.py   # *.normalised_text.parquet schema + IO
 │   │   ├── spellfix_output.py    # *.spellfix_text.parquet + *.spellfix_corrections.parquet schemas + IO

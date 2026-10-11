@@ -117,6 +117,8 @@ export interface Evidence {
 	text_layer: string | null;
 	// How precisely the span is located: span | element | chunk | document.
 	anchor_level: 'span' | 'element' | 'chunk' | 'document' | null;
+	// Whether the receipt was verified before writing; a `fails` row is written, not refused.
+	evidence_check: 'holds' | 'fails' | 'unchecked' | null;
 }
 
 // One detected PII span. `start` / `end` are derived by the reader from the
