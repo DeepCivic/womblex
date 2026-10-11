@@ -59,6 +59,7 @@ from womblex.cli import (
     spellfix,
     ui,
     verify,
+    workflow,
 )
 from womblex.cli._shared import setup_logging
 
@@ -85,6 +86,7 @@ ALL_COMMANDS = [
     *api_token.COMMANDS,
     *serve.COMMANDS,
     *demo.COMMANDS,
+    *workflow.COMMANDS,
 ]
 
 

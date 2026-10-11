@@ -30,7 +30,8 @@ womblex/
 │   │   ├── ground_truth.py # ground-truth subcommand (segment + render a shard dir into baselines + sidecars)
 │   │   ├── profile.py      # profile subcommand
 │   │   ├── demo.py         # seed-demo subcommand (publish the vendored demo run)
-│   │   └── verify.py       # verify-shards, verify-evidence, resolve-source subcommands
+│   │   ├── verify.py       # verify-shards, verify-evidence, resolve-source subcommands
+│   │   └── workflow.py     # run-workflow subcommand (a stored workflow over a local shard dir)
 │   ├── config/             # Pydantic config models (__init__: YAML loader + WomblexConfig; process.py: process-stage models)
 │   ├── pipeline_order.py   # PIPELINE_ORDER — what runs when; enabled_downstream_stages(config)
 │   ├── batch.py            # process_batch() — shared per-batch pipeline body (extract → optional redaction detection; extraction only)
@@ -162,7 +163,8 @@ womblex/
 │   │   ├── worker.py           # run_worker() — launch DBOS, join the queues this process can serve
 │   │   ├── stage_contracts.py  # Declarative StageContract per downstream stage (inputs/outputs/scope)
 │   │   ├── stage_runner.py     # Execute a contract against an object store
-│   │   └── workflow_store.py   # Stored workflow object (preset ref, input binding, steps, conditions, destinations, triggers) — schema, validation, its table
+│   │   ├── workflow_store.py   # Stored workflow object (preset ref, input binding, steps, conditions, destinations, triggers) — schema, validation, its table
+│   │   └── workflow_runner.py  # Local multi-stage runner — a stored workflow's steps through the stage functions; refuse before work, record after
 │   ├── api/                    # Service API (`womblex serve`)
 │   │   ├── app.py              # create_api_app() — `/v1` health/ready, run submit, list/detail, manifest, files, document text, metrics; owner-scoped
 │   │   ├── readers.py          # Document text rows by layer (masked / chunks / elements), read in place with a source_hash filter

@@ -108,15 +108,38 @@ def _check_triggers(spec: StoredWorkflowSpec) -> None:
                 raise ValueError(f"unknown timezone: {trigger.timezone!r}") from e
 
 
+def combine_config(preset_config: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
+    """A preset's config with a workflow's own `config` laid over it, per top-level section.
+
+    A section named in *overlay* replaces the preset's whole section (`enrichment: {...}` does not
+    merge into the preset's `enrichment`). `dataset` and `paths` are run identity, not recipe, and
+    are dropped. The one combination rule: the save-time check and the runner both use it.
+    """
+    return {k: v for k, v in {**preset_config, **overlay}.items() if k not in {"dataset", "paths"}}
+
+
 def _check_config_overlay(spec: StoredWorkflowSpec) -> None:
     """Check `spec.config` as a preset is checked, over a built-in preset's overlay when one is named.
 
-    An unknown name may be an operator-saved preset (unreadable without a store), so it passes here.
+    An unknown name may be an operator-saved preset (unreadable without a store), so it passes here;
+    the runner resolves it and re-validates the full combination.
     """
     from womblex.ui.presets import _validate_overlay, get_preset
 
     builtin = get_preset(spec.preset)
-    _validate_overlay({**builtin.config, **spec.config} if builtin else spec.config)
+    _validate_overlay(combine_config(builtin.config if builtin else {}, spec.config))
+
+
+def check_spec(spec: StoredWorkflowSpec) -> None:
+    """The checks beyond the pydantic shape: steps, triggers and the config overlay.
+
+    Run by `validate_workflow_spec`, by `WorkflowStore.save` (a spec built without
+    `validate_workflow_spec` is not stored unchecked) and by the runner on load
+    (a row written before a stage was renamed or removed is refused, not run).
+    """
+    _check_steps(spec)
+    _check_triggers(spec)
+    _check_config_overlay(spec)
 
 
 def validate_workflow_spec(raw: dict[str, Any]) -> StoredWorkflowSpec:
@@ -126,9 +149,7 @@ def validate_workflow_spec(raw: dict[str, Any]) -> StoredWorkflowSpec:
     overlay, and `ValueError` on bad steps, cron expressions or timezones.
     """
     spec = StoredWorkflowSpec(**raw)
-    _check_steps(spec)
-    _check_triggers(spec)
-    _check_config_overlay(spec)
+    check_spec(spec)
     return spec
 
 
@@ -230,7 +251,8 @@ class WorkflowStore:
     def save(self, workflow_id: str, spec: StoredWorkflowSpec, *, owner: str | None = None) -> StoredWorkflow:
         """Create or replace *workflow_id*'s definition.
 
-        Raises `ValueError` if *workflow_id* is unsafe, `WorkflowOwnedError`
+        Raises `ValueError` if *workflow_id* is unsafe or the spec fails `check_spec`
+        (`pydantic.ValidationError` for a bad config overlay), `WorkflowOwnedError`
         if it already exists under a different owner (mirrors
         `cloud.jobs.RunBoard`'s owner check on runs) — an unscoped caller
         (`owner=None`) is not checked and inherits the existing owner.
@@ -239,6 +261,7 @@ class WorkflowStore:
 
         if not is_safe_workflow_id(workflow_id):
             raise ValueError(f"unsafe workflow id: {workflow_id!r}")
+        check_spec(spec)
         try:
             self._write(workflow_id, spec, owner)
         except sqlalchemy.exc.IntegrityError:
@@ -314,6 +337,8 @@ __all__ = [
     "WorkflowStep",
     "WorkflowStore",
     "WorkflowTrigger",
+    "check_spec",
+    "combine_config",
     "ensure_workflow_schema",
     "is_safe_workflow_id",
     "validate_workflow_spec",

@@ -65,6 +65,7 @@ class StageRunSummary:
     bases: int = 0
     not_ready_missing: set[str] = field(default_factory=set)
     discovery_failed: bool = False
+    error: str | None = None
 
     @property
     def exit_code(self) -> int:
@@ -577,6 +578,7 @@ def run_stage_local(
         # Actionable, not a crash — no traceback.
         logger.error("%s: refused: %s", contract.name, e)
         summary.failed = 1
+        summary.error = str(e)
         return summary
     summary.processed = 1
     summary.bases = 1
