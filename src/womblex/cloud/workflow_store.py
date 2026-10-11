@@ -4,8 +4,8 @@ A *workflow* is a named, persisted recipe kept in the database DBOS's own tables
 live in (`dbos_app.system_database_url`), so a local run needs no second database.
 
 Schema and storage only (`docs/plan-trust-and-recipes.md`, Phase 2 merge 1):
-`conditions` and `destinations` round-trip but are not evaluated or
-dispatched, `triggers` are stored but not scheduled, and nothing here runs a
+`destinations` round-trip but are not dispatched (`conditions` are evaluated by
+`workflow_conditions`), `triggers` are stored but not scheduled, and nothing here runs a
 workflow. The table is created if absent; there is no versioned migration yet.
 """
 
@@ -49,7 +49,7 @@ class WorkflowInputBinding(StrictModel):
 
 
 class WorkflowCondition(StrictModel):
-    """A constraint over a manifest/profile column. Stored, not evaluated — see the module docstring."""
+    """A guard over a manifest column that must hold for every document; `workflow_conditions` evaluates it."""
 
     column: str
     op: Literal["eq", "ne", "in", "not_in", "gt", "gte", "lt", "lte"]
@@ -148,7 +148,10 @@ def check_spec(spec: StoredWorkflowSpec) -> None:
     `validate_workflow_spec` is not stored unchecked) and by the runner on load
     (a row written before a stage was renamed or removed is refused, not run).
     """
+    from womblex.cloud.workflow_conditions import check_conditions_static
+
     _check_steps(spec)
+    check_conditions_static(spec.conditions)
     _check_triggers(spec)
     _check_config_overlay(spec)
 

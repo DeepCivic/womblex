@@ -65,6 +65,12 @@ class RefusalCode(str, Enum):
     ORDER_NOT_PIPELINE = "order_not_pipeline"
     """The fleet runs stages in pipeline order, so a list in another order is not dispatched."""
 
+    CONDITION_FAILED = "condition_failed"
+    """A condition does not hold for every document in the run's manifests."""
+
+    CONDITION_UNEVALUABLE = "condition_unevaluable"
+    """A condition could not be evaluated (no manifest rows, or a column or value it cannot read)."""
+
     RUN_CONFLICT = "run_conflict"
     """The run already dispatched a stage under a different workflow digest."""
 
@@ -181,7 +187,6 @@ def not_acted_on(stored: StoredWorkflow) -> tuple[str, ...]:
     spec = stored.spec
     return tuple(
         name for name, present in (
-            ("conditions", spec.conditions),
             ("destinations", spec.destinations),
             ("triggers", spec.triggers),
             ("input_binding.ingest_prefix", spec.input_binding.ingest_prefix),
@@ -205,8 +210,12 @@ def check_workflow(
     resolve_preset: Callable[[str], Preset | None],
     present: Present | None,
     models_check: str | None = None,
+    shard_dir: Path | None = None,
 ) -> tuple[WomblexConfig, list[str]]:
-    """The offline half of the pre-run path: spec, preset, merged config, step order.
+    """The offline half of the pre-run path: spec, preset, merged config, step order, conditions.
+
+    Conditions are evaluated over *shard_dir*'s manifests when it is given (a caller with
+    no shard directory states they were not evaluated).
 
     Makes no model request and builds no client. `womblex plan` stops here; the runner and
     `validate` continue into `prepare_workflow`. Raises `WorkflowRefusedError`.
@@ -227,6 +236,19 @@ def check_workflow(
             f"workflow {stored.id!r}: step order cannot complete: {err}", err.issues,
             code=RefusalCode.STEP_ORDER,
         ) from err
+    if shard_dir is not None and stored.spec.conditions:
+        from womblex.cloud.workflow_conditions import (
+            ConditionRefused,
+            manifest_from_dir,
+            require_conditions,
+        )
+
+        try:
+            require_conditions(stored.spec.conditions, manifest_from_dir(shard_dir))
+        except ConditionRefused as e:
+            raise WorkflowRefusedError(
+                f"workflow {stored.id!r}: {e}", code=RefusalCode(e.code),
+            ) from e
     return config, stages
 
 
@@ -236,6 +258,7 @@ def prepare_workflow(
     resolve_preset: Callable[[str], Preset | None],
     present: Present | None,
     models_check: str | None = None,
+    shard_dir: Path | None = None,
 ) -> PreparedWorkflow:
     """The one pre-run path: `check_workflow`, then every step's context.
 
@@ -245,6 +268,7 @@ def prepare_workflow(
     """
     config, stages = check_workflow(
         stored, resolve_preset=resolve_preset, present=present, models_check=models_check,
+        shard_dir=shard_dir,
     )
     contexts: list[RunContext] = []
     failures: list[tuple[str, str]] = []
@@ -278,6 +302,7 @@ def run_workflow_local(
     prepared = prepare_workflow(
         stored, resolve_preset=resolve_preset, models_check=models_check,
         present=present_from_names(p.name for p in shard_dir.glob("*.parquet")),
+        shard_dir=shard_dir,
     )
     config, contexts = prepared.config, prepared.contexts
     for warning in prepared.order_warnings:

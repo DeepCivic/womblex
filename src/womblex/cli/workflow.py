@@ -163,7 +163,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
         if report.not_acted_on:
             print(f"stored but not acted on: {', '.join(report.not_acted_on)}")
         if not report.shards_checked:
-            print("note: no --shards, so inputs on disk were not checked")
+            print("note: no --shards, so inputs on disk and conditions were not checked")
     return 0 if report.valid else 1
 
 
