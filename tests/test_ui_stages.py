@@ -228,3 +228,15 @@ def test_dispatch_bounds_the_queue_connect(
     )
     assert resp.status_code == 200
     assert seen == {"connect_timeout": 5.0}
+
+
+def test_a_layer_no_stage_produces_is_refused_before_the_queue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("womblex.cloud.jobs.RunBoard", _FakeQueue)
+    _FakeQueue.last = None
+    config = {**_CONFIG, "processing": {"text_source": "spellfix"}, "spellfix": {"enabled": False}}
+    resp = _client(tmp_path).post("/api/execute/stages", json={"run_id": "run-1", "config": config})
+    assert resp.status_code == 400
+    assert "[input_missing] chunk: .spellfix_text.parquet" in resp.json()["detail"]
+    assert _FakeQueue.last is None and not _FakeQueue.schema_ensured

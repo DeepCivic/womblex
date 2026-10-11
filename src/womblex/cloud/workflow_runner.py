@@ -5,8 +5,9 @@ Per step it composes what `womblex run-stage --shards` uses (`prepare_stage_cont
 so before the first step (spec, preset, config, every step's context), so a workflow
 that cannot complete spends nothing. Once a step has run nothing halts: a failed step
 is recorded and logged, later steps still run labelled with the failures they follow,
-and the exit code is the account. Steps run in list order (checking it is a later merge);
-conditions, destinations and triggers are stored but not acted on, and the log says so.
+and the exit code is the account. Steps run in list order, and the order is checked first
+(`workflow_order`): an input no earlier step produces, or that a later step will rewrite,
+refuses the workflow with stable codes. Conditions, destinations and triggers are stored but not acted on, and the log says so.
 """
 
 from __future__ import annotations
@@ -24,6 +25,13 @@ from womblex.cloud.stage_runner import (
     prepare_stage_context,
     run_stage_local,
 )
+from womblex.cloud.workflow_order import (
+    OrderIssue,
+    StageOrderError,
+    check_step_order,
+    optional_order_warnings,
+    present_from_names,
+)
 from womblex.cloud.workflow_store import StoredWorkflow, check_spec, combine_config
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -34,7 +42,14 @@ logger = logging.getLogger(__name__)
 
 
 class WorkflowRefusedError(Exception):
-    """The workflow cannot start. Raised before any step has run, so nothing was spent."""
+    """The workflow cannot start. Raised before any step has run, so nothing was spent.
+
+    `issues` carries the ordering refusals, each with its stable `code`, when that was the cause.
+    """
+
+    def __init__(self, message: str, issues: tuple[OrderIssue, ...] = ()):
+        super().__init__(message)
+        self.issues = issues
 
 
 @dataclass
@@ -133,6 +148,15 @@ def run_workflow_local(
     config = resolve_workflow_config(stored, resolve_preset)
     if models_check:
         config.processing.models_check = models_check  # type: ignore[assignment]
+    stages = [s.stage for s in stored.spec.steps]
+    present = present_from_names(p.name for p in shard_dir.glob("*.parquet"))
+    if order := check_step_order(stages, config, present=present):
+        err = StageOrderError(order)
+        raise WorkflowRefusedError(
+            f"workflow {stored.id!r}: step order cannot complete: {err}", err.issues,
+        ) from err
+    for warning in optional_order_warnings(stages, config):
+        logger.warning("workflow %r: %s", stored.id, warning)
     contexts: list[RunContext] = []
     for step in stored.spec.steps:
         try:

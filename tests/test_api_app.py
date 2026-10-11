@@ -185,6 +185,19 @@ def test_config_stages_are_enqueued_with_the_owner(client):
     assert FakeQueue.written[1] == ("stages", run_id, ("chunk",), "alice")
 
 
+def test_unsatisfiable_stage_order_is_refused_with_codes_before_any_row(client):
+    # chunk selects the spellfix overlay, but spellfix is disabled: no dispatched stage produces it
+    config = {"chunking": {"enabled": True}, "processing": {"text_source": "spellfix"},
+              "spellfix": {"enabled": False}}
+    resp = client.post(
+        "/v1/runs", headers=auth("ta"), json={"input_prefix": "alice/up1", "config": config},
+    )
+    assert resp.status_code == 400
+    issue = resp.json()["detail"]["issues"][0]
+    assert issue["code"] == "input_missing" and issue["stage"] == "chunk"
+    assert FakeQueue.written == []
+
+
 @pytest.mark.parametrize("extra", [
     {"config": {"chunking": {"chunk_size": "not-a-number"}}},
     {"config": {"extraction": {"ocr": {"engine": "no-such-engine"}}}},

@@ -63,6 +63,8 @@ def cmd_run_workflow(args: argparse.Namespace) -> int:
         )
     except WorkflowRefusedError as e:
         logger.error("%s", e)
+        for issue in e.issues:
+            logger.error("[%s] %s", issue.code.value, issue.message)
         return 1
     result.log()
     return result.exit_code

@@ -311,6 +311,25 @@ class StageDispatchResult:
         }
 
 
+def check_stage_order(
+    settings: UISettings, config: dict, stages: tuple[str, ...], run_id: str,
+) -> None:
+    """Refuse a stage list whose strict inputs no earlier stage or stored copy supplies.
+
+    Writes nothing, so a submit can refuse with no row on the queue. Raises
+    :class:`~womblex.cloud.workflow_order.StageOrderError` (a ``ValueError``, so 400).
+    """
+    from womblex.cloud.workflow_order import check_dispatch_order
+    from womblex.config import WomblexConfig
+    from womblex.store.remote import RemoteStore
+    from womblex.ui.composer import deployment_paths
+
+    paths, _ = deployment_paths(settings)
+    validated = WomblexConfig(**{"dataset": {"name": "console"}, **config, "paths": paths})
+    store = RemoteStore.from_uri(settings.store_uri) if settings.store_uri else None
+    check_dispatch_order(stages, validated, store, f"runs/{run_id}/documents")
+
+
 def enqueue_downstream_stages(
     settings: UISettings,
     *,
@@ -318,6 +337,7 @@ def enqueue_downstream_stages(
     config: dict,
     max_attempts: int = 3,
     owner: str | None = None,
+    order_checked: bool = False,
 ) -> StageDispatchResult:
     """Dispatch *run_id*'s downstream stages — the console's second write action.
 
@@ -334,7 +354,9 @@ def enqueue_downstream_stages(
     budget on enrich and embed either. The operator enqueues, watches it drain,
     looks at it, then presses this.
 
-    *owner* is checked against the run's owner as in `RunBoard.enqueue_stages`.
+    *owner* is checked against the run's owner as in `RunBoard.enqueue_stages`. The stage
+    order is checked (:func:`check_stage_order`) unless the caller already did
+    (*order_checked*, the API's submit, which checks before writing any row).
 
     ``pii`` and ``quality`` are never dispatched — that bound lives in
     ``DOWNSTREAM_STAGES``, not here, so the console cannot widen it. Both stay
@@ -359,6 +381,8 @@ def enqueue_downstream_stages(
         )
 
     shard_prefix = f"runs/{run_id}/documents"
+    if not order_checked:
+        check_stage_order(settings, config, stages, run_id)
     ensure_schema(settings.db_dsn)
     with RunBoard(settings.db_dsn, connect_timeout=QUEUE_CONNECT_TIMEOUT) as board:
         newly = board.enqueue_stages(

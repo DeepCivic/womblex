@@ -164,6 +164,7 @@ womblex/
 │   │   ├── stage_contracts.py  # Declarative StageContract per downstream stage (inputs/outputs/scope)
 │   │   ├── stage_runner.py     # Execute a contract against an object store
 │   │   ├── workflow_store.py   # Stored workflow object (preset ref, input binding, steps, conditions, destinations, triggers) — schema, validation, its table
+│   │   ├── workflow_order.py   # Up-front step-order check — inputs on disk or produced earlier, stable refusal codes
 │   │   └── workflow_runner.py  # Local multi-stage runner — a stored workflow's steps through the stage functions; refuse before work, record after
 │   ├── api/                    # Service API (`womblex serve`)
 │   │   ├── app.py              # create_api_app() — `/v1` health/ready, run submit, list/detail, manifest, files, document text, metrics; owner-scoped

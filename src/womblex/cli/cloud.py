@@ -383,6 +383,8 @@ def _register_enqueue_stages(p: argparse.ArgumentParser) -> None:
         help="Store-relative outputs dir (default: runs/<run_id>). "
              "Stages read and write <output-prefix>/documents/.",
     )
+    p.add_argument("--store", help="Object-store base URI (or $WOMBLEX_STORE_URI). Optional: "
+                   "when set, the stage order is also checked against what the run already holds.")
     p.add_argument("--stages", default=None,
                    help="Comma-separated override of the config-derived stage list. "
                         f"Choose from: {', '.join(DISPATCHABLE_STAGES)}.")
@@ -432,6 +434,17 @@ def cmd_enqueue_stages(args: argparse.Namespace) -> int:
     output_prefix = (args.output_prefix or f"runs/{args.run_id}").strip("/")
     shard_prefix = f"{output_prefix}/documents"
     logger.info("run_id=%s: stages %s -> %s", args.run_id, " -> ".join(stages), shard_prefix)
+    from womblex.cloud.workflow_order import StageOrderError, check_dispatch_order
+    from womblex.store.remote import RemoteStore
+
+    store_uri = _resolve_store(args)
+    try:
+        check_dispatch_order(stages, config, RemoteStore.from_uri(store_uri) if store_uri else None,
+                             shard_prefix)
+    except StageOrderError as e:
+        for issue in e.issues:
+            logger.error("[%s] %s", issue.code.value, issue.message)
+        return 1
     if args.dry_run:
         return 0
 

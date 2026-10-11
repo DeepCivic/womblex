@@ -70,7 +70,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 
 **TO-DO:**
 
-- **A missing required input is not a fail-fast, before-processing error (re: "Invalid compositions … naming the producing stage").** `stage_runner.run_stage_remote` (`cloud/stage_runner.py`) resolves required inputs *per base* and raises `NotReady`, which is caught and logged as a warning; the run still exits `0` unless the count of not-ready bases equals the total discovered bases (`StageRunSummary.exit_code`). This is deliberate — a still-draining fleet must not read as a stage-ordering error — but it means a genuinely mis-ordered composition over a *partially* processed run neither raises immediately nor fails the run, and the operator only sees a per-base warning. Decide whether to (a) add an explicit up-front composition check (verify the whole DAG's required-input edges against what the store already holds before processing any base, distinguishing "upstream still draining" from "upstream will never run" via the dispatched-stage set), or (b) document the per-base `NotReady`/warning behaviour as the intended contract and soften the acceptance criterion accordingly. On the DBOS path a stage whose upstream sidecar is missing fails without step retries, as retrying cannot produce it; the up-front whole-DAG composition check above is still open (workflow plan, Phase 2).
+- **A missing required input is not a fail-fast, before-processing error for a single `run-stage --store`.** `stage_runner.run_stage_remote` resolves required inputs *per base* and raises `NotReady`, caught and logged as a warning; the run exits `0` unless every discovered base is not ready (`StageRunSummary.exit_code`). Deliberate: a still-draining fleet must not read as an ordering error. The whole-sequence check now exists for a stored workflow and for stage dispatch (`cloud/workflow_order.py`, refusals `input_missing` / `input_out_of_order` / `input_stale`): option (a) from the earlier note, with extraction's siblings treated as arriving. Open: a stored workflow has no object-store runner yet (dispatch is covered), and a lone `run-stage` keeps its per-base behaviour.
 
 ## 4. File Profiling, Detection, and Routing
 
@@ -545,7 +545,7 @@ Requirements not yet fully met. The detail lives in the **TO-DO** block under ea
 
 
 - **Requirement 2 (Scale-Out):** Azure storage URIs (`az://` / `abfs://`) are not credential-wired, and the enrichment paths have no Azure ML connection.
-- **Requirement 3 (Ingest-First Data Flow):** no up-front whole-DAG composition check.
+- **Requirement 3 (Ingest-First Data Flow):** up-front composition check covers workflows and dispatch, not a lone `run-stage --store` (per-base `NotReady`).
 - **Requirement 6 (Native Office and Spreadsheet Extraction):** multi-row headers are emitted for DOCX only; spreadsheets and the legacy table view collapse to row 0, no per-cell header-row coordinate exists, and cell formulas are never captured.
 - **Requirement 7 (Standalone Reference Register Ingestion):** G-NAF and geospatial writes are not guarded against partial output.
 - **Requirement 9 (Redaction Handling):** no redaction `pipeline_point`, and the E2E `run` path writes no `*.redactions.parquet`.

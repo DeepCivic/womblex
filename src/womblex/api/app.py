@@ -49,6 +49,7 @@ from womblex.cli._shared import SUPPORTED_EXTENSIONS, normalise_prefix, select_s
 from womblex.cloud import dispatch
 from womblex.cloud.dispatch import QUEUE_CONNECT_TIMEOUT
 from womblex.cloud.jobs import RunBoard, RunSummary
+from womblex.cloud.workflow_order import StageOrderError
 from womblex.store.contract import read_footer_contract
 from womblex.store.remote import RemoteStore
 from womblex.store.retention import generate_run_id
@@ -202,6 +203,8 @@ def create_api_app(
         written = False
         try:
             stages = dispatch.downstream_stages(settings, config) if config is not None else ()
+            if stages:
+                dispatch.check_stage_order(settings, cast(dict, config), stages, run_id)
             run = dispatch.enqueue_extraction(
                 settings, input_prefix=prefix, run_id=run_id,
                 batch_size=body.batch_size, owner=caller.owner,
@@ -210,9 +213,15 @@ def create_api_app(
             if stages:
                 dispatch.enqueue_downstream_stages(
                     settings, run_id=run_id, config=cast(dict, config), owner=caller.owner,
+                    order_checked=True,
                 )
         except dispatch.ExecutionDisabled as e:
             raise HTTPException(status_code=503, detail=e.detail) from e
+        except StageOrderError as e:  # stable `code` per issue; checked before any row is written
+            raise HTTPException(
+                status_code=400,
+                detail={"message": str(e), "issues": [i.as_dict() for i in e.issues]},
+            ) from e
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
         except (psycopg.Error, sqlalchemy.exc.SQLAlchemyError) as e:
