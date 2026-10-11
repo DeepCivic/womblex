@@ -75,14 +75,15 @@ when its text is in the document and to the chunk when it is not, and one whose
 elements or table are missing to the chunk. An entity link whose slice is not
 the enricher's text for the mention is located to the document. Masking never depends on
 the receipt. The text a `span` row is checked against is `text` (`mention_text`
-on `entity_links`).
+on `entity_links`). `womblex verify-evidence <run>` recomputes every row's check
+over a finished run and reports the counts (exit 2 if any receipt fails).
 
 The major bump removed `start_char` / `end_char` / `text_source` / `parent_elem_order`
 / `row` / `col` from `money_spans` (now `char_start`, `char_end`, `text_layer`,
 `elem_order`, `cell_row`, `cell_col`), `start` / `end` (chunk-relative) from
 `pii_spans`, and `mention_start` / `mention_end` from `entity_links`. Readers
 back-fill an older file: a money span keeps its narrative offsets (`span`) or its
-cell (`element`); a PII span reads as `chunk`; a link reads as `document`. A PII
+cell (`element`); a PII span reads as `chunk`; a link reads as `span` when its shard has the elements and no text-layer overlay (the offsets can then only be the verbatim narrative's) and as `document` otherwise. A PII
 span's position in its chunk is `char_start - chunk.start_char` for a `span` row.
 
 ## Determinism

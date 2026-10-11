@@ -33,11 +33,8 @@ skip-existing on resume, batch-level isolation.
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
 from dataclasses import dataclass
-from functools import partial
 from pathlib import Path
-from typing import Any
 
 import pyarrow.parquet as pq
 
@@ -45,7 +42,12 @@ from womblex.config import PIIConfig
 from womblex.pii.cleaner import PIICleaner
 from womblex.process.chunk_stage import _batch_bases
 from womblex.process.chunker import TableText
-from womblex.process.evidence import EvidenceIndex, EvidenceIndexes, stamp_evidence
+from womblex.process.evidence import (
+    EvidenceIndex,
+    EvidenceIndexes,
+    chunk_text_from,
+    stamp_evidence,
+)
 from womblex.process.text_overlay import require_overlays
 from womblex.store.checkpoint import CheckpointManager
 from womblex.store.enrichment_output import (
@@ -205,7 +207,7 @@ def pii_shards(
 
         stamp_evidence(
             span_rows, indexes.get, text_key="text", label="pii_spans", base=base,
-            chunk_text=partial(_chunk_text, chunk_texts),
+            chunk_text=chunk_text_from(chunk_texts),
         )
         write_pii_spans(span_rows, base)
         if write_clean:
@@ -284,10 +286,6 @@ def _enriched_docs(base_path: Path) -> tuple[set[str], set[str]]:
             if (row.get("table_count") or 0) > 0:
                 table_docs.add(row["source_hash"])
     return docs, table_docs
-
-
-def _chunk_text(texts: dict[tuple[str, int], str], row: Mapping[str, Any]) -> str | None:
-    return texts.get((row["source_hash"], row["chunk_index"]))
 
 
 def _receipt(
