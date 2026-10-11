@@ -161,7 +161,8 @@ womblex/
 │   │   ├── dispatch.py         # enqueue_extraction / enqueue_downstream_stages (owner=), downstream_stages gate + guard — shared by the console and the service API
 │   │   ├── worker.py           # run_worker() — launch DBOS, join the queues this process can serve
 │   │   ├── stage_contracts.py  # Declarative StageContract per downstream stage (inputs/outputs/scope)
-│   │   └── stage_runner.py     # Execute a contract against an object store
+│   │   ├── stage_runner.py     # Execute a contract against an object store
+│   │   └── workflow_store.py   # Stored workflow object (preset ref, input binding, steps, conditions, destinations, triggers) — schema, validation, its table
 │   ├── api/                    # Service API (`womblex serve`)
 │   │   ├── app.py              # create_api_app() — `/v1` health/ready, run submit, list/detail, manifest, files, document text, metrics; owner-scoped
 │   │   ├── readers.py          # Document text rows by layer (masked / chunks / elements), read in place with a source_hash filter
