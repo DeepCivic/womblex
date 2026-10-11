@@ -46,6 +46,9 @@ logger = logging.getLogger(__name__)
 class RefusalCode(str, Enum):
     """Stable codes for a refusal that is not an ordering issue (those carry `OrderCode`)."""
 
+    WORKFLOW_UNAVAILABLE = "workflow_unavailable"
+    """No stored workflow by that id, or the store could not be read (`womblex validate --json`)."""
+
     SPEC_INVALID = "spec_invalid"
     PRESET_UNKNOWN = "preset_unknown"
     CONFIG_INVALID = "config_invalid"

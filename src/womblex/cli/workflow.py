@@ -90,7 +90,7 @@ def cmd_run_workflow(args: argparse.Namespace) -> int:
             source_root=args.ingest, force=args.force, models_check=args.models_check,
         )
     except WorkflowRefusedError as e:
-        logger.error("%s", e)
+        logger.error("[%s] %s", e.code.value, e)
         for issue in e.issues:
             logger.error("[%s] %s", issue.code.value, issue.message)
         return 1
@@ -100,6 +100,7 @@ def cmd_run_workflow(args: argparse.Namespace) -> int:
 
 def cmd_validate(args: argparse.Namespace) -> int:
     """Run a workflow's pre-run checks without running it; exit 1 if it would be refused."""
+    from womblex.cloud.workflow_runner import RefusalCode
     from womblex.cloud.workflow_validate import validate_workflow
 
     if args.shards is not None and not args.shards.is_dir():
@@ -107,6 +108,12 @@ def cmd_validate(args: argparse.Namespace) -> int:
         return 1
     stored = _load_workflow(args)
     if stored is None:
+        if args.json:  # a script reading stdout gets a report, not nothing
+            print(json.dumps({
+                "workflow_id": args.workflow_id, "valid": False,
+                "code": RefusalCode.WORKFLOW_UNAVAILABLE.value,
+                "message": "no stored workflow by that id, or the store could not be read",
+            }, indent=2))
         return 1
     report = validate_workflow(
         stored, resolve_preset=_preset_resolver(args),  # type: ignore[arg-type]
@@ -120,7 +127,8 @@ def cmd_validate(args: argparse.Namespace) -> int:
         if report.valid:
             print("valid: it would not be refused")
         else:
-            print(f"refused [{report.code}]: {report.message}")
+            # The message joins the issues and steps listed below, so print it only when there are none.
+            print(f"refused [{report.code}]" + ("" if report.issues or report.steps else f": {report.message}"))
             for issue in report.issues:
                 print(f"  [{issue['code']}] {issue['message']}")
             for step in report.steps:

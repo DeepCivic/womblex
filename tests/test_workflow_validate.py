@@ -71,6 +71,7 @@ def test_cli_json_and_exit_codes(shards: Path, tmp_path: Path, capsys: pytest.Ca
     ensure_workflow_schema(dsn)
     with WorkflowStore(dsn) as store:
         store.save("good", _stored(["normalise"]).spec)
+        store.save("misordered", _stored(["chunk", "normalise"], config=_NORMALISED).spec)
     from womblex.ui.presets import build_preset_record, preset_filename, serialise_preset_record
 
     record, _ = build_preset_record(name=_PRESET.name, description="", formats=(), config=_PRESET.config)
@@ -82,9 +83,12 @@ def test_cli_json_and_exit_codes(shards: Path, tmp_path: Path, capsys: pytest.Ca
         return argparse.Namespace(**{**base, **kw})
 
     assert cmd_validate(args("missing")) == 1
-    capsys.readouterr()
+    assert json.loads(capsys.readouterr().out)["code"] == RefusalCode.WORKFLOW_UNAVAILABLE.value
     assert cmd_validate(args("good")) == 0
     body = json.loads(capsys.readouterr().out)
     assert body["valid"] is True and body["stages"] == ["normalise"]
     assert cmd_validate(args("good", json=False, presets_dir=None)) == 1
     assert "refused [preset_unknown]" in capsys.readouterr().out
+    assert cmd_validate(args("misordered", json=False)) == 1
+    out = capsys.readouterr().out
+    assert "refused [step_order]\n" in out and out.count("move 'normalise' before 'chunk'") == 1
