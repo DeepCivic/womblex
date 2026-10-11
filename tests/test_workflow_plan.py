@@ -67,9 +67,10 @@ def test_a_step_that_cannot_run_offline_leaves_the_count_pending(
 ) -> None:
     monkeypatch.setitem(STAGE_CONTRACTS, "chunk", replace(
         STAGE_CONTRACTS["chunk"], needs_isaacus_api_for=lambda _c: True))
-    plan = plan_workflow(_stored(["chunk", "embed"]), shards, resolve_preset=_resolve)
+    plan = plan_workflow(_stored(["chunk", "embed"]), shards, resolve_preset=_resolve, prices={"embed": 2.0})
     t = plan.steps[1].tokens
     assert t is not None and t.basis == "pending" and "'chunk'" in t.note and t.tokens == 0
+    assert t.assumed_cost is None  # no count, so no $0.00
 
 
 def test_price_appears_only_when_assumed(shards: Path) -> None:  # noqa: F811
@@ -102,3 +103,20 @@ def test_cli_json_prices_and_exit_codes(shards: Path, tmp_path: Path, capsys: py
     assert cmd_plan(args(json=False, assume_price=["embed=3"])) == 0
     assert "ASSUMPTION" in capsys.readouterr().out
     assert cmd_plan(args(assume_price=["chunk=1"])) == 1
+    with WorkflowStore(dsn) as store:
+        store.save("refused", _stored(["embed"]).spec)  # chunks are not on disk
+    for wid, code in (("absent", "workflow_unavailable"), ("refused", "step_order")):  # still one JSON object
+        capsys.readouterr()
+        assert cmd_plan(args(workflow_id=wid)) == 1 and json.loads(capsys.readouterr().out)["code"] == code
+
+
+def test_layout_skips_only_when_every_sidecar_carries_the_fingerprint(shards: Path) -> None:  # noqa: F811
+    from womblex.cloud.workflow_runner import resolve_workflow_config
+    from womblex.store.layout_output import layout_fingerprint, write_layout_regions
+
+    stored = _stored(["layout"])
+    fp = layout_fingerprint(resolve_workflow_config(stored, _resolve))
+    for dpi, action in ((fp.dpi + 1, "run"), (fp.dpi, "skip")):
+        for base in _batch_bases(shards):
+            write_layout_regions([], base, replace(fp, dpi=dpi), redaction_consumed=False)
+        assert plan_workflow(stored, shards, resolve_preset=_resolve).steps[0].action == action

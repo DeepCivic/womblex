@@ -73,41 +73,24 @@ def _layout_skips(shard_dir: Path, config: WomblexConfig) -> tuple[int, int]:
     import pyarrow.parquet as pq
 
     from womblex.process.chunk_stage import _batch_bases
-    from womblex.store.layout_output import (
-        layout_fingerprint,
-        layout_regions_path_for,
-        read_footer_layout_fingerprint,
-    )
+    from womblex.store.layout_output import layout_fingerprint, layout_regions_path_for, read_footer_layout_fingerprint
 
-    want = layout_fingerprint(config)
-    bases = _batch_bases(shard_dir)
-    same = 0
-    for base in bases:
-        sidecar = layout_regions_path_for(base)
-        if sidecar.exists() and read_footer_layout_fingerprint(
-            pq.read_metadata(str(sidecar)).metadata,
-        ) == want:
-            same += 1
+    want, bases = layout_fingerprint(config), _batch_bases(shard_dir)
+    sidecars = [p for p in map(layout_regions_path_for, bases) if p.exists()]
+    same = sum(read_footer_layout_fingerprint(pq.read_metadata(str(p)).metadata) == want for p in sidecars)
     return same, len(bases)
 
 
-def _estimate(
-    stage: str, index: int, stages: list[str], config: WomblexConfig, shard_dir: Path,
-) -> TokenEstimate:
+def _estimate(stage: str, index: int, stages: list[str], config: WomblexConfig, shard_dir: Path) -> TokenEstimate:
     contract = STAGE_CONTRACTS[stage]
     # Optional inputs (enrich reading chunks for graph edges) never change a count.
-    wanted = set(contract.required_inputs) | {
-        c.suffix for c in contract.conditional_inputs(config) if c.strict
-    }
+    wanted = set(contract.required_inputs) | {c.suffix for c in contract.conditional_inputs(config) if c.strict}
     for earlier in stages[:index]:
         c = STAGE_CONTRACTS[earlier]
         simulable = earlier in _FEEDS[stage] and not c.requires_isaacus_api(config)
         if not simulable and c.mutation is MutationMode.SIDECAR and wanted & set(c.outputs(config)):
-            return TokenEstimate(
-                "pending",
-                f"{earlier!r} produces an input of {stage!r} and cannot be run offline; "
-                "counted once it has run",
-            )
+            return TokenEstimate("pending", f"{earlier!r} produces an input of {stage!r} and cannot be run "
+                                 "offline; counted once it has run")
     sim = [s for s in stages[:index] if s in _FEEDS[stage]]
     held_back = {sfx for s in sim for sfx in STAGE_CONTRACTS[s].outputs(config)}
     try:
@@ -122,15 +105,11 @@ def _estimate(
             if stage == "enrich":
                 from womblex.analyse.enrich_stage import plan_enrichment
 
-                p = plan_enrichment(
-                    scratch, config.enrichment, text_source=config.processing.text_source,
-                )
+                p = plan_enrichment(scratch, config.enrichment, text_source=config.processing.text_source)
                 return TokenEstimate(
                     basis, tokens=p.tokens, requests=p.requests, texts=p.documents + p.tables,
-                    detail={"documents": p.documents, "tables": p.tables,
-                            "narrative_tokens": p.narrative_tokens,
-                            "table_tokens": p.table_tokens,
-                            "split_documents": p.split_documents},
+                    detail={"documents": p.documents, "tables": p.tables, "narrative_tokens": p.narrative_tokens,
+                            "table_tokens": p.table_tokens, "split_documents": p.split_documents},
                 )
             from womblex.analyse.embed_stage import plan_embedding
 
@@ -174,7 +153,7 @@ def plan_workflow(
         if stage in _FEEDS:
             plan.tokens = _estimate(stage, i, stages, config, shard_dir)
             price = (prices or {}).get(stage)
-            if price is not None and plan.tokens.basis != "unavailable":
+            if price is not None and plan.tokens.basis in ("on_disk", "simulated"):  # no count, no cost
                 plan.tokens.assumed_price_per_million = price
                 plan.tokens.assumed_cost = plan.tokens.tokens / 1e6 * price
         steps.append(plan)

@@ -165,7 +165,7 @@ def _parse_prices(items: list[str]) -> dict[str, float]:
 def cmd_plan(args: argparse.Namespace) -> int:
     """Say what a workflow would run and spend, calling no paid API; exit 1 if it would be refused."""
     from womblex.cloud.workflow_plan import plan_workflow
-    from womblex.cloud.workflow_runner import WorkflowRefusedError
+    from womblex.cloud.workflow_runner import RefusalCode, WorkflowRefusedError
 
     if not args.shards.is_dir():
         logger.error("--shards path is not a directory: %s", args.shards)
@@ -176,16 +176,21 @@ def cmd_plan(args: argparse.Namespace) -> int:
         logger.error("%s", e)
         return 1
     stored = _load_workflow(args)
-    if stored is None:
-        return 1
     try:
+        if stored is None:
+            raise WorkflowRefusedError("no stored workflow by that id, or the store could not be read",
+                                       code=RefusalCode.WORKFLOW_UNAVAILABLE)
         plan = plan_workflow(
             stored, args.shards, resolve_preset=_preset_resolver(args), prices=prices,  # type: ignore[arg-type]
         )
     except WorkflowRefusedError as e:
-        logger.error("%s", e)
+        # The message joins the issues listed after it, so say it only when there are none.
+        logger.error("refused [%s]%s", e.code.value, "" if e.issues else f": {e}")
         for issue in e.issues:
             logger.error("[%s] %s", issue.code.value, issue.message)
+        if args.json:  # a script reading stdout gets an answer, as `validate --json` does
+            print(json.dumps({"workflow_id": args.workflow_id, "refused": True, "code": e.code.value,
+                              "message": str(e), "issues": [i.as_dict() for i in e.issues]}, indent=2))
         return 1
     if args.json:
         print(json.dumps(plan.as_dict(), indent=2))
