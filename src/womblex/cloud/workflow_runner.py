@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -27,6 +28,7 @@ from womblex.cloud.stage_runner import (
 )
 from womblex.cloud.workflow_order import (
     OrderIssue,
+    Present,
     StageOrderError,
     check_step_order,
     optional_order_warnings,
@@ -41,15 +43,38 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 logger = logging.getLogger(__name__)
 
 
+class RefusalCode(str, Enum):
+    """Stable codes for a refusal that is not an ordering issue (those carry `OrderCode`)."""
+
+    SPEC_INVALID = "spec_invalid"
+    PRESET_UNKNOWN = "preset_unknown"
+    CONFIG_INVALID = "config_invalid"
+    STEP_ORDER = "step_order"
+    """The steps cannot complete in this order; `issues` carries each `OrderCode`."""
+
+    STEP_PRECONDITION = "step_precondition"
+    """A step's preflight, Isaacus or model check failed; `steps` names each."""
+
+
 class WorkflowRefusedError(Exception):
     """The workflow cannot start. Raised before any step has run, so nothing was spent.
 
-    `issues` carries the ordering refusals, each with its stable `code`, when that was the cause.
+    `issues` carries the ordering refusals, each with its stable `code`, when that was the
+    cause; `steps` is `(stage, message)` for every step whose preconditions failed.
     """
 
-    def __init__(self, message: str, issues: tuple[OrderIssue, ...] = ()):
+    def __init__(
+        self,
+        message: str,
+        issues: tuple[OrderIssue, ...] = (),
+        *,
+        code: RefusalCode = RefusalCode.CONFIG_INVALID,
+        steps: tuple[tuple[str, str], ...] = (),
+    ):
         super().__init__(message)
         self.issues = issues
+        self.code = code
+        self.steps = steps
 
 
 @dataclass
@@ -101,7 +126,9 @@ def resolve_workflow_config(
     spec = stored.spec
     preset = resolve_preset(spec.preset)
     if preset is None:
-        raise WorkflowRefusedError(f"workflow {stored.id!r}: unknown preset {spec.preset!r}")
+        raise WorkflowRefusedError(
+            f"workflow {stored.id!r}: unknown preset {spec.preset!r}", code=RefusalCode.PRESET_UNKNOWN,
+        )
     overlay = combine_config(preset.config, spec.config)
     try:
         return WomblexConfig.model_validate({
@@ -111,11 +138,12 @@ def resolve_workflow_config(
         })
     except ValueError as e:
         raise WorkflowRefusedError(
-            f"workflow {stored.id!r}: preset {spec.preset!r} with the workflow's config does not load: {e}"
+            f"workflow {stored.id!r}: preset {spec.preset!r} with the workflow's config does not load: {e}",
+            code=RefusalCode.CONFIG_INVALID,
         ) from e
 
 
-def _not_acted_on(stored: StoredWorkflow) -> tuple[str, ...]:
+def not_acted_on(stored: StoredWorkflow) -> tuple[str, ...]:
     spec = stored.spec
     return tuple(
         name for name, present in (
@@ -125,6 +153,60 @@ def _not_acted_on(stored: StoredWorkflow) -> tuple[str, ...]:
             ("input_binding.ingest_prefix", spec.input_binding.ingest_prefix),
         ) if present
     )
+
+
+@dataclass
+class PreparedWorkflow:
+    """What is checked before a workflow's first step, and what that built."""
+
+    config: WomblexConfig
+    stages: list[str]
+    contexts: list[RunContext]
+    order_warnings: list[str]
+
+
+def prepare_workflow(
+    stored: StoredWorkflow,
+    *,
+    resolve_preset: Callable[[str], Preset | None],
+    present: Present | None,
+    models_check: str | None = None,
+) -> PreparedWorkflow:
+    """The one pre-run path: spec, preset, merged config, step order, every step's context.
+
+    Shared by `run_workflow_local` and `womblex validate`, so they refuse alike. *present*
+    is the disk state (`None`: unknown, so only the order among the steps is checked).
+    Raises `WorkflowRefusedError`, naming every step whose preconditions failed.
+    """
+    try:
+        check_spec(stored.spec)
+    except ValueError as e:
+        raise WorkflowRefusedError(
+            f"workflow {stored.id!r} is no longer valid: {e}", code=RefusalCode.SPEC_INVALID,
+        ) from e
+    config = resolve_workflow_config(stored, resolve_preset)
+    if models_check:
+        config.processing.models_check = models_check  # type: ignore[assignment]
+    stages = [s.stage for s in stored.spec.steps]
+    if order := check_step_order(stages, config, present=present):
+        err = StageOrderError(order)
+        raise WorkflowRefusedError(
+            f"workflow {stored.id!r}: step order cannot complete: {err}", err.issues,
+            code=RefusalCode.STEP_ORDER,
+        ) from err
+    contexts: list[RunContext] = []
+    failures: list[tuple[str, str]] = []
+    for stage in stages:
+        try:
+            contexts.append(prepare_stage_context(STAGE_CONTRACTS[stage], config))
+        except StagePreconditionError as e:
+            failures.append((stage, str(e)))
+    if failures:
+        raise WorkflowRefusedError(
+            f"workflow {stored.id!r}: " + "; ".join(m for _, m in failures),
+            code=RefusalCode.STEP_PRECONDITION, steps=tuple(failures),
+        )
+    return PreparedWorkflow(config, stages, contexts, optional_order_warnings(stages, config))
 
 
 def run_workflow_local(
@@ -141,30 +223,15 @@ def run_workflow_local(
     Raises `WorkflowRefusedError` before any step runs; after that, returns a
     `WorkflowRunResult` whatever the steps did.
     """
-    try:
-        check_spec(stored.spec)
-    except ValueError as e:
-        raise WorkflowRefusedError(f"workflow {stored.id!r} is no longer valid: {e}") from e
-    config = resolve_workflow_config(stored, resolve_preset)
-    if models_check:
-        config.processing.models_check = models_check  # type: ignore[assignment]
-    stages = [s.stage for s in stored.spec.steps]
-    present = present_from_names(p.name for p in shard_dir.glob("*.parquet"))
-    if order := check_step_order(stages, config, present=present):
-        err = StageOrderError(order)
-        raise WorkflowRefusedError(
-            f"workflow {stored.id!r}: step order cannot complete: {err}", err.issues,
-        ) from err
-    for warning in optional_order_warnings(stages, config):
+    prepared = prepare_workflow(
+        stored, resolve_preset=resolve_preset, models_check=models_check,
+        present=present_from_names(p.name for p in shard_dir.glob("*.parquet")),
+    )
+    config, contexts = prepared.config, prepared.contexts
+    for warning in prepared.order_warnings:
         logger.warning("workflow %r: %s", stored.id, warning)
-    contexts: list[RunContext] = []
-    for step in stored.spec.steps:
-        try:
-            contexts.append(prepare_stage_context(STAGE_CONTRACTS[step.stage], config))
-        except StagePreconditionError as e:
-            raise WorkflowRefusedError(f"workflow {stored.id!r}: {e}") from e
 
-    result = WorkflowRunResult(stored.id, stored.digest, not_acted_on=_not_acted_on(stored))
+    result = WorkflowRunResult(stored.id, stored.digest, not_acted_on=not_acted_on(stored))
     if result.not_acted_on:
         logger.warning(
             "workflow %s: %s stored but not acted on by the local runner",
@@ -190,9 +257,13 @@ def run_workflow_local(
 
 
 __all__ = [
+    "PreparedWorkflow",
+    "RefusalCode",
     "StepOutcome",
     "WorkflowRefusedError",
     "WorkflowRunResult",
+    "not_acted_on",
+    "prepare_workflow",
     "resolve_workflow_config",
     "run_workflow_local",
 ]

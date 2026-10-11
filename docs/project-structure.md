@@ -31,7 +31,7 @@ womblex/
 │   │   ├── profile.py      # profile subcommand
 │   │   ├── demo.py         # seed-demo subcommand (publish the vendored demo run)
 │   │   ├── verify.py       # verify-shards, verify-evidence, resolve-source subcommands
-│   │   └── workflow.py     # run-workflow subcommand (a stored workflow over a local shard dir)
+│   │   └── workflow.py     # run-workflow / validate subcommands (a stored workflow over a local shard dir; its pre-run checks alone)
 │   ├── config/             # Pydantic config models (__init__: YAML loader + WomblexConfig; process.py: process-stage models)
 │   ├── pipeline_order.py   # PIPELINE_ORDER — what runs when; enabled_downstream_stages(config)
 │   ├── batch.py            # process_batch() — shared per-batch pipeline body (extract → optional redaction detection; extraction only)
@@ -165,6 +165,7 @@ womblex/
 │   │   ├── stage_runner.py     # Execute a contract against an object store
 │   │   ├── workflow_store.py   # Stored workflow object (preset ref, input binding, steps, conditions, destinations, triggers) — schema, validation, its table
 │   │   ├── workflow_order.py   # Up-front step-order check — inputs on disk or produced earlier, stable refusal codes
+│   │   ├── workflow_validate.py # `womblex validate` — the runner's pre-run checks, read-only, a JSON-able report
 │   │   └── workflow_runner.py  # Local multi-stage runner — a stored workflow's steps through the stage functions; refuse before work, record after
 │   ├── api/                    # Service API (`womblex serve`)
 │   │   ├── app.py              # create_api_app() — `/v1` health/ready, run submit, list/detail, manifest, files, document text, metrics; owner-scoped
