@@ -81,7 +81,7 @@ RUN_MANIFEST_FILENAME = "manifest.parquet"
 #: Version 5 adds ``files`` — the SHA-256 of each published output file, taken
 #: at write time — and a record without it names the gap in ``partial``.
 RUN_RECORD_KEY = f"{NAMESPACE}.run_record"
-RUN_RECORD_VERSION = 5
+RUN_RECORD_VERSION = 6
 
 #: What one observed parquet contributes: its footer key-value metadata and its
 #: row count. A caller that reads files where they live supplies these rather
@@ -234,6 +234,21 @@ def _observed_models(footers: FooterList) -> list[dict]:
         {"name": name, "digest": digest, "stages": sorted(stages[(name, digest)])}
         for name, digest in sorted(stages)
     ]
+
+
+def _observed_workflows(footers: FooterList) -> list[dict]:
+    """The stored workflows whose digest the run's files carry, with the stages they wrote.
+
+    Observed from the files like the stages are: a file written by `run-workflow` says so,
+    a workflow that was only stored is absent. Two digests means two workflows (or one
+    edited between runs) touched the directory, and both are listed.
+    """
+    stages: dict[str, set[str]] = {}
+    for meta, _rows in footers:
+        stamp = read_footer_stamp(meta)
+        if digest := stamp.get("workflow_digest"):
+            stages.setdefault(digest, set()).add(stamp.get("stage", ""))
+    return [{"digest": d, "stages": sorted(s for s in stages[d] if s)} for d in sorted(stages)]
 
 
 def _observed_slot_models(footers: FooterList) -> list[dict]:
@@ -503,6 +518,7 @@ def build_run_record(
             "statuses": dict(sorted(statuses.items())),
         },
         "stages": _observed_stages(footers),
+        "workflows": _observed_workflows(footers),
         "local_models": _observed_models(footers),
         "slot_models": _observed_slot_models(footers),
         "model_check": _observed_model_checks(footers),

@@ -65,7 +65,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -88,6 +90,24 @@ MODELS_KEY = f"{NAMESPACE}.models"
 MODEL_CHECK_KEY = f"{NAMESPACE}.model_check"
 SLOT_MODELS_KEY = f"{NAMESPACE}.slot_models"
 PRESET_KEY = f"{NAMESPACE}.preset"
+WORKFLOW_DIGEST_KEY = f"{NAMESPACE}.workflow_digest"
+
+_workflow_digest: ContextVar[str | None] = ContextVar("womblex_workflow_digest", default=None)
+
+
+@contextmanager
+def workflow_context(digest: str) -> Iterator[None]:
+    """Mark every sidecar written inside the block as produced by the workflow *digest*.
+
+    Beside `config_digest`, which says how the stages were configured: this says which
+    stored workflow (preset reference, steps, config overlay) ran them. It is a contextvar
+    so concurrent runs in one process cannot stamp each other's files.
+    """
+    token = _workflow_digest.set(digest)
+    try:
+        yield
+    finally:
+        _workflow_digest.reset(token)
 
 # Excluded from the digest: see the module docstring. `paths` is deployment
 # location and `dataset.run_id` is the run's own identity, already a key;
@@ -250,6 +270,7 @@ def read_footer_stamp(metadata: Mapping[bytes, bytes] | None) -> dict[str, str]:
         (CONFIG_DIGEST_KEY, "config_digest"),
         (STAGE_KEY, "stage"),
         (PRESET_KEY, "preset"),
+        (WORKFLOW_DIGEST_KEY, "workflow_digest"),
     )
     return {name: decoded[key] for key, name in names if key in decoded}
 
@@ -380,7 +401,11 @@ def stamp_for_sidecar(base_path: Path, stage: str) -> RunStamp | None:
 def sidecar_footer(base_path: Path, stage: str) -> dict[bytes, bytes] | None:
     """:func:`stamp_for_sidecar` as footer metadata, for a writer to pass on."""
     stamp = stamp_for_sidecar(base_path, stage)
-    return stamp.footer_metadata() if stamp is not None else None
+    meta = stamp.footer_metadata() if stamp is not None else None
+    if (digest := _workflow_digest.get()) is not None:
+        # A workflow digest is a fact about this write even where the run cannot be named.
+        meta = {**(meta or {}), WORKFLOW_DIGEST_KEY.encode(): digest.encode()}
+    return meta
 
 
 __all__ = [
@@ -393,6 +418,7 @@ __all__ = [
     "SLOT_MODELS_KEY",
     "STAGE_KEY",
     "VERSION_KEY",
+    "WORKFLOW_DIGEST_KEY",
     "RunStamp",
     "config_digest",
     "read_footer_model_check",
@@ -402,4 +428,5 @@ __all__ = [
     "sidecar_footer",
     "stamp_for_sidecar",
     "stamp_from_footers",
+    "workflow_context",
 ]

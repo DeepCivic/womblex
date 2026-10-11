@@ -35,6 +35,7 @@ from womblex.cloud.workflow_order import (
     present_from_names,
 )
 from womblex.cloud.workflow_store import StoredWorkflow, check_spec, combine_config
+from womblex.store.run_stamp import workflow_context
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from womblex.config import WomblexConfig
@@ -260,20 +261,21 @@ def run_workflow_local(
         )
     logger.info("workflow %s (%s): %s over %s", stored.id, stored.digest, " -> ".join(s.stage for s in stored.spec.steps), shard_dir)
 
-    for step, ctx in zip(stored.spec.steps, contexts, strict=True):
-        ctx.source_root, ctx.force = source_root, force
-        earlier = tuple(s.stage for s in result.steps if s.status == "failed")
-        if earlier:
-            logger.warning("%s: running after failed step(s) %s", step.stage, ", ".join(earlier))
-        summary: StageRunSummary | None = None
-        try:
-            summary = run_stage_local(STAGE_CONTRACTS[step.stage], shard_dir, config, ctx=ctx)
-            error = summary.error
-            status: Literal["ok", "failed"] = "failed" if summary.exit_code else "ok"
-        except Exception as e:
-            logger.exception("%s: failed", step.stage)
-            error, status = f"{type(e).__name__}: {e}", "failed"
-        result.steps.append(StepOutcome(step.stage, status, summary, error, earlier))
+    with workflow_context(stored.digest):
+        for step, ctx in zip(stored.spec.steps, contexts, strict=True):
+            ctx.source_root, ctx.force = source_root, force
+            earlier = tuple(s.stage for s in result.steps if s.status == "failed")
+            if earlier:
+                logger.warning("%s: running after failed step(s) %s", step.stage, ", ".join(earlier))
+            summary: StageRunSummary | None = None
+            try:
+                summary = run_stage_local(STAGE_CONTRACTS[step.stage], shard_dir, config, ctx=ctx)
+                error = summary.error
+                status: Literal["ok", "failed"] = "failed" if summary.exit_code else "ok"
+            except Exception as e:
+                logger.exception("%s: failed", step.stage)
+                error, status = f"{type(e).__name__}: {e}", "failed"
+            result.steps.append(StepOutcome(step.stage, status, summary, error, earlier))
     return result
 
 

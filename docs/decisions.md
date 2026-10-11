@@ -175,6 +175,9 @@ Phase 2 merge 5 (`cloud/workflow_plan.py`).
 - **Free earlier steps are produced in a scratch symlink directory** (`normalise`, `spellfix`, `chunk` sans AI chunking), so a fresh-extraction workflow gets a real embed count. An input only a paid step produces is `pending`, never guessed.
 - **No model probe and no rate card.** Plan stops at `check_workflow`; `--assume-price` is the caller's rate, labelled an assumption. `skip` is only what is knowable offline (`layout` by fingerprint).
 
+### The workflow digest is a contextvar, observed in the record
+Phase 2 merge 6. `sidecar_footer` is the one place every stage's writer already takes its stamp, so the digest rides it through `workflow_context` rather than a parameter on a dozen writers. A contextvar, not a global, so two workflows in one worker process cannot stamp each other's files. It is written even where the shard is unstamped (it is a fact about the write; the run id is not claimed). The run record lists workflows *observed* in files, like stages, never those merely stored.
+
 ### The remote shard-stage runner generalises `finalize`
 Extraction went distributed in 2026-06; everything downstream of it stopped at
 the local filesystem, so a store-backed run had to be pulled down before any
