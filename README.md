@@ -130,6 +130,7 @@ config, never in code.
 |---|---|
 | `ingest-gnaf`, `ingest-abn`, `ingest-geo` | Reference-register ingests |
 | `verify-shards` | Audit a run's shard files; optionally diff two runs |
+| `verify-evidence` | Re-check every money, entity-link and PII span against the source text it points at |
 | `resolve-source` | Map output rows back to their source files, verified by content hash |
 | `egress` | Export a finished run as a bundle |
 | `ground-truth`, `score` | Build review baselines from a run, and score corrected ones |

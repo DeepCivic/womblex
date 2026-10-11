@@ -17,7 +17,7 @@ import pyarrow.parquet as pq
 
 from womblex.store.evidence import DOCUMENT, EVIDENCE_FIELDS, backfill_evidence
 from womblex.store.normalise_output import NORMALISED_TEXT_SUFFIX
-from womblex.store.output import _write_rows
+from womblex.store.output import ELEMENTS_SUFFIX, _write_rows
 from womblex.store.run_stamp import sidecar_footer
 from womblex.store.spellfix_output import SPELLFIX_TEXT_SUFFIX
 
@@ -111,8 +111,9 @@ def _reanchor_legacy(raw: pa.Table, path: Path) -> pa.Table:
     from womblex.process.evidence import EvidenceIndexes
 
     base = path.parent / f"{path.name.removesuffix(ENTITY_LINKS_SUFFIX)}.parquet"
-    if any((path.parent / f"{base.stem}{s}").exists()
-           for s in (NORMALISED_TEXT_SUFFIX, SPELLFIX_TEXT_SUFFIX)):
+    if not (path.parent / f"{base.stem}{ELEMENTS_SUFFIX}").exists() or any(
+            (path.parent / f"{base.stem}{s}").exists()
+            for s in (NORMALISED_TEXT_SUFFIX, SPELLFIX_TEXT_SUFFIX)):
         return raw
     indexes = EvidenceIndexes(base)
     rows = raw.to_pylist()
