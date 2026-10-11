@@ -26,6 +26,12 @@ space chunks and enrichment mentions use), ``table_markdown`` (the markdown of
 the table ``elem_order``, or of the sheet ``sheet``) or ``cell`` (one cell's
 value). A position is never searched for: offsets are carried from where they
 were computed, or the row is given a coarser level.
+
+``evidence_check`` is the outcome of checking the receipt at its own level
+before the file was written: ``holds``, ``fails`` or ``unchecked`` (its source or
+text was not to hand, or the file predates the check). A receipt that fails is
+written and labelled, never refused: the run completes and says what it could
+not verify.
 """
 
 from __future__ import annotations
@@ -40,6 +46,7 @@ TABLE_LAYER = "table_markdown"
 CELL_LAYER = "cell"
 
 SPAN, ELEMENT, CHUNK, DOCUMENT = "span", "element", "chunk", "document"
+HOLDS, FAILS, UNCHECKED = "holds", "fails", "unchecked"
 
 EVIDENCE_FIELDS: tuple[pa.Field, ...] = (
     pa.field("elem_order", pa.int32()),
@@ -52,12 +59,9 @@ EVIDENCE_FIELDS: tuple[pa.Field, ...] = (
     pa.field("char_end", pa.int32()),
     pa.field("text_layer", pa.string()),
     pa.field("anchor_level", pa.string()),
+    pa.field("evidence_check", pa.string()),
 )
 EVIDENCE_COLUMNS: tuple[str, ...] = tuple(f.name for f in EVIDENCE_FIELDS)
-
-
-class EvidenceError(ValueError):
-    """A receipt fails its own check; the batch is not published."""
 
 
 def evidence(level: str, **fields: Any) -> dict[str, Any]:
@@ -75,8 +79,9 @@ def backfill_evidence(
 
     ``columns`` maps an evidence column to the legacy column that carried the
     same value unchanged (a cell's row and column, a sheet name); everything
-    else is null, and ``anchor_level`` is ``level`` for every row. Offsets of
-    the old shape are not re-expressed here: that needs the elements.
+    else is null, ``anchor_level`` is ``level`` and ``evidence_check`` is
+    ``unchecked`` for every row. Offsets of the old shape are not re-expressed
+    here: that needs the elements.
     """
     if level not in (SPAN, ELEMENT, CHUNK, DOCUMENT):
         raise ValueError(f"bad evidence level: {level!r}")
@@ -87,8 +92,9 @@ def backfill_evidence(
         legacy = columns.get(field.name)
         if legacy is not None and legacy in raw.schema.names:
             raw = raw.append_column(field.name, raw.column(legacy).cast(field.type))
-        elif field.name == "anchor_level":
-            raw = raw.append_column(field.name, pa.array([level] * raw.num_rows, field.type))
+        elif field.name in ("anchor_level", "evidence_check"):
+            value = level if field.name == "anchor_level" else UNCHECKED
+            raw = raw.append_column(field.name, pa.array([value] * raw.num_rows, field.type))
         else:
             raw = raw.append_column(field.name, pa.nulls(raw.num_rows, field.type))
     return raw

@@ -35,6 +35,13 @@ class Candidate:
     source_hash: str
     mention_start: int = -1
     mention_end: int = -1
+    # Where the mention offsets point (see store/evidence.py): the text layer, the
+    # table (``elem_order`` or ``sheet``) for a table mention, and the enricher's
+    # own text for the mention (``text`` is the entity's name).
+    text_layer: str | None = None
+    elem_order: int | None = None
+    sheet: str | None = None
+    mention_text: str | None = None
 
 
 @dataclass

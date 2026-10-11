@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import bisect
 import logging
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, MutableMapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -27,9 +27,11 @@ from womblex.store.evidence import (
     CHUNK,
     DOCUMENT,
     ELEMENT,
+    FAILS,
+    HOLDS,
     SPAN,
     TABLE_LAYER,
-    EvidenceError,
+    UNCHECKED,
     evidence,
 )
 
@@ -239,7 +241,7 @@ class EvidenceIndexes:
         return self._cache[key]
 
 
-#: Rows named in a refusal; the counts are always complete.
+#: Rows named in the warning; the counts are always complete.
 _REPORT_LIMIT = 5
 
 #: ``(source_hash, text_layer)`` -> that document's index, or ``None`` if its elements are absent.
@@ -252,8 +254,8 @@ ChunkText = Callable[[Mapping[str, Any]], str | None]
 class EvidenceReport:
     """Outcome of checking receipts against their sources.
 
-    ``unchecked`` counts receipts whose source is absent: written and warned
-    about, never refused.
+    ``unchecked`` counts receipts whose source or text is absent; ``n_mismatched``
+    those that fail their own check. Both are written and labelled, never refused.
     """
 
     checked: int = 0
@@ -273,10 +275,10 @@ class EvidenceReport:
 
 
 def check_rows(
-    rows: Iterable[Mapping[str, Any]], lookup: IndexLookup, *, text_key: str, label: str,
+    rows: Iterable[MutableMapping[str, Any]], lookup: IndexLookup, *, text_key: str, label: str,
     chunk_text: ChunkText | None = None,
 ) -> EvidenceReport:
-    """Check each row's receipt at its own precision against ``row[text_key]``.
+    """Check each row's receipt at its own precision and label it in ``evidence_check``.
 
     A row without a valid ``anchor_level`` is a null receipt and fails. A
     ``chunk`` receipt is checked against ``chunk_text(row)``; every other level
@@ -299,6 +301,7 @@ def check_rows(
         else:
             index = lookup(row["source_hash"], row.get("text_layer"))
             verdict = None if index is None else index.holds(row, text)
+        row["evidence_check"] = UNCHECKED if verdict is None else HOLDS if verdict else FAILS
         if verdict is None:
             report.unchecked += 1
             continue
@@ -313,25 +316,27 @@ def check_rows(
     return report
 
 
-def assert_evidence(
+def stamp_evidence(
     rows: list[dict[str, Any]], lookup: IndexLookup, *, text_key: str, label: str, base: Path,
     chunk_text: ChunkText | None = None,
 ) -> EvidenceReport:
-    """Refuse a batch with a receipt that fails its own check; warn about unchecked ones.
+    """Check every receipt, label each row's ``evidence_check`` and warn about the rest.
 
-    Called before the sidecar is written, so a refusal publishes nothing.
+    Called before the sidecar is written. Nothing is refused: a receipt that
+    fails, or cannot be checked, is written with its label so the run completes
+    and says what it could not verify.
     """
     report = check_rows(rows, lookup, text_key=text_key, label=label, chunk_text=chunk_text)
     if report.unchecked:
         logger.warning(
-            "%s: %s has %d receipt(s) whose source or text is absent, so they are written"
-            " unchecked",
+            "%s: %s has %d receipt(s) whose source or text is absent; written as unchecked",
             label, base.stem, report.unchecked,
         )
     if not report.ok:
-        raise EvidenceError(
-            f"{label}: {base.stem} has {report.n_mismatched} of {report.checked + report.unchecked}"
-            f" receipt(s) that fail their own check; nothing written. First: "
-            + "; ".join(report.mismatches)
+        logger.warning(
+            "%s: %s has %d of %d receipt(s) that fail their own check; written as fails."
+            " First: %s",
+            label, base.stem, report.n_mismatched, report.checked + report.unchecked,
+            "; ".join(report.mismatches),
         )
     return report

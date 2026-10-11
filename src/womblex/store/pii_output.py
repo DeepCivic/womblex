@@ -16,6 +16,7 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from womblex.store.evidence import CHUNK, EVIDENCE_FIELDS, backfill_evidence
 from womblex.store.output import _write_rows
 from womblex.store.run_stamp import sidecar_footer
 
@@ -28,8 +29,7 @@ PII_SPANS_SCHEMA = pa.schema([
     ("source_hash", pa.string()),
     ("chunk_index", pa.int32()),
     ("content_type", pa.string()),
-    ("start", pa.int32()),
-    ("end", pa.int32()),
+    *EVIDENCE_FIELDS,               # where the span is in the source, and how precisely
     ("text", pa.string()),
     ("entity_type", pa.string()),
     ("entity_id", pa.string()),     # graph entity id ("" for regex spans)
@@ -97,7 +97,10 @@ def read_pii_spans(path: Path) -> pa.Table:
 
 
 def _read_pii_spans_shard(path: Path) -> pa.Table:
-    raw = pq.read_table(str(path))
+    # Contract 1.x spans carried chunk-relative `start` / `end`; they cannot be mapped
+    # to the source without the elements, so an older file reads as chunk-located
+    # (the row's own `chunk_index`).
+    raw = backfill_evidence(pq.read_table(str(path)), level=CHUNK)
     missing = [f.name for f in PII_SPANS_SCHEMA if f.name not in raw.schema.names]
     if missing:
         raise ValueError(

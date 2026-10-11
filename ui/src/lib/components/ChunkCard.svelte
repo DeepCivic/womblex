@@ -2,10 +2,10 @@
 	// One chunk (docs/ui-plan.md merge 6): its text with PII spans highlighted
 	// inline, plus the entity and money overlays that resolved to this chunk.
 	//
-	// Only PII spans are chunk-relative — `PII_SPANS_SCHEMA` documents its
-	// `start`/`end` as offsets into `chunk.text` (slice `text[start:end]`). So
+	// Only PII spans are chunk-relative — the reader derives their `start`/`end`
+	// from the evidence offsets as positions in `chunk.text` (slice `text[start:end]`). So
 	// those are the only overlay drawn *on* the text. Entity mentions
-	// (`mention_start`/`_end`) and money spans (`start_char`/`_end`) are offsets
+	// (`mention_start`/`_end`) and money spans (`char_start`/`_end`) are offsets
 	// into the reassembled document narrative, a different coordinate space; the
 	// screen groups them onto their chunk (entities by `chunk_index`, money by
 	// range containment) and lists them beside the text rather than inventing a
@@ -132,7 +132,7 @@
 
 	{#if show.money && money.length > 0}
 		<ul class="flex flex-col gap-1 text-xs">
-			{#each money as m (m.start_char)}
+			{#each money as m (m.char_start)}
 				<li class="flex items-baseline gap-2">
 					<span class="font-mono font-medium tabular-nums">{moneyLabel(m)}</span>
 					<span class="truncate text-muted-foreground" title={m.text}>“{m.text}”</span>
