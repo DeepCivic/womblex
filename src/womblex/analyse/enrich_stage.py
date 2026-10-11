@@ -233,9 +233,8 @@ def plan_enrichment(
 ) -> EnrichPlan:
     """Count the requests and tokens `enrich_shards` would spend over *shard_dir*.
 
-    Builds the same texts (`_load_narratives`, `_load_tables`) and packs them the same way,
-    so the counts are the run's own, not an estimate. Raises `MissingOverlayError` as the
-    stage does. Never calls the API.
+    Same texts and packing as the stage, so the counts are the run's own. Raises
+    `MissingOverlayError` as the stage does. Never calls the API.
     """
     bases = _batch_bases(shard_dir)
     require_overlays(bases, text_source)

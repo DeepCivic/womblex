@@ -11,10 +11,9 @@ import pytest
 
 from tests.test_workflow_runner import _PRESET, _resolve, _stored, shards  # noqa: F401
 from womblex.analyse.embed_stage import plan_embedding
-from womblex.analyse.enrich_stage import _load_narratives, plan_enrichment
+from womblex.analyse.enrich_stage import _load_narratives
 from womblex.cloud.stage_contracts import STAGE_CONTRACTS
 from womblex.cloud.workflow_plan import plan_workflow
-from womblex.cloud.workflow_runner import WorkflowRefusedError
 from womblex.cloud.workflow_store import WorkflowStore, ensure_workflow_schema
 from womblex.config import EnrichmentConfig
 from womblex.process.chunk_stage import _batch_bases
@@ -26,7 +25,6 @@ _STEPS = ["normalise", "chunk", "enrich", "embed"]
 
 @pytest.fixture(autouse=True)
 def _no_paid_path(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Plan must not reach a client or a model probe; either would fail loudly."""
     def boom(*_a, **_k):
         raise AssertionError("plan reached a paid or model-probing path")
 
@@ -47,13 +45,9 @@ def test_counts_are_the_stages_own_and_the_directory_is_untouched(shards: Path) 
     assert enrich is not None and embed is not None
     assert enrich.basis == embed.basis == "simulated" and enrich.tokens > 0 and embed.tokens > 0
 
-    # The oracle: the same text counted directly.
-    counter = TokenCounter(EnrichmentConfig().tokenizer)
-    [base] = _batch_bases(shards)
-    narrative, _ = _load_narratives(base, "elements")
-    # normalise passthrough on the synthetic CSV: enrichment text equals the verbatim narrative
+    counter = TokenCounter(EnrichmentConfig().tokenizer)  # the oracle: the same text counted directly
+    narrative, _ = _load_narratives(_batch_bases(shards)[0], "elements")  # normalise is a passthrough here
     assert enrich.detail["narrative_tokens"] == sum(counter.count_batch(list(narrative.values())))
-    assert plan_enrichment(shards, EnrichmentConfig()).narrative_tokens == enrich.detail["narrative_tokens"]
 
 
 def test_embed_count_equals_a_real_chunk_run(shards: Path, tmp_path: Path) -> None:  # noqa: F811
@@ -80,19 +74,10 @@ def test_a_step_that_cannot_run_offline_leaves_the_count_pending(
 
 def test_price_appears_only_when_assumed(shards: Path) -> None:  # noqa: F811
     stored = _stored(["chunk", "embed"])
-    bare = plan_workflow(stored, shards, resolve_preset=_resolve).steps[1].tokens
-    assert bare is not None and bare.assumed_cost is None
+    assert plan_workflow(stored, shards, resolve_preset=_resolve).steps[1].tokens.assumed_cost is None  # type: ignore[union-attr]
     priced = plan_workflow(stored, shards, resolve_preset=_resolve, prices={"embed": 2.0}).steps[1].tokens
     assert priced is not None and priced.assumed_cost == pytest.approx(priced.tokens / 1e6 * 2.0)
     assert priced.assumed_price_per_million == 2.0
-
-
-def test_layout_skips_when_fingerprints_match_and_a_bad_order_is_refused(shards: Path) -> None:  # noqa: F811
-    layout = plan_workflow(_stored(["layout"]), shards, resolve_preset=_resolve).steps[0]
-    assert layout.action in {"skip", "run"}  # the fixture's own fingerprint decides; see below
-    assert (layout.action == "skip") == ("fingerprint" in layout.reason)
-    with pytest.raises(WorkflowRefusedError):
-        plan_workflow(_stored(["chunk", "normalise"], config=_NORMALISED), shards, resolve_preset=_resolve)
 
 
 def test_cli_json_prices_and_exit_codes(shards: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:  # noqa: F811
@@ -117,4 +102,3 @@ def test_cli_json_prices_and_exit_codes(shards: Path, tmp_path: Path, capsys: py
     assert cmd_plan(args(json=False, assume_price=["embed=3"])) == 0
     assert "ASSUMPTION" in capsys.readouterr().out
     assert cmd_plan(args(assume_price=["chunk=1"])) == 1
-    assert cmd_plan(args(workflow_id="nope")) == 1

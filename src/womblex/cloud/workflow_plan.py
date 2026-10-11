@@ -1,21 +1,17 @@
 """`womblex plan`: what a workflow would run over a shard directory, and what it would spend.
 
-Offline by construction: it stops at `check_workflow` (spec, preset, config, step order),
-so no model request is made and no client is built; `womblex validate` is the check that
-probes models. Enrich and embed counts come from the stages' own request builders
-(`plan_enrichment`, `plan_embedding`) over the offline kanon-2 tokeniser, so they are the
-run's own counts. Where an earlier step is a free local one (`normalise`, `spellfix`,
-`chunk` without AI chunking) its output is produced in a scratch directory of symlinks, so
-the count is over the layer the step would actually read; the shard directory is untouched.
-A price appears only when the caller supplies a rate, and is labelled an assumption.
+Offline: it stops at `check_workflow` (no model request, no client); `validate` probes
+models. Enrich and embed counts come from the stages' own request builders over the offline
+kanon-2 tokeniser. A free earlier step (`normalise`, `spellfix`, `chunk` without AI chunking)
+is produced in a scratch directory of symlinks so the count is over the layer the step would
+read; the shard directory is untouched. A price is the caller's assumed rate, labelled.
 """
 
 from __future__ import annotations
 
-import logging
 import tempfile
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -27,8 +23,6 @@ from womblex.cloud.workflow_store import StoredWorkflow
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from womblex.config import WomblexConfig
     from womblex.ui.presets import Preset
-
-logger = logging.getLogger(__name__)
 
 #: Free, local, deterministic steps whose output a count may need, per counted stage.
 _FEEDS: dict[str, tuple[str, ...]] = {
@@ -71,8 +65,6 @@ class WorkflowPlan:
     shard_dir: str
 
     def as_dict(self) -> dict[str, Any]:
-        from dataclasses import asdict
-
         return asdict(self)
 
 
@@ -125,7 +117,6 @@ def _estimate(
                 if not any(f.name.endswith(sfx) for sfx in held_back):
                     (scratch / f.name).symlink_to(f.resolve())
             for s in sim:
-                logger.info("plan: producing %s offline in a scratch directory", s)
                 STAGE_CONTRACTS[s].run(scratch, config, RunContext())
             basis = "simulated" if sim else "on_disk"
             if stage == "enrich":
