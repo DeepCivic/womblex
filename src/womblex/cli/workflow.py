@@ -44,6 +44,16 @@ def _register_validate(p: argparse.ArgumentParser) -> None:
     p.add_argument("--json", action="store_true", help="Print the report as one JSON object")
 
 
+def _register_plan(p: argparse.ArgumentParser) -> None:
+    _add_workflow_arguments(p)
+    p.add_argument("--shards", type=Path, required=True,
+                   help="Local shard dir the steps would run over.")
+    p.add_argument("--assume-price", action="append", default=[], metavar="STAGE=USD_PER_MILLION",
+                   help="An assumed rate for `enrich` or `embed` tokens (repeatable). Womblex holds no "
+                        "rate card: any cost shown is this assumption times the exact token count.")
+    p.add_argument("--json", action="store_true", help="Print the plan as one JSON object")
+
+
 def _load_workflow(args: argparse.Namespace):  # type: ignore[no-untyped-def]
     """The stored workflow named by *args*, or `None` (the reason is logged)."""
     from womblex.cloud.workflow_store import WorkflowStore
@@ -142,9 +152,69 @@ def cmd_validate(args: argparse.Namespace) -> int:
     return 0 if report.valid else 1
 
 
+def _parse_prices(items: list[str]) -> dict[str, float]:
+    out: dict[str, float] = {}
+    for item in items:
+        stage, _, value = item.partition("=")
+        if stage not in ("enrich", "embed"):
+            raise ValueError(f"--assume-price takes enrich=… or embed=…, got {item!r}")
+        out[stage] = float(value)
+    return out
+
+
+def cmd_plan(args: argparse.Namespace) -> int:
+    """Say what a workflow would run and spend, calling no paid API; exit 1 if it would be refused."""
+    from womblex.cloud.workflow_plan import plan_workflow
+    from womblex.cloud.workflow_runner import WorkflowRefusedError
+
+    if not args.shards.is_dir():
+        logger.error("--shards path is not a directory: %s", args.shards)
+        return 1
+    try:
+        prices = _parse_prices(args.assume_price)
+    except ValueError as e:
+        logger.error("%s", e)
+        return 1
+    stored = _load_workflow(args)
+    if stored is None:
+        return 1
+    try:
+        plan = plan_workflow(
+            stored, args.shards, resolve_preset=_preset_resolver(args), prices=prices,  # type: ignore[arg-type]
+        )
+    except WorkflowRefusedError as e:
+        logger.error("%s", e)
+        for issue in e.issues:
+            logger.error("[%s] %s", issue.code.value, issue.message)
+        return 1
+    if args.json:
+        print(json.dumps(plan.as_dict(), indent=2))
+        return 0
+    print(f"workflow {plan.workflow_id} ({plan.digest}) over {plan.shard_dir}")
+    for s in plan.steps:
+        print(f"  {s.action:<4} {s.stage}" + (f" — {s.reason}" if s.reason else ""))
+        if (t := s.tokens) is not None:
+            if t.basis in ("pending", "unavailable"):
+                print(f"       tokens: {t.basis}: {t.note}")
+            else:
+                print(f"       tokens: {t.tokens:,} over {t.texts:,} text(s) in {t.requests:,} "
+                      f"request(s) [{t.basis}, offline kanon-2 tokeniser]")
+            if t.assumed_cost is not None:
+                print(f"       cost: ${t.assumed_cost:,.2f} — ASSUMPTION: ${t.assumed_price_per_million}/M "
+                      "tokens supplied by --assume-price; not a published rate")
+    for w in plan.warnings:
+        print(f"warning: {w}")
+    if plan.not_acted_on:
+        print(f"stored but not acted on: {', '.join(plan.not_acted_on)}")
+    print("no paid API was called; `womblex validate` checks models and Isaacus availability")
+    return 0
+
+
 COMMANDS = [
     Command("run-workflow", "Run a stored workflow's steps over a local shard directory",
             _register_run_workflow, cmd_run_workflow),
+    Command("plan", "Say what a stored workflow would run and spend, calling no paid API",
+            _register_plan, cmd_plan),
     Command("validate", "Check a stored workflow would run, without running it",
             _register_validate, cmd_validate),
 ]

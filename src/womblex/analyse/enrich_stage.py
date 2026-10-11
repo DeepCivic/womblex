@@ -208,6 +208,70 @@ def enrich_shards(
     )
 
 
+@dataclass
+class EnrichPlan:
+    """What `enrich_shards` would send, counted offline (no client, no request)."""
+
+    documents: int = 0
+    tables: int = 0
+    narrative_tokens: int = 0
+    table_tokens: int = 0
+    requests: int = 0
+    split_documents: int = 0
+
+    @property
+    def tokens(self) -> int:
+        return self.narrative_tokens + self.table_tokens
+
+
+def plan_enrichment(
+    shard_dir: Path,
+    enrichment_config: EnrichmentConfig,
+    *,
+    text_source: str = "elements",
+    token_counter: TokenCounter | None = None,
+) -> EnrichPlan:
+    """Count the requests and tokens `enrich_shards` would spend over *shard_dir*.
+
+    Builds the same texts (`_load_narratives`, `_load_tables`) and packs them the same way,
+    so the counts are the run's own, not an estimate. Raises `MissingOverlayError` as the
+    stage does. Never calls the API.
+    """
+    bases = _batch_bases(shard_dir)
+    require_overlays(bases, text_source)
+    counter = token_counter or TokenCounter(enrichment_config.tokenizer)
+    plan = EnrichPlan()
+    min_chars = max(1, enrichment_config.skip_short_documents)
+    for base in bases:
+        narratives, _ = _load_narratives(base, text_source)
+        packable = [(h, t) for h, t in narratives.items() if len(t.strip()) >= min_chars]
+        tables = _load_tables(base) if enrichment_config.include_tables else {}
+        table_items = [
+            (_table_key(h, i), t.markdown) for h, ts in tables.items() for i, t in enumerate(ts)
+        ]
+        plan.documents += len(packable)
+        plan.tables += len(table_items)
+        for group in pack_by_tokens(
+            packable + table_items, counter.count_batch,
+            max_items=enrichment_config.max_texts_per_request,
+            token_budget=enrichment_config.token_budget,
+        ):
+            if group.solo and group.total_tokens > enrichment_config.split_ceiling:
+                plan.split_documents += 1
+                plan.requests += len(split_on_boundaries(
+                    group.items[0].text, counter.count_batch,
+                    max_tokens=enrichment_config.split_ceiling,
+                ))
+            else:
+                plan.requests += 1
+            for it in group.items:
+                if _SEP in it.key:
+                    plan.table_tokens += it.tokens
+                else:
+                    plan.narrative_tokens += it.tokens
+    return plan
+
+
 # ---------------------------------------------------------------------------
 # Token-budgeted request packing + long-doc split
 # ---------------------------------------------------------------------------

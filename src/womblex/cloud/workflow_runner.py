@@ -168,18 +168,17 @@ class PreparedWorkflow:
     order_warnings: list[str]
 
 
-def prepare_workflow(
+def check_workflow(
     stored: StoredWorkflow,
     *,
     resolve_preset: Callable[[str], Preset | None],
     present: Present | None,
     models_check: str | None = None,
-) -> PreparedWorkflow:
-    """The one pre-run path: spec, preset, merged config, step order, every step's context.
+) -> tuple[WomblexConfig, list[str]]:
+    """The offline half of the pre-run path: spec, preset, merged config, step order.
 
-    Shared by `run_workflow_local` and `womblex validate`, so they refuse alike. *present*
-    is the disk state (`None`: unknown, so only the order among the steps is checked).
-    Raises `WorkflowRefusedError`, naming every step whose preconditions failed.
+    Makes no model request and builds no client. `womblex plan` stops here; the runner and
+    `validate` continue into `prepare_workflow`. Raises `WorkflowRefusedError`.
     """
     try:
         check_spec(stored.spec)
@@ -197,6 +196,25 @@ def prepare_workflow(
             f"workflow {stored.id!r}: step order cannot complete: {err}", err.issues,
             code=RefusalCode.STEP_ORDER,
         ) from err
+    return config, stages
+
+
+def prepare_workflow(
+    stored: StoredWorkflow,
+    *,
+    resolve_preset: Callable[[str], Preset | None],
+    present: Present | None,
+    models_check: str | None = None,
+) -> PreparedWorkflow:
+    """The one pre-run path: `check_workflow`, then every step's context.
+
+    Shared by `run_workflow_local` and `womblex validate`, so they refuse alike. *present*
+    is the disk state (`None`: unknown, so only the order among the steps is checked).
+    Raises `WorkflowRefusedError`, naming every step whose preconditions failed.
+    """
+    config, stages = check_workflow(
+        stored, resolve_preset=resolve_preset, present=present, models_check=models_check,
+    )
     contexts: list[RunContext] = []
     failures: list[tuple[str, str]] = []
     for stage in stages:
@@ -265,6 +283,7 @@ __all__ = [
     "StepOutcome",
     "WorkflowRefusedError",
     "WorkflowRunResult",
+    "check_workflow",
     "not_acted_on",
     "prepare_workflow",
     "resolve_workflow_config",

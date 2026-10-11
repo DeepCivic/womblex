@@ -168,6 +168,15 @@ Phase 2 merge 4 (`cloud/workflow_validate.py`). The plan left the report's shape
 - **The model check runs as configured.** At `load` or `smoke` it makes the same minimal requests a run would to an Isaacus model; `--models-check off` makes validate fully offline. Validate never runs a step and never writes.
 - **Without `--shards` only the order among the steps is checked**, and the report says so (`shards_checked`).
 
+### `womblex plan` counts, it does not price
+Phase 2 merge 5 (`cloud/workflow_plan.py`).
+
+- **Exact counts come from the stages' own request builders** (`plan_enrichment`, `plan_embedding`), so there is no parallel packing logic to drift. Embed tokens use the kanon-2 tokenizer (`TokenCounter` default); `EmbeddingConfig` carries none.
+- **Free earlier steps are produced offline in a scratch directory** (`normalise`, `spellfix`, `chunk` without AI chunking), linked from the shard directory minus the suffixes they would rewrite, so a fresh-extraction workflow gets a real embed count rather than "unknown". Cost: chunking the corpus once. An input only a paid step produces is `pending`, never guessed.
+- **No model probe.** Plan stops at `check_workflow`; `validate` is where `load`/`smoke` checks run, because they make minimal paid requests and plan promises none.
+- **No rate card.** Womblex holds no Isaacus price; `--assume-price` multiplies a caller-supplied rate and the output labels it an assumption.
+- **`skip` is only what is knowable offline**: `layout` by fingerprint. Checkpoint skips depend on run state and are not predicted.
+
 ### The remote shard-stage runner generalises `finalize`
 Extraction went distributed in 2026-06; everything downstream of it stopped at
 the local filesystem, so a store-backed run had to be pulled down before any

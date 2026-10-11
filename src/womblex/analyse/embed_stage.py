@@ -14,12 +14,13 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-from womblex.analyse.embed import embed_texts
+from womblex.analyse.embed import MAX_TEXTS_PER_REQUEST, embed_texts
 from womblex.config import EmbeddingConfig
 from womblex.process.chunk_stage import _batch_bases
 from womblex.store.checkpoint import CheckpointManager
 from womblex.store.embed_output import embeddings_path_for, write_embeddings
 from womblex.store.output import read_chunks, read_manifest
+from womblex.utils.token_packer import TokenCounter
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +102,27 @@ def embed_shards(
         logger.info("embed_shards: %s embedded %d chunks", base.stem, len(rows))
 
     return EmbedStageResult(batches_written=batches_written, chunks_embedded=chunks_embedded)
+
+
+@dataclass
+class EmbedPlan:
+    """What `embed_shards` would send, counted offline."""
+
+    chunks: int = 0
+    tokens: int = 0
+    requests: int = 0
+
+
+def plan_embedding(shard_dir: Path, *, token_counter: TokenCounter | None = None) -> EmbedPlan:
+    """Count the chunks, requests and tokens `embed_shards` would send; never calls the API."""
+    counter = token_counter or TokenCounter()
+    plan = EmbedPlan()
+    for base in _batch_bases(shard_dir):
+        texts = [r["text"] for r in _chunk_rows(base)]
+        plan.chunks += len(texts)
+        plan.tokens += sum(counter.count_batch(texts)) if texts else 0
+        plan.requests += -(-len(texts) // MAX_TEXTS_PER_REQUEST)
+    return plan
 
 
 def _chunk_rows(base_path: Path) -> list[dict]:
