@@ -54,6 +54,21 @@ def _register_plan(p: argparse.ArgumentParser) -> None:
     p.add_argument("--json", action="store_true", help="Print the plan as one JSON object")
 
 
+def _register_dispatch(p: argparse.ArgumentParser) -> None:
+    p.add_argument("workflow_id", help="Stored workflow to dispatch")
+    p.add_argument("--run-id", required=True, help="Run whose extraction the stages follow")
+    p.add_argument("--store", default=None,
+                   help="Object-store URI the run's shards are in (or $WOMBLEX_STORE_URI)")
+    p.add_argument("--output-prefix", default=None, help="Default: runs/<run-id>")
+    p.add_argument("--max-attempts", type=int, default=3)
+    p.add_argument("--dry-run", action="store_true", help="Run every check, write no queue row")
+    p.add_argument("--dsn", default=None,
+                   help="DBOS system database holding the workflow and the queue "
+                        "(or $WOMBLEX_DB_DSN / $DATABASE_URL). Default: the local SQLite file.")
+    p.add_argument("--presets-dir", type=Path, default=None,
+                   help="Directory of operator-saved presets (or $WOMBLEX_UI_PRESETS_DIR).")
+
+
 def _load_workflow(args: argparse.Namespace):  # type: ignore[no-untyped-def]
     """The stored workflow named by *args*, or `None` (the reason is logged)."""
     from womblex.cloud.workflow_store import WorkflowStore
@@ -215,9 +230,40 @@ def cmd_plan(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_dispatch_workflow(args: argparse.Namespace) -> int:
+    """Queue a stored workflow's steps for the fleet; exit 1 if it is refused before any row."""
+    from womblex.cloud.workflow_dispatch import dispatch_workflow
+    from womblex.cloud.workflow_runner import WorkflowRefusedError
+
+    stored = _load_workflow(args)
+    if stored is None:
+        return 1
+    dsn = args.dsn or os.environ.get("WOMBLEX_DB_DSN") or os.environ.get("DATABASE_URL")
+    try:
+        result = dispatch_workflow(
+            stored, resolve_preset=_preset_resolver(args),  # type: ignore[arg-type]
+            run_id=args.run_id, store_uri=args.store or os.environ.get("WOMBLEX_STORE_URI"),
+            dsn=dsn, output_prefix=args.output_prefix, max_attempts=args.max_attempts,
+            dry_run=args.dry_run,
+        )
+    except WorkflowRefusedError as e:
+        logger.error("[%s] %s", e.code.value, e)
+        for issue in e.issues:
+            logger.error("[%s] %s", issue.code.value, issue.message)
+        return 1
+    logger.info(
+        "workflow %s (%s): %s -> %s%s", result.workflow_id, result.digest,
+        " -> ".join(result.stages), result.shard_prefix,
+        " (dry run: nothing queued)" if result.dry_run else f", {result.newly_enqueued} newly dispatched",
+    )
+    return 0
+
+
 COMMANDS = [
     Command("run-workflow", "Run a stored workflow's steps over a local shard directory",
             _register_run_workflow, cmd_run_workflow),
+    Command("dispatch-workflow", "Queue a stored workflow's steps for the fleet (object-store run)",
+            _register_dispatch, cmd_dispatch_workflow),
     Command("plan", "Say what a stored workflow would run and spend, calling no paid API",
             _register_plan, cmd_plan),
     Command("validate", "Check a stored workflow would run, without running it",

@@ -309,6 +309,16 @@ class RunBoard:
                     newly, run_id, len(stages))
         return newly
 
+    def stage_workflow_digests(self, run_id: str) -> dict[str, str | None]:
+        """Each stage already dispatched for *run_id*, with the workflow digest it ran under.
+
+        `None` is a stage dispatched without a workflow (`enqueue-stages`, the console).
+        """
+        return {
+            _attr(s, "stage"): _attr(s, "workflow_digest")
+            for s in self._list(run_id) if _attr(s, "kind") == dbos_app.KIND_STAGE
+        }
+
     # --- reads ----------------------------------------------------------------
 
     def _rows(self, run_id: str | None, owner: str | None, **kwargs: Any) -> list[WorkflowStatus]:

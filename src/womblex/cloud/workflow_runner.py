@@ -59,6 +59,15 @@ class RefusalCode(str, Enum):
     STEP_PRECONDITION = "step_precondition"
     """A step's preflight, Isaacus or model check failed; `steps` names each."""
 
+    STAGE_NOT_DISPATCHABLE = "stage_not_dispatchable"
+    """The fleet runs only `DOWNSTREAM_STAGES`; `steps` names the others (`pii` is local-only)."""
+
+    ORDER_NOT_PIPELINE = "order_not_pipeline"
+    """The fleet runs stages in pipeline order, so a list in another order is not dispatched."""
+
+    RUN_CONFLICT = "run_conflict"
+    """The run already dispatched a stage under a different workflow digest."""
+
 
 class WorkflowRefusedError(Exception):
     """The workflow cannot start. Raised before any step has run, so nothing was spent.
@@ -133,6 +142,22 @@ def config_from_overlay(
     })
 
 
+def workflow_overlay(
+    stored: StoredWorkflow, resolve_preset: Callable[[str], Preset | None],
+) -> dict[str, Any]:
+    """The resolved recipe: the preset's config with the workflow's own `config` over it.
+
+    Raises `WorkflowRefusedError` for an unknown preset.
+    """
+    preset = resolve_preset(stored.spec.preset)
+    if preset is None:
+        raise WorkflowRefusedError(
+            f"workflow {stored.id!r}: unknown preset {stored.spec.preset!r}",
+            code=RefusalCode.PRESET_UNKNOWN,
+        )
+    return combine_config(preset.config, stored.spec.config)
+
+
 def resolve_workflow_config(
     stored: StoredWorkflow, resolve_preset: Callable[[str], Preset | None],
 ) -> WomblexConfig:
@@ -143,14 +168,8 @@ def resolve_workflow_config(
     unknown preset or a combination that does not load.
     """
     spec = stored.spec
-    preset = resolve_preset(spec.preset)
-    if preset is None:
-        raise WorkflowRefusedError(
-            f"workflow {stored.id!r}: unknown preset {spec.preset!r}", code=RefusalCode.PRESET_UNKNOWN,
-        )
-    overlay = combine_config(preset.config, spec.config)
     try:
-        return config_from_overlay(spec.preset, overlay)
+        return config_from_overlay(spec.preset, workflow_overlay(stored, resolve_preset))
     except ValueError as e:
         raise WorkflowRefusedError(
             f"workflow {stored.id!r}: preset {spec.preset!r} with the workflow's config does not load: {e}",
@@ -302,4 +321,5 @@ __all__ = [
     "prepare_workflow",
     "resolve_workflow_config",
     "run_workflow_local",
+    "workflow_overlay",
 ]
