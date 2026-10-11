@@ -30,7 +30,7 @@ womblex/
 │   │   ├── ground_truth.py # ground-truth subcommand (segment + render a shard dir into baselines + sidecars)
 │   │   ├── profile.py      # profile subcommand
 │   │   ├── demo.py         # seed-demo subcommand (publish the vendored demo run)
-│   │   └── verify.py       # verify-shards, resolve-source subcommands
+│   │   └── verify.py       # verify-shards, verify-evidence, resolve-source subcommands
 │   ├── config/             # Pydantic config models (__init__: YAML loader + WomblexConfig; process.py: process-stage models)
 │   ├── pipeline_order.py   # PIPELINE_ORDER — what runs when; enabled_downstream_stages(config)
 │   ├── batch.py            # process_batch() — shared per-batch pipeline body (extract → optional redaction detection; extraction only)

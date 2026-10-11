@@ -16,8 +16,10 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from womblex.store.evidence import DOCUMENT, EVIDENCE_FIELDS, backfill_evidence
+from womblex.store.normalise_output import NORMALISED_TEXT_SUFFIX
 from womblex.store.output import _write_rows
 from womblex.store.run_stamp import sidecar_footer
+from womblex.store.spellfix_output import SPELLFIX_TEXT_SUFFIX
 
 logger = logging.getLogger(__name__)
 
@@ -93,11 +95,41 @@ def read_entity_links(path: Path, *, grain: str = "span") -> pa.Table:
     raise ValueError(f"grain must be 'span' or 'doc', got {grain!r}")
 
 
+def _reanchor_legacy(raw: pa.Table, path: Path) -> pa.Table:
+    """Place an older file's mentions in the source where that is certain.
+
+    A contract 1.x link's `mention_start` / `mention_end` index the enrichment
+    text, which is the verbatim narrative unless a text layer was selected. With
+    no overlay sidecar beside the file the layer can only have been `elements`, so
+    the offsets locate the mention exactly (`span`, unchecked: the file has no
+    mention text). A shard with an overlay, or with no elements, stays
+    document-located.
+    """
+    if "mention_start" not in raw.schema.names:
+        return raw
+    # Lazy: re-anchoring needs the elements, which only the process layer reads.
+    from womblex.process.evidence import EvidenceIndexes
+
+    base = path.parent / f"{path.name.removesuffix(ENTITY_LINKS_SUFFIX)}.parquet"
+    if any((path.parent / f"{base.stem}{s}").exists()
+           for s in (NORMALISED_TEXT_SUFFIX, SPELLFIX_TEXT_SUFFIX)):
+        return raw
+    indexes = EvidenceIndexes(base)
+    rows = raw.to_pylist()
+    for r in rows:
+        index = indexes.get(r["source_hash"])
+        start, end = r["mention_start"], r["mention_end"]
+        ref = index.narrative_ref(start, end) if index and start is not None and 0 <= start < end else None
+        if ref:
+            r.update({k: v for k, v in ref.items() if k != "evidence_check"})
+    return pa.Table.from_pylist(rows, schema=raw.schema)
+
+
 def _read_entity_links_shard(path: Path) -> pa.Table:
     # Contract 1.x links carried `mention_start` / `mention_end` into the enrichment
-    # text; the evidence columns replace them. Their offsets cannot be re-expressed
-    # here, so an older file reads as document-located.
-    raw = backfill_evidence(pq.read_table(str(path)), level=DOCUMENT)
+    # text; the evidence columns replace them. A file with no elements beside it
+    # reads as document-located; see `_reanchor_legacy`.
+    raw = _reanchor_legacy(backfill_evidence(pq.read_table(str(path)), level=DOCUMENT), path)
     if "mention_text" not in raw.schema.names:
         raw = raw.append_column("mention_text", pa.nulls(raw.num_rows, pa.string()))
     missing = [f.name for f in ENTITY_LINKS_SCHEMA if f.name not in raw.schema.names]

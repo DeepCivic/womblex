@@ -611,6 +611,9 @@ One anchor shape replaces the per-sidecar anchors of `money_spans`,
   disagree). The womblex-benchmark suites that read these sidecars need the paired
   change.
 - **`money_columns` is not a span sidecar** and keeps its own column keys.
+- **A finished run can be re-checked.** `womblex verify-evidence <run>` recomputes
+  every row's check against the source (the write-time label is a record, not a
+  proof: sources change, and older files have none), beside `verify-shards`.
 
 ### PII / redaction marker convention
 House style is **Presidio-style typed angle-bracket tags**. PII person masks are
@@ -1280,7 +1283,22 @@ be re-derivable, and the first pass's were not.
   A config-selected local provider (spaCy / fine-tuned NER) populating
   `EnrichmentResult` would serve both offline, at lower quality. *Wanted
   (2026-10)*: a GLiNER-based provider is in development by the maintainer, so
-  no interim provider is added.
+  no interim provider is added. *Position (2026-10, not built):* the route is an
+  `enrichment` slot in `utils/model_registry.py`, default `kanon-2-enricher`,
+  with providers installed through `womblex.models.enrichment` entry points like
+  the other slots. *The provider contract:* text in, one `EnrichmentResult` per
+  text, offsets into the text sent, results independent of batch composition, and
+  labels mapped to the existing taxonomy inside the adapter. *Each provider
+  declares its limits:* texts per request, token ceiling, token counter, whether
+  it needs the network, and whether it returns a Document that AI chunking can
+  reuse. Womblex keeps packing, splitting, the table pass, the sidecars, evidence
+  and chunk mapping, so a provider changes who recognises entities and nothing
+  downstream. The Isaacus-only features (AI-chunking reuse, `persist_document`)
+  stay as they are, with token splitting as the fallback for a provider that
+  returns no Document. *Rationale:* a pure Isaacus pipeline is the Isaacus SDK
+  used directly; the slot keeps Womblex's own pipeline from hard-wiring one
+  provider. Embedding follows the same pattern, and the GLiNER provider is the
+  first alternative once the slot exists.
 
 - **Downstream text-cleaning op (#B/#D)** — *v1 shipped* as `womblex normalise
   --shards` (`process/normalise.py` transforms + `process/normalise_stage.py`

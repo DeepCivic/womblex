@@ -19,9 +19,9 @@ from pathlib import Path
 from typing import Any
 
 from womblex.ingest.elements import BBox, Element
-from womblex.process.chunk_stage import _load_elements
+from womblex.process.chunk_stage import _batch_bases, _load_elements
 from womblex.process.chunker import TableText, element_spans, reassemble_narrative, table_texts
-from womblex.process.text_overlay import apply_overlay, load_overlay
+from womblex.process.text_overlay import MissingOverlayError, apply_overlay, load_overlay
 from womblex.store.evidence import (
     CELL_LAYER,
     CHUNK,
@@ -340,3 +340,57 @@ def stamp_evidence(
             "; ".join(report.mismatches),
         )
     return report
+
+
+def chunk_text_from(texts: Mapping[tuple[str, int], str]) -> ChunkText:
+    """A :data:`ChunkText` over ``{(source_hash, chunk_index): text}``."""
+    return lambda row: texts.get((row["source_hash"], row["chunk_index"]))
+
+
+def _lookup_in(indexes: EvidenceIndexes) -> IndexLookup:
+    """``indexes.get``, with a text layer whose sidecar is missing read as no index."""
+    def lookup(source_hash: str, layer: str | None) -> EvidenceIndex | None:
+        try:
+            return indexes.get(source_hash, layer)
+        except MissingOverlayError:
+            return None
+    return lookup
+
+
+def verify_shards(shard_dir: Path) -> EvidenceReport:
+    """Re-check every money, entity-link and PII receipt in ``shard_dir`` against its source.
+
+    Each row's check is recomputed, so a file written before ``evidence_check``
+    existed, or whose source has changed since, is judged afresh. A receipt whose
+    source (the elements, a text layer, the chunk) is absent counts as unchecked.
+    """
+    from womblex.store.entity_links_output import read_entity_links
+    from womblex.store.money_output import read_money_spans
+    from womblex.store.output import read_chunks
+    from womblex.store.pii_output import read_pii_spans
+
+    readers: tuple[tuple[str, str, Callable[[Path], Any]], ...] = (
+        ("money_spans", "text", read_money_spans),
+        ("entity_links", "mention_text", read_entity_links),
+        ("pii_spans", "text", read_pii_spans),
+    )
+    total = EvidenceReport()
+    for base in _batch_bases(shard_dir):
+        lookup: IndexLookup | None = None
+        for label, text_key, read in readers:
+            try:
+                rows = read(base).to_pylist()
+            except FileNotFoundError:
+                continue
+            lookup = lookup or _lookup_in(EvidenceIndexes(base))
+            texts: dict[tuple[str, int], str] = {}
+            if label == "pii_spans":
+                try:
+                    texts = {(r["source_hash"], r["chunk_index"]): r["text"] or ""
+                             for r in read_chunks(base).to_pylist()}
+                except FileNotFoundError:
+                    pass
+            total.merge(check_rows(
+                rows, lookup, text_key=text_key, label=f"{label}:{base.stem}",
+                chunk_text=chunk_text_from(texts)))
+    return total
