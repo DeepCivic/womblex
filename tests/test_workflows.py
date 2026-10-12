@@ -405,3 +405,77 @@ def test_a_dispatched_workflow_runs_its_stages_under_its_own_config_and_digest(f
     assert meta[b"womblex.workflow_digest"] == b"sha256:feed"
     base = pq.read_metadata(str(out / "runs/r1/documents/batch-0001.chunks.parquet")).metadata
     assert b"womblex.workflow_digest" not in base
+
+    # finalize observes the workflow in the record; the manifest is not a workflow stage's file
+    import argparse
+
+    from womblex.cli.cloud import cmd_finalize
+    from womblex.store.run_manifest import read_run_record
+
+    for run in ("r1", "r2"):
+        assert cmd_finalize(argparse.Namespace(
+            store=str(store), run_id=run, output_prefix=None,
+            dsn=f"sqlite:///{fleet[2] / 'dbos.sqlite'}")) == 0
+    manifest = out / "runs/r2/manifest.parquet"
+    assert read_run_record(manifest)["workflows"] == [{"digest": "sha256:feed", "stages": ["chunk"]}]
+    assert b"womblex.workflow_digest" not in pq.read_metadata(str(manifest)).metadata
+    assert read_run_record(out / "runs/r1/manifest.parquet")["workflows"] == []
+
+
+def test_a_workflow_unit_takes_none_of_the_workers_config_and_leaves_no_digest_behind(tmp_path):
+    """Same thread, workflow unit then plain unit: the worker's `chunk_size` reaches only
+    the plain one, and the workflow's digest only the workflow one."""
+    import pyarrow.parquet as pq
+
+    from womblex.config import ChunkingConfig
+
+    store = RemoteStore.from_uri(str(tmp_path / "store"))
+    ingest = RemoteStore.from_uri(str(tmp_path / "ingest"))
+    csv = tmp_path / "people.csv"
+    csv.write_text("name,role\nAlice,Director\n")
+    ingest.upload_file(csv, "people.csv")
+    config = _minimal_config(tmp_path).model_copy(
+        update={"chunking": ChunkingConfig(chunk_size=8)})
+    _extract(config, store, ingest, keys=["people.csv"])
+    out = tmp_path / "store/runs/r1/documents/batch-0001.chunks.parquet"
+    wf = {"id": "wf", "digest": "sha256:feed", "preset": "recipe", "config": {}}
+
+    workflows.set_context(workflows.WorkerContext(config, store, ingest, ""))
+    try:
+        (unit,) = workflows._plan("chunk", "runs/r1/documents", wf)
+        workflows._unit("chunk", "r1", "runs/r1/documents", unit, wf)
+        under_workflow = pq.read_table(out).num_rows, pq.read_metadata(str(out)).metadata
+        workflows._unit("chunk", "r1", "runs/r1/documents", unit)
+        plain = pq.read_table(out).num_rows, pq.read_metadata(str(out)).metadata
+    finally:
+        workflows.set_context(None)
+
+    assert under_workflow[0] < plain[0]  # the worker's chunk_size 8 split only the plain run
+    assert under_workflow[1][b"womblex.workflow_digest"] == b"sha256:feed"
+    assert b"womblex.workflow_digest" not in plain[1]
+
+
+def test_workflows_recorded_before_the_workflow_argument_still_run(fleet):
+    """A coordinator (five inputs) and a stage (four) enqueued by an older release."""
+    store, ingest, _ = fleet
+    with RunBoard(None) as board:
+        for run in ("r1", "r2"):
+            board.enqueue(run, [JobSpec(batch_num=1, input_keys=["people.csv"],
+                                        shard_prefix=f"runs/{run}/documents", ingest_root=ingest)])
+        work(fleet, idle_timeout=2)  # a bare stage does not wait for extraction
+        board._client.enqueue({
+            "workflow_name": dbos_app.DOWNSTREAM_WORKFLOW, "queue_name": dbos_app.DOWNSTREAM_QUEUE,
+            "workflow_id": dbos_app.downstream_id("r1", ["normalise"]),
+            "attributes": {"run_id": "r1", "kind": dbos_app.KIND_DOWNSTREAM},
+        }, "r1", ["normalise"], "runs/r1/documents", 1, None)
+        board._client.enqueue({
+            "workflow_name": dbos_app.STAGE_WORKFLOW, "queue_name": dbos_app.stage_queue("normalise"),
+            "workflow_id": dbos_app.stage_id("r2", "normalise"),
+            "attributes": {"run_id": "r2", "kind": dbos_app.KIND_STAGE, "stage": "normalise"},
+        }, "r2", "normalise", "runs/r2/documents", 1)
+        work(fleet, idle_timeout=3)
+        rows = board.list_jobs("r1") + board.list_jobs("r2")
+    assert rows and all(r.status == "done" for r in rows), [(r.id, r.error) for r in rows]
+    out = RemoteStore.from_uri(str(store))
+    for run in ("r1", "r2"):
+        assert out.list_files(f"runs/{run}/documents", "*.normalised_text.parquet")

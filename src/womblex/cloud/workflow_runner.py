@@ -127,9 +127,9 @@ def config_from_overlay(
     from womblex.config import WomblexConfig
 
     return WomblexConfig.model_validate({
+        **overlay,  # first, so run identity cannot come from the overlay
         "dataset": {"name": preset_name},
         "paths": paths or {"input_root": ".", "output_root": ".", "checkpoint_dir": "."},
-        **overlay,
     })
 
 
