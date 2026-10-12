@@ -80,6 +80,9 @@ RUN_MANIFEST_FILENAME = "manifest.parquet"
 #: actually built, by distribution and version (O3) — for the same reason.
 #: Version 5 adds ``files`` — the SHA-256 of each published output file, taken
 #: at write time — and a record without it names the gap in ``partial``.
+#: Version 6 adds ``workflows`` — each ``womblex.workflow_digest`` the files
+#: carry with the stages that wrote under it — so an empty list means no file
+#: was written by ``run-workflow``, not a record that predates the key.
 RUN_RECORD_KEY = f"{NAMESPACE}.run_record"
 RUN_RECORD_VERSION = 6
 

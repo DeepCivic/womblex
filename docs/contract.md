@@ -108,7 +108,9 @@ run, or disagree, is written unstamped. Further keys name what produced a file:
 swappable-slot model (`docs/model-plugins.md`) each slot actually built, by
 slot, name, and the distribution and version that supplied it
 (`read_footer_slot_models`); `womblex.model_check` records the pre-run model
-check's result (`read_footer_model_check`). Each is written only when it has a
+check's result (`read_footer_model_check`); `womblex.workflow_digest` names the
+stored workflow whose `run-workflow` step wrote a sidecar (`read_footer_stamp`),
+absent from extraction files and from sidecars written outside a workflow. Each is written only when it has a
 value — a process that loaded, built or checked nothing writes no key — and
 all are additive metadata, so a reader that ignores them reads the file
 unchanged. No column is added for any.

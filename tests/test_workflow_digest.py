@@ -30,6 +30,7 @@ def test_every_file_a_workflow_writes_carries_its_digest(shards: Path) -> None: 
     assert {"." + p.name.split(".", 1)[1] for p in written} >= set(_NEW)
     assert {_digest(p) for p in written} == {stored.digest}
     assert all(_digest(p) is None for p in shards.glob("*.elements.parquet"))  # extraction is not the workflow's
+    assert sidecar_footer(shards / "batch-0001.parquet", "chunk") is None  # the context ended with the run
 
 
 def test_run_record_names_the_workflow_and_its_stages(tmp_path: Path) -> None:
@@ -41,8 +42,9 @@ def test_run_record_names_the_workflow_and_its_stages(tmp_path: Path) -> None:
     out.mkdir()
     stamp = RunStamp.declare("run-1", cfg, stage="extract")
     process_batch([REGISTER_CSV], cfg, batch_num=1, shard_dir=out, stamp=stamp)
+    assert read_run_record(write_run_manifest(out))["workflows"] == []  # type: ignore[index]
     stored = _stored(["normalise", "chunk"])
-    run_workflow_local(stored, out, resolve_preset=_resolve)
+    assert run_workflow_local(stored, out, resolve_preset=_resolve).exit_code == 0
     record = read_run_record(write_run_manifest(out))
     assert record is not None
     assert record["workflows"] == [{"digest": stored.digest, "stages": ["chunk", "normalise"]}]
