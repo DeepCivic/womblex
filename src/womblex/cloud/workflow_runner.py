@@ -7,7 +7,8 @@ that cannot complete spends nothing. Once a step has run nothing halts: a failed
 is recorded and logged, later steps still run labelled with the failures they follow,
 and the exit code is the account. Steps run in list order, and the order is checked first
 (`workflow_order`): an input no earlier step produces, or that a later step will rewrite,
-refuses the workflow with stable codes. Conditions, destinations and triggers are stored but not acted on, and the log says so.
+refuses the workflow with stable codes, as does a condition that does not hold over the shard dir's
+manifests (`workflow_conditions`). Destinations and triggers are not acted on here, and the log says so.
 """
 
 from __future__ import annotations

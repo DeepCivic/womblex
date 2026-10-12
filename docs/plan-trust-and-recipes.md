@@ -83,7 +83,6 @@ An `enrichment` slot in `utils/model_registry.py`, default `kanon-2-enricher`, w
 - **Shipped (merge 8):** constrained conditions over manifest columns, evaluated and refused before any step spends anything (`cloud/workflow_conditions.py`); admit-or-refuse only, so none can skip a step or disable `pii`. Page-level profile is not persisted, so it is not a condition column.
 - Standing triggers on DBOS schedules.
 - **Shipped (merge 5):** `womblex plan <id> --shards DIR [--assume-price STAGE=USD] [--json]` (`cloud/workflow_plan.py`): run/skip per step and exact enrich and embed token counts via the offline tokeniser, never calling a paid API; prices only as caller-supplied, labelled assumptions.
-- Constrained conditions over manifest and profile columns only. A condition that cannot be evaluated stops the run; no condition can disable `pii`.
 - **Shipped (merge 6):** the workflow digest stamped beside the config digest: `womblex.workflow_digest` on every sidecar a workflow run writes, and `workflows` in the run record (version 6).
 
 ### Phase 3 — integration (branch)
