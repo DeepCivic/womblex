@@ -76,12 +76,12 @@ def test_validate_overlay_ignores_run_identity_like_a_preset() -> None:
 def test_validate_round_trips_conditions_destinations_and_triggers() -> None:
     raw = {
         **_MINIMAL,
-        "conditions": [{"column": "manifest.doc_type", "op": "eq", "value": "pdf"}],
+        "conditions": [{"column": "ext", "op": "eq", "value": ".pdf"}],
         "destinations": [{"kind": "webhook", "target": "https://example.invalid/hook"}],
         "triggers": [{"cron": "0 0 * * *"}],
     }
     spec = validate_workflow_spec(raw)
-    assert spec.conditions[0].column == "manifest.doc_type"
+    assert spec.conditions[0].column == "ext"
     assert spec.destinations[0].kind == "webhook"
     assert spec.triggers[0].cron == "0 0 * * *"
 

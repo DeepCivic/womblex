@@ -165,6 +165,7 @@ womblex/
 │   │   ├── stage_runner.py     # Execute a contract against an object store
 │   │   ├── workflow_store.py   # Stored workflow object (preset ref, input binding, steps, conditions, destinations, triggers) — schema, validation, its table
 │   │   ├── workflow_order.py   # Up-front step-order check — inputs on disk or produced earlier, stable refusal codes
+│   │   ├── workflow_conditions.py # Workflow conditions — manifest-column guards, every document, refused before any step
 │   │   ├── workflow_dispatch.py # `dispatch-workflow` — a stored workflow to the fleet; refuse before any row
 │   │   ├── workflow_plan.py    # `womblex plan` — steps to run or skip and exact enrich/embed token counts, offline
 │   │   ├── workflow_validate.py # `womblex validate` — the runner's pre-run checks, read-only, a JSON-able report

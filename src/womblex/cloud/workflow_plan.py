@@ -134,7 +134,9 @@ def plan_workflow(
     from womblex.cloud.workflow_order import optional_order_warnings
 
     present = present_from_names(p.name for p in shard_dir.glob("*.parquet"))
-    config, stages = check_workflow(stored, resolve_preset=resolve_preset, present=present)
+    config, stages = check_workflow(
+        stored, resolve_preset=resolve_preset, present=present, shard_dir=shard_dir,
+    )
     steps: list[StepPlan] = []
     for i, stage in enumerate(stages):
         contract = STAGE_CONTRACTS[stage]

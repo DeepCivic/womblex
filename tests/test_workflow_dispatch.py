@@ -109,7 +109,7 @@ def test_a_workflow_runs_on_the_fleet_and_a_different_one_cannot_follow_it(fleet
     assert e.value.code is RefusalCode.RUN_CONFLICT
 
 
-def test_cli_exit_codes_and_one_line_per_refusal(fleet, caplog):  # noqa: F811
+def test_cli_exit_codes_and_one_line_per_refusal(fleet, caplog, monkeypatch):  # noqa: F811
     import argparse
     import logging
 
@@ -119,6 +119,8 @@ def test_cli_exit_codes_and_one_line_per_refusal(fleet, caplog):  # noqa: F811
     from womblex.ui.presets import build_preset_record, preset_filename, serialise_preset_record
 
     store, _, tmp = fleet
+    for var in ("WOMBLEX_DB_DSN", "DATABASE_URL"):  # the CLI reads these; CI sets one for Postgres
+        monkeypatch.delenv(var, raising=False)
     ensure_workflow_schema(None)
     with WorkflowStore(None) as saved:
         saved.save("good", _stored(["normalise"], config=_NORMALISED).spec)
