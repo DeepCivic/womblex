@@ -39,12 +39,17 @@ _LOCAL_DB_ENV = "WOMBLEX_DBOS_PATH"
 _LOCAL_DB_DEFAULT = ".womblex/dbos.sqlite"
 
 
+def local_database_path() -> Path:
+    """The SQLite file used when no DSN is given."""
+    return Path(os.environ.get(_LOCAL_DB_ENV, _LOCAL_DB_DEFAULT)).resolve()
+
+
 def system_database_url(dsn: str | None) -> str:
     """The SQLAlchemy URL for *dsn*; a local SQLite file when there is none."""
     if dsn:
         # SQLAlchemy 2 refuses the `postgres://` spelling some platforms hand out.
         return "postgresql://" + dsn[len("postgres://"):] if dsn.startswith("postgres://") else dsn
-    path = Path(os.environ.get(_LOCAL_DB_ENV, _LOCAL_DB_DEFAULT)).resolve()
+    path = local_database_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     return f"sqlite:///{path}"
 

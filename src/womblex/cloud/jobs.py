@@ -289,7 +289,7 @@ class RunBoard:
         ordered = list(in_pipeline_order(stages))
         row_owner = self._claim_run_owner(run_id, owner)
         attrs: dict[str, Any] = {"run_id": run_id, "kind": dbos_app.KIND_DOWNSTREAM,
-                                 "max_attempts": max_attempts}
+                                 "max_attempts": max_attempts, "stages": ordered}
         if row_owner is not None:
             attrs["owner"] = row_owner
         if workflow is not None:
@@ -309,15 +309,22 @@ class RunBoard:
                     newly, run_id, len(stages))
         return newly
 
-    def stage_workflow_digests(self, run_id: str) -> dict[str, str | None]:
-        """Each stage already dispatched for *run_id*, with the workflow digest it ran under.
+    def stage_workflow_digests(self, run_id: str) -> dict[str, set[str | None]]:
+        """Each stage already dispatched for *run_id*, with the workflow digests it is under.
 
-        `None` is a stage dispatched without a workflow (`enqueue-stages`, the console).
+        `None` is a stage dispatched without a workflow (`enqueue-stages`, the console). A
+        queued coordinator counts before it has enqueued its stages: it names them in its
+        `stages` attribute (a coordinator enqueued before that attribute is seen through
+        its stage rows only).
         """
-        return {
-            _attr(s, "stage"): _attr(s, "workflow_digest")
-            for s in self._list(run_id) if _attr(s, "kind") == dbos_app.KIND_STAGE
-        }
+        found: dict[str, set[str | None]] = {}
+        for s in self._list(run_id):
+            kind, digest = _attr(s, "kind"), _attr(s, "workflow_digest")
+            names = [_attr(s, "stage")] if kind == dbos_app.KIND_STAGE else (
+                _attr(s, "stages") or [] if kind == dbos_app.KIND_DOWNSTREAM else [])
+            for name in names:
+                found.setdefault(name, set()).add(digest)
+        return found
 
     # --- reads ----------------------------------------------------------------
 

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -110,24 +111,27 @@ def dispatch_workflow(
     except StageOrderError as e:
         raise refuse(f"step order cannot complete: {e}", RefusalCode.STEP_ORDER) from e
 
-    from womblex.cloud.dbos_app import ensure_schema
+    from womblex.cloud.dbos_app import ensure_schema, local_database_path
     from womblex.cloud.jobs import RunBoard
 
     if not dry_run:
         ensure_schema(dsn)
-    with RunBoard(dsn) as board:
+    # A dry run does not create the local database just to find it empty.
+    unread = dry_run and not dsn and not local_database_path().exists()
+    with nullcontext() if unread else RunBoard(dsn) as board:
         clash = {
-            s: d for s, d in board.stage_workflow_digests(run_id).items()
-            if s in stages and d != stored.digest
+            s: sorted(str(d) for d in ds - {stored.digest})
+            for s, ds in (board.stage_workflow_digests(run_id).items() if board else ())
+            if s in stages and ds - {stored.digest}
         }
         if clash:
             raise refuse(
                 f"run {run_id!r} already dispatched {', '.join(sorted(clash))} under a different "
                 "workflow (or none); a finished stage would return its recorded result, not run "
                 "this one. Use a new run id.", RefusalCode.RUN_CONFLICT,
-                steps=tuple((s, str(d)) for s, d in sorted(clash.items())),
+                steps=tuple((s, ", ".join(d)) for s, d in sorted(clash.items())),
             )
-        newly = 0 if dry_run else board.enqueue_stages(
+        newly = 0 if dry_run or board is None else board.enqueue_stages(
             run_id, list(stages), shard_prefix, max_attempts=max_attempts, owner=owner,
             workflow={"id": stored.id, "digest": stored.digest,
                       "preset": stored.spec.preset, "config": overlay},
