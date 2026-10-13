@@ -115,7 +115,7 @@ def test_a_failed_unit_does_not_stop_the_stages_other_units(fleet, monkeypatch):
         (stage,) = [r for r in board.list_jobs("r1") if r.kind == "stage"]
         checksums = board.file_checksums("r1")
     assert stage.status == "failed"
-    assert "1 of 2 unit(s) failed, the rest ran" in (stage.error or "")
+    assert "1 of 2 unit(s) failed; every unit ran" in (stage.error or "")
     assert "normalise broke on batch-0001" in (stage.error or "")
     out = RemoteStore.from_uri(str(store))
     assert out.exists("runs/r1/documents/batch-0002.normalised_text.parquet")

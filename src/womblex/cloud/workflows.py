@@ -286,7 +286,7 @@ def run_stage(
         checksums.update(_digests(recorded))
     if failed:
         raise StageIncomplete(
-            f"{stage}: {len(failed)} of {len(units)} unit(s) failed, the rest ran — {'; '.join(failed)}"
+            f"{stage}: {len(failed)} of {len(units)} unit(s) failed; every unit ran — {'; '.join(failed)}"
         )
     return {"stage": stage, "units": len(units), "published": published, "checksums": checksums}
 
