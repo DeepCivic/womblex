@@ -153,7 +153,8 @@ the surface depends on the path:
   input gap before any unit runs, and a unit missing an upstream sidecar raises
   `StageNotReady` (naming the producing stage), which is not retried. The
   coordinator runs stages in pipeline order, so this means the stage was
-  dispatched out of order or an earlier stage failed; it ends the coordinator.
+  dispatched out of order or an earlier unit failed; that unit is recorded,
+  the stage's other units and later stages still run, and the stage fails last.
 
 The register-ingest rows are structural impossibilities: their output has no
 extraction sidecars, so shard discovery finds no batch bases.

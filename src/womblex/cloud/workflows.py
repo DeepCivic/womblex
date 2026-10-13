@@ -7,6 +7,12 @@ the whole run), then runs each as its own step, so a unit that finished is
 recorded and a re-run starts after it. The coordinator waits for the run's
 extraction to settle, then runs the requested stages in pipeline order.
 
+A launched run is never stopped part-way (`docs/decisions.md`, "A run is an
+arrow"): a unit that fails does not stop the stage's other units, and a stage
+that fails does not stop the stages after it. Each is recorded where it
+happened and named again at the end, so the board shows it failed once
+everything that could run has.
+
 Step results are storage keys, never data. The worker's config and stores are
 process state (:func:`set_context`), not workflow arguments: arguments are
 stored with the workflow, so they stay plain JSON-shaped values.
@@ -23,6 +29,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from dbos import DBOS, SetWorkflowAttributes, SetWorkflowID, StepOptions
+from dbos import error as dbos_error
 
 from womblex.batch import process_batch
 from womblex.cloud import dbos_app
@@ -52,6 +59,33 @@ _UNSETTLED = ["ENQUEUED", "DELAYED", "PENDING"]
 
 class StageNotReady(Exception):
     """An upstream sidecar the stage reads is absent: the stage was run out of order."""
+
+
+class StageIncomplete(Exception):
+    """Every unit of a stage ran and some failed; raised last, so the stage reads as failed."""
+
+
+class RunIncomplete(Exception):
+    """Every stage of a run ran and some failed; raised last, so the coordinator reads as failed."""
+
+
+#: What a unit or a stage can fail with and the run still carry on: the work's own error,
+#: surfaced by DBOS once retries are spent or a child workflow ends. Any other DBOS error
+#: (nondeterminism, recovery) is the engine's and propagates.
+_CARRIED: tuple[type[BaseException], ...] = (
+    dbos_error.DBOSMaxStepRetriesExceeded,
+    dbos_error.DBOSAwaitedWorkflowCancelledError,
+    dbos_error.DBOSAwaitedWorkflowMaxRecoveryAttemptsExceeded,
+)
+
+
+def _carried(e: Exception) -> str:
+    """*e* as one line for the record, or re-raise it when it is the engine's own."""
+    if isinstance(e, dbos_error.DBOSException) and not isinstance(e, _CARRIED):
+        raise e
+    if isinstance(e, dbos_error.DBOSMaxStepRetriesExceeded) and e.errors:
+        e = e.errors[-1]
+    return f"{type(e).__name__}: {e}"
 
 
 @dataclass
@@ -236,14 +270,24 @@ def run_stage(
     units = DBOS.run_step({"name": "plan"}, _plan, stage, shard_prefix, workflow)
     published = 0
     checksums: dict[str, str] = {}
+    failed: list[str] = []
     for unit in units:
         label = unit[0] if len(unit) == 1 else "run"
-        recorded = DBOS.run_step(
-            _retry(f"unit:{label}", max_attempts), _unit, stage, run_id, shard_prefix, unit,
-            workflow,
-        )
+        try:
+            recorded = DBOS.run_step(
+                _retry(f"unit:{label}", max_attempts), _unit, stage, run_id, shard_prefix, unit,
+                workflow,
+            )
+        except Exception as e:  # one bad unit must not stop the others
+            failed.append(f"{label} ({_carried(e)})")
+            logger.warning("%s: %s failed; the stage's other units still run: %s", stage, label, failed[-1])
+            continue
         published += len(recorded)
         checksums.update(_digests(recorded))
+    if failed:
+        raise StageIncomplete(
+            f"{stage}: {len(failed)} of {len(units)} unit(s) failed; every unit ran — {'; '.join(failed)}"
+        )
     return {"stage": stage, "units": len(units), "published": published, "checksums": checksums}
 
 
@@ -265,13 +309,17 @@ def run_downstream(
     """Run *stages* over the run once its extraction has settled, in the order given.
 
     A failed batch does not hold the run: its absence surfaces as the
-    not-ready or missing-input error of the stage that needed it. A failed
-    stage ends the coordinator, since every later stage reads what it wrote.
+    not-ready or missing-input error of the stage that needed it, for that
+    batch only. A failed stage does not stop the stages after it: each runs
+    over what exists, recorded with the failures it follows (`ran_after_failed`
+    on its row, as the local runner records), and the coordinator fails last
+    if any did, naming them.
     """
     while DBOS.run_step({"name": "await-extraction"}, _unsettled_batches, run_id):
         DBOS.sleep(SETTLE_POLL_SECONDS)
 
     results: list[dict[str, Any]] = []
+    failed: list[str] = []
     for stage in stages:
         attrs: dict[str, Any] = {"run_id": run_id, "kind": dbos_app.KIND_STAGE, "stage": stage,
                                  "max_attempts": max_attempts}
@@ -279,6 +327,8 @@ def run_downstream(
             attrs["owner"] = owner
         if workflow is not None:
             attrs["workflow_digest"] = workflow["digest"]
+        if failed:
+            attrs["ran_after_failed"] = list(failed)
         # Enqueued by name, not registered: the workers that serve the stage
         # own the queue's settings.
         with SetWorkflowID(dbos_app.stage_id(run_id, stage)), SetWorkflowAttributes(attrs):
@@ -286,5 +336,17 @@ def run_downstream(
                 dbos_app.stage_queue(stage), run_stage, run_id, stage, shard_prefix, max_attempts,
                 workflow,
             )
-        results.append(handle.get_result())
+        try:
+            results.append({**handle.get_result(), "ran_after_failed": list(failed)})
+        except Exception as e:  # a failed stage must not stop the ones after it
+            results.append({"stage": stage, "error": _carried(e), "ran_after_failed": list(failed)})
+            logger.warning("run %s: %s failed; later stages still run: %s", run_id, stage, results[-1]["error"])
+            failed.append(stage)
+    if failed:
+        after = [f"{r['stage']} after {', '.join(r['ran_after_failed'])}"
+                 for r in results if r["ran_after_failed"]]
+        raise RunIncomplete(
+            f"run {run_id}: stage(s) {', '.join(failed)} failed; every stage ran"
+            + (f"; ran after a failure: {'; '.join(after)}" if after else "")
+        )
     return results
