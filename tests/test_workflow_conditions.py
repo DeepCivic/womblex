@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import shutil
@@ -18,7 +19,7 @@ from womblex.cloud.workflow_conditions import label_manifest
 from womblex.cloud.workflow_runner import RefusalCode, WorkflowRefusedError, run_workflow_local
 from womblex.cloud.workflow_store import StoredWorkflowSpec, WorkflowCondition, validate_workflow_spec
 from womblex.cloud.workflow_validate import validate_workflow
-from womblex.store.conditions_output import OUTCOMES_KEY, read_conditions
+from womblex.store.conditions_output import OUTCOMES_KEY, read_conditions, write_conditions
 from womblex.store.contract import SENSITIVITY_KEY
 from womblex.store.output import read_manifest
 
@@ -74,10 +75,37 @@ def test_a_failing_condition_labels_the_documents_and_the_run_goes_on(
     by_condition = {i: set(labels.filter(pc.equal(labels["condition_index"], i))["outcome"].to_pylist())
                     for i in (0, 1)}
     assert by_condition == {0: {"fails"}, 1: {"holds"}}
+    first = labels.filter(pc.equal(labels["condition_index"], 0))
+    assert set(first["cell"].to_pylist()) == {json.dumps(ok)} and set(labels["workflow_id"].to_pylist()) == {"wf"}
     footer = pq.read_schema(next(shards.glob("*.conditions.parquet"))).metadata
     assert json.loads(footer[OUTCOMES_KEY.encode()]) == {"holds": n, "fails": n, "unevaluable": 0}
     assert footer[SENSITIVITY_KEY.encode()] == b"none"
     assert f"{n} of {n} document(s) fail it" in caplog.text and "the run goes on" in caplog.text
+    assert f"holds for all {n} document(s)" in caplog.text
+
+
+def test_a_null_cell_is_written_as_null_and_counted_unevaluable(tmp_path: Path) -> None:
+    table = pa.table({"source_hash": ["h1", "h2"], "doc_id": ["a", "b"], "status": ["ok", None]})
+    rows = label_manifest([WorkflowCondition(column="status", op="eq", value="ok")], table)
+    target = write_conditions(rows, tmp_path / "batch-0000.parquet", "wf")
+    got = read_conditions(target)
+    assert got["cell"].to_pylist() == [json.dumps("ok"), None]
+    assert got["outcome"].to_pylist() == ["holds", "unevaluable"]
+    footer = pq.read_schema(target).metadata
+    assert json.loads(footer[OUTCOMES_KEY.encode()]) == {"holds": 1, "fails": 0, "unevaluable": 1}
+
+
+def test_the_last_workflow_with_conditions_writes_the_labels_and_one_without_leaves_them(
+    shards: Path,  # noqa: F811
+) -> None:
+    ok = _status(shards)
+    run_workflow_local(_stored(["normalise"], conditions=[_cond("status", "eq", ok)]), shards, resolve_preset=_resolve)
+    second = dataclasses.replace(_stored(["normalise"], conditions=[_cond("status", "ne", ok)]), id="wf2")
+    run_workflow_local(second, shards, resolve_preset=_resolve)
+    labels = read_conditions(shards)
+    assert set(labels["workflow_id"].to_pylist()) == {"wf2"} and set(labels["outcome"].to_pylist()) == {"fails"}
+    run_workflow_local(dataclasses.replace(_stored(["normalise"]), id="wf3"), shards, resolve_preset=_resolve)
+    assert read_conditions(shards).equals(labels)
 
 
 def test_no_manifest_rows_label_nothing_and_refuse_nothing(

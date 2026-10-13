@@ -5,6 +5,11 @@ condition, joined to the batch's ``*._manifest.parquet`` on ``source_hash``:
 ``outcome`` is ``holds``, ``fails`` or ``unevaluable`` (a null manifest cell).
 A label never stops anything; the footer counts each outcome so a reader need
 not scan the rows.
+
+One file per batch, like every sidecar: the last workflow with conditions to
+run over the batch wrote it, and every row names that workflow
+(``workflow_id``). A workflow without conditions leaves an earlier file as it
+was.
 """
 
 from __future__ import annotations
@@ -31,6 +36,7 @@ HOLDS, FAILS, UNEVALUABLE = "holds", "fails", "unevaluable"
 CONDITIONS_SCHEMA = pa.schema([
     ("source_hash", pa.string()),
     ("doc_id", pa.string()),
+    ("workflow_id", pa.string()),     # the stored workflow whose conditions these are
     ("condition_index", pa.int32()),  # position in the workflow's `conditions`
     ("column", pa.string()),
     ("op", pa.string()),
@@ -45,8 +51,9 @@ def conditions_path_for(base_path: Path) -> Path:
     return base_path.parent / f"{base_path.stem}{CONDITIONS_SUFFIX}"
 
 
-def write_conditions(rows: list[dict], base_path: Path) -> Path:
-    """Write a batch's condition labels beside *base_path*, counting each outcome in the footer."""
+def write_conditions(rows: list[dict], base_path: Path, workflow_id: str) -> Path:
+    """Write *workflow_id*'s labels for a batch beside *base_path*, counting each outcome in the footer."""
+    rows = [{**r, "workflow_id": workflow_id} for r in rows]
     target = conditions_path_for(base_path)
     counts = Counter(r["outcome"] for r in rows)
     meta = {

@@ -119,7 +119,7 @@ def label_shard_dir(workflow_id: str, conditions: Sequence[WorkflowCondition], s
     for manifest in sorted(shard_dir.glob(f"*{_MANIFEST_SUFFIX}")):
         base = shard_dir / f"{manifest.name.removesuffix(_MANIFEST_SUFFIX)}.parquet"
         batch = label_manifest(conditions, read_manifest(base))
-        write_conditions(batch, base)
+        write_conditions(batch, base, workflow_id)
         rows.extend(batch)
     log_outcomes(workflow_id, conditions, rows)
     return rows
