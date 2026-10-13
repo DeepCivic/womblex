@@ -73,7 +73,6 @@ def validate_workflow(
     try:
         prepared = prepare_workflow(
             stored, resolve_preset=resolve_preset, present=present, models_check=models_check,
-            shard_dir=shard_dir,
         )
     except WorkflowRefusedError as e:
         return report(
