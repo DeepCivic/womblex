@@ -45,7 +45,7 @@ from womblex.api.models import (
     RunSubmitted,
     UploadAccepted,
 )
-from womblex.cli._shared import SUPPORTED_EXTENSIONS, normalise_prefix, select_supported
+from womblex.cli._shared import SUPPORTED_EXTENSIONS, select_supported
 from womblex.cloud import dispatch
 from womblex.cloud.dispatch import QUEUE_CONNECT_TIMEOUT
 from womblex.cloud.jobs import RunBoard, RunSummary
