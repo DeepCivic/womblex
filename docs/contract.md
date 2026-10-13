@@ -43,7 +43,7 @@ the single source). An unknown role reads as `raw`.
 | `money_spans` | `source_hash` plus the evidence reference | none |
 | `money_columns` | `source_hash` plus `column_id` (`parent_elem_order` / `sheet`) | none |
 | `layout_regions` | `(source_hash, page)`; boxes are normalised like element `bbox` ([layout.md](layout.md)) | none |
-| `conditions` | `source_hash` to `_manifest`, one row per document and workflow condition (`condition_index`); `outcome` is `holds`, `fails` or `unevaluable` (null manifest cell), counted in the `womblex.condition_outcomes` footer. A label, never a gate | none |
+| `conditions` | `source_hash` to `_manifest`, one row per document and workflow condition (`condition_index`), naming the workflow (`workflow_id`) — the last one with conditions to run over the batch; `outcome` is `holds`, `fails` or `unevaluable` (null manifest cell), counted in the `womblex.condition_outcomes` footer. A label, never a gate | none |
 | `redactions`, `source_index` | `source_hash` | none |
 | `provenance` | `source_hash` | raw |
 
