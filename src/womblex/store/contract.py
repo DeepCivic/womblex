@@ -63,6 +63,7 @@ ROLE_SENSITIVITY: dict[str, Sensitivity] = {
     "money_spans": "none",
     "money_columns": "none",
     "layout_regions": "none",
+    "conditions": "none",
 }
 
 

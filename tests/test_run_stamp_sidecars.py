@@ -97,6 +97,9 @@ EXEMPT: dict[str, str] = {
     "write_entity_mentions": "whole-corpus E2E writer: no per-batch shard to inherit from",
     "write_graph_edges": "whole-corpus E2E writer: no per-batch shard to inherit from",
     "write_enrichment_metadata": "whole-corpus E2E writer: no per-batch shard to inherit from",
+    "write_conditions": "a stored workflow's condition labels, written by the workflow before its "
+                        "first step rather than by a pipeline stage; stamped as `conditions`, "
+                        "covered in test_workflow_conditions.py",
 }
 
 
