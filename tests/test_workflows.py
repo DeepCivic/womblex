@@ -93,6 +93,62 @@ def test_a_stage_with_nothing_to_run_over_fails_with_the_reason(fleet):
     assert failed and any("No batch bases" in (r.error or "") for r in failed)
 
 
+def _failing_units(monkeypatch, fails) -> None:
+    """Make `run_unit` raise for every unit *fails* picks out; the others run as normal."""
+    real = workflows.run_unit
+
+    def run_unit(contract, config, ctx, store, prefix, unit, ingest):
+        if fails(contract.name, unit):
+            raise RuntimeError(f"{contract.name} broke on {unit[0]}")
+        return real(contract, config, ctx, store, prefix, unit, ingest)
+
+    monkeypatch.setattr(workflows, "run_unit", run_unit)
+
+
+def test_a_failed_unit_does_not_stop_the_stages_other_units(fleet, monkeypatch):
+    store, ingest, _ = fleet
+    _failing_units(monkeypatch, lambda stage, unit: unit == ["batch-0001"])
+    with RunBoard(None) as board:
+        board.enqueue("r1", [batch(ingest, 1), batch(ingest, 2)])
+        board.enqueue_stages("r1", ["normalise"], "runs/r1/documents", max_attempts=1)
+        work(fleet, idle_timeout=2)
+        (stage,) = [r for r in board.list_jobs("r1") if r.kind == "stage"]
+        checksums = board.file_checksums("r1")
+    assert stage.status == "failed"
+    assert "1 of 2 unit(s) failed, the rest ran" in (stage.error or "")
+    assert "normalise broke on batch-0001" in (stage.error or "")
+    out = RemoteStore.from_uri(str(store))
+    assert out.exists("runs/r1/documents/batch-0002.normalised_text.parquet")
+    assert not out.exists("runs/r1/documents/batch-0001.normalised_text.parquet")
+    assert "runs/r1/documents/batch-0002.normalised_text.parquet" in checksums.checksums
+    assert "r1:stage:normalise" in checksums.undigested  # named as a gap in the run record
+
+
+def test_a_failed_stage_does_not_stop_the_stages_after_it(fleet, monkeypatch):
+    store, ingest, _ = fleet
+    _failing_units(monkeypatch, lambda stage, unit: stage == "normalise")
+    with RunBoard(None) as board:
+        board.enqueue("r1", [batch(ingest)])
+        board.enqueue_stages("r1", ["normalise", "chunk"], "runs/r1/documents", max_attempts=1)
+        work(fleet, idle_timeout=2)
+        jobs = {r.stage or r.kind: r for r in board.list_jobs("r1")}
+    assert jobs["normalise"].status == "failed"
+    assert jobs["chunk"].status == "done"  # ran after the failure, over what exists
+    assert jobs["downstream"].status == "failed"
+    assert "stage(s) normalise failed; every stage ran" in (jobs["downstream"].error or "")
+    assert RemoteStore.from_uri(str(store)).exists("runs/r1/documents/batch-0001.chunks.parquet")
+
+
+def test_an_engine_error_is_not_carried_as_a_units_failure():
+    from dbos import error as dbos_error
+
+    assert workflows._carried(RuntimeError("boom")) == "RuntimeError: boom"
+    spent = dbos_error.DBOSMaxStepRetriesExceeded("unit:b1", 3, [OSError("gone")])
+    assert workflows._carried(spent) == "OSError: gone"
+    with pytest.raises(dbos_error.DBOSStepNondeterminismError):
+        workflows._carried(dbos_error.DBOSStepNondeterminismError("wf", 2))
+
+
 # --- the extraction body a batch workflow runs, outside DBOS ------------------
 
 

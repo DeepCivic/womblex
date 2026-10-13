@@ -133,8 +133,8 @@ claim*. Two deliberate choices:
   *Behaviour that moved with it:* a worker no longer claims a job and hands it
   back — it joins only the queues it can serve (an extraction queue is named for
   the ingest root, a stage queue for the stage, joined only if the stage's
-  models pass the model check). A failed stage ends its run's coordinator
-  instead of letting later stages report "not ready"; re-dispatching it returns
+  models pass the model check). A failed stage is recorded and the stages
+  after it still run (see "A run is an arrow"); re-dispatching it returns
   the recorded failure (a retry is a plan follow-up). A stage whose upstream
   sidecar is missing fails without step retries, as retrying cannot produce it.
   Queue settings are stored in the system database and set by the workers that
@@ -186,6 +186,9 @@ Phase 2 merge 7b. Three fleet-specific refusals, because the coordinator is not 
 
 ### A run is an arrow: refused before launch, never stopped after
 A run is launched, then it lands. Everything that can refuse does so before launch (spec, preset, config, step order, each step's preflight and model check); once launched, nothing stops it — a failure is recorded where it happened and the rest of the run carries on, labelled with what it follows. This is why the pre-run checks matter, and why no check is added after launch.
+
+- **The fleet carries on as the local runner does.** A unit that fails (once its retries are spent) does not stop the stage's other units, and a failed stage does not stop the stages after it; each later stage records `ran_after_failed`. The stage, and then the coordinator, fail last, naming what failed, so the board shows them failed and the run record lists them in `partial`. A batch missing an input only that failure would have written is not ready for that batch alone. A strict input missing from any batch still refuses that one stage as a whole, as `require_overlays` does locally and `run-stage --store` does, so a stage never mixes text layers.
+- *Rejected:* **a failed stage ends the coordinator** (Phase 0), chosen so later stages would not report "not ready". It stopped a launched run over one batch, and the local runner already carried on. Engine errors (nondeterminism, recovery) still propagate; only the work's own failures are carried.
 
 ### Conditions label documents; they never gate, select or skip
 Phase 2 merge 8. A condition (`column op value` over a manifest column) labels each document `holds`, `fails` or `unevaluable` (a null cell) in `*.conditions.parquet` beside its batch, and the counts are logged. The run goes on over every document. The only refusal is a condition that could never be evaluated (column, value type, order operator on text), at save and on load, before launch. Why not per-document selection or per-step skipping: stages run per batch shard and their signatures do not change, and a condition that could skip a step could skip `pii`; a condition has no step field and the spec model forbids extra keys, so the pii rule is structural. Profile columns: only the manifest's own (`extraction_method`, counts, `status`), because the per-page `PageProfile` is not persisted. The fleet does not label conditions yet; dispatch warns them as not acted on.
