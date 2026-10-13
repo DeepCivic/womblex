@@ -311,8 +311,9 @@ def run_downstream(
     A failed batch does not hold the run: its absence surfaces as the
     not-ready or missing-input error of the stage that needed it, for that
     batch only. A failed stage does not stop the stages after it: each runs
-    over what exists, recorded with the failures it follows (`ran_after_failed`,
-    as the local runner records), and the coordinator fails last if any did.
+    over what exists, recorded with the failures it follows (`ran_after_failed`
+    on its row, as the local runner records), and the coordinator fails last
+    if any did, naming them.
     """
     while DBOS.run_step({"name": "await-extraction"}, _unsettled_batches, run_id):
         DBOS.sleep(SETTLE_POLL_SECONDS)
@@ -326,6 +327,8 @@ def run_downstream(
             attrs["owner"] = owner
         if workflow is not None:
             attrs["workflow_digest"] = workflow["digest"]
+        if failed:
+            attrs["ran_after_failed"] = list(failed)
         # Enqueued by name, not registered: the workers that serve the stage
         # own the queue's settings.
         with SetWorkflowID(dbos_app.stage_id(run_id, stage)), SetWorkflowAttributes(attrs):
@@ -340,5 +343,10 @@ def run_downstream(
             logger.warning("run %s: %s failed; later stages still run: %s", run_id, stage, results[-1]["error"])
             failed.append(stage)
     if failed:
-        raise RunIncomplete(f"run {run_id}: stage(s) {', '.join(failed)} failed; every stage ran")
+        after = [f"{r['stage']} after {', '.join(r['ran_after_failed'])}"
+                 for r in results if r["ran_after_failed"]]
+        raise RunIncomplete(
+            f"run {run_id}: stage(s) {', '.join(failed)} failed; every stage ran"
+            + (f"; ran after a failure: {'; '.join(after)}" if after else "")
+        )
     return results

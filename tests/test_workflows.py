@@ -136,6 +136,11 @@ def test_a_failed_stage_does_not_stop_the_stages_after_it(fleet, monkeypatch):
     assert jobs["chunk"].status == "done"  # ran after the failure, over what exists
     assert jobs["downstream"].status == "failed"
     assert "stage(s) normalise failed; every stage ran" in (jobs["downstream"].error or "")
+    assert "ran after a failure: chunk after normalise" in (jobs["downstream"].error or "")
+    with RunBoard(None) as board:
+        attrs = {(s.attributes or {}).get("stage"): s.attributes for s in board._rows("r1", None)}
+    assert attrs["chunk"]["ran_after_failed"] == ["normalise"]  # on the stage's own row
+    assert "ran_after_failed" not in attrs["normalise"]
     assert RemoteStore.from_uri(str(store)).exists("runs/r1/documents/batch-0001.chunks.parquet")
 
 
