@@ -1,4 +1,4 @@
-"""Conditions: labels over manifest columns, logged per document; never a gate."""
+"""Conditions: labels over manifest columns, written per batch and logged; never a gate."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import shutil
 from pathlib import Path
 
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import pytest
 from pydantic import ValidationError
@@ -17,6 +18,8 @@ from womblex.cloud.workflow_conditions import label_manifest
 from womblex.cloud.workflow_runner import RefusalCode, WorkflowRefusedError, run_workflow_local
 from womblex.cloud.workflow_store import StoredWorkflowSpec, WorkflowCondition, validate_workflow_spec
 from womblex.cloud.workflow_validate import validate_workflow
+from womblex.store.conditions_output import OUTCOMES_KEY, read_conditions
+from womblex.store.contract import SENSITIVITY_KEY
 from womblex.store.output import read_manifest
 
 
@@ -65,9 +68,16 @@ def test_a_failing_condition_labels_the_documents_and_the_run_goes_on(
     with caplog.at_level(logging.INFO):
         result = run_workflow_local(stored, shards, resolve_preset=_resolve)
     assert result.exit_code == 0 and list(shards.glob("*.normalised_text.parquet"))  # the step ran
+    labels = read_conditions(shards)
     n = read_manifest(shards).num_rows
+    assert labels.num_rows == 2 * n
+    by_condition = {i: set(labels.filter(pc.equal(labels["condition_index"], i))["outcome"].to_pylist())
+                    for i in (0, 1)}
+    assert by_condition == {0: {"fails"}, 1: {"holds"}}
+    footer = pq.read_schema(next(shards.glob("*.conditions.parquet"))).metadata
+    assert json.loads(footer[OUTCOMES_KEY.encode()]) == {"holds": n, "fails": n, "unevaluable": 0}
+    assert footer[SENSITIVITY_KEY.encode()] == b"none"
     assert f"{n} of {n} document(s) fail it" in caplog.text and "the run goes on" in caplog.text
-    assert f"holds for all {n} document(s)" in caplog.text
 
 
 def test_no_manifest_rows_label_nothing_and_refuse_nothing(
@@ -80,6 +90,7 @@ def test_no_manifest_rows_label_nothing_and_refuse_nothing(
     assert validate_workflow(stored, resolve_preset=_resolve, shard_dir=shards).valid
     with caplog.at_level(logging.WARNING):
         assert run_workflow_local(stored, shards, resolve_preset=_resolve).exit_code == 0
+    assert read_conditions(shards).num_rows == 0
     assert "no manifest rows" in caplog.text
 
 
@@ -116,6 +127,7 @@ def test_no_entry_point_refuses_a_failing_condition(
                                  store_uri=str(store), dsn=None, dry_run=True)
     assert sent.stages == ("normalise",)
     assert "conditions stored but not acted on by dispatch" in caplog.text
+    assert not list(shards.glob("*.conditions.parquet"))  # validate, plan and dispatch write nothing
 
 
 def test_a_row_stored_before_conditions_were_checked_is_refused_on_load(

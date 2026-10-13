@@ -132,6 +132,7 @@ womblex/
 │   │   ├── enrichment_doc.py     # *.enrichment_doc.parquet — raw ILGS Document, for AI-chunking reuse
 │   │   ├── evidence.py      # The shared evidence-reference columns, anchor levels, `evidence_check` labels, `evidence()` builder, legacy back-fill
 │   │   ├── pii_output.py    # pii_spans + clean_text parquet schemas + IO
+│   │   ├── conditions_output.py # *.conditions.parquet — a workflow's per-document condition labels
 │   │   ├── normalise_output.py   # *.normalised_text.parquet schema + IO
 │   │   ├── spellfix_output.py    # *.spellfix_text.parquet + *.spellfix_corrections.parquet schemas + IO
 │   │   ├── quality_output.py     # *.chunk_quality.parquet schema + IO

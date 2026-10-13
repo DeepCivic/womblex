@@ -3,8 +3,8 @@
 A condition is `column op value` over a **manifest column** (`MANIFEST_SCHEMA`: the
 document-level extraction profile Womblex persists — method, counts, status — and the
 identity columns). Each document is labelled against each condition — `holds`, `fails`, or
-`unevaluable` where its manifest cell is null — and the counts are logged. That is the whole
-semantics:
+`unevaluable` where its manifest cell is null — in a `*.conditions.parquet` beside its
+batch, and the counts are logged. That is the whole semantics:
 
 - a condition never refuses, halts or narrows a run: a document that fails one is labelled
   and the run goes on over every document (one document never decides a run);
@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 
+from womblex.store.conditions_output import FAILS, HOLDS, UNEVALUABLE, write_conditions
 from womblex.store.output import MANIFEST_SCHEMA, read_manifest
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -45,7 +46,6 @@ _ORDER: dict[str, Callable[[Any, Any], bool]] = {
     "gt": operator.gt, "gte": operator.ge, "lt": operator.lt, "lte": operator.le,
 }
 _MANIFEST_SUFFIX = "._manifest.parquet"
-HOLDS, FAILS, UNEVALUABLE = "holds", "fails", "unevaluable"
 
 
 def check_conditions_static(conditions: Sequence[WorkflowCondition]) -> None:
@@ -80,7 +80,7 @@ def _outcome(c: WorkflowCondition, cell: Any) -> str:
 
 
 def label_manifest(conditions: Sequence[WorkflowCondition], manifest: pa.Table) -> list[dict]:
-    """One label per document and condition."""
+    """One `*.conditions.parquet` row per document and condition."""
     hashes = manifest.column("source_hash").to_pylist()
     docs = manifest.column("doc_id").to_pylist()
     rows: list[dict] = []
@@ -114,11 +114,13 @@ def log_outcomes(workflow_id: str, conditions: Sequence[WorkflowCondition], rows
 
 
 def label_shard_dir(workflow_id: str, conditions: Sequence[WorkflowCondition], shard_dir: Path) -> list[dict]:
-    """Label every batch's documents against *conditions* and log the counts."""
+    """Label every batch's documents, writing `batch-NNNN.conditions.parquet` beside each manifest."""
     rows: list[dict] = []
     for manifest in sorted(shard_dir.glob(f"*{_MANIFEST_SUFFIX}")):
         base = shard_dir / f"{manifest.name.removesuffix(_MANIFEST_SUFFIX)}.parquet"
-        rows.extend(label_manifest(conditions, read_manifest(base)))
+        batch = label_manifest(conditions, read_manifest(base))
+        write_conditions(batch, base)
+        rows.extend(batch)
     log_outcomes(workflow_id, conditions, rows)
     return rows
 
