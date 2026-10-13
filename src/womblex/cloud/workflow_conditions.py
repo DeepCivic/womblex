@@ -1,23 +1,26 @@
-"""A workflow's conditions: guards over the run's manifest, decided before any step runs.
+"""A workflow's conditions: labels over the run's manifest, never a gate.
 
 A condition is `column op value` over a **manifest column** (`MANIFEST_SCHEMA`: the
 document-level extraction profile Womblex persists — method, counts, status — and the
-identity columns). The workflow's conditions are a conjunction and must hold for **every**
-document in the run's manifests; if they do not, or cannot be evaluated, the run is refused
-before it starts. That is the whole semantics:
+identity columns). Each document is labelled against each condition — `holds`, `fails`, or
+`unevaluable` where its manifest cell is null — and the counts are logged. That is the whole
+semantics:
 
-- a condition admits or refuses a run, it never selects documents or skips a step, so no
-  condition can disable `pii` or any other step (a condition has no step field to name one);
-- a null cell never satisfies a condition, `ne` and `not_in` included: an unknown value is
-  not evidence the document is fine;
-- a column outside the manifest, a value of the wrong type, an order operator on text, or no
-  manifest rows at all, cannot be evaluated and is refused, never read as "holds".
+- a condition never refuses, halts or narrows a run: a document that fails one is labelled
+  and the run goes on over every document (one document never decides a run);
+- it never selects documents or skips a step, so no condition can disable `pii` or any other
+  step (a condition has no step field to name one);
+- a condition that could never be evaluated — a column outside the manifest, a value of the
+  wrong type, an order operator on text — is refused when the workflow is saved and again
+  when it is loaded, before launch, which is the only time anything refuses.
 
 The per-page profile (`PageProfile`) is not persisted, so it is not a condition column.
 """
 
 from __future__ import annotations
 
+import json
+import logging
 import operator
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -29,7 +32,8 @@ from womblex.store.output import MANIFEST_SCHEMA, read_manifest
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from womblex.cloud.workflow_store import WorkflowCondition
-    from womblex.store.remote import RemoteStore
+
+logger = logging.getLogger(__name__)
 
 #: column -> "number" | "text", from the manifest schema itself.
 CONDITION_COLUMNS: dict[str, str] = {
@@ -40,14 +44,8 @@ CONDITION_COLUMNS: dict[str, str] = {
 _ORDER: dict[str, Callable[[Any, Any], bool]] = {
     "gt": operator.gt, "gte": operator.ge, "lt": operator.lt, "lte": operator.le,
 }
-
-
-class ConditionRefused(Exception):
-    """A condition failed or could not be evaluated. `code` is `condition_failed` or `condition_unevaluable`."""
-
-    def __init__(self, code: str, message: str):
-        super().__init__(message)
-        self.code = code
+_MANIFEST_SUFFIX = "._manifest.parquet"
+HOLDS, FAILS, UNEVALUABLE = "holds", "fails", "unevaluable"
 
 
 def check_conditions_static(conditions: Sequence[WorkflowCondition]) -> None:
@@ -69,64 +67,66 @@ def check_conditions_static(conditions: Sequence[WorkflowCondition]) -> None:
             raise ValueError(f"condition {c.column} {c.op}: order operators need a number column")
 
 
-def _holds(c: WorkflowCondition, cell: Any) -> bool:
+def _outcome(c: WorkflowCondition, cell: Any) -> str:
     if cell is None:
-        return False
-    if c.op == "eq":
-        return bool(cell == c.value)
-    if c.op == "ne":
-        return bool(cell != c.value)
-    if c.op == "in":
-        return cell in c.value
-    if c.op == "not_in":
-        return cell not in c.value
-    return _ORDER[c.op](cell, c.value)
+        return UNEVALUABLE
+    if c.op in ("in", "not_in"):
+        held = (cell in c.value) == (c.op == "in")
+    elif c.op in ("eq", "ne"):
+        held = (cell == c.value) == (c.op == "eq")
+    else:
+        held = _ORDER[c.op](cell, c.value)
+    return HOLDS if held else FAILS
 
 
-def require_conditions(conditions: Sequence[WorkflowCondition], manifest: pa.Table) -> None:
-    """Raise `ConditionRefused` unless every condition holds for every manifest row."""
-    if not conditions:
-        return
-    try:
-        check_conditions_static(conditions)
-    except ValueError as e:
-        raise ConditionRefused("condition_unevaluable", str(e)) from e
-    if manifest.num_rows == 0:
-        raise ConditionRefused(
-            "condition_unevaluable",
-            "no manifest rows to evaluate the conditions over (extraction has not produced any)",
-        )
+def label_manifest(conditions: Sequence[WorkflowCondition], manifest: pa.Table) -> list[dict]:
+    """One label per document and condition."""
+    hashes = manifest.column("source_hash").to_pylist()
     docs = manifest.column("doc_id").to_pylist()
-    problems: list[str] = []
-    for c in conditions:
-        cells = manifest.column(c.column).to_pylist()
-        bad = [i for i, cell in enumerate(cells) if not _holds(c, cell)]
-        if bad:
-            shown = ", ".join(str(docs[i]) for i in bad[:3])
-            problems.append(
-                f"{c.column} {c.op} {c.value!r} fails for {len(bad)} of {len(cells)} document(s) "
-                f"(e.g. {shown})"
-            )
-    if problems:
-        raise ConditionRefused("condition_failed", "; ".join(problems))
+    rows: list[dict] = []
+    for i, c in enumerate(conditions):
+        for h, d, cell in zip(hashes, docs, manifest.column(c.column).to_pylist(), strict=True):
+            rows.append({
+                "source_hash": h, "doc_id": d, "condition_index": i, "column": c.column, "op": c.op,
+                "value": json.dumps(c.value), "cell": None if cell is None else json.dumps(cell),
+                "outcome": _outcome(c, cell),
+            })
+    return rows
 
 
-def manifest_from_dir(shard_dir: Path) -> pa.Table:
-    return read_manifest(shard_dir)
+def log_outcomes(workflow_id: str, conditions: Sequence[WorkflowCondition], rows: list[dict]) -> None:
+    """Warn, per condition, how many documents fail it or cannot be evaluated (a few named)."""
+    if not rows:
+        logger.warning("workflow %s: no manifest rows, so no document was labelled", workflow_id)
+        return
+    for i, c in enumerate(conditions):
+        mine = [r for r in rows if r["condition_index"] == i]
+        bad = {o: [r["doc_id"] for r in mine if r["outcome"] == o] for o in (FAILS, UNEVALUABLE)}
+        if not any(bad.values()):
+            logger.info("workflow %s: %s %s %r holds for all %d document(s)",
+                        workflow_id, c.column, c.op, c.value, len(mine))
+            continue
+        logger.warning(
+            "workflow %s: %s %s %r — %d of %d document(s) fail it, %d unevaluable (e.g. %s); "
+            "labelled, the run goes on", workflow_id, c.column, c.op, c.value, len(bad[FAILS]),
+            len(mine), len(bad[UNEVALUABLE]), ", ".join(str(d) for d in (bad[FAILS] + bad[UNEVALUABLE])[:3]),
+        )
 
 
-def manifest_from_store(store: RemoteStore, shard_prefix: str, scratch: Path) -> pa.Table:
-    """The run's manifest rows read from an object store (each `*._manifest.parquet` staged into *scratch*)."""
-    for key in store.list_files(shard_prefix, "*._manifest.parquet"):
-        store.download_file(key, scratch / key.rsplit("/", 1)[-1])
-    return read_manifest(scratch)
+def label_shard_dir(workflow_id: str, conditions: Sequence[WorkflowCondition], shard_dir: Path) -> list[dict]:
+    """Label every batch's documents against *conditions* and log the counts."""
+    rows: list[dict] = []
+    for manifest in sorted(shard_dir.glob(f"*{_MANIFEST_SUFFIX}")):
+        base = shard_dir / f"{manifest.name.removesuffix(_MANIFEST_SUFFIX)}.parquet"
+        rows.extend(label_manifest(conditions, read_manifest(base)))
+    log_outcomes(workflow_id, conditions, rows)
+    return rows
 
 
 __all__ = [
     "CONDITION_COLUMNS",
-    "ConditionRefused",
     "check_conditions_static",
-    "manifest_from_dir",
-    "manifest_from_store",
-    "require_conditions",
+    "label_manifest",
+    "label_shard_dir",
+    "log_outcomes",
 ]

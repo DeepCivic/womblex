@@ -4,7 +4,7 @@ A *workflow* is a named, persisted recipe kept in the database DBOS's own tables
 live in (`dbos_app.system_database_url`), so a local run needs no second database.
 
 Schema and storage only (`docs/plan-trust-and-recipes.md`, Phase 2 merge 1):
-`destinations` round-trip but are not dispatched (`conditions` are evaluated by
+`destinations` round-trip but are not dispatched (`conditions` label documents through
 `workflow_conditions`), `triggers` are stored but not scheduled, and nothing here runs a
 workflow. The table is created if absent; there is no versioned migration yet.
 """
@@ -49,7 +49,7 @@ class WorkflowInputBinding(StrictModel):
 
 
 class WorkflowCondition(StrictModel):
-    """A guard over a manifest column that must hold for every document; `workflow_conditions` evaluates it."""
+    """A label over a manifest column, recorded per document; it never gates a run (`workflow_conditions`)."""
 
     column: str
     op: Literal["eq", "ne", "in", "not_in", "gt", "gte", "lt", "lte"]

@@ -111,25 +111,6 @@ def dispatch_workflow(
     except StageOrderError as e:
         raise refuse(f"step order cannot complete: {e}", RefusalCode.STEP_ORDER) from e
 
-    if stored.spec.conditions:
-        import tempfile
-        from pathlib import Path
-
-        from womblex.cloud.workflow_conditions import (
-            ConditionRefused,
-            manifest_from_store,
-            require_conditions,
-        )
-
-        try:
-            if not store_uri:
-                raise ConditionRefused("condition_unevaluable", "no --store to read manifests from")
-            with tempfile.TemporaryDirectory(prefix="womblex-cond-") as tmp:
-                manifest = manifest_from_store(RemoteStore.from_uri(store_uri), shard_prefix, Path(tmp))
-            require_conditions(stored.spec.conditions, manifest)
-        except ConditionRefused as e:
-            raise refuse(str(e), RefusalCode(e.code)) from e
-
     from womblex.cloud.dbos_app import ensure_schema, local_database_path
     from womblex.cloud.jobs import RunBoard
 
@@ -155,7 +136,8 @@ def dispatch_workflow(
             workflow={"id": stored.id, "digest": stored.digest,
                       "preset": stored.spec.preset, "config": overlay},
         )
-    if left := not_acted_on(stored):
+    # The fleet does not label conditions yet; the local runner does.
+    if left := not_acted_on(stored) + (("conditions",) if stored.spec.conditions else ()):
         logger.warning("workflow %s: %s stored but not acted on by dispatch", stored.id, ", ".join(left))
     return WorkflowDispatch(
         run_id, stored.id, stored.digest, stages, shard_prefix, newly, dry_run,
