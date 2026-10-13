@@ -144,6 +144,21 @@ def config_from_overlay(
     })
 
 
+def preset_resolver(presets_dir: Path | None) -> Callable[[str], Preset | None]:
+    """Resolve a preset name: an operator-saved one in *presets_dir* shadows a built-in.
+
+    Imports `ui.presets`, not `ui.readers` (which needs fastapi, an extra).
+    """
+    from womblex.ui import presets as pm
+
+    def resolve(name: str) -> Preset | None:
+        path = presets_dir / pm.preset_filename(name) if presets_dir and pm.is_safe_preset_name(name) else None
+        saved = pm.parse_saved_preset(name, path.read_text(encoding="utf-8")) if path and path.is_file() else None
+        return saved or pm.PRESETS.get(name)
+
+    return resolve
+
+
 def workflow_overlay(
     stored: StoredWorkflow, resolve_preset: Callable[[str], Preset | None],
 ) -> dict[str, Any]:
@@ -332,6 +347,7 @@ __all__ = [
     "config_from_overlay",
     "not_acted_on",
     "prepare_workflow",
+    "preset_resolver",
     "resolve_workflow_config",
     "run_workflow_local",
     "workflow_overlay",
