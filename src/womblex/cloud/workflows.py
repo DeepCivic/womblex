@@ -21,10 +21,12 @@ stored with the workflow, so they stay plain JSON-shaped values.
 from __future__ import annotations
 
 import logging
+import os
 import tempfile
 from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -96,6 +98,7 @@ class WorkerContext:
     store: RemoteStore
     ingest: RemoteStore
     ingest_root: str
+    dsn: str | None = None  # the system database a firing reads stored workflows from
 
 
 _ctx: WorkerContext | None = None
@@ -289,6 +292,55 @@ def run_stage(
             f"{stage}: {len(failed)} of {len(units)} unit(s) failed; every unit ran — {'; '.join(failed)}"
         )
     return {"stage": stage, "units": len(units), "published": published, "checksums": checksums}
+
+
+# --- scheduled firings ---------------------------------------------------------
+
+
+def scheduled_run_id(workflow_id: str, scheduled_time: datetime) -> str:
+    """`<workflow id>-<UTC firing time>`: two triggers firing at the same instant share a run."""
+    return f"{workflow_id}-{scheduled_time.astimezone(UTC):%Y%m%dT%H%M%SZ}"
+
+
+def _fire(run_id: str, context: dict[str, Any]) -> dict[str, Any]:
+    """Load the stored workflow and fire it (`workflow_dispatch.fire_workflow`)."""
+    from womblex.cloud.workflow_dispatch import fire_workflow
+    from womblex.cloud.workflow_runner import WorkflowRefusedError, preset_resolver
+    from womblex.cloud.workflow_store import WorkflowStore
+
+    ctx = _context()
+    with WorkflowStore(ctx.dsn) as wf_store:
+        stored = wf_store.get(context["workflow_id"], owner=context.get("owner"))
+    if stored is None:
+        raise RuntimeError(f"scheduled workflow {context['workflow_id']!r} is no longer stored")
+    presets = os.environ.get("WOMBLEX_UI_PRESETS_DIR")
+    try:
+        sent = fire_workflow(
+            stored, run_id=run_id, resolve_preset=preset_resolver(Path(presets) if presets else None),
+            store=ctx.store, ingest=ctx.ingest, ingest_root=ctx.ingest_root, dsn=ctx.dsn,
+        )
+    except WorkflowRefusedError as e:  # the board shows the message, so it carries the code
+        raise WorkflowRefusedError(f"[{e.code.value}] {e}", e.issues, code=e.code, steps=e.steps) from e
+    return {"run_id": run_id, "stages": list(sent.stages)}
+
+
+@DBOS.workflow(name=dbos_app.TRIGGER_WORKFLOW)
+def fire_trigger(run_id: str, context: dict[str, Any]) -> dict[str, Any]:
+    return DBOS.run_step({"name": "fire"}, _fire, run_id, context)
+
+
+@DBOS.workflow(name=dbos_app.SCHEDULED_WORKFLOW)
+def run_scheduled(scheduled_time: datetime, context: dict[str, Any]) -> dict[str, str]:
+    """Start the firing as `<run>:trigger` with the run's id and owner, so a firing that fails is
+    on the board under its run, not only as DBOS's unattributed `sched-…` row."""
+    run_id = scheduled_run_id(context["workflow_id"], scheduled_time)
+    attrs: dict[str, Any] = {"run_id": run_id, "kind": dbos_app.KIND_TRIGGER,
+                             "workflow_id": context["workflow_id"]}
+    if context.get("owner") is not None:
+        attrs["owner"] = context["owner"]
+    with SetWorkflowID(dbos_app.trigger_id(run_id)), SetWorkflowAttributes(attrs):
+        DBOS.enqueue_workflow(dbos_app.DOWNSTREAM_QUEUE, fire_trigger, run_id, context)
+    return {"run_id": run_id, "firing": dbos_app.trigger_id(run_id)}
 
 
 # --- coordinator -------------------------------------------------------------

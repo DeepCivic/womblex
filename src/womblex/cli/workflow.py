@@ -69,6 +69,15 @@ def _register_dispatch(p: argparse.ArgumentParser) -> None:
                    help="Directory of operator-saved presets (or $WOMBLEX_UI_PRESETS_DIR).")
 
 
+def _register_schedule(p: argparse.ArgumentParser) -> None:
+    p.add_argument("workflow_id", help="Stored workflow whose cron triggers to (un)schedule")
+    p.add_argument("--dsn", default=None,
+                   help="DBOS system database (or $WOMBLEX_DB_DSN / $DATABASE_URL). Default: the local SQLite file.")
+    mode = p.add_mutually_exclusive_group()
+    mode.add_argument("--remove", action="store_true", help="Unschedule every trigger of the workflow")
+    mode.add_argument("--status", action="store_true", help="List its schedules; change nothing")
+
+
 def _load_workflow(args: argparse.Namespace):  # type: ignore[no-untyped-def]
     """The stored workflow named by *args*, or `None` (the reason is logged)."""
     from womblex.cloud.workflow_store import WorkflowStore
@@ -253,11 +262,50 @@ def cmd_dispatch_workflow(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_schedule_workflow(args: argparse.Namespace) -> int:
+    """Make the board's schedules for a stored workflow equal its triggers (workers fire them)."""
+    from womblex.cloud import dbos_app
+    from womblex.cloud.dispatch import owned_prefix
+    from womblex.cloud.workflow_schedules import list_schedules, remove_schedules, sync_schedules
+
+    dsn = args.dsn or os.environ.get("WOMBLEX_DB_DSN") or os.environ.get("DATABASE_URL")
+    # --status and --remove go by id alone: deleting a workflow leaves its schedules behind.
+    if args.status or args.remove:
+        stored = None
+    elif (stored := _load_workflow(args)) is None:
+        return 1
+    if stored is not None:
+        try:  # a firing would refuse it, so it is not scheduled
+            owned_prefix(stored.owner, stored.spec.input_binding.ingest_prefix)
+        except ValueError as e:
+            logger.error("workflow %s: %s", stored.id, e)
+            return 1
+    if args.status and not dsn and not dbos_app.local_database_path().exists():
+        return 0  # nothing scheduled, and --status creates no database to say so
+    if not args.status:
+        dbos_app.ensure_schema(dsn)
+    client = dbos_app.open_client(dsn)
+    if args.status:
+        for s in list_schedules(client, args.workflow_id):
+            print(f"{s['schedule_name']}  {s['schedule']} {s.get('cron_timezone') or 'UTC'}  "
+                  f"{s['status']}  last fired {s.get('last_fired_at') or 'never'}")
+        return 0
+    if args.remove:
+        print(f"unscheduled {remove_schedules(client, args.workflow_id)} trigger(s) of {args.workflow_id}")
+        return 0
+    assert stored is not None  # neither --status nor --remove
+    names = sync_schedules(client, stored)
+    print(f"{stored.id}: {len(names)} trigger(s) scheduled" + (f" ({', '.join(names)})" if names else ""))
+    return 0
+
+
 COMMANDS = [
     Command("run-workflow", "Run a stored workflow's steps over a local shard directory",
             _register_run_workflow, cmd_run_workflow),
     Command("dispatch-workflow", "Queue a stored workflow's steps for the fleet (object-store run)",
             _register_dispatch, cmd_dispatch_workflow),
+    Command("schedule-workflow", "Schedule a stored workflow's cron triggers on the queue (workers fire them)",
+            _register_schedule, cmd_schedule_workflow),
     Command("plan", "Say what a stored workflow would run and spend, calling no paid API",
             _register_plan, cmd_plan),
     Command("validate", "Check a stored workflow would run, without running it",

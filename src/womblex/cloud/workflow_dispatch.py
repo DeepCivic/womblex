@@ -18,7 +18,7 @@ import logging
 from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from womblex.cloud.workflow_order import StageOrderError, check_dispatch_order
 from womblex.cloud.workflow_runner import (
@@ -33,6 +33,7 @@ from womblex.pipeline_order import DOWNSTREAM_STAGES, in_pipeline_order
 from womblex.store.retention import is_safe_run_id
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from womblex.store.remote import RemoteStore
     from womblex.ui.presets import Preset
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,7 @@ def dispatch_workflow(
     owner: str | None = None,
     max_attempts: int = 3,
     dry_run: bool = False,
+    store: RemoteStore | None = None,
 ) -> WorkflowDispatch:
     """Check *stored* against the store and the board, then enqueue it for *run_id*.
 
@@ -104,10 +106,9 @@ def dispatch_workflow(
     shard_prefix = f"{(output_prefix or f'runs/{run_id}').strip('/')}/documents"
     from womblex.store.remote import RemoteStore
 
+    store = store or (RemoteStore.from_uri(store_uri) if store_uri else None)
     try:
-        check_dispatch_order(
-            list(stages), config, RemoteStore.from_uri(store_uri) if store_uri else None, shard_prefix,
-        )
+        check_dispatch_order(list(stages), config, store, shard_prefix)
     except StageOrderError as e:
         raise refuse(f"step order cannot complete: {e}", RefusalCode.STEP_ORDER) from e
 
@@ -143,4 +144,45 @@ def dispatch_workflow(
     )
 
 
-__all__ = ["WorkflowDispatch", "dispatch_workflow"]
+def fire_workflow(
+    stored: StoredWorkflow,
+    *,
+    run_id: str,
+    resolve_preset: Callable[[str], Preset | None],
+    store: RemoteStore,
+    ingest: RemoteStore,
+    ingest_root: str,
+    dsn: str | None,
+) -> WorkflowDispatch:
+    """One firing of a standing trigger: extract the input prefix into *run_id*, then dispatch the steps.
+
+    The launch, so every check runs first — a dry-run dispatch, the owner's prefix, at least one
+    document — and a firing that cannot complete writes no row. The coordinator labels the
+    conditions once extraction settles.
+    """
+    from womblex.cloud.dispatch import PrefixNotOwned, batch_specs, owned_prefix, supported_keys
+    from womblex.cloud.jobs import RunBoard
+
+    common: dict[str, Any] = {"resolve_preset": resolve_preset, "run_id": run_id, "store_uri": None,
+                              "store": store, "dsn": dsn, "owner": stored.owner}
+    dispatch_workflow(stored, dry_run=True, **common)
+    binding = stored.spec.input_binding
+    try:
+        prefix = owned_prefix(stored.owner, binding.ingest_prefix)
+    except ValueError as e:
+        code = RefusalCode.PREFIX_NOT_OWNED if isinstance(e, PrefixNotOwned) else RefusalCode.SPEC_INVALID
+        raise WorkflowRefusedError(f"workflow {stored.id!r}: {e}", code=code) from e
+    location, keys = supported_keys(ingest, ingest_root, prefix)
+    if not keys:
+        raise WorkflowRefusedError(f"workflow {stored.id!r}: no supported documents under {location}",
+                                   code=RefusalCode.NO_DOCUMENTS)
+    specs = batch_specs(keys, shard_prefix=f"runs/{run_id}/documents", ingest_root=ingest_root,
+                        batch_size=binding.batch_size, max_attempts=3)
+    with RunBoard(dsn) as board:
+        board.enqueue(run_id, specs, owner=stored.owner)
+    sent = dispatch_workflow(stored, **common)
+    logger.info("workflow %s fired: run %s, %d doc(s), stages %s", stored.id, run_id, len(keys), ", ".join(sent.stages))
+    return sent
+
+
+__all__ = ["WorkflowDispatch", "dispatch_workflow", "fire_workflow"]
