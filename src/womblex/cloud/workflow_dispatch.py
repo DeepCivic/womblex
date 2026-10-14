@@ -7,9 +7,10 @@ the spec, preset and config (`workflow_runner`), the step order against the stor
 listing (`workflow_order.check_dispatch_order`), and three things only a fleet has to
 say: the stage is not dispatchable, the list is not in pipeline order (the coordinator
 sorts, so another order would not be the order the workflow declares), or the run
-already ran a stage under a different workflow. The workflow's resolved overlay and
-digest travel with the dispatch (`enqueue_stages(workflow=…)`), so workers run the
-stages under that recipe and stamp its digest.
+already ran a stage under a different workflow. The workflow's resolved overlay,
+digest and conditions travel with the dispatch (`enqueue_stages(workflow=…)`), so workers
+run the stages under that recipe and stamp its digest, and the coordinator labels the
+conditions once extraction settles.
 """
 
 from __future__ import annotations

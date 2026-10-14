@@ -375,9 +375,8 @@ class RunBoard:
         so a key a later workflow rewrote (an in-place stage, a re-dispatched
         stage) carries the newest digest.
         """
-        every = self._rows(run_id, None, load_output=True)
+        every = sorted(self._rows(run_id, None, load_output=True), key=lambda s: s.created_at or 0)
         rows = [s for s in every if _attr(s, "kind", dbos_app.KIND_BATCH) != dbos_app.KIND_DOWNSTREAM]
-        rows.sort(key=lambda s: s.created_at or 0)
         checksums: dict[str, str] = {}
         undigested: list[str] = []
         for s in rows:

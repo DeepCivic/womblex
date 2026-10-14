@@ -144,7 +144,6 @@ def test_a_failed_stage_does_not_stop_the_stages_after_it(fleet, monkeypatch):
     assert RemoteStore.from_uri(str(store)).exists("runs/r1/documents/batch-0001.chunks.parquet")
 
 
-
 def _conditioned(fleet, conditions) -> tuple[RunBoard, dict]:
     """Run r1 with one batch and a dispatched workflow carrying *conditions* through `normalise`."""
     _, ingest, _ = fleet
@@ -185,6 +184,18 @@ def test_a_labelling_failure_in_the_coordinator_is_logged_and_the_stages_run(fle
     _, jobs = _conditioned(fleet, [{"column": "status", "op": "eq", "value": "ok"}])
     assert jobs["downstream"].status == "done" and jobs["normalise"].status == "done"
     assert "conditions not labelled" in caplog.text
+
+
+def test_a_later_coordinators_condition_labels_carry_the_newest_digest():
+    key = "k/b1.conditions.parquet"
+    rows = [
+        _Row("r1:downstream:new", "SUCCESS", [], kind="downstream", created_at=2),
+        _Row("r1:downstream:old", "SUCCESS", [], kind="downstream", created_at=1),
+    ]
+    steps = {wid: [{"function_id": 1, "output": {key: digest}, "error": None}]
+             for wid, digest in (("r1:downstream:new", "bb"), ("r1:downstream:old", "aa"))}
+    assert _board(rows, steps).file_checksums("r1").checksums == {key: "bb"}
+
 
 def test_an_engine_error_is_not_carried_as_a_units_failure():
     from dbos import error as dbos_error
