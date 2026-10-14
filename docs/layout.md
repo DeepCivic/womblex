@@ -182,6 +182,10 @@ What a rerun changes, and what it does not:
 - DOCX, spreadsheets and text carry no layout and are not opened.
 - `layout` is not in the stages `enqueue-stages` dispatches: a rerun is
   deliberate.
+- The replace is in place, unlike the write-once sidecars of other stages,
+  because the file is a derived cache of the source document: its fingerprint
+  records which model and settings produced it, and the replace is
+  all-or-nothing per batch.
 
 ### On a distributed run
 

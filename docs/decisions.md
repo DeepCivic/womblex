@@ -117,8 +117,8 @@ claim*. Two deliberate choices:
   backend means the air-gapped/CPU default exercises the *same* code path with
   no S3 dependency touched.
 - **DBOS workflows are the distributed checkpoint, not a second mechanism
-  alongside the JSON `CheckpointManager`** (2026-10; D9 of
-  [plan-trust-and-recipes.md](plan-trust-and-recipes.md)). Concurrent workers
+  alongside the JSON `CheckpointManager`** (2026-10; D9 of the
+  trust-and-recipes plan). Concurrent workers
   writing one checkpoint file would race, so the worker path does **not** use
   `CheckpointManager`. An extraction batch and a downstream stage are DBOS
   workflows on queues; a batch, and each stage unit, run as a recorded step, so
@@ -151,6 +151,14 @@ The load-bearing invariant: `cmd_run` and the worker call **one** shared
 `batch.process_batch`, so local and distributed runs produce byte-identical
 shards by construction — the same reasoning as "per-stage and E2E feed the same
 engines".
+
+### Trust and recipes: what an external requirements set does and does not change
+2026-10. A business-analyst requirements set (FR-1.1 to FR-5.2: high-integrity extraction, recipe-based workflows, destinations and delivery, agent-friendly operation, safety and operability) was written without knowledge of the repository. Most of it mapped onto what already existed: evidence onto element `page` / `bbox` / `order`, content-addressed `source_hash` and the evidence reference; run artefacts and lineage onto the run stamp, `content_digest`, `manifest.parquet`, the run record and `source_index.parquet`; recipes and step ordering onto validated configs, presets, stored workflows and `STAGE_CONTRACTS`; delivery onto egress; agent operation onto typed exceptions and the owner-scoped `/v1` API; sensitive data onto the `sensitivity` footer key and the API's masked-by-default reads. What it did not change:
+
+- **No accepted / flagged / rejected verdicts (FR-1.2).** Measuring quality is the benchmark's job; the rule against quality scoring stands.
+- **No schema-driven field extraction.** "Extract invoices" or "summarise contracts" are not Womblex features; evidence requirements apply only to the annotations Womblex produces (money spans, enrichment mentions, entity links, PII spans). Topic annotation of elements is a later roadmap item and, when it lands, is one more annotation sidecar under the evidence reference.
+- **Egress keeps delivering unredacted sources (FR-5.1, D10).** Access control stays with whoever runs egress and hosts the bundle (`egress.md`); per-step destinations do not change that.
+- **Destinations come in this order (D11):** object storage (built on egress), Postgres with pgvector, then webhook notifications. `httpx`, already locked through the Isaacus SDK, is approved for direct declaration for webhooks; each database or vector-store destination brings its own client in a per-destination extra.
 
 ### A workflow is a stored object, not an extended preset or a recipe file
 2026-10; D8 of the trust-and-recipes plan, shipped as Phase 2 merges 1–9a (`cloud/workflow_store.py`). A preset is a partial config applied once per run; it holds no step sequence, inputs, conditions or destinations. A stored workflow references a preset and adds those, in its own table in the database DBOS uses, owner-scoped as runs are, its digest stamped beside `config_digest`. The up-front ordering check (D4) shipped with it (merge 3), so local and fleet runs got it at once.
@@ -582,7 +590,7 @@ There is no separate detector and **no second enrichment pass**.
   treated as an internal substrate; if embeddings are ever published, re-embed
   the masked `clean_text` instead.
 - **`clean_text` says whether masking could have found anything** (2026-10;
-  D1 of [plan-trust-and-recipes.md](plan-trust-and-recipes.md)). Each row
+  D1 of the trust-and-recipes plan). Each row
   carries `mask_status`: `masked`, `no_entity` (a candidate source covered the
   chunk and found nothing) or `not_masked` (none did, so the text is verbatim).
   *Rejected:* refusing the stage with a typed error when a chunk has no
@@ -1011,6 +1019,22 @@ be re-derivable, and the first pass's were not.
   kinds are bbox-populated. The narrower real issue was OCR-form bbox loss,
   since fixed.
 
+- **Dependencies assessed for the trust-and-recipes work (2026-10).** Against the repository's rules (thin adapters, delete Womblex code a library takes over, no heavyweight ML in core, a core install that runs without a database). DBOS was adopted (see "Distributed execution").
+
+  | Candidate | Licence | Verdict | Reason |
+  |---|---|---|---|
+  | OpenLineage (`openlineage-python`) | Apache-2.0 | No dependency | Emit spec-conformant JSON from the run record and test it against the published schema; an optional extra only if pushing to a lineage server becomes a requirement |
+  | Docling (full converter) | MIT | Reject for core | Brings torch and its own layout models; its layout model could be a `womblex.models.layout` plugin outside core, judged by the benchmark ([`layout.md`](layout.md)) |
+  | docling-core | MIT | Optional egress format, later | Light, pydantic-based; only as an output format for consumers that want Docling's schema |
+  | docling-parse | MIT | Hold | A fallback if pypdfium2 + pdfplumber miss their parity gates |
+  | Docling Graph | MIT | Reject; borrow the idea | Its deterministic provenance ledger informed the evidence reference; the package brings full Docling plus LLM clients |
+  | Pydantic AI | MIT | Reject | Field extraction is out of scope; a topic annotation would go through Isaacus |
+  | Unstructured | Apache-2.0 | Reject | Heavy, torch-based inference; duplicates the existing extractors |
+  | MarkItDown | MIT | Reject | Drops page geometry, which the evidence reference needs |
+  | Temporal, Prefect, Haystack | MIT / Apache-2.0 | Reject | A separate service, or a pipeline model competing with `STAGE_CONTRACTS` |
+  | lakeFS | BUSL-1.1 | Reject | Not a permissive licence; a separate service |
+  | OpenInference | Apache-2.0 | Reject for now | Model calls are Isaacus and Bedrock; JSON logs with run context already exist |
+
 ## Known limitations (library-general)
 
 - **Residual low-confidence native-text table fabrication.** The
@@ -1092,6 +1116,7 @@ be re-derivable, and the first pass's were not.
     The shell therefore uses lime for the 2px rule (a fill, always legible)
     and carries the active state in the label's weight and `--foreground`
     (13.72:1 dark / 17.46:1 light).
+- **Only native PDF tables have cell boxes.** DOCX, OCR-reconstructed and spreadsheet-print table cells carry a null `bbox` (`extraction.md`). OCR tables could take one from the `table_grid` bands and columns if a consumer needs it.
 
 ## Deferred / backlog
 
@@ -1143,12 +1168,9 @@ be re-derivable, and the first pass's were not.
   - **Prerequisite — shipped.** `config.py` (920 lines) was split
     mechanically into the `config/` package (#132).
 
-- **Trust baseline and recipes.** *In progress 2026-10; Phase 0 (DBOS), strict
-  `text_source` and `mask_status` shipped.* Maps an external
-  requirements set onto what exists: evidence anchoring for existing
-  annotations, strict config and ordering checks, file checksums, a recipe
-  file with a local multi-stage runner, then destinations. No quality scoring
-  and no field extraction. Plan, dependency assessment and phases:
+- **Trust baseline and recipes.** *In progress 2026-10; the trust baseline and
+  stored workflows shipped.* Scope and the dependency assessment are recorded
+  above ("Trust and recipes", "Dependencies assessed"). Outstanding work:
   [plan-trust-and-recipes.md](plan-trust-and-recipes.md).
 - **Permissive dependencies — Apache-2.0 compatibility.** *Shipped 2026-10
   (layout swap #130, layout stage L3, pdfium default F1, PyMuPDF removed F2).*
