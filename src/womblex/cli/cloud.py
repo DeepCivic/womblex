@@ -27,7 +27,6 @@ from womblex.cli._shared import (
     add_models_check_argument,
     apply_models_check,
     normalise_prefix,
-    select_supported,
 )
 
 logger = logging.getLogger("womblex")
@@ -101,7 +100,8 @@ def _register_enqueue(p: argparse.ArgumentParser) -> None:
 
 def cmd_enqueue(args: argparse.Namespace) -> int:
     from womblex.cloud.dbos_app import ensure_schema
-    from womblex.cloud.jobs import JobSpec, RunBoard
+    from womblex.cloud.dispatch import batch_specs, supported_keys
+    from womblex.cloud.jobs import RunBoard
     from womblex.store.remote import RemoteStore, assert_disjoint_locations
     from womblex.store.retention import generate_run_id
 
@@ -153,32 +153,18 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
             logger.error(str(e))
             return 1
 
-    ingest_store = RemoteStore.from_uri(ingest_uri) if ingest_uri else RemoteStore.from_uri(store_uri)
-    location = f"{ingest_uri or store_uri}/{input_prefix}".rstrip("/")
-    all_keys = ingest_store.list_files(input_prefix, "*", recursive=True)
-    # `list_files` returns store-relative keys, so the prefix comes off before
-    # the nesting check and goes back on after — the worker stages by key.
-    scope = f"{input_prefix}/" if input_prefix else ""
+    root = ingest_uri or store_uri
     try:
-        names = select_supported((k.removeprefix(scope) for k in all_keys), location=location)
+        location, keys = supported_keys(RemoteStore.from_uri(root), root, input_prefix)
     except NestedCorpusError as e:
         logger.error(str(e))
         return 1
-    keys = [f"{scope}{n}" for n in names]
     if not keys:
         logger.error("No supported documents under %s", location)
         return 1
 
-    specs = [
-        JobSpec(
-            batch_num=batch_idx,
-            input_keys=keys[i : i + batch_size],
-            shard_prefix=shard_prefix,
-            max_attempts=args.max_attempts,
-            ingest_root=ingest_uri or store_uri,
-        )
-        for batch_idx, i in enumerate(range(0, len(keys), batch_size), start=1)
-    ]
+    specs = batch_specs(keys, shard_prefix=shard_prefix, ingest_root=root,
+                        batch_size=batch_size, max_attempts=args.max_attempts)
 
     ensure_schema(dsn)
     with RunBoard(dsn) as board:

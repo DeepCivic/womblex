@@ -7,9 +7,10 @@ the spec, preset and config (`workflow_runner`), the step order against the stor
 listing (`workflow_order.check_dispatch_order`), and three things only a fleet has to
 say: the stage is not dispatchable, the list is not in pipeline order (the coordinator
 sorts, so another order would not be the order the workflow declares), or the run
-already ran a stage under a different workflow. The workflow's resolved overlay and
-digest travel with the dispatch (`enqueue_stages(workflow=…)`), so workers run the
-stages under that recipe and stamp its digest.
+already ran a stage under a different workflow. The workflow's resolved overlay,
+digest and conditions travel with the dispatch (`enqueue_stages(workflow=…)`), so workers
+run the stages under that recipe and stamp its digest, and the coordinator labels the
+conditions once extraction settles.
 """
 
 from __future__ import annotations
@@ -133,11 +134,10 @@ def dispatch_workflow(
             )
         newly = 0 if dry_run or board is None else board.enqueue_stages(
             run_id, list(stages), shard_prefix, max_attempts=max_attempts, owner=owner,
-            workflow={"id": stored.id, "digest": stored.digest,
-                      "preset": stored.spec.preset, "config": overlay},
+            workflow={"id": stored.id, "digest": stored.digest, "preset": stored.spec.preset,
+                      "config": overlay, "conditions": [c.model_dump() for c in stored.spec.conditions]},
         )
-    # The fleet does not label conditions yet; the local runner does.
-    if left := not_acted_on(stored) + (("conditions",) if stored.spec.conditions else ()):
+    if left := not_acted_on(stored):
         logger.warning("workflow %s: %s stored but not acted on by dispatch", stored.id, ", ".join(left))
     return WorkflowDispatch(
         run_id, stored.id, stored.digest, stages, shard_prefix, newly, dry_run,

@@ -154,7 +154,7 @@ def test_no_entry_point_refuses_a_failing_condition(
         sent = dispatch_workflow(stored, resolve_preset=_resolve, run_id="r1",
                                  store_uri=str(store), dsn=None, dry_run=True)
     assert sent.stages == ("normalise",)
-    assert "conditions stored but not acted on by dispatch" in caplog.text
+    assert "not acted on" not in caplog.text  # carried to the coordinator, which labels them
     assert not list(shards.glob("*.conditions.parquet"))  # validate, plan and dispatch write nothing
 
 
