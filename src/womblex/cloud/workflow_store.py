@@ -5,7 +5,7 @@ live in (`dbos_app.system_database_url`), so a local run needs no second databas
 
 Schema and storage only (`docs/plan-trust-and-recipes.md`, Phase 2 merge 1):
 `destinations` round-trip but are not dispatched (`conditions` label documents through
-`workflow_conditions`), `triggers` are stored but not scheduled, and nothing here runs a
+`workflow_conditions`), `triggers` are scheduled by `workflow_schedules`, and nothing here runs a
 workflow. The table is created if absent; there is no versioned migration yet.
 """
 

@@ -27,13 +27,15 @@ APP_NAME = "womblex"
 EXTRACT_WORKFLOW = "womblex.extract_batch"
 STAGE_WORKFLOW = "womblex.run_stage"
 DOWNSTREAM_WORKFLOW = "womblex.run_downstream"
+SCHEDULED_WORKFLOW = "womblex.run_scheduled"
+TRIGGER_WORKFLOW = "womblex.fire_trigger"
 
 #: Coordinators wait on a run's extraction, so they sit on their own queue and
 #: never hold a slot a batch or a stage needs.
 DOWNSTREAM_QUEUE = "womblex-downstream"
 
 #: Workflow kinds, carried as the ``kind`` attribute.
-KIND_BATCH, KIND_STAGE, KIND_DOWNSTREAM = "batch", "stage", "downstream"
+KIND_BATCH, KIND_STAGE, KIND_DOWNSTREAM, KIND_TRIGGER = "batch", "stage", "downstream", "trigger"
 
 _LOCAL_DB_ENV = "WOMBLEX_DBOS_PATH"
 _LOCAL_DB_DEFAULT = ".womblex/dbos.sqlite"
@@ -66,6 +68,11 @@ def stage_queue(stage: str) -> str:
 
 def batch_id(run_id: str, batch_num: int) -> str:
     return f"{run_id}:batch:{batch_num:04d}"
+
+
+def trigger_id(run_id: str) -> str:
+    """A scheduled firing's row on the board, under the run it starts."""
+    return f"{run_id}:trigger"
 
 
 def stage_id(run_id: str, stage: str) -> str:

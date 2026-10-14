@@ -102,7 +102,7 @@ def run_worker(
     # Before launch, so a model this worker lacks is known up front: the queues
     # that need it are simply not joined.
     served = served_queues(check_models(config), ingest_root)
-    workflows.set_context(workflows.WorkerContext(config, store, ingest, ingest_root))
+    workflows.set_context(workflows.WorkerContext(config, store, ingest, ingest_root, dsn))
 
     DBOS(config={
         "name": dbos_app.APP_NAME,
