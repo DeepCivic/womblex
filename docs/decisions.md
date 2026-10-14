@@ -152,6 +152,12 @@ The load-bearing invariant: `cmd_run` and the worker call **one** shared
 shards by construction — the same reasoning as "per-stage and E2E feed the same
 engines".
 
+### A workflow is a stored object, not an extended preset or a recipe file
+2026-10; D8 of the trust-and-recipes plan, shipped as Phase 2 merges 1–9a (`cloud/workflow_store.py`). A preset is a partial config applied once per run; it holds no step sequence, inputs, conditions or destinations. A stored workflow references a preset and adds those, in its own table in the database DBOS uses, owner-scoped as runs are, its digest stamped beside `config_digest`. The up-front ordering check (D4) shipped with it (merge 3), so local and fleet runs got it at once.
+
+- *Rejected:* **extending the preset** with steps, conditions and destinations. One schema and no new storage, but it mixes how a stage behaves with what runs and where results go, and leaves nothing for a standing trigger to act on.
+- *Rejected:* **a recipe file** in the user's repository. Diffable, with no storage or lifecycle, and promotable later, but it cannot carry standing triggers; event subscriptions would be declared per run.
+
 ### A stored workflow runs locally: validate on save and load, refuse before work, record after
 Phase 2 merge 2 (`cloud/workflow_runner.py`). Three calls the merge-1 review left open.
 
