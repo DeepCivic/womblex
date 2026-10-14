@@ -294,6 +294,23 @@ def run_stage(
 # --- coordinator -------------------------------------------------------------
 
 
+def _label_conditions(shard_prefix: str, workflow: dict[str, Any]) -> dict[str, str]:
+    """Label the settled run's documents against the workflow's conditions; key -> SHA-256.
+
+    The run is launched, so a failure here is logged and the stages run regardless.
+    """
+    from womblex.cloud.workflow_conditions import label_store
+    from womblex.cloud.workflow_store import WorkflowCondition
+
+    try:
+        with workflow_context(workflow["digest"]):
+            return label_store(workflow["id"], [WorkflowCondition(**c) for c in workflow["conditions"]],
+                               _context().store, shard_prefix)
+    except Exception:
+        logger.exception("workflow %s: conditions not labelled; the stages run regardless", workflow["id"])
+        return {}
+
+
 def _unsettled_batches(run_id: str) -> int:
     return len(DBOS.list_workflows(
         workflow_id_prefix=f"{run_id}:batch:", status=_UNSETTLED,
@@ -317,6 +334,8 @@ def run_downstream(
     """
     while DBOS.run_step({"name": "await-extraction"}, _unsettled_batches, run_id):
         DBOS.sleep(SETTLE_POLL_SECONDS)
+    if workflow and workflow.get("conditions"):
+        DBOS.run_step({"name": "conditions"}, _label_conditions, shard_prefix, workflow)
 
     results: list[dict[str, Any]] = []
     failed: list[str] = []

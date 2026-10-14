@@ -45,7 +45,7 @@ from womblex.api.models import (
     RunSubmitted,
     UploadAccepted,
 )
-from womblex.cli._shared import SUPPORTED_EXTENSIONS, normalise_prefix, select_supported
+from womblex.cli._shared import SUPPORTED_EXTENSIONS, select_supported
 from womblex.cloud import dispatch
 from womblex.cloud.dispatch import QUEUE_CONNECT_TIMEOUT
 from womblex.cloud.jobs import RunBoard, RunSummary
@@ -87,13 +87,11 @@ def mint_run_id() -> str:
 def confine_prefix(caller: Caller, input_prefix: str) -> str:
     """*input_prefix* normalised; a non-admin caller may only name its own ``<client_id>/`` tree."""
     try:
-        prefix = normalise_prefix(input_prefix)
+        return dispatch.owned_prefix(caller.owner, input_prefix)
+    except dispatch.PrefixNotOwned as e:
+        raise HTTPException(status_code=403, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    owner = caller.owner
-    if owner is not None and prefix != owner and not prefix.startswith(f"{owner}/"):
-        raise HTTPException(status_code=403, detail=f"input_prefix must be under {owner}/")
-    return prefix
 
 
 def upload_names(files: list[UploadFile]) -> list[str]:

@@ -17,12 +17,16 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from womblex.cli._shared import normalise_prefix, select_supported
 from womblex.cloud.dbos_app import ensure_schema
 from womblex.store.retention import generate_run_id, is_safe_run_id
-from womblex.ui.deps import UISettings
+
+if TYPE_CHECKING:  # pragma: no cover - typing only; ui.deps imports fastapi, an extra a worker lacks
+    from womblex.cloud.jobs import JobSpec
+    from womblex.store.remote import RemoteStore
+    from womblex.ui.deps import UISettings
 
 #: Seconds to wait for the queue connection before reporting it unreachable. A
 #: polled dashboard or a request thread would otherwise sit on a routable-but-dead
@@ -144,13 +148,47 @@ def _supported_under(settings: UISettings, prefix: str) -> tuple[str, list[str]]
     from womblex.store.remote import RemoteStore
 
     ingest_uri = cast(str, settings.ingest_uri)
+    return supported_keys(RemoteStore.from_uri(ingest_uri), ingest_uri, prefix)
+
+
+def supported_keys(ingest_store: RemoteStore, ingest_uri: str, prefix: str) -> tuple[str, list[str]]:
+    """`(location, keys)`: what a run over *prefix* of *ingest_store* would ingest."""
     location = f"{ingest_uri}/{prefix}".rstrip("/")
-    ingest_store = RemoteStore.from_uri(ingest_uri)
     all_keys = ingest_store.list_files(prefix, "*", recursive=True)
     # Store-relative keys: strip the prefix for the nesting check, restore after.
     scope = f"{prefix}/" if prefix else ""
     names = select_supported((k.removeprefix(scope) for k in all_keys), location=location)
     return location, [f"{scope}{n}" for n in names]
+
+
+class PrefixNotOwned(ValueError):
+    """An ingest prefix outside the owner's own `<owner>/` tree."""
+
+
+def owned_prefix(owner: str | None, input_prefix: str | None) -> str:
+    """*input_prefix* normalised; an owner (a non-admin caller) may name only its own `<owner>/` tree.
+
+    Raises `ValueError` for an unsafe prefix and `PrefixNotOwned` for another owner's.
+    """
+    prefix = normalise_prefix(input_prefix)
+    if owner is not None and prefix != owner and not prefix.startswith(f"{owner}/"):
+        raise PrefixNotOwned(f"input_prefix must be under {owner}/")
+    return prefix
+
+
+def batch_specs(
+    keys: list[str], *, shard_prefix: str, ingest_root: str, batch_size: int, max_attempts: int,
+) -> list[JobSpec]:
+    """*keys* split into `batch_size` extraction batches, numbered from 1."""
+    from womblex.cloud.jobs import JobSpec
+
+    if batch_size < 1:
+        raise ValueError("batch_size must be >= 1")
+    return [
+        JobSpec(batch_num=n, input_keys=keys[i : i + batch_size], shard_prefix=shard_prefix,
+                max_attempts=max_attempts, ingest_root=ingest_root)
+        for n, i in enumerate(range(0, len(keys), batch_size), start=1)
+    ]
 
 
 @dataclass(frozen=True)
@@ -214,7 +252,7 @@ def enqueue_extraction(
     if not is_safe_run_id(resolved_run_id):
         raise ValueError(f"unsafe run_id: {resolved_run_id!r}")
 
-    from womblex.cloud.jobs import JobSpec, RunBoard
+    from womblex.cloud.jobs import RunBoard
 
     ingest_uri = cast(str, settings.ingest_uri)
     location, keys = _supported_under(settings, normalise_prefix(input_prefix))
@@ -223,16 +261,8 @@ def enqueue_extraction(
 
     output_prefix = f"runs/{resolved_run_id}"
     shard_prefix = f"{output_prefix}/documents"
-    specs = [
-        JobSpec(
-            batch_num=batch_idx,
-            input_keys=keys[i : i + batch_size],
-            shard_prefix=shard_prefix,
-            max_attempts=max_attempts,
-            ingest_root=ingest_uri,
-        )
-        for batch_idx, i in enumerate(range(0, len(keys), batch_size), start=1)
-    ]
+    specs = batch_specs(keys, shard_prefix=shard_prefix, ingest_root=ingest_uri,
+                        batch_size=batch_size, max_attempts=max_attempts)
 
     ensure_schema(settings.db_dsn)
     with RunBoard(settings.db_dsn, connect_timeout=QUEUE_CONNECT_TIMEOUT) as board:

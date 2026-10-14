@@ -632,3 +632,36 @@ def test_a_prefix_scoping_to_nothing_is_not_a_licence_to_list_the_whole_store(
     _CapturingQueue.keys = None
     assert cloud.cmd_enqueue(_enqueue_args(tmp_path, "./", ingest=False)) == 1
     assert _CapturingQueue.keys is None
+
+
+def test_the_worker_side_dispatch_helpers_import_without_fastapi():
+    """fastapi is the `ui`/`api` extra; a base-install worker must still import these."""
+    import subprocess
+    import sys
+
+    code = ("import sys; sys.modules['fastapi'] = None; "
+            "import womblex.cloud.dispatch, womblex.cloud.workflow_runner, womblex.cloud.workflows")
+    subprocess.run([sys.executable, "-c", code], check=True)
+
+
+def test_owned_prefix_confines_an_owner_to_its_own_tree():
+    from womblex.cloud.dispatch import PrefixNotOwned, owned_prefix
+
+    assert owned_prefix(None, "anyone/x") == "anyone/x"  # admin, CLI and console
+    assert owned_prefix("acme", "acme//in/") == "acme/in"
+    assert owned_prefix("acme", "acme") == "acme"
+    for other in ("other/x", "acme-two/x", ""):
+        with pytest.raises(PrefixNotOwned):
+            owned_prefix("acme", other)
+    with pytest.raises(ValueError):
+        owned_prefix("acme", "acme/../other")
+
+
+def test_batch_specs_split_keys_into_numbered_batches():
+    from womblex.cloud.dispatch import batch_specs
+
+    specs = batch_specs(["a", "b", "c"], shard_prefix="runs/r/documents", ingest_root="file:///in",
+                        batch_size=2, max_attempts=5)
+    assert [(s.batch_num, s.input_keys, s.max_attempts) for s in specs] == [(1, ["a", "b"], 5), (2, ["c"], 5)]
+    with pytest.raises(ValueError):
+        batch_specs(["a"], shard_prefix="p", ingest_root="r", batch_size=0, max_attempts=1)

@@ -86,16 +86,10 @@ def _load_workflow(args: argparse.Namespace):  # type: ignore[no-untyped-def]
 
 
 def _preset_resolver(args: argparse.Namespace) -> Callable[[str], object]:
-    from womblex.ui import presets as pm  # not ui.readers: that needs fastapi, an extra
+    from womblex.cloud.workflow_runner import preset_resolver
 
     presets_dir = args.presets_dir or (Path(d) if (d := os.environ.get("WOMBLEX_UI_PRESETS_DIR")) else None)
-
-    def resolve_preset(name: str) -> pm.Preset | None:  # a saved preset shadows a built-in
-        path = presets_dir / pm.preset_filename(name) if presets_dir and pm.is_safe_preset_name(name) else None
-        saved = pm.parse_saved_preset(name, path.read_text(encoding="utf-8")) if path and path.is_file() else None
-        return saved or pm.PRESETS.get(name)
-
-    return resolve_preset
+    return preset_resolver(presets_dir)
 
 
 def cmd_run_workflow(args: argparse.Namespace) -> int:

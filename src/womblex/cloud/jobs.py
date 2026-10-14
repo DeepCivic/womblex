@@ -375,8 +375,8 @@ class RunBoard:
         so a key a later workflow rewrote (an in-place stage, a re-dispatched
         stage) carries the newest digest.
         """
-        rows = [s for s in self._rows(run_id, None, load_output=True)
-                if _attr(s, "kind", dbos_app.KIND_BATCH) != dbos_app.KIND_DOWNSTREAM]
+        every = self._rows(run_id, None, load_output=True)
+        rows = [s for s in every if _attr(s, "kind", dbos_app.KIND_BATCH) != dbos_app.KIND_DOWNSTREAM]
         rows.sort(key=lambda s: s.created_at or 0)
         checksums: dict[str, str] = {}
         undigested: list[str] = []
@@ -397,6 +397,12 @@ class RunBoard:
                 # A step that stopped part-way may have published without returning.
                 undigested.append(s.workflow_id)
             checksums.update(digests)
+        # A coordinator publishes only its condition labels, from a step that never fails.
+        for s in every:
+            if _attr(s, "kind") == dbos_app.KIND_DOWNSTREAM:
+                for step in self._client.list_workflow_steps(s.workflow_id):
+                    if step["error"] is None and _is_digest_map(output := step["output"]):
+                        checksums.update(output)
         return FileChecksums(checksums, sorted(undigested))
 
     def stale_jobs(
