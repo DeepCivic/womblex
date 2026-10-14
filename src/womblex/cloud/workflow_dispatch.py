@@ -63,11 +63,13 @@ def dispatch_workflow(
     max_attempts: int = 3,
     dry_run: bool = False,
     store: RemoteStore | None = None,
+    acted_on: tuple[str, ...] = (),
 ) -> WorkflowDispatch:
     """Check *stored* against the store and the board, then enqueue it for *run_id*.
 
     Raises `WorkflowRefusedError` before any row is written. *dry_run* runs every check and
-    writes nothing.
+    writes nothing. *acted_on* names spec fields the caller acts on itself (a firing), so
+    they are not warned as left alone.
     """
     def refuse(message: str, code: RefusalCode, **kw: object) -> WorkflowRefusedError:
         return WorkflowRefusedError(f"workflow {stored.id!r}: {message}", code=code, **kw)  # type: ignore[arg-type]
@@ -138,7 +140,7 @@ def dispatch_workflow(
             workflow={"id": stored.id, "digest": stored.digest, "preset": stored.spec.preset,
                       "config": overlay, "conditions": [c.model_dump() for c in stored.spec.conditions]},
         )
-    if left := not_acted_on(stored):
+    if left := [f for f in not_acted_on(stored) if f not in acted_on]:
         logger.warning("workflow %s: %s stored but not acted on by dispatch", stored.id, ", ".join(left))
     return WorkflowDispatch(
         run_id, stored.id, stored.digest, stages, shard_prefix, newly, dry_run,
@@ -165,7 +167,8 @@ def fire_workflow(
     from womblex.cloud.jobs import RunBoard
 
     common: dict[str, Any] = {"resolve_preset": resolve_preset, "run_id": run_id, "store_uri": None,
-                              "store": store, "dsn": dsn, "owner": stored.owner}
+                              "store": store, "dsn": dsn, "owner": stored.owner,
+                              "acted_on": ("triggers", "input_binding.ingest_prefix")}
     dispatch_workflow(stored, dry_run=True, **common)
     binding = stored.spec.input_binding
     try:

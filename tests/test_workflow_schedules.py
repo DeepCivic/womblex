@@ -170,7 +170,7 @@ def test_a_failed_firing_is_on_the_board_under_its_run(fleet, saved_preset) -> N
 
 
 def test_two_firings_never_conflict_and_each_dry_run_matches_its_dispatch(
-    fleet, saved_preset, monkeypatch,  # noqa: F811
+    fleet, saved_preset, monkeypatch, caplog,  # noqa: F811
 ) -> None:
     from tests.test_cloud import _minimal_config
     from womblex.cloud import workflow_dispatch, workflows
@@ -201,6 +201,7 @@ def test_two_firings_never_conflict_and_each_dry_run_matches_its_dispatch(
     with RunBoard(None) as board:
         coordinators = [r for r in board.list_jobs() if r.kind == "downstream"]
     assert sorted(r.run_id for r in coordinators) == ["nightly-1", "nightly-2"]
+    assert "not acted on" not in caplog.text  # the firing acts on the input prefix
 
 
 def test_an_owned_workflow_never_extracts_outside_its_owners_tree(fleet, saved_preset, capsys) -> None:  # noqa: F811
