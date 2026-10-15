@@ -1,5 +1,5 @@
 """``/api/resources`` — connection cards for the Resources Console
-(docs/ui-plan.md merge 10).
+(docs/functional_requirements.md, Requirement 20).
 
 ``GET`` returns the three cards cheaply — configuration and masked
 credentials only, no network call. Each card's live reachability check is a

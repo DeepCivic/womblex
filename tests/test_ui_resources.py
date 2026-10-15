@@ -1,4 +1,4 @@
-"""Tests for the Resources Console (docs/ui-plan.md merge 10).
+"""Tests for the Resources Console (docs/functional_requirements.md, Requirement 20).
 
 Kept out of ``test_ui.py`` (already at the 750-line file cap) rather than
 growing it further — ``TestResourcesApi`` needs none of that file's shared
@@ -20,7 +20,7 @@ from womblex.ui.deps import resolve_settings
 
 class TestResourcesApi:
     """The Resources Console reuses existing library reads rather than adding
-    detection logic of its own (docs/ui-plan.md merge 10): `GET /api/resources`
+    detection logic of its own (docs/functional_requirements.md, Requirement 20): `GET /api/resources`
     is cheap and network-free; `POST /test/*` is the live check behind each
     card's action button.
     """

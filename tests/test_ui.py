@@ -589,7 +589,7 @@ class _BrokenQueue(_MissingTableQueue):
 
 class TestDashboardApi:
     """The Dashboard reads the queue when there is one and the run's own
-    per-stage checkpoints always (docs/ui-plan.md merge 8). These exercise
+    per-stage checkpoints always (docs/functional_requirements.md, Requirement 16). These exercise
     the queue-less shape — a plain local deployment — and the checkpoint
     half, which is the same in both.
     """
@@ -794,7 +794,7 @@ _NO_DATASET: dict = {}
 
 class TestComposerApi:
     """The Pipeline Composer reads no run — `config.py` and
-    `cloud/stage_contracts.py` are static (docs/ui-plan.md merge 9), so
+    `cloud/stage_contracts.py` are static (docs/functional_requirements.md, Requirement 19), so
     `api_client`'s local/remote parametrisation is irrelevant here; a bare
     `TestClient` is enough.
     """
@@ -1059,7 +1059,7 @@ class TestComposerApi:
 
 
 class TestComposerSavePresets:
-    """Saving a composed config as a named preset (docs/ui-plan.md merge 9).
+    """Saving a composed config as a named preset (docs/functional_requirements.md, Requirement 19).
 
     Parametrised over local (a writable `presets_dir`) and remote (the store's
     own `presets/` prefix, a sibling of `runs/`). A store-backed console therefore
@@ -1232,7 +1232,7 @@ def _seed_store_inputs(store_root: Path, prefix: str, names: list[str]) -> None:
 
 class TestExecuteApi:
     """Dispatch requires a store, an ingest location, and a DSN
-    (docs/ui-plan.md merge 11)."""
+    (docs/functional_requirements.md, Requirement 19)."""
 
     def test_status_reflects_the_flags(self, tmp_path: Path) -> None:
         client = TestClient(create_app(output_root=tmp_path))
@@ -1632,7 +1632,7 @@ class TestStoreUnreachable:
 
 
 class TestSpaMount:
-    """The console serves the built SPA (docs/ui-plan.md merge 4) when one is
+    """The console serves the built SPA (docs/functional_requirements.md, Requirement 15) when one is
     present alongside it, and falls back to the API-only shape when not —
     the same image serves cloud and local deployments.
     """

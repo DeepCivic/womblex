@@ -1,5 +1,5 @@
 <script lang="ts">
-	// The Chunk Inspector (docs/ui-plan.md merge 6). Pick a document from the
+	// The Chunk Inspector (functional_requirements.md, Requirement 18). Pick a document from the
 	// run's manifest, then read its chunks and overlays from
 	// `/api/runs/{id}/chunks/{source_hash}` and render one `ChunkCard` each.
 	//

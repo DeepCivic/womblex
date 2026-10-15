@@ -1,16 +1,10 @@
 # Trust baseline and recipes — plan
 
-*Status: in progress (2026-10). Outstanding work only; completed work is recorded in `CHANGELOG.md`, `decisions.md` and the enduring docs, not here. Scope, settled decisions and the dependency assessment are in `decisions.md` ("Trust and recipes", "Dependencies assessed"). Phase 1 needs no design decision and goes first; each later phase opens with the decisions it needs before its first merge. Each merge removes its item from this document as it lands, and the document is deleted once its last item ships.*
+*Status: in progress (2026-10). Outstanding work only; completed work is recorded in `CHANGELOG.md`, `decisions.md` and the enduring docs, not here. Scope, settled decisions and the dependency assessment are in `decisions.md` ("Trust and recipes", "Dependencies assessed"). Each phase opens with the decisions it needs before its first merge. Each merge removes its item from this document as it lands, and the document is deleted once its last item ships.*
 
 ## Findings
 - **Limits the merged PRs recorded.** #197's are in `decisions.md` ("A trigger fires a dispatch"). #192: replay of a coordinator that caught a failed child was not crash-tested. Every DBOS merge exercises Postgres through CI only.
 - **The local stage sequence still lives in comments.** `configs/default-isaacus.yaml` documents the full pipeline as commented per-stage commands. Nothing saves a stored workflow except code (no CLI or API), so no shipped workflow can replace them yet (decision D-2.2).
-- **Enduring docs have drifted.** The README command table lacks `validate`, `plan` and `dispatch-workflow`; its documentation index lacks `egress.md`, `service-api.md`, `money-extraction.md`, `evaluation.md`, `deployment-images.md`, `heuristics_disambiguation.md` and `DESIGN.md`; `functional_requirements.md` has no stored-workflow requirement; `architecture.md` holds workflows in one paragraph; `steering.md` row 15 is stale; three tests cite docs that do not exist (`ui-plan.md`, `ground-truth-units.md`, `ground-truth-review.md`).
-
-## Phase 1 — no decisions required (branch)
-Everything here is settled in `decisions.md` or in a reviewed PR.
-
-- **1.6 Stocktake S-1 (baseline).** The full checklist below, plus the drift in Findings: README command table and documentation index; a new stored-workflows requirement absorbing the Requirement 3 TO-DO; a "Workflows and distributed execution" section in `architecture.md`; `steering.md` row 15; the three dead doc citations in tests; #198's summary that Phase 2 shipped, written before #197 re-landed. Split into S-1a and S-1b if it passes the cap.
 
 ## Phase 2 — retry and workflow operation (branch)
 **Decisions before the first merge:**

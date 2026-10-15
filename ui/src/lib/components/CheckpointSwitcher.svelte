@@ -1,5 +1,5 @@
 <script lang="ts">
-	// The lifecycle-checkpoint switcher (docs/ui-plan.md merge 5): picks which
+	// The lifecycle-checkpoint switcher (functional_requirements.md, Requirement 17): picks which
 	// pipeline stage's sidecar presence annotates the documents grid. `stages`
 	// is the run's own `RunSummary.stages` — already in pipeline order — so
 	// there is nothing to hand-order here. `null` is the unfiltered "All" option.

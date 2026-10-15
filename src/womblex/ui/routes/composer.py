@@ -1,5 +1,5 @@
 """``/api/composer`` — the Pipeline Composer's graph, form schema, presets and
-config validation (docs/ui-plan.md merge 9).
+config validation (docs/functional_requirements.md, Requirement 19).
 
 The read surface (`graph`, `schema`, `validate`, `yaml`, `GET /presets`) touches
 no run and no filesystem — it builds a `WomblexConfig` in memory. Saving a
@@ -75,7 +75,7 @@ class SavePresetRequest(BaseModel):
 def post_preset(
     body: SavePresetRequest, settings: UISettings = Depends(get_settings),  # noqa: B008
 ) -> dict:
-    """Save *body* as a named preset (docs/ui-plan.md merge 9).
+    """Save *body* as a named preset (docs/functional_requirements.md, Requirement 19).
 
     Remote mode writes to the store's own ``presets/`` prefix (a sibling of
     ``runs/``), so a store-backed console always saves and

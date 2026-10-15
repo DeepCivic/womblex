@@ -1,5 +1,5 @@
 
-"""The Pipeline Composer's read model (docs/ui-plan.md merge 9).
+"""The Pipeline Composer's read model (docs/functional_requirements.md, Requirement 19).
 
 Two static sources, neither run-scoped — unlike every other screen, the
 composer edits configuration and shows the pipeline's shape, it does not

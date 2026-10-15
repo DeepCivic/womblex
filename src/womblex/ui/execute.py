@@ -1,4 +1,4 @@
-"""The Execution Controls' read model (docs/ui-plan.md merge 11).
+"""The Execution Controls' read model (docs/functional_requirements.md, Requirement 19).
 
 The console's dispatch actions — enqueue an extraction run, dispatch a run's
 downstream stages — live in :mod:`womblex.cloud.dispatch`, shared with the

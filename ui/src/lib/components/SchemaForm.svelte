@@ -1,5 +1,5 @@
 <script module lang="ts">
-	// A form over one Pydantic model's JSON Schema (docs/ui-plan.md merge 9).
+	// A form over one Pydantic model's JSON Schema (functional_requirements.md, Requirement 19).
 	// Recursive: a `$ref` property renders as a collapsible subsection, so the
 	// whole of `WomblexConfig` is reachable without a hand-typed mirror of
 	// `config.py` — the field list is whatever `/api/composer/schema` serves.

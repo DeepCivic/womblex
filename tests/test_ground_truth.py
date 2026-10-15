@@ -4,7 +4,7 @@ Builds a programmatic extraction shard (real ``write_results`` output, so the
 manifest, footer stamp and four siblings are exactly what a run writes) and
 exercises :func:`build_ground_truth` end to end, offline: a word-count
 ``count_fn`` stands in for the kanon-2 tokeniser. Each assertion pins one
-field's derivation against ``docs/ground-truth-units.md``.
+field's derivation against ``docs/ground-truth-units.md`` (womblex-benchmark).
 """
 
 from __future__ import annotations
@@ -264,7 +264,7 @@ def test_document_without_provenance_is_skipped_not_fatal(tmp_path: Path) -> Non
 
 
 def test_determinism_by_recorded_inputs(tmp_path: Path) -> None:
-    """Decision 5 (`ground-truth-review.md`): re-derivation from the recorded
+    """Decision 5 (womblex-benchmark `docs/ground-truth-review.md`): re-derivation from the recorded
     inputs reproduces the artefact exactly. Two builds over the same shard —
     same run, digest, preset and elements — write byte-identical baselines and
     sidecars, so a GT unit is re-derivable without ever being persisted."""

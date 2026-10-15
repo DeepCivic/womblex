@@ -260,7 +260,7 @@ def test_remote_store_move_replaces_the_destination(tmp_path):
 
 
 def test_remote_store_read_text_and_delete(tmp_path):
-    """The small in-place read/delete the console's saved presets use (ui-plan merge 9)."""
+    """The small in-place read/delete the console's saved presets use (docs/functional_requirements.md, Requirement 19)."""
     store = RemoteStore.from_uri(str(tmp_path / "store"))
     src = tmp_path / "one.preset.json"
     src.write_text('{"name": "one"}', encoding="utf-8")

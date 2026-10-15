@@ -71,7 +71,6 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 **TO-DO:**
 
 - **A missing required input is not a fail-fast, before-processing error for a single `run-stage --store`.** `stage_runner.run_stage_remote` resolves required inputs *per base* and raises `NotReady`, caught and logged as a warning; the run exits `0` unless every discovered base is not ready (`StageRunSummary.exit_code`). Deliberate: a still-draining fleet must not read as an ordering error. The whole-sequence check now exists for a stored workflow and for stage dispatch (`cloud/workflow_order.py`, refusals `input_missing` / `input_out_of_order` / `input_stale`): option (a) from the earlier note, with extraction's siblings treated as arriving. A stored workflow dispatched with `dispatch-workflow` is checked the same way before any row; a lone `run-stage` keeps its per-base behaviour.
-- **Stored workflows and their standing triggers have no requirement of their own.** Saving, validating, planning, running, dispatching and scheduling a stored workflow (`cloud/workflow_*.py`, `womblex schedule-workflow` and its siblings) shipped without acceptance criteria; this requirement covers only the stage composition beneath them. A stored-workflows requirement absorbs this item.
 
 ## 4. File Profiling, Detection, and Routing
 
@@ -541,17 +540,48 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - A model the pre-run check builds only to confirm it loads is not recorded as used — a run whose check built the model but whose stages never actually called it shows no entry for it; only a run's own build of it does.
 - Benchmark reports (womblex-benchmark) name the models that produced them, suites can run against a named model, and `docs/accuracy/` stays labelled as the default group.
 
+## 27. Stored Workflows — Check, Run, Dispatch and Schedule
+
+**As** an operator,
+**I want** to save a named recipe of steps over a preset and run it locally, on the fleet or on a schedule,
+**so that** a run's sequence is declared once, checked before it spends anything, and recorded in what it writes.
+
+**Given** a stored workflow (a preset reference, input binding, ordered steps, conditions, destinations and triggers)
+**When** the operator validates, plans, runs, dispatches or schedules it
+**Then** everything that can refuse does so before the first step, and the files each step writes name the workflow.
+
+**Acceptance criteria:**
+
+- A workflow is stored in the database the queue uses, owner-scoped like runs, and checked on save and again on load (steps, cron and timezone, config overlay, conditions); its digest is stable over its spec.
+- Its own `config` is laid over its preset's key by key, and the whole is validated as a full config.
+- `validate` runs exactly the checks `run-workflow` runs before its first step, and writes nothing; `plan` counts the requests and tokens its paid steps would send, calling no paid API.
+- Step order is checked before launch: a step whose input is missing, produced later, or rewritten later is refused with a stable code.
+- Once a step has run, a failed step does not stop the steps after it; each later step records the failure it follows, and the exit code is non-zero.
+- Conditions over manifest columns label each document `holds`, `fails` or `unevaluable` and never refuse, halt or narrow a run.
+- Every sidecar a workflow step writes carries the workflow's digest, and the run record lists the workflows observed in its files.
+- `dispatch-workflow` queues the steps for the fleet, refused before any row for anything the local runner refuses and for a step the fleet cannot run, an order the coordinator would change, or a run already worked under another digest; workers run each stage under the workflow's config.
+- `schedule-workflow` makes the queue's schedules equal the workflow's cron triggers; each firing extracts the input prefix into a fresh run and dispatches the workflow, refused before any row when the prefix is outside the owner's tree or holds no document.
+
+**TO-DO:**
+
+- **No command or API saves a workflow.** `WorkflowStore.save` is reachable only from code; nothing under `cli/` or `api/` writes one.
+- **Destinations are stored but not acted on.**
+- **`schedule-workflow` checks only the owner prefix.** Any other refusal surfaces per firing, after it is scheduled.
+
+**Out of scope:** incremental firings (only documents not seen before) and backfill of missed firings.
+
 ## Outstanding
 
 Requirements not yet fully met. The detail lives in the **TO-DO** block under each requirement; this list is the index. When a gap is closed (or the criterion is deliberately narrowed), its TO-DO block and its entry here are removed in the same PR.
 
 
 - **Requirement 2 (Scale-Out):** Azure storage URIs (`az://` / `abfs://`) are not credential-wired, and the enrichment paths have no Azure ML connection.
-- **Requirement 3 (Ingest-First Data Flow):** up-front composition check covers workflows (local and `dispatch-workflow`) and dispatch, not a lone `run-stage --store` (per-base `NotReady`); stored workflows and triggers have no requirement.
+- **Requirement 3 (Ingest-First Data Flow):** up-front composition check covers workflows (local and `dispatch-workflow`) and dispatch, not a lone `run-stage --store` (per-base `NotReady`).
 - **Requirement 6 (Native Office and Spreadsheet Extraction):** multi-row headers are emitted for DOCX only; spreadsheets and the legacy table view collapse to row 0, no per-cell header-row coordinate exists, and cell formulas are never captured.
 - **Requirement 7 (Standalone Reference Register Ingestion):** G-NAF and geospatial writes are not guarded against partial output.
 - **Requirement 9 (Redaction Handling):** no redaction `pipeline_point`, and the E2E `run` path writes no `*.redactions.parquet`.
 - **Requirement 13 (Money Annotation):** the money span row carries no merge extent or header-row coordinate.
 - **Requirements 17 and 21 (Corpus Inspector; Console Design System):** `DocumentGrid.svelte` is not virtualised and emits no `aria-rowcount`.
+- **Requirement 27 (Stored Workflows):** nothing but code saves a workflow, destinations are not acted on, and `schedule-workflow` checks only the owner prefix.
 
 ---

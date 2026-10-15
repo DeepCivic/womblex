@@ -69,7 +69,7 @@ export async function getStagePresence(
 	return body.source_hashes;
 }
 
-// The Chunk Inspector's payload for one document (docs/ui-plan.md merge 6):
+// The Chunk Inspector's payload for one document (functional_requirements.md, Requirement 18):
 // chunks plus the overlay sidecars, all joined on `source_hash` and
 // `chunk_index`. Field names mirror the store schemas the reader serialises
 // (`CHUNKS_SCHEMA`, `ENTITY_SCHEMA`, `PII_SPANS_SCHEMA`, `MONEY_SPANS_SCHEMA`,
@@ -276,7 +276,7 @@ export async function getAudit(
 	return (await resp.json()) as ShardAudit;
 }
 
-// The Resources Console's connection cards (docs/ui-plan.md merge 10). Cheap,
+// The Resources Console's connection cards (functional_requirements.md, Requirement 20). Cheap,
 // network-free reads — each card's live check is a separate `test*` call.
 export interface StoreOptions {
 	credentials_configured: boolean;
@@ -365,7 +365,7 @@ export async function testIngest(fetchImpl: typeof fetch = fetch): Promise<Reach
 }
 
 // Fleet + queue-depth state, from the same `JobQueue` views the Dashboard
-// reads (docs/ui-plan.md merge 8) — the queue card's "test" action doubles as
+// reads (functional_requirements.md, Requirement 16) — the queue card's "test" action doubles as
 // that read. `WorkerState` / `Throughput` field names mirror `cloud/queue.py`
 // exactly (`asdict()` is what the API serialises).
 export interface QueueWorker {
@@ -399,7 +399,7 @@ export async function testQueueConnection(
 	return (await resp.json()) as QueueTestResult;
 }
 
-// The Dashboard (docs/ui-plan.md merge 8). Two sources, both already written
+// The Dashboard (functional_requirements.md, Requirement 16). Two sources, both already written
 // by the pipeline: the job queue (when a DSN is configured) and the per-stage
 // checkpoints inside the selected run. `queue` is null whenever there is no
 // queue to read — no DSN, or the connection failed — and `queue_error` says
@@ -473,7 +473,7 @@ export async function getDashboard(
 	return (await resp.json()) as DashboardData;
 }
 
-// The Pipeline Composer (docs/ui-plan.md merge 9). Neither read is run-scoped:
+// The Pipeline Composer (functional_requirements.md, Requirement 19). Neither read is run-scoped:
 // the DAG comes from `STAGE_CONTRACTS` and the form's fields from
 // `WomblexConfig`'s JSON Schema, so the frontend hand-codes neither the stage
 // ordering nor the config field list.
