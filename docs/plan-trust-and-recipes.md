@@ -8,11 +8,16 @@
 
 ## Phase 2 — retry and workflow operation (branch)
 **Decisions before the first merge:**
-- **D-2.1 Retry status.** Whether the latest attempt counts in a run's rollup, with the original listed `failed` and naming its retry; whether retry is CLI-only for now; whether a retry offers to re-run the later stages that ran after the failure.
-- **D-2.2 Workflow authoring.** Whether `womblex workflow save | list | show | delete` and a shipped `configs/workflows/default-isaacus.yaml` are in scope.
-- **D-2.3 Scheduling a workflow a firing would refuse.** Refuse at `schedule-workflow`, or warn.
-- **D-2.4 Workflow guide.** A new `docs/workflows.md`, or sections in the README and `architecture.md`.
-- **D-2.5 Doc-currency test.** Whether the stocktakes gain a test holding the README command table to the CLI parser and the CLAUDE.md module table to `src/`.
+- **D-2.1 Retry status.** Whether the latest attempt counts in a run's rollup, with the original listed `failed` and naming its retry; whether retry is CLI-only for now; whether a retry offers to re-run the later stages that ran after the failure. ANSWERED: Yes
+
+- **D-2.2 Workflow authoring.** Whether `womblex workflow save | list | show | delete` and a shipped `configs/workflows/default-isaacus.yaml` are in scope. ANSWER: no
+
+- **D-2.3 Scheduling a workflow a firing would refuse.** Refuse at `schedule-workflow`, or warn. ANSWERED: Refuse at `schedule-workflow`
+
+- **D-2.4 Workflow guide.** A new `docs/workflows.md`, or sections in the README and `architecture.md`. ANSWERED: A new `docs/workflows.md`
+
+
+- **D-2.5 Doc-currency test.** Whether the stocktakes gain a test holding the README command table to the CLI parser and the CLAUDE.md module table to `src/`. ANSWERED: I need more information, I don't understand the implications.
 
 **Merges:**
 - **2.1 Retry a failed stage by fork.** Re-dispatching a failed stage returns its recorded failure; DBOS's `resume_workflow` does not restart it, `fork_workflow` does, keeping the steps before the chosen one. Refused before the fork: a stage not failed, still running, owned by another owner, or failing its own pre-launch checks (a retry is a launch). Forks from the first failed unit as `run:stage:retry:N`; status per D-2.1. First task: confirm the DBOS 3.2 `fork_workflow` signature and whether it carries attributes. Docs: `decisions.md` (replaces "a retry is a plan follow-up"), Requirements 14 and 16, `architecture.md`, README, CLAUDE.md rows, `project-structure.md`.
@@ -23,9 +28,14 @@
 
 ## Phase 3 — integration (branch)
 **Decisions and approvals before the first merge:**
+ALL OF THESE NEED SIMPLER EXPLINATIONS ABOUT THE IMPLICATIONS AND TRADEOFFS
+
 - **D-3.1 Object-store destination on fleet runs.** Corpus-only, which keeps the recorded egress boundary (egress does not read a run ingested from an object store); or reopen that decision so egress fetches sources from the ingest store, which changes Requirement 23's last two criteria.
+
 - **D-3.2 pgvector text layer.** Masked `clean_text` only, or raw chunk text where a workflow declares it.
+
 - **D-3.3 Webhooks.** HMAC signing with an environment secret, and the event list: extraction settled, stage done or failed, run done, delivery done or failed.
+
 - **D-3.4 Dependency approval.** `httpx` declared in core (approved under D11) and a `[pgvector]` extra.
 
 **Merges:**
@@ -39,8 +49,8 @@
 
 ## Phase 4 — operation (branch)
 **Decisions before the first merge:**
-- **D-4.1 Plain-language status.** The vocabulary, shared with the webhook events and the lineage event types, and its surfaces: `womblex jobs --run`, an additive `summary` on `/v1/runs/{id}`, the console. It sits beside the exact status values Requirement 16 renders, never in place of them.
-- **D-4.2 A versioned `graph-refresh` output.** A new sidecar keyed by the chunks' digest, leaving the enrichment sidecars as enrich wrote them, or a version in the file name.
+- **D-4.1 Plain-language status.** The vocabulary, shared with the webhook events and the lineage event types, and its surfaces: `womblex jobs --run`, an additive `summary` on `/v1/runs/{id}`, the console. It sits beside the exact status values Requirement 16 renders, never in place of them. ANSWER: unclear on the decision here, yes plain language is good??
+- **D-4.2 A versioned `graph-refresh` output.** A new sidecar keyed by the chunks' digest, leaving the enrichment sidecars as enrich wrote them, or a version in the file name. ANSWER: unclear why we need this or don't need it.
 
 **Merges:**
 - **4.1 `RunBoard.describe` and its surfaces** (per D-4.1). Docs: Requirements 16 and 22, `service-api.md`, `DESIGN.md`.
