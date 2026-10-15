@@ -4,13 +4,13 @@
 
 ## Findings
 - **Limits the merged PRs recorded.** #197's are in `decisions.md` ("A trigger fires a dispatch"). #192: replay of a coordinator that caught a failed child was not crash-tested. Every DBOS merge exercises Postgres through CI only.
-- **The local stage sequence still lives in comments.** `configs/default-isaacus.yaml` documents the full pipeline as commented per-stage commands. Nothing saves a stored workflow except code (no CLI or API), so no shipped workflow can replace them yet (decision D-2.2).
+- **The local stage sequence stays in comments.** `configs/default-isaacus.yaml` documents the full pipeline as commented per-stage commands. Nothing saves a stored workflow except code (no CLI or API), and D-2.2 keeps it that way for this plan, so the comments are the shipped sequence.
 
 ## Phase 2 — retry and workflow operation (branch)
 **Decisions before the first merge:**
 - **D-2.1 Retry status.** Whether the latest attempt counts in a run's rollup, with the original listed `failed` and naming its retry; whether retry is CLI-only for now; whether a retry offers to re-run the later stages that ran after the failure. ANSWERED: Yes
 
-- **D-2.2 Workflow authoring.** Whether `womblex workflow save | list | show | delete` and a shipped `configs/workflows/default-isaacus.yaml` are in scope. ANSWER: no
+- **D-2.2 Workflow authoring.** Out of scope: no `womblex workflow save | list | show | delete` and no shipped default workflow. A stored workflow is still saved only through code (`WorkflowStore`), and the workflow guide (2.3.5) says so.
 
 - **D-2.3 Scheduling a workflow a firing would refuse.** Refuse at `schedule-workflow`, or warn. ANSWERED: Refuse at `schedule-workflow`
 
@@ -18,25 +18,42 @@
 
 
 - **D-2.5 Doc-currency test.** Whether the stocktakes gain a test holding the README command table to the CLI parser and the CLAUDE.md module table to `src/`. ANSWERED: I need more information, I don't understand the implications.
+  *In plain terms:* stocktake checks 1 and 2 are done by hand each phase: compare the README's list of commands with the commands `womblex` actually has, and CLAUDE.md's module table with the files under `src/`. A test would do the comparison on every CI run instead.
+  - *Add it:* drift is caught in the PR that causes it, not up to a phase later, and stocktakes get shorter. The cost is one small test file. A PR that adds a command or a module then fails CI until its doc row is written, which is what the conventions already require.
+  - *Don't:* nothing breaks; drift is still found, but only at the next stocktake, by hand.
+  - *Recommendation:* add it. It enforces a rule the plan already holds, and fails before a merge, never during a run.
 
 **Merges:**
 - **2.1 Retry a failed stage by fork.** Re-dispatching a failed stage returns its recorded failure; DBOS's `resume_workflow` does not restart it, `fork_workflow` does, keeping the steps before the chosen one. Refused before the fork: a stage not failed, still running, owned by another owner, or failing its own pre-launch checks (a retry is a launch). Forks from the first failed unit as `run:stage:retry:N`; status per D-2.1. First task: confirm the DBOS 3.2 `fork_workflow` signature and whether it carries attributes. Docs: `decisions.md` (replaces "a retry is a plan follow-up"), Requirements 14 and 16, `architecture.md`, README, CLAUDE.md rows, `project-structure.md`.
-- **2.2 Workflow authoring and the shipped default workflow** (per D-2.2). Replaces the comment sequence in `configs/default-isaacus.yaml`, keeping `ui/presets.py` and the demo run consistent as that file requires. Docs: README quick start and command table, `composable-design.md` (CLI), the stored-workflows requirement, CLAUDE.md rows, `project-structure.md`.
 - **2.3 Schedule-time checks** (per D-2.3). Docs: the stored-workflows requirement, `decisions.md`.
-- **2.3.5 Workflow guide** (per D-2.4, docs only).
+- **2.3.5 Workflow guide** (per D-2.4, docs only), saying that a workflow is saved only through code (D-2.2).
 - **2.4 Stocktake S-2**, with the currency test if D-2.5 adds it.
 
 ## Phase 3 — integration (branch)
 **Decisions and approvals before the first merge:**
-ALL OF THESE NEED SIMPLER EXPLINATIONS ABOUT THE IMPLICATIONS AND TRADEOFFS
+Phase 3 lets a finished run send its output somewhere by itself (a "destination"), rather than someone running `womblex egress` or reading the API. Note for D-2.2: destinations live on a stored workflow, and a workflow is saved only through code, so until authoring exists a destination is configured the same way.
 
 - **D-3.1 Object-store destination on fleet runs.** Corpus-only, which keeps the recorded egress boundary (egress does not read a run ingested from an object store); or reopen that decision so egress fetches sources from the ingest store, which changes Requirement 23's last two criteria.
+  *In plain terms:* egress today builds a bundle of the extracted corpus *plus* the original PDFs, and finds the PDFs on local disk. A fleet run read its PDFs from an object store (S3), so egress refuses it. The question is what a fleet run's object-store destination sends.
+  - *Corpus-only:* it sends the extracted parquet and manifest, not the PDFs. It's small and safe, and no recorded decision changes. A consumer that wants the PDFs fetches them from the ingest bucket itself, using the manifest's `source_relpath`.
+  - *Fetch sources:* it copies the PDFs out of the ingest store too, checking each by hash, so the bundle is complete. It's more code, and it reverses a recorded boundary (Requirement 23 and `egress.md` change). It also copies raw, unmasked government documents to a second place, which matters if the destination is less locked down than the ingest bucket.
+  - *Recommendation:* corpus-only now. Reopen it if a consumer needs the PDFs and can't reach the ingest bucket.
 
 - **D-3.2 pgvector text layer.** Masked `clean_text` only, or raw chunk text where a workflow declares it.
+  *In plain terms:* pgvector puts each chunk's text and embedding into a Postgres table, for search. The question is which text goes in the table: the PII-masked version (`<PERSON_1>`) or the original (real names).
+  - *Masked only:* nothing with personal names leaves Womblex through this route, and it matches `contract.md`'s "safe to hand onward" rule. Search still works, because the embeddings were made from the raw text; only the returned text is masked. It needs the `pii` stage to have run first, so a workflow with this destination and no `pii` would be refused before launch.
+  - *Raw if declared:* search results show real names, which reviewers may need. But a database holding raw text is now a store of personal information and needs the access controls that go with that, and one setting turns it on.
+  - *Recommendation:* masked only. Add raw later, as its own decision, if a named use needs it.
 
 - **D-3.3 Webhooks.** HMAC signing with an environment secret, and the event list: extraction settled, stage done or failed, run done, delivery done or failed.
+  *In plain terms:* today a caller has to keep asking the API "is my run done?" (polling). A webhook makes Womblex POST to the caller's URL when something happens.
+  - *HMAC signing:* each POST carries a signature made with a shared secret held in an environment variable. The receiver recomputes it to prove the message came from Womblex and wasn't altered. It's the standard approach (GitHub and Stripe do the same) and costs one secret to manage per deployment. Without it, anyone who learns the URL can fake a "run done".
+  - *Event list:* fewer events are simpler and less noisy; more give finer progress. The proposed five cover "can I start reading?" (extraction settled, run done) and "did something go wrong?" (stage failed, delivery failed). Per-document or per-batch events are left out because a large run would send thousands.
+  - *Failures:* a webhook that can't be delivered is retried a few times, then recorded on the run. It never stops the run.
+  - *Recommendation:* yes to both as proposed.
 
 - **D-3.4 Dependency approval.** `httpx` declared in core (approved under D11) and a `[pgvector]` extra.
+  *In plain terms:* `httpx` is the HTTP client the webhooks send with. It's small and already installed on every install (the Isaacus SDK and `huggingface-hub` depend on it), but Womblex declares it only in `[dev]`, for the test client. The `[pgvector]` extra adds the Postgres vector driver only for installs that want that destination, so nobody else carries it. Per the conventions, this is its own merge (3.1), made only after you approve it.
 
 **Merges:**
 - **3.1 Dependencies only.** `pyproject.toml` and `uv.lock`.
@@ -50,7 +67,19 @@ ALL OF THESE NEED SIMPLER EXPLINATIONS ABOUT THE IMPLICATIONS AND TRADEOFFS
 ## Phase 4 — operation (branch)
 **Decisions before the first merge:**
 - **D-4.1 Plain-language status.** The vocabulary, shared with the webhook events and the lineage event types, and its surfaces: `womblex jobs --run`, an additive `summary` on `/v1/runs/{id}`, the console. It sits beside the exact status values Requirement 16 renders, never in place of them. ANSWER: unclear on the decision here, yes plain language is good??
+  *In plain terms:* the run status today is exact but technical: per-stage counts of `pending` / `running` / `done` / `failed`, with DBOS workflow ids. The proposal adds one plain sentence per run, such as "Extracted 1,204 of 1,210 documents; enrichment running; 6 documents failed (see list)", worked out from the exact counts, which stay where they are. Plain language is already agreed; the decision is only:
+  - *Which words:* a short, fixed set of phrases (for example: waiting, extracting, processing, finished, finished with failures). The same set names the webhook events and the lineage events, so one word means one thing everywhere.
+  - *Where it shows:* `womblex jobs --run`, a new `summary` field on `/v1/runs/{id}` (added, so existing callers are unaffected), and the console.
+  - *Recommendation:* approve both. The cost is one function and three places that show it.
 - **D-4.2 A versioned `graph-refresh` output.** A new sidecar keyed by the chunks' digest, leaving the enrichment sidecars as enrich wrote them, or a version in the file name. ANSWER: unclear why we need this or don't need it.
+  *In plain terms:* `graph-refresh` is the only downstream stage that edits another stage's file. Enrich writes `*.enrichment_entities.parquet` before chunks exist, so each mention's `chunk_index` is `-1`. Then `graph-refresh` reopens that file and fills the numbers in. That causes three problems:
+  - The file no longer matches what enrich wrote, so its footer stamp (stage, run, digest) describes a file that has since been changed.
+  - If chunking is re-run with different settings, the filled-in numbers point at chunks that no longer exist until graph-refresh runs again, and nothing on the file says which chunks it was matched against.
+  - Re-running enrich wipes the refresh, and the ordering checks have to treat the file as "stale" in special ways (`workflow_order`, `workflow_plan`).
+
+  A separate sidecar written by graph-refresh fixes all three. Enrich's file stays as written, the new file records which chunks it matched (the chunks' digest), and a reader can tell when it is out of date. That is merge 4.3, "every new artefact is a sidecar", applied to the last exception.
+  - *Need it?* Only if chunks get re-run on a run that has already been refreshed, or if anyone relies on footers to say who wrote a file. If neither ever happens, the in-place rewrite works and Phase 4's merges 4.2 and 4.3 can be dropped.
+  - *Recommendation:* the new sidecar keyed by the chunks' digest, not a version in the file name. A version number says *that* the file changed, not *which chunks* it matches.
 
 **Merges:**
 - **4.1 `RunBoard.describe` and its surfaces** (per D-4.1). Docs: Requirements 16 and 22, `service-api.md`, `DESIGN.md`.
