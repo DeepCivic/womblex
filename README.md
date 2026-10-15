@@ -1,76 +1,48 @@
 # Womblex
 
-Womblex turns messy document releases (FOI bundles, government papers,
-scanned forms, spreadsheets) into a versioned Parquet corpus that other
-systems can trust. Extraction comes first and keeps text verbatim. After it,
-independent stages clean, chunk, annotate, enrich and mask the corpus, each one
-writing its own sidecar file beside the extraction output.
+**Turn messy document releases into a versioned, verifiable Parquet corpus.**
+
+[![CI](https://github.com/DeepCivic/womblex/actions/workflows/ci.yml/badge.svg)](https://github.com/DeepCivic/womblex/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/womblex)](https://pypi.org/project/womblex/)
+[![Python 3.12](https://img.shields.io/badge/python-3.12-blue)](pyproject.toml)
+[![Licence: Apache-2.0](https://img.shields.io/badge/licence-Apache--2.0-blue)](LICENSE)
+
+Government document releases (FOI bundles, papers, scanned forms, printed
+spreadsheets) are hard to get text out of without losing key details. Womblex extracts it first and keeps it verbatim, as an ordered stream
+of paragraphs, headings, tables and forms. Independent stages then clean, chunk,
+annotate, enrich and mask the corpus, each writing its own sidecar beside the
+extraction output, so every derived row points back at the source it came from.
 
 It runs on a laptop with no network access, and the same code scales out to a
-fleet of workers over object storage and a DBOS-backed Postgres queue. The models
-behind each step are swappable without changing any output schema.
+fleet of workers.
 
-What Womblex must do is specified in
-[docs/functional_requirements.md](docs/functional_requirements.md). This README
-is the overview and the command reference.
+## Features
 
-## What it does
-
-### Extraction
-- **PDFs and images** are profiled page by page. Each page is routed on its own
-  signals: native text, OCR, tables, forms, or a spreadsheet printed to PDF. A
-  single FOI bundle that mixes a cover letter, a scanned form and a printed
-  table is handled page by page rather than forced through one strategy.
-- **Word, Markdown and spreadsheets** are read natively, in document order.
-  Spreadsheets become a cell-grained stream with header and preamble detection,
-  and merged regions are kept.
-- **Output is an ordered element stream** (paragraphs, headings, tables, forms,
-  sheet cells) written as Parquet. Text is verbatim from the extractor; any
-  cleanup happens in later stages, as overlays.
-
-### Downstream stages
-Each stage reads the extraction shards (and sometimes another stage's
-sidecar), writes its own sidecar, and checkpoints independently. A stage can
-run whenever its inputs exist, so several orderings are valid.
-
-| Stage | What it writes | Needs |
-|---|---|---|
-| `normalise` | Cleaned text overlay (whitespace, footer glyphs, configured substitutions) | Offline |
-| `spellfix` | OCR character-confusion repairs, gated by an en_AU dictionary, plus an audit file | Offline |
-| `redact` | Detected redaction regions | Offline |
-| `chunk` | Token-bounded chunks of narrative and tables ([semchunk](https://github.com/isaacus-dev/semchunk)) | Offline; AI chunking is optional and calls a hosted model |
-| `money` | Monetary amounts in narrative text and table cells, with exact values | Offline |
-| `enrich` | Entities, relationships and a document graph | A hosted enrichment model ([Isaacus](https://isaacus.com/) Kanon-2) |
-| `graph-refresh` | Mention-to-chunk edges, rebuilt after chunking | Offline |
-| `embed` | One vector per chunk | A hosted embedding model (Isaacus) |
-| `link` | Entity mentions matched to a reference register you supply | Offline |
-| `pii` | PII spans (audit) and a masked text layer (`<PERSON_1>`) | Offline; reads the enrichment graph |
-| `quality` | Chunk-quality annotations, including corpus-wide duplicates | Offline |
-
-### Reference registers
-G-NAF, the ABN bulk extract and shapefiles have their own ingests. They write
-typed Parquet or GeoParquet directly and bypass the text stages.
-
-### How you use it
-- **Other software** integrates in one of two ways: it calls the
-  authenticated `/v1` service API (`womblex serve`), or it reads the versioned
-  Parquet a run writes, under the data contract. See
-  [Integrating with Womblex](#integrating-with-womblex).
-- **Operators** drive runs with the `womblex` CLI, where every capability is a
-  subcommand.
-- **The console** (`womblex ui`) is an optional admin and debugging UI over a
-  run's files: queue and stage progress, a document grid, a chunk inspector
-  with entity, PII and money overlays, and a pipeline composer. It has no
-  authentication, binds to loopback, and is not an integration surface.
-
-## Support status
-
-- **Alpha.** Schemas are versioned by the data contract (below), but the Python
-  surface outside `womblex.__all__` may change between minor releases.
+- **Page-level routing for PDFs and images.** Every page is profiled and routed
+  on its own signals (native text, OCR, tables, forms, a spreadsheet printed to
+  PDF), so a bundle mixing a cover letter, a scanned form and a printed table is
+  handled page by page.
+- **Word, Markdown and spreadsheets** read natively, in document order;
+  spreadsheets become a cell-grained stream with header detection.
+- **Composable downstream stages** — `normalise`, `spellfix`, `redact`, `chunk`,
+  `money`, `enrich`, `graph-refresh`, `embed`, `link`, `pii`, `quality` — each
+  reading the shards, writing a sidecar and checkpointing independently.
+- **Evidence on every annotation.** Money, entity-link and PII rows carry a
+  reference to the element, page and character span they came from, labelled
+  with whether it was checked.
+- **Swappable models.** OCR, layout, PII context, tokeniser, dictionary,
+  enrichment and embedding are named slots; a package can register its own model
+  through an entry point, with no schema change. The default set is CPU-only.
+- **Provenance in the files.** Every Parquet footer records its contract version
+  and sensitivity; a run's files also record the run, version, config digest and
+  the model that filled each slot.
+- **Reference registers.** G-NAF, the ABN bulk extract and shapefiles have their
+  own ingests to typed Parquet or GeoParquet.
 
 ## Installation
 
-Requires Python 3.12. `rapidocr-onnxruntime`, the OCR engine, does not install on 3.13 or later.
+Requires Python 3.12 (the OCR engine, `rapidocr-onnxruntime`, does not install
+on 3.13).
 
 ```bash
 pip install womblex          # the whole pipeline, CPU-only
@@ -78,239 +50,138 @@ pip install womblex[api]     # + the /v1 service API (womblex serve)
 pip install womblex[ui]      # + the admin console (womblex ui)
 ```
 
-Object-storage staging, the DBOS workflow engine and the SDKs for the hosted
-models are all in the base install. They stay dormant until configured: with
-no credentials or endpoints set, nothing calls out. `[local]` and `[cloud]` are
-accepted but empty.
-
-**Model files.** The wheel ships only the small artefacts: the en_AU dictionary
-and the Kanon-2 tokeniser. The larger local models (PaddleOCR v5,
-PP-DocLayout-M, the PII context model) are resolved from `WOMBLEX_MODELS_DIR`,
-or from `src/womblex/_models/` and `models/` in a source checkout. Without
-them, OCR falls back to the PaddleOCR v4 models inside the `rapidocr` wheel;
-without PP-DocLayout-M the pre-run model check stops `womblex run`
-([layout.md](docs/layout.md)). Every model, local or hosted, is listed in
-[docs/models.md](docs/models.md), along with how to connect the hosted ones.
+The wheel ships only the small model artefacts. The larger local models
+(PaddleOCR v5, PP-DocLayout-M, the PII context model) are resolved from
+`WOMBLEX_MODELS_DIR`, or from `src/womblex/_models/` and `models/` in a source
+checkout; without PP-DocLayout-M the pre-run model check stops `womblex run`.
+Every model, and how to connect a hosted one, is in [docs/models.md](docs/models.md).
 
 ## Quick start
 
 ```bash
-# Extract one file to text or Parquet
+# One file, to text or Parquet
 womblex extract report.pdf -o output/
 womblex extract register.xlsx -o output/ --format parquet
 
-# Extract a corpus described by a config (resumable)
-womblex run --config configs/example.yaml
-womblex run --config configs/example.yaml --resume
+# A corpus described by a config: copy configs/example.yaml and set paths.input_root
+womblex run --config my-dataset.yaml            # add --resume to continue after a failure
 ```
 
-`womblex run` does extraction (and redaction detection) only. Every other stage
-is its own command over the run's shard directory:
+`womblex run` does extraction only. Every other stage is its own command over
+the run's shard directory:
 
 ```bash
-SHARDS=output/<run_id>/documents
+SHARDS=<output_root>/<run_id>/documents
 womblex normalise --shards $SHARDS
-womblex chunk     --shards $SHARDS --config configs/example.yaml
+womblex chunk     --shards $SHARDS --config my-dataset.yaml
 womblex money     --shards $SHARDS
-womblex pii       --shards $SHARDS
-womblex manifest  --shards $SHARDS     # rebuild the run-level manifest (--lineage OUT: also as an OpenLineage RunEvent)
+womblex manifest  --shards $SHARDS     # rebuild the run-level manifest.parquet
 ```
 
-`configs/default-isaacus.yaml` is the reference full pipeline (extract,
-normalise, enrich, chunk, graph-refresh, embed, money, link), with the command
-sequence and the reason for each setting commented inside it. With AI chunking
-on, run `enrich` before `chunk`, so chunking reuses the enrichment instead of
-paying for it a second time. Copy a config
-under `configs/` to start a new dataset; dataset-specific settings belong in
-config, never in code.
+[`configs/default-isaacus.yaml`](configs/default-isaacus.yaml) is the reference
+full pipeline, with the command sequence and the reason for each setting
+commented inside it. With AI chunking on, run `enrich` before `chunk`, so
+chunking reuses the enrichment instead of paying for it twice. Dataset-specific
+settings belong in config, never in code.
 
-### Other commands
+To browse a sample run in the console:
+
+```bash
+womblex seed-demo --output-root runs/   # publishes run-synthetic-demo
+womblex ui --output-root runs/          # http://127.0.0.1:8080
+```
+
+### Commands
+
+`womblex <command> --help` lists each command's options.
 
 | Command | Purpose |
 |---|---|
+| `extract`, `run` | Extract one file; extract a corpus from a config |
+| `normalise`, `spellfix`, `redact`, `chunk`, `money`, `enrich`, `graph-refresh`, `embed`, `link`, `pii`, `quality` | Downstream stages over a shard directory |
+| `manifest` | Rebuild the run manifest (`--lineage OUT`: also as an OpenLineage RunEvent) |
 | `ingest-gnaf`, `ingest-abn`, `ingest-geo` | Reference-register ingests |
 | `verify-shards` | Audit a run's shard files; optionally diff two runs |
 | `verify-evidence` | Re-check every money, entity-link and PII span against the source text it points at |
 | `resolve-source` | Map output rows back to their source files, verified by content hash |
 | `egress` | Export a finished run as a bundle |
+| `enqueue`, `worker`, `jobs`, `finalize`, `run-stage`, `enqueue-stages` | Distributed runs over object storage and the job queue |
 | `run-workflow`, `validate`, `plan` | Run a stored workflow's steps over a local shard directory; check it would run, without running it; count what its paid steps would send, calling nothing |
 | `dispatch-workflow`, `schedule-workflow` | Queue a stored workflow's steps for the fleet; schedule its cron triggers for workers to fire |
 | `validate-redactions` | Validate the redaction detector against a labels packet (`annotate-redactions` is a deprecated alias of `redact --shards --pdfs`) |
 | `ground-truth`, `score` | Build review baselines from a run, and score corrected ones |
 | `profile` | Print the inferred column schema of a tabular file |
 | `api-token`, `serve` | Mint service tokens; run the service API |
-| `ui`, `seed-demo` | Run the console; seed a demo corpus for it |
-
-`womblex <command> --help` lists each command's options.
-
-## Output
-
-Extraction writes four Parquet files per batch, joined on `source_hash` (the
-SHA-256 of the source file):
-
-| File | Holds |
-|---|---|
-| `batch-NNNN.elements.parquet` | One row per element, in document order |
-| `batch-NNNN.table_cells.parquet` | Cells of table elements, joined by `(source_hash, parent_elem_order)` |
-| `batch-NNNN.form_fields.parquet` | Fields of form elements, same join |
-| `batch-NNNN._manifest.parquet` | One row per source file: status, counts, `content_digest` |
-
-Each stage adds siblings named after the same batch, such as
-`batch-NNNN.chunks.parquet`. At the end of a run, `<run>/manifest.parquet`
-consolidates the batch manifests, and its footer holds the run record: version,
-commit, config digest, the stages observed and the models used.
-
-**The data contract.** Every file's footer carries a contract version and a
-sensitivity (`raw`, `masked` or `none`). Only `masked` and `none` files are safe
-to pass beyond your trust boundary. Content is deterministic given the same
-source, version, config and models, which `content_digest` lets you check.
-See [docs/contract.md](docs/contract.md) for the consumer rules and
-[docs/extraction.md](docs/extraction.md) for the element schema.
+| `ui`, `seed-demo` | Run the admin console; publish the demo run for it |
 
 ## Integrating with Womblex
 
-### The service API
-`womblex serve` is a `/v1` HTTP API over a store, a job queue and an ingest
-location. Software uploads documents, submits a run over them, polls it, and
-reads the results back. Workers do the processing; the API only writes queue
-rows and reads output.
+Other software integrates in one of two ways.
+
+**The `/v1` service API.** `womblex serve` is an authenticated HTTP API over a
+store, a job queue and an ingest location. A client uploads documents, submits a
+run, polls it and reads results back; runs are owner-scoped, so a client sees
+only its own. Workers do the processing; the API only writes queue rows and
+reads output.
 
 ```bash
-pip install womblex[api]
 womblex api-token --client my-app --scope submit --scope read   # token shown once, plus its registry entry
 WOMBLEX_API_CLIENTS=clients.yaml womblex serve --store <uri> --dsn <dsn> --ingest <uri>   # 127.0.0.1:8081
-```
 
-```bash
 H="Authorization: Bearer $TOKEN"
 curl -H "$H" -F files=@report.pdf http://localhost:8081/v1/uploads          # returns input_prefix
 curl -H "$H" -H "Content-Type: application/json" \
      -d '{"input_prefix": "<input_prefix>"}' http://localhost:8081/v1/runs  # returns the run id
 curl -H "$H" http://localhost:8081/v1/runs/<run_id>                         # pending, running, done or failed
-curl -H "$H" http://localhost:8081/v1/runs/<run_id>/files                   # keys, row counts, contract footers
-curl -H "$H" "http://localhost:8081/v1/runs/<run_id>/documents/<source_hash>/text?layer=elements"
+curl -H "$H" "http://localhost:8081/v1/runs/<run_id>/documents/<source_hash>/text"   # masked layer by default
 ```
 
-- **Tokens and scopes.** Callers present static service tokens; the registry
-  stores only their hashes. Scopes are `submit`, `read`, `read_raw` and `admin`.
-  `serve` refuses to start with an empty registry.
-- **Ownership.** A run belongs to the client that submitted it. Another
-  client's run answers 404, a non-admin can submit only over its own upload
-  folder, and only `admin` sees runs started from the CLI or console.
-- **Stages.** A submitted `preset` or `config` is validated before anything is
-  queued, and it only selects which downstream stages run; workers run them
-  under their own config. A config that enables no stage gives an
-  extraction-only run.
-- **Text layers.** The default layer is `masked`. Raw layers (`chunks`,
-  `elements`) need `read_raw`. The masked layer is written by the `pii` stage,
-  which is never dispatched automatically, because masking is irreversible: an
-  operator runs it deliberately with `run-stage --stage pii`. Until then a
-  document's masked text answers 404.
+Scopes, ownership, text layers and error codes are in
+[docs/service-api.md](docs/service-api.md).
 
-Callers poll; there are no webhooks. Endpoints, status rules and error codes are
-in [docs/service-api.md](docs/service-api.md), and the OpenAPI surface is
-pinned by a test.
+**The Parquet data contract.** A consumer can read a run's Parquet directly, or
+receive it as an egress bundle (`womblex egress <run> --to <dest>`). Every file's
+footer carries a contract version and a sensitivity (`raw`, `masked` or `none`);
+only `masked` and `none` are safe to pass beyond your trust boundary. The rules
+are in [docs/contract.md](docs/contract.md), the schemas in
+[docs/extraction.md](docs/extraction.md) and the bundle in
+[docs/egress.md](docs/egress.md). In Python, `womblex.__all__` is the stable
+surface.
 
-### The data contract
-A consumer can instead read a run's Parquet directly, or receive it as an
-egress bundle (`womblex egress <run> --to <dest>`): the corpus, the deduplicated
-source files and an index between them. See [docs/egress.md](docs/egress.md).
-Files are self-describing through their footers, as described under
-[Output](#output). In Python, `womblex.__all__` is the stable surface.
-
-## Models
-
-Each model sits in a named slot (OCR engine, layout analyser, PII context
-model, chunk tokeniser, spellfix dictionary), and the default set is CPU-only.
-An installed package can register its own model for a slot through an entry
-point, and a config selects it by name, with no schema change. Built-in
-alternatives include a hosted VLM OCR engine on AWS Bedrock and a local Ollama
-vision model.
-
-Before a run, worker or stage processes anything, the models it needs are
-checked (`--models-check off|load|smoke`), and every output file records which
-model filled each slot. See [docs/model-plugins.md](docs/model-plugins.md).
-
-## Scaling out
-
-You don't need any of this to use Womblex. A distributed run calls the same
-batch code as `womblex run` and writes the same shard layout, so its output can
-be synced down and used by every local command, or processed in place.
-
-The backend follows from what you pass: `--store` takes a local path or an
-`s3://` (or `gs://`, `az://`) URI, and execution is either `womblex run` or
-`enqueue` plus `worker`.
-
-```bash
-womblex enqueue  --store s3://bucket --ingest s3://bucket/inbox \
-                 --config configs/example.yaml --create-schema
-womblex worker   --store s3://bucket --ingest s3://bucket/inbox \
-                 --config configs/example.yaml
-womblex jobs     --run-id <run_id>
-womblex finalize --store s3://bucket --run-id <run_id>    # consolidate the manifest
-
-# Downstream stages, in place in the store...
-womblex run-stage --stage chunk --store s3://bucket --run-id <run_id> --config <yaml>
-# ...or queued for the workers, ordered and gated by the config
-womblex enqueue-stages --run-id <run_id> --config <yaml>
-```
-
-Work runs as DBOS workflows, so you can add or remove workers mid-run. A
-stopped worker's unfinished workflows are recovered when a worker with the same
-`--worker-id` (default: the host name) starts again, and a batch or stage unit
-that finished is not run twice. `enqueue-stages` never dispatches `pii` (masking is
-irreversible) or `quality` (run-scoped); run those with `run-stage`.
-
-Connections come from `WOMBLEX_STORE_URI`, `WOMBLEX_INGEST_URI` and
-`WOMBLEX_DB_DSN`. S3 credentials go on `WOMBLEX_S3_ACCESS_KEY_ID`,
-`WOMBLEX_S3_SECRET_ACCESS_KEY` and `WOMBLEX_S3_ENDPOINT` (MinIO works as an S3
-endpoint). `WOMBLEX_DB_DSN` is the DBOS system database (a Postgres URL);
-without it a local SQLite file is used: `.womblex/dbos.sqlite` under the
-working directory, or `WOMBLEX_DBOS_PATH`. Every process in a run (`enqueue`,
-`worker`, `jobs`) must point at the same database. Womblex writes no vectors to the
-database.
-
-### Docker Compose
-
-`docker-compose.yml` runs Postgres, MinIO, scalable workers and the console,
-using published images. Postgres and MinIO sit behind the `local` profile, so
-setting the connection variables points the same file at external services
-instead. The service API runs under the `api` profile
-(`docker compose --profile api up -d api`, port 8081) with the client registry
-mounted read-only.
-
-```bash
-export COMPOSE_FILE=docker-compose.yml:docker-compose.local.override.yml  # build your working tree
-docker compose --profile local up -d postgres minio createbuckets init
-docker compose run --rm womblex enqueue --config configs/example.yaml --create-schema
-docker compose up --scale worker=4 worker
-```
-
-Without the override file, Compose pulls released images; pin a release with
-`docker compose --env-file deploy/images.env up`. Each service's image is
-listed in [docs/deployment-images.md](docs/deployment-images.md).
+The console (`womblex ui`) is an admin and debugging view over a run's files. It
+has no authentication, binds to loopback, and is not an integration surface.
 
 ## Documentation
 
 | Document | Covers |
 |---|---|
 | [functional_requirements.md](docs/functional_requirements.md) | What Womblex must do |
-| [architecture.md](docs/architecture.md), [project-structure.md](docs/project-structure.md) | How it is built, module by module |
+| [architecture.md](docs/architecture.md), [project-structure.md](docs/project-structure.md) | How it is built, and where each thing lives |
 | [dataflow.md](docs/dataflow.md), [composable-design.md](docs/composable-design.md) | How data moves between stages, and the stage contracts |
 | [extraction.md](docs/extraction.md), [contract.md](docs/contract.md) | The output schema and the consumer contract |
-| [models.md](docs/models.md), [model-plugins.md](docs/model-plugins.md) | Every model, and how to plug in your own |
+| [service-api.md](docs/service-api.md), [egress.md](docs/egress.md) | The `/v1` service API, and the egress bundle |
+| [models.md](docs/models.md), [model-plugins.md](docs/model-plugins.md) | Every model, connecting hosted providers, and plugging in your own |
 | [layout.md](docs/layout.md) | Layout settings and the `layout_regions` sidecar |
-| [decisions.md](docs/decisions.md) | Why things are the way they are, and dead ends not to retry |
-| [service-api.md](docs/service-api.md), [egress.md](docs/egress.md) | Integrating: the `/v1` service API, and the egress bundle |
-| [money-extraction.md](docs/money-extraction.md) | The `money` annotation: patterns, values and the sidecar |
-| [evaluation.md](docs/evaluation.md) | The metrics each process is evaluated by |
+| [money-extraction.md](docs/money-extraction.md) | The `money` annotation |
+| [evaluation.md](docs/evaluation.md), [accuracy/](docs/accuracy/) | Evaluation metrics, and benchmark reports generated by [womblex-benchmark](https://github.com/DeepCivic/womblex-benchmark) |
 | [heuristics_disambiguation.md](docs/heuristics_disambiguation.md) | The CV2 and NumPy heuristics used in detection |
-| [deployment-images.md](docs/deployment-images.md) | Where each compose service's image comes from |
-| [DESIGN.md](DESIGN.md) | The console's design system |
+| [deployment-images.md](docs/deployment-images.md) | Docker Compose services and their images |
+| [decisions.md](docs/decisions.md) | Why things are the way they are, and dead ends not to retry |
 | [steering.md](docs/steering.md), [CHANGELOG.md](CHANGELOG.md) | What's next, and what has shipped |
-| [accuracy/](docs/accuracy/) | Benchmark reports, generated by [womblex-benchmark](https://github.com/DeepCivic/womblex-benchmark) |
+| [DESIGN.md](DESIGN.md) | The console's design system |
 
-## Development
+## Project status
+
+Womblex 0.6.0 is **alpha** and pre-1.0.
+
+- **Stable:** the on-disk data contract, versioned apart from the package
+  (additive changes are minor bumps with back-fill; renames are major bumps with
+  a reader shim), and the Python names in `womblex.__all__`, which change only
+  after one minor release of deprecation warnings. See [docs/contract.md](docs/contract.md).
+- **Moving:** everything outside `__all__`, the CLI options, the stored-workflow
+  commands, and the console.
+
+## Contributing
 
 ```bash
 git clone https://github.com/DeepCivic/womblex.git && cd womblex
@@ -318,38 +189,32 @@ uv sync --extra dev --extra ui --extra api
 
 uv run ruff check src/ tests/
 uv run mypy src/
-uv run python -m pytest tests/ -v -m "not benchmark"           # what CI runs
+uv run python -m pytest tests/ -v -m "not benchmark"               # what CI runs
 uv run python -m pytest tests/ -v -m "not slow and not benchmark"  # fast subset
 ```
 
-These three checks are the CI gate. The suite reads only the synthetic fixtures
-in [fixtures/synthetic/](fixtures/synthetic/README.md), so a bare clone runs all
-of it; tests that call a paid API or need a Postgres DSN skip without one.
-Accuracy benchmarks live in womblex-benchmark, not here; the one maintainer-only
-`benchmark` module is described in [THIRD_PARTY_DATA.md](THIRD_PARTY_DATA.md).
-
-The commit hook runs a secret scan and the semgrep rules in `.semgrep/rules/`:
-
-```bash
-pip install pre-commit==4.6.1 && pre-commit install
-```
-
-Record a reviewed false positive at the site (`# pragma: allowlist secret` or
-`# nosemgrep: <rule-id> -- <reason>`) rather than switching a check off.
-`bash .github/scripts/doctor.sh` compares your environment with `.env.example`.
-
-Contributor conventions (file and merge size caps, what belongs in core) are in
-[CLAUDE.md](CLAUDE.md).
+All three are the CI gate. The suite reads only the synthetic fixtures in
+[fixtures/synthetic/](fixtures/synthetic/README.md), so a bare clone runs it;
+tests that need a paid API key or a Postgres DSN skip without one. Install the
+commit hook (secret scan and the semgrep rules in `.semgrep/rules/`) with
+`pip install pre-commit==4.6.1 && pre-commit install`. Conventions — file and
+merge size caps, what belongs in core — are in [CLAUDE.md](CLAUDE.md); third-party
+data policy is in [THIRD_PARTY_DATA.md](THIRD_PARTY_DATA.md).
 
 ## Licence
 
-Apache-2.0.
+[Apache-2.0](LICENSE).
 
 ## Acknowledgements
 
-- [pypdfium2](https://github.com/pypdfium2-team/pypdfium2) and [pdfplumber](https://github.com/jsvine/pdfplumber) for PDF handling
-- [RapidOCR](https://github.com/RapidAI/RapidOCR) for OCR, running PaddleOCR ONNX models
-- [PP-DocLayout](https://huggingface.co/PaddlePaddle/PP-DocLayout-M) for layout detection
-- [semchunk](https://github.com/isaacus-dev/semchunk) for chunking
-- [python-docx](https://python-docx.readthedocs.io/), [pandas](https://pandas.pydata.org/) and [openpyxl](https://openpyxl.readthedocs.io/) for Office formats
-- [Isaacus](https://isaacus.com/) for the Kanon-2 enrichment and embedding models
+Womblex is a thin layer over mature libraries, including
+[pypdfium2](https://github.com/pypdfium2-team/pypdfium2) and
+[pdfplumber](https://github.com/jsvine/pdfplumber) (PDF),
+[RapidOCR](https://github.com/RapidAI/RapidOCR) running PaddleOCR ONNX models (OCR),
+[PP-DocLayout](https://huggingface.co/PaddlePaddle/PP-DocLayout-M) (layout),
+[semchunk](https://github.com/isaacus-dev/semchunk) (chunking),
+[Presidio](https://github.com/microsoft/presidio) (PII replacement),
+[DBOS](https://github.com/dbos-inc/dbos-transact-py) (workflows), and
+[python-docx](https://python-docx.readthedocs.io/),
+[pandas](https://pandas.pydata.org/) and
+[openpyxl](https://openpyxl.readthedocs.io/) (Office formats).
