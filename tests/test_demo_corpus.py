@@ -2,7 +2,7 @@
 
 The seeder exists to fix "Sample corpus not present": a fresh console — local
 or store-backed — reads an empty run source and shows nothing until a real run
-lands. `seed-demo` publishes the vendored `output/console-demo/run-throsby-demo`
+lands. `seed-demo` publishes the vendored `output/console-demo/run-synthetic-demo`
 into that run source so the console has a browsable sample. These tests prove
 the two console modes each *see* the seeded run through the same `ui.readers`
 the frontend calls, and that the per-mode layout (local vs `runs/` prefix) is
@@ -21,6 +21,9 @@ from womblex.cli.demo import cmd_seed_demo
 from womblex.store import demo_corpus
 from womblex.ui import readers
 from womblex.ui.deps import UISettings
+
+#: The synthetic PDF and DOCX documents the demo run was built from.
+DEMO_DOCUMENTS = 7
 
 
 class _Args:
@@ -62,12 +65,12 @@ class TestSeedDemoCommand:
         settings = UISettings(output_root=tmp_path, store_uri=None)
         runs = readers.list_run_summaries(settings)
         assert [r.run_id for r in runs] == [demo_corpus.DEMO_RUN_ID]
-        assert runs[0].document_count == 1
+        assert runs[0].document_count == DEMO_DOCUMENTS
         # A full pipeline run: the stages the checkpoints/sidecars evidence.
         assert "extract" in runs[0].stages and "money" in runs[0].stages
 
         rows = readers.get_manifest_rows(settings, demo_corpus.DEMO_RUN_ID)
-        assert rows is not None and len(rows) == 1
+        assert rows is not None and len(rows) == DEMO_DOCUMENTS
 
     def test_seeded_run_carries_the_default_isaacus_shape(self, tmp_path: Path) -> None:
         """The sample corpus is a completed DEFAULT-Isaacus run, so the console's
@@ -78,7 +81,7 @@ class TestSeedDemoCommand:
         settings = UISettings(output_root=tmp_path, store_uri=None)
         stages = set(readers.list_run_summaries(settings)[0].stages)
         # The stages the DEFAULT-Isaacus shape names, evidenced by their sidecars.
-        assert {"extract", "chunk", "enrich", "embed", "money"} <= stages
+        assert {"extract", "normalise", "chunk", "enrich", "embed", "money"} <= stages
 
     def test_seeds_a_store_the_console_then_reads(self, tmp_path: Path) -> None:
         """Store mode: the run lands under runs/<run_id>/ (RemoteStore's local backend)."""
@@ -90,7 +93,7 @@ class TestSeedDemoCommand:
         settings = UISettings(output_root=None, store_uri=str(store_root))
         runs = readers.list_run_summaries(settings)
         assert [r.run_id for r in runs] == [demo_corpus.DEMO_RUN_ID]
-        assert runs[0].document_count == 1
+        assert runs[0].document_count == DEMO_DOCUMENTS
 
     def test_refuses_two_targets(self, tmp_path: Path) -> None:
         assert cmd_seed_demo(_Args(output_root=tmp_path, store="s3://x")) == 1

@@ -1,0 +1,17 @@
+{
+  "processed_ids": [
+    "koala-habitat-audit",
+    "bilby-schedule-of-documents",
+    "bilby-foi-documents-index",
+    "numbat-scanned-survey-page",
+    "emu-spacing-variants",
+    "quokka-care-decision-notice_redacted",
+    "wombat-portfolio-budget-statements"
+  ],
+  "total_processed": 7,
+  "total_succeeded": 7,
+  "total_failed": 0,
+  "last_batch": 1,
+  "started_at": "2026-10-15T19:16:16.434383+00:00",
+  "updated_at": "2026-10-15T19:16:20.777011+00:00"
+}

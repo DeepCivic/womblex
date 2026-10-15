@@ -6,9 +6,11 @@ impression for an operator evaluating the console, and the cause of the
 cloud-deployment "Sample corpus not present": the store (`s3://redline`) was
 simply empty.
 
-`output/console-demo/run-throsby-demo/` is a complete, pre-built pipeline run
-of the reference DEFAULT-Isaacus shape (extract → chunk → enrich → build_graph
-→ embed → money, checkpoints included) vendored into the repo/image. This
+`output/console-demo/run-synthetic-demo/` is a complete, pre-built pipeline run
+of the reference DEFAULT-Isaacus shape (extract → normalise → enrich → chunk →
+build_graph → embed → money, checkpoints included; not `link`, which needs a
+corpus reference register) over the PDF and DOCX documents in
+`fixtures/synthetic/documents/`, vendored into the repo/image. This
 module copies it into whatever store the console reads — a local `output_root`
 or an `s3://` bucket — under `runs/<run_id>/`, so a fresh deployment has a
 browsable sample corpus with one command (`womblex seed-demo`). It is
@@ -32,14 +34,14 @@ logger = logging.getLogger(__name__)
 #: The run id the demo lands under in the target store. A distinctive,
 #: obviously-a-sample id so an operator can tell it apart from their own runs
 #: (and delete it) at a glance.
-DEMO_RUN_ID = "run-throsby-demo"
+DEMO_RUN_ID = "run-synthetic-demo"
 
 #: Directory name (under the resolved demo root) holding the pre-built run.
 _DEMO_DIRNAME = "console-demo"
 
 
 def demo_root() -> Path:
-    """The vendored demo directory (the parent of ``run-throsby-demo/``).
+    """The vendored demo directory (the parent of ``run-synthetic-demo/``).
 
     Resolved from ``$WOMBLEX_DEMO_DIR`` when set, else ``output/console-demo``
     under the current working directory — where both Dockerfiles place it
@@ -52,7 +54,7 @@ def demo_root() -> Path:
 
 
 def demo_run_dir() -> Path:
-    """The demo run directory itself (``<demo_root>/run-throsby-demo``)."""
+    """The demo run directory itself (``<demo_root>/run-synthetic-demo``)."""
     return demo_root() / DEMO_RUN_ID
 
 
