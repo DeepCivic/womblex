@@ -500,10 +500,6 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - With no plugin configured, `content_digest` is unchanged on every synthetic fixture.
 - The model-plugin guide documents each slot's interface and how a package registers a model, with a minimal example.
 
-**TO-DO:**
-
-- **The model-plugin guide has no enrichment or embedding section (re: "documents each slot's interface").** `docs/model-plugins.md` does not yet describe the `enrichment` and `embedding` slots' provider interfaces or their declared limits.
-
 **Out of scope:** model provenance (26), `/v1` submission controls (a submitted config only selects stages; workers run under the operator's config), container-image packaging of plugins, and slots that need a Parquet schema change, each needing its own requirement (25 and 26, and the rest): AI chunking with a non-Isaacus model, graph-driven PII detection, link-stage candidates, `graph_refresh`, the enrichment token-budget tokeniser, per-page or per-element OCR engine recording.
 
 ## 25. Pre-Run Model Check
@@ -551,7 +547,6 @@ Requirements not yet fully met. The detail lives in the **TO-DO** block under ea
 
 
 - **Requirement 2 (Scale-Out):** Azure storage URIs (`az://` / `abfs://`) are not credential-wired, and the enrichment paths have no Azure ML connection.
-- **Requirement 24 (Swappable Models):** the model-plugin guide has no section for the enrichment or embedding slot.
 - **Requirement 3 (Ingest-First Data Flow):** up-front composition check covers workflows (local and `dispatch-workflow`) and dispatch, not a lone `run-stage --store` (per-base `NotReady`); stored workflows and triggers have no requirement.
 - **Requirement 6 (Native Office and Spreadsheet Extraction):** multi-row headers are emitted for DOCX only; spreadsheets and the legacy table view collapse to row 0, no per-cell header-row coordinate exists, and cell formulas are never captured.
 - **Requirement 7 (Standalone Reference Register Ingestion):** G-NAF and geospatial writes are not guarded against partial output.
