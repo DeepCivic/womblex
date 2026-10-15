@@ -536,6 +536,10 @@ def _register_manifest(p: argparse.ArgumentParser) -> None:
         "-o", "--output", type=Path, default=None,
         help="Output parquet path (default: `<run_root>/manifest.parquet`).",
     )
+    p.add_argument(
+        "--lineage", type=Path, default=None,
+        help="Also write the run record as an OpenLineage RunEvent (JSON) to this path.",
+    )
 
 
 def cmd_manifest(args: argparse.Namespace) -> int:
@@ -549,7 +553,21 @@ def cmd_manifest(args: argparse.Namespace) -> int:
     if not any(shard_dir.glob("*._manifest.parquet")):
         logger.error("--shards directory has no `*._manifest.parquet`: %s", shard_dir)
         return 1
-    write_run_manifest(shard_dir, args.output)
+    manifest = write_run_manifest(shard_dir, args.output)
+    lineage: Path | None = getattr(args, "lineage", None)
+    if lineage is not None:
+        import json
+
+        from womblex.store.lineage import LineageError, run_event
+        from womblex.store.run_manifest import read_run_record
+
+        try:
+            event = run_event(read_run_record(manifest) or {})
+        except LineageError as e:
+            logger.error("--lineage: %s", e)
+            return 1
+        lineage.write_text(json.dumps(event, indent=2, sort_keys=True) + "\n")
+        logger.info("OpenLineage RunEvent written to %s", lineage)
     return 0
 
 

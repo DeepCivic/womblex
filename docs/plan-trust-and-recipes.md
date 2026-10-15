@@ -10,7 +10,6 @@
 ## Phase 1 — no decisions required (branch)
 Everything here is settled in `decisions.md` or in a reviewed PR.
 
-- **1.5 OpenLineage-shaped export of the run record.** `store/lineage.py` maps the run record (observed, never config) to RunEvent JSON; `womblex manifest --shards DIR --lineage OUT`; tested against the published schema vendored under `fixtures/`. No dependency. Docs: `architecture.md` (the run record), `contract.md`, README command table, CHANGELOG.
 - **1.6 Stocktake S-1 (baseline).** The full checklist below, plus the drift in Findings: README command table and documentation index; a new stored-workflows requirement absorbing the Requirement 3 TO-DO; a "Workflows and distributed execution" section in `architecture.md`; `steering.md` row 15; the three dead doc citations in tests; #198's summary that Phase 2 shipped, written before #197 re-landed. Split into S-1a and S-1b if it passes the cap.
 
 ## Phase 2 — retry and workflow operation (branch)

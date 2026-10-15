@@ -113,7 +113,7 @@ womblex normalise --shards $SHARDS
 womblex chunk     --shards $SHARDS --config configs/example.yaml
 womblex money     --shards $SHARDS
 womblex pii       --shards $SHARDS
-womblex manifest  --shards $SHARDS     # rebuild the run-level manifest
+womblex manifest  --shards $SHARDS     # rebuild the run-level manifest (--lineage OUT: also as an OpenLineage RunEvent)
 ```
 
 `configs/default-isaacus.yaml` is the reference full pipeline (extract,

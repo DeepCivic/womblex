@@ -151,6 +151,7 @@ womblex/
 │   │   ├── content_digest.py # content_digest(elements): the manifest's determinism handle (kind / order / text / cells / fields / sheet cells / meta)
 │   │   ├── contract.py      # womblex.contract_version + womblex.sensitivity (raw / masked / none) footer keys, on every pipeline Parquet
 │   │   ├── run_manifest.py  # Consolidate per-batch manifests into a run-root manifest.parquet + the run record in its footer
+│   │   ├── lineage.py       # The run record as an OpenLineage 2-0-2 RunEvent (`manifest --lineage`)
 │   │   ├── register_manifest.py  # Manifest for standalone register ingests (G-NAF/ABN/geospatial)
 │   │   ├── demo_corpus.py   # Publish the vendored demo run into a console's run store (`womblex seed-demo`)
 │   │   ├── remote.py        # fsspec stage-in/stage-out object-storage adapter for distributed runs
