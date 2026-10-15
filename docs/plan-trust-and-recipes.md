@@ -16,50 +16,33 @@
 
 - **D-2.4 Workflow guide.** A new `docs/workflows.md`, or sections in the README and `architecture.md`. ANSWERED: A new `docs/workflows.md`
 
-
-- **D-2.5 Doc-currency test.** Whether the stocktakes gain a test holding the README command table to the CLI parser and the CLAUDE.md module table to `src/`. ANSWERED: I need more information, I don't understand the implications.
-  *In plain terms:* stocktake checks 1 and 2 are done by hand each phase: compare the README's list of commands with the commands `womblex` actually has, and CLAUDE.md's module table with the files under `src/`. A test would do the comparison on every CI run instead.
-  - *Add it:* drift is caught in the PR that causes it, not up to a phase later, and stocktakes get shorter. The cost is one small test file. A PR that adds a command or a module then fails CI until its doc row is written, which is what the conventions already require.
-  - *Don't:* nothing breaks; drift is still found, but only at the next stocktake, by hand.
-  - *Recommendation:* add it. It enforces a rule the plan already holds, and fails before a merge, never during a run.
+- **D-2.5 Doc-currency test.** ANSWERED: add it. A test holds the README command table to the CLI parser and the CLAUDE.md module table to `src/`, so drift fails CI in the PR that causes it; stocktake checks 1 and 2 cite the test instead of being done by hand.
 
 **Merges:**
 - **2.1 Retry a failed stage by fork.** Re-dispatching a failed stage returns its recorded failure; DBOS's `resume_workflow` does not restart it, `fork_workflow` does, keeping the steps before the chosen one. Refused before the fork: a stage not failed, still running, owned by another owner, or failing its own pre-launch checks (a retry is a launch). Forks from the first failed unit as `run:stage:retry:N`; status per D-2.1. First task: confirm the DBOS 3.2 `fork_workflow` signature and whether it carries attributes. Docs: `decisions.md` (replaces "a retry is a plan follow-up"), Requirements 14 and 16, `architecture.md`, README, CLAUDE.md rows, `project-structure.md`.
 - **2.3 Schedule-time checks** (per D-2.3). Docs: the stored-workflows requirement, `decisions.md`.
 - **2.3.5 Workflow guide** (per D-2.4, docs only), saying that a workflow is saved only through code (D-2.2).
-- **2.4 Stocktake S-2**, with the currency test if D-2.5 adds it.
+- **2.3.7 Doc-currency test** (per D-2.5). Fixes any drift it finds on landing. Docs: the stocktake checklist below, `decisions.md`.
+- **2.4 Stocktake S-2.**
 
 ## Phase 3 — integration (branch)
 **Decisions and approvals before the first merge:**
-Phase 3 lets a finished run send its output somewhere by itself (a "destination"), rather than someone running `womblex egress` or reading the API. Note for D-2.2: destinations live on a stored workflow, and a workflow is saved only through code, so until authoring exists a destination is configured the same way.
+Phase 3 lets a finished run send its output somewhere by itself (a "destination"), rather than someone running `womblex egress` or reading the API. Destinations live on a stored workflow, and per D-2.2 a workflow is saved only through code, so a destination is configured the same way.
 
-- **D-3.1 Object-store destination on fleet runs.** Corpus-only, which keeps the recorded egress boundary (egress does not read a run ingested from an object store); or reopen that decision so egress fetches sources from the ingest store, which changes Requirement 23's last two criteria.
-  *In plain terms:* egress today builds a bundle of the extracted corpus *plus* the original PDFs, and finds the PDFs on local disk. A fleet run read its PDFs from an object store (S3), so egress refuses it. The question is what a fleet run's object-store destination sends.
-  - *Corpus-only:* it sends the extracted parquet and manifest, not the PDFs. It's small and safe, and no recorded decision changes. A consumer that wants the PDFs fetches them from the ingest bucket itself, using the manifest's `source_relpath`.
-  - *Fetch sources:* it copies the PDFs out of the ingest store too, checking each by hash, so the bundle is complete. It's more code, and it reverses a recorded boundary (Requirement 23 and `egress.md` change). It also copies raw, unmasked government documents to a second place, which matters if the destination is less locked down than the ingest bucket.
-  - *Recommendation:* corpus-only now. Reopen it if a consumer needs the PDFs and can't reach the ingest bucket.
+- **D-3.1 Sources on object-store runs.** ANSWERED: reopen the egress boundary. Egress, and the object-store destination built on it, can fetch a run's source documents from the ingest store it was read from: each by the manifest's `source_relpath`, checked against `source_hash`, with the same per-document status as local resolution. Including sources stays the caller's choice per export or destination (`include_sources`, as `build_bundle` has today). Womblex is a backend service; whether raw documents may go to a destination is the deploying system's call, not a limit Womblex sets. Requirement 23's object-store refusal goes.
 
-- **D-3.2 pgvector text layer.** Masked `clean_text` only, or raw chunk text where a workflow declares it.
-  *In plain terms:* pgvector puts each chunk's text and embedding into a Postgres table, for search. The question is which text goes in the table: the PII-masked version (`<PERSON_1>`) or the original (real names).
-  - *Masked only:* nothing with personal names leaves Womblex through this route, and it matches `contract.md`'s "safe to hand onward" rule. Search still works, because the embeddings were made from the raw text; only the returned text is masked. It needs the `pii` stage to have run first, so a workflow with this destination and no `pii` would be refused before launch.
-  - *Raw if declared:* search results show real names, which reviewers may need. But a database holding raw text is now a store of personal information and needs the access controls that go with that, and one setting turns it on.
-  - *Recommendation:* masked only. Add raw later, as its own decision, if a named use needs it.
+- **D-3.2 pgvector text layer.** ANSWERED: both. Masked `clean_text` is the default; raw chunk text is written where the workflow's destination declares it. Each row and the table record which layer it holds, and the masked layer needs `pii` in the workflow (refused before launch otherwise); the raw layer does not. As with D-3.1, whether raw text is appropriate is the deploying system's call.
 
-- **D-3.3 Webhooks.** HMAC signing with an environment secret, and the event list: extraction settled, stage done or failed, run done, delivery done or failed.
-  *In plain terms:* today a caller has to keep asking the API "is my run done?" (polling). A webhook makes Womblex POST to the caller's URL when something happens.
-  - *HMAC signing:* each POST carries a signature made with a shared secret held in an environment variable. The receiver recomputes it to prove the message came from Womblex and wasn't altered. It's the standard approach (GitHub and Stripe do the same) and costs one secret to manage per deployment. Without it, anyone who learns the URL can fake a "run done".
-  - *Event list:* fewer events are simpler and less noisy; more give finer progress. The proposed five cover "can I start reading?" (extraction settled, run done) and "did something go wrong?" (stage failed, delivery failed). Per-document or per-batch events are left out because a large run would send thousands.
-  - *Failures:* a webhook that can't be delivered is retried a few times, then recorded on the run. It never stops the run.
-  - *Recommendation:* yes to both as proposed.
+- **D-3.3 Webhooks.** ANSWERED: yes. HMAC signing with an environment secret, and five events: extraction settled, stage done or failed, run done, delivery done or failed. No per-document or per-batch events. A webhook that cannot be delivered is retried a bounded number of times, then recorded on the run; it never stops the run.
 
-- **D-3.4 Dependency approval.** `httpx` declared in core (approved under D11) and a `[pgvector]` extra.
-  *In plain terms:* `httpx` is the HTTP client the webhooks send with. It's small and already installed on every install (the Isaacus SDK and `huggingface-hub` depend on it), but Womblex declares it only in `[dev]`, for the test client. The `[pgvector]` extra adds the Postgres vector driver only for installs that want that destination, so nobody else carries it. Per the conventions, this is its own merge (3.1), made only after you approve it.
+- **D-3.4 Dependency approval.** ANSWERED: approved. `httpx` declared in core (already installed through the Isaacus SDK and `huggingface-hub`; today declared only in `[dev]`) and a `[pgvector]` extra.
 
 **Merges:**
 - **3.1 Dependencies only.** `pyproject.toml` and `uv.lock`.
 - **3.2 Delivery model.** Destination targets validated per kind at save, and an unbuilt kind refused there. A delivery is a DBOS workflow (`run:deliver:<n>`) with bounded retries, enqueued after the last stage whether or not one failed, and labelled `ran_after_failed`; locally, delivery follows the steps. The run record gains `deliveries` (record version 7), read by a new `store/` module beside `run_manifest.py`. A failed delivery labels the run and never stops it. Docs: `decisions.md`, Requirement 23 or a new destinations requirement, `architecture.md`, CLAUDE.md rows.
-- **3.3 Object-store destination** (per D-3.1), built on `build_bundle`. Docs: `egress.md`, Requirement 23.
-- **3.4 Postgres with pgvector** (per D-3.2): an idempotent upsert keyed `(run_id, source_hash, chunk_index, content_type)`. Docs: `contract.md` ("Safe to hand onward"), README installation extras.
+- **3.3 Sources from the ingest store** (per D-3.1). `build_bundle` resolves a run ingested from an object store against that store, by `source_relpath` and checked by hash, reusing the per-document fetcher the `layout` contract builds; the object-store refusal is removed. Docs: `egress.md`, Requirement 23 (its last two criteria), `decisions.md` (the egress boundary), CLAUDE.md rows.
+- **3.3.1 Object-store destination**, built on `build_bundle`, with `include_sources` per destination. Docs: `egress.md`, Requirement 23.
+- **3.4 Postgres with pgvector** (per D-3.2): an idempotent upsert keyed `(run_id, source_hash, chunk_index, content_type)`, masked text by default and raw where the destination declares it, the layer recorded on each row. Docs: `contract.md` ("Safe to hand onward" names the raw option and who decides it), README installation extras.
 - **3.5 Webhooks** (per D-3.3), each POST a DBOS workflow with bounded retries. Docs: `service-api.md` and README (both say callers poll and there are no webhooks), Requirement 22.
 - **3.5.5 `egress.md` becomes "Egress and destinations"** with a payload reference (docs only).
 - **3.6 Stocktake S-3.**
@@ -90,8 +73,8 @@ Phase 3 lets a finished run send its output somewhere by itself (a "destination"
 
 ## Stocktake checklist
 The last merge of every phase, docs only, its record in the PR body rather than a new file. It covers every enduring document: README, CHANGELOG, CLAUDE.md, DESIGN.md, THIRD_PARTY_DATA.md, `fixtures/synthetic/README.md`, the PR template and every `docs/*.md`. It never edits `docs/accuracy/` (written by womblex-benchmark). Each check carries its evidence (a grep, a listing or a command):
-1. Module tables in CLAUDE.md and `project-structure.md` against the `src/` tree.
-2. The README command table against the CLI parser's subcommands.
+1. Module tables in CLAUDE.md and `project-structure.md` against the `src/` tree (CLAUDE.md's by the doc-currency test once 2.3.7 lands).
+2. The README command table against the CLI parser's subcommands (by the doc-currency test once 2.3.7 lands).
 3. The Requirements "Outstanding" index against the TO-DO blocks.
 4. `decisions.md` entries marked "not built", "position" or "wanted" that have since shipped.
 5. `CHANGELOG.md` Unreleased covers the phase's merges.
