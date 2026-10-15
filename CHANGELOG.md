@@ -8,6 +8,10 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-16
+
+The repository's history before this release is squashed into one root commit, and v0.6.0 is its only tag: the earlier history held third-party documents that the test suite no longer uses (see "The test suite runs on synthetic fixtures" below) and the original console demo run.
+
 ### Added
 - **The run record as an OpenLineage RunEvent — trust plan, Phase 1 item 1.5.** `womblex manifest --shards DIR --lineage OUT` also writes the run record as an OpenLineage 2-0-2 `RunEvent` (`store/lineage.py`): `runId` a UUID5 of the run id, the record's observed facts in `womblex_*` facets, refused for a record that names no run. No dependency; tested against the published schema, vendored at `fixtures/openlineage/`.
 - **The `embedding` model slot — trust plan, Phase 1 item 1.4.** `embedding.model` names a registered provider (default `kanon-2-embedder`; plugins through `womblex.models.embedding`), declaring texts per request and network need; `embed_shards` and `plan_embedding` batch by it. The embed contract's Isaacus gate and client and the model check's Isaacus ping apply only to an Isaacus provider; any other is loaded and smoke-tested like a local model.
