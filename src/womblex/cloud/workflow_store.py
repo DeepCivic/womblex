@@ -5,7 +5,7 @@ live in (`dbos_app.system_database_url`), so a local run needs no second databas
 
 Schema and storage only (`docs/decisions.md`, Phase 2 merge 1):
 `destinations` round-trip but are not dispatched (`conditions` label documents through
-`workflow_conditions`), `triggers` are stored but not scheduled, and nothing here runs a
+`workflow_conditions`), `triggers` are scheduled by `workflow_schedules`, and nothing here runs a
 workflow. The table is created if absent; there is no versioned migration yet.
 """
 
@@ -96,7 +96,11 @@ def _check_steps(spec: StoredWorkflowSpec) -> None:
 
 def _check_triggers(spec: StoredWorkflowSpec) -> None:
     # The parser DBOS's own scheduler validates with, so a stored trigger is one it will accept.
-    from dbos._croniter import croniter  # type: ignore[attr-defined]
+    # DBOS 3.3 depends on the `croniter` package; 3.2 vendors it as `dbos._croniter`.
+    try:
+        from croniter import croniter  # type: ignore[import-untyped, import-not-found, unused-ignore]
+    except ImportError:
+        from dbos._croniter import croniter  # type: ignore[import-not-found, attr-defined, no-redef, unused-ignore]
 
     for trigger in spec.triggers:
         if not croniter.is_valid(trigger.cron, second_at_beginning=True):
