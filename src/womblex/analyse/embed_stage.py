@@ -14,7 +14,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-from womblex.analyse.embed import MAX_TEXTS_PER_REQUEST, embed_texts
+from womblex.analyse.embed import make_embedding_provider
 from womblex.config import EmbeddingConfig
 from womblex.process.chunk_stage import _batch_bases
 from womblex.store.checkpoint import CheckpointManager
@@ -38,7 +38,10 @@ def embed_shards(
     client: object,
     checkpoint_mgr: CheckpointManager | None = None,
 ) -> EmbedStageResult:
-    """Embed every batch's chunks and write ``*.embeddings.parquet`` siblings."""
+    """Embed every batch's chunks and write ``*.embeddings.parquet`` siblings.
+
+    ``client`` is used only by an Isaacus provider; ``None`` for any other.
+    """
     if not shard_dir.is_dir():
         raise FileNotFoundError(f"shard directory not found: {shard_dir}")
 
@@ -47,6 +50,8 @@ def embed_shards(
         logger.warning("embed_shards: no batches found in %s", shard_dir)
         return EmbedStageResult(0, 0)
 
+    provider = make_embedding_provider(embedding_config, client)
+    per_request = provider.limits.max_texts_per_request
     batches_written = 0
     chunks_embedded = 0
 
@@ -61,14 +66,10 @@ def embed_shards(
         if chunk_rows:
             texts = [r["text"] for r in chunk_rows]
             try:
-                vectors = embed_texts(
-                    texts, client,
-                    model=embedding_config.model,
-                    task=embedding_config.task,
-                    dimensions=embedding_config.dimensions,
-                    max_retries=embedding_config.max_retries,
-                    retry_base_delay=embedding_config.retry_base_delay,
-                )
+                vectors = [
+                    v for i in range(0, len(texts), per_request)
+                    for v in provider.embed(texts[i : i + per_request])
+                ]
             except Exception as e:  # transient — leave batch for retry
                 logger.error("embed_shards: embedding failed for %s: %s", base.stem, e)
                 errored = True
@@ -113,15 +114,19 @@ class EmbedPlan:
     requests: int = 0
 
 
-def plan_embedding(shard_dir: Path, *, token_counter: TokenCounter | None = None) -> EmbedPlan:
+def plan_embedding(
+    shard_dir: Path, embedding_config: EmbeddingConfig | None = None, *,
+    token_counter: TokenCounter | None = None,
+) -> EmbedPlan:
     """Count the chunks, requests and tokens `embed_shards` would send; never calls the API."""
+    per_request = make_embedding_provider(embedding_config or EmbeddingConfig()).limits.max_texts_per_request
     counter = token_counter or TokenCounter()
     plan = EmbedPlan()
     for base in _batch_bases(shard_dir):
         texts = [r["text"] for r in _chunk_rows(base)]
         plan.chunks += len(texts)
         plan.tokens += sum(counter.count_batch(texts)) if texts else 0
-        plan.requests += -(-len(texts) // MAX_TEXTS_PER_REQUEST)
+        plan.requests += -(-len(texts) // per_request)
     return plan
 
 

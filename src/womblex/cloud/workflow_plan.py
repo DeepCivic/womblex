@@ -113,7 +113,7 @@ def _estimate(stage: str, index: int, stages: list[str], config: WomblexConfig, 
                 )
             from womblex.analyse.embed_stage import plan_embedding
 
-            e = plan_embedding(scratch)
+            e = plan_embedding(scratch, config.embedding)
             return TokenEstimate(basis, tokens=e.tokens, requests=e.requests, texts=e.chunks)
     except Exception as exc:  # a layer that is not there: the plan says so, never raises
         return TokenEstimate("unavailable", f"{type(exc).__name__}: {exc}")

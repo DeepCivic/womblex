@@ -32,6 +32,7 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from womblex.analyse.embed import calls_isaacus as embedding_calls_isaacus
 from womblex.analyse.enrich import ai_chunking_model, calls_isaacus, effective_chunking, returns_document
 
 # `_SUFFIX` / `_SHARD_SUFFIX` are imported rather than re-spelled so a schema
@@ -508,8 +509,9 @@ STAGE_CONTRACTS: dict[str, StageContract] = {
         outputs=lambda _c: (EMBEDDINGS_SUFFIX,),
         run=_run_embed,
         needs_isaacus_api=True,
+        needs_isaacus_api_for=lambda c: embedding_calls_isaacus(c.embedding.model),
         needs_client=True,
-        models=lambda c: (c.embedding.model,),
+        models=lambda c: (c.embedding.model,) if embedding_calls_isaacus(c.embedding.model) else (),
         checkpoint_dirname=".embed-checkpoint",
     ),
     "link": StageContract(

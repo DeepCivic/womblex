@@ -1374,7 +1374,9 @@ be re-derivable, and the first pass's were not.
   returns no Document, `chunking.chunking_model` is set aside (warned) and
   chunks come from semchunk's local token splitting. The Isaacus SDK is a
   dependency for what it runs locally (the tokeniser); a paid call is made only
-  where the configured provider asks for one, never as a fallback. *The provider contract:* text in, one `EnrichmentResult` per
+  where the configured provider asks for one, never as a fallback. The `embedding` slot
+  followed (item 1.4): default `kanon-2-embedder`, a provider declaring texts per
+  request and network need. *The provider contract:* text in, one `EnrichmentResult` per
   text, offsets into the text sent, results independent of batch composition, and
   labels mapped to the existing taxonomy inside the adapter. *Each provider
   declares its limits:* texts per request, token ceiling, token counter, whether
