@@ -9,7 +9,7 @@ narrative layer, not a sparse diff.
 
 Distinct from the PII stage's ``*.clean_text.parquet`` (masking layer):
 this is the *cleaning* layer (whitespace / footer-glyph / typo fixes),
-applied pre-chunk. See ``docs/decisions.md`` "Downstream text-cleaning op".
+applied pre-chunk. See ``docs/decisions-dead-ends.md`` "Downstream text-cleaning op".
 """
 
 from __future__ import annotations

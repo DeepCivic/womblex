@@ -11,7 +11,7 @@
  * here) — chosen to satisfy the properties DESIGN.md *does* state (the
  * measured-contrast table's dark-mode values, lime/purple never doubling as
  * page surface or body text, near-black #18182a as the pill-text colour) and
- * flagged in docs/decisions.md rather than asserted as a pixel match.
+ * flagged in docs/decisions-dead-ends.md rather than asserted as a pixel match.
  */
 @theme {
 	--font-display: 'Barlow Condensed', sans-serif;

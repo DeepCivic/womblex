@@ -30,7 +30,7 @@ Moved here from the permissive-dependencies plan, retired when PyMuPDF was remov
 - **Hand checks (step 3).**
   - `REDACTION_HANDLING` read by hand; earlier reports are not a comparison.
   - Exclusion area spot-checked on the 02737-class scanned forms.
-  - The swap's findings (recorded in `decisions.md`) re-checked: table-class recall fell from 50% to 25%, and `dense_text_548` gave three table regions where the ground truth has one, with a `chart` box (mapped to `figure`) almost identical to the `table` box. `LABEL_MAP` and the 0.3 threshold are the knobs. The `dense_text_548` table must be found.
+  - The swap's findings (recorded in `decisions-dead-ends.md`) re-checked: table-class recall fell from 50% to 25%, and `dense_text_548` gave three table regions where the ground truth has one, with a `chart` box (mapped to `figure`) almost identical to the `table` box. `LABEL_MAP` and the 0.3 threshold are the knobs. The `dense_text_548` table must be found.
   - End-to-end tables emitted on the scanned fixtures checked by hand.
   - DocLayNet F1 recorded as the floor later merges must not drop below.
 - **H-B, womblex-collection run.** Run both backends over the collection, including rotated spreadsheet-print pages, and reproduce the multi-column reading-order tail on the ASX pages (Phase 0's divergence; the synthetic two-column pages do not reproduce it). A divergence found becomes a P8 fix in Womblex, with a synthetic shape added to its generator.

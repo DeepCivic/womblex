@@ -1,7 +1,7 @@
 """Offline tests for semchunk-4 AI-chunking enrichment reuse.
 
 Covers the Womblex-owned seams of the single-enrichment reuse design
-(``docs/decisions.md``) without a live Isaacus key:
+(``docs/decisions-dead-ends.md``) without a live Isaacus key:
 
 - ``store/enrichment_doc.py`` round-trips ``(source_hash, text_source,
   document_json)``;
@@ -14,7 +14,7 @@ Covers the Womblex-owned seams of the single-enrichment reuse design
 semchunk's actual handling of a real SDK Document is covered end-to-end by the
 live AI-chunking test (``tests/test_pipeline.py::TestAiChunkingLive``, real
 ``kanon-2-enricher``, skips without a key) and the live verification gates
-recorded in ``docs/decisions.md``; a fake duck-typed Document cannot pass
+recorded in ``docs/decisions-dead-ends.md``; a fake duck-typed Document cannot pass
 semchunk's ``isinstance`` check, so the ``chunk_batch`` wiring is exercised here
 with a recording fake chunker instead.
 """

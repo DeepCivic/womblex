@@ -339,7 +339,7 @@ def enrich_document_raw(
     """Like :func:`enrich_document` but also return the *raw* SDK Document.
 
     The raw ``isaacus.types.ilgs.v1.document.Document`` is the object semchunk
-    4 accepts for AI chunking without re-enriching (``docs/decisions.md``). It
+    4 accepts for AI chunking without re-enriching (``docs/decisions-dead-ends.md``). It
     is already in hand inside :func:`enrich_documents_raw` and normally
     discarded after conversion; this entry point hands it back so the enrich
     stage can persist it for chunk-stage reuse.

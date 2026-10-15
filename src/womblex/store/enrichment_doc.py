@@ -5,7 +5,7 @@ Self-contained store module (mirrors ``store/enrichment_output.py`` /
 *raw* Isaacus ILGS Document — the full segment tree, headings and span set —
 so the chunk stage can reuse it for semchunk-4 AI chunking instead of
 re-enriching the same narrative (the single-enrichment reuse design in
-``docs/decisions.md``). The flattened ``*.enrichment_entities.parquet`` /
+``docs/decisions-dead-ends.md``). The flattened ``*.enrichment_entities.parquet`` /
 ``*.enrichment_meta.parquet`` siblings are lossy and cannot serve this.
 
 The Document is a Stainless-generated pydantic model that round-trips

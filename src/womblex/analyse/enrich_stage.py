@@ -109,7 +109,7 @@ def enrich_shards(
     When ``persist_document`` is true, also writes a
     ``*.enrichment_doc.parquet`` sibling holding the raw ILGS Document per
     doc (stamped with ``text_source``) so the chunk stage can reuse it for
-    semchunk-4 AI chunking without re-enriching (``docs/decisions.md``).
+    semchunk-4 AI chunking without re-enriching (``docs/decisions-dead-ends.md``).
     """
     if not shard_dir.is_dir():
         raise FileNotFoundError(f"shard directory not found: {shard_dir}")

@@ -49,7 +49,7 @@ enriching the same narrative twice (once at chunk time, once in the
 mapping ``source_hash`` → a pre-enriched ``Document`` persisted by the
 enrich stage (``*.enrichment_doc.parquet``). An override is used only when
 its ``.text`` is byte-identical to the doc's reassembled narrative — the
-coordinate-space guard from ``docs/decisions.md``; on mismatch (or no
+coordinate-space guard from ``docs/decisions-dead-ends.md``; on mismatch (or no
 sidecar) the doc falls back to passing the string and letting semchunk
 self-enrich. The composable default (``chunking_model=None``) keeps the
 offline token split, so non-Kanon callers are unaffected.
@@ -360,7 +360,7 @@ def chunk_batch(
     input (an ILGS ``Document``) for semchunk-4 AI-chunking reuse. An
     override is used **only** when its ``.text`` is byte-identical to that
     doc's reassembled ``narrative`` (the coordinate-space guard from
-    ``docs/decisions.md``); on any mismatch the plain narrative string is
+    ``docs/decisions-dead-ends.md``); on any mismatch the plain narrative string is
     chunked instead, so a stale or differently-cleaned Document silently
     falls back to self-enrich rather than desyncing offsets. Tables always
     chunk in token mode.
@@ -474,7 +474,7 @@ def _resolve_narrative_input(doc: ChunkInput, overrides: dict[str, object]) -> o
     The byte-identity guard: an override is honoured only when its ``.text``
     equals ``doc.narrative`` exactly (same coordinate space). Otherwise the
     plain narrative string is returned and semchunk self-enriches (if a
-    ``chunking_model`` is set) — the per-doc fallback in ``docs/decisions.md``.
+    ``chunking_model`` is set) — the per-doc fallback in ``docs/decisions-dead-ends.md``.
     """
     override = overrides.get(doc.source_hash)
     if override is None:
@@ -503,7 +503,7 @@ def _chunker_batch(
     """Call semchunk on a list of texts; always returns ``(chunks, offsets)``.
 
     ``texts`` may mix ``str`` and ILGS ``Document`` items (AI-chunking reuse);
-    semchunk dispatches on type at runtime — verified live in docs/decisions.md.
+    semchunk dispatches on type at runtime — verified live in docs/decisions-dead-ends.md.
     """
     chunks, offsets = chunker(
         texts,  # type: ignore[arg-type]  # str | Document items; semchunk handles both

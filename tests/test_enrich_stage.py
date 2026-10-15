@@ -112,7 +112,7 @@ class TestEnrichShards:
 class TestPersistDocumentReuse:
     """Live: the persisted Document round-trips and byte-matches the narrative.
 
-    This is the runtime form of verification gate 1 (docs/decisions.md): the
+    This is the runtime form of verification gate 1 (docs/decisions-dead-ends.md): the
     chunk stage's reuse guard accepts a Document only when ``document.text``
     equals the reassembled narrative, so the persisted-then-rehydrated text
     must be byte-identical to what enrich/chunk reassemble.
