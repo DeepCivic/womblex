@@ -1,8 +1,8 @@
 """Tests for the console's downstream-stage dispatch (issue 5, part 3).
 
-Kept out of ``test_ui.py`` (already past the 750-line file cap) for the same
-reason ``test_ui_resources.py`` is: every case here builds its own
-``TestClient`` and needs none of that file's shared fixtures.
+Kept apart from ``test_ui_execute.py`` for the same reason
+``test_ui_resources.py`` is its own module: every case here builds its own
+``TestClient`` and needs none of the shared console fixtures.
 
 The behaviour under test is that the console is a *skin over the CLI*: the
 press writes exactly the rows ``womblex enqueue-stages`` writes, with the stage

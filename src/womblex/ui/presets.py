@@ -12,7 +12,7 @@ run's identity and filesystem paths untouched.
 Presets are just data here for the same reason the DAG is: the composer's
 validation and YAML download go through the same ``WomblexConfig(**raw)``
 construction ``load_config`` uses, so a preset that would not load is a test
-failure, not a runtime surprise (``tests/test_ui.py`` builds each one).
+failure, not a runtime surprise (``tests/test_ui_composer.py`` builds each one).
 
 `DEFAULT-Isaacus` is the reference Isaacus pipeline:
 ``extract → normalise → enrich → chunk → build_graph → embed →
