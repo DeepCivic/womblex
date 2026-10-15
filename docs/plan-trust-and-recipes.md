@@ -49,20 +49,9 @@ Phase 3 lets a finished run send its output somewhere by itself (a "destination"
 
 ## Phase 4 — operation (branch)
 **Decisions before the first merge:**
-- **D-4.1 Plain-language status.** The vocabulary, shared with the webhook events and the lineage event types, and its surfaces: `womblex jobs --run`, an additive `summary` on `/v1/runs/{id}`, the console. It sits beside the exact status values Requirement 16 renders, never in place of them. ANSWER: unclear on the decision here, yes plain language is good??
-  *In plain terms:* the run status today is exact but technical: per-stage counts of `pending` / `running` / `done` / `failed`, with DBOS workflow ids. The proposal adds one plain sentence per run, such as "Extracted 1,204 of 1,210 documents; enrichment running; 6 documents failed (see list)", worked out from the exact counts, which stay where they are. Plain language is already agreed; the decision is only:
-  - *Which words:* a short, fixed set of phrases (for example: waiting, extracting, processing, finished, finished with failures). The same set names the webhook events and the lineage events, so one word means one thing everywhere.
-  - *Where it shows:* `womblex jobs --run`, a new `summary` field on `/v1/runs/{id}` (added, so existing callers are unaffected), and the console.
-  - *Recommendation:* approve both. The cost is one function and three places that show it.
-- **D-4.2 A versioned `graph-refresh` output.** A new sidecar keyed by the chunks' digest, leaving the enrichment sidecars as enrich wrote them, or a version in the file name. ANSWER: unclear why we need this or don't need it.
-  *In plain terms:* `graph-refresh` is the only downstream stage that edits another stage's file. Enrich writes `*.enrichment_entities.parquet` before chunks exist, so each mention's `chunk_index` is `-1`. Then `graph-refresh` reopens that file and fills the numbers in. That causes three problems:
-  - The file no longer matches what enrich wrote, so its footer stamp (stage, run, digest) describes a file that has since been changed.
-  - If chunking is re-run with different settings, the filled-in numbers point at chunks that no longer exist until graph-refresh runs again, and nothing on the file says which chunks it was matched against.
-  - Re-running enrich wipes the refresh, and the ordering checks have to treat the file as "stale" in special ways (`workflow_order`, `workflow_plan`).
+- **D-4.1 Plain-language status.** ANSWERED: approved. One plain sentence per run (for example "Extracted 1,204 of 1,210 documents; enrichment running; 6 documents failed"), worked out from the exact per-stage counts, which stay where they are. Its words are one short, fixed set (waiting, extracting, processing, finished, finished with failures) that the webhook events (3.5) and the lineage event types also use. It shows in `womblex jobs --run`, a new additive `summary` field on `/v1/runs/{id}`, and the console.
 
-  A separate sidecar written by graph-refresh fixes all three. Enrich's file stays as written, the new file records which chunks it matched (the chunks' digest), and a reader can tell when it is out of date. That is merge 4.3, "every new artefact is a sidecar", applied to the last exception.
-  - *Need it?* Only if chunks get re-run on a run that has already been refreshed, or if anyone relies on footers to say who wrote a file. If neither ever happens, the in-place rewrite works and Phase 4's merges 4.2 and 4.3 can be dropped.
-  - *Recommendation:* the new sidecar keyed by the chunks' digest, not a version in the file name. A version number says *that* the file changed, not *which chunks* it matches.
+- **D-4.2 Graph-refresh output.** ANSWERED: a new sidecar keyed by the chunks' digest, not a version in the file name. Enrich's `*.enrichment_entities.parquet` stays as enrich wrote it; graph-refresh writes its mention-to-chunk results to its own file, which records the chunks it was matched against, so a reader can tell when it is out of date. This ends the last case of one stage rewriting another's file.
 
 **Merges:**
 - **4.1 `RunBoard.describe` and its surfaces** (per D-4.1). Docs: Requirements 16 and 22, `service-api.md`, `DESIGN.md`.
