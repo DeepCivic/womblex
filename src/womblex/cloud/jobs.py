@@ -376,7 +376,7 @@ class RunBoard:
         stage) carries the newest digest.
         """
         every = sorted(self._rows(run_id, None, load_output=True), key=lambda s: s.created_at or 0)
-        rows = [s for s in every if _attr(s, "kind", dbos_app.KIND_BATCH) != dbos_app.KIND_DOWNSTREAM]
+        rows = [s for s in every if _attr(s, "kind", dbos_app.KIND_BATCH) in (dbos_app.KIND_BATCH, dbos_app.KIND_STAGE)]
         checksums: dict[str, str] = {}
         undigested: list[str] = []
         for s in rows:
