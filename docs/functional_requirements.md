@@ -470,8 +470,12 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - A corpus-only export (`--no-sources` / `--corpus-only`) skips resolution and writes no `sources/` or `source_index.parquet`.
 - `--source-root` resolves sources from a moved corpus; `--run-id` defaults to the run root's directory name and must agree with the run's own stamp, if it has one.
 - Re-exporting into an existing bundle removes source files the fresh export neither wrote nor attempted, and leaves a source whose upload failed untouched.
-- A run ingested from an object store is refused before anything is written.
+- A run ingested from an object store resolves each source from that store by the manifest's `source_relpath`, checked against `source_hash`, with the same per-document statuses.
 - Womblex writes the bundle and nothing downstream of it: no retention, serving, or write-back of consumer corrections.
+
+**TO-DO:**
+
+- **Object-store runs are refused (re: "resolves each source from that store").** `build_bundle` needs a single `file://` ingest root, so a run ingested from an object store is refused before anything is written; stage it locally first.
 
 ## 24. Swappable Models Without a Schema Change
 
@@ -564,11 +568,10 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 
 **TO-DO:**
 
-- **No command or API saves a workflow.** `WorkflowStore.save` is reachable only from code; nothing under `cli/` or `api/` writes one.
 - **Destinations are stored but not acted on.**
 - **`schedule-workflow` checks only the owner prefix.** Any other refusal surfaces per firing, after it is scheduled.
 
-**Out of scope:** incremental firings (only documents not seen before) and backfill of missed firings.
+**Out of scope:** a command or API that saves a workflow (one is saved through `WorkflowStore` in code), incremental firings (only documents not seen before) and backfill of missed firings.
 
 ## Outstanding
 
@@ -582,6 +585,7 @@ Requirements not yet fully met. The detail lives in the **TO-DO** block under ea
 - **Requirement 9 (Redaction Handling):** no redaction `pipeline_point`, and the E2E `run` path writes no `*.redactions.parquet`.
 - **Requirement 13 (Money Annotation):** the money span row carries no merge extent or header-row coordinate.
 - **Requirements 17 and 21 (Corpus Inspector; Console Design System):** `DocumentGrid.svelte` is not virtualised and emits no `aria-rowcount`.
-- **Requirement 27 (Stored Workflows):** nothing but code saves a workflow, destinations are not acted on, and `schedule-workflow` checks only the owner prefix.
+- **Requirement 23 (Egress Bundle):** a run ingested from an object store is refused rather than resolving its sources from that store.
+- **Requirement 27 (Stored Workflows):** destinations are not acted on, and `schedule-workflow` checks only the owner prefix.
 
 ---
