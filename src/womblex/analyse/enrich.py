@@ -7,7 +7,14 @@ relationships.  Operates on full document text (not chunks).
 An `EnrichmentProvider` is what the enrich stage calls: text in, one
 `EnrichmentResult` per text, offsets into the text sent, results independent of
 batch composition. It declares the limits the stage packs and splits by
-(`ProviderLimits`); `IsaacusEnrichment` is the one provider so far.
+(`ProviderLimits`). Providers are the `enrichment` registry slot
+(`enrichment.model`; plugins through `womblex.models.enrichment`), built by
+`make_enrichment_provider`; `kanon-2-enricher` (`IsaacusEnrichment`) is the default.
+A factory's `isaacus` and `returns_document` traits answer the pre-launch gates
+(Isaacus availability, persisted Documents) before anything is built. AI chunking
+follows the enrichment it reuses: with a provider that returns no Document it is
+off (`ai_chunking_model`), and chunking is semchunk's local token splitting rather
+than a paid call of its own.
 """
 
 from __future__ import annotations
@@ -33,9 +40,10 @@ from womblex.analyse.models import (
     Term,
     Website,
 )
+from womblex.utils.model_registry import SLOT_ENRICHMENT, record_use, register, resolve
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from womblex.config import EnrichmentConfig
+    from womblex.config import ChunkingConfig, EnrichmentConfig, WomblexConfig
     from womblex.utils.token_packer import TokenCounter
 
 logger = logging.getLogger(__name__)
@@ -504,3 +512,66 @@ def isaacus_provider(
         needs_network=True,
         returns_document=True,
     ))
+
+
+def _make_isaacus(
+    *, config: EnrichmentConfig, client: object = None, token_counter: TokenCounter | None = None,
+    **_: object,
+) -> IsaacusEnrichment:
+    return isaacus_provider(config, client, token_counter)
+
+
+register(SLOT_ENRICHMENT, DEFAULT_MODEL, _make_isaacus,
+         traits={"isaacus": True, "returns_document": True})
+
+
+def provider_traits(model: str) -> dict[str, object]:
+    """*model*'s registered traits; empty for an unknown name, which the model check reports."""
+    try:
+        return resolve(SLOT_ENRICHMENT, model).traits
+    except ValueError:
+        return {}
+
+
+def calls_isaacus(model: str) -> bool:
+    """Whether the provider registered as *model* is served by an Isaacus deployment."""
+    return bool(provider_traits(model).get("isaacus"))
+
+
+def returns_document(model: str) -> bool:
+    """Whether *model* hands back a Document that AI chunking can reuse."""
+    return bool(provider_traits(model).get("returns_document"))
+
+
+def make_enrichment_provider(
+    config: EnrichmentConfig, client: object = None, token_counter: TokenCounter | None = None,
+) -> EnrichmentProvider:
+    """Build the provider `config.model` names; *client* is used only by an Isaacus provider."""
+    entry = resolve(SLOT_ENRICHMENT, config.model)
+    provider: EnrichmentProvider = entry.factory(
+        config=config, client=client, token_counter=token_counter,
+    )
+    record_use(entry)
+    return provider
+
+
+def ai_chunking_model(config: WomblexConfig) -> str | None:
+    """`chunking.chunking_model` when the enrichment provider returns a Document, else `None`.
+
+    AI chunking reuses that Document; without one the chunker would call Isaacus itself,
+    a paid call the configured provider did not ask for, so semchunk's token splitting runs.
+    """
+    model = config.chunking.chunking_model
+    return model if model and returns_document(config.enrichment.model) else None
+
+
+def effective_chunking(config: WomblexConfig) -> ChunkingConfig:
+    """`config.chunking` as the chunk stage runs it, warning when AI chunking is set aside."""
+    if config.chunking.chunking_model and ai_chunking_model(config) is None:
+        logger.warning(
+            "chunking.chunking_model=%r is set aside: enrichment provider %r returns no Document "
+            "to reuse, so chunks come from semchunk's local token splitting",
+            config.chunking.chunking_model, config.enrichment.model,
+        )
+        return config.chunking.model_copy(update={"chunking_model": None})
+    return config.chunking

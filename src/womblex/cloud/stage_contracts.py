@@ -32,6 +32,8 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from womblex.analyse.enrich import ai_chunking_model, calls_isaacus, effective_chunking, returns_document
+
 # `_SUFFIX` / `_SHARD_SUFFIX` are imported rather than re-spelled so a schema
 # change in `store/` or `process/text_overlay.py` reaches the runner
 # automatically — the same cross-module private-import idiom the stages already
@@ -116,7 +118,7 @@ def _chunk_needs_api(config: WomblexConfig) -> bool:
     on the contract is the *display* answer (chunk can use the API); this is
     the *runtime-gate* answer, resolved from config.
     """
-    return bool(config.chunking.chunking_model)
+    return bool(ai_chunking_model(config))
 
 
 @dataclass
@@ -199,7 +201,7 @@ def _overlay_input(text_source: str) -> tuple[ConditionalInput, ...]:
 
 def _chunk_conditional(config: WomblexConfig) -> tuple[ConditionalInput, ...]:
     inputs = _overlay_input(config.processing.text_source)
-    if config.chunking.chunking_model:
+    if ai_chunking_model(config):
         # Ordering requirement, not a hard dependency: without the sidecar the
         # chunker self-enriches (double cost, same output). Warn, don't fail.
         inputs += (
@@ -288,8 +290,10 @@ def _pii_outputs(config: WomblexConfig) -> tuple[str, ...]:
 
 
 def _persist_document(config: WomblexConfig) -> bool:
-    """Mirror ``cli/link.py``: persist whenever this config also enables AI chunking."""
-    return config.enrichment.persist_document or bool(config.chunking.chunking_model)
+    """Mirror ``cli/link.py``: persist whenever this config also enables AI chunking,
+    and only from a provider that returns a Document."""
+    wanted = config.enrichment.persist_document or bool(ai_chunking_model(config))
+    return wanted and returns_document(config.enrichment.model)
 
 
 # ---------------------------------------------------------------------------
@@ -337,7 +341,7 @@ def _run_chunk(shard_dir: Path, config: WomblexConfig, ctx: RunContext) -> None:
     from womblex.process.chunk_stage import chunk_shards
 
     chunk_shards(
-        shard_dir, config.chunking,
+        shard_dir, effective_chunking(config),
         text_source=config.processing.text_source,
         checkpoint_mgr=ctx.checkpoint_mgr,
     )
@@ -490,8 +494,9 @@ STAGE_CONTRACTS: dict[str, StageContract] = {
         outputs=_enrich_outputs,
         run=_run_enrich,
         needs_isaacus_api=True,
+        needs_isaacus_api_for=lambda c: calls_isaacus(c.enrichment.model),
         needs_client=True,
-        models=lambda c: (c.enrichment.model,),
+        models=lambda c: (c.enrichment.model,) if calls_isaacus(c.enrichment.model) else (),
         checkpoint_dirname=".enrich-checkpoint",
     ),
     "embed": StageContract(

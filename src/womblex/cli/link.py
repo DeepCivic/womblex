@@ -46,7 +46,8 @@ def _register_enrich(p: argparse.ArgumentParser) -> None:
 
 
 def cmd_enrich(args: argparse.Namespace) -> int:
-    """Enrich a shard directory via the Kanon-2 enrichment API (per-stage)."""
+    """Enrich a shard directory through the configured enrichment provider (per-stage)."""
+    from womblex.analyse.enrich import calls_isaacus
     from womblex.analyse.enrich_stage import enrich_shards
     from womblex.config import EnrichmentConfig, load_config
     from womblex.process.text_overlay import MissingOverlayError
@@ -79,11 +80,13 @@ def cmd_enrich(args: argparse.Namespace) -> int:
         text_source = "elements"
         persist_document = enrichment_config.persist_document
 
+    client = None
     try:
         # Hosted API (ISAACUS_API_KEY) or SageMaker (ISAACUS_SAGEMAKER_ENDPOINTS),
         # whichever the environment declares; the model is checked against the
-        # deployed endpoints up front.
-        client = make_isaacus_client(models=[enrichment_config.model])
+        # deployed endpoints up front. Another provider takes no client.
+        if calls_isaacus(enrichment_config.model):
+            client = make_isaacus_client(models=[enrichment_config.model])
     except ImportError as e:
         logger.error("Isaacus SDK not usable (reinstall womblex): %s", e)
         return 1

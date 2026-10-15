@@ -10,7 +10,6 @@
 ## Phase 1 — no decisions required (branch)
 Everything here is settled in `decisions.md` or in a reviewed PR.
 
-- **1.3 The `enrichment` registry slot.** Default `kanon-2-enricher`, the `womblex.models.enrichment` entry-point group, `enrichment.model`. The contract's Isaacus gate, `unserved_models` and the model check key off the provider; AI-chunking reuse and `persist_document` only for a provider that returns a Document, token splitting otherwise. Paired womblex-benchmark merge, since `is_default_group` labels its reports. Docs: Requirement 24 (the slot, and "the enrichment provider" out of its out-of-scope line), Requirement 12, `models.md`, `architecture.md` (Enrichment), `decisions.md` ("Local enrichment fallback" from position to shipped).
 - **1.4 The `embedding` slot**, the same pattern: an Isaacus adapter, `embedding.model`, a paired benchmark merge. Docs: Requirement 24, `models.md`, CLAUDE.md rows.
 - **1.4.5 `model-plugins.md` provider sections** (docs only): the enrichment and embedding interfaces, the declared limits, what Womblex keeps, and a minimal entry-point example.
 - **1.5 OpenLineage-shaped export of the run record.** `store/lineage.py` maps the run record (observed, never config) to RunEvent JSON; `womblex manifest --shards DIR --lineage OUT`; tested against the published schema vendored under `fixtures/`. No dependency. Docs: `architecture.md` (the run record), `contract.md`, README command table, CHANGELOG.

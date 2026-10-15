@@ -247,7 +247,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 
 **Acceptance criteria:**
 
-- Enrichment securely calls external services (retrying on rate limits) to produce entities and relationships.
+- Enrichment calls the configured provider (by default Kanon-2 over Isaacus, retrying on rate limits) to produce entities and relationships. Only a provider that returns a Document persists one for AI-chunking reuse; with any other, chunking is semchunk's local token splitting and no paid call is made in its place.
 - The graph generation builds nodes and edges, producing an explicit mention-to-chunk link layer.
 - Graph refresh operations explicitly rewrite mention-to-chunk links in place if chunking is executed or modified after initial enrichment.
 - Graph generation is idempotent and never skips its refresh based solely on file existence.
@@ -486,7 +486,8 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 
 **Acceptance criteria:**
 
-- Swappable slots: OCR engine, layout analyser, PII context model, chunk tokeniser, and spellfix dictionary.
+- Swappable slots: OCR engine, layout analyser, PII context model, chunk tokeniser, spellfix dictionary, and enrichment provider.
+- An enrichment provider declares its limits (texts per request, token ceiling, token counter, network need, whether it returns a Document); Womblex keeps the packing, splitting, table pass, sidecars, evidence and chunk mapping, so a provider changes who recognises entities and nothing downstream. Only a provider that needs Isaacus is gated on an Isaacus deployment.
 - Installing a third-party model package makes its models selectable by name, with no change to Womblex's own dependencies.
 - The built-in models (PaddleOCR, Mistral, Ollama, PP-DocLayout-M) keep their existing names and aliases.
 - An installed package can supply model files, and they resolve offline the same way bundled models do.
@@ -499,7 +500,11 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - With no plugin configured, `content_digest` is unchanged on every synthetic fixture.
 - The model-plugin guide documents each slot's interface and how a package registers a model, with a minimal example.
 
-**Out of scope:** model provenance (26), `/v1` submission controls (a submitted config only selects stages; workers run under the operator's config), container-image packaging of plugins, and slots that need a Parquet schema change, each needing its own requirement (25 and 26, and the rest): the enrichment provider, AI chunking with a non-Isaacus model, graph-driven PII detection, link-stage candidates, `graph_refresh`, the enrichment token-budget tokeniser, per-page or per-element OCR engine recording, and the embedder provider (including any CPU embedding baseline).
+**TO-DO:**
+
+- **The model-plugin guide has no enrichment section (re: "documents each slot's interface").** `docs/model-plugins.md` does not yet describe the `enrichment` slot's provider interface or its declared limits.
+
+**Out of scope:** model provenance (26), `/v1` submission controls (a submitted config only selects stages; workers run under the operator's config), container-image packaging of plugins, and slots that need a Parquet schema change, each needing its own requirement (25 and 26, and the rest): AI chunking with a non-Isaacus model, graph-driven PII detection, link-stage candidates, `graph_refresh`, the enrichment token-budget tokeniser, per-page or per-element OCR engine recording, and the embedder provider (including any CPU embedding baseline).
 
 ## 25. Pre-Run Model Check
 
@@ -546,6 +551,7 @@ Requirements not yet fully met. The detail lives in the **TO-DO** block under ea
 
 
 - **Requirement 2 (Scale-Out):** Azure storage URIs (`az://` / `abfs://`) are not credential-wired, and the enrichment paths have no Azure ML connection.
+- **Requirement 24 (Swappable Models):** the model-plugin guide has no section for the enrichment slot.
 - **Requirement 3 (Ingest-First Data Flow):** up-front composition check covers workflows (local and `dispatch-workflow`) and dispatch, not a lone `run-stage --store` (per-base `NotReady`); stored workflows and triggers have no requirement.
 - **Requirement 6 (Native Office and Spreadsheet Extraction):** multi-row headers are emitted for DOCX only; spreadsheets and the legacy table view collapse to row 0, no per-cell header-row coordinate exists, and cell formulas are never captured.
 - **Requirement 7 (Standalone Reference Register Ingestion):** G-NAF and geospatial writes are not guarded against partial output.

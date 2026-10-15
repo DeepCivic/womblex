@@ -30,8 +30,10 @@ SLOT_LAYOUT = "layout"
 SLOT_PII_CONTEXT = "pii-context"
 SLOT_TOKENIZER = "tokenizer"
 SLOT_SPELLFIX_DICTIONARY = "spellfix-dictionary"
+SLOT_ENRICHMENT = "enrichment"
 SLOTS: tuple[str, ...] = (
     SLOT_OCR, SLOT_LAYOUT, SLOT_PII_CONTEXT, SLOT_TOKENIZER, SLOT_SPELLFIX_DICTIONARY,
+    SLOT_ENRICHMENT,
 )
 
 ENTRY_POINT_GROUP_PREFIX = "womblex.models."
@@ -41,7 +43,7 @@ ENTRY_POINT_GROUP_PREFIX = "womblex.models."
 #: value is the slot's canonical registered name, matching the literal its own
 #: module declares as default (`OCRConfig.engine`, `paddle_ocr.DEFAULT_LAYOUT_MODEL`,
 #: `cleaner.DEFAULT_CONTEXT_MODEL`, `chunker.DEFAULT_TOKENIZER`,
-#: `SpellfixConfig.dict_name`). Held here rather than imported from them so the
+#: `SpellfixConfig.dict_name`, `EnrichmentConfig.model`). Held here rather than imported from them so the
 #: registry — the one place a slot's identity is defined — does not import
 #: ingest/pii/process modules; `tests/test_model_registry.py` keeps the two in
 #: agreement. Changing a default here is the one edit that changes the default
@@ -52,6 +54,7 @@ DEFAULT_MODELS: dict[str, str] = {
     SLOT_PII_CONTEXT: "all-minilm-l6-v2",
     SLOT_TOKENIZER: "kanon-2-tokenizer",
     SLOT_SPELLFIX_DICTIONARY: "en_au",
+    SLOT_ENRICHMENT: "kanon-2-enricher",
 }
 
 

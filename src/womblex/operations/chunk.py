@@ -37,6 +37,9 @@ def run_chunking(
     """
     if not config.chunking.enabled:
         return results
+    from womblex.analyse.enrich import effective_chunking
+
+    config = config.model_copy(update={"chunking": effective_chunking(config)})
 
     # Resolved first so an unknown tokeniser name is an error either way.
     tokenizer = resolve_tokenizer(

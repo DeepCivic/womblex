@@ -223,9 +223,9 @@ Table chunks take their candidates from the table's own enrichment (each table's
 
 ### 9. Analyse — Enrichment
 
-Wrappers in `analyse/` call the Isaacus SDK:
+Wrappers in `analyse/` call the enrichment provider and the Isaacus SDK:
 
-- `enrich.py` — calls `kanon-2-enricher` to produce structured ILGS Documents containing segments, entities, and relationships. Handles 429 rate-limit errors with exponential backoff.
+- `enrich.py` — the `enrichment` slot: an `EnrichmentProvider` takes texts and returns one `EnrichmentResult` each, declaring its `ProviderLimits` (texts per request, token ceiling, token counter, network need, whether it returns a Document). The default, `kanon-2-enricher`, produces structured ILGS Documents containing segments, entities, and relationships, handling 429 rate-limit errors with exponential backoff. The enrich contract's Isaacus gate, `unserved_models` and the model check apply only to a provider registered with the `isaacus` trait; any other is loaded and smoke-tested like a local model.
 - `graph.py` — builds a `DocumentGraph` from enrichment results, mapping entities (persons, locations, terms, external documents) to graph nodes and relationships (cross-references, contact info, dates) to edges. Chunk-level mention links are computed from span offsets.
 - `enrich_stage.py` — per shard directory, sends the narrative and each table's markdown (`enrichment.include_tables`) as separate request texts in the same token-budgeted requests; a table mention's offsets index that table's markdown (`text_layer = table_markdown`).
 - `models.py` — ILGS data models: `Span`, `Segment`, `Person`, `Location`, `Term`, `ExternalDocument`, `Quote`, `DateInfo`, `CrossReference`, `EnrichmentResult`, and contact info types.

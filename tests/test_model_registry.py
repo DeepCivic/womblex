@@ -445,6 +445,8 @@ from womblex.config import OCRConfig, PIIConfig, SpellfixConfig
 def test_default_models_agree_with_each_slots_own_config_default() -> None:
     """DEFAULT_MODELS is held independently of config.py (no import), so a
     changed default in either place must not drift from the other unnoticed."""
+    from womblex.analyse import enrich  # noqa: F401  (registers the enrichment default)
+    from womblex.config import EnrichmentConfig
     from womblex.ingest import paddle_ocr
     from womblex.pii import cleaner
     from womblex.process import chunker
@@ -462,6 +464,9 @@ def test_default_models_agree_with_each_slots_own_config_default() -> None:
     assert reg.resolve(
         reg.SLOT_SPELLFIX_DICTIONARY, SpellfixConfig().dict_name,
     ).name == reg.DEFAULT_MODELS[reg.SLOT_SPELLFIX_DICTIONARY]
+    assert reg.resolve(
+        reg.SLOT_ENRICHMENT, EnrichmentConfig().model,
+    ).name == reg.DEFAULT_MODELS[reg.SLOT_ENRICHMENT]
     assert cleaner.DEFAULT_CONTEXT_MODEL == PIIConfig().model
 
 

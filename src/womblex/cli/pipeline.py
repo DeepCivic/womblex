@@ -428,7 +428,9 @@ def _cmd_chunk_shards(args: argparse.Namespace) -> int:
 
     full = load_config(args.config) if args.config is not None else None
     if full is not None:
-        chunking_config = full.chunking
+        from womblex.analyse.enrich import effective_chunking
+
+        chunking_config = effective_chunking(full)
         text_source = full.processing.text_source
     else:
         chunking_config = ChunkingConfig()
