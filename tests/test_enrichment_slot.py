@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -12,6 +14,7 @@ from womblex.analyse.enrich import ProviderLimits, _convert_document, calls_isaa
 from womblex.analyse.enrich_stage import enrich_shards
 from womblex.cloud.stage_contracts import STAGE_CONTRACTS
 from womblex.config import EnrichmentConfig
+from womblex.operations import DocumentResult, run_enrichment
 from womblex.pipeline_order import enabled_downstream_stages
 from womblex.store.enrichment_doc import enrichment_doc_path_for
 from womblex.store.enrichment_output import read_enrichment_entities
@@ -131,3 +134,13 @@ def test_without_a_document_to_reuse_chunking_is_local_semchunk(tmp_path, caplog
     assert ("graph-refresh" in enabled_downstream_stages(config)) is ai
     assert effective_chunking(config).chunking_model == ("kanon-2-enricher" if ai else None)
     assert ("set aside" in caplog.text) is not ai
+
+
+def test_run_enrichment_goes_through_the_slot(tmp_path) -> None:
+    """The in-memory path calls the configured provider, and refuses an unknown one before any document."""
+    doc = DocumentResult(path=Path("d.pdf"), doc_id="d", status="completed",
+                         extraction=SimpleNamespace(full_text="a b c"))  # type: ignore[arg-type]
+    run_enrichment([doc], _config(tmp_path, LOCAL), client=None)
+    assert doc.enrichment is not None and _built[-1].calls == [["a b c"]]
+    with pytest.raises(ValueError, match="unknown enrichment model"):
+        run_enrichment([doc], _config(tmp_path, "no-such-enricher"), client=None)
