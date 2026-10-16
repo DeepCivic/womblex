@@ -46,7 +46,9 @@ claim*. Two deliberate choices:
   scoping is a workflow attribute, filtered client-side because attribute
   filtering is Postgres-only; two submitters racing to create one run can both
   pass the owner check (the advisory lock is gone) and the first row written
-  names the owner.
+  names the owner. *Limits:* replay of a coordinator that caught a failed child
+  is not crash-tested (#192), and the DBOS paths exercise Postgres through CI
+  only; the local suite runs them on SQLite.
 
 The load-bearing invariant: `cmd_run` and the worker call **one** shared
 `batch.process_batch`, so local and distributed runs produce byte-identical

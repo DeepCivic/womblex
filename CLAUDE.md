@@ -72,7 +72,7 @@ For mature, widely-used dependencies (`semchunk`, `rapidocr-onnxruntime`, `presi
 PII detection consumes the Kanon-2 enrichment graph: PII-typed entities (`natural`→PERSON, `address`→ADDRESS) are the candidates, mapped onto chunks via mention offsets. Table chunks take candidates from the table's own enrichment (offsets into that table's markdown), mapped onto the chunk by offset. There is no separate detector and no second enrichment pass — the optional regex/cosine backstop (`pii.use_regex_backstop`, default off) is low-precision and opt-in only; recall is flexed by enrichment *granularity/duration*, not by the backstop. Masking is **terminal**: the `pii` stage writes a masked `*.clean_text.parquet` (`<PERSON_n>`, typed + numbered off the graph entity) *after* enrich + embed and never rewrites the raw chunks that feed Isaacus (the enricher strips `<…>` tags as OCR noise). See [docs/decisions.md](docs/decisions.md).
 
 ### Decisions, dead-ends & limitations live in three docs
-The "why" behind the library is recorded by concern: library design decisions and their rejected alternatives in [docs/decisions.md](docs/decisions.md); decisions about operating Womblex (distributed execution, stored workflows, source resolution, deployment, the service) in [docs/decisions-operations.md](docs/decisions-operations.md); approaches tried and abandoned (don't re-attempt), library-general limitations, and the deferred backlog in [docs/decisions-dead-ends.md](docs/decisions-dead-ends.md). Shipped state is in [CHANGELOG.md](CHANGELOG.md). Read those before re-litigating a settled call or retrying a known dead-end.
+The "why" behind the library is recorded by concern: library design decisions and their rejected alternatives in [docs/decisions.md](docs/decisions.md); decisions about operating Womblex (distributed execution, stored workflows, source resolution, deployment, the service) in [docs/decisions-operations.md](docs/decisions-operations.md); approaches tried and abandoned (don't re-attempt), library-general limitations, and the deferred backlog in [docs/decisions-dead-ends.md](docs/decisions-dead-ends.md). Shipped state is in [CHANGELOG.md](CHANGELOG.md). Read those before re-litigating a settled call or retrying a known dead-end; a recorded boundary stands until a new decision reopens it.
 
 ### Config-driven, not hardcoded
 Dataset-specific settings live in YAML configs. The codebase doesn't know about specific datasets — that's all in config files under `configs/`.
@@ -230,6 +230,25 @@ suite red — each merge must pass tests on its own. If a single coherent
 change genuinely can't fit (a schema migration touching every stage, a
 library-wide rename), say so in the PR body with the reason and get human
 approval rather than quietly exceeding it.
+
+A stacked PR is retargeted to `main` before it merges, never merged into its
+base branch. A file near the 750-line cap takes no new responsibilities: new
+code goes in a new module beside it.
+
+### Stocktake
+The last merge of a multi-merge plan phase is a docs-only stocktake, recorded
+in its PR body. It covers every enduring document (README, CHANGELOG,
+CLAUDE.md, DESIGN.md, THIRD_PARTY_DATA.md, `fixtures/synthetic/README.md`, the
+PR template and every `docs/*.md`, never `docs/accuracy/`), and each check
+carries its evidence (a grep, a listing or a command):
+1. Module tables in CLAUDE.md and `docs/project-structure.md` against the `src/` tree.
+2. The README command table against the CLI parser's subcommands.
+3. The Requirements "Outstanding" index against the TO-DO blocks.
+4. Decision-doc entries marked "not built", "position" or "wanted" that have since shipped.
+5. `CHANGELOG.md` Unreleased covers the phase's merges.
+6. Every document cited in docs, code comments and tests exists.
+7. No section-sign character and no line-number references.
+8. Each mechanism claim the phase touched holds against the code.
 
 ### Error Handling
 - Individual document failures shouldn't stop the batch
@@ -454,7 +473,8 @@ belongs on the orchestrator path, not here.
 - Assume documents have text layers
 - Skip redaction handling for "clean-looking" documents
 - Add heavy ML dependencies (keep extraction lightweight)
-- Modify `pyproject.toml` dependencies without human approval
+- Modify `pyproject.toml` dependencies without human approval; a dependency change is its own merge
+- Change the model registry's `SLOTS` or `DEFAULT_MODELS` without raising the womblex-benchmark pair beside it
 - Create oversized files — stay under 750 lines unless justified
 - Land oversized merges — stay under 500 changed lines; split into sequential merges instead
 - Add TODOs or FIXMEs — fix issues immediately or document in issues

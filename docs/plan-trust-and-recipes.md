@@ -1,17 +1,13 @@
 # Trust baseline and recipes — plan
 
-*Status: in progress (2026-10). Outstanding work only; completed work is recorded in `CHANGELOG.md`, `decisions.md` and the enduring docs, not here. Scope, settled decisions and the dependency assessment are in `decisions-operations.md` ("Trust and recipes", "Trust and recipes: the calls taken before Phases 2 to 4") and `decisions-dead-ends.md` ("Dependencies assessed"); a merge cites its decision by number (D-2.1 to D-4.2). Each merge removes its item from this document as it lands, and the document is deleted once its last item ships.*
-
-## Findings
-- **Limits the merged PRs recorded.** #197's are in `decisions-operations.md` ("A trigger fires a dispatch"). #192: replay of a coordinator that caught a failed child was not crash-tested. Every DBOS merge exercises Postgres through CI only.
-- **The local stage sequence stays in comments.** `configs/default-isaacus.yaml` documents the full pipeline as commented per-stage commands. Nothing saves a stored workflow except code (no CLI or API), and D-2.2 keeps it that way for this plan, so the comments are the shipped sequence.
+*Status: in progress (2026-10); Phase 1 has shipped. Outstanding work only: completed work is recorded in `CHANGELOG.md` and the enduring docs, and the conventions every merge holds to (merge size, stocktakes, stacked PRs, dependency merges) are in CLAUDE.md. Scope, settled decisions and the dependency assessment are in `decisions-operations.md` ("Trust and recipes", "Trust and recipes: the calls taken before Phases 2 to 4") and `decisions-dead-ends.md` ("Dependencies assessed"); a merge cites its decision by number (D-2.1 to D-4.2). A `.5` merge carries only further documentation (a guide or a restructured section). Each merge removes its item from this document as it lands, and the document is deleted once its last item ships.*
 
 ## Phase 2 — retry and workflow operation (branch)
 **Merges:**
 - **2.1 Retry a failed stage by fork.** Re-dispatching a failed stage returns its recorded failure; DBOS's `resume_workflow` does not restart it, `fork_workflow` does, keeping the steps before the chosen one. Refused before the fork: a stage not failed, still running, owned by another owner, or failing its own pre-launch checks (a retry is a launch). Forks from the first failed unit as `run:stage:retry:N`; status per D-2.1. First task: confirm the DBOS 3.2 `fork_workflow` signature and whether it carries attributes. Docs: `decisions-operations.md` (replaces "a retry is a plan follow-up"), Requirements 14 and 16, `architecture.md`, README, CLAUDE.md rows, `project-structure.md`.
 - **2.3 Schedule-time checks** (per D-2.3). Docs: Requirement 27's TO-DO and its Outstanding entry, `decisions-operations.md` ("A trigger fires a dispatch", its limits).
 - **2.3.5 Workflow guide** (per D-2.4, docs only), saying that a workflow is saved only through code (D-2.2).
-- **2.3.7 Doc-currency test** (per D-2.5). Fixes any drift it finds on landing. Docs: the stocktake checklist below.
+- **2.3.7 Doc-currency test** (per D-2.5). Fixes any drift it finds on landing. Docs: CLAUDE.md's stocktake (its checks 1 and 2 cite the test).
 - **2.4 Stocktake S-2.**
 
 ## Phase 3 — integration (branch)
@@ -33,26 +29,4 @@ Phase 3 lets a finished run send its output somewhere by itself (a "destination"
 - **4.2 The new graph-refresh sidecar** (per D-4.2); readers (`analyse/query.py`, the Chunk Inspector's entities overlay) prefer it. Docs: `contract.md` (minor version), CLAUDE.md rows.
 - **4.3 Stop rewriting in place.** The contract moves from `MutationMode.IN_PLACE` to `SIDECAR`, with `PRODUCER_OF`, `store/retention.py`, `workflow_order` and `workflow_plan` updated; older runs fall back to the in-place `chunk_index`. `layout` keeps its in-place replace. Docs: CLAUDE.md rows, `project-structure.md`.
 - **4.3.5 Docs:** `composable-design.md` (its three "rewritten in place" passages), Requirement 12, `decisions.md` ("Graph-edge refresh"), `architecture.md`, README.
-- **4.4 Stocktake S-4 (final).** Retire this plan into `decisions.md` and `CHANGELOG.md`, then delete it.
-
-## Stocktake checklist
-The last merge of every phase, docs only, its record in the PR body rather than a new file. It covers every enduring document: README, CHANGELOG, CLAUDE.md, DESIGN.md, THIRD_PARTY_DATA.md, `fixtures/synthetic/README.md`, the PR template and every `docs/*.md`. It never edits `docs/accuracy/` (written by womblex-benchmark). Each check carries its evidence (a grep, a listing or a command):
-1. Module tables in CLAUDE.md and `project-structure.md` against the `src/` tree (CLAUDE.md's by the doc-currency test once 2.3.7 lands).
-2. The README command table against the CLI parser's subcommands (by the doc-currency test once 2.3.7 lands).
-3. The Requirements "Outstanding" index against the TO-DO blocks.
-4. `decisions.md`, `decisions-operations.md` and `decisions-dead-ends.md` entries marked "not built", "position" or "wanted" that have since shipped.
-5. `CHANGELOG.md` Unreleased covers the phase's merges.
-6. Every document cited (in docs, code comments and tests) exists.
-7. No section-sign character and no line-number references.
-8. Each mechanism claim the phase touched holds against the code.
-
-## Conventions this plan holds to
-- No quality or confidence scoring, and no scoring against ground truth in this repository.
-- Extraction text stays verbatim; every new artefact is a sidecar.
-- Each merge stays under 500 changed lines, passes `ruff`, `mypy src/` and the suite, and carries its own documentation: `CHANGELOG.md`, the CLAUDE.md module rows, `docs/architecture.md`, `docs/project-structure.md`, `docs/functional_requirements.md` and a `decisions.md` entry for any call it makes, wherever it changes them. A `.5` merge carries only further material: a guide or a restructured section.
-- A dependency change is its own merge, approved before it lands.
-- A run is an arrow: every refusal happens before launch; a retry is a launch and runs its stage's pre-launch checks again; delivery, webhook and lineage failures label the run and never stop it.
-- Recorded boundaries stand unless a numbered decision reopens them.
-- A change to `SLOTS` or `DEFAULT_MODELS` is raised with its womblex-benchmark pair.
-- Files near the 750-line cap (`cli/cloud.py`, `cloud/stage_runner.py`, `store/run_manifest.py`, `cloud/stage_contracts.py`) take no new responsibilities: new CLI goes in `cli/workflow.py`, new run-record readers in their own `store/` modules.
-- Every merge targets `main`. A stacked PR is retargeted to `main` before it merges, never merged into its base branch.
+- **4.4 Stocktake S-4 (final).** Retire this plan into the decision docs and `CHANGELOG.md`, then delete it.

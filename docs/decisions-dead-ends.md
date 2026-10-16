@@ -195,8 +195,9 @@ Approaches tried and abandoned, library-general limitations, and the deferred ba
   - **Prerequisite — shipped.** `config.py` (920 lines) was split
     mechanically into the `config/` package (#132).
 
-- **Trust baseline and recipes.** *In progress 2026-10; the trust baseline and
-  stored workflows shipped.* Scope and the dependency assessment are recorded
+- **Trust baseline and recipes.** *In progress 2026-10; the trust baseline,
+  stored workflows, the enrichment and embedding model slots and the
+  OpenLineage export shipped.* Scope and the dependency assessment are recorded
   in decisions-operations.md ("Trust and recipes") and above ("Dependencies assessed"). Outstanding work:
   [plan-trust-and-recipes.md](plan-trust-and-recipes.md).
 - **Permissive dependencies — Apache-2.0 compatibility.** *Shipped 2026-10
