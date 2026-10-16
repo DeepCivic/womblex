@@ -1,8 +1,13 @@
-﻿"""Isaacus enrichment API wrapper.
+﻿"""Isaacus enrichment API wrapper, and the enrichment provider seam.
 
 Calls the kanon-2-enricher model to transform extracted document text
 into structured ILGS Documents containing segments, entities, and
 relationships.  Operates on full document text (not chunks).
+
+An `EnrichmentProvider` is what the enrich stage calls: text in, one
+`EnrichmentResult` per text, offsets into the text sent, results independent of
+batch composition. It declares the limits the stage packs and splits by
+(`ProviderLimits`); `IsaacusEnrichment` is the one provider so far.
 """
 
 from __future__ import annotations
@@ -10,6 +15,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Protocol
 
 from womblex.analyse.models import (
     CrossReference,
@@ -27,6 +33,10 @@ from womblex.analyse.models import (
     Term,
     Website,
 )
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from womblex.config import EnrichmentConfig
+    from womblex.utils.token_packer import TokenCounter
 
 logger = logging.getLogger(__name__)
 
@@ -433,3 +443,64 @@ def enrich_documents_raw(
     raise RuntimeError(
         f"Enrichment failed after {max_retries + 1} attempts: {last_error}"
     ) from last_error
+
+
+# ---------------------------------------------------------------------------
+# Provider seam
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ProviderLimits:
+    """What a provider declares, so the stage packs and splits requests by it."""
+
+    max_texts_per_request: int
+    token_ceiling: int
+    """A text over this many tokens is split on boundaries and offset-merged."""
+    token_counter: TokenCounter
+    needs_network: bool
+    returns_document: bool
+    """Whether `enrich` hands back a Document AI chunking can reuse."""
+
+
+class EnrichmentProvider(Protocol):
+    name: str
+    limits: ProviderLimits
+
+    def enrich(self, texts: list[str]) -> list[tuple[EnrichmentResult, object | None]]:
+        """One `(result, document)` pair per text; `document` is `None` unless `returns_document`."""
+        ...
+
+
+@dataclass
+class IsaacusEnrichment:
+    """Kanon-2 enrichment through the Isaacus SDK; its limits come from `EnrichmentConfig`."""
+
+    client: object
+    config: EnrichmentConfig
+    limits: ProviderLimits
+    name: str = "isaacus"
+
+    def enrich(self, texts: list[str]) -> list[tuple[EnrichmentResult, object | None]]:
+        return list(enrich_documents_raw(
+            texts, self.client,
+            model=self.config.model,
+            overflow_strategy=self.config.overflow_strategy,
+            max_retries=self.config.max_retries,
+            retry_base_delay=self.config.retry_base_delay,
+        ))
+
+
+def isaacus_provider(
+    config: EnrichmentConfig, client: object, token_counter: TokenCounter | None = None,
+) -> IsaacusEnrichment:
+    """The Isaacus provider; *client* may be `None` where only the limits are read (`plan`)."""
+    from womblex.utils.token_packer import TokenCounter
+
+    return IsaacusEnrichment(client, config, ProviderLimits(
+        max_texts_per_request=config.max_texts_per_request,
+        token_ceiling=config.split_ceiling,
+        token_counter=token_counter or TokenCounter(config.tokenizer),
+        needs_network=True,
+        returns_document=True,
+    ))
