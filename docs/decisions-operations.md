@@ -46,9 +46,12 @@ claim*. Two deliberate choices:
   scoping is a workflow attribute, filtered client-side because attribute
   filtering is Postgres-only; two submitters racing to create one run can both
   pass the owner check (the advisory lock is gone) and the first row written
-  names the owner. *Limits:* replay of a coordinator that caught a failed child
-  is not crash-tested (#192), and the DBOS paths exercise Postgres through CI
-  only; the local suite runs them on SQLite.
+  names the owner. *Tested:* replay of a coordinator that
+  caught a failed child (a recovered coordinator re-reads the child's recorded
+  failure, runs the later stage once and ends `failed` with the same error; no
+  unit runs again), and the board, worker and workflow tests run on SQLite and,
+  where CI has a service, on a fresh Postgres database each (`tests/_postgres.py`).
+  *Limits:* locally those tests run on SQLite alone unless `WOMBLEX_DB_DSN` names a Postgres server.
 
 The load-bearing invariant: `cmd_run` and the worker call **one** shared
 `batch.process_batch`, so local and distributed runs produce byte-identical
@@ -139,7 +142,7 @@ Phase 2 merge 9b (#197, re-landed after it merged into a stacked base that had a
 - **A firing is a row of its run.** DBOS names a scheduled workflow `sched-…` with no attributes, so the firing runs as a child `<run>:trigger` carrying the run's id and owner. Two triggers firing at one instant share the run id, so the second attaches to the first and runs nothing. The firing body lives in `workflow_dispatch`, beside the dispatch it composes; `workflows.py` holds only the DBOS wrappers.
 - **Scheduling checks the firing (D-2.3).** `schedule-workflow` calls `workflow_dispatch.check_firing`, the function a firing runs first (dry-run dispatch, owner prefix, at least one document), against `--store` and `--ingest` (or their environment variables) and refuses before it writes a schedule; a workflow with no triggers needs neither. *Rejected:* a second copy of the checks in the CLI, and warning at scheduling while the firing fails each time. A firing can still refuse later, because the ingest prefix or the run may change after scheduling.
 - **A firing that fails after its batches are queued withdraws them.** Every check has passed by then, so the window is the two writes (the batches, then the dispatch); if either fails, `fire_workflow` cancels the run's unfinished batches (`RunBoard.cancel_batches`) and re-raises, so the firing is `failed` and no extraction is left running for a run that never launched. A batch a worker already holds stops at its next step and may leave partial shards under that run id. If the cancel fails too (the same database), the failure is logged naming the run as extraction without stages; nothing else labels it. *Rejected:* dispatching first (the coordinator would find no batch rows, read extraction as settled and run the stages over nothing) and labelling the orphan while leaving it to run.
-- **Limits.** No test runs on Postgres: the schedule tests use the SQLite system database, and the CLI tests clear CI's `WOMBLEX_DB_DSN`. Before they did, #200's CI reached Postgres by accident and showed `--status` on a database whose DBOS tables are not yet created failing on the missing `workflow_schedules` table, where a missing SQLite file prints nothing. No test waits for DBOS's scheduler to start a firing on its own: the tests set a cron that never comes due and enqueue each firing with the workflow name, queue and context its schedule holds.
+- **Limits.** The schedule tests run on SQLite and, where CI has a service, on a fresh Postgres database each. `--status` on a Postgres database whose DBOS tables are not yet created (#200's CI failure on the missing `workflow_schedules` table) now prints nothing, as a missing SQLite file does (`list_schedules` reads a database no writer has migrated as empty). No test waits for DBOS's scheduler to start a firing on its own: the tests set a cron that never comes due and enqueue each firing with the workflow name, queue and context its schedule holds.
 
 ### The remote shard-stage runner generalises `finalize`
 Extraction went distributed in 2026-06; everything downstream of it stopped at

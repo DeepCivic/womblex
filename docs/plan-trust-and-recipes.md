@@ -6,7 +6,6 @@
 This phase finishes the stored-workflows work (`CHANGELOG.md`'s "Phase 2 merges 1–9b", an earlier numbering of this plan): the retry it deferred and the limits it recorded in `decisions-operations.md` ("A trigger fires a dispatch" and the DBOS decision). **Phase 3 does not open until every merge here has landed**, since destinations sit on the dispatch and firing paths these merges harden. There is no 2.2: D-2.2 dropped workflow authoring.
 
 **Merges:**
-- **2.3.2 Workflow and schedule tests on Postgres.** The schedule tests use SQLite and the CLI tests clear CI's `WOMBLEX_DB_DSN`, so nothing runs them on Postgres; #200's CI showed `schedule-workflow --status` failing on a Postgres database whose DBOS tables are not yet created (missing `workflow_schedules`), where SQLite prints nothing. Fix that and run the tests against CI's Postgres service. Adds the crash test for replaying a coordinator that caught a failed child (#192). Docs: the limits in `decisions-operations.md` (DBOS decision and "A trigger fires a dispatch").
 - **2.3.5 Workflow guide** (per D-2.4, docs only), saying that a workflow is saved only through code (D-2.2).
 - **2.3.7 Doc-currency test** (per D-2.5). Fixes any drift it finds on landing. Docs: CLAUDE.md's stocktake (its checks 1 and 2 cite the test).
 - **2.4 Stocktake S-2**, which also confirms that the limits recorded by the stored-workflows phase are retired or deliberately kept as boundaries.

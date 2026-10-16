@@ -393,6 +393,7 @@ are on broken code. On a bare checkout (no Isaacus key, no Postgres DSN)
 service, ~12.
 Run with `-rs` to see live reasons. The recurring ones:
 
+- **Postgres** (the `[postgres]` parameter of the `fleet` fixture, `tests/_postgres.py`): skipped unless `WOMBLEX_DB_DSN` names a Postgres server; each test gets a fresh database on it, so no test shares state with another.
 - **geospatial** (`test_geospatial.py`): needs `geopandas` / `pyogrio`, which
   are not declared in `pyproject.toml` (no extra installs them); install them
   separately to run these tests.

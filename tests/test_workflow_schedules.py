@@ -90,8 +90,6 @@ def test_remove_and_status_work_after_the_workflow_is_deleted(
 
     from womblex.cli.workflow import cmd_schedule_workflow
 
-    for var in ("WOMBLEX_DB_DSN", "DATABASE_URL"):  # the CLI reads these; CI sets one for Postgres
-        monkeypatch.delenv(var, raising=False)
     fresh = fleet[2] / "none" / "dbos.sqlite"
     with monkeypatch.context() as m:  # --status changes nothing, not even by creating a database
         m.setenv("WOMBLEX_DBOS_PATH", str(fresh))
@@ -268,8 +266,6 @@ def test_a_workflow_its_firing_would_refuse_is_not_scheduled(
 
     from womblex.cli.workflow import cmd_schedule_workflow
 
-    for var in ("WOMBLEX_DB_DSN", "DATABASE_URL"):  # the CLI reads these; CI sets one for Postgres
-        monkeypatch.delenv(var, raising=False)
     ensure_workflow_schema(None)
     with WorkflowStore(None) as store:
         store.save("wf", _spec(steps, prefix=prefix))
@@ -294,8 +290,6 @@ def test_an_owned_workflow_never_extracts_outside_its_owners_tree(
     from womblex.store.remote import RemoteStore
 
     store_dir, ingest, tmp = fleet
-    for var in ("WOMBLEX_DB_DSN", "DATABASE_URL"):  # the CLI reads these; CI sets one for Postgres
-        monkeypatch.delenv(var, raising=False)
     ensure_workflow_schema(None)
     with WorkflowStore(None) as store:
         for wid, prefix in (("root", None), ("bobs", "bob")):

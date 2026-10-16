@@ -131,7 +131,7 @@ def _error_text(error: BaseException | None) -> str | None:
     return f"{error}{last}"[:2000]
 
 
-def _schema_missing(e: Exception) -> bool:
+def schema_missing(e: Exception) -> bool:
     """The DBOS system tables have not been created yet (Postgres or SQLite)."""
     orig = getattr(e, "orig", None)
     return getattr(orig, "sqlstate", None) in ("42P01", "3F000") or "no such table" in str(orig)
@@ -230,7 +230,7 @@ class RunBoard:
             rows = self._client.list_workflows(status=status, **kwargs)
         except sqlalchemy.exc.DBAPIError as e:
             # Readers do not migrate: a database no writer has touched holds no runs.
-            if not _schema_missing(e):
+            if not schema_missing(e):
                 raise
             return []
         # Filtered here, not by DBOS: filtering on attributes is Postgres-only.

@@ -15,10 +15,22 @@ from womblex.cloud.worker import run_worker
 from womblex.store.remote import RemoteStore
 
 
-@pytest.fixture()
-def fleet(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """A store holding one CSV, a SQLite system database, and fast polling."""
+@pytest.fixture(params=["sqlite", "postgres"])
+def fleet(request, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """A store holding one CSV, a system database (SQLite, or a fresh Postgres one where CI has a
+    service), and fast polling. Code given no DSN reaches the Postgres database too."""
     monkeypatch.setenv("WOMBLEX_DBOS_PATH", str(tmp_path / "dbos.sqlite"))
+    if request.param == "postgres":
+        from tests._postgres import fresh_database
+
+        database = fresh_database()
+        url = database.__enter__()
+        request.addfinalizer(lambda: database.__exit__(None, None, None))
+        real = dbos_app.system_database_url
+        monkeypatch.setattr(dbos_app, "system_database_url", lambda dsn: real(dsn or url))
+        (tmp_path / "dbos.sqlite").touch()  # code that skips an absent local database reads the real one
+    for var in ("WOMBLEX_DB_DSN", "DATABASE_URL"):  # the CLI reads these in place of the test's database
+        monkeypatch.delenv(var, raising=False)
     monkeypatch.setattr(workflows, "SETTLE_POLL_SECONDS", 0.2)
     inbox = tmp_path / "inbox"
     inbox.mkdir()
@@ -413,7 +425,7 @@ def test_finalize_records_the_checksum_of_every_published_file(fleet):
     from womblex.cli.cloud import cmd_finalize
     from womblex.store.run_manifest import read_run_record
 
-    store_root, ingest, tmp = fleet
+    store_root, ingest, _ = fleet
     with RunBoard(None) as board:
         board.enqueue("r1", [batch(ingest)])
         board.enqueue_stages("r1", ["normalise"], "runs/r1/documents")
@@ -430,7 +442,7 @@ def test_finalize_records_the_checksum_of_every_published_file(fleet):
 
     rc = cmd_finalize(argparse.Namespace(
         store=str(store_root), run_id="r1", output_prefix=None,
-        dsn=f"sqlite:///{tmp / 'dbos.sqlite'}",
+        dsn=dbos_app.system_database_url(None),
     ))
     assert rc == 0
     record = read_run_record(store_root / "runs" / "r1" / "manifest.parquet")
@@ -529,7 +541,7 @@ def test_a_dispatched_workflow_runs_its_stages_under_its_own_config_and_digest(f
     for run in ("r1", "r2"):
         assert cmd_finalize(argparse.Namespace(
             store=str(store), run_id=run, output_prefix=None,
-            dsn=f"sqlite:///{fleet[2] / 'dbos.sqlite'}")) == 0
+            dsn=dbos_app.system_database_url(None))) == 0
     manifest = out / "runs/r2/manifest.parquet"
     assert read_run_record(manifest)["workflows"] == [{"digest": "sha256:feed", "stages": ["chunk"]}]
     assert b"womblex.workflow_digest" not in pq.read_metadata(str(manifest)).metadata
