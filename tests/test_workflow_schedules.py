@@ -218,12 +218,14 @@ def test_two_firings_never_conflict_and_each_dry_run_matches_its_dispatch(
     (["normalise"], "empty", "no_documents"),
 ])
 def test_a_workflow_its_firing_would_refuse_is_not_scheduled(
-    fleet, saved_preset, caplog, steps, prefix, code,  # noqa: F811
+    fleet, saved_preset, caplog, monkeypatch, steps, prefix, code,  # noqa: F811
 ) -> None:
     import argparse
 
     from womblex.cli.workflow import cmd_schedule_workflow
 
+    for var in ("WOMBLEX_DB_DSN", "DATABASE_URL"):  # the CLI reads these; CI sets one for Postgres
+        monkeypatch.delenv(var, raising=False)
     ensure_workflow_schema(None)
     with WorkflowStore(None) as store:
         store.save("wf", _spec(steps, prefix=prefix))
