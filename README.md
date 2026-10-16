@@ -172,7 +172,7 @@ has no authentication, binds to loopback, and is not an integration surface.
 
 ## Project status
 
-Womblex 0.6.0 is **alpha** and pre-1.0.
+Womblex is **alpha** and pre-1.0.
 
 - **Stable:** the on-disk data contract, versioned apart from the package
   (additive changes are minor bumps with back-fill; renames are major bumps with

@@ -3,7 +3,7 @@
 The version was already carried — ``store/run_stamp.py`` reads ``__version__``
 and writes it into every pipeline Parquet's footer. What it could not say is
 *which source* that version was built from, and a version alone does not
-identify a build: the same ``0.6.0`` is cut from every commit between two
+identify a build: the same ``0.5.12`` is cut from every commit between two
 releases.
 
 Two sources answer it, and neither answers it everywhere:

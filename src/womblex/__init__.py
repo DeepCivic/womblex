@@ -9,7 +9,7 @@ from __future__ import annotations
 import importlib
 from typing import Any
 
-__version__ = "0.6.0"
+__version__ = "0.5.12"
 
 #: public name -> module that defines it
 _EXPORTS: dict[str, str] = {
