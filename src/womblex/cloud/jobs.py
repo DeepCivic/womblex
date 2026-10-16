@@ -369,8 +369,9 @@ class RunBoard:
     def stage_arguments(self, workflow_id: str) -> tuple[str, dict[str, Any] | None]:
         """A stage workflow's recorded `shard_prefix` and dispatched `workflow` overlay."""
         (s,) = self._client.list_workflows(workflow_ids=[workflow_id], load_input=True, load_output=False)
-        args = s.input["args"] if s.input else ()
-        return args[2], args[4] if len(args) > 4 else None
+        given = s.input or {"args": (), "kwargs": {}}  # read by name, whether passed by position or keyword
+        named = dict(zip(("run_id", "stage", "shard_prefix", "max_attempts", "workflow"), given["args"])) | given["kwargs"]
+        return named["shard_prefix"], named.get("workflow")
 
     def first_failed_step(self, workflow_id: str) -> int:
         """The function id of the workflow's first failed step; 1 (the whole workflow) when none is recorded."""

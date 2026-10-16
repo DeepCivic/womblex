@@ -22,6 +22,7 @@ import sqlalchemy.exc
 
 from womblex.cloud import dbos_app
 from womblex.cloud.jobs import RunBoard, _attr, _board_status
+from womblex.pipeline_order import in_pipeline_order
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from dbos import WorkflowStatus
@@ -66,10 +67,10 @@ def _latest(attempts: dict[str, list[WorkflowStatus]], stage: str) -> WorkflowSt
     return attempts[stage][-1]
 
 
-def _ran_after(attempts: dict[str, list[WorkflowStatus]], stage: str) -> list[str]:
-    """The stages whose latest attempt succeeded having run after *stage* failed."""
-    return sorted(s for s in attempts if s != stage and _board_status(_latest(attempts, s)) == "done"
-                  and stage in (_attr(_latest(attempts, s), "ran_after_failed") or []))
+def _ran_after(attempts: dict[str, list[WorkflowStatus]], stage: str) -> tuple[str, ...]:
+    """The stages whose latest attempt succeeded having run after *stage* failed, in pipeline order."""
+    return in_pipeline_order(s for s in attempts if s != stage and _board_status(_latest(attempts, s)) == "done"
+                             and stage in (_attr(_latest(attempts, s), "ran_after_failed") or []))
 
 
 def _check_retryable(attempts: dict[str, list[WorkflowStatus]], run_id: str, stage: str) -> None:
@@ -138,7 +139,7 @@ def retry_stage(
     except sqlalchemy.exc.IntegrityError as e:  # two retries raced for the same attempt number
         raise RetryRefusedError(f"{new_id} already exists", RetryCode.ALREADY_RETRIED) from e
     logger.info("run %s: %s forked from step %d as %s (original %s)", run_id, stage, start, new_id, original)
-    return StageRetry(run_id, stage, new_id, latest.workflow_id, start, tuple(_ran_after(attempts, stage)))
+    return StageRetry(run_id, stage, new_id, latest.workflow_id, start, _ran_after(attempts, stage))
 
 
 __all__ = ["RetryCode", "RetryRefusedError", "StageRetry", "retry_stage"]
