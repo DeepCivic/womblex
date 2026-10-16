@@ -78,7 +78,14 @@ def test_sync_makes_schedules_equal_triggers_and_remove_unschedules(fleet) -> No
         assert sync_schedules(client, store.save("nightly", _spec(["normalise"], []))) == []
 
 
-def test_remove_and_status_work_after_the_workflow_is_deleted(fleet, capsys, monkeypatch) -> None:  # noqa: F811
+def _where(fleet) -> dict:  # noqa: F811
+    """The locations `schedule-workflow` checks a firing against."""
+    return {"store": str(fleet[0]), "ingest": fleet[1], "presets_dir": None}
+
+
+def test_remove_and_status_work_after_the_workflow_is_deleted(
+    fleet, saved_preset, capsys, monkeypatch,  # noqa: F811
+) -> None:
     import argparse
 
     from womblex.cli.workflow import cmd_schedule_workflow
@@ -93,7 +100,7 @@ def test_remove_and_status_work_after_the_workflow_is_deleted(fleet, capsys, mon
     ensure_workflow_schema(None)
     with WorkflowStore(None) as store:
         store.save("gone", _spec(["normalise"], [_TRIGGER, {"cron": "0 5 * * *"}]))
-    args = argparse.Namespace(workflow_id="gone", dsn=None, remove=False, status=False)
+    args = argparse.Namespace(workflow_id="gone", dsn=None, remove=False, status=False, **_where(fleet))
     assert cmd_schedule_workflow(args) == 0
     with WorkflowStore(None) as store:
         store.delete("gone")
@@ -206,6 +213,28 @@ def test_two_firings_never_conflict_and_each_dry_run_matches_its_dispatch(
     assert "not acted on" not in caplog.text  # the firing acts on the input prefix
 
 
+@pytest.mark.parametrize("steps, prefix, code", [
+    (["pii"], None, "stage_not_dispatchable"),  # the dry-run dispatch the firing makes
+    (["normalise"], "empty", "no_documents"),
+])
+def test_a_workflow_its_firing_would_refuse_is_not_scheduled(
+    fleet, saved_preset, caplog, steps, prefix, code,  # noqa: F811
+) -> None:
+    import argparse
+
+    from womblex.cli.workflow import cmd_schedule_workflow
+
+    ensure_workflow_schema(None)
+    with WorkflowStore(None) as store:
+        store.save("wf", _spec(steps, prefix=prefix))
+    (Path(fleet[1]) / "empty").mkdir()
+    args = argparse.Namespace(workflow_id="wf", dsn=None, remove=False, status=False, **_where(fleet))
+    assert cmd_schedule_workflow(args) == 1
+    assert f"[{code}]" in caplog.text
+    assert list_schedules(dbos_app.open_client(None), "wf") == []
+    assert cmd_schedule_workflow(argparse.Namespace(**{**vars(args), "store": None})) == 1  # nothing to check against
+
+
 def test_an_owned_workflow_never_extracts_outside_its_owners_tree(
     fleet, saved_preset, monkeypatch,  # noqa: F811
 ) -> None:
@@ -226,7 +255,7 @@ def test_an_owned_workflow_never_extracts_outside_its_owners_tree(
         for wid, prefix in (("root", None), ("bobs", "bob")):
             store.save(wid, _spec(["normalise"], [_TRIGGER], prefix), owner="alice")
     for wid in ("root", "bobs"):
-        args = argparse.Namespace(workflow_id=wid, dsn=None, remove=False, status=False)
+        args = argparse.Namespace(workflow_id=wid, dsn=None, remove=False, status=False, **_where(fleet))
         assert cmd_schedule_workflow(args) == 1
         assert list_schedules(dbos_app.open_client(None), wid) == []
     workflows.set_context(workflows.WorkerContext(

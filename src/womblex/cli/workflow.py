@@ -73,6 +73,13 @@ def _register_schedule(p: argparse.ArgumentParser) -> None:
     p.add_argument("workflow_id", help="Stored workflow whose cron triggers to (un)schedule")
     p.add_argument("--dsn", default=None,
                    help="DBOS system database (or $WOMBLEX_DB_DSN / $DATABASE_URL). Default: the local SQLite file.")
+    p.add_argument("--store", default=None,
+                   help="Object-store URI the firings write to (or $WOMBLEX_STORE_URI); with --ingest, "
+                        "what the scheduling checks run against.")
+    p.add_argument("--ingest", default=None,
+                   help="Source-document location the firings read (or $WOMBLEX_INGEST_URI); default: --store.")
+    p.add_argument("--presets-dir", type=Path, default=None,
+                   help="Directory of operator-saved presets (or $WOMBLEX_UI_PRESETS_DIR).")
     mode = p.add_mutually_exclusive_group()
     mode.add_argument("--remove", action="store_true", help="Unschedule every trigger of the workflow")
     mode.add_argument("--status", action="store_true", help="List its schedules; change nothing")
@@ -262,10 +269,37 @@ def cmd_dispatch_workflow(args: argparse.Namespace) -> int:
     return 0
 
 
+def _check_firing(args: argparse.Namespace, stored, dsn: str | None) -> bool:  # type: ignore[no-untyped-def]
+    """Run the checks a firing would make, so a workflow it would refuse is not scheduled."""
+    from datetime import UTC, datetime
+
+    from womblex.cloud.workflow_dispatch import check_firing
+    from womblex.cloud.workflow_runner import WorkflowRefusedError
+    from womblex.cloud.workflows import scheduled_run_id
+    from womblex.store.remote import RemoteStore
+
+    store_uri = args.store or os.environ.get("WOMBLEX_STORE_URI")
+    if not store_uri:
+        logger.error("no store URI to check the firing against (pass --store or set WOMBLEX_STORE_URI)")
+        return False
+    ingest_uri = args.ingest or os.environ.get("WOMBLEX_INGEST_URI")
+    store = RemoteStore.from_uri(store_uri)
+    try:
+        check_firing(
+            stored, run_id=scheduled_run_id(stored.id, datetime.now(UTC)),
+            resolve_preset=_preset_resolver(args),  # type: ignore[arg-type]
+            store=store, ingest=RemoteStore.from_uri(ingest_uri) if ingest_uri else store,
+            ingest_root=ingest_uri or store_uri, dsn=dsn,
+        )
+    except WorkflowRefusedError as e:
+        logger.error("not scheduled, a firing would refuse it: [%s] %s", e.code.value, e)
+        return False
+    return True
+
+
 def cmd_schedule_workflow(args: argparse.Namespace) -> int:
     """Make the board's schedules for a stored workflow equal its triggers (workers fire them)."""
     from womblex.cloud import dbos_app
-    from womblex.cloud.dispatch import owned_prefix
     from womblex.cloud.workflow_schedules import list_schedules, remove_schedules, sync_schedules
 
     dsn = args.dsn or os.environ.get("WOMBLEX_DB_DSN") or os.environ.get("DATABASE_URL")
@@ -274,12 +308,8 @@ def cmd_schedule_workflow(args: argparse.Namespace) -> int:
         stored = None
     elif (stored := _load_workflow(args)) is None:
         return 1
-    if stored is not None:
-        try:  # a firing would refuse it, so it is not scheduled
-            owned_prefix(stored.owner, stored.spec.input_binding.ingest_prefix)
-        except ValueError as e:
-            logger.error("workflow %s: %s", stored.id, e)
-            return 1
+    if stored is not None and stored.spec.triggers and not _check_firing(args, stored, dsn):
+        return 1
     if args.status and not dsn and not dbos_app.local_database_path().exists():
         return 0  # nothing scheduled, and --status creates no database to say so
     if not args.status:

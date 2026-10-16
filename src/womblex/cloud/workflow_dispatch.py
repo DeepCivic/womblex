@@ -147,6 +147,39 @@ def dispatch_workflow(
     )
 
 
+def _firing_kwargs(
+    stored: StoredWorkflow, run_id: str, resolve_preset: Callable[[str], Preset | None],
+    store: RemoteStore, dsn: str | None,
+) -> dict[str, Any]:
+    return {"resolve_preset": resolve_preset, "run_id": run_id, "store_uri": None, "store": store,
+            "dsn": dsn, "owner": stored.owner, "acted_on": ("triggers", "input_binding.ingest_prefix")}
+
+
+def check_firing(
+    stored: StoredWorkflow, *, run_id: str, resolve_preset: Callable[[str], Preset | None],
+    store: RemoteStore, ingest: RemoteStore, ingest_root: str, dsn: str | None,
+) -> list[str]:
+    """Every check a firing makes before it writes a row; the keys it would extract.
+
+    A dry-run dispatch, the owner's prefix, and at least one document. Raises
+    `WorkflowRefusedError`; a firing and `schedule-workflow` both call it, so a workflow is
+    refused at scheduling for exactly what its firing would refuse.
+    """
+    from womblex.cloud.dispatch import PrefixNotOwned, owned_prefix, supported_keys
+
+    dispatch_workflow(stored, dry_run=True, **_firing_kwargs(stored, run_id, resolve_preset, store, dsn))
+    try:
+        prefix = owned_prefix(stored.owner, stored.spec.input_binding.ingest_prefix)
+    except ValueError as e:
+        code = RefusalCode.PREFIX_NOT_OWNED if isinstance(e, PrefixNotOwned) else RefusalCode.SPEC_INVALID
+        raise WorkflowRefusedError(f"workflow {stored.id!r}: {e}", code=code) from e
+    location, keys = supported_keys(ingest, ingest_root, prefix)
+    if not keys:
+        raise WorkflowRefusedError(f"workflow {stored.id!r}: no supported documents under {location}",
+                                   code=RefusalCode.NO_DOCUMENTS)
+    return keys
+
+
 def fire_workflow(
     stored: StoredWorkflow,
     *,
@@ -159,34 +192,22 @@ def fire_workflow(
 ) -> WorkflowDispatch:
     """One firing of a standing trigger: extract the input prefix into *run_id*, then dispatch the steps.
 
-    The launch, so every check runs first — a dry-run dispatch, the owner's prefix, at least one
-    document — and a firing that cannot complete writes no row. The coordinator labels the
-    conditions once extraction settles.
+    The launch, so every check runs first (`check_firing`) and a firing that cannot complete
+    writes no row. The coordinator labels the conditions once extraction settles.
     """
-    from womblex.cloud.dispatch import PrefixNotOwned, batch_specs, owned_prefix, supported_keys
+    from womblex.cloud.dispatch import batch_specs
     from womblex.cloud.jobs import RunBoard
 
-    common: dict[str, Any] = {"resolve_preset": resolve_preset, "run_id": run_id, "store_uri": None,
-                              "store": store, "dsn": dsn, "owner": stored.owner,
-                              "acted_on": ("triggers", "input_binding.ingest_prefix")}
-    dispatch_workflow(stored, dry_run=True, **common)
+    keys = check_firing(stored, run_id=run_id, resolve_preset=resolve_preset, store=store,
+                        ingest=ingest, ingest_root=ingest_root, dsn=dsn)
     binding = stored.spec.input_binding
-    try:
-        prefix = owned_prefix(stored.owner, binding.ingest_prefix)
-    except ValueError as e:
-        code = RefusalCode.PREFIX_NOT_OWNED if isinstance(e, PrefixNotOwned) else RefusalCode.SPEC_INVALID
-        raise WorkflowRefusedError(f"workflow {stored.id!r}: {e}", code=code) from e
-    location, keys = supported_keys(ingest, ingest_root, prefix)
-    if not keys:
-        raise WorkflowRefusedError(f"workflow {stored.id!r}: no supported documents under {location}",
-                                   code=RefusalCode.NO_DOCUMENTS)
     specs = batch_specs(keys, shard_prefix=f"runs/{run_id}/documents", ingest_root=ingest_root,
                         batch_size=binding.batch_size, max_attempts=3)
     with RunBoard(dsn) as board:
         board.enqueue(run_id, specs, owner=stored.owner)
-    sent = dispatch_workflow(stored, **common)
+    sent = dispatch_workflow(stored, **_firing_kwargs(stored, run_id, resolve_preset, store, dsn))
     logger.info("workflow %s fired: run %s, %d doc(s), stages %s", stored.id, run_id, len(keys), ", ".join(sent.stages))
     return sent
 
 
-__all__ = ["WorkflowDispatch", "dispatch_workflow", "fire_workflow"]
+__all__ = ["WorkflowDispatch", "check_firing", "dispatch_workflow", "fire_workflow"]
