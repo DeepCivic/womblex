@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Self, TypeGuard
 
@@ -68,6 +68,7 @@ class JobRow:
     updated_at: str | None
     kind: str = "batch"
     stage: str | None = None
+    retried_by: str | None = None  # a failed stage's next attempt (`<run>:stage:<s>:retry:N`)
 
 
 @dataclass(frozen=True)
@@ -134,6 +135,31 @@ def _schema_missing(e: Exception) -> bool:
     """The DBOS system tables have not been created yet (Postgres or SQLite)."""
     orig = getattr(e, "orig", None)
     return getattr(orig, "sqlstate", None) in ("42P01", "3F000") or "no such table" in str(orig)
+
+
+def _latest_attempts(rows: list[WorkflowStatus]) -> list[WorkflowStatus]:
+    """*rows* without the stage attempts a retry superseded: the run's rollup counts the latest."""
+    newest: dict[str, int] = {}
+    for s in rows:
+        if attempt := dbos_app.stage_attempt(s.workflow_id):
+            newest[attempt[0]] = max(newest.get(attempt[0], 0), attempt[1])
+    return [s for s in rows
+            if not (attempt := dbos_app.stage_attempt(s.workflow_id)) or attempt[1] == newest[attempt[0]]]
+
+
+def _attempt_number(status: WorkflowStatus) -> int:
+    attempt = dbos_app.stage_attempt(status.workflow_id)
+    return attempt[1] if attempt else 0
+
+
+def _retried_by(rows: list[WorkflowStatus]) -> dict[str, str]:
+    """Each superseded stage attempt's id -> the id of the attempt after it."""
+    attempts: dict[str, dict[int, str]] = {}
+    for s in rows:
+        if attempt := dbos_app.stage_attempt(s.workflow_id):
+            attempts.setdefault(attempt[0], {})[attempt[1]] = s.workflow_id
+    return {ids[n]: ids[min(m for m in ids if m > n)]
+            for ids in attempts.values() for n in ids if any(m > n for m in ids)}
 
 
 def _board_status(status: WorkflowStatus) -> str:
@@ -326,6 +352,43 @@ class RunBoard:
                 found.setdefault(name, set()).add(digest)
         return found
 
+    def stage_attempts(
+        self, run_id: str, *, owner: str | None = None,
+    ) -> dict[str, list[WorkflowStatus]]:
+        """Each stage of *run_id* with its attempts, the original first.
+
+        Raises :class:`RunOwnedError` for a named *owner* that does not own the run.
+        """
+        self._claim_run_owner(run_id, owner)
+        found: dict[str, list[WorkflowStatus]] = {}
+        for s in self._list(run_id):
+            if _attr(s, "kind") == dbos_app.KIND_STAGE:
+                found.setdefault(_attr(s, "stage"), []).append(s)
+        return {stage: sorted(rows, key=_attempt_number) for stage, rows in found.items()}
+
+    def stage_arguments(self, workflow_id: str) -> tuple[str, dict[str, Any] | None]:
+        """A stage workflow's recorded `shard_prefix` and dispatched `workflow` overlay."""
+        (s,) = self._client.list_workflows(workflow_ids=[workflow_id], load_input=True, load_output=False)
+        args = s.input["args"] if s.input else ()
+        return args[2], args[4] if len(args) > 4 else None
+
+    def first_failed_step(self, workflow_id: str) -> int:
+        """The function id of the workflow's first failed step; 1 (the whole workflow) when none is recorded."""
+        failed = [st["function_id"] for st in self._client.list_workflow_steps(workflow_id)
+                  if st["error"] is not None]
+        return min(failed, default=1)
+
+    def fork_stage(self, workflow_id: str, stage: str, new_id: str, start_step: int) -> None:
+        """Fork *workflow_id* from *start_step* as *new_id* on the stage's queue.
+
+        The steps before *start_step* are kept, and the fork carries the original's attributes
+        (owner, workflow digest, the stages it ran after), so it reads as the same stage.
+        """
+        from dbos import SetWorkflowID
+
+        with SetWorkflowID(new_id):
+            self._client.fork_workflow(workflow_id, start_step, queue_name=dbos_app.stage_queue(stage))
+
     # --- reads ----------------------------------------------------------------
 
     def _rows(self, run_id: str | None, owner: str | None, **kwargs: Any) -> list[WorkflowStatus]:
@@ -333,7 +396,7 @@ class RunBoard:
 
     def stats(self, run_id: str | None = None, *, owner: str | None = None) -> dict[str, int]:
         """Count jobs by status (optionally for one run, one owner)."""
-        return dict(Counter(_board_status(s) for s in self._rows(run_id, owner)))
+        return dict(Counter(_board_status(s) for s in _latest_attempts(self._rows(run_id, owner))))
 
     def runs(
         self, owner: str | None = None, *, run_id: str | None = None, limit: int = 100,
@@ -344,7 +407,7 @@ class RunBoard:
         including CLI- and console-submitted ones that have no owner.
         """
         grouped: dict[str, list[WorkflowStatus]] = {}
-        for s in self._rows(run_id, owner):
+        for s in _latest_attempts(self._rows(run_id, owner)):
             grouped.setdefault(_attr(s, "run_id", ""), []).append(s)
         summaries = [
             RunSummary(
@@ -361,10 +424,14 @@ class RunBoard:
         self, run_id: str | None = None, *, status: str | None = None, limit: int = 200,
         owner: str | None = None,
     ) -> list[JobRow]:
-        """Recent jobs, newest activity first, optionally scoped by run and status."""
+        """Recent jobs, newest activity first, optionally scoped by run and status.
+
+        A stage a retry superseded stays listed, `failed`, naming the attempt after it.
+        """
         rows = self._rows(run_id, owner, load_output=True)
         rows.sort(key=lambda s: s.updated_at or 0, reverse=True)
-        jobs = [_job_row(s) for s in rows]
+        retried = _retried_by(rows)
+        jobs = [replace(_job_row(s), retried_by=retried.get(s.workflow_id)) for s in rows]
         return [j for j in jobs if status is None or j.status == status][:limit]
 
     def file_checksums(self, run_id: str) -> FileChecksums:

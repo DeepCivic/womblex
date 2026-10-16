@@ -19,6 +19,7 @@ womblex/
 │   │   ├── _shared.py      # Command NamedTuple, setup_logging, select_supported / discover_files, normalise_prefix, check_stage_models
 │   │   ├── pipeline.py     # run, extract, chunk, manifest subcommands
 │   │   ├── cloud.py        # enqueue / enqueue-stages / worker / jobs / finalize / run-stage / egress subcommands
+│   │   ├── retry.py        # retry-stage subcommand
 │   │   ├── serve.py        # serve subcommand (the `/v1` service API)
 │   │   ├── api_token.py    # api-token subcommand
 │   │   ├── ui.py           # ui subcommand (admin and debugging console)
@@ -159,7 +160,8 @@ womblex/
 │   │   └── checkpoint.py    # Per-stage CheckpointManager — JSON checkpoints for resumable batch runs
 │   ├── cloud/                  # Distributed run support — `womblex enqueue` / `enqueue-stages` / `worker` / `jobs` / `finalize` / `run-stage` / `egress`
 │   │   ├── dbos_app.py         # DBOS wiring — system database URL, queue/workflow names and ids, client
-│   │   ├── jobs.py             # RunBoard — enqueue + read runs over DBOS workflows; run `owner` scoping
+│   │   ├── jobs.py             # RunBoard — enqueue + read runs over DBOS workflows; run `owner` scoping; stage attempts and the fork
+│   │   ├── retry.py            # retry_stage() — fork a failed stage from its first failed unit, refusing before the fork
 │   │   ├── workflows.py        # extract_batch / run_stage / run_downstream workflows; a dispatched workflow's stage runs under its overlay and digest
 │   │   ├── dispatch.py         # enqueue_extraction / enqueue_downstream_stages (owner=), downstream_stages gate + guard — shared by the console and the service API
 │   │   ├── worker.py           # run_worker() — launch DBOS, join the queues this process can serve

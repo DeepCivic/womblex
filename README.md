@@ -106,6 +106,7 @@ womblex ui --output-root runs/          # http://127.0.0.1:8080
 | `resolve-source` | Map output rows back to their source files, verified by content hash |
 | `egress` | Export a finished run as a bundle |
 | `enqueue`, `worker`, `jobs`, `finalize`, `run-stage`, `enqueue-stages` | Distributed runs over object storage and the job queue |
+| `retry-stage` | Retry a failed distributed stage from its first failed unit |
 | `run-workflow`, `validate`, `plan` | Run a stored workflow's steps over a local shard directory; check it would run, without running it; count what its paid steps would send, calling nothing |
 | `dispatch-workflow`, `schedule-workflow` | Queue a stored workflow's steps for the fleet; schedule its cron triggers for workers to fire |
 | `validate-redactions` | Validate the redaction detector against a labels packet (`annotate-redactions` is a deprecated alias of `redact --shards --pdfs`) |

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -77,6 +78,20 @@ def trigger_id(run_id: str) -> str:
 
 def stage_id(run_id: str, stage: str) -> str:
     return f"{run_id}:stage:{stage}"
+
+
+_STAGE_ATTEMPT = re.compile(r"^(?P<base>.+:stage:[^:]+)(?::retry:(?P<n>\d+))?$")
+
+
+def stage_retry_id(run_id: str, stage: str, attempt: int) -> str:
+    """Attempt *attempt* (1 is the first retry) of a stage; the original is :func:`stage_id`."""
+    return f"{stage_id(run_id, stage)}:retry:{attempt}"
+
+
+def stage_attempt(workflow_id: str) -> tuple[str, int] | None:
+    """A stage workflow id as (the original attempt's id, attempt number; 0 is the original), else `None`."""
+    m = _STAGE_ATTEMPT.match(workflow_id)
+    return (m["base"], int(m["n"] or 0)) if m else None
 
 
 def downstream_id(run_id: str, stages: list[str], workflow_digest: str | None = None) -> str:
