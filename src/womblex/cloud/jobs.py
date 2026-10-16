@@ -389,6 +389,17 @@ class RunBoard:
         with SetWorkflowID(new_id):
             self._client.fork_workflow(workflow_id, start_step, queue_name=dbos_app.stage_queue(stage))
 
+    def cancel_batches(self, run_id: str) -> int:
+        """Cancel *run_id*'s extraction batches that have not finished; return how many were asked to stop.
+
+        A queued batch never starts; one a worker already holds stops at its next step.
+        """
+        live = [s.workflow_id for s in self._list(run_id, status=dbos_app.UNSETTLED)
+                if _attr(s, "kind") == dbos_app.KIND_BATCH]
+        if live:
+            self._client.cancel_workflows(live)
+        return len(live)
+
     # --- reads ----------------------------------------------------------------
 
     def _rows(self, run_id: str | None, owner: str | None, **kwargs: Any) -> list[WorkflowStatus]:

@@ -56,7 +56,7 @@ logger = logging.getLogger(__name__)
 
 #: Seconds between looks at whether a run's extraction has settled.
 SETTLE_POLL_SECONDS = 30.0
-_UNSETTLED = ["ENQUEUED", "DELAYED", "PENDING"]
+_UNSETTLED = dbos_app.UNSETTLED
 
 
 class StageNotReady(Exception):

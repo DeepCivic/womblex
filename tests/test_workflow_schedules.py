@@ -164,6 +164,50 @@ def test_a_firing_that_cannot_complete_queues_nothing(fleet, saved_preset) -> No
     assert database.read_bytes() == before
 
 
+def _fire_with_a_failing_dispatch(fleet, monkeypatch) -> None:  # noqa: F811
+    """Fire `wf` with the dry run and the batches succeeding and the real dispatch failing."""
+    import os
+
+    from womblex.cloud import workflow_dispatch
+    from womblex.cloud.workflow_runner import preset_resolver
+    from womblex.store.remote import RemoteStore
+
+    store_dir, ingest, _ = fleet
+    ensure_workflow_schema(None)
+    with WorkflowStore(None) as store:
+        stored = store.save("wf", _spec(["normalise"], []))
+    real = workflow_dispatch.dispatch_workflow
+
+    def dispatch(stored, **kw):
+        if kw.get("dry_run"):
+            return real(stored, **kw)
+        raise OSError("system database dropped")
+
+    monkeypatch.setattr(workflow_dispatch, "dispatch_workflow", dispatch)
+    with pytest.raises(OSError, match="dropped"):
+        workflow_dispatch.fire_workflow(
+            stored, run_id="wf-1", resolve_preset=preset_resolver(Path(os.environ["WOMBLEX_UI_PRESETS_DIR"])),
+            store=RemoteStore.from_uri(str(store_dir)), ingest=RemoteStore.from_uri(ingest),
+            ingest_root=ingest, dsn=None)
+
+
+def test_a_firing_whose_dispatch_fails_cancels_the_batches_it_queued(fleet, saved_preset, monkeypatch) -> None:  # noqa: F811
+    _fire_with_a_failing_dispatch(fleet, monkeypatch)
+    with RunBoard(None) as board:
+        jobs = board.list_jobs("wf-1")
+    assert [(j.kind, j.status) for j in jobs] == [("batch", "failed")]  # cancelled: never started
+    assert work(fleet, idle_timeout=1) == 0  # and no worker picks it up
+
+
+def test_a_cancel_that_fails_too_names_the_orphaned_run(fleet, saved_preset, monkeypatch, caplog) -> None:  # noqa: F811
+    def broken(self, run_id):
+        raise OSError("still down")
+
+    monkeypatch.setattr(RunBoard, "cancel_batches", broken)
+    _fire_with_a_failing_dispatch(fleet, monkeypatch)  # the dispatch error, not the cancel's, surfaces
+    assert "run wf-1 has extraction and no stages" in caplog.text
+
+
 def test_a_failed_firing_is_on_the_board_under_its_run(fleet, saved_preset) -> None:  # noqa: F811
     ensure_workflow_schema(None)
     with WorkflowStore(None) as store:
