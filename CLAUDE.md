@@ -243,8 +243,8 @@ in its PR body. It covers every enduring document (README, CHANGELOG,
 CLAUDE.md, DESIGN.md, THIRD_PARTY_DATA.md, `fixtures/synthetic/README.md`, the
 PR template and every `docs/*.md`, never `docs/accuracy/`), and each check
 carries its evidence (a grep, a listing or a command):
-1. Module tables in CLAUDE.md and `docs/project-structure.md` against the `src/` tree.
-2. The README command table against the CLI parser's subcommands.
+1. Module tables in CLAUDE.md and `docs/project-structure.md` against the `src/` tree. `tests/test_doc_currency.py` holds CLAUDE.md's table to `src/` (every named path exists; a module outside the table is a failure unless it is on the test's recorded gap list); `docs/project-structure.md` is still read by hand.
+2. The README command table against the CLI parser's subcommands: `tests/test_doc_currency.py` fails on any difference, so this check is its green run.
 3. The Requirements "Outstanding" index against the TO-DO blocks.
 4. Decision-doc entries marked "not built", "position" or "wanted" that have since shipped.
 5. `CHANGELOG.md` Unreleased covers the phase's merges.
