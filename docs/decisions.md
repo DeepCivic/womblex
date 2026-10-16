@@ -1365,10 +1365,16 @@ be re-derivable, and the first pass's were not.
   A config-selected local provider (spaCy / fine-tuned NER) populating
   `EnrichmentResult` would serve both offline, at lower quality. *Wanted
   (2026-10)*: a GLiNER-based provider is in development by the maintainer, so
-  no interim provider is added. *Position (2026-10, not built):* the route is an
-  `enrichment` slot in `utils/model_registry.py`, default `kanon-2-enricher`,
+  no interim provider is added. *Shipped (2026-10, trust plan items 1.2–1.3):*
+  an `enrichment` slot in `utils/model_registry.py`, default `kanon-2-enricher`,
   with providers installed through `womblex.models.enrichment` entry points like
-  the other slots. *The provider contract:* text in, one `EnrichmentResult` per
+  the other slots. A factory's `isaacus` and `returns_document` traits answer the
+  pre-launch gates before anything is built; the provider's own limits drive the
+  run. AI chunking follows the enrichment it reuses: with a provider that
+  returns no Document, `chunking.chunking_model` is set aside (warned) and
+  chunks come from semchunk's local token splitting. Isaacus's open-source
+  parts (semchunk, the vendored Kanon-2 tokeniser) run locally; a paid call is
+  made only where the configured provider asks for one, never as a fallback. *The provider contract:* text in, one `EnrichmentResult` per
   text, offsets into the text sent, results independent of batch composition, and
   labels mapped to the existing taxonomy inside the adapter. *Each provider
   declares its limits:* texts per request, token ceiling, token counter, whether

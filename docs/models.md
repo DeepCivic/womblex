@@ -62,13 +62,33 @@ A different `paddle2onnx` version may change the ONNX digest.
 
 | Model | Provider | Used by | What it does | Enabled by |
 |---|---|---|---|---|
-| `kanon-2-enricher` | Isaacus (hosted API or SageMaker) | `analyse/enrich.py`, `analyse/enrich_stage.py` | Builds the ILGS document graph: segments, entities, relationships. PII detection reads PERSON / ADDRESS candidates from this graph | `enrichment.enabled` + `ISAACUS_API_KEY` or `ISAACUS_SAGEMAKER_ENDPOINTS` |
-| `kanon-2-enricher` (as `chunking.chunking_model`) | Isaacus | `process/chunker.py` via semchunk 4 | AI chunking: boundaries follow the enrichment's structure. Reuses a persisted `*.enrichment_doc.parquet` Document when its text matches | `chunking.chunking_model` set |
+| `kanon-2-enricher` | Isaacus (hosted API or SageMaker) | `analyse/enrich.py`, `analyse/enrich_stage.py` | The default `enrichment` provider (`enrichment.model`; another is installed through `womblex.models.enrichment`). Builds the ILGS document graph: segments, entities, relationships. PII detection reads PERSON / ADDRESS candidates from this graph | `enrichment.enabled` + `ISAACUS_API_KEY` or `ISAACUS_SAGEMAKER_ENDPOINTS` |
+| `kanon-2-enricher` (as `chunking.chunking_model`) | Isaacus | `process/chunker.py` via semchunk 4 | AI chunking: boundaries follow the enrichment's structure. Reuses a persisted `*.enrichment_doc.parquet` Document when its text matches; only an enrichment provider that returns a Document persists one, and with any other `chunking_model` is set aside for local semchunk token splitting | `chunking.chunking_model` set |
 | `kanon-2-embedder` | Isaacus | `analyse/embed.py`, `analyse/embed_stage.py` | Chunk embeddings (`retrieval/document`; `retrieval/query` for queries) | `embed` stage + Isaacus credentials |
 | `mistral.pixtral-large-2502-v1:0` | Mistral Pixtral Large via AWS Bedrock | `ingest/llm_ocr.py` | VLM OCR returning markdown with reading order resolved. No regions, so it skips the layout pass and table reconstruction | `ocr.engine: mistral-ocr` + AWS credentials. Override with `engine_options.model` or `MISTRAL_OCR_MODEL_ID` |
 | `llama3.2-vision` (default) | Local Ollama, OpenAI-compatible endpoint | `ingest/llm_ocr.py` (`OllamaOCRReader`) | Same role and shape as the Mistral engine | `ocr.engine: ollama`; endpoint from `OLLAMA_BASE_URL` |
 
 The default OCR engine is `paddleocr`, so a default run calls no hosted OCR.
+
+### Isaacus: open source and paid
+
+Isaacus supplies two different kinds of thing, and only one of them costs money.
+
+- **Open source, run locally, no key.** semchunk (MIT), the chunking engine every
+  chunk run uses; the Kanon-2 tokeniser, vendored in `_models/kanon-2-tokenizer/`
+  from Hugging Face `isaacus/kanon-2-tokenizer` (its licence is not recorded in
+  this repository); and the client SDKs `isaacus` (Apache-2.0) and
+  `isaacus-sagemaker` (MIT). The SDKs are core dependencies, but they do nothing
+  until a deployment is declared.
+- **Paid models, billed per call.** `kanon-2-enricher` (the `enrich` stage, and AI
+  chunking through `chunking.chunking_model`) and `kanon-2-embedder` (the `embed`
+  stage), through the hosted API (`ISAACUS_API_KEY`) or a SageMaker Marketplace
+  deployment billed through AWS.
+
+A default run uses only the open-source parts. A paid model is called only by
+the stage configured to call it, never as a fallback: where a paid option cannot
+apply (AI chunking with an enrichment provider that returns no Document), it is
+set aside with a warning and the local path runs.
 
 ### Connecting Isaacus
 

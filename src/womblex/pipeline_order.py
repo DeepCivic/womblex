@@ -139,7 +139,9 @@ def enabled_downstream_stages(config: WomblexConfig) -> tuple[str, ...]:
     enrichment (`chunking.chunking_model`) — after plain semchunk the offsets
     enrich recorded still hold and the refresh is a no-op.
     """
-    ai_chunking = bool(config.chunking.enabled and config.chunking.chunking_model)
+    from womblex.analyse.enrich import ai_chunking_model
+
+    ai_chunking = bool(config.chunking.enabled and ai_chunking_model(config))
     wanted = {
         "normalise": _normalise_wanted(config),
         "spellfix": config.spellfix.enabled,

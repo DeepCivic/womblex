@@ -46,7 +46,7 @@ from pathlib import Path
 
 import pyarrow.parquet as pq
 
-from womblex.analyse.enrich import EnrichmentProvider, isaacus_provider
+from womblex.analyse.enrich import EnrichmentProvider, make_enrichment_provider
 from womblex.analyse.enrich_merge import merge_segment_results
 from womblex.analyse.graph import build_document_graph
 from womblex.analyse.models import EnrichmentResult
@@ -103,7 +103,7 @@ def enrich_shards(
     """Enrich every batch in ``shard_dir`` and write enrichment siblings.
 
     ``client`` is an ``isaacus.Isaacus`` instance (injected so tests can
-    pass a fake). Skips batches whose entities sidecar already exists when
+    pass a fake), used only by an Isaacus provider; ``None`` for any other. Skips batches whose entities sidecar already exists when
     ``checkpoint_mgr`` is provided and every contained doc is checkpointed.
 
     When ``persist_document`` is true, also writes a
@@ -120,8 +120,12 @@ def enrich_shards(
         return EnrichStageResult(0, 0, 0)
     require_overlays(bases, text_source)
 
-    provider = isaacus_provider(enrichment_config, client, token_counter)
+    provider = make_enrichment_provider(enrichment_config, client, token_counter)
     counter = provider.limits.token_counter
+    if persist_document and not provider.limits.returns_document:
+        logger.info("enrich_shards: provider %r returns no Document; none is persisted for "
+                    "AI-chunking reuse", enrichment_config.model)
+        persist_document = False
 
     batches_written = 0
     docs_enriched = 0
@@ -241,7 +245,7 @@ def plan_enrichment(
     """
     bases = _batch_bases(shard_dir)
     require_overlays(bases, text_source)
-    limits = isaacus_provider(enrichment_config, None, token_counter).limits
+    limits = make_enrichment_provider(enrichment_config, None, token_counter).limits
     counter = limits.token_counter
     plan = EnrichPlan()
     min_chars = max(1, enrichment_config.skip_short_documents)

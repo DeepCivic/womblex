@@ -1,4 +1,4 @@
-"""run_enrichment — call Isaacus on completed documents (requires chunks)."""
+"""run_enrichment — call the enrichment provider on completed documents (requires chunks)."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ def run_enrichment(
     config: WomblexConfig,
     client: object,
 ) -> None:
-    """Enrich completed documents via the Isaacus API.
+    """Enrich completed documents through the provider ``config.enrichment.model`` names.
 
     Failures are logged per-document but do not halt the batch. Results are
     stored on ``DocumentResult.enrichment`` and ``.graph``.
@@ -23,14 +23,16 @@ def run_enrichment(
     Args:
         results: DocumentResults with chunks populated.
         config: Pipeline configuration (uses ``config.enrichment``).
-        client: An ``isaacus.Isaacus`` client instance.
+        client: An ``isaacus.Isaacus`` client, used only by an Isaacus provider.
     """
-    from womblex.analyse.enrich import enrich_document
+    from womblex.analyse.enrich import make_enrichment_provider
     from womblex.analyse.graph import build_document_graph
 
     enrich_cfg = config.enrichment
     if not enrich_cfg.enabled:
         return
+    # Before any document, so an unregistered `enrichment.model` is refused up front.
+    provider = make_enrichment_provider(enrich_cfg, client)
 
     for dr in results:
         if dr.status != "completed" or not dr.extraction:
@@ -44,13 +46,7 @@ def run_enrichment(
             continue
 
         try:
-            enrichment = enrich_document(
-                full_text,
-                client,
-                model=enrich_cfg.model,
-                max_retries=enrich_cfg.max_retries,
-                retry_base_delay=enrich_cfg.retry_base_delay,
-            )
+            enrichment = provider.enrich([full_text])[0][0]
             dr.enrichment = enrichment
             dr.graph = build_document_graph(
                 document_id=dr.doc_id,
