@@ -1,5 +1,5 @@
 <script lang="ts">
-	// The Dashboard (docs/ui-plan.md merge 8): queue state and per-stage
+	// The Dashboard (functional_requirements.md, Requirement 16): queue state and per-stage
 	// progress, from two sources the pipeline already writes. Run-scoped like
 	// the inspectors — the run selector chooses which run's checkpoints to read
 	// and which run to scope the queue counts to. It polls, because a run

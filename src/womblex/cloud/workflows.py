@@ -7,7 +7,7 @@ the whole run), then runs each as its own step, so a unit that finished is
 recorded and a re-run starts after it. The coordinator waits for the run's
 extraction to settle, then runs the requested stages in pipeline order.
 
-A launched run is never stopped part-way (`docs/decisions.md`, "A run is an
+A launched run is never stopped part-way (`docs/decisions-operations.md`, "A run is an
 arrow"): a unit that fails does not stop the stage's other units, and a stage
 that fails does not stop the stages after it. Each is recorded where it
 happened and named again at the end, so the board shows it failed once

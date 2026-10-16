@@ -32,16 +32,16 @@ def _register_seed_demo(p: argparse.ArgumentParser) -> None:
         "--output-root", type=Path, default=None,
         help="Local run root to seed into — the parent of run-*/ dirs "
              "(or $WOMBLEX_UI_OUTPUT_ROOT). The demo lands at "
-             "<output-root>/run-throsby-demo/.",
+             "<output-root>/run-synthetic-demo/.",
     )
     target.add_argument(
         "--store", default=None,
         help="Object-store base URI to seed into (or $WOMBLEX_STORE_URI), "
-             "e.g. s3://redline. The demo lands under runs/run-throsby-demo/.",
+             "e.g. s3://redline. The demo lands under runs/run-synthetic-demo/.",
     )
     p.add_argument(
         "--run-id", default=None,
-        help="Run id the demo lands under (default: run-throsby-demo). Use this "
+        help="Run id the demo lands under (default: run-synthetic-demo). Use this "
              "to seed more than one copy, or to name it for your deployment.",
     )
 

@@ -21,7 +21,7 @@
 # This file is the source of truth for the "DEFAULT-Isaacus" preset the console's
 # Pipeline Composer offers (src/womblex/ui/presets.py mirrors the stage toggles
 # and settings here) and the vendored demo run (output/console-demo, a completed
-# run of this exact shape). Edit all three together.
+# run of this shape, bar link). Edit all three together.
 #
 # ─────────────────────────────────────────────────────────────────────────────
 # HOW TO RUN IT (important: `womblex run` does NOT execute this whole shape).

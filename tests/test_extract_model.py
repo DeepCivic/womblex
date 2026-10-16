@@ -1,0 +1,454 @@
+"""Tests for womblex.ingest.extract — data model, page primitives and get_extractor."""
+
+from pathlib import Path
+
+import pytest
+
+from tests._pdf_builders import PdfBuilder
+from womblex.ingest.detect import DocumentProfile, DocumentType
+from womblex.ingest.extract import (
+    ExtractionMetadata,
+    ExtractionResult,
+    PageResult,
+    Position,
+    _classify_native_block,
+    _count_blocks_in_bbox,
+    _find_native_tables,
+    _normalise_bbox,
+    get_extractor,
+)
+from womblex.ingest.pdf.types import Rect
+from womblex.ingest.spreadsheet import SpreadsheetExtractor
+from womblex.ingest.strategies import (
+    DocxExtractor,
+    MarkdownExtractor,
+    TextExtractor,
+)
+
+# ---------------------------------------------------------------------------
+# Data model tests
+# ---------------------------------------------------------------------------
+
+
+class TestPosition:
+    def test_fields(self) -> None:
+        p = Position(x=0.1, y=0.2, width=0.5, height=0.3)
+        assert p.x == 0.1
+        assert p.width == 0.5
+
+    def test_normalise_bbox(self) -> None:
+        pos = _normalise_bbox((100, 200, 400, 600), 800, 1000)
+        assert pos.x == pytest.approx(0.125)
+        assert pos.y == pytest.approx(0.2)
+        assert pos.width == pytest.approx(0.375)
+        assert pos.height == pytest.approx(0.4)
+
+
+class TestExtractionResult:
+    def test_full_text_concatenation(self) -> None:
+        result = ExtractionResult(
+            pages=[
+                PageResult(page_number=0, text="Hello", method="native"),
+                PageResult(page_number=1, text="World", method="native"),
+            ],
+            method="native",
+        )
+        assert result.full_text == "Hello\n\nWorld"
+
+    def test_full_text_skips_empty(self) -> None:
+        result = ExtractionResult(
+            pages=[
+                PageResult(page_number=0, text="Hello", method="native"),
+                PageResult(page_number=1, text="", method="native"),
+                PageResult(page_number=2, text="End", method="native"),
+            ],
+            method="native",
+        )
+        assert result.full_text == "Hello\n\nEnd"
+
+    def test_page_count(self) -> None:
+        result = ExtractionResult(
+            pages=[PageResult(page_number=i, text=f"p{i}", method="native") for i in range(5)],
+            method="native",
+        )
+        assert result.page_count == 5
+
+    def test_empty_result(self) -> None:
+        result = ExtractionResult()
+        assert result.full_text == ""
+        assert result.page_count == 0
+        assert result.error is None
+        assert result.tables == []
+        assert result.forms == []
+        assert result.images == []
+        assert result.text_blocks == []
+
+    def test_structured_fields(self) -> None:
+        # The legacy structured fields (tables/forms/images/text_blocks) are
+        # now read-only derived views over ExtractionResult.elements. Build
+        # an element stream and confirm each view projects correctly.
+        from womblex.ingest.elements import Cell, Element, FieldEntry
+
+        pos = Position(x=0.0, y=0.0, width=1.0, height=1.0)
+        elements = [
+            Element(
+                order=0, kind="paragraph", extractor="native_text",
+                bbox=pos, text="Test", confidence=0.9,
+            ),
+            Element(
+                order=1, kind="table", extractor="native_text",
+                bbox=pos, confidence=0.8,
+                cells=[
+                    Cell(row=0, col=0, value="A"),
+                    Cell(row=0, col=1, value="B"),
+                    Cell(row=1, col=0, value="1"),
+                    Cell(row=1, col=1, value="2"),
+                ],
+                header_rows=[0],
+            ),
+            Element(
+                order=2, kind="form", extractor="form_acroform",
+                bbox=pos, confidence=0.9,
+                fields=[FieldEntry(name="Name", value="Alice")],
+            ),
+            Element(
+                order=3, kind="image", extractor="figure_image",
+                bbox=pos, alt_text="photo", confidence=0.7,
+            ),
+        ]
+        result = ExtractionResult(
+            pages=[PageResult(page_number=0, text="Test", method="native")],
+            elements=elements,
+            method="native_with_structured",
+        )
+        assert len(result.tables) == 1
+        assert result.tables[0].headers == ["A", "B"]
+        assert len(result.forms) == 1
+        assert result.forms[0].field_name == "Name"
+        assert len(result.images) == 1
+        assert len(result.text_blocks) == 1
+
+
+class TestFindNativeTablesGate:
+    """Cross-classifier gate inside ``_find_native_tables``.
+
+    Real tables decompose into ≥1 text block per row; prose-as-
+    table over-claims rows by carving sub-block whitespace into pseudo-
+    rows. The gate rejects candidates where block count < row count.
+    """
+
+    def test_count_blocks_in_bbox_uses_block_centre(self, tmp_path) -> None:
+        builder = PdfBuilder(tmp_path / "blocks.pdf").page(400, 600)
+        builder.text(50, 50, "alpha").text(50, 200, "beta").text(50, 500, "gamma")
+
+        with builder.open() as doc:
+            page = doc[0]
+            assert _count_blocks_in_bbox(page, Rect(0, 0, 400, 300)) == 2  # alpha, beta
+            assert _count_blocks_in_bbox(page, Rect(0, 400, 400, 600)) == 1  # gamma
+            assert _count_blocks_in_bbox(page, Rect(0, 300, 400, 400)) == 0
+
+    def test_gate_rejects_prose_as_table(self, tmp_path) -> None:
+        # One paragraph block of prose with consistent left-indent. The
+        # text-strategy `find_tables` reads the whitespace pattern as columnar
+        # and over-claims many rows; the gate should reject because
+        # `n_blocks_in_bbox` (about 1) is much smaller than the claimed row count.
+        prose = [
+            "1. As you are aware, the Authority has issued this Notice.",
+            "2. The Provider must comply with the requirements set out below.",
+            "3. The Authority will continue to monitor compliance.",
+            "4. Should you have any questions, contact the Director.",
+            "5. This Notice takes effect immediately upon receipt.",
+        ]
+        builder = PdfBuilder(tmp_path / "prose.pdf").page()
+        for i, line in enumerate(prose):
+            builder.text(50, 62 + i * 13.2, line)
+
+        with builder.open() as doc:
+            page = doc[0]
+            assert _count_blocks_in_bbox(page, Rect(0, 0, 595, 842)) == 1
+            # The text strategy over-claims rows here, so an empty result is the
+            # gate rejecting it rather than nothing to reject.
+            assert any(t.row_count >= 3 for t in page.find_tables(strategy="text"))
+            assert _find_native_tables(page) == []
+
+
+class TestClassifyNativeBlock:
+    """Audit-cluster K1, K4, K5 — `_classify_native_block` kind output."""
+
+    def test_yours_sincerely_is_no_longer_signature(self) -> None:
+        # K1: closing phrase should not classify as 'signature'. Falls to paragraph.
+        for phrase in ("Yours sincerely", "Yours faithfully,", "Yours truly"):
+            assert _classify_native_block(phrase, max_font_size=12, is_bold=False, y_norm=0.7) == "paragraph"
+
+    def test_top_of_page_short_text_is_header(self) -> None:
+        # K4: short blocks at y_norm < 0.08 classify as header (not paragraph).
+        assert _classify_native_block("ACT Government", max_font_size=12, is_bold=False, y_norm=0.04) == "header"
+
+    def test_bottom_of_page_short_text_is_footer(self) -> None:
+        assert _classify_native_block("3", max_font_size=10, is_bold=False, y_norm=0.97) == "footer"
+        assert _classify_native_block("2 | P a g e", max_font_size=10, is_bold=False, y_norm=0.97) == "footer"
+
+    def test_letter_subparagraph_is_list_item(self) -> None:
+        # K5: (a) (b) markers classify as list_item.
+        assert _classify_native_block("(a) Any discipline that is unreasonable", max_font_size=12, is_bold=False, y_norm=0.5) == "list_item"
+        assert _classify_native_block("(b) other text here", max_font_size=12, is_bold=False, y_norm=0.5) == "list_item"
+
+    def test_roman_subparagraph_is_list_item(self) -> None:
+        assert _classify_native_block("(i) first item", max_font_size=12, is_bold=False, y_norm=0.5) == "list_item"
+        assert _classify_native_block("(iii) third item", max_font_size=12, is_bold=False, y_norm=0.5) == "list_item"
+
+    def test_numbered_subparagraph_is_list_item(self) -> None:
+        assert _classify_native_block("(1) numbered sub-item", max_font_size=12, is_bold=False, y_norm=0.5) == "list_item"
+
+    def test_bullet_is_list_item(self) -> None:
+        assert _classify_native_block("• bullet point", max_font_size=12, is_bold=False, y_norm=0.5) == "list_item"
+        assert _classify_native_block("- dash bullet", max_font_size=12, is_bold=False, y_norm=0.5) == "list_item"
+
+    def test_bare_numbered_paragraph_is_NOT_list_item(self) -> None:
+        # K5: deliberate scope — "1. " is ambiguous with numbered paragraphs, leave as paragraph.
+        text = "1. As you are aware, Authorised Officers from the ACT Regulatory Authority have completed an investigation."
+        assert _classify_native_block(text, max_font_size=12, is_bold=False, y_norm=0.5) == "paragraph"
+
+    def test_heading_by_font_size(self) -> None:
+        assert _classify_native_block("Compliance Notice", max_font_size=14, is_bold=True, y_norm=0.3) == "heading"
+
+    def test_paragraph_fallback(self) -> None:
+        assert _classify_native_block("Body text in a regulation citation.", max_font_size=11, is_bold=False, y_norm=0.5) == "paragraph"
+
+
+class TestOcrRegionBlockType:
+    """K9-fig — full-page OCR collapsed onto a non-text layout kind.
+
+    A full-page scan OCR's to substantial prose but is tagged with the dominant
+    region's kind. When that kind is `figure` (∉ TEXT_KINDS) the block is
+    excluded from chunking and its content is silently lost. The helper promotes
+    such a block to `paragraph` by text volume; page-furniture (page numbers,
+    bare logos) keeps its `figure` kind. Text kinds (incl. `caption`) and
+    `table` already reach the right consumer and pass through unchanged.
+    """
+
+    def test_substantial_text_promotes_figure_to_paragraph(self) -> None:
+        from womblex.ingest.strategies_scanned import _ocr_region_block_type
+
+        scan = (
+            "13. Relevant extracts from Witness B's statement include the "
+            "following observations made during the incident."
+        )
+        assert _ocr_region_block_type(scan, "figure") == "paragraph"
+
+    def test_sparse_text_keeps_figure_kind(self) -> None:
+        from womblex.ingest.strategies_scanned import _ocr_region_block_type
+
+        for furniture in ("8lPage", "4l Page", "ACT\nGovernment\nEducation"):
+            assert _ocr_region_block_type(furniture, "figure") == "figure"
+
+    def test_text_kinds_and_tables_pass_through(self) -> None:
+        from womblex.ingest.strategies_scanned import _ocr_region_block_type
+
+        # A text kind (caption ∈ TEXT_KINDS) or table is never reclassified.
+        assert _ocr_region_block_type("short", "heading") == "heading"
+        assert _ocr_region_block_type("Figure 1 caption text here", "caption") == "caption"
+        assert _ocr_region_block_type("a much longer block of prose here", "table") == "table"
+
+    def test_threshold_boundary_is_inclusive(self) -> None:
+        from womblex.ingest.strategies_scanned import _ocr_region_block_type
+
+        assert _ocr_region_block_type("one two three four", "figure") == "figure"
+        assert _ocr_region_block_type("one two three four five", "figure") == "paragraph"
+
+
+class TestFormLabelDenylist:
+    """K3 — `_looks_like_form_label` denylist for regulatory-letter prose."""
+
+    def test_penalty_label_rejected(self) -> None:
+        # Regulation citation: "Penalty: $10 000, in the case of an individual"
+        from womblex.ingest.forms import _looks_like_form_label
+        assert not _looks_like_form_label("Penalty")
+
+    def test_official_banner_rejected(self) -> None:
+        # Document classification banner: "OFFICIAL: Sensitive - Legislative Secrecy"
+        from womblex.ingest.forms import _looks_like_form_label
+        assert not _looks_like_form_label("OFFICIAL")
+
+    def test_note_aside_rejected(self) -> None:
+        from womblex.ingest.forms import _looks_like_form_label
+        assert not _looks_like_form_label("Note")
+
+    def test_real_form_label_still_accepted(self) -> None:
+        from womblex.ingest.forms import _looks_like_form_label
+        assert _looks_like_form_label("Notification Number")
+        assert _looks_like_form_label("Date generated")
+        assert _looks_like_form_label("Approved provider name")
+
+
+class TestFootnoteKind:
+    """K7(b) — `footnote` is a real ElementKind, in TEXT_KINDS and block-type map."""
+
+    def test_footnote_in_text_kinds(self) -> None:
+        from womblex.ingest.elements import TEXT_KINDS
+        assert "footnote" in TEXT_KINDS
+
+    def test_footnote_in_block_type_to_kind(self) -> None:
+        from womblex.ingest.orchestrator import _BLOCK_TYPE_TO_KIND
+        assert _BLOCK_TYPE_TO_KIND["footnote"] == "footnote"
+
+
+class TestK2PrimeOcrFormBboxes:
+    """K2′ — OCR form-pair extractor preserves per-region bbox."""
+
+    def test_region_bbox_normalised_to_position(self) -> None:
+        from womblex.ingest.forms import _extract_form_pairs_from_regions
+        from womblex.ingest.interfaces.protocols import OCRRegionResult
+
+        regions = [
+            OCRRegionResult(
+                bbox=[[100, 200], [400, 200], [400, 230], [100, 230]],
+                text="Notification Number: ABC-1234",
+                confidence=0.95,
+            ),
+        ]
+        fields = _extract_form_pairs_from_regions(regions, pix_width=600, pix_height=800)
+        assert len(fields) == 1
+        f = fields[0]
+        assert f.field_name == "Notification Number"
+        assert f.value == "ABC-1234"
+        # The defining K2′ check: bbox must be a real position, not (0,0,0,0).
+        assert f.position.x > 0
+        assert f.position.y > 0
+        assert f.position.width > 0
+        assert f.position.height > 0
+
+    def test_gap_pattern_pair(self) -> None:
+        from womblex.ingest.forms import _extract_form_pairs_from_regions
+        from womblex.ingest.interfaces.protocols import OCRRegionResult
+
+        regions = [
+            OCRRegionResult(
+                bbox=[[50, 100], [550, 100], [550, 130], [50, 130]],
+                text="Provider Name    Wonderschool",
+                confidence=0.92,
+            ),
+        ]
+        fields = _extract_form_pairs_from_regions(regions, pix_width=600, pix_height=800)
+        assert len(fields) == 1
+        assert fields[0].field_name == "Provider Name"
+        assert fields[0].value == "Wonderschool"
+
+    def test_denylist_still_applies(self) -> None:
+        # K3 label denylist must be respected in the region-based path too.
+        from womblex.ingest.forms import _extract_form_pairs_from_regions
+        from womblex.ingest.interfaces.protocols import OCRRegionResult
+
+        regions = [
+            OCRRegionResult(
+                bbox=[[50, 100], [400, 100], [400, 130], [50, 130]],
+                text="OFFICIAL: Sensitive",
+                confidence=0.90,
+            ),
+        ]
+        fields = _extract_form_pairs_from_regions(regions, pix_width=600, pix_height=800)
+        assert len(fields) == 0
+
+    def test_empty_dims_returns_empty(self) -> None:
+        from womblex.ingest.forms import _extract_form_pairs_from_regions
+        assert _extract_form_pairs_from_regions([], 0, 0) == []
+
+
+class TestPageBreakEmission:
+    """K8 — orchestrator emits kind='page_break' between consecutive pages."""
+
+    def test_three_page_pdf_emits_two_page_breaks(self, tmp_path: Path) -> None:
+        from womblex.ingest.detect import DocumentType
+        from womblex.ingest.orchestrator import extract_with_plan
+        from womblex.ingest.page_profile import profile_pages
+
+        builder = PdfBuilder(tmp_path / "multi.pdf")
+        for i in range(3):
+            builder.page().text(72, 72, f"Page {i} body text")
+        with builder.open() as doc:
+            profiles = profile_pages(doc)
+            result = extract_with_plan(doc, profiles, DocumentType.NATIVE_NARRATIVE)
+
+        page_breaks = [e for e in result.elements if e.kind == "page_break"]
+        assert len(page_breaks) == 2  # N-1 breaks between N pages
+        # Each page_break is associated with the page it precedes
+        assert page_breaks[0].page == 1
+        assert page_breaks[1].page == 2
+
+    def test_single_page_pdf_emits_no_page_breaks(self, tmp_path: Path) -> None:
+        from womblex.ingest.detect import DocumentType
+        from womblex.ingest.orchestrator import extract_with_plan
+        from womblex.ingest.page_profile import profile_pages
+
+        with PdfBuilder(tmp_path / "single.pdf").page().text(72, 72, "single page").open() as doc:
+            profiles = profile_pages(doc)
+            result = extract_with_plan(doc, profiles, DocumentType.NATIVE_NARRATIVE)
+
+        assert not any(e.kind == "page_break" for e in result.elements)
+
+
+class TestExtractionMetadata:
+    def test_fields(self) -> None:
+        m = ExtractionMetadata(
+            extraction_strategy="native_narrative",
+            confidence=0.95,
+            processing_time=1.2,
+            page_count=3,
+            text_coverage=0.9,
+        )
+        assert m.extraction_strategy == "native_narrative"
+        assert m.preprocessing_steps == []
+        assert m.content_mix == {}
+
+
+# ---------------------------------------------------------------------------
+# get_extractor
+# ---------------------------------------------------------------------------
+
+
+class TestGetExtractor:
+    """`get_extractor` is the legacy path-based dispatch — SPREADSHEET, DOCX,
+    TEXT, MARKDOWN and nothing else. Everything else, images included, routes
+    through `extract_pdf_with_plan` (orchestrator) — see test_pipeline.py /
+    test_integration.py, and test_table_reconstruction.py for the image case."""
+
+    def _make_profile(self, doc_type: DocumentType) -> DocumentProfile:
+        return DocumentProfile(
+            doc_type=doc_type,
+            page_count=1,
+            has_text_layer=True,
+            text_coverage=1.0,
+            has_images=False,
+            has_tables=False,
+            has_handwriting_signals=False,
+            ocr_confidence=None,
+            glyph_regularity=None,
+            stroke_consistency=None,
+            confidence=0.9,
+        )
+
+    def test_image_is_not_handled_here(self) -> None:
+        """Images route through the orchestrator, like every other seam-openable
+        input — the seam opens one as a single-page document."""
+        with pytest.raises(ValueError, match="SPREADSHEET/DOCX/TEXT"):
+            get_extractor(self._make_profile(DocumentType.IMAGE))
+
+    def test_spreadsheet_returns_correct_extractor(self) -> None:
+        ext = get_extractor(self._make_profile(DocumentType.SPREADSHEET))
+        assert isinstance(ext, SpreadsheetExtractor)
+
+    def test_docx_returns_correct_extractor(self) -> None:
+        ext = get_extractor(self._make_profile(DocumentType.DOCX))
+        assert isinstance(ext, DocxExtractor)
+
+    def test_text_returns_correct_extractor(self) -> None:
+        ext = get_extractor(self._make_profile(DocumentType.TEXT))
+        assert isinstance(ext, TextExtractor)
+
+    def test_markdown_returns_correct_extractor(self) -> None:
+        ext = get_extractor(self._make_profile(DocumentType.MARKDOWN))
+        assert isinstance(ext, MarkdownExtractor)
+
+    def test_pdf_type_raises(self) -> None:
+        with pytest.raises(ValueError, match="only handles SPREADSHEET/DOCX/TEXT/MARKDOWN"):
+            get_extractor(self._make_profile(DocumentType.NATIVE_NARRATIVE))

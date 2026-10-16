@@ -8,7 +8,7 @@ module-responsibility table in [`../CLAUDE.md`](../CLAUDE.md).
 ```
 womblex/
 ├── configs/           # Dataset-specific configurations
-├── docs/              # Architecture docs, ADRs, accuracy reports, the deployment-image audit, the consumer contract (contract.md), the service API (service-api.md), the egress bundle (egress.md)
+├── docs/              # Architecture docs, ADRs, accuracy reports, the deployment-image audit, the consumer contract (contract.md), the service API (service-api.md), the egress bundle (egress.md), the design decisions by concern (decisions.md for the library, decisions-operations.md for operating it, decisions-dead-ends.md for dead-ends, limitations and the backlog)
 ├── fixtures/synthetic/  # Generated test fixtures (generate.py + its committed output; see its README)
 ├── models/            # Locally pre-downloaded models, resolved by utils/models.py (see models.md)
 ├── ui/                # Console SPA frontend (SvelteKit), built into the console image by Dockerfile.ui
@@ -151,6 +151,7 @@ womblex/
 │   │   ├── content_digest.py # content_digest(elements): the manifest's determinism handle (kind / order / text / cells / fields / sheet cells / meta)
 │   │   ├── contract.py      # womblex.contract_version + womblex.sensitivity (raw / masked / none) footer keys, on every pipeline Parquet
 │   │   ├── run_manifest.py  # Consolidate per-batch manifests into a run-root manifest.parquet + the run record in its footer
+│   │   ├── lineage.py       # The run record as an OpenLineage 2-0-2 RunEvent (`manifest --lineage`)
 │   │   ├── register_manifest.py  # Manifest for standalone register ingests (G-NAF/ABN/geospatial)
 │   │   ├── demo_corpus.py   # Publish the vendored demo run into a console's run store (`womblex seed-demo`)
 │   │   ├── remote.py        # fsspec stage-in/stage-out object-storage adapter for distributed runs

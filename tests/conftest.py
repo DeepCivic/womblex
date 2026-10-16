@@ -58,6 +58,25 @@ def tmp_dir(tmp_path: Path) -> Path:
     return tmp_path
 
 
+@pytest.fixture(params=["local", "remote"])
+def api_client(request: pytest.FixtureRequest, tmp_path: Path) -> tuple:
+    """(client, run_root) — write ``<run_root>/<run_id>/documents/`` to seed a run.
+
+    Shared by the console tests (``tests/test_ui_*.py``). FastAPI is imported
+    here rather than at module level so the rest of the suite runs without it.
+    """
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from womblex.ui.app import create_app
+
+    if request.param == "remote":
+        pytest.importorskip("fsspec")
+        store_root = tmp_path / "store"
+        return TestClient(create_app(store_uri=str(store_root))), store_root / "runs"
+    return TestClient(create_app(output_root=tmp_path)), tmp_path
+
+
 # ---------------------------------------------------------------------------
 # Fixture paths
 # ---------------------------------------------------------------------------

@@ -1,5 +1,5 @@
 <script lang="ts">
-	// The pipeline DAG (docs/ui-plan.md merge 9), drawn from
+	// The pipeline DAG (functional_requirements.md, Requirement 19), drawn from
 	// `/api/composer/graph` — nodes and their ordering come from
 	// `STAGE_CONTRACTS`, never from a hand-written list here.
 	//

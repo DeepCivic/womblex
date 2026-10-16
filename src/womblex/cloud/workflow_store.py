@@ -3,7 +3,7 @@
 A *workflow* is a named, persisted recipe kept in the database DBOS's own tables
 live in (`dbos_app.system_database_url`), so a local run needs no second database.
 
-Schema and storage only (`docs/decisions.md`, Phase 2 merge 1):
+Schema and storage only (`docs/decisions-operations.md`, Phase 2 merge 1):
 `destinations` round-trip but are not dispatched (`conditions` label documents through
 `workflow_conditions`), `triggers` are scheduled by `workflow_schedules`, and nothing here runs a
 workflow. The table is created if absent; there is no versioned migration yet.

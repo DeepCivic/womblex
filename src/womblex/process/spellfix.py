@@ -1,7 +1,7 @@
 """Constrained, dictionary-gated OCR character-confusion repair.
 
 This is **not** a general spell-corrector and deliberately not the rejected
-substitution-table OCR fix in ``docs/decisions.md`` (which enumerated errors as
+substitution-table OCR fix in ``docs/decisions-dead-ends.md`` (which enumerated errors as
 fixed rules). It validates candidates against the bundled en_AU Hunspell
 dictionary (read with the pure-Python ``spylls`` engine) and only rewrites a
 token when **all three gates** pass, so valid words and ambiguous cases are

@@ -1,5 +1,5 @@
 <script lang="ts">
-	// The Pipeline Composer (docs/ui-plan.md merge 9; dispatch moved here later).
+	// The Pipeline Composer (functional_requirements.md, Requirement 19; dispatch moved here later).
 	// It edits configuration and shows the
 	// pipeline's shape, and — as the console's one dispatch surface — enqueues a
 	// run over the deployment's configured ingest location.
@@ -56,7 +56,7 @@
 	let defs = $derived(schema?.$defs ?? {});
 	let selectedNode = $derived(graph?.nodes.find((n) => n.id === selected) ?? null);
 
-	// Saving the composed config as a named preset (docs/ui-plan.md merge 9).
+	// Saving the composed config as a named preset (functional_requirements.md, Requirement 19).
 	// The server strips `dataset`/`paths` (a preset is an overlay) and validates
 	// the rest, so this form sends the whole current config and lets the server
 	// do the stripping — the browser re-implements no part of that.

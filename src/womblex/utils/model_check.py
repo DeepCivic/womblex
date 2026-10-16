@@ -27,6 +27,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from womblex.utils.model_registry import (
+    SLOT_EMBEDDING,
     SLOT_ENRICHMENT,
     SLOT_LAYOUT,
     SLOT_OCR,
@@ -60,6 +61,7 @@ ISAACUS = "isaacus"
 
 # The modules that register the built-in models at import.
 _BUILTIN_MODULES = (
+    "womblex.analyse.embed",
     "womblex.analyse.enrich",
     "womblex.ingest.paddle_ocr",
     "womblex.pii.cleaner",
@@ -173,10 +175,13 @@ def _candidates(config: WomblexConfig) -> list[tuple[str, str, str, dict[str, An
         SCOPE_SPELLFIX, SLOT_SPELLFIX_DICTIONARY, config.spellfix.dict_name,
         dict(config.spellfix.dict_options),
     ))
+    from womblex.analyse.embed import calls_isaacus as embedding_calls_isaacus
     from womblex.analyse.enrich import calls_isaacus
 
     if not calls_isaacus(config.enrichment.model):  # an Isaacus provider is pinged instead
         out.append((SCOPE_ENRICH, SLOT_ENRICHMENT, config.enrichment.model, {}))
+    if not embedding_calls_isaacus(config.embedding.model):
+        out.append((SCOPE_EMBED, SLOT_EMBEDDING, config.embedding.model, {}))
     if config.pii.use_regex_backstop:  # the only consumer of the context model
         out.append((SCOPE_PII, SLOT_PII_CONTEXT, config.pii.model, dict(config.pii.model_options)))
     return out
@@ -223,10 +228,11 @@ def isaacus_models(
 ) -> list[ModelUse]:
     """The Isaacus models *config* calls for *scopes* (every enabled stage if ``None``).
 
-    Enrich calls its model when the provider is Isaacus's, embed always; chunk
+    Enrich and embed call their model when the provider is Isaacus's; chunk
     calls the enricher only under AI chunking (``chunking.chunking_model``) —
     plain chunking is offline.
     """
+    from womblex.analyse.embed import calls_isaacus as embedding_calls_isaacus
     from womblex.analyse.enrich import ai_chunking_model, calls_isaacus
 
     wanted = _enabled_scopes(config) if scopes is None else set(scopes)
@@ -234,7 +240,7 @@ def isaacus_models(
     for scope, model in (
         (SCOPE_ENRICH, config.enrichment.model if calls_isaacus(config.enrichment.model) else None),
         (SCOPE_CHUNK, ai_chunking_model(config)),
-        (SCOPE_EMBED, config.embedding.model),
+        (SCOPE_EMBED, config.embedding.model if embedding_calls_isaacus(config.embedding.model) else None),
     ):
         if model and scope in wanted:
             found.setdefault(model, []).append(scope)
@@ -315,6 +321,11 @@ def _load(use: ModelUse) -> Any:
         from womblex.config import EnrichmentConfig
 
         model = make_enrichment_provider(EnrichmentConfig(model=use.name))
+    elif use.slot == SLOT_EMBEDDING:
+        from womblex.analyse.embed import make_embedding_provider
+        from womblex.config import EmbeddingConfig
+
+        model = make_embedding_provider(EmbeddingConfig(model=use.name))
     else:
         model = resolve(use.slot, use.name).factory(**use.options)
     _warm(model)
@@ -343,6 +354,10 @@ def _smoke(use: ModelUse, model: Any) -> None:
     elif use.slot == SLOT_ENRICHMENT:
         if len(model.enrich([_PROBE_SENTENCE])) != 1:
             raise RuntimeError("returned no enrichment for the probe sentence")
+    elif use.slot == SLOT_EMBEDDING:
+        vectors = model.embed([_PROBE_SENTENCE])
+        if len(vectors) != 1 or not len(vectors[0]):
+            raise RuntimeError("returned no embedding for the probe sentence")
     elif use.slot == SLOT_PII_CONTEXT:
         import numpy as np
 

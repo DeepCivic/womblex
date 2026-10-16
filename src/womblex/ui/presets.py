@@ -12,7 +12,7 @@ run's identity and filesystem paths untouched.
 Presets are just data here for the same reason the DAG is: the composer's
 validation and YAML download go through the same ``WomblexConfig(**raw)``
 construction ``load_config`` uses, so a preset that would not load is a test
-failure, not a runtime surprise (``tests/test_ui.py`` builds each one).
+failure, not a runtime surprise (``tests/test_ui_composer.py`` builds each one).
 
 `DEFAULT-Isaacus` is the reference Isaacus pipeline:
 ``extract → normalise → enrich → chunk → build_graph → embed →
@@ -23,8 +23,9 @@ kanon-2-embedder retrieval index), monetary amounts and entity links produced
 over the one run. It targets PDF, DOCX and Markdown sources — the narrative formats
 among ``SUPPORTED_EXTENSIONS`` — which is what makes AI chunking and enrichment
 meaningful (spreadsheets are structured, not narrative). The vendored demo run
-(``run-throsby-demo``, ``womblex seed-demo``) is a completed run of exactly this
-shape, so the console's sample corpus and the preset stay in step.
+(``run-synthetic-demo``, ``womblex seed-demo``) is a completed run of this
+shape over the synthetic fixture documents, bar ``link`` (it needs a corpus
+reference register), so the console's sample corpus and the preset stay in step.
 
 The runnable, CLI-first source of truth for that shape is
 ``configs/default-isaacus.yaml`` — a complete config plus the per-stage command
@@ -77,8 +78,8 @@ class Preset:
 #: build_graph → embed → money → link.
 #:
 #: Mirrors ``configs/default-isaacus.yaml`` (the runnable, CLI-first source of
-#: truth) and the vendored demo run (``run-throsby-demo``, which is a completed
-#: run of this exact shape) — edit all three together. Settings beyond the bare
+#: truth) and the vendored demo run (``run-synthetic-demo``, a completed run of
+#: this shape bar ``link``) — edit all three together. Settings beyond the bare
 #: `enabled` flags are carried so the composer form seeds sensible values, not
 #: just toggles:
 #:
@@ -164,7 +165,7 @@ def get_preset(name: str) -> Preset | None:
 
 
 # ---------------------------------------------------------------------------
-# Operator-saved presets (docs/ui-plan.md merge 9)
+# Operator-saved presets (docs/functional_requirements.md, Requirement 19)
 # ---------------------------------------------------------------------------
 #
 # Besides the built-ins above (code), an operator can *save* a composed config
@@ -178,7 +179,7 @@ def get_preset(name: str) -> Preset | None:
 
 #: The store prefix operator-saved presets live under in remote mode — a
 #: sibling of ``runs/`` in the same bucket, so the container
-#: stays ``read_only`` (docs/ui-plan.md merge 9).
+#: stays ``read_only`` (docs/functional_requirements.md, Requirement 19).
 PRESETS_DIRNAME = "presets"
 
 _PRESET_SUFFIX = ".preset.json"

@@ -1,8 +1,7 @@
-"""Tests for the Resources Console (docs/ui-plan.md merge 10).
+"""Tests for the Resources Console (docs/functional_requirements.md, Requirement 20).
 
-Kept out of ``test_ui.py`` (already at the 750-line file cap) rather than
-growing it further — ``TestResourcesApi`` needs none of that file's shared
-fixtures, since every case builds its own ``TestClient`` directly.
+``TestResourcesApi`` needs none of the shared console fixtures, since every
+case builds its own ``TestClient`` directly.
 """
 from __future__ import annotations
 
@@ -20,7 +19,7 @@ from womblex.ui.deps import resolve_settings
 
 class TestResourcesApi:
     """The Resources Console reuses existing library reads rather than adding
-    detection logic of its own (docs/ui-plan.md merge 10): `GET /api/resources`
+    detection logic of its own (docs/functional_requirements.md, Requirement 20): `GET /api/resources`
     is cheap and network-free; `POST /test/*` is the live check behind each
     card's action button.
     """
@@ -43,7 +42,7 @@ class TestResourcesApi:
         self, tmp_path: Path
     ) -> None:
         """A plain dir used as ``store_uri`` (fsspec's local backend, as
-        ``test_ui.py``'s ``api_client`` fixture does) is real for
+        the ``api_client`` fixture in ``conftest.py`` does) is real for
         ``settings.is_remote``, but it is not an object store."""
         pytest.importorskip("fsspec")
         client = TestClient(create_app(store_uri=str(tmp_path / "store")))

@@ -450,7 +450,7 @@ class EnrichmentConfig(StrictModel):
         description=(
             "Persist the raw ILGS Document per doc to *.enrichment_doc.parquet so "
             "the chunk stage reuses it for semchunk-4 AI chunking without "
-            "re-enriching (docs/decisions.md). Off by default (large blob); "
+            "re-enriching (docs/decisions-dead-ends.md). Off by default (large blob); "
             "auto-enabled by WomblexConfig when chunking.chunking_model is set."
         ),
     )
@@ -640,7 +640,7 @@ class WomblexConfig(StrictModel):
         """Auto-wire single-enrichment reuse when AI chunking + enrich both run.
 
         To avoid enriching the same narrative twice, the enrich stage persists
-        the raw ILGS Document and the chunk stage reuses it (docs/decisions.md).
+        the raw ILGS Document and the chunk stage reuses it (docs/decisions-dead-ends.md).
         When both are on we auto-enable ``enrichment.persist_document`` and warn
         only about the ordering the config can't enforce: enrich must run before
         chunk, else chunk self-enriches (the double-enrich falls back per doc).

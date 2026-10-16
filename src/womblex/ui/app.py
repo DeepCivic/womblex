@@ -1,6 +1,6 @@
 """FastAPI app factory for the console sidecar.
 
-Serves the read API, and the built SPA (``ui/``, docs/ui-plan.md merge 4)
+Serves the read API, and the built SPA (``ui/``, docs/functional_requirements.md, Requirement 15)
 when one has been built alongside it.
 """
 from __future__ import annotations

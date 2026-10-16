@@ -1,5 +1,5 @@
 
-"""The Pipeline Composer's read model (docs/ui-plan.md merge 9).
+"""The Pipeline Composer's read model (docs/functional_requirements.md, Requirement 19).
 
 Two static sources, neither run-scoped — unlike every other screen, the
 composer edits configuration and shows the pipeline's shape, it does not
@@ -40,7 +40,7 @@ EXTRACT_NODE = "extract"
 #: Which `WomblexConfig` section configures each stage. Not derivable from
 #: `StageContract` — contracts name parquet suffixes, not config fields — so it
 #: is declared here, beside the config models, rather than in the frontend
-#: where it would drift silently (`tests/test_ui.py` asserts every name is a
+#: where it would drift silently (`tests/test_ui_composer.py` asserts every name is a
 #: real field). It is what lets a node in the composer's graph carry its own
 #: enabled toggle instead of the operator hunting for the matching section.
 #: `graph-refresh` is absent because it has none: it re-derives edges from what

@@ -116,6 +116,11 @@ value — a process that loaded, built or checked nothing writes no key — and
 all are additive metadata, so a reader that ignores them reads the file
 unchanged. No column is added for any.
 
+The run record in `manifest.parquet`'s footer can be exported as an OpenLineage
+2-0-2 `RunEvent` (`womblex manifest --shards DIR --lineage OUT`). It carries the
+record's own facts, with the run id, file keys and digests, models and services
+in `womblex_*` facets, and no document text.
+
 ## Safe to hand onward
 
 Only files whose footer says `sensitivity=masked` or `none`. Anything `raw`,

@@ -38,7 +38,8 @@ def _register_embed(p: argparse.ArgumentParser) -> None:
 
 
 def cmd_embed(args: argparse.Namespace) -> int:
-    """Embed a shard directory's chunks via the Isaacus embedding API."""
+    """Embed a shard directory's chunks through the configured embedding provider."""
+    from womblex.analyse.embed import calls_isaacus
     from womblex.analyse.embed_stage import embed_shards
     from womblex.config import EmbeddingConfig, load_config
     from womblex.store.checkpoint import CheckpointManager
@@ -58,11 +59,13 @@ def cmd_embed(args: argparse.Namespace) -> int:
 
     embedding_config = load_config(args.config).embedding if args.config else EmbeddingConfig()
 
+    client = None
     try:
         # Hosted API (ISAACUS_API_KEY) or SageMaker (ISAACUS_SAGEMAKER_ENDPOINTS),
         # whichever the environment declares; the model is checked against the
-        # deployed endpoints up front.
-        client = make_isaacus_client(models=[embedding_config.model])
+        # deployed endpoints up front. Another provider takes no client.
+        if calls_isaacus(embedding_config.model):
+            client = make_isaacus_client(models=[embedding_config.model])
     except ImportError as e:
         logger.error("Isaacus SDK not usable (reinstall womblex): %s", e)
         return 1

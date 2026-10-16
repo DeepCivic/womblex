@@ -62,7 +62,7 @@
 #   export COMPOSE_FILE=docker-compose.yml:docker-compose.local.override.yml
 #   docker compose --profile local up -d postgres minio createbuckets init
 #   docker compose --profile seed up seed-demo
-#   docker compose up -d ui           # run-throsby-demo now shows at :8080
+#   docker compose up -d ui           # run-synthetic-demo now shows at :8080
 #
 # Inputs and outputs share the s3://womblex bucket, on disjoint prefixes:
 # source documents live under inbox/, shards land at runs/<run_id>/documents/.
@@ -240,7 +240,7 @@ services:
     command: ["worker", "--config", "configs/example.yaml",
               "--poll-interval", "5"]
 
-  # One-shot, opt-in: publish the vendored sample corpus (run-throsby-demo)
+  # One-shot, opt-in: publish the vendored sample corpus (run-synthetic-demo)
   # into the bucket so a fresh console shows a browsable run instead of
   # "Sample corpus not present". Behind a profile so a real deployment does
   # not seed a sample into its own store unasked; run it explicitly with

@@ -17,7 +17,8 @@ A config names registered models only. An unknown name raises and lists the
 known names; anything shaped like an import path is refused. A plugin cannot
 take a built-in's name or alias. Options in the config (`engine_options`,
 `layout.options`, `model_options`, `tokenizer_options`, `dict_options`)
-reach the factory as keyword arguments, unchanged.
+reach the factory as keyword arguments, unchanged. The enrichment and embedding
+factories take no options key: they receive their config section instead.
 
 ## Slots
 
@@ -28,10 +29,13 @@ reach the factory as keyword arguments, unchanged.
 | PII context model | `womblex.models.pii-context` | `pii.model` | `model_options` | an object with `encode(texts) -> embeddings` |
 | Chunk tokeniser | `womblex.models.tokenizer` | `chunking.tokenizer` | `tokenizer_options` | a Hugging Face id string, or a `(str) -> int` token counter |
 | Spellfix dictionary | `womblex.models.spellfix-dictionary` | `spellfix.dict_name` | `dict_options` | an object with `lookup(word)`, as a Hunspell dictionary has |
+| Enrichment provider | `womblex.models.enrichment` | `enrichment.model` | `config=` (`EnrichmentConfig`), `client=`, `token_counter=` | an `EnrichmentProvider` |
+| Embedding provider | `womblex.models.embedding` | `embedding.model` | `config=` (`EmbeddingConfig`), `client=` | an `EmbeddingProvider` |
 
 Slot names and the interfaces above are defined in the code that resolves
 them: `ingest/paddle_ocr.py`, `ingest/interfaces/protocols.py`,
-`pii/cleaner.py`, `process/chunker.py`, `process/spellfix.py`.
+`pii/cleaner.py`, `process/chunker.py`, `process/spellfix.py`, `analyse/enrich.py`,
+`analyse/embed.py`.
 
 ### OCR output shape
 
@@ -69,7 +73,63 @@ object; it appears in the check result and the run record. A `smoke` check
 needs, per slot: OCR, a non-empty reading of a rendered text line; layout,
 regions that pass `check_layout_regions`; PII context, `encode` returning
 `(1, dim)`; tokeniser, a non-empty chunking of a sentence; dictionary,
-`lookup("the")` truthy. A failure names the slot, the model and the reason.
+`lookup("the")` truthy; enrichment, one result for a sentence; embedding, one
+non-empty vector. A failure names the slot, the model and the reason.
+
+### Enrichment and embedding providers
+
+An enrichment provider has a `name`, a `limits` (`ProviderLimits`) and
+`enrich(texts) -> list[(EnrichmentResult, document | None)]`: one result per
+text, its offsets into the text sent, independent of which other texts share
+the request. Map labels onto the existing taxonomy inside the provider (a
+`Person` of `type="natural"` is what PII masks as `PERSON`). The limits it
+declares are what the stage packs and splits by: `max_texts_per_request`,
+`token_ceiling` (a longer text is split on blank lines and the results
+offset-merged), `token_counter` (`count_batch(texts) -> list[int]`),
+`needs_network`, and `returns_document`.
+
+An embedding provider has a `name`, a `limits` (`EmbeddingLimits`:
+`max_texts_per_request`, `needs_network`) and `embed(texts) -> list[list[float]]`,
+one vector per text in order.
+
+Womblex keeps everything around the call: request packing, long-document
+splitting, the table pass, the sidecars, the evidence reference and the
+mention-to-chunk mapping. A provider changes who recognises entities or
+computes vectors and nothing downstream.
+
+Two factory traits answer the pre-launch gates before anything is built.
+`returns_document` declares that `enrich` hands back a Document AI chunking
+can reuse; without it nothing is persisted, `chunking.chunking_model` is set
+aside, and chunks come from semchunk's local token splitting. `isaacus` gates the stage on an Isaacus deployment; leave it off a
+provider Isaacus does not serve. A provider with neither runs with
+`client=None` and is checked like any local model.
+
+```toml
+[project.entry-points."womblex.models.enrichment"]
+my-ner = "my_pkg.ner:make_provider"
+```
+
+```python
+# my_pkg/ner.py
+from womblex.analyse.enrich import ProviderLimits
+from womblex.analyse.models import EnrichmentResult, Person, Span
+
+class WordCounter:
+    def count_batch(self, texts): return [len(t.split()) for t in texts]
+
+class Provider:
+    name = "my-ner"
+    limits = ProviderLimits(max_texts_per_request=16, token_ceiling=4_000,
+                            token_counter=WordCounter(), needs_network=False,
+                            returns_document=False)
+    def enrich(self, texts):
+        return [(EnrichmentResult(text=t, type="other", persons=[
+            Person(id="p0", name=Span(0, 4), type="natural", role="other",
+                   mentions=[Span(0, 4)])]), None) for t in texts]
+
+def make_provider(*, config, client=None, **_):
+    return Provider()
+```
 
 ### PII context model
 

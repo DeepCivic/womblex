@@ -227,7 +227,7 @@ def _log_entry(name: str, size: int, mtime: float) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Operator-saved presets (docs/ui-plan.md merge 9)
+# Operator-saved presets (docs/functional_requirements.md, Requirement 19)
 # ---------------------------------------------------------------------------
 #
 # Presets get the same local-vs-store treatment as other console

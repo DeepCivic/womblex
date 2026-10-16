@@ -2,7 +2,7 @@
 
 Extraction is **verbatim by policy** — whatever the producing extractor
 emits lands on the element ``text`` unchanged (see CLAUDE.md and
-``docs/decisions.md`` "Verbatim policy"). Systematic cleanup belongs to
+``docs/decisions-dead-ends.md`` "Verbatim policy"). Systematic cleanup belongs to
 *this* downstream op, never to a normalisation pass at the extraction
 boundary.
 
@@ -30,7 +30,7 @@ v1 scope (intra-element):
 Deferred (cross-element, needs a reassembly join-hint): re-joining
 redaction-induced paragraph breaks — the PDF text layer returns text either side of
 a mid-paragraph redaction bar as separate blocks. See
-``docs/decisions.md`` "Deferred / backlog".
+``docs/decisions-dead-ends.md`` "Deferred / backlog".
 """
 
 from __future__ import annotations

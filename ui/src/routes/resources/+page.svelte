@@ -1,5 +1,5 @@
 <script lang="ts">
-	// The Resources Console (docs/ui-plan.md merge 10):
+	// The Resources Console (functional_requirements.md, Requirement 20):
 	// four connection cards, none of them
 	// run-scoped — like the Composer, this screen reads deployment configuration,
 	// not a run's artefacts. All four are read-only and credential-masked:

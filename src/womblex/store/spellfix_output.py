@@ -16,7 +16,7 @@ Repair lands at the **element** layer — the shared source both the chunk branc
 (``build_chunk_input``) and the enrichment branch (``reassemble_narrative``)
 fork from — so the repaired text composes across chunking, embeddings, Kanon-2
 enrichment and PII in a single coordinate space (mention offsets stay aligned
-with chunk offsets). See ``docs/decisions.md`` "Dictionary-gated OCR repair".
+with chunk offsets). See ``docs/decisions-dead-ends.md`` "Dictionary-gated OCR repair".
 """
 
 from __future__ import annotations

@@ -177,7 +177,7 @@ class SpellfixConfig(StrictModel):
     ``*.spellfix_corrections.parquet`` audit trail — the raw elements are never
     modified. Consumers opt in by setting ``processing.text_source='spellfix'``.
     Only out-of-dictionary tokens with a single unambiguous in-dictionary
-    candidate are rewritten. See ``docs/decisions.md`` "Dictionary-gated OCR repair".
+    candidate are rewritten. See ``docs/decisions-dead-ends.md`` "Dictionary-gated OCR repair".
     """
 
     enabled: bool = Field(default=False, description="Run the spellfix stage.")
