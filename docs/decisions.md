@@ -161,7 +161,7 @@ engines".
 - **Destinations come in this order (D11):** object storage (built on egress), Postgres with pgvector, then webhook notifications. `httpx`, already locked through the Isaacus SDK, is approved for direct declaration for webhooks; each database or vector-store destination brings its own client in a per-destination extra.
 
 ### A workflow is a stored object, not an extended preset or a recipe file
-2026-10; D8 of the trust-and-recipes plan, shipped as Phase 2 merges 1–9a (`cloud/workflow_store.py`). A preset is a partial config applied once per run; it holds no step sequence, inputs, conditions or destinations. A stored workflow references a preset and adds those, in its own table in the database DBOS uses, owner-scoped as runs are, its digest stamped beside `config_digest`. The up-front ordering check (D4) shipped with it (merge 3), so local and fleet runs got it at once.
+2026-10; D8 of the trust-and-recipes plan, shipped as Phase 2 merges 1–9b (`cloud/workflow_store.py`). A preset is a partial config applied once per run; it holds no step sequence, inputs, conditions or destinations. A stored workflow references a preset and adds those, in its own table in the database DBOS uses, owner-scoped as runs are, its digest stamped beside `config_digest`. The up-front ordering check (D4) shipped with it (merge 3), so local and fleet runs got it at once.
 
 - *Rejected:* **extending the preset** with steps, conditions and destinations. One schema and no new storage, but it mixes how a stage behaves with what runs and where results go, and leaves nothing for a standing trigger to act on.
 - *Rejected:* **a recipe file** in the user's repository. Diffable, with no storage or lifecycle, and promotable later, but it cannot carry standing triggers; event subscriptions would be declared per run.
@@ -209,6 +209,16 @@ Phase 2 merge 8. A condition (`column op value` over a manifest column) labels e
 
 - *Rejected:* **one document refuses the run** — the merge's first cut, a conjunction that had to hold for every document, with a null cell failing every operator. One errored or unusual document (null counts) refused downstream work for every other document. It contradicts "individual document failures shouldn't stop the batch" (CLAUDE.md), the requirement that document errors "do not crash the wider batch", and the evidence reference's ruling that one receipt never refuses the batch. Do not re-attempt.
 - *Rejected:* **conditions evaluated after launch as a gate** (the coordinator holding them once extraction settles). It stops a launched run; after launch a condition may only label.
+### A trigger fires a dispatch
+Phase 2 merge 9b (#197, re-landed after it merged into a stacked base that had already merged). A DBOS schedule per trigger, firing `womblex.run_scheduled` on the coordinator queue every worker serves. The firing is the run's launch: id `<workflow id>-<UTC firing time>`, `input_binding.ingest_prefix` listed through the same `supported_keys` the console uses, owner copied from the stored workflow.
+
+- **Check first.** A dry-run dispatch, the owner's prefix and at least one document are checked before any row, so a firing that cannot complete queues nothing and fails with the refusal's code.
+- **An owned workflow extracts only under `<owner>/`** (`dispatch.owned_prefix`, the rule the API applies to a submission), refused again by `schedule-workflow` so it is never scheduled.
+- **Conditions follow extraction**, labelled by the coordinator (merge 9a).
+- **No incrementality.** Every firing re-extracts the prefix; "only new documents" needs a seen-set Womblex does not keep, and is a separate decision. No backfill (`automatic_backfill` false).
+- **Deleting a workflow does not unschedule it.** `schedule-workflow --remove` does (by id), and a firing for a deleted workflow fails naming it.
+- **A firing is a row of its run.** DBOS names a scheduled workflow `sched-…` with no attributes, so the firing runs as a child `<run>:trigger` carrying the run's id and owner. Two triggers firing at one instant share the run id, so the second attaches to the first and runs nothing. The firing body lives in `workflow_dispatch`, beside the dispatch it composes; `workflows.py` holds only the DBOS wrappers.
+- **Limits.** `schedule-workflow` refuses only the owner-prefix rule; any other refusal surfaces per firing. A dispatch that fails after the batches are queued leaves extraction without stages (the firing is recorded failed). No test runs on Postgres: the schedule tests use the SQLite system database, and the CLI tests clear CI's `WOMBLEX_DB_DSN`. Before they did, #200's CI reached Postgres by accident and showed `--status` on a database whose DBOS tables are not yet created failing on the missing `workflow_schedules` table, where a missing SQLite file prints nothing. No test waits for DBOS's scheduler to start a firing on its own: the tests set a cron that never comes due and enqueue each firing with the workflow name, queue and context its schedule holds.
 
 ### The remote shard-stage runner generalises `finalize`
 Extraction went distributed in 2026-06; everything downstream of it stopped at

@@ -71,6 +71,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 **TO-DO:**
 
 - **A missing required input is not a fail-fast, before-processing error for a single `run-stage --store`.** `stage_runner.run_stage_remote` resolves required inputs *per base* and raises `NotReady`, caught and logged as a warning; the run exits `0` unless every discovered base is not ready (`StageRunSummary.exit_code`). Deliberate: a still-draining fleet must not read as an ordering error. The whole-sequence check now exists for a stored workflow and for stage dispatch (`cloud/workflow_order.py`, refusals `input_missing` / `input_out_of_order` / `input_stale`): option (a) from the earlier note, with extraction's siblings treated as arriving. A stored workflow dispatched with `dispatch-workflow` is checked the same way before any row; a lone `run-stage` keeps its per-base behaviour.
+- **Stored workflows and their standing triggers have no requirement of their own.** Saving, validating, planning, running, dispatching and scheduling a stored workflow (`cloud/workflow_*.py`, `womblex schedule-workflow` and its siblings) shipped without acceptance criteria; this requirement covers only the stage composition beneath them. A stored-workflows requirement absorbs this item.
 
 ## 4. File Profiling, Detection, and Routing
 
@@ -545,7 +546,7 @@ Requirements not yet fully met. The detail lives in the **TO-DO** block under ea
 
 
 - **Requirement 2 (Scale-Out):** Azure storage URIs (`az://` / `abfs://`) are not credential-wired, and the enrichment paths have no Azure ML connection.
-- **Requirement 3 (Ingest-First Data Flow):** up-front composition check covers workflows (local and `dispatch-workflow`) and dispatch, not a lone `run-stage --store` (per-base `NotReady`).
+- **Requirement 3 (Ingest-First Data Flow):** up-front composition check covers workflows (local and `dispatch-workflow`) and dispatch, not a lone `run-stage --store` (per-base `NotReady`); stored workflows and triggers have no requirement.
 - **Requirement 6 (Native Office and Spreadsheet Extraction):** multi-row headers are emitted for DOCX only; spreadsheets and the legacy table view collapse to row 0, no per-cell header-row coordinate exists, and cell formulas are never captured.
 - **Requirement 7 (Standalone Reference Register Ingestion):** G-NAF and geospatial writes are not guarded against partial output.
 - **Requirement 9 (Redaction Handling):** no redaction `pipeline_point`, and the E2E `run` path writes no `*.redactions.parquet`.
