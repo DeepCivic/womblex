@@ -1,61 +1,85 @@
-# Trust baseline and recipes — plan
+# Trust and Recipes — Plan
 
-*Status: in progress (2026-10). Phase 1 has shipped. Phase 2 shipped with design failures, and Phase R repairs them before Phase 3 starts. This document lists outstanding work only. Completed work is recorded in `CHANGELOG.md` and the enduring docs, and the conventions every merge holds to (merge size, stocktakes, stacked PRs, dependency merges) are in CLAUDE.md. Each merge removes its item from this document as it lands, and the document is deleted once its last item ships. A merge that reverses a recorded decision deletes that entry from the decision docs. It does not keep it as a "rejected" alternative: the design failures below are the record. Each phase ends with draft requirements written in the form of `functional_requirements.md`. The merge that satisfies a criterion moves it there, and removes the TO-DO and Outstanding entries it closes.*
+*Status: in progress, October 2026.*
 
-## Design failures — do not repeat
-Phase 2 shipped each of these. Before building, check every merge in this plan and every new plan against this list.
+Phase 1 is finished. Phase 2 is finished but has design mistakes, and Phase R fixes them before Phase 3 starts.
 
-1. **A field stored before anything uses it.** `destinations` was added to the stored workflow as "stored, not acted on yet". It was a TODO in schema form, and it produced design questions about rows that do nothing. *Rule:* a field lands in the merge that acts on it, and only with the kinds that merge builds.
-2. **An output nothing reads.** Conditions write `*.conditions.parquet`, which no module reads. Every label in it is a filter over `manifest.parquet`, which can be computed at any time. *Rule:* a new output names its reader in the same merge. Anything derivable from data already persisted is computed when read, not written.
-3. **Unattended automation that repeats paid work.** Each trigger firing re-extracts the whole ingest prefix under a new run id, and re-enriches and re-embeds it at Isaacus prices. *Rule:* anything that runs unattended processes only documents it has not seen, keyed by `source_hash`.
-4. **The operator surface was removed.** D-2.2 made a workflow creatable only by writing Python against `WorkflowStore`. "No specific YAML format" was misread as "no file at all". *Rule:* every object an operator defines has a file form beside `configs/*.yaml` and a CLI path. An operator never writes Python to use a feature.
-5. **A justification that was never delivered.** Storing workflows in the database won over a recipe file because a file "cannot carry standing triggers". The triggers were then built so that they repeat all work at every firing (failure 3). *Rule:* when a decision is justified by a feature, that feature ships in a useful form in the same phase, or the decision is reopened.
-6. **Refusals after launch, built and then reverted.** #186 refused a batch over failed evidence receipts, and #189 refused a run over one document's condition result. Both contradicted "a run is an arrow" and cost merges to undo. *Rule:* check a refusal against "a run is an arrow" before building it. Refusals go only in the pre-run checks.
-7. **Credentials in stored rows.** `WorkflowDestination.target: str` would have stored a Postgres DSN, password included, in `womblex_workflows`. *Rule:* a stored object names an environment variable, never a secret.
-8. **Decisions brought to the owner that the design already answers.** Plan reviews accepted stubs as premises and turned them into options for the owner. *Rule:* a question goes to the owner only if its answer changes what an operator or consumer gets. Anything the documented design answers is settled by the implementer and cited.
+This plan lists only the work still to do. Finished work is recorded in the change log and the other project documents. The rules every piece of work follows, such as how large one change can be and the review at the end of each phase, are in the project guide (CLAUDE.md). Each item is removed from this plan when it is done, and the plan is deleted when the last item is done.
 
-## Phase R — repair (branch)
-Decisions taken 2026-10-17. Each merge records its decision in `decisions-operations.md` and deletes the entries it reverses.
+When a piece of work reverses an earlier decision, the old decision is deleted from the decision records. It is not kept as a rejected option. The list of mistakes below is the record of what went wrong.
 
-- **D-R.1 Workflows are YAML files.** A workflow is a YAML file with the `StoredWorkflowSpec` fields. `run-workflow`, `validate`, `plan`, `dispatch-workflow` and `schedule-workflow` take its path. The file is the source. The `womblex_workflows` table holds the copy that scheduling writes and that a firing reads. `dispatch-workflow` writes no copy: the coordinator already receives the spec as its arguments. Reverses D-2.2 and the "recipe file" rejection.
-- **D-R.2 A workflow's run grows; it does not restart.** A trigger firing adds to one long-lived run per workflow. It hashes each file under the ingest prefix, extracts only `source_hash` values the run's manifest does not hold, as batches numbered on from the last, and runs the steps over those batches only. Stage ids and units are scoped to the firing, because `run:stage` would attach a second firing to the finished stage. A file whose bytes change is a new document, and the old one stays. Handling superseded documents is out of scope. Replaces "No incrementality".
-  Each firing runs under the digest of the stored copy it reads. After an edit, later firings apply the new recipe to new documents only. Documents processed under an earlier digest are not processed again, and the run record lists each digest with the stages it wrote. Merge 7b's `run_conflict` refusal is deleted, because its reason (stage ids of the form `run:stage`) goes with firing-scoped ids.
-- **D-R.3 Conditions are removed.** The code, the sidecar, the spec field and their docs go. A filter over `manifest.parquet` gives the same answer.
-- **D-R.4 The `destinations` field is removed.** It returns in 3.2c with the object-store kind only.
+Each phase ends with draft requirements, written in the same form as the requirements document. When a piece of work meets a requirement, the requirement moves into that document.
 
-*Proposed 2026-10-17, not yet decided.* These repair Phase 2 and earlier merges found in the review of #182 to #222.
-- **D-R.5 A run's state comes from the latest attempt of each piece of work.** A coordinator's state is derived from the latest attempts of its stages. A failed firing row stops counting once its run has a coordinator. A run whose failures have all been retried successfully, or whose orphaned firing has been dispatched, reads `done`. Reverses D-2.1's "the coordinator's own row stays `failed`".
-- **D-R.6 A retry resends only the work the failure affected.** `ran_after_failed` is recorded per batch as well as per stage. Retrying a later stage runs only its units over batches whose inputs the failed stage's retry rewrote, plus units that failed or were not ready. Completed units over unchanged inputs are never sent to a paid service again.
-- **D-R.7 Every dispatch carries its config.** Extraction batches, `enqueue-stages`, the console and `POST /v1/runs` pass the resolved config as a workflow argument, as merge 7a does for workflows. A worker contributes only its `paths`. The order check and the stamped `config_digest` are over the config the work actually runs under. This reverses Requirement 22's "selects downstream stages only".
-- **D-R.8 Work runs only where its models were checked.**
-  - A stage queue is named for the stage and the models its config names, as an extraction queue is named for its ingest root.
-  - A worker checks the models of every stage contract in its own config, enabled or not, and joins only the queues it passed.
-  - A worker records the queues it serves.
-  - Dispatch, a firing and `retry-stage` are refused before any row when no live worker serves a queue the work needs.
-  - A retry runs every check a dispatch runs, not only the model-registration check.
-- **D-R.9 A workflow's input names its ingest root.** `input_binding` holds the ingest root URI beside the prefix. Credentials come from the environment, per failure 7. A firing is enqueued on that root's queue, so only a worker serving that root runs it. `schedule-workflow` checks against the same root, and its `--ingest` flag goes.
-- **D-R.10 Scheduling writes the copy and its schedules together.** `schedule-workflow` is the only writer of the stored copy. In one call it runs `check_firing` and makes the schedules equal the copy's triggers. A copy with no triggers has no schedules.
-- **D-R.11 A run's files name the recipe that wrote them.** Beside its digest, each sidecar written by a workflow step carries the workflow id and the full spec. The run record lists each observed workflow by id, digest and spec, so the recipe can be recovered from the run alone after the file or its stored copy is edited.
-- **D-R.12 `plan` counts every paid call through the provider that makes it.**
-  - It counts AI chunking's enricher requests for documents whose Document cannot be reused.
-  - `EmbeddingLimits` declares a `token_counter`, as `ProviderLimits` does, and `plan` counts embed tokens with it.
-  - A step whose provider declares `needs_network=False` is reported as making no paid calls.
-- **D-R.13 A workflow has no owner.** No operator surface sets one (the CLI has no owner flag, and a service-API route for workflows is out of scope). So the copy holds no `owner`, firings run unowned like CLI and console runs, and the owner-prefix check on firings goes. An owner returns with a service-API route for workflows, if one is built. Reverses "owner-scoped as runs are" for workflows.
+## Words used in this plan
+- **Workflow:** a saved recipe. It names the settings to use, the steps to run, where the documents are, and when to run.
+- **Step:** one stage of processing, such as reading the text, finding names, or creating search vectors.
+- **Run:** one pass of processing over a set of documents.
+- **Group of documents:** the documents processed together as one unit within a run.
+- **Cloud machines:** the computers that process runs sent to the cloud.
+- **Paid service:** an outside service that charges for each piece of text it processes.
+- **Export package:** the folder of results, and optionally original documents, that Womblex prepares for another system.
+- **Scheduled run:** a run started automatically at a set time.
 
-**Merges:**
-- **R.1 Remove conditions** (D-R.3). Delete `cloud/workflow_conditions.py` and `store/conditions_output.py`, the labelling step in `cloud/workflows.py` and in the runner, the spec field, the condition digests in `cloud/jobs.py`, and their tests. Docs: the conditions entry in `decisions-operations.md`, `workflows.md`, Requirement 27, CLAUDE.md rows, `architecture.md`, `project-structure.md`. Split into fleet path then spec and modules if it goes over the cap.
-- **R.2 Remove `destinations`** (D-R.4). The spec field, the runner's "not acted on" warning, tests. Docs: `workflows.md`, Requirement 27's destinations TO-DO and its Outstanding entry.
-- **R.2b Remove the workflow's owner** (D-R.13). The `owner` column and argument in `cloud/workflow_store.py`, `WorkflowOwnedError`, the owner-prefix check in `check_firing` (`prefix_not_owned`), and the owner copied onto a firing's rows. Docs: `workflows.md`, Requirement 27, the CLAUDE.md rows.
-- **R.3 Workflows from YAML** (D-R.1, D-R.10). The five commands take a path. An example workflow sits beside `configs/default-isaacus.yaml` and replaces its commented commands. `dispatch-workflow` stops writing the stored copy. `schedule-workflow` writes the copy, runs `check_firing` and syncs the schedules in one call. Docs: `workflows.md` (the "Saving one" Python block goes), README command table, D-2.2 deleted.
-- **R.3b A workflow names its ingest root** (D-R.9). An `input_binding` field, the firing enqueued on the root's queue, and `schedule-workflow --ingest` removed. Docs: `workflows.md`, `decisions-operations.md` ("A trigger fires a dispatch").
-- **R.4 Incremental firings** (D-R.2). `workflow_dispatch.fire_workflow` lists the prefix and hashes against the run's manifest, `dispatch.batch_specs` numbers on from the last batch, and stage ids and `plan_units` are scoped to the firing. `cloud/retry.py` follows the new stage ids. `run_conflict` is deleted from `workflow_dispatch.py` and `RefusalCode`. Docs: `decisions-operations.md` ("A trigger fires a dispatch"; "No incrementality" and the `run_conflict` part of merge 7b deleted), `workflows.md`. Split mechanical (firing-scoped ids) then behaviour (hash-and-skip) if over the cap.
-- **R.5 Run state from latest attempts** (D-R.5). `cloud/jobs.py` rollup and `_orphaned`, and the API run state. Docs: D-2.1's "Kept as is" deleted, Requirement 28.
-- **R.6 Every dispatch carries its config** (D-R.7). `cloud/dispatch.py`, `RunBoard.enqueue` / `enqueue_stages`, `workflows.extract_batch` and `_stage_config`. Docs: Requirements 22 and 28, `service-api.md`, `decisions-operations.md` (merge 7a widened to every path).
-- **R.7 Model-keyed stage queues** (D-R.8). `dbos_app.stage_queue`, `worker.served_queues` and its record of served queues, the unserved-queue refusal in dispatch, firing and retry, and `retry_stage` running the dispatch checks. Docs: Requirement 28, `decisions-operations.md`. Split the queue naming from the refusal if over the cap.
-- **R.8 A retry resends only affected work** (D-R.6). Per-batch `ran_after_failed` on the coordinator, and a later stage's retry run over the affected units only. Docs: D-2.1, Requirement 28.
-- **R.9 Recipes in files and the run record** (D-R.11). `store/run_stamp.workflow_context` carries the id and spec, and `run_manifest._observed_workflows` lists them in the next run-record version (3.2c's `deliveries` takes the one after). Docs: `contract.md`, Requirement 27.
-- **R.10 `plan` counts every paid call** (D-R.12). `cloud/workflow_plan.py`, `EmbeddingLimits`, `embed_stage.plan_embedding`, and an AI-chunking count from `chunk_stage`. Docs: `workflows.md`, `model-plugins.md`.
-- **R.11 Stocktake S-R.**
+## Mistakes to avoid
+Phase 2 made each of these mistakes. Check every item in this plan, and every new plan, against this list before building.
+
+1. **Saving a setting before anything uses it.** Workflows got a "send results to" setting that did nothing, which led to questions about settings with no effect. *Rule:* a setting is added in the same piece of work that makes it do something.
+2. **Writing a file nobody reads.** Workflow "conditions" wrote a file of labels that nothing reads. The same labels can be worked out from the run's document list at any time. *Rule:* every new output names who reads it. Anything that can be worked out from saved data is worked out when needed, not saved again.
+3. **Automatic runs that pay twice.** Each scheduled run processes every document again and pays the outside service again for each one. *Rule:* anything that runs on its own processes only documents it has not seen before.
+4. **Taking away the operator's tools.** A workflow could only be created by writing program code. *Rule:* anything an operator sets up has a settings file and a command. An operator never writes code to use a feature.
+5. **A reason that was never delivered.** Workflows were stored in a database rather than a file because a file "cannot hold a timetable". The timetable was then built so that it repeats all the work every time (mistake 3). *Rule:* when a feature is the reason for a decision, that feature must work properly in the same phase, or the decision is reopened.
+6. **Stopping a run after it started, then undoing it.** Two changes stopped work part way through a run because of a single document. Both broke the rule that a run, once started, always finishes, and both had to be undone. *Rule:* every check that can stop a run happens before the run starts.
+7. **Passwords in saved settings.** A planned setting would have saved a database password inside the stored workflow. *Rule:* saved settings name where a password is kept, never the password itself.
+8. **Asking the owner questions the design already answers.** Reviews treated unfinished pieces as settled and asked the owner to choose between options. *Rule:* only ask the owner a question if the answer changes what users get. Anything the written design already answers is settled by the builder, who says where.
+
+## Phase R — Repairs
+
+### Decisions made on 17 October 2026
+Each piece of work records its decision in the operating decisions document and deletes any decision it reverses.
+
+- **Decision 1. Workflows are files.** A workflow is a plain text settings file, and every workflow command takes the file's location. The file is the master copy. Womblex keeps its own copy only when a workflow is scheduled, because scheduled runs read that copy. Sending a workflow to the cloud keeps no copy, because the cloud run receives the whole workflow when it starts. This reverses the decision that workflows are created only through code.
+- **Decision 2. A scheduled workflow adds to one run instead of starting again.** Each scheduled run checks every file in the document folder, processes only the documents the run does not already have, and runs the steps on those new documents only. A file whose contents change counts as a new document, and the old version stays. Removing old versions is not part of this work.
+  Each scheduled run uses the workflow as it is when that run starts. After an edit, the new version applies to new documents only. The rule that refused a run already used by another version of a workflow is removed, because it no longer serves a purpose.
+- **Decision 3. Conditions are removed.** Everything they produced can be found from the run's document list.
+- **Decision 4. The "send results to" setting is removed.** It returns in Phase 3, once results can actually be sent.
+
+### Decisions proposed on 17 October 2026, not yet made
+These fix problems found in a review of the work done between 10 and 17 October.
+
+- **Decision 5. A run's status reflects the latest try at each piece of work.** Today, a run whose failed step was retried successfully still shows as failed, and so does a scheduled run that was fixed by hand. After this change, both show their real status. This reverses the earlier rule that the original failure keeps counting.
+- **Decision 6. A retry redoes only the work the failure affected.** Today, retrying a step that ran after a failure redoes every group of documents and pays the outside service again for all of them. After this change, it redoes only the groups the failure affected.
+- **Decision 7. Every cloud run uses the settings it was sent with.** Today, only workflows do. Runs sent from the web API, the web console or the command line use each cloud machine's own settings, so the same run can behave differently on different machines. After this change, every run carries its settings with it. This reverses the part of Requirement 22 that says submitted settings only choose which steps run.
+- **Decision 8. Work goes only to machines checked for it.** Today, a machine checks only the AI models its own settings use, but accepts work that needs other models. After this change:
+  - each piece of work goes only to machines that have checked the models it needs;
+  - a machine checks the models for every step in its settings, whether or not that step is turned on;
+  - each machine records which kinds of work it accepts;
+  - if no running machine can do the work, the work is refused before anything starts;
+  - a retry runs every check a new run would.
+- **Decision 9. A workflow names where its documents are stored.** Today, a scheduled run reads from whichever storage the machine that picks it up uses. After this change, the workflow names the storage, and only machines that use it run the workflow. Passwords for the storage still come from the machine, never the workflow.
+- **Decision 10. Scheduling saves the workflow and its timetable together.** Today, a stored workflow can be changed without updating its timetable, so the saved times and the real timetable can differ. After this change, only scheduling saves a workflow, and it runs the checks and updates the timetable in the same action.
+- **Decision 11. A run records the whole workflow that made it.** Today, a run records only a code for the workflow's version, and once the workflow changes the original cannot be found. After this change, each output file and the run's summary record hold the workflow's name and full contents.
+- **Decision 12. The pricing command counts every paid call.** Today, it misses the paid calls made when text is split into pieces using AI, and it counts text for every outside service as if it were the default one. After this change:
+  - AI text-splitting calls are counted;
+  - text is counted the way each service counts it;
+  - steps that run on Womblex's own machines are shown as free.
+- **Decision 13. Workflows have no owner.** No command or screen lets anyone set an owner, so the owner setting does nothing, and it is removed. Runs started by a workflow are visible to administrators, as runs started from the command line are. An owner can be added back if the web API ever lets users create workflows. This reverses the rule that workflows are owned like runs.
+
+### Work items
+Each item is one change that stays under the project's size limit. An item that grows too large is split into two changes that each work on their own.
+
+- **R.1 Remove conditions** (Decision 3) from both local and cloud runs, with their documentation.
+- **R.2 Remove the "send results to" setting** (Decision 4) and its open item in the requirements.
+- **R.2b Remove the workflow owner** (Decision 13), including the owner check on scheduled runs.
+- **R.3 Workflows as files** (Decisions 1 and 10). Every workflow command takes a file, and an example workflow is added beside the example settings. Only scheduling saves a copy, and it updates the timetable in the same action. The code example in the workflow guide is removed.
+- **R.3b A workflow names its document storage** (Decision 9). Scheduled runs go only to machines that use that storage.
+- **R.4 Scheduled runs add only new documents** (Decision 2), and the rule against a run used by two versions of a workflow is removed. If too large, the change to internal labels goes first and the new-documents-only behaviour second.
+- **R.5 Run status from the latest try** (Decision 5).
+- **R.6 Every cloud run carries its settings** (Decision 7), with the web API guide updated.
+- **R.7 Work goes only to checked machines** (Decision 8). If too large, the way work is sorted goes first and the up-front refusal second.
+- **R.8 Retries redo only affected work** (Decision 6).
+- **R.9 Runs record their whole workflow** (Decision 11). The run's summary record gets a new version number.
+- **R.10 Pricing counts every paid call** (Decision 12).
+- **R.11 End-of-phase review.**
 
 ### Draft requirements — Phase R
 **Requirement 27 is replaced by:**
@@ -121,29 +145,31 @@ Decisions taken 2026-10-17. Each merge records its decision in `decisions-operat
 
 This replaces the part of Requirement 22 that says submitted settings only choose which steps run, and adds to the retry part of Requirement 14.
 
-## Phase 3 — integration (branch)
-A finished run sends its output somewhere by itself (a "destination"), declared in the workflow file. Each merge adds one destination kind that works end to end. No kind is stored before the merge that delivers it.
+## Phase 3 — Sending results to other systems
+In Phase 3, a finished run sends its results to other systems by itself, to the places its workflow file names. Each piece of work adds one kind of place that works from start to finish. No kind of place can be named before Womblex can deliver to it.
 
-Decisions taken 2026-10-17, recorded with the merge that builds each one:
-- **`pii` is a fleet step when a workflow lists it.** Config-driven dispatch (`enqueue-stages`) still never runs it. Reverses merge 7b's `stage_not_dispatchable` for `pii` and the `pipeline_order.py` rule for workflows.
-- **The coordinator finalises every fleet run.** It writes `manifest.parquet` to the store, and `womblex finalize` stays as an idempotent re-run.
-- **Egress copies a store-hosted run store to store.** Reverses "stage-in/stage-out" for egress only.
-- **Run status uses the existing `/v1/runs` state words** (`pending`, `running`, `done`, `failed`, `cancelled`, plus `orphaned`) for the summary sentence, webhook events and lineage event types. Replaces D-4.1's word set and renames D-3.3's events.
-- **Delivery follows D-2.1.** A delivery is labelled `ran_after_failed` like a later stage. Once the failed stage's retry succeeds, `retry-stage` prints the delivery's retry line. No automatic re-run.
-- **Destinations check before launch.** Credentials, the webhook secret and the `[pgvector]` extra are checked in `prepare_workflow` and `check_firing`, beside the model check.
-- **pgvector needs embeddings.** `embeddings` is a strict input, so a workflow without `embed` is refused before launch.
-- **Destination criteria live in Requirement 27.**
+### Decisions made on 17 October 2026
+Each is recorded with the piece of work that builds it.
 
-**Merges:**
-- **3.1 Dependencies only** (per D-3.4). `httpx` moves from the `[dev]` extra to core, and a new `[pgvector]` extra holds pgvector's client. `pyproject.toml` and `uv.lock`, with human approval.
-- **3.2a The coordinator finalises.** Move `cmd_finalize`'s logic into a library function that the CLI and the coordinator both call. Docs: `decisions-operations.md`, CLAUDE.md rows.
-- **3.2b Egress from a store-hosted run.** `build_bundle` reads the corpus from the result store, store to store, and resolves sources from the ingest store by `source_relpath`, checked by hash (D-3.1). `womblex egress` works on a fleet run. Docs: `egress.md`, Requirement 23's TO-DO and its Outstanding entry.
-- **3.2c Object-store destination and the delivery model.** `destinations` returns with `object_store` only (a prefix and `include_sources`). A delivery is a DBOS workflow with bounded retries, enqueued after the last stage whether or not one failed. The run record gains `deliveries` (the record version after R.9's). A failed delivery labels the run and never stops it. The pre-launch check and the D-2.1 retry line ship here. Docs: `decisions-operations.md`, Requirement 27, `architecture.md`, CLAUDE.md rows.
-- **3.3 `pii` as a fleet step.** Docs: `decisions-operations.md` (merge 7b), `workflows.md`, the `pipeline_order.py` comment.
-- **3.4 Postgres with pgvector** (per D-3.2). The destination names the environment variable that holds its DSN. An idempotent upsert keyed `(run_id, source_hash, chunk_index, content_type)`, masked text by default and raw where declared, with the layer recorded on each row. A masked destination without a `pii` step, or any pgvector destination without `embed`, is refused before launch. Docs: `contract.md` ("Safe to hand onward"), README installation extras, Requirement 27.
-- **3.5 Webhooks** (per D-3.3, events named in the state words). Each POST is a DBOS workflow with bounded retries, signed with an environment secret. Docs: `service-api.md` ("Callbacks and webhooks (consumers poll)"), README (callers poll), `decisions-operations.md` ("Consumers poll"), Requirements 22 and 27.
-- **3.5.5 `egress.md` becomes "Egress and destinations"**, with a payload reference (docs only).
-- **3.6 Stocktake S-3.**
+- **Cloud runs hide personal details when a workflow asks.** Runs started without a workflow still never include this step. This reverses the rule that cloud runs never include it.
+- **Cloud runs write their own document list when they finish.** The command that writes it by hand stays, and running it again changes nothing.
+- **A run kept in cloud storage is exported directly between cloud locations.** It no longer has to be copied to a local machine first.
+- **Status uses the web API's existing words** (pending, running, done, failed and cancelled, plus a warning for a scheduled run that could not start its steps). The status sentence, the notices and the run's history record all use them. This replaces a different set of words chosen earlier.
+- **Sending results follows the retry rules.** Results sent after a failure are marked with that failure. When the failed step is retried successfully, the retry command shows how to resend the results. Nothing is resent automatically.
+- **Places to send results are checked before the run starts.** Passwords, the signing key for notices and any extra software needed are checked alongside the AI model check.
+- **Sending to the database needs search vectors.** A workflow without the step that creates them is refused before it starts.
+- **The requirements for sending results belong in Requirement 27.**
+
+### Work items
+- **3.1 New software only.** The library for sending notices becomes part of the standard install, and the database's library becomes an optional add-on. This needs human approval.
+- **3.2a Cloud runs write their own document list.** The command and the cloud use the same code.
+- **3.2b Export from cloud storage.** A run kept in cloud storage is exported directly. Original documents are fetched from where they were first uploaded and checked against their recorded fingerprint.
+- **3.2c Sending to cloud file storage, and how sending works.** The "send results to" setting returns, with cloud file storage as its only kind. Results are sent after the last step, even if a step failed, and a failed send is retried a set number of times. The run's summary record lists every send. A failed send is recorded on the run and never stops it. The up-front checks and the retry instructions are added here.
+- **3.3 Hiding personal details in cloud runs.**
+- **3.4 Sending to a Postgres database with search vectors.** The workflow names where the database password is kept. Each piece of text is one row, updated rather than duplicated when results are resent. Text with personal details hidden is sent by default, and original text only where the workflow asks, with each row saying which version it holds. A workflow that sends hidden text without the hiding step, or sends to the database without the search-vector step, is refused before it starts.
+- **3.5 Notices to a web address.** Each notice is retried a set number of times and signed with a secret key kept on the machine.
+- **3.5.5 The export guide also covers sending results**, with a description of what is sent. Documentation only.
+- **3.6 End-of-phase review.**
 
 ### Draft requirements — Phase 3
 **Requirement 27 adds these, as each kind of destination is built (3.2c, 3.3, 3.4 and 3.5):**
@@ -171,14 +197,15 @@ The workflow file can also name places to send the results. Once the steps have 
 
 **Out of scope for Phase 3:** sending each step's results to a different place, databases other than Postgres with search vectors (each needs its own requirement), setting up notice addresses through the web API, and taking corrections back from the systems that receive the results.
 
-## Phase 4 — operation (branch)
-**Merges:**
-- **4.0 Split `cli/cloud.py`.** `jobs` moves to its own CLI module (the file is near the 750-line cap). Commands and output stay the same.
-- **4.1 `RunBoard.describe` and its surfaces.** One sentence per run in the state words, over the exact per-stage counts: `womblex jobs --run`, an additive `summary` on `/v1/runs/{id}`, the console. The OpenLineage event (`store/lineage.py`, today always `COMPLETE`) takes its type from the run's state (`cancelled` is `ABORT`, `failed` is `FAIL`). Docs: `contract.md` (the lineage export), Requirements 16 and 22, `service-api.md`, `DESIGN.md`.
-- **4.2 The graph-refresh sidecar** (per D-4.2). Define the chunks digest (`store/content_digest.py`), then a sidecar keyed by it. Readers (`analyse/query.py`, the Chunk Inspector's entities overlay) prefer it. Until 4.3, graph-refresh writes both the sidecar and the in-place files. Docs: `contract.md` (minor version), CLAUDE.md rows.
-- **4.3 Graph-refresh stops rewriting in place.** Its contract moves from `MutationMode.IN_PLACE` to `SIDECAR`, with `PRODUCER_OF`, `store/retention.py`, `workflow_order` and `workflow_plan` updated. Older runs fall back to the in-place `chunk_index`. `layout` keeps its in-place replace. Docs: CLAUDE.md rows, `project-structure.md`.
-- **4.3.5 Docs:** `composable-design.md` (the outputs table's "rewritten in place" and the `graph-refresh` "in place" bullet), Requirement 12, `decisions.md` ("Graph-edge refresh"), `architecture.md`, README.
-- **4.4 Stocktake S-4 (final).** Move the design-failures list into `decisions-dead-ends.md`, retire this plan into the decision docs and `CHANGELOG.md`, then delete it.
+## Phase 4 — Day-to-day operation
+
+### Work items
+- **4.0 Split one large command-line file.** The command that lists jobs moves to its own file, because the current file is near the size limit. Commands and output do not change.
+- **4.1 One-sentence run status.** One plain sentence for each run, built from the exact counts at each step, shown by the command line, the web API and the web console. The run's history record reports finished, failed or cancelled, instead of always finished.
+- **4.2 A separate file for re-linked names.** The step that re-links names to text writes its own file, marked with the exact version of the text it linked to, and readers use it where it matches. Until 4.3, the step also keeps rewriting the old files.
+- **4.3 Re-linking stops changing earlier results.** Older runs are read as before. The page-layout step keeps replacing its own file.
+- **4.3.5 Documentation for 4.2 and 4.3.**
+- **4.4 Final review.** The list of mistakes moves to the dead-ends document. The rest of this plan moves into the decision records and the change log, and the plan is deleted.
 
 ### Draft requirements — Phase 4
 **Requirements 16 and 22 add (4.1):**
