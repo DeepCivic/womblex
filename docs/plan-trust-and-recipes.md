@@ -49,62 +49,77 @@ Decisions taken 2026-10-17. Each merge records its decision in `decisions-operat
 - **R.3 Workflows from YAML** (D-R.1, D-R.10). The five commands take a path. An example workflow sits beside `configs/default-isaacus.yaml` and replaces its commented commands. `dispatch-workflow` stops writing the stored copy. `schedule-workflow` writes the copy, runs `check_firing` and syncs the schedules in one call. Docs: `workflows.md` (the "Saving one" Python block goes), README command table, D-2.2 deleted.
 - **R.3b A workflow names its ingest root** (D-R.9). An `input_binding` field, the firing enqueued on the root's queue, and `schedule-workflow --ingest` removed. Docs: `workflows.md`, `decisions-operations.md` ("A trigger fires a dispatch").
 - **R.4 Incremental firings** (D-R.2). `workflow_dispatch.fire_workflow` lists the prefix and hashes against the run's manifest, `dispatch.batch_specs` numbers on from the last batch, and stage ids and `plan_units` are scoped to the firing. `cloud/retry.py` follows the new stage ids. `run_conflict` is deleted from `workflow_dispatch.py` and `RefusalCode`. Docs: `decisions-operations.md` ("A trigger fires a dispatch"; "No incrementality" and the `run_conflict` part of merge 7b deleted), `workflows.md`. Split mechanical (firing-scoped ids) then behaviour (hash-and-skip) if over the cap.
-- **R.5 Run state from latest attempts** (D-R.5). `cloud/jobs.py` rollup and `_orphaned`, and the API run state. Docs: D-2.1's "Kept as is" deleted, Requirements 14, 16 and 22.
-- **R.6 Every dispatch carries its config** (D-R.7). `cloud/dispatch.py`, `RunBoard.enqueue` / `enqueue_stages`, `workflows.extract_batch` and `_stage_config`. Docs: Requirements 2 and 22, `service-api.md`, `decisions-operations.md` (merge 7a widened to every path).
-- **R.7 Model-keyed stage queues** (D-R.8). `dbos_app.stage_queue`, `worker.served_queues` and its record of served queues, the unserved-queue refusal in dispatch, firing and retry, and `retry_stage` running the dispatch checks. Docs: Requirements 2, 14 and 25, `decisions-operations.md`. Split the queue naming from the refusal if over the cap.
-- **R.8 A retry resends only affected work** (D-R.6). Per-batch `ran_after_failed` on the coordinator, and a later stage's retry run over the affected units only. Docs: D-2.1, Requirement 14.
+- **R.5 Run state from latest attempts** (D-R.5). `cloud/jobs.py` rollup and `_orphaned`, and the API run state. Docs: D-2.1's "Kept as is" deleted, Requirement 28.
+- **R.6 Every dispatch carries its config** (D-R.7). `cloud/dispatch.py`, `RunBoard.enqueue` / `enqueue_stages`, `workflows.extract_batch` and `_stage_config`. Docs: Requirements 22 and 28, `service-api.md`, `decisions-operations.md` (merge 7a widened to every path).
+- **R.7 Model-keyed stage queues** (D-R.8). `dbos_app.stage_queue`, `worker.served_queues` and its record of served queues, the unserved-queue refusal in dispatch, firing and retry, and `retry_stage` running the dispatch checks. Docs: Requirement 28, `decisions-operations.md`. Split the queue naming from the refusal if over the cap.
+- **R.8 A retry resends only affected work** (D-R.6). Per-batch `ran_after_failed` on the coordinator, and a later stage's retry run over the affected units only. Docs: D-2.1, Requirement 28.
 - **R.9 Recipes in files and the run record** (D-R.11). `store/run_stamp.workflow_context` carries the id and spec, and `run_manifest._observed_workflows` lists them in the next run-record version (3.2c's `deliveries` takes the one after). Docs: `contract.md`, Requirement 27.
 - **R.10 `plan` counts every paid call** (D-R.12). `cloud/workflow_plan.py`, `EmbeddingLimits`, `embed_stage.plan_embedding`, and an AI-chunking count from `chunk_stage`. Docs: `workflows.md`, `model-plugins.md`.
 - **R.11 Stocktake S-R.**
 
 ### Draft requirements — Phase R
-**Requirement 27 is replaced by: 27. Workflows — Define, Check, Run, Dispatch and Schedule**
+**Requirement 27 is replaced by:**
+
+#### 27. Workflows — Define, Check, Run, Dispatch and Schedule
 
 **As** an operator,
 **I want** to define a recipe of steps over a preset in a file and run it locally, on the fleet or on a schedule,
-**so that** a run's sequence is declared once, checked before it spends anything, recorded in what it writes, and a schedule pays only for documents it has not processed.
+**so that** a run's sequence is declared once, checked before it spends anything, traceable from what it writes, and a schedule pays only for documents it has not processed.
 
-**Given** a workflow file (a preset reference, config overlay, input binding naming an ingest root and prefix, ordered steps and cron triggers)
+**Given** a workflow file (a preset, a config overlay, an ingest location and prefix, ordered steps and cron triggers)
 **When** the operator validates, plans, runs, dispatches or schedules it by its path
-**Then** everything that can refuse does so before the first step, the files each step writes name the workflow, and each firing processes only documents its run does not already hold.
+**Then** everything that can refuse does so before the first step, each firing processes only new documents, and the files each step writes identify the workflow that wrote them.
 
 **Acceptance criteria:**
 
 - A workflow is a YAML file, and every workflow command takes its path. Defining or changing a workflow needs no code.
-- The file is checked by every command (steps, cron and timezone, config overlay), and an unknown field is refused. Its digest is stable over its content, so comments and formatting do not change it.
-- `schedule-workflow` stores a copy keyed by the workflow id. In the same call it runs the firing's checks and makes the schedules equal the copy's triggers, so the stored triggers and the live schedules never differ. A firing runs that copy. `dispatch-workflow` stores nothing.
-- Its own `config` is laid over its preset's key by key, and the whole is validated as a full config.
-- `validate` runs exactly the checks `run-workflow` runs before its first step, and writes nothing. `plan` counts the requests and tokens every paid step would send, AI chunking included, with the tokeniser of the provider that makes the call, calling no paid API. A step whose provider needs no network is reported as making no paid calls.
-- Step order is checked before launch: a step whose input is missing, produced later, or rewritten later is refused with a stable code.
+- Every command checks the file (steps, cron and timezone, config overlay) and refuses an unknown field.
+- A workflow's digest depends only on its content, so comments and formatting do not change it.
+- The workflow's config is laid over its preset's key by key, and the whole is validated as a full config.
+- `validate` runs exactly the checks `run-workflow` runs before its first step, and writes nothing.
+- `plan` reports the requests and tokens of every step that calls a paid service, AI chunking included, counted with the tokeniser of the model that receives them. It calls no paid service, and reports a step whose model runs locally as free.
+- Step order is checked before launch. A step whose input is missing, produced later, or rewritten later is refused with a stable code.
 - Once a step has run, a failed step does not stop the steps after it. Each later step records the failure it follows, and the exit code is non-zero.
-- Every sidecar a workflow step writes carries the workflow's id, digest and spec, and the run record lists each workflow observed in its files by id, digest and spec. The recipe that wrote a run can be recovered from the run alone after the file is edited.
-- `dispatch-workflow` queues the steps for the fleet. It is refused before any row for anything the local runner refuses, a step the fleet cannot run, or an order the coordinator would change. Workers run each stage under the workflow's config.
-- A scheduled workflow has one run that grows. A firing extracts only documents whose `source_hash` the run does not hold, numbers its batches on from the last, and runs the steps over its own batches only. A document already in the run is never re-extracted or re-sent to a paid service by a firing.
-- A firing runs under the digest of the stored copy it reads. After an edit, later firings apply the new recipe to new documents only, and documents processed under an earlier digest are not processed again.
+- Every file a step writes names the workflow and its digest. The run record holds the full workflow for each digest found in the run's files, so the workflow behind a run can be read after the file has changed.
+- `dispatch-workflow` queues the steps for the fleet. Before anything is queued, it refuses whatever the local runner refuses, a step the fleet cannot run, and an order the fleet would change.
+- `schedule-workflow` stores a copy of the workflow and makes the schedules match its triggers in the same command, so the stored triggers and the live schedules never differ.
+- `schedule-workflow` runs every check a firing runs, against the ingest location the workflow names, and does not schedule a workflow its firing would refuse.
+- A firing runs the stored copy and reads the ingest location the workflow names, whichever worker picks it up.
+- A scheduled workflow has one run that grows. A firing extracts only documents the run does not hold, matched by content hash, and runs the steps over those documents only.
+- No document already in the run is re-extracted or resent to a paid service by a firing.
+- After a workflow is edited and rescheduled, later firings apply the new version to new documents only. Earlier documents keep the output of the version that processed them.
 - A firing that finds no new document queues nothing and logs that it found none.
 - A file whose bytes have changed is a new document, and the earlier version stays in the run.
-- `schedule-workflow` makes the queue's schedules equal the workflow's triggers, and runs a firing's checks first (`check_firing`, against `--store` and the ingest root the workflow names), so a workflow its firing would refuse is not scheduled. A firing runs only on a worker serving that ingest root.
+- A workflow has no owner. The runs it starts are visible to admins, as runs started from the CLI are.
 
-**Out of scope:** removing or superseding a document whose file changed or was deleted, backfill of missed firings, a service-API route for workflows and workflow ownership (proposed D-R.13), and destinations (Phase 3).
+**Out of scope:** removing or superseding a document whose file changed or was deleted, backfill of missed firings, a service-API route for workflows, workflow ownership, and destinations (Phase 3).
 
-**Proposed, with D-R.5 to D-R.8.**
+**New requirement:**
 
-**Requirement 2 gains (with R.6 and R.7):**
+#### 28. Fleet Runs — Run as Dispatched, Report as Finished
 
-- Every piece of fleet work runs under the config it was dispatched with. A worker contributes only its `paths`, so the same dispatch behaves the same on any worker.
-- A worker serves only the queues whose models it checked. Work whose queue no live worker serves is refused before any row is written.
+**As** an operator or a service-API caller,
+**I want** work I send to the fleet to run under the settings I sent, on workers able to run it, and to report its true state after a retry,
+**so that** a fleet run gives the same result as a local run, and a repaired run is not reported as failed.
 
-**Requirement 14's retry criterion changes (with R.5, R.7 and R.8):**
+**Given** a run dispatched to the fleet from the CLI, the console, the service API or a workflow
+**When** workers run it, a stage fails, or the operator retries a stage
+**Then** every piece of work runs under the dispatched config on a worker checked for it, a retry resends only the work the failure affected, and the run's state reflects the latest attempt of each piece of work.
 
-- A retry runs every check a dispatch runs.
-- Retrying a stage that ran after a failure runs only its units over batches the retry changed, plus units that failed or were not ready. Completed units over unchanged inputs are not resent to a paid service.
-- Once every failure in a run has been retried successfully, the run reads `done`.
+**Acceptance criteria:**
 
-**Requirements 16 and 22 gain (with R.5):** "A run's state counts the latest attempt of each stage, the coordinator and the firing. A repaired run reads `done`, and an orphaned run reads normally once its stages are dispatched."
+- Extraction and every stage run under the config the run was dispatched with. A worker's own config supplies only its local paths.
+- A config or preset submitted through the service API, the console or `enqueue-stages` is the config the run uses, not only a selection of stages.
+- A worker runs a stage only if it has checked the models that stage's config names.
+- Work that no running worker can serve is refused before anything is queued.
+- A retry is refused before it starts for anything a dispatch would refuse.
+- Retrying a stage that ran after a failure re-runs only the batches the failure affected. Batches that completed over unchanged inputs are not resent to a paid service.
+- A run whose failures have all been retried successfully reads `done`.
+- A run whose firing failed after queueing extraction reads by its stages once they are dispatched, not `failed`.
 
-**Requirement 22's config criterion changes (with R.6):** "A submitted `preset` or `config` is validated before any queue row is written (400 on failure), selects the downstream stages, and is the config the run's extraction and stages run under. A config enabling none is an extraction-only run."
+**Out of scope:** retrying a stage automatically, and retry through the service API or the console.
 
-**Requirement 25 gains (with R.7):** "A fleet worker checks the models of every stage in its own config, enabled or not, and joins only the queues it passed."
+This replaces Requirement 22's "selects downstream stages only" and adds to Requirement 14's retry criterion.
 
 ## Phase 3 — integration (branch)
 A finished run sends its output somewhere by itself (a "destination"), declared in the workflow file. Each merge adds one destination kind that works end to end. No kind is stored before the merge that delivers it.
