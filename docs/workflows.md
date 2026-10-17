@@ -62,7 +62,10 @@ Steps must be in pipeline order: `normalise`, `spellfix`, `enrich`, `chunk`,
 
 At each cron time a worker starts a firing: it runs the same checks as scheduling,
 queues the extraction batches for run `<id>-<UTC time>`, then dispatches the steps
-under the workflow's recipe. If it fails after queueing the batches it cancels them.
+under the workflow's recipe. If the dispatch fails after the batches are queued, the
+batches run on and the run reads `orphaned` (`womblex jobs`, `/v1/runs`) until you
+dispatch its steps with `womblex dispatch-workflow <id> --run-id <run> --store <uri>`.
+A firing refuses a run that already holds cancelled batches.
 It re-extracts the whole prefix every time; there is no "only new documents" and no
 backfill of missed firings. Deleting a workflow does not unschedule it: run
 `schedule-workflow <id> --remove`.
