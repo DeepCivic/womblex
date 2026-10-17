@@ -39,7 +39,7 @@ sidecar its steps write.
 | `preset` | The base config. `dataset` and `paths` are never taken from the workflow. |
 | `config` | Overlay on the preset's config: mappings merge, anything else replaces, `null` drops a key to its default. |
 | `input_binding` | `ingest_prefix` (the documents a firing extracts) and `batch_size`. Extraction is not a step. |
-| `steps` | Downstream stages in pipeline order, each at most once. |
+| `steps` | Downstream stages, each at most once, run in the order listed (`dispatch-workflow` needs pipeline order). |
 | `conditions` | `column op value` over manifest columns; they label each document `holds` / `fails` / `unevaluable` and never refuse, halt or narrow a run. |
 | `destinations` | Stored, not acted on yet. |
 | `triggers` | Cron expressions scheduled by `schedule-workflow`. |
@@ -51,12 +51,15 @@ sidecar its steps write.
 | `womblex validate <id> [--shards DIR] [--json]` | Every check a run makes before its first step, and nothing else. Exit 1 if it would be refused. |
 | `womblex plan <id> --shards DIR [--assume-price enrich=…]` | Which steps would run or skip, and the exact tokens `enrich` and `embed` would send. Calls no paid API; a cost appears only for a price you supply. |
 | `womblex run-workflow <id> --shards DIR` | Run the steps over a local shard directory. Refused before the first step, never halted after it: a failed step is recorded and the later steps still run. |
-| `womblex dispatch-workflow <id> --run-id R --store URI [--dry-run]` | Queue the steps for the fleet. Refused before any queue row for anything the local runner refuses, a step the fleet does not dispatch (`pii`), an order the coordinator would change, or a run already worked under another workflow. |
+| `womblex dispatch-workflow <id> --run-id R --store URI [--dry-run]` | Queue the steps for the fleet. Refused before any queue row for anything the local runner refuses, a step the fleet does not dispatch (`layout`, `pii`, `quality`), an order the coordinator would change, or a run already worked under another workflow. |
 | `womblex schedule-workflow <id> [--store URI --ingest URI] [--remove \| --status]` | Make the queue's schedules equal the workflow's triggers. Refuses a workflow its firing would refuse (an input prefix outside the owner's tree, no documents, a failing dry-run dispatch). |
 
-Steps must be in pipeline order: `normalise`, `spellfix`, `enrich`, `chunk`,
-`graph-refresh`, `embed`, `money`, `link` (the fleet dispatches these; `layout`,
-`pii` and `quality` run locally or through `run-stage`).
+`run-workflow` runs the steps in the order listed. It refuses an order in which a
+step reads a required input that is missing, produced only by a later step, or
+rewritten by a later step. `dispatch-workflow` also needs pipeline order, since the
+coordinator runs stages in that order: `normalise`, `spellfix`, `enrich`, `chunk`,
+`graph-refresh`, `embed`, `money`, `link`. The fleet dispatches only these;
+`layout`, `pii` and `quality` run through `run-workflow` or `run-stage`.
 
 ## A trigger firing
 
@@ -75,4 +78,4 @@ backfill of missed firings. Deleting a workflow does not unschedule it: run
 A failed stage does not stop the stages after it; the run finishes and says which
 failed. Retry one with `womblex retry-stage --run-id R --stage S --config C`: it
 resumes from the first failed unit, and stages that ran after the failure are offered
-a retry once it succeeds. The call is D-2.1.
+a retry once it succeeds (D-2.1).
