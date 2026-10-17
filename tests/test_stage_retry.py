@@ -158,7 +158,6 @@ def test_stages_that_ran_after_a_failure_are_offered_once_it_is_cured(fleet, mon
     fault.fix()
     from womblex.cli.retry import cmd_retry_stage
 
-    monkeypatch.delenv("WOMBLEX_DB_DSN", raising=False)  # the CLI reads it in place of the test's database
     monkeypatch.setattr("womblex.config.load_config", lambda _: _minimal_config(fleet[2]))
     args = argparse.Namespace(run_id="r1", stage="normalise", config=Path("c.yaml"), store=None, dsn=None)
     assert cmd_retry_stage(args) == 0
