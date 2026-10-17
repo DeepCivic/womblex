@@ -467,7 +467,8 @@ def test_a_config_that_does_not_load_is_one_line_from_the_cli(tmp_path: Path, ca
         path.write_text(content)
     assert main(["run", "--config", str(path)]) == 1
     (record,) = [r for r in caplog.records if r.levelname == "ERROR"]
-    assert record.getMessage().startswith(f"config {path} does not load: ") and record.exc_info is None
+    message = record.getMessage()
+    assert message.startswith(f"config {path} does not load: ") and "\n" not in message and record.exc_info is None
 
 
 def test_an_error_outside_load_config_still_raises_from_the_cli(monkeypatch) -> None:
@@ -480,3 +481,21 @@ def test_an_error_outside_load_config_still_raises_from_the_cli(monkeypatch) -> 
     monkeypatch.setattr("womblex.cli.ALL_COMMANDS", [Command("run", "", lambda p: p.add_argument("--config"), broken)])
     with pytest.raises(FileNotFoundError, match="not a config"):
         main(["run", "--config", "c.yaml"])
+
+
+def test_a_config_error_names_each_invalid_field_and_the_path_load_config_was_given(
+    tmp_path: Path, caplog, monkeypatch,
+) -> None:
+    from womblex.cli import main
+    from womblex.cli._shared import Command
+    from womblex.config import load_config
+
+    path = tmp_path / "other.yaml"
+    path.write_text("dataset:\n  name: 123\npaths:\n  wrong: true\n")
+    command = Command("run", "", lambda p: None, lambda args: load_config(path))  # no --config argument
+    monkeypatch.setattr("womblex.cli.ALL_COMMANDS", [command])
+    assert main(["run"]) == 1
+    (record,) = [r for r in caplog.records if r.levelname == "ERROR"]
+    message = record.getMessage()
+    assert message.startswith(f"config {path} does not load: 5 validation error(s): dataset.name: ")
+    assert "paths.wrong: Extra inputs are not permitted" in message and "\n" not in message

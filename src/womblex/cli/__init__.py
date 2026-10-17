@@ -113,23 +113,32 @@ def main(argv: list[str] | None = None) -> int:
         try:
             return dispatch[args.command](args)
         except Exception as e:
-            if not _config_did_not_load(e):
+            if (report := _config_failure(e)) is None:
                 raise
-            logger.error("config %s does not load: %s", getattr(args, "config", ""), e)
+            logger.error("%s", report)
             return 1
     parser.print_help()
     return 0
 
 
-def _config_did_not_load(e: Exception) -> bool:
-    """*e* is `load_config`'s own failure (missing file, bad YAML, invalid config): one line, not a traceback."""
+def _config_failure(e: Exception) -> str | None:
+    """`load_config`'s own failure (missing file, bad YAML, invalid config) as one line; None for any other error."""
     import yaml
     from pydantic import ValidationError
 
     from womblex.config import load_config
 
-    frames = (frame.f_code for frame, _ in traceback.walk_tb(e.__traceback__))
-    return isinstance(e, OSError | yaml.YAMLError | ValidationError) and load_config.__code__ in frames
+    if not isinstance(e, OSError | yaml.YAMLError | ValidationError):
+        return None
+    frame = next((f for f, _ in traceback.walk_tb(e.__traceback__) if f.f_code is load_config.__code__), None)
+    if frame is None:
+        return None
+    if isinstance(e, ValidationError):
+        detail = f"{e.error_count()} validation error(s): " + "; ".join(
+            f"{'.'.join(map(str, err['loc']))}: {err['msg']}" if err["loc"] else err["msg"] for err in e.errors())
+    else:
+        detail = str(e)
+    return f"config {frame.f_locals['path']} does not load: " + " ".join(s.strip() for s in detail.splitlines())
 
 
 if __name__ == "__main__":
