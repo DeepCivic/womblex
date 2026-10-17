@@ -60,66 +60,66 @@ Decisions taken 2026-10-17. Each merge records its decision in `decisions-operat
 ### Draft requirements — Phase R
 **Requirement 27 is replaced by:**
 
-#### 27. Workflows — Define, Check, Run, Dispatch and Schedule
+#### 27. Workflows — Set Up Once, Check First, Run Anywhere
 
 **As** an operator,
-**I want** to define a recipe of steps over a preset in a file and run it locally, on the fleet or on a schedule,
-**so that** a run's sequence is declared once, checked before it spends anything, traceable from what it writes, and a schedule pays only for documents it has not processed.
+**I want** to write down a set of processing steps once and run it on my own machine, in the cloud, or on a timetable,
+**so that** every run follows the same steps, problems are caught before any money is spent, and a timetable only pays for new documents.
 
-**Given** a workflow file (a preset, a config overlay, an ingest location and prefix, ordered steps and cron triggers)
-**When** the operator validates, plans, runs, dispatches or schedules it by its path
-**Then** everything that can refuse does so before the first step, each firing processes only new documents, and the files each step writes identify the workflow that wrote them.
+**Given** a workflow file that lists the starting settings, any changes to them, where the documents are, the steps to run, and when to run them
+**When** the operator checks, prices, runs, sends to the cloud, or schedules the workflow
+**Then** any problem is reported before the first step starts, each scheduled run handles only new documents, and every output shows which workflow made it.
 
 **Acceptance criteria:**
 
-- A workflow is a YAML file, and every workflow command takes its path. Defining or changing a workflow needs no code.
-- Every command checks the file (steps, cron and timezone, config overlay) and refuses an unknown field.
-- A workflow's digest depends only on its content, so comments and formatting do not change it.
-- The workflow's config is laid over its preset's key by key, and the whole is validated as a full config.
-- `validate` runs exactly the checks `run-workflow` runs before its first step, and writes nothing.
-- `plan` reports the requests and tokens of every step that calls a paid service, AI chunking included, counted with the tokeniser of the model that receives them. It calls no paid service, and reports a step whose model runs locally as free.
-- Step order is checked before launch. A step whose input is missing, produced later, or rewritten later is refused with a stable code.
-- Once a step has run, a failed step does not stop the steps after it. Each later step records the failure it follows, and the exit code is non-zero.
-- Every file a step writes names the workflow and its digest. The run record holds the full workflow for each digest found in the run's files, so the workflow behind a run can be read after the file has changed.
-- `dispatch-workflow` queues the steps for the fleet. Before anything is queued, it refuses whatever the local runner refuses, a step the fleet cannot run, and an order the fleet would change.
-- `schedule-workflow` stores a copy of the workflow and makes the schedules match its triggers in the same command, so the stored triggers and the live schedules never differ.
-- `schedule-workflow` runs every check a firing runs, against the ingest location the workflow names, and does not schedule a workflow its firing would refuse.
-- A firing runs the stored copy and reads the ingest location the workflow names, whichever worker picks it up.
-- A scheduled workflow has one run that grows. A firing extracts only documents the run does not hold, matched by content hash, and runs the steps over those documents only.
-- No document already in the run is re-extracted or resent to a paid service by a firing.
-- After a workflow is edited and rescheduled, later firings apply the new version to new documents only. Earlier documents keep the output of the version that processed them.
-- A firing that finds no new document queues nothing and logs that it found none.
-- A file whose bytes have changed is a new document, and the earlier version stays in the run.
-- A workflow has no owner. The runs it starts are visible to admins, as runs started from the CLI are.
+- A workflow is a plain text file. Creating or changing one needs no programming.
+- Every command checks the file first and rejects anything it does not recognise.
+- Changing only the layout or comments in the file does not change its identity.
+- Settings in the workflow are added on top of its starting settings, and the result is checked as a whole.
+- The check command runs every test a real run would run before its first step, and changes nothing.
+- The pricing command shows how much text each paid step would send, including every step that uses a paid service. It does not use any paid service itself. Steps that run on our own machines are shown as free.
+- Steps listed in the wrong order are rejected before anything runs, with a clear reason.
+- If a step fails after the run has started, the other steps still run. Each later step notes the failure, and the run is reported as failed.
+- Every output file shows which workflow made it. The full workflow is kept with the run, so it can be read even after the file has changed.
+- Sending a workflow to the cloud is rejected before anything starts if it would be rejected on a local machine, uses a step the cloud cannot run, or lists steps in an order the cloud would change.
+- Scheduling a workflow saves a copy of it and sets its timetable in one action. The saved times and the real timetable always match.
+- Scheduling runs every check a scheduled run would make, against the document location named in the workflow. A workflow that would fail is not scheduled.
+- Each scheduled run uses the saved copy and reads from the document location named in the workflow, whichever machine runs it.
+- A scheduled workflow keeps adding to one run. Each time it runs, it processes only documents the run has not seen before.
+- A document already in the run is never processed again or sent to a paid service again.
+- After a workflow is changed and scheduled again, the new version applies to new documents only. Earlier documents keep their results.
+- If there are no new documents, nothing runs and the log says so.
+- A file whose contents have changed counts as a new document. The earlier version stays in the run.
+- A workflow has no owner. Only administrators can see the runs it starts, as with runs started from the command line.
 
-**Out of scope:** removing or superseding a document whose file changed or was deleted, backfill of missed firings, a service-API route for workflows, workflow ownership, and destinations (Phase 3).
+**Out of scope:** removing documents that have changed or been deleted, catching up on scheduled times that were missed, managing workflows through the web API, workflow owners, and sending results to other systems (Phase 3).
 
 **New requirement:**
 
-#### 28. Fleet Runs — Run as Dispatched, Report as Finished
+#### 28. Cloud Runs — Do What Was Asked, Report What Happened
 
-**As** an operator or a service-API caller,
-**I want** work I send to the fleet to run under the settings I sent, on workers able to run it, and to report its true state after a retry,
-**so that** a fleet run gives the same result as a local run, and a repaired run is not reported as failed.
+**As** an operator, or a system that sends work to Womblex,
+**I want** work sent to the cloud to use the settings I chose, run only on machines that can handle it, and show its real status after a fix,
+**so that** cloud results match local results, and a fixed run is no longer shown as failed.
 
-**Given** a run dispatched to the fleet from the CLI, the console, the service API or a workflow
-**When** workers run it, a stage fails, or the operator retries a stage
-**Then** every piece of work runs under the dispatched config on a worker checked for it, a retry resends only the work the failure affected, and the run's state reflects the latest attempt of each piece of work.
+**Given** a run sent to the cloud from the command line, the web console, the web API or a workflow
+**When** the cloud machines process it, a step fails, or the operator retries a failed step
+**Then** every part of the run uses the settings that were sent, runs only on a machine checked for it, redoes only the work a failure affected, and shows its real status.
 
 **Acceptance criteria:**
 
-- Extraction and every stage run under the config the run was dispatched with. A worker's own config supplies only its local paths.
-- A config or preset submitted through the service API, the console or `enqueue-stages` is the config the run uses, not only a selection of stages.
-- A worker runs a stage only if it has checked the models that stage's config names.
-- Work that no running worker can serve is refused before anything is queued.
-- A retry is refused before it starts for anything a dispatch would refuse.
-- Retrying a stage that ran after a failure re-runs only the batches the failure affected. Batches that completed over unchanged inputs are not resent to a paid service.
-- A run whose failures have all been retried successfully reads `done`.
-- A run whose firing failed after queueing extraction reads by its stages once they are dispatched, not `failed`.
+- Every part of a cloud run uses the settings it was sent with. A machine's own settings only say where its files are kept.
+- Settings sent through the web API, the web console or the command line control how the run works, not just which steps it includes.
+- A cloud machine only runs a step after checking it has the AI models that step needs.
+- If no running machine can do part of the work, the run is rejected before anything starts.
+- A retry is rejected before it starts for any reason a new run would be rejected.
+- When a failed step is retried, later steps redo only the groups of documents the failure affected. Work that already finished correctly is not sent to a paid service again.
+- Once every failed step in a run has been retried successfully, the run shows as done.
+- A scheduled run whose steps could not be started at first shows its real status once they are started, not "failed".
 
-**Out of scope:** retrying a stage automatically, and retry through the service API or the console.
+**Out of scope:** retrying steps automatically, and retrying from the web API or the web console.
 
-This replaces Requirement 22's "selects downstream stages only" and adds to Requirement 14's retry criterion.
+This replaces the part of Requirement 22 that says submitted settings only choose which steps run, and adds to the retry part of Requirement 14.
 
 ## Phase 3 — integration (branch)
 A finished run sends its output somewhere by itself (a "destination"), declared in the workflow file. Each merge adds one destination kind that works end to end. No kind is stored before the merge that delivers it.
