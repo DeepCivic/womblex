@@ -244,6 +244,7 @@ def cmd_jobs(args: argparse.Namespace) -> int:
         ensure_schema(dsn)
     with RunBoard(dsn) as board:
         stats = board.stats(args.run_id)
+        orphaned = [r.run_id for r in board.runs(run_id=args.run_id, limit=10_000) if r.orphaned]
 
     scope = f"run {args.run_id}" if args.run_id else "all runs"
     if not stats:
@@ -252,6 +253,8 @@ def cmd_jobs(args: argparse.Namespace) -> int:
     total = sum(stats.values())
     parts = ", ".join(f"{status}={count}" for status, count in sorted(stats.items()))
     logger.info("Jobs (%s): %s (total %d)", scope, parts, total)
+    if orphaned:
+        logger.warning("Orphaned (a firing queued extraction, then failed before its stages): %s", ", ".join(orphaned))
     return 0
 
 
@@ -316,9 +319,8 @@ def cmd_finalize(args: argparse.Namespace) -> int:
                 "run %s has %d unfinished job(s) (%s) — finalising shards present so far",
                 args.run_id, unfinished, stats,
             )
-        if stats.get("failed"):
-            logger.warning("run %s has %d failed job(s); their docs are absent",
-                           args.run_id, stats["failed"])
+        if absent := stats.get("failed", 0) + stats.get("cancelled", 0):
+            logger.warning("run %s has %d failed or cancelled job(s); their docs are absent", args.run_id, absent)
     else:
         logger.warning("no --dsn: the run record will carry no file checksums "
                        "(they are read from the workflow outputs)")
@@ -597,9 +599,8 @@ def _warn_if_draining(args: argparse.Namespace, run_id: str) -> None:
             "cover only the batches present so far. Re-run when the fleet drains.",
             run_id, unfinished, stats,
         )
-    if stats.get("failed"):
-        logger.warning("run %s has %d failed job(s); their docs are absent",
-                       run_id, stats["failed"])
+    if absent := stats.get("failed", 0) + stats.get("cancelled", 0):
+        logger.warning("run %s has %d failed or cancelled job(s); their docs are absent", run_id, absent)
 
 
 # --- egress ------------------------------------------------------------------

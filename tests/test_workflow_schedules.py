@@ -164,48 +164,64 @@ def test_a_firing_that_cannot_complete_queues_nothing(fleet, saved_preset) -> No
     assert database.read_bytes() == before
 
 
-def _fire_with_a_failing_dispatch(fleet, monkeypatch) -> None:  # noqa: F811
-    """Fire `wf` with the dry run and the batches succeeding and the real dispatch failing."""
+def _firing_args(fleet) -> dict:  # noqa: F811
     import os
 
-    from womblex.cloud import workflow_dispatch
     from womblex.cloud.workflow_runner import preset_resolver
     from womblex.store.remote import RemoteStore
 
-    store_dir, ingest, _ = fleet
+    store_dir = fleet[0]
+    return {"resolve_preset": preset_resolver(Path(os.environ["WOMBLEX_UI_PRESETS_DIR"])),
+            "store": RemoteStore.from_uri(str(store_dir)), "dsn": None}
+
+
+def test_a_firing_whose_dispatch_fails_leaves_its_extraction_running_and_the_run_orphaned(
+    fleet, saved_preset, monkeypatch, caplog,  # noqa: F811
+) -> None:
+    from womblex.cloud import workflow_dispatch
+
+    ensure_workflow_schema(None)
+    with WorkflowStore(None) as store:
+        stored = store.save("wf", _spec(["normalise"]))
+    real, down = workflow_dispatch.dispatch_workflow, [True]
+
+    def dispatch(stored, **kw):
+        if down[0] and not kw.get("dry_run"):
+            raise OSError("system database dropped")
+        return real(stored, **kw)
+
+    monkeypatch.setattr(workflow_dispatch, "dispatch_workflow", dispatch)
+    _fire_all_at_once(dbos_app.open_client(None), stored)
+    work(fleet, idle_timeout=3)
+    with RunBoard(None) as board:
+        (run,) = board.runs()
+    assert run.counts == {"done": 1, "failed": 1} and run.orphaned  # the batch ran; the firing failed
+    assert f"dispatch-workflow wf --run-id {run.run_id}" in caplog.text
+    down[0] = False  # the operator dispatches the stages: the run is no longer orphaned
+    real(stored, run_id=run.run_id, store_uri=None, **_firing_args(fleet))
+    with RunBoard(None) as board:
+        assert not board.runs()[0].orphaned
+
+
+def test_a_firing_refuses_a_run_whose_batches_were_cancelled(fleet, saved_preset) -> None:  # noqa: F811
+    from tests.test_workflows import batch
+    from womblex.cloud.workflow_dispatch import fire_workflow
+    from womblex.cloud.workflow_runner import RefusalCode, WorkflowRefusedError
+    from womblex.store.remote import RemoteStore
+
+    _, ingest, _ = fleet
     ensure_workflow_schema(None)
     with WorkflowStore(None) as store:
         stored = store.save("wf", _spec(["normalise"], []))
-    real = workflow_dispatch.dispatch_workflow
-
-    def dispatch(stored, **kw):
-        if kw.get("dry_run"):
-            return real(stored, **kw)
-        raise OSError("system database dropped")
-
-    monkeypatch.setattr(workflow_dispatch, "dispatch_workflow", dispatch)
-    with pytest.raises(OSError, match="dropped"):
-        workflow_dispatch.fire_workflow(
-            stored, run_id="wf-1", resolve_preset=preset_resolver(Path(os.environ["WOMBLEX_UI_PRESETS_DIR"])),
-            store=RemoteStore.from_uri(str(store_dir)), ingest=RemoteStore.from_uri(ingest),
-            ingest_root=ingest, dsn=None)
-
-
-def test_a_firing_whose_dispatch_fails_cancels_the_batches_it_queued(fleet, saved_preset, monkeypatch) -> None:  # noqa: F811
-    _fire_with_a_failing_dispatch(fleet, monkeypatch)
     with RunBoard(None) as board:
-        jobs = board.list_jobs("wf-1")
-    assert [(j.kind, j.status) for j in jobs] == [("batch", "failed")]  # cancelled: never started
-    assert work(fleet, idle_timeout=1) == 0  # and no worker picks it up
-
-
-def test_a_cancel_that_fails_too_names_the_orphaned_run(fleet, saved_preset, monkeypatch, caplog) -> None:  # noqa: F811
-    def broken(self, run_id):
-        raise OSError("still down")
-
-    monkeypatch.setattr(RunBoard, "cancel_batches", broken)
-    _fire_with_a_failing_dispatch(fleet, monkeypatch)  # the dispatch error, not the cancel's, surfaces
-    assert "run wf-1 has extraction and no stages" in caplog.text
+        board.enqueue("r1", [batch(ingest)])
+    dbos_app.open_client(None).cancel_workflow(dbos_app.batch_id("r1", 1))
+    with pytest.raises(WorkflowRefusedError) as e:  # a replayed firing would attach to it and never run
+        fire_workflow(stored, run_id="r1", ingest=RemoteStore.from_uri(ingest), ingest_root=ingest,
+                      **_firing_args(fleet))
+    assert e.value.code is RefusalCode.BATCHES_CANCELLED
+    with RunBoard(None) as board:
+        assert [(j.kind, j.status) for j in board.list_jobs("r1")] == [("batch", "cancelled")]
 
 
 def test_a_failed_firing_is_on_the_board_under_its_run(fleet, saved_preset) -> None:  # noqa: F811
