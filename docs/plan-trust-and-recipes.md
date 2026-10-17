@@ -146,28 +146,30 @@ Decisions taken 2026-10-17, recorded with the merge that builds each one:
 - **3.6 Stocktake S-3.**
 
 ### Draft requirements — Phase 3
-**Requirement 27 gains (with 3.2c, 3.3, 3.4 and 3.5):**
+**Requirement 27 adds these, as each kind of destination is built (3.2c, 3.3, 3.4 and 3.5):**
 
-Given: "… ordered steps, cron triggers and destinations". Then: "… and each destination receives the run's output once its steps have run".
+The workflow file can also name places to send the results. Once the steps have run, each place named receives the results.
 
-- A workflow may declare destinations. A kind is accepted only once Womblex delivers it: an object store (3.2c), Postgres with pgvector (3.4), a webhook (3.5).
-- A destination names the environment variables that hold its credentials. A secret never appears in the workflow file or its stored copy.
-- Every destination is checked before launch: its credentials and webhook secret are set and its extra is installed. A pgvector destination also needs an `embed` step, and a masked one a `pii` step. A failed check refuses the run before any row.
-- Delivery starts after the last step, whether or not a step failed. A delivery that follows a failure is labelled with the failures it follows.
-- A failed delivery is retried a bounded number of times, then recorded on the run and in the run record's `deliveries`. It never stops the run.
-- Once a retried stage succeeds, `retry-stage` names the delivery's retry. A re-delivery replaces the earlier one at the destination: the bundle prefix is rewritten and pgvector rows are updated in place.
-- An object-store destination writes the bundle Requirement 23 defines, with `include_sources` set per destination.
-- A pgvector destination upserts one row per chunk, keyed `(run_id, source_hash, chunk_index, content_type)`, with its vector. Masked text is the default and raw text is sent where the destination declares it. Each row records its text layer.
-- A webhook destination POSTs five events, each signed with HMAC under an environment secret: extraction settled, stage done or failed, run done, delivery done or failed. Each event carries the run's state in the words `/v1/runs` uses. No event is sent per document or per batch.
-- `pii` runs on the fleet when a workflow lists it. Config-driven dispatch (`enqueue-stages`) never runs it.
+- A workflow can name places to send its results. Womblex accepts a kind of place only once it can actually deliver to it: cloud file storage first, then a Postgres database with search vectors, then a web address that receives notices.
+- The workflow names where Womblex can find passwords and keys, never the passwords or keys themselves. No secret is ever written in the workflow file or in the copy Womblex keeps.
+- Every place is checked before the run starts. Its passwords and keys must be available, and the software it needs must be installed. If a check fails, the run does not start.
+- Sending to the database needs a step that creates search vectors. Sending text with personal details hidden needs the step that hides them. A workflow missing the step it needs does not start.
+- Results are sent after the last step, even if a step failed. Results sent after a failure say which steps failed.
+- If sending fails, Womblex tries again a set number of times, then records the failure on the run. A failed send never stops the run.
+- When a failed step is retried successfully, Womblex shows how to resend the results. A resend replaces what was sent before. Files are rewritten and database rows are updated, not duplicated.
+- Sending to cloud file storage writes the same export package as Requirement 23. Each place decides whether the original documents are included.
+- Sending to the database writes one row per piece of text, with its search vector. Text with personal details hidden is sent by default. The original text is sent only where the workflow asks for it, and each row says which version it holds.
+- Sending to a web address sends five kinds of notice: all documents read in, a step finished or failed, the run finished, results sent, and sending failed. Each notice is signed with a secret key so the receiver can trust it.
+- Each notice gives the run's status in the same words the web API uses. No notice is sent for each document or group of documents.
+- When a workflow includes the step that hides personal details, cloud runs carry it out. Runs started without a workflow still never include it.
 
-**Requirement 23 changes (with 3.2b):** Given becomes "a finished run, local or held in an object store". Added: "A run held in an object store is copied store to store, and its sources are fetched from the ingest store." The TO-DO and its Outstanding entry go.
+**Requirement 23 changes (3.2b):** Export works for a finished run whether it is kept on a local machine or in cloud storage. A run kept in cloud storage is copied directly from one cloud location to another, and its original documents are fetched from where they were first uploaded. The TO-DO and its Outstanding entry are removed.
 
-**Requirement 2 gains (with 3.2a):** "A fleet run's `manifest.parquet` is written by the coordinator once the run's stages finish. `womblex finalize` re-runs it idempotently."
+**Requirement 2 adds (3.2a):** When a cloud run's steps finish, Womblex writes the run's list of documents by itself. The command that writes the list by hand still works, and running it again changes nothing.
 
-**Requirement 22 gains (with 3.5):** "A run dispatched from a workflow with a webhook destination signals its events to the caller's endpoint. Polling stays available, and a caller that registers no webhook polls."
+**Requirement 22 adds (3.5):** A run started from a workflow that names a web address sends its notices to that address. Callers can still check a run's status themselves, and a caller with no web address does so.
 
-**Out of scope for Phase 3:** a destination per step, databases or vector stores other than Postgres with pgvector (each brings its own extra and requirement), registering webhooks through the service API, and writing consumer corrections back.
+**Out of scope for Phase 3:** sending each step's results to a different place, databases other than Postgres with search vectors (each needs its own requirement), setting up notice addresses through the web API, and taking corrections back from the systems that receive the results.
 
 ## Phase 4 — operation (branch)
 **Merges:**
@@ -179,14 +181,15 @@ Given: "… ordered steps, cron triggers and destinations". Then: "… and each 
 - **4.4 Stocktake S-4 (final).** Move the design-failures list into `decisions-dead-ends.md`, retire this plan into the decision docs and `CHANGELOG.md`, then delete it.
 
 ### Draft requirements — Phase 4
-**Requirements 16 and 22 gain (with 4.1):**
+**Requirements 16 and 22 add (4.1):**
 
-- A run's status is one sentence, built from its exact per-stage counts, in the state words `/v1/runs` uses (`pending`, `running`, `done`, `failed`, `cancelled`, and `orphaned`). The counts stay alongside it.
-- The sentence is shown by `womblex jobs --run`, an additive `summary` field on `/v1/runs/{id}`, and the Dashboard. All three give the same sentence for the same run.
-- A run's OpenLineage event takes its type from the run's state: `done` is `COMPLETE`, `failed` is `FAIL`, `cancelled` is `ABORT`.
+- A run's status is shown as one plain sentence, built from the exact counts of work done, waiting and failed at each step. The counts are still shown beside it.
+- The sentence uses the same status words as the web API (pending, running, done, failed and cancelled), plus a warning when a scheduled run could not start its steps.
+- The command line, the web API and the dashboard all show the same sentence for the same run.
+- The run's history record, which other tools use to track where data came from, reports the run's real outcome: finished, failed or cancelled. Today it always says finished.
 
-**Requirement 12 changes (with 4.2 and 4.3):** "Graph refresh operations explicitly rewrite mention-to-chunk links in place …" becomes:
+**Requirement 12 changes (4.2 and 4.3):** the step that re-links named people and organisations to the pieces of text they appear in no longer rewrites earlier results. Instead:
 
-- Graph refresh writes its own sidecar, keyed by the digest of the chunks it linked against, and never rewrites enrichment's files.
-- A reader can tell when the refresh no longer matches the chunks, and prefers the refresh sidecar wherever it matches.
-- A run written before the sidecar existed is read through its in-place links, unchanged.
+- It saves its links in a file of their own, marked with the exact version of the text pieces it linked to. It never changes the files the earlier step wrote.
+- Anyone reading the results can tell when the links no longer match the current text pieces, and the matching links are used wherever they exist.
+- Runs made before this change are read exactly as before.
