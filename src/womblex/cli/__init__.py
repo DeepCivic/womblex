@@ -38,6 +38,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import traceback
 
 from womblex.cli import (
     api_token,
@@ -109,9 +110,26 @@ def main(argv: list[str] | None = None) -> int:
     setup_logging(args.verbose, args.log_format)
 
     if args.command in dispatch:
-        return dispatch[args.command](args)
+        try:
+            return dispatch[args.command](args)
+        except Exception as e:
+            if not _config_did_not_load(e):
+                raise
+            logger.error("config %s does not load: %s", getattr(args, "config", ""), e)
+            return 1
     parser.print_help()
     return 0
+
+
+def _config_did_not_load(e: Exception) -> bool:
+    """*e* is `load_config`'s own failure (missing file, bad YAML, invalid config): one line, not a traceback."""
+    import yaml
+    from pydantic import ValidationError
+
+    from womblex.config import load_config
+
+    frames = (frame.f_code for frame, _ in traceback.walk_tb(e.__traceback__))
+    return isinstance(e, OSError | yaml.YAMLError | ValidationError) and load_config.__code__ in frames
 
 
 if __name__ == "__main__":

@@ -456,3 +456,27 @@ class TestStrictConfig:
         with caplog.at_level("WARNING"):
             assert parse_saved_preset("my-old-preset", body) is None
         assert "my-old-preset" in caplog.text
+
+
+@pytest.mark.parametrize("content", [None, "dataset: [unclosed\n", "dataset:\n  name: 123\npaths:\n  wrong: true\n"])
+def test_a_config_that_does_not_load_is_one_line_from_the_cli(tmp_path: Path, caplog, content) -> None:
+    from womblex.cli import main
+
+    path = tmp_path / "config.yaml"
+    if content is not None:  # None: the file is missing
+        path.write_text(content)
+    assert main(["run", "--config", str(path)]) == 1
+    (record,) = [r for r in caplog.records if r.levelname == "ERROR"]
+    assert record.getMessage().startswith(f"config {path} does not load: ") and record.exc_info is None
+
+
+def test_an_error_outside_load_config_still_raises_from_the_cli(monkeypatch) -> None:
+    from womblex.cli import main
+    from womblex.cli._shared import Command
+
+    def broken(args):
+        raise FileNotFoundError("not a config")
+
+    monkeypatch.setattr("womblex.cli.ALL_COMMANDS", [Command("run", "", lambda p: p.add_argument("--config"), broken)])
+    with pytest.raises(FileNotFoundError, match="not a config"):
+        main(["run", "--config", "c.yaml"])
