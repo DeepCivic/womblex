@@ -17,14 +17,16 @@ class Ready(BaseModel):
 
 
 class RunStatus(BaseModel):
-    """One run's queue rollup. ``state`` is derived from ``counts``."""
+    """One run's queue rollup. ``state`` is derived from ``counts``; ``orphaned`` marks extraction
+    a failed firing queued with no stages dispatched."""
 
     run_id: str
-    state: Literal["pending", "running", "done", "failed"]
+    state: Literal["pending", "running", "done", "failed", "cancelled"]
     counts: dict[str, int]
     total: int
     created_at: str | None = None
     updated_at: str | None = None
+    orphaned: bool = False
 
 
 class RunList(BaseModel):
