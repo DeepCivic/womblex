@@ -81,7 +81,7 @@ def _check_retryable(attempts: dict[str, list[WorkflowStatus]], run_id: str, sta
     status = _board_status(latest)
     if status in ("pending", "running"):
         raise RetryRefusedError(f"{latest.workflow_id} is still {status}", RetryCode.STILL_RUNNING)
-    if status == "failed":
+    if status in ("failed", "cancelled"):  # a cancelled stage did not finish either
         return
     after = [f for f in _attr(latest, "ran_after_failed") or [] if f in attempts]
     not_cured = [f for f in after if _board_status(_latest(attempts, f)) != "done"]
