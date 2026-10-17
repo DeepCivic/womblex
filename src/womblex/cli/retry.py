@@ -51,11 +51,11 @@ def cmd_retry_stage(args: argparse.Namespace) -> int:
     logger.info("%s retried as %s, from step %d of %s", args.stage, retry.retry_id,
                 retry.start_step, retry.forked_from)
     if retry.later:
+        where = f" --config {args.config}" + (f" --store {store_uri}" if store_uri else "")
         logger.info(
             "%s ran on the partial output of %s. Once %s succeeds, re-run each in this order:\n%s",
             ", ".join(retry.later), args.stage, retry.retry_id,
-            "\n".join(f"  womblex retry-stage --run-id {args.run_id} --stage {s} --config {args.config}"
-                      for s in retry.later),
+            "\n".join(f"  womblex retry-stage --run-id {args.run_id} --stage {s}{where}" for s in retry.later),
         )
     return 0
 

@@ -389,8 +389,8 @@ uv run python -m pytest accuracy/ -v
 ### Expected conditional skips
 The skip count depends on credentials and services, never on fixtures — none
 are on broken code. On a bare checkout (no Isaacus key, no Postgres DSN)
-`pytest tests/ -m "not benchmark"` reports ~32 skips; CI, which runs a Postgres
-service, ~12.
+`pytest tests/ -m "not benchmark"` reports ~60 skips, 48 of them the Postgres
+variants; CI, which runs a Postgres service, ~12.
 Run with `-rs` to see live reasons. The recurring ones:
 
 - **Postgres** (the `[postgres]` parameter of the `fleet` fixture, `tests/_postgres.py`): skipped unless `WOMBLEX_DB_DSN` names a Postgres server; each test gets a fresh database on it, so no test shares state with another.
