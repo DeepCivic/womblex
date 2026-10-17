@@ -118,6 +118,8 @@ def test_run_detail_reports_derived_state(client):
     ({"pending": 1, "done": 1}, "running"),
     ({"pending": 2}, "pending"),
     ({"done": 2}, "done"),
+    ({"done": 2, "cancelled": 1}, "cancelled"),
+    ({"pending": 1, "cancelled": 1}, "pending"),
 ])
 def test_run_state(counts, state):
     assert run_state(counts) == state
@@ -389,7 +391,7 @@ def test_openapi_surface_is_pinned(client):
             "RunManifest": ["documents", "run_id"],
             "RunMetrics": ["run_id", "stats", "throughput", "workers"],
             "RunRequest": ["batch_size", "config", "input_prefix", "preset"],
-            "RunStatus": ["counts", "created_at", "run_id", "state", "total", "updated_at"],
+            "RunStatus": ["counts", "created_at", "orphaned", "run_id", "state", "total", "updated_at"],
             "RunSubmitted": ["batch_count", "document_count", "run_id", "stages"],
             "UploadAccepted": ["bytes", "files", "input_prefix", "upload_id"],
             "Body_upload_v1_uploads_post": ["files"],

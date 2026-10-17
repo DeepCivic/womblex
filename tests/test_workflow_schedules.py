@@ -78,13 +78,18 @@ def test_sync_makes_schedules_equal_triggers_and_remove_unschedules(fleet) -> No
         assert sync_schedules(client, store.save("nightly", _spec(["normalise"], []))) == []
 
 
-def test_remove_and_status_work_after_the_workflow_is_deleted(fleet, capsys, monkeypatch) -> None:  # noqa: F811
+def _where(fleet) -> dict:  # noqa: F811
+    """The locations `schedule-workflow` checks a firing against."""
+    return {"store": str(fleet[0]), "ingest": fleet[1], "presets_dir": None}
+
+
+def test_remove_and_status_work_after_the_workflow_is_deleted(
+    fleet, saved_preset, capsys, monkeypatch,  # noqa: F811
+) -> None:
     import argparse
 
     from womblex.cli.workflow import cmd_schedule_workflow
 
-    for var in ("WOMBLEX_DB_DSN", "DATABASE_URL"):  # the CLI reads these; CI sets one for Postgres
-        monkeypatch.delenv(var, raising=False)
     fresh = fleet[2] / "none" / "dbos.sqlite"
     with monkeypatch.context() as m:  # --status changes nothing, not even by creating a database
         m.setenv("WOMBLEX_DBOS_PATH", str(fresh))
@@ -93,7 +98,7 @@ def test_remove_and_status_work_after_the_workflow_is_deleted(fleet, capsys, mon
     ensure_workflow_schema(None)
     with WorkflowStore(None) as store:
         store.save("gone", _spec(["normalise"], [_TRIGGER, {"cron": "0 5 * * *"}]))
-    args = argparse.Namespace(workflow_id="gone", dsn=None, remove=False, status=False)
+    args = argparse.Namespace(workflow_id="gone", dsn=None, remove=False, status=False, **_where(fleet))
     assert cmd_schedule_workflow(args) == 0
     with WorkflowStore(None) as store:
         store.delete("gone")
@@ -157,6 +162,66 @@ def test_a_firing_that_cannot_complete_queues_nothing(fleet, saved_preset) -> No
     assert database.read_bytes() == before
 
 
+def _firing_args(fleet) -> dict:  # noqa: F811
+    import os
+
+    from womblex.cloud.workflow_runner import preset_resolver
+    from womblex.store.remote import RemoteStore
+
+    store_dir = fleet[0]
+    return {"resolve_preset": preset_resolver(Path(os.environ["WOMBLEX_UI_PRESETS_DIR"])),
+            "store": RemoteStore.from_uri(str(store_dir)), "dsn": None}
+
+
+def test_a_firing_whose_dispatch_fails_leaves_its_extraction_running_and_the_run_orphaned(
+    fleet, saved_preset, monkeypatch, caplog,  # noqa: F811
+) -> None:
+    from womblex.cloud import workflow_dispatch
+
+    ensure_workflow_schema(None)
+    with WorkflowStore(None) as store:
+        stored = store.save("wf", _spec(["normalise"]))
+    real, down = workflow_dispatch.dispatch_workflow, [True]
+
+    def dispatch(stored, **kw):
+        if down[0] and not kw.get("dry_run"):
+            raise OSError("system database dropped")
+        return real(stored, **kw)
+
+    monkeypatch.setattr(workflow_dispatch, "dispatch_workflow", dispatch)
+    _fire_all_at_once(dbos_app.open_client(None), stored)
+    work(fleet, idle_timeout=3)
+    with RunBoard(None) as board:
+        (run,) = board.runs()
+    assert run.counts == {"done": 1, "failed": 1} and run.orphaned  # the batch ran; the firing failed
+    assert f"dispatch-workflow wf --run-id {run.run_id}" in caplog.text
+    down[0] = False  # the operator dispatches the stages: the run is no longer orphaned
+    real(stored, run_id=run.run_id, store_uri=None, **_firing_args(fleet))
+    with RunBoard(None) as board:
+        assert not board.runs()[0].orphaned
+
+
+def test_a_firing_refuses_a_run_whose_batches_were_cancelled(fleet, saved_preset) -> None:  # noqa: F811
+    from tests.test_workflows import batch
+    from womblex.cloud.workflow_dispatch import fire_workflow
+    from womblex.cloud.workflow_runner import RefusalCode, WorkflowRefusedError
+    from womblex.store.remote import RemoteStore
+
+    _, ingest, _ = fleet
+    ensure_workflow_schema(None)
+    with WorkflowStore(None) as store:
+        stored = store.save("wf", _spec(["normalise"], []))
+    with RunBoard(None) as board:
+        board.enqueue("r1", [batch(ingest)])
+    dbos_app.open_client(None).cancel_workflow(dbos_app.batch_id("r1", 1))
+    with pytest.raises(WorkflowRefusedError) as e:  # a replayed firing would attach to it and never run
+        fire_workflow(stored, run_id="r1", ingest=RemoteStore.from_uri(ingest), ingest_root=ingest,
+                      **_firing_args(fleet))
+    assert e.value.code is RefusalCode.BATCHES_CANCELLED
+    with RunBoard(None) as board:
+        assert [(j.kind, j.status) for j in board.list_jobs("r1")] == [("batch", "cancelled")]
+
+
 def test_a_failed_firing_is_on_the_board_under_its_run(fleet, saved_preset) -> None:  # noqa: F811
     ensure_workflow_schema(None)
     with WorkflowStore(None) as store:
@@ -206,6 +271,28 @@ def test_two_firings_never_conflict_and_each_dry_run_matches_its_dispatch(
     assert "not acted on" not in caplog.text  # the firing acts on the input prefix
 
 
+@pytest.mark.parametrize("steps, prefix, code", [
+    (["pii"], None, "stage_not_dispatchable"),  # the dry-run dispatch the firing makes
+    (["normalise"], "empty", "no_documents"),
+])
+def test_a_workflow_its_firing_would_refuse_is_not_scheduled(
+    fleet, saved_preset, caplog, monkeypatch, steps, prefix, code,  # noqa: F811
+) -> None:
+    import argparse
+
+    from womblex.cli.workflow import cmd_schedule_workflow
+
+    ensure_workflow_schema(None)
+    with WorkflowStore(None) as store:
+        store.save("wf", _spec(steps, prefix=prefix))
+    (Path(fleet[1]) / "empty").mkdir()
+    args = argparse.Namespace(workflow_id="wf", dsn=None, remove=False, status=False, **_where(fleet))
+    assert cmd_schedule_workflow(args) == 1
+    assert f"[{code}]" in caplog.text
+    assert list_schedules(dbos_app.open_client(None), "wf") == []
+    assert cmd_schedule_workflow(argparse.Namespace(**{**vars(args), "store": None})) == 1  # nothing to check against
+
+
 def test_an_owned_workflow_never_extracts_outside_its_owners_tree(
     fleet, saved_preset, monkeypatch,  # noqa: F811
 ) -> None:
@@ -219,14 +306,12 @@ def test_an_owned_workflow_never_extracts_outside_its_owners_tree(
     from womblex.store.remote import RemoteStore
 
     store_dir, ingest, tmp = fleet
-    for var in ("WOMBLEX_DB_DSN", "DATABASE_URL"):  # the CLI reads these; CI sets one for Postgres
-        monkeypatch.delenv(var, raising=False)
     ensure_workflow_schema(None)
     with WorkflowStore(None) as store:
         for wid, prefix in (("root", None), ("bobs", "bob")):
             store.save(wid, _spec(["normalise"], [_TRIGGER], prefix), owner="alice")
     for wid in ("root", "bobs"):
-        args = argparse.Namespace(workflow_id=wid, dsn=None, remove=False, status=False)
+        args = argparse.Namespace(workflow_id=wid, dsn=None, remove=False, status=False, **_where(fleet))
         assert cmd_schedule_workflow(args) == 1
         assert list_schedules(dbos_app.open_client(None), wid) == []
     workflows.set_context(workflows.WorkerContext(

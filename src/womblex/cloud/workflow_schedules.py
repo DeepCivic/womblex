@@ -11,7 +11,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+import sqlalchemy.exc
+
 from womblex.cloud import dbos_app
+from womblex.cloud.jobs import schema_missing
 from womblex.cloud.workflow_store import StoredWorkflow
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -39,7 +42,13 @@ def schedule_inputs(stored: StoredWorkflow) -> list[dict[str, Any]]:
 
 
 def list_schedules(client: DBOSClient, workflow_id: str) -> list[dict[str, Any]]:
-    return [dict(s) for s in client.list_schedules(schedule_name_prefix=schedule_prefix(workflow_id))]
+    """A workflow's schedules; none in a database no writer has migrated (readers do not migrate)."""
+    try:
+        return [dict(s) for s in client.list_schedules(schedule_name_prefix=schedule_prefix(workflow_id))]
+    except sqlalchemy.exc.DBAPIError as e:
+        if not schema_missing(e):
+            raise
+        return []
 
 
 def sync_schedules(client: DBOSClient, stored: StoredWorkflow) -> list[str]:

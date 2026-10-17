@@ -1,0 +1,187 @@
+"""Retrying a failed stage by fork (D-2.1): a real worker on a SQLite system database."""
+# ruff: noqa: F811  (`fleet` is a fixture imported from test_workflows, then taken as an argument)
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+import pytest
+
+pytest.importorskip("dbos")
+
+from tests.test_cloud import _minimal_config
+from tests.test_workflows import batch, fleet, work  # noqa: F401
+from womblex.cloud import dbos_app, workflows
+from womblex.cloud.jobs import RunBoard, RunOwnedError
+from womblex.cloud.retry import RetryCode, RetryRefusedError, retry_stage
+
+PREFIX = "runs/r1/documents"
+
+
+class Fault:
+    """A stage unit that raises while `broken`, and the log of every unit `run_unit` is asked to run."""
+
+    def __init__(self, monkeypatch, stage: str, unit: list[str]):
+        self.broken, self.calls = True, []
+        real = workflows.run_unit
+
+        def run_unit(contract, config, ctx, store, prefix, u, ingest):
+            self.calls.append((contract.name, u))
+            if self.broken and contract.name == stage and u == unit:
+                raise RuntimeError(f"{stage} broke on {u[0]}")
+            return real(contract, config, ctx, store, prefix, u, ingest)
+
+        monkeypatch.setattr(workflows, "run_unit", run_unit)
+
+    def fix(self) -> list[tuple[str, list[str]]]:
+        """The fault is fixed; the log so far is returned and restarted."""
+        self.broken, seen, self.calls = False, self.calls, []
+        return seen
+
+
+def _failed_run(fleet, monkeypatch, stages=("normalise",), broken="normalise"):
+    """Run r1 (two batches) to the point `broken` has failed on its second batch."""
+    _, ingest, _ = fleet
+    fault = Fault(monkeypatch, broken, ["batch-0002"])
+    with RunBoard(None) as board:
+        board.enqueue("r1", [batch(ingest, 1), batch(ingest, 2)])
+        board.enqueue_stages("r1", list(stages), PREFIX, max_attempts=1)
+        work(fleet, idle_timeout=2)
+    return fault
+
+
+def _attempts(stage):
+    with RunBoard(None) as board:
+        return board.stage_attempts("r1")[stage]
+
+
+def _retry(fleet, stage="normalise", **kw):
+    with RunBoard(None) as board:
+        return retry_stage(board, "r1", stage, config=_minimal_config(fleet[2]), **kw)
+
+
+def test_a_failed_stage_is_forked_from_its_first_failed_unit(fleet, monkeypatch):
+    fault = _failed_run(fleet, monkeypatch)
+    calls = fault.fix()
+    retry = _retry(fleet)
+    assert retry.retry_id == "r1:stage:normalise:retry:1" and retry.forked_from == "r1:stage:normalise"
+    work(fleet, idle_timeout=2)
+    assert ("normalise", ["batch-0001"]) in calls
+    assert fault.calls == [("normalise", ["batch-0002"])]  # the finished unit's recorded step was kept
+    with RunBoard(None) as board:
+        rows = {r.id: r for r in board.list_jobs("r1") if r.kind == "stage"}
+        stats = board.stats("r1")
+        (run,) = board.runs(run_id="r1")
+    original, forked = (s.attributes for s in _attempts("normalise"))
+    assert forked == original  # the fork is the same stage: owner, digest and all
+    assert rows["r1:stage:normalise"].status == "failed"
+    assert rows["r1:stage:normalise"].retried_by == "r1:stage:normalise:retry:1"
+    assert rows["r1:stage:normalise:retry:1"].status == "done"
+    assert rows["r1:stage:normalise:retry:1"].retried_by is None
+    assert stats == {"done": 3, "failed": 1}  # two batches + stage retry; the coordinator's record stays
+    assert run.counts == stats
+
+
+def test_a_second_retry_is_the_next_attempt(fleet, monkeypatch):
+    _failed_run(fleet, monkeypatch)
+    _retry(fleet)
+    work(fleet, idle_timeout=2)  # the fault is still there: the retry fails too
+    assert _retry(fleet).retry_id == "r1:stage:normalise:retry:2"
+
+
+@pytest.mark.parametrize("stage, code", [("embed", RetryCode.NOT_FOUND), ("normalise", RetryCode.NOT_FAILED)])
+def test_a_stage_that_is_unknown_or_succeeded_is_refused(fleet, stage, code):
+    _, ingest, _ = fleet
+    with RunBoard(None) as board:
+        board.enqueue("r1", [batch(ingest)])
+        board.enqueue_stages("r1", ["normalise"], PREFIX)
+        work(fleet, idle_timeout=2)
+    with pytest.raises(RetryRefusedError) as e:
+        _retry(fleet, stage)
+    assert e.value.code is code
+
+
+def test_a_stage_still_running_is_refused(fleet):
+    with RunBoard(None) as board:
+        board._client.enqueue(
+            {"workflow_name": dbos_app.STAGE_WORKFLOW, "queue_name": dbos_app.stage_queue("normalise"),
+             "workflow_id": dbos_app.stage_id("r1", "normalise"),
+             "attributes": {"run_id": "r1", "kind": dbos_app.KIND_STAGE, "stage": "normalise"}},
+            "r1", "normalise", PREFIX, 1,
+        )
+        with pytest.raises(RetryRefusedError) as e:
+            retry_stage(board, "r1", "normalise", config=_minimal_config(fleet[2]))
+    assert e.value.code is RetryCode.STILL_RUNNING
+
+
+def test_a_retry_by_another_owner_is_refused(fleet, monkeypatch):
+    _failed_run(fleet, monkeypatch)
+    with RunBoard(None) as board:
+        board.enqueue_stages("r2", ["normalise"], PREFIX, owner="alice")
+        with pytest.raises(RunOwnedError):
+            board.stage_attempts("r2", owner="bob")
+
+
+def test_a_retry_that_fails_a_launch_check_forks_nothing(fleet, monkeypatch):
+    from womblex.cloud import workflow_order
+
+    _failed_run(fleet, monkeypatch)
+
+    def refuse(*_):
+        raise workflow_order.StageOrderError([])
+
+    monkeypatch.setattr(workflow_order, "check_dispatch_order", refuse)
+    with pytest.raises(RetryRefusedError) as e:
+        _retry(fleet)
+    assert e.value.code is RetryCode.STEP_ORDER
+    with RunBoard(None) as board:
+        assert [s.workflow_id for s in board.stage_attempts("r1")["normalise"]] == ["r1:stage:normalise"]
+
+
+def test_a_config_that_will_not_load_refuses_the_retry(fleet, monkeypatch):
+    from womblex.utils import model_check
+
+    _failed_run(fleet, monkeypatch)
+
+    def unregistered(*_):
+        raise ValueError("no such model")
+
+    monkeypatch.setattr(model_check, "check_registered", unregistered)
+    with pytest.raises(RetryRefusedError) as e:
+        _retry(fleet)
+    assert e.value.code is RetryCode.CONFIG_INVALID
+
+
+def test_stages_that_ran_after_a_failure_are_offered_once_it_is_cured(fleet, monkeypatch, caplog):
+    fault = _failed_run(fleet, monkeypatch, stages=("normalise", "chunk"))
+    fault.fix()
+    from womblex.cli.retry import cmd_retry_stage
+
+    monkeypatch.setattr("womblex.config.load_config", lambda _: _minimal_config(fleet[2]))
+    args = argparse.Namespace(run_id="r1", stage="normalise", config=Path("c.yaml"), store=None, dsn=None)
+    assert cmd_retry_stage(args) == 0
+    assert "womblex retry-stage --run-id r1 --stage chunk" in caplog.text  # offered, to run once cured
+    assert cmd_retry_stage(args) == 1  # the retry is still queued: a second is refused
+    assert "retry refused" in caplog.text
+    with pytest.raises(RetryRefusedError) as e:  # but not before normalise has succeeded
+        _retry(fleet, "chunk")
+    assert e.value.code is RetryCode.EARLIER_FAILED
+    work(fleet, idle_timeout=2)
+    again = _retry(fleet, "chunk")
+    assert again.retry_id == "r1:stage:chunk:retry:1" and again.start_step == 1
+    work(fleet, idle_timeout=2)
+    with pytest.raises(RetryRefusedError) as e:  # re-run since: nothing left to offer
+        _retry(fleet, "chunk")
+    assert e.value.code is RetryCode.NOT_FAILED
+
+
+def test_stages_offered_after_a_failure_are_in_pipeline_order():
+    from types import SimpleNamespace as Row
+
+    from womblex.cloud.retry import _ran_after
+
+    attempts = {s: [Row(status="SUCCESS", attributes={"ran_after_failed": ["normalise"]})]
+                for s in ("money", "embed", "chunk", "enrich", "spellfix")}
+    attempts["normalise"] = [Row(status="ERROR", attributes={})]
+    assert _ran_after(attempts, "normalise") == ("spellfix", "enrich", "chunk", "embed", "money")

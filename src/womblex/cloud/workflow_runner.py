@@ -62,7 +62,7 @@ class RefusalCode(str, Enum):
     """A step's preflight, Isaacus or model check failed; `steps` names each."""
 
     STAGE_NOT_DISPATCHABLE = "stage_not_dispatchable"
-    """The fleet runs only `DOWNSTREAM_STAGES`; `steps` names the others (`pii` is local-only)."""
+    """The fleet runs only `DOWNSTREAM_STAGES`; `steps` names the others (`layout`, `pii`, `quality`)."""
 
     ORDER_NOT_PIPELINE = "order_not_pipeline"
     """The fleet runs stages in pipeline order, so a list in another order is not dispatched."""
@@ -75,6 +75,9 @@ class RefusalCode(str, Enum):
 
     RUN_CONFLICT = "run_conflict"
     """The run already dispatched a stage under a different workflow digest."""
+
+    BATCHES_CANCELLED = "batches_cancelled"
+    """A firing's run already holds cancelled batches, which a re-enqueue would attach to and never run."""
 
 
 class WorkflowRefusedError(Exception):

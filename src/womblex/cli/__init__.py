@@ -54,6 +54,7 @@ from womblex.cli import (
     profile,
     quality,
     redact,
+    retry,
     score,
     serve,
     spellfix,
@@ -69,6 +70,7 @@ logger = logging.getLogger("womblex")
 ALL_COMMANDS = [
     *pipeline.COMMANDS,
     *cloud.COMMANDS,
+    *retry.COMMANDS,
     *redact.COMMANDS,
     *link.COMMANDS,
     *embed.COMMANDS,

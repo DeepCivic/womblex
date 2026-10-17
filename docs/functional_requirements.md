@@ -288,6 +288,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - Resuming an interrupted run automatically reconciles checkpoints and skips already-completed documents.
 - Individual document errors are isolated, recorded in the manifest, and do not crash the wider batch.
 - CLI commands allow stages to be dispatched independently, with idempotent queueing ensuring dependent stages sequence properly.
+- `womblex retry-stage` retries a failed distributed stage by forking its workflow from the first failed unit, so the units that finished are not run again. A retry is a launch: it is refused, before anything is forked, for a stage that is unknown, still running, not failed, owned by another owner, or failing the checks a dispatch makes (its config and registered models, the inputs it needs in the store). A stage that ran after a failure ran on partial output, so once the failed stage's latest attempt has succeeded it is retryable too, in the order the operator runs them.
 - Logs can be emitted as JSON lines (`womblex --log-format json` or `WOMBLEX_LOG_FORMAT=json`) with no added dependency; worker and batch records carry `run_id`, `job_id`, `stage`, and `source_hash` where known, and the default text format is unchanged.
 
 ## 15. Web Console Shell, Navigation, and Deployment Modes
@@ -322,7 +323,8 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 **Acceptance criteria:**
 
 - Queue and stage state are read from sources the pipeline already writes (the job queue and per-stage checkpoints); with no queue configured, the dashboard falls back to checkpoints.
-- Job status is rendered with the exact values the system writes (`pending` / `running` / `done` / `failed`), plus `stale` for a running workflow with no update past the staleness threshold, and `skipped`.
+- Job status is rendered with the exact values the system writes (`pending` / `running` / `done` / `failed` / `cancelled`), plus `stale` for a running workflow with no update past the staleness threshold, and `skipped`.
+- A retried stage counts once: the run's counts take its latest attempt, and the attempt a retry superseded stays listed `failed` with `retried_by` naming the next.
 - The dashboard only *names* a stalled job; DBOS recovers it when its executor restarts, and the dashboard never requeues, cancels, or claims work itself.
 - Polling is paused while the browser tab is hidden so a backgrounded console stops hitting the queue.
 - Per-stage progress renders in the declared pipeline order rather than an ad-hoc frontend ordering.
@@ -564,12 +566,11 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - Conditions over manifest columns label each document `holds`, `fails` or `unevaluable` and never refuse, halt or narrow a run.
 - Every sidecar a workflow step writes carries the workflow's digest, and the run record lists the workflows observed in its files.
 - `dispatch-workflow` queues the steps for the fleet, refused before any row for anything the local runner refuses and for a step the fleet cannot run, an order the coordinator would change, or a run already worked under another digest; workers run each stage under the workflow's config.
-- `schedule-workflow` makes the queue's schedules equal the workflow's cron triggers; each firing extracts the input prefix into a fresh run and dispatches the workflow, refused before any row when the prefix is outside the owner's tree or holds no document.
+- `schedule-workflow` makes the queue's schedules equal the workflow's cron triggers; each firing extracts the input prefix into a fresh run and dispatches the workflow, refused before any row when the prefix is outside the owner's tree or holds no document. `schedule-workflow` runs the same checks first (`check_firing`, against `--store` / `--ingest`), so a workflow its firing would refuse is not scheduled.
 
 **TO-DO:**
 
 - **Destinations are stored but not acted on.**
-- **`schedule-workflow` checks only the owner prefix.** Any other refusal surfaces per firing, after it is scheduled.
 
 **Out of scope:** a command or API that saves a workflow (one is saved through `WorkflowStore` in code), incremental firings (only documents not seen before) and backfill of missed firings.
 
@@ -586,6 +587,6 @@ Requirements not yet fully met. The detail lives in the **TO-DO** block under ea
 - **Requirement 13 (Money Annotation):** the money span row carries no merge extent or header-row coordinate.
 - **Requirements 17 and 21 (Corpus Inspector; Console Design System):** `DocumentGrid.svelte` is not virtualised and emits no `aria-rowcount`.
 - **Requirement 23 (Egress Bundle):** a run ingested from an object store is refused rather than resolving its sources from that store.
-- **Requirement 27 (Stored Workflows):** destinations are not acted on, and `schedule-workflow` checks only the owner prefix.
+- **Requirement 27 (Stored Workflows):** destinations are not acted on.
 
 ---

@@ -67,12 +67,15 @@ MAX_UPLOAD_BYTES = 256 * 1024 * 1024
 
 
 def run_state(counts: dict[str, int]) -> str:
-    """Collapse a status rollup into one state; any failed job fails the run."""
+    """Collapse a status rollup into one state; any failed job fails the run, and a finished run
+    with a cancelled job is cancelled."""
     if counts.get("failed"):
         return "failed"
     if counts.get("running") or (counts.get("pending") and counts.get("done")):
         return "running"
-    return "pending" if counts.get("pending") else "done"
+    if counts.get("pending"):
+        return "pending"
+    return "cancelled" if counts.get("cancelled") else "done"
 
 
 def mint_run_id() -> str:
@@ -128,7 +131,7 @@ def upload_size(f: UploadFile) -> int:
 def _status(run: RunSummary) -> RunStatus:
     return RunStatus(
         run_id=run.run_id, state=run_state(run.counts), counts=run.counts,  # type: ignore[arg-type]
-        total=run.total, created_at=run.created_at, updated_at=run.updated_at,
+        total=run.total, created_at=run.created_at, updated_at=run.updated_at, orphaned=run.orphaned,
     )
 
 
