@@ -35,9 +35,6 @@ TRIGGER_WORKFLOW = "womblex.fire_trigger"
 #: never hold a slot a batch or a stage needs.
 DOWNSTREAM_QUEUE = "womblex-downstream"
 
-#: DBOS statuses of a workflow that has not finished.
-UNSETTLED = ["ENQUEUED", "DELAYED", "PENDING"]
-
 #: Workflow kinds, carried as the ``kind`` attribute.
 KIND_BATCH, KIND_STAGE, KIND_DOWNSTREAM, KIND_TRIGGER = "batch", "stage", "downstream", "trigger"
 

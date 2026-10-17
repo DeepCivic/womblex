@@ -323,7 +323,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 **Acceptance criteria:**
 
 - Queue and stage state are read from sources the pipeline already writes (the job queue and per-stage checkpoints); with no queue configured, the dashboard falls back to checkpoints.
-- Job status is rendered with the exact values the system writes (`pending` / `running` / `done` / `failed`), plus `stale` for a running workflow with no update past the staleness threshold, and `skipped`.
+- Job status is rendered with the exact values the system writes (`pending` / `running` / `done` / `failed` / `cancelled`), plus `stale` for a running workflow with no update past the staleness threshold, and `skipped`.
 - A retried stage counts once: the run's counts take its latest attempt, and the attempt a retry superseded stays listed `failed` with `retried_by` naming the next.
 - The dashboard only *names* a stalled job; DBOS recovers it when its executor restarts, and the dashboard never requeues, cancels, or claims work itself.
 - Polling is paused while the browser tab is hidden so a backgrounded console stops hitting the queue.

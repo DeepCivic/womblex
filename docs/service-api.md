@@ -105,7 +105,9 @@ pins its operation and model surface so breaking changes show in review.
 ### Run state
 
 `failed` if any job failed; `running` while jobs run or some are pending
-beside some done; `pending` while all are pending; otherwise `done`.
+beside some done; `pending` while all are pending; `cancelled` when a job
+was cancelled; otherwise `done`. `orphaned` is true for a run whose firing
+queued extraction and failed before its stages were dispatched.
 
 ### Document text layers
 
