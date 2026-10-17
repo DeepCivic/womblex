@@ -1,6 +1,6 @@
 # Trust baseline and recipes — plan
 
-*Status: in progress (2026-10). Phase 1 has shipped. Phase 2 shipped with design failures, and Phase R repairs them before Phase 3 starts. This document lists outstanding work only. Completed work is recorded in `CHANGELOG.md` and the enduring docs, and the conventions every merge holds to (merge size, stocktakes, stacked PRs, dependency merges) are in CLAUDE.md. Each merge removes its item from this document as it lands, and the document is deleted once its last item ships. A merge that reverses a recorded decision deletes that entry from the decision docs. It does not keep it as a "rejected" alternative: the design failures below are the record.*
+*Status: in progress (2026-10). Phase 1 has shipped. Phase 2 shipped with design failures, and Phase R repairs them before Phase 3 starts. This document lists outstanding work only. Completed work is recorded in `CHANGELOG.md` and the enduring docs, and the conventions every merge holds to (merge size, stocktakes, stacked PRs, dependency merges) are in CLAUDE.md. Each merge removes its item from this document as it lands, and the document is deleted once its last item ships. A merge that reverses a recorded decision deletes that entry from the decision docs. It does not keep it as a "rejected" alternative: the design failures below are the record. Each phase ends with draft requirements written in the form of `functional_requirements.md`. The merge that satisfies a criterion moves it there, and removes the TO-DO and Outstanding entries it closes.*
 
 ## Design failures — do not repeat
 Phase 2 shipped each of these. Before building, check every merge in this plan and every new plan against this list.
@@ -29,6 +29,35 @@ Decisions taken 2026-10-17. Each merge records its decision in `decisions-operat
 - **R.4 Incremental firings** (D-R.2). `workflow_dispatch.fire_workflow` lists the prefix and hashes against the run's manifest, `dispatch.batch_specs` numbers on from the last batch, and stage ids and `plan_units` are scoped to the firing. `cloud/retry.py` follows the new stage ids. Docs: `decisions-operations.md` ("A trigger fires a dispatch"; "No incrementality" deleted), `workflows.md`. Split mechanical (firing-scoped ids) then behaviour (hash-and-skip) if over the cap.
 - **R.5 Stocktake S-R.**
 
+### Draft requirements — Phase R
+**Requirement 27 is replaced by: 27. Workflows — Define, Check, Run, Dispatch and Schedule**
+
+**As** an operator,
+**I want** to define a recipe of steps over a preset in a file and run it locally, on the fleet or on a schedule,
+**so that** a run's sequence is declared once, checked before it spends anything, recorded in what it writes, and a schedule pays only for documents it has not processed.
+
+**Given** a workflow file (a preset reference, config overlay, input binding, ordered steps and cron triggers)
+**When** the operator validates, plans, runs, dispatches or schedules it by its path
+**Then** everything that can refuse does so before the first step, the files each step writes name the workflow, and each firing processes only documents its run does not already hold.
+
+**Acceptance criteria:**
+
+- A workflow is a YAML file, and every workflow command takes its path. Defining or changing a workflow needs no code.
+- The file is checked by every command (steps, cron and timezone, config overlay), and an unknown field is refused. Its digest is stable over its content, so comments and formatting do not change it.
+- `dispatch-workflow` and `schedule-workflow` store a copy keyed by the workflow id, owner-scoped like runs. A firing runs that copy, and scheduling an edited file replaces it.
+- Its own `config` is laid over its preset's key by key, and the whole is validated as a full config.
+- `validate` runs exactly the checks `run-workflow` runs before its first step, and writes nothing. `plan` counts the requests and tokens its paid steps would send, calling no paid API.
+- Step order is checked before launch: a step whose input is missing, produced later, or rewritten later is refused with a stable code.
+- Once a step has run, a failed step does not stop the steps after it. Each later step records the failure it follows, and the exit code is non-zero.
+- Every sidecar a workflow step writes carries the workflow's digest, and the run record lists the workflows observed in its files.
+- `dispatch-workflow` queues the steps for the fleet. It is refused before any row for anything the local runner refuses, a step the fleet cannot run, an order the coordinator would change, or a run already worked under another digest. Workers run each stage under the workflow's config.
+- A scheduled workflow has one run that grows. A firing extracts only documents whose `source_hash` the run does not hold, numbers its batches on from the last, and runs the steps over its own batches only. A document already in the run is never re-extracted or re-sent to a paid service by a firing.
+- A firing that finds no new document queues nothing and logs that it found none.
+- A file whose bytes have changed is a new document, and the earlier version stays in the run.
+- `schedule-workflow` makes the queue's schedules equal the workflow's triggers, and runs a firing's checks first (`check_firing`, against `--store` / `--ingest`), so a workflow its firing would refuse is not scheduled. A firing over a prefix outside the owner's tree is refused before any row.
+
+**Out of scope:** removing or superseding a document whose file changed or was deleted, backfill of missed firings, a service-API route for workflows, and destinations (Phase 3).
+
 ## Phase 3 — integration (branch)
 A finished run sends its output somewhere by itself (a "destination"), declared in the workflow file. Each merge adds one destination kind that works end to end. No kind is stored before the merge that delivers it.
 
@@ -53,6 +82,30 @@ Decisions taken 2026-10-17, recorded with the merge that builds each one:
 - **3.5.5 `egress.md` becomes "Egress and destinations"**, with a payload reference (docs only).
 - **3.6 Stocktake S-3.**
 
+### Draft requirements — Phase 3
+**Requirement 27 gains (with 3.2c, 3.3, 3.4 and 3.5):**
+
+Given: "… ordered steps, cron triggers and destinations". Then: "… and each destination receives the run's output once its steps have run".
+
+- A workflow may declare destinations. A kind is accepted only once Womblex delivers it: an object store (3.2c), Postgres with pgvector (3.4), a webhook (3.5).
+- A destination names the environment variables that hold its credentials. A secret never appears in the workflow file or its stored copy.
+- Every destination is checked before launch: its credentials and webhook secret are set and its extra is installed. A pgvector destination also needs an `embed` step, and a masked one a `pii` step. A failed check refuses the run before any row.
+- Delivery starts after the last step, whether or not a step failed. A delivery that follows a failure is labelled with the failures it follows.
+- A failed delivery is retried a bounded number of times, then recorded on the run and in the run record's `deliveries`. It never stops the run.
+- Once a retried stage succeeds, `retry-stage` names the delivery's retry. A re-delivery replaces the earlier one at the destination: the bundle prefix is rewritten and pgvector rows are updated in place.
+- An object-store destination writes the bundle Requirement 23 defines, with `include_sources` set per destination.
+- A pgvector destination upserts one row per chunk, keyed `(run_id, source_hash, chunk_index, content_type)`, with its vector. Masked text is the default and raw text is sent where the destination declares it. Each row records its text layer.
+- A webhook destination POSTs five events, each signed with HMAC under an environment secret: extraction settled, stage done or failed, run done, delivery done or failed. Each event carries the run's state in the words `/v1/runs` uses. No event is sent per document or per batch.
+- `pii` runs on the fleet when a workflow lists it. Config-driven dispatch (`enqueue-stages`) never runs it.
+
+**Requirement 23 changes (with 3.2b):** Given becomes "a finished run, local or held in an object store". Added: "A run held in an object store is copied store to store, and its sources are fetched from the ingest store." The TO-DO and its Outstanding entry go.
+
+**Requirement 2 gains (with 3.2a):** "A fleet run's `manifest.parquet` is written by the coordinator once the run's stages finish. `womblex finalize` re-runs it idempotently."
+
+**Requirement 22 gains (with 3.5):** "A run dispatched from a workflow with a webhook destination signals its events to the caller's endpoint. Polling stays available, and a caller that registers no webhook polls."
+
+**Out of scope for Phase 3:** a destination per step, databases or vector stores other than Postgres with pgvector (each brings its own extra and requirement), registering webhooks through the service API, and writing consumer corrections back.
+
 ## Phase 4 — operation (branch)
 **Merges:**
 - **4.0 Split `cli/cloud.py`.** `jobs` moves to its own CLI module (the file is near the 750-line cap). Commands and output stay the same.
@@ -61,3 +114,16 @@ Decisions taken 2026-10-17, recorded with the merge that builds each one:
 - **4.3 Graph-refresh stops rewriting in place.** Its contract moves from `MutationMode.IN_PLACE` to `SIDECAR`, with `PRODUCER_OF`, `store/retention.py`, `workflow_order` and `workflow_plan` updated. Older runs fall back to the in-place `chunk_index`. `layout` keeps its in-place replace. Docs: CLAUDE.md rows, `project-structure.md`.
 - **4.3.5 Docs:** `composable-design.md` (the outputs table's "rewritten in place" and the `graph-refresh` "in place" bullet), Requirement 12, `decisions.md` ("Graph-edge refresh"), `architecture.md`, README.
 - **4.4 Stocktake S-4 (final).** Move the design-failures list into `decisions-dead-ends.md`, retire this plan into the decision docs and `CHANGELOG.md`, then delete it.
+
+### Draft requirements — Phase 4
+**Requirements 16 and 22 gain (with 4.1):**
+
+- A run's status is one sentence, built from its exact per-stage counts, in the state words `/v1/runs` uses (`pending`, `running`, `done`, `failed`, `cancelled`, and `orphaned`). The counts stay alongside it.
+- The sentence is shown by `womblex jobs --run`, an additive `summary` field on `/v1/runs/{id}`, and the Dashboard. All three give the same sentence for the same run.
+- A run's OpenLineage event takes its type from the run's state: `done` is `COMPLETE`, `failed` is `FAIL`, `cancelled` is `ABORT`.
+
+**Requirement 12 changes (with 4.2 and 4.3):** "Graph refresh operations explicitly rewrite mention-to-chunk links in place …" becomes:
+
+- Graph refresh writes its own sidecar, keyed by the digest of the chunks it linked against, and never rewrites enrichment's files.
+- A reader can tell when the refresh no longer matches the chunks, and prefers the refresh sidecar wherever it matches.
+- A run written before the sidecar existed is read through its in-place links, unchanged.
