@@ -9,7 +9,7 @@ and a re-enqueue resumes a run rather than duplicating it.
 
 Ownership travels as the ``owner`` workflow attribute. DBOS's own statuses are
 mapped back to the board's vocabulary (``pending`` / ``running`` / ``done`` /
-``failed``), which the API and console already speak.
+``failed`` / ``cancelled``), which the API and console speak.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ _STATUS = {
     "PENDING": "running",
     "SUCCESS": "done",
     "ERROR": "failed",
-    "CANCELLED": "failed",
+    "CANCELLED": "cancelled",
     "MAX_RECOVERY_ATTEMPTS_EXCEEDED": "failed",
 }
 
@@ -80,6 +80,7 @@ class RunSummary:
     counts: dict[str, int]
     created_at: str | None
     updated_at: str | None
+    orphaned: bool = False  # extraction queued by a firing that failed before its stages were dispatched
 
     @property
     def total(self) -> int:
@@ -160,6 +161,17 @@ def _retried_by(rows: list[WorkflowStatus]) -> dict[str, str]:
             attempts.setdefault(attempt[0], {})[attempt[1]] = s.workflow_id
     return {ids[n]: ids[min(m for m in ids if m > n)]
             for ids in attempts.values() for n in ids if any(m > n for m in ids)}
+
+
+def _orphaned(rows: list[WorkflowStatus]) -> bool:
+    """A run whose firing failed after queueing its batches: extraction and no coordinator.
+
+    Read from the rows themselves, so it holds even when the database that failed the
+    dispatch could not have taken a label either; dispatching the stages clears it.
+    """
+    kinds = {_attr(s, "kind") for s in rows}
+    fired_and_failed = any(_attr(s, "kind") == dbos_app.KIND_TRIGGER and _board_status(s) == "failed" for s in rows)
+    return fired_and_failed and dbos_app.KIND_BATCH in kinds and dbos_app.KIND_DOWNSTREAM not in kinds
 
 
 def _board_status(status: WorkflowStatus) -> str:
@@ -390,16 +402,9 @@ class RunBoard:
         with SetWorkflowID(new_id):
             self._client.fork_workflow(workflow_id, start_step, queue_name=dbos_app.stage_queue(stage))
 
-    def cancel_batches(self, run_id: str) -> int:
-        """Cancel *run_id*'s extraction batches that have not finished; return how many were asked to stop.
-
-        A queued batch never starts; one a worker already holds stops at its next step.
-        """
-        live = [s.workflow_id for s in self._list(run_id, status=dbos_app.UNSETTLED)
-                if _attr(s, "kind") == dbos_app.KIND_BATCH]
-        if live:
-            self._client.cancel_workflows(live)
-        return len(live)
+    def cancelled_batches(self, run_id: str) -> list[str]:
+        """*run_id*'s extraction batches that were cancelled: a re-enqueue would attach to them and never run."""
+        return [s.workflow_id for s in self._list(run_id, status="CANCELLED") if _attr(s, "kind") == dbos_app.KIND_BATCH]
 
     # --- reads ----------------------------------------------------------------
 
@@ -427,6 +432,7 @@ class RunBoard:
                 dict(Counter(_board_status(s) for s in rows)),
                 _iso(min(s.created_at or 0 for s in rows)),
                 _iso(max(s.updated_at or 0 for s in rows)),
+                _orphaned(rows),
             )
             for rid, rows in grouped.items() if rid
         ]

@@ -76,6 +76,9 @@ class RefusalCode(str, Enum):
     RUN_CONFLICT = "run_conflict"
     """The run already dispatched a stage under a different workflow digest."""
 
+    BATCHES_CANCELLED = "batches_cancelled"
+    """A firing's run already holds cancelled batches, which a re-enqueue would attach to and never run."""
+
 
 class WorkflowRefusedError(Exception):
     """The workflow cannot start. Raised before any step has run, so nothing was spent.

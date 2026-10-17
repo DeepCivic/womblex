@@ -133,7 +133,7 @@ H="Authorization: Bearer $TOKEN"
 curl -H "$H" -F files=@report.pdf http://localhost:8081/v1/uploads          # returns input_prefix
 curl -H "$H" -H "Content-Type: application/json" \
      -d '{"input_prefix": "<input_prefix>"}' http://localhost:8081/v1/runs  # returns the run id
-curl -H "$H" http://localhost:8081/v1/runs/<run_id>                         # pending, running, done or failed
+curl -H "$H" http://localhost:8081/v1/runs/<run_id>                         # pending, running, done, failed or cancelled
 curl -H "$H" "http://localhost:8081/v1/runs/<run_id>/documents/<source_hash>/text"   # masked layer by default
 ```
 

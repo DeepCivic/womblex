@@ -180,19 +180,6 @@ def check_firing(
     return keys
 
 
-def _withdraw_batches(run_id: str, dsn: str | None) -> None:
-    """Cancel the batches a failed firing queued; if that fails too, say which run is orphaned."""
-    from womblex.cloud.jobs import RunBoard
-
-    try:
-        with RunBoard(dsn) as board:
-            cancelled = board.cancel_batches(run_id)
-        logger.warning("firing of run %s failed after queueing its batches: cancelled %d", run_id, cancelled)
-    except Exception:
-        logger.exception("firing of run %s failed and its queued batches could not be cancelled: "
-                         "run %s has extraction and no stages", run_id, run_id)
-
-
 def fire_workflow(
     stored: StoredWorkflow,
     *,
@@ -205,8 +192,11 @@ def fire_workflow(
 ) -> WorkflowDispatch:
     """One firing of a standing trigger: extract the input prefix into *run_id*, then dispatch the steps.
 
-    The launch, so every check runs first (`check_firing`) and a firing that cannot complete
-    writes no row. The coordinator labels the conditions once extraction settles.
+    The launch, so every check runs first (`check_firing`, then that the run has no cancelled
+    batches a re-enqueue would attach to) and a firing that cannot complete writes no row. A
+    dispatch that fails after the batches are queued leaves them running: the run reads
+    `orphaned` on the board until its stages are dispatched. The coordinator labels the
+    conditions once extraction settles.
     """
     from womblex.cloud.dispatch import batch_specs
     from womblex.cloud.jobs import RunBoard
@@ -216,12 +206,17 @@ def fire_workflow(
     binding = stored.spec.input_binding
     specs = batch_specs(keys, shard_prefix=f"runs/{run_id}/documents", ingest_root=ingest_root,
                         batch_size=binding.batch_size, max_attempts=3)
+    with RunBoard(dsn) as board:
+        if cancelled := board.cancelled_batches(run_id):  # a replayed firing: they would never run
+            raise WorkflowRefusedError(f"run {run_id!r} has cancelled batches ({', '.join(cancelled)}); "
+                                       "use a new run id", code=RefusalCode.BATCHES_CANCELLED)
+        board.enqueue(run_id, specs, owner=stored.owner)
     try:
-        with RunBoard(dsn) as board:
-            board.enqueue(run_id, specs, owner=stored.owner)
         sent = dispatch_workflow(stored, **_firing_kwargs(stored, run_id, resolve_preset, store, dsn))
     except Exception:
-        _withdraw_batches(run_id, dsn)  # a run that did not launch leaves no extraction behind
+        logger.error("firing of run %s failed after queueing its batches; extraction runs on and the run reads "
+                     "orphaned: dispatch its stages with `womblex dispatch-workflow %s --run-id %s --store <store>`",
+                     run_id, stored.id, run_id)
         raise
     logger.info("workflow %s fired: run %s, %d doc(s), stages %s", stored.id, run_id, len(keys), ", ".join(sent.stages))
     return sent
