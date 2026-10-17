@@ -174,3 +174,14 @@ def test_stages_that_ran_after_a_failure_are_offered_once_it_is_cured(fleet, mon
     with pytest.raises(RetryRefusedError) as e:  # re-run since: nothing left to offer
         _retry(fleet, "chunk")
     assert e.value.code is RetryCode.NOT_FAILED
+
+
+def test_stages_offered_after_a_failure_are_in_pipeline_order():
+    from types import SimpleNamespace as Row
+
+    from womblex.cloud.retry import _ran_after
+
+    attempts = {s: [Row(status="SUCCESS", attributes={"ran_after_failed": ["normalise"]})]
+                for s in ("money", "embed", "chunk", "enrich", "spellfix")}
+    attempts["normalise"] = [Row(status="ERROR", attributes={})]
+    assert _ran_after(attempts, "normalise") == ("spellfix", "enrich", "chunk", "embed", "money")

@@ -22,13 +22,14 @@ def fresh_database() -> Iterator[str]:
     """A new empty database on the service, dropped afterwards; yields its URL."""
     import psycopg
     import sqlalchemy as sa
+    from psycopg import sql
 
     admin = admin_dsn()
     name = f"womblex_t_{uuid.uuid4().hex[:12]}"
     with psycopg.connect(admin, autocommit=True) as conn:
-        conn.execute(f'CREATE DATABASE "{name}"')
+        conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
     try:
         yield sa.make_url(admin).set(database=name).render_as_string(hide_password=False)
     finally:
         with psycopg.connect(admin, autocommit=True) as conn:
-            conn.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+            conn.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(name)))
