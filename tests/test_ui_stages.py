@@ -57,6 +57,8 @@ def _fake_schema(monkeypatch: pytest.MonkeyPatch) -> None:
         "womblex.cloud.dispatch.ensure_schema",
         lambda _dsn: setattr(_FakeQueue, "schema_ensured", True),
     )
+    # A live worker serves the work: the queue is faked, so is the registry it would be read from.
+    monkeypatch.setattr("womblex.cloud.worker_registry.require_served", lambda _dsn, _needed: None)
 
 
 def _client(tmp_path: Path, **kw: object) -> TestClient:

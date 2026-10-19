@@ -67,11 +67,25 @@ def test_dry_run_checks_and_queues_nothing(fleet):  # noqa: F811
         assert board.list_jobs("r1") == []
 
 
-def test_a_dry_run_creates_no_database(fleet, monkeypatch):  # noqa: F811
+def test_a_dry_run_creates_no_database_and_is_refused_with_no_worker_recorded(fleet, monkeypatch):  # noqa: F811
     fresh = fleet[2] / "none" / "dbos.sqlite"
     monkeypatch.setenv("WOMBLEX_DBOS_PATH", str(fresh))
-    assert _dispatch(fleet, ["normalise"], config=_NORMALISED, dry_run=True).newly_enqueued == 0
+    with pytest.raises(WorkflowRefusedError) as e:  # no worker has ever recorded itself there
+        _dispatch(fleet, ["normalise"], config=_NORMALISED, dry_run=True)
+    assert e.value.code is RefusalCode.NO_WORKER and "normalise" in str(e.value)
     assert not fresh.parent.exists()
+
+
+def test_a_workflow_no_live_worker_serves_is_refused_before_any_row(fleet):  # noqa: F811
+    from womblex.cloud.worker_registry import WorkerRegistry
+
+    with WorkerRegistry(None) as registry:
+        registry.remove("standby")
+    with pytest.raises(WorkflowRefusedError) as e:
+        _dispatch(fleet, ["normalise"], config=_NORMALISED)
+    assert e.value.code is RefusalCode.NO_WORKER
+    with RunBoard(None) as board:
+        assert board.list_jobs("r1") == []
 
 
 def test_a_workflow_runs_on_the_fleet_and_a_different_one_runs_its_own_stages(fleet):  # noqa: F811

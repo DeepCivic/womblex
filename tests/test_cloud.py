@@ -607,6 +607,7 @@ def test_enqueue_queues_one_key_however_the_prefix_was_typed(tmp_path, monkeypat
 
     monkeypatch.setattr(jobs_module, "RunBoard", _CapturingQueue)
     monkeypatch.setattr(dbos_app, "ensure_schema", lambda _dsn: None)
+    monkeypatch.setattr("womblex.cloud.worker_registry.require_served", lambda _dsn, _needed: None)
     (tmp_path / "inbox" / "2026-08").mkdir(parents=True)
     (tmp_path / "inbox" / "2026-08" / "a.pdf").write_bytes(b"%PDF-1.4\n")
 
@@ -627,6 +628,7 @@ def test_a_prefix_scoping_to_nothing_is_not_a_licence_to_list_the_whole_store(
 
     monkeypatch.setattr(jobs_module, "RunBoard", _CapturingQueue)
     monkeypatch.setattr(dbos_app, "ensure_schema", lambda _dsn: None)
+    monkeypatch.setattr("womblex.cloud.worker_registry.require_served", lambda _dsn, _needed: None)
     (tmp_path / "store").mkdir()
     (tmp_path / "store" / "stray.pdf").write_bytes(b"%PDF-1.4\n")
 

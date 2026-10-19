@@ -152,6 +152,19 @@ def run_config(settings: UISettings, config: dict | None) -> dict:
     return config_payload(WomblexConfig(**{"dataset": {"name": "console"}, **(config or {}), "paths": paths}))
 
 
+def check_served(
+    settings: UISettings, config: dict | None, stages: tuple[str, ...] = (), *, extraction: bool = False,
+) -> None:
+    """Refuse (`worker_registry.NoLiveWorker`, a ``ValueError``) a run under *config* whose
+    extraction or *stages* no live worker serves. Writes nothing, so a submit refuses before any row."""
+    from womblex.cloud.worker_registry import needed_queues, require_served
+    from womblex.cloud.workflow_runner import config_from_payload
+
+    validated = config_from_payload(run_config(settings, config), {"input_root": ".", "output_root": ".",
+                                                                    "checkpoint_dir": "."})
+    require_served(settings.db_dsn, needed_queues(validated, stages, settings.ingest_uri if extraction else None))
+
+
 def _supported_under(settings: UISettings, prefix: str) -> tuple[str, list[str]]:
     """The location *prefix* names, and the store keys a run there would ingest.
 
@@ -273,6 +286,7 @@ def enqueue_extraction(
     from womblex.cloud.jobs import RunBoard
 
     payload = run_config(settings, config)
+    check_served(settings, config, extraction=True)
     ingest_uri = cast(str, settings.ingest_uri)
     location, keys = _supported_under(settings, normalise_prefix(input_prefix))
     if not keys:
@@ -432,6 +446,7 @@ def enqueue_downstream_stages(
     shard_prefix = f"runs/{run_id}/documents"
     if not order_checked:
         check_stage_order(settings, config, stages, run_id)
+    check_served(settings, config, stages)
     ensure_schema(settings.db_dsn)
     with RunBoard(settings.db_dsn, connect_timeout=QUEUE_CONNECT_TIMEOUT) as board:
         newly = board.enqueue_stages(

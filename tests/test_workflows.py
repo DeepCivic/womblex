@@ -36,7 +36,19 @@ def fleet(request, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     inbox.mkdir()
     (inbox / "people.csv").write_text("name,role\nAlice,Director\n")
     dbos_app.ensure_schema(None)
+    live_worker(tmp_path, str(inbox))
     return tmp_path / "store", str(inbox), tmp_path
+
+
+def live_worker(tmp: Path, ingest: str, worker_id: str = "standby") -> None:
+    """Record a live worker serving what the test worker's config does, as a running fleet has,
+    so a dispatch is not refused for want of one (`worker_registry.require_served`)."""
+    from womblex.cloud.worker import served_queues
+    from womblex.cloud.worker_registry import WorkerRegistry
+    from womblex.utils.model_check import CheckLevel, ModelCheckResult
+
+    with WorkerRegistry(None) as registry:
+        registry.record(worker_id, list(served_queues(ModelCheckResult(CheckLevel.LOAD), ingest, _minimal_config(tmp))))
 
 
 def batch(ingest: str, n: int = 1) -> JobSpec:

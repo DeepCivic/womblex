@@ -43,7 +43,7 @@ def cmd_retry_stage(args: argparse.Namespace) -> int:
         with RunBoard(dsn) as board:
             retry = retry_stage(
                 board, args.run_id, args.stage, config=load_config(args.config),
-                store=RemoteStore.from_uri(store_uri) if store_uri else None,
+                store=RemoteStore.from_uri(store_uri) if store_uri else None, dsn=dsn,
             )
     except (RetryRefusedError, RunOwnedError) as e:
         logger.error("retry refused: %s", e)

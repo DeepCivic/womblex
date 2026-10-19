@@ -89,6 +89,18 @@ def test_a_failed_stage_is_forked_from_its_first_failed_unit(fleet, monkeypatch)
     assert {r.kind: r.status for r in board_jobs("r1") if r.kind == "downstream"} == {"downstream": "failed"}
 
 
+def test_a_retry_no_live_worker_serves_is_refused_before_the_fork(fleet, monkeypatch):
+    from womblex.cloud.worker_registry import WorkerRegistry
+
+    _failed_run(fleet, monkeypatch)
+    with WorkerRegistry(None) as registry:
+        registry.remove("standby")
+    with pytest.raises(RetryRefusedError) as e:
+        _retry(fleet)
+    assert e.value.code is RetryCode.NO_WORKER
+    assert [s.workflow_id for s in _attempts("normalise")] == ["r1:stage:normalise"]
+
+
 def test_a_second_retry_is_the_next_attempt(fleet, monkeypatch):
     _failed_run(fleet, monkeypatch)
     _retry(fleet)

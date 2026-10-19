@@ -101,6 +101,9 @@ pins its operation and model surface so breaking changes show in review.
   paths, credentials and model locations. A config enabling no stage is an
   extraction-only run; with neither `preset` nor `config` the run carries the
   default config.
+- A run no live worker serves (its extraction, or a stage it enables, under
+  its config) is refused with 409 before any queue row: start a worker whose
+  config names the same models.
 - The run id is minted server-side: the timestamp id plus a random suffix.
 - A prefix with documents in nested folders is refused, as for every run.
 

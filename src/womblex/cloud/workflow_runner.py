@@ -68,6 +68,9 @@ class RefusalCode(str, Enum):
     NO_DOCUMENTS = "no_documents"
     """A firing found no supported document under its ingest prefix."""
 
+    NO_WORKER = "no_worker"
+    """No live worker serves a step's (or a firing's extraction's) work under the workflow's config."""
+
     BATCHES_CANCELLED = "batches_cancelled"
     """A replayed firing's own batches were cancelled; re-queueing would attach to them and never run."""
 

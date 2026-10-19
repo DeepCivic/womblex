@@ -66,6 +66,7 @@ class FakeQueue:
 def client(tmp_path: Path, monkeypatch) -> TestClient:
     monkeypatch.setattr(api_app, "RunBoard", FakeQueue)
     monkeypatch.setattr(queue_mod, "RunBoard", FakeQueue)
+    monkeypatch.setattr("womblex.cloud.worker_registry.require_served", lambda _dsn, _needed: None)
     monkeypatch.setattr("womblex.cloud.dispatch.ensure_schema", lambda _dsn: None)
     FakeQueue.written = []
     for owner in ("alice", "bob"):
@@ -192,6 +193,19 @@ def test_config_stages_are_enqueued_with_the_owner(client):
     # the submitted config governs extraction and every stage, on whichever worker claims them
     assert [c["chunking"]["chunk_size"] for c in FakeQueue.configs] == [77, 77]
     assert all("paths" not in c for c in FakeQueue.configs)
+
+
+def test_a_run_no_live_worker_serves_is_refused_before_any_row(client, monkeypatch):
+    from womblex.cloud import worker_registry
+
+    def none_live(_dsn, needed):
+        raise worker_registry.NoLiveWorker(f"no live worker serves {', '.join(needed)}")
+
+    monkeypatch.setattr(worker_registry, "require_served", none_live)
+    resp = client.post("/v1/runs", headers=auth("ta"),
+                       json={"input_prefix": "alice/up1", "config": {"chunking": {"enabled": True}}})
+    assert resp.status_code == 409 and "extraction" in resp.json()["detail"]
+    assert FakeQueue.written == []
 
 
 def test_unsatisfiable_stage_order_is_refused_with_codes_before_any_row(client):

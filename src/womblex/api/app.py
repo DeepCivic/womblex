@@ -49,6 +49,7 @@ from womblex.cli._shared import SUPPORTED_EXTENSIONS, select_supported
 from womblex.cloud import dispatch
 from womblex.cloud.dispatch import QUEUE_CONNECT_TIMEOUT
 from womblex.cloud.jobs import RunBoard, RunSummary
+from womblex.cloud.worker_registry import NoLiveWorker
 from womblex.cloud.workflow_order import StageOrderError
 from womblex.store.contract import read_footer_contract
 from womblex.store.remote import RemoteStore
@@ -206,6 +207,7 @@ def create_api_app(
             stages = dispatch.downstream_stages(settings, config) if config is not None else ()
             if stages:
                 dispatch.check_stage_order(settings, cast(dict, config), stages, run_id)
+            dispatch.check_served(settings, config, stages, extraction=True)  # before any row
             run = dispatch.enqueue_extraction(
                 settings, input_prefix=prefix, run_id=run_id,
                 batch_size=body.batch_size, owner=caller.owner, config=config,
@@ -218,6 +220,8 @@ def create_api_app(
                 )
         except dispatch.ExecutionDisabled as e:
             raise HTTPException(status_code=503, detail=e.detail) from e
+        except NoLiveWorker as e:
+            raise HTTPException(status_code=409, detail=str(e)) from e
         except StageOrderError as e:  # stable `code` per issue; checked before any row is written
             raise HTTPException(
                 status_code=400,

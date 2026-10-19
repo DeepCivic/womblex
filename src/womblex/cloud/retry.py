@@ -40,6 +40,7 @@ class RetryCode(StrEnum):
     EARLIER_FAILED = "earlier_failed"
     CONFIG_INVALID = "config_invalid"
     STEP_ORDER = "step_order"
+    NO_WORKER = "no_worker"
     ALREADY_RETRIED = "already_retried"
 
 
@@ -106,13 +107,14 @@ def _stage_config(base: WomblexConfig, workflow: dict[str, Any] | None, run: dic
 
 def retry_stage(
     board: RunBoard, run_id: str, stage: str, *, config: WomblexConfig,
-    store: RemoteStore | None = None, owner: str | None = None,
+    store: RemoteStore | None = None, owner: str | None = None, dsn: str | None = None,
 ) -> StageRetry:
     """Fork *stage*'s latest attempt from its first failed unit as the next `:retry:N`.
 
     Refused (`RetryRefusedError`) before the fork if the stage is unknown, still running, not failed
     (and not a stage that ran on a failure since re-run), or fails the checks a launch makes: its
-    config loads with registered models, and its required inputs are in *store*. `RunOwnedError`
+    config loads with registered models, its required inputs are in *store*, and a live worker
+    serves the fork's queue (the workers in *dsn*'s registry), as a dispatch checks. `RunOwnedError`
     if *owner* is named and does not own the run.
     """
     from womblex.cloud.workflow_order import StageOrderError, check_dispatch_order
@@ -133,11 +135,17 @@ def retry_stage(
     except StageOrderError as e:
         raise RetryRefusedError(f"the stage's inputs are not there: {e}", RetryCode.STEP_ORDER) from e
 
+    from womblex.cloud.worker_registry import NoLiveWorker, require_served
+
+    models = models_key(stage_config, stage) if recorded.get("workflow") or recorded.get("config") else ""
+    try:
+        require_served(dsn, {stage: dbos_app.stage_queue(stage, models)})
+    except NoLiveWorker as e:
+        raise RetryRefusedError(str(e), RetryCode.NO_WORKER) from e
     original, number = dbos_app.stage_attempt(latest.workflow_id) or (latest.workflow_id, 0)
     new_id = dbos_app.stage_retry_id(original, number + 1)
     start = board.first_failed_step(latest.workflow_id)
     try:
-        models = models_key(stage_config, stage) if recorded.get("workflow") or recorded.get("config") else ""
         board.fork_stage(latest.workflow_id, stage, new_id, start, models)
     except sqlalchemy.exc.IntegrityError as e:  # two retries raced for the same attempt number
         raise RetryRefusedError(f"{new_id} already exists", RetryCode.ALREADY_RETRIED) from e

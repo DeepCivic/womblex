@@ -120,6 +120,12 @@ def dispatch_workflow(
         check_dispatch_order(list(stages), config, store, shard_prefix)
     except StageOrderError as e:
         raise refuse(f"step order cannot complete: {e}", RefusalCode.STEP_ORDER) from e
+    from womblex.cloud.worker_registry import NoLiveWorker, needed_queues, require_served
+
+    try:
+        require_served(dsn, needed_queues(config, stages))
+    except NoLiveWorker as e:
+        raise refuse(str(e), RefusalCode.NO_WORKER) from e
 
     from womblex.cloud.dbos_app import ensure_schema, local_database_path
     from womblex.cloud.jobs import RunBoard
@@ -176,8 +182,14 @@ def check_firing(
         prefix = normalise_prefix(stored.spec.input_binding.ingest_prefix)
     except ValueError as e:
         raise WorkflowRefusedError(f"workflow {stored.id!r}: {e}", code=RefusalCode.SPEC_INVALID) from e
+    from womblex.cloud.worker_registry import NoLiveWorker, needed_queues, require_served
     from womblex.store.remote import RemoteStore
 
+    try:
+        recipe = config_from_overlay(stored.spec.preset, workflow_overlay(stored, resolve_preset))
+        require_served(dsn, needed_queues(recipe, ingest_root=ingest_root))
+    except NoLiveWorker as e:
+        raise WorkflowRefusedError(f"workflow {stored.id!r}: {e}", code=RefusalCode.NO_WORKER) from e
     location, keys = supported_keys(ingest or RemoteStore.from_uri(ingest_root), ingest_root, prefix)
     if not keys:
         raise WorkflowRefusedError(f"workflow {stored.id!r}: no supported documents under {location}",

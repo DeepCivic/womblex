@@ -288,7 +288,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - Resuming an interrupted run automatically reconciles checkpoints and skips already-completed documents.
 - Individual document errors are isolated, recorded in the manifest, and do not crash the wider batch.
 - CLI commands allow stages to be dispatched independently, with idempotent queueing ensuring dependent stages sequence properly.
-- `womblex retry-stage` retries a failed distributed stage by forking its workflow from the first failed unit, so the units that finished are not run again. A retry is a launch: it is refused, before anything is forked, for a stage that is unknown, still running, not failed, owned by another owner, or failing the checks a dispatch makes (its config and registered models, the inputs it needs in the store). A stage that ran after a failure ran on partial output, so once the failed stage's latest attempt has succeeded it is retryable too, in the order the operator runs them.
+- `womblex retry-stage` retries a failed distributed stage by forking its workflow from the first failed unit, so the units that finished are not run again. A retry is a launch: it is refused, before anything is forked, for a stage that is unknown, still running, not failed, owned by another owner, or failing the checks a dispatch makes (its config and registered models, the inputs it needs in the store, a live worker that passes the model check for the stage). A stage that ran after a failure ran on partial output, so once the failed stage's latest attempt has succeeded it is retryable too, in the order the operator runs them.
 - Logs can be emitted as JSON lines (`womblex --log-format json` or `WOMBLEX_LOG_FORMAT=json`) with no added dependency; worker and batch records carry `run_id`, `job_id`, `stage`, and `source_hash` where known, and the default text format is unchanged.
 
 ## 15. Web Console Shell, Navigation, and Deployment Modes
@@ -593,12 +593,13 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - Every stage of a fleet run runs under the config it was dispatched with; a worker's own config supplies only its store, paths, credentials and model locations.
 - Config submitted through the API, console or CLI governs how stages run, not only which run.
 - A worker serves a stage only once its model check passes for that stage: work is queued by the models the run's config names for it, and a worker checks the local models of every stage in its own config, enabled or not, and an Isaacus model only for a stage its config enables, and joins only the queues for the models it checked.
+- A run no live worker can serve is refused before launch.
+- A retry is refused before the fork for each refusal Requirement 14 lists.
 - Once every failed stage has been retried successfully, the run shows `done`.
 - A scheduled firing whose dispatch failed and was later completed shows its real status, not `failed`.
 
 **TO-DO:**
 
-- **A run no live worker can serve is not refused before launch,** and a retry does not check for one.
 - **Retrying a stage that ran after a failure redoes every unit,** not only the affected ones.
 
 **Out of scope:** automatic retries, and retrying from the API or console.
@@ -616,6 +617,6 @@ Requirements not yet fully met. The detail lives in the **TO-DO** block under ea
 - **Requirement 13 (Money Annotation):** the money span row carries no merge extent or header-row coordinate.
 - **Requirements 17 and 21 (Corpus Inspector; Console Design System):** `DocumentGrid.svelte` is not virtualised and emits no `aria-rowcount`.
 - **Requirement 23 (Egress Bundle):** a run ingested from an object store is refused rather than resolving its sources from that store.
-- **Requirement 28 (Fleet Runs):** a run no live worker can serve is not refused before launch, and a later stage's retry redoes every unit.
+- **Requirement 28 (Fleet Runs):** a later stage's retry redoes every unit.
 
 ---
