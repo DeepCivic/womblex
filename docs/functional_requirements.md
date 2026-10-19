@@ -592,12 +592,13 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 
 - Every stage of a fleet run runs under the config it was dispatched with; a worker's own config supplies only its store, paths, credentials and model locations.
 - Config submitted through the API, console or CLI governs how stages run, not only which run.
+- A worker serves a stage only once its model check passes for that stage: work is queued by the models the run's config names for it, and a worker checks every stage in its own config, enabled or not, and joins only the queues for the models it checked.
 - Once every failed stage has been retried successfully, the run shows `done`.
 - A scheduled firing whose dispatch failed and was later completed shows its real status, not `failed`.
 
 **TO-DO:**
 
-- **A worker serves a stage its model check did not cover, and a run no live worker can serve is not refused before launch.**
+- **A run no live worker can serve is not refused before launch,** and a retry does not check for one.
 - **Retrying a stage that ran after a failure redoes every unit,** not only the affected ones.
 
 **Out of scope:** automatic retries, and retrying from the API or console.
@@ -615,6 +616,6 @@ Requirements not yet fully met. The detail lives in the **TO-DO** block under ea
 - **Requirement 13 (Money Annotation):** the money span row carries no merge extent or header-row coordinate.
 - **Requirements 17 and 21 (Corpus Inspector; Console Design System):** `DocumentGrid.svelte` is not virtualised and emits no `aria-rowcount`.
 - **Requirement 23 (Egress Bundle):** a run ingested from an object store is refused rather than resolving its sources from that store.
-- **Requirement 28 (Fleet Runs):** work reaches workers not checked for it, and a later stage's retry redoes every unit.
+- **Requirement 28 (Fleet Runs):** a run no live worker can serve is not refused before launch, and a later stage's retry redoes every unit.
 
 ---

@@ -675,3 +675,33 @@ class TestPing:
         else:
             with pytest.raises(RuntimeError, match="ollama pull"):
                 reader.ping()
+
+
+class TestRoutingByModels:
+    def test_work_is_queued_by_the_models_its_config_names_and_joined_by_a_worker_that_names_them(self) -> None:
+        from womblex.cloud import dbos_app
+        from womblex.cloud.worker import served_queues
+        from womblex.utils.model_check import ModelCheckResult, models_key
+
+        root, mine = "s3://bucket/inbox", _config()
+        other = _config(chunking={"tokenizer": "some-other/tokenizer"})
+        assert models_key(mine, "normalise") == ""  # a stage with no model keeps its plain queue
+        assert models_key(mine, "chunk") != models_key(other, "chunk")
+        served = served_queues(ModelCheckResult(CheckLevel.LOAD), root, mine)
+        assert dbos_app.stage_queue("chunk", models_key(mine, "chunk")) in served
+        assert dbos_app.stage_queue("chunk", models_key(other, "chunk")) not in served  # never checked for it
+        assert dbos_app.stage_queue("chunk") in served  # work enqueued before runs carried a config
+        assert dbos_app.extract_queue(root, models_key(mine, SCOPE_EXTRACT)) in served
+
+
+def test_the_worker_registry_names_the_queues_live_workers_serve(tmp_path: Path) -> None:
+    from womblex.cloud.worker_registry import WorkerRegistry
+
+    with WorkerRegistry(f"sqlite:///{tmp_path}/dbos.sqlite") as registry:
+        assert registry.live_queues() == {}
+        registry.record("w1", ["q-a", "q-b"])
+        registry.record("w2", ["q-b"])
+        assert registry.live_queues() == {"q-a": ["w1"], "q-b": ["w1", "w2"]}
+        assert registry.live_queues(within_seconds=-1) == {}  # none refreshed in time
+        registry.remove("w1")
+        assert registry.live_queues() == {"q-b": ["w2"]}

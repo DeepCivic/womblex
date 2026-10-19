@@ -206,6 +206,16 @@ def _board_status(status: WorkflowStatus) -> str:
     return _STATUS.get(status.status, "failed")
 
 
+def queue_models(config: dict[str, Any] | None, scope: str) -> str:
+    """The models key (`model_check.models_key`) a run's *config* payload routes *scope*'s work by."""
+    if config is None:  # a run that carries no config: the unkeyed queue, served as before
+        return ""
+    from womblex.cloud.workflow_runner import config_from_payload
+    from womblex.utils.model_check import models_key
+
+    return models_key(config_from_payload(config, {"input_root": ".", "output_root": ".", "checkpoint_dir": "."}), scope)
+
+
 def _job_row(s: WorkflowStatus) -> JobRow:
     running = _board_status(s) == "running"
     return JobRow(
@@ -321,6 +331,9 @@ class RunBoard:
         belongs to someone else, including a run with no owner.
         """
         row_owner = self._claim_run_owner(run_id, owner)
+        from womblex.utils.model_check import SCOPE_EXTRACT
+
+        models = queue_models(config, SCOPE_EXTRACT)
         sends = []
         for spec in jobs:
             attrs = {"run_id": run_id, "kind": dbos_app.KIND_BATCH, "batch_num": spec.batch_num,
@@ -332,7 +345,7 @@ class RunBoard:
                 attrs["fingerprints"] = {k: (fingerprints or {}).get(k, "") for k in spec.input_keys}
             options: EnqueueOptions = {
                 "workflow_name": dbos_app.EXTRACT_WORKFLOW,
-                "queue_name": dbos_app.extract_queue(spec.ingest_root),
+                "queue_name": dbos_app.extract_queue(spec.ingest_root, models),
                 "workflow_id": dbos_app.batch_id(run_id, spec.batch_num),
                 "attributes": attrs,
             }
@@ -448,8 +461,8 @@ class RunBoard:
                   if st["error"] is not None]
         return min(failed, default=1)
 
-    def fork_stage(self, workflow_id: str, stage: str, new_id: str, start_step: int) -> None:
-        """Fork *workflow_id* from *start_step* as *new_id* on the stage's queue.
+    def fork_stage(self, workflow_id: str, stage: str, new_id: str, start_step: int, models: str = "") -> None:
+        """Fork *workflow_id* from *start_step* as *new_id* on the stage's queue for *models*.
 
         The steps before *start_step* are kept, and the fork carries the original's attributes
         (owner, workflow digest, the stages it ran after), so it reads as the same stage.
@@ -457,7 +470,7 @@ class RunBoard:
         from dbos import SetWorkflowID
 
         with SetWorkflowID(new_id):
-            self._client.fork_workflow(workflow_id, start_step, queue_name=dbos_app.stage_queue(stage))
+            self._client.fork_workflow(workflow_id, start_step, queue_name=dbos_app.stage_queue(stage, models))
 
     def cancelled_batches(self, run_id: str, firing: str | None = None) -> list[str]:
         """*run_id*'s extraction batches (*firing*'s alone, if named) that were cancelled: a

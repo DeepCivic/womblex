@@ -18,6 +18,7 @@ paid later stage before its first document.
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 import json
 import logging
@@ -245,6 +246,19 @@ def isaacus_models(
         if model and scope in wanted:
             found.setdefault(model, []).append(scope)
     return [ModelUse(ISAACUS, m, {}, tuple(s)) for m, s in found.items()]
+
+
+def models_key(config: WomblexConfig, scope: str) -> str:
+    """A short digest of the models *config* uses for *scope*, `""` when it uses none.
+
+    The identity work is routed by (Phase R, D8): a queue named with it is joined only by a
+    worker whose own config names the same models and whose check of them passed.
+    """
+    uses = [*configured_models(config, [scope]), *isaacus_models(config, [scope])]
+    if not uses:
+        return ""
+    ident = sorted((u.slot, u.name.strip().lower(), json.dumps(u.options, sort_keys=True, default=str)) for u in uses)
+    return hashlib.sha256(json.dumps(ident).encode()).hexdigest()[:10]
 
 
 def check_registered(config: WomblexConfig) -> None:
@@ -520,5 +534,6 @@ __all__ = [
     "configured_models",
     "footer_payload",
     "isaacus_models",
+    "models_key",
     "reset_model_check",
 ]

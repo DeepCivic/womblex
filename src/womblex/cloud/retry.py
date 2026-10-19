@@ -116,7 +116,7 @@ def retry_stage(
     if *owner* is named and does not own the run.
     """
     from womblex.cloud.workflow_order import StageOrderError, check_dispatch_order
-    from womblex.utils.model_check import check_registered
+    from womblex.utils.model_check import check_registered, models_key
 
     attempts = board.stage_attempts(run_id, owner=owner)
     _check_retryable(attempts, run_id, stage)
@@ -137,7 +137,8 @@ def retry_stage(
     new_id = dbos_app.stage_retry_id(original, number + 1)
     start = board.first_failed_step(latest.workflow_id)
     try:
-        board.fork_stage(latest.workflow_id, stage, new_id, start)
+        models = models_key(stage_config, stage) if recorded.get("workflow") or recorded.get("config") else ""
+        board.fork_stage(latest.workflow_id, stage, new_id, start, models)
     except sqlalchemy.exc.IntegrityError as e:  # two retries raced for the same attempt number
         raise RetryRefusedError(f"{new_id} already exists", RetryCode.ALREADY_RETRIED) from e
     logger.info("run %s: %s forked from step %d as %s (original %s)", run_id, stage, start, new_id, original)

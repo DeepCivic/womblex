@@ -46,6 +46,7 @@ from womblex.cloud.stage_runner import (
 from womblex.store.run_stamp import RunStamp, workflow_context
 from womblex.store.source_provenance import IngestProvenance
 from womblex.utils.log_format import log_context
+from womblex.utils.model_check import models_key
 from womblex.utils.run_log import capture_batch_log
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -406,9 +407,11 @@ def run_downstream(
         # Enqueued by name, not registered: the workers that serve the stage
         # own the queue's settings.
         scope = dbos_app.stage_scope(firing, workflow["digest"] if workflow else None)
+        # Routed by the models the stage needs under the run's config, so only a worker checked for them claims it.
+        models = models_key(_stage_config(workflow, config), stage) if workflow or config else ""
         with SetWorkflowID(dbos_app.stage_id(run_id, stage, scope)), SetWorkflowAttributes(attrs):
             handle = DBOS.enqueue_workflow(
-                dbos_app.stage_queue(stage), run_stage, run_id, stage, shard_prefix, max_attempts,
+                dbos_app.stage_queue(stage, models), run_stage, run_id, stage, shard_prefix, max_attempts,
                 workflow, bases, config,
             )
         try:

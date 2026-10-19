@@ -61,9 +61,10 @@ def _root(ingest_root: str) -> str:
     return hashlib.sha256(ingest_root.rstrip("/").encode()).hexdigest()[:10]
 
 
-def extract_queue(ingest_root: str) -> str:
-    """The queue extraction batches reading *ingest_root* are enqueued on."""
-    return f"womblex-extract-{_root(ingest_root)}"
+def extract_queue(ingest_root: str, models: str = "") -> str:
+    """The queue extraction batches reading *ingest_root* with the models keyed *models*
+    (`model_check.models_key`) are enqueued on."""
+    return f"womblex-extract-{_root(ingest_root)}" + (f"-{models}" if models else "")
 
 
 def firing_queue(ingest_root: str) -> str:
@@ -71,8 +72,9 @@ def firing_queue(ingest_root: str) -> str:
     return f"womblex-fire-{_root(ingest_root)}"
 
 
-def stage_queue(stage: str) -> str:
-    return f"womblex-stage-{stage}"
+def stage_queue(stage: str, models: str = "") -> str:
+    """The queue *stage* is enqueued on when its work needs the models keyed *models*."""
+    return f"womblex-stage-{stage}" + (f"-{models}" if models else "")
 
 
 def batch_id(run_id: str, batch_num: int) -> str:
