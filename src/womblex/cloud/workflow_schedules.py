@@ -1,8 +1,8 @@
 """Standing triggers: a stored workflow's cron triggers as DBOS schedules.
 
 One DBOS schedule per trigger, named `womblex-wf:<workflow id>:<n>`, all firing
-`womblex.run_scheduled` on the always-served coordinator queue with a context naming the
-workflow. `sync_schedules` makes the board's schedules for a workflow equal its
+`womblex.run_scheduled` on the firing queue of the workflow's input store, so only a worker on
+that store runs it, with a context naming the workflow and its store. `sync_schedules` makes the board's schedules for a workflow equal its
 stored triggers (atomic apply, then delete the stale ones), so removing a trigger or the
 workflow's last trigger unschedules it. The firing itself is `workflows.run_scheduled`.
 
@@ -36,8 +36,8 @@ def schedule_inputs(stored: StoredWorkflow) -> list[dict[str, Any]]:
             "workflow_name": dbos_app.SCHEDULED_WORKFLOW,
             "schedule": t.cron,
             "cron_timezone": t.timezone,
-            "queue_name": dbos_app.DOWNSTREAM_QUEUE,
-            "context": {"workflow_id": stored.id, "trigger": i},
+            "queue_name": dbos_app.firing_queue(stored.spec.input_binding.store or ""),
+            "context": {"workflow_id": stored.id, "store": stored.spec.input_binding.store, "trigger": i},
             "automatic_backfill": False,
         }
         for i, t in enumerate(stored.spec.triggers)

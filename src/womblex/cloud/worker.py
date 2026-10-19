@@ -35,9 +35,10 @@ def served_queues(check: ModelCheckResult, ingest_root: str) -> dict[str, int]:
     """Queue name -> concurrency for the queues this worker's models can serve.
 
     Only the models a queue's work needs count: a worker whose tokeniser is
-    broken still serves OCR batches. Coordinators are light and always served.
+    broken still serves OCR batches. Coordinators, and the firings of workflows
+    whose input store is this worker's ingest root, are light and always served.
     """
-    queues = {dbos_app.DOWNSTREAM_QUEUE: 4}
+    queues = {dbos_app.DOWNSTREAM_QUEUE: 4, dbos_app.firing_queue(ingest_root): 1}
     if check.failures_for((SCOPE_EXTRACT,)):
         logger.error("model check failed for extraction on this worker: %s", check.message())
     else:

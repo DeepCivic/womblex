@@ -57,10 +57,18 @@ def system_database_url(dsn: str | None) -> str:
     return f"sqlite:///{path}"
 
 
+def _root(ingest_root: str) -> str:
+    return hashlib.sha256(ingest_root.rstrip("/").encode()).hexdigest()[:10]
+
+
 def extract_queue(ingest_root: str) -> str:
     """The queue extraction batches reading *ingest_root* are enqueued on."""
-    digest = hashlib.sha256(ingest_root.rstrip("/").encode()).hexdigest()[:10]
-    return f"womblex-extract-{digest}"
+    return f"womblex-extract-{_root(ingest_root)}"
+
+
+def firing_queue(ingest_root: str) -> str:
+    """The queue a scheduled firing of a workflow whose input store is *ingest_root* runs on."""
+    return f"womblex-fire-{_root(ingest_root)}"
 
 
 def stage_queue(stage: str) -> str:

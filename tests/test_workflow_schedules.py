@@ -29,11 +29,11 @@ if TYPE_CHECKING:
 _TRIGGER = {"cron": "0 0 1 1 *", "timezone": "Australia/Sydney"}  # never fires within a test
 
 
-def _spec(steps: list[str], triggers: list[dict] | None = None, prefix: str | None = None):
+def _spec(steps: list[str], triggers: list[dict] | None = None, prefix: str | None = None, store: str | None = None):
     return validate_workflow_spec({
         "preset": _PRESET.name, "steps": [{"stage": s} for s in steps],
         "triggers": [_TRIGGER] if triggers is None else triggers,
-        "input_binding": {"ingest_prefix": prefix},
+        "input_binding": {"store": store, "ingest_prefix": prefix},
     })
 
 
@@ -66,21 +66,21 @@ def test_sync_makes_schedules_equal_triggers_and_remove_unschedules(fleet) -> No
     ensure_workflow_schema(None)
     with WorkflowStore(None) as store:
         client = dbos_app.open_client(None)
-        stored = store.save("nightly", _spec(["normalise"], [_TRIGGER, {"cron": "0 5 * * *"}]))
+        stored = store.save("nightly", _spec(["normalise"], [_TRIGGER, {"cron": "0 5 * * *"}], store=fleet[1]))
         assert len(sync_schedules(client, stored)) == 2
         assert sync_schedules(client, stored) == [s["schedule_name"] for s in list_schedules(client, "nightly")]
         assert {s["cron_timezone"] for s in list_schedules(client, "nightly")} == {"Australia/Sydney", None}
         assert list_schedules(client, "night") == []  # a prefix of the id is not the workflow
 
-        one = store.save("nightly", _spec(["normalise"], [_TRIGGER]))
+        one = store.save("nightly", _spec(["normalise"], [_TRIGGER], store=fleet[1]))
         assert len(sync_schedules(client, one)) == 1 and len(list_schedules(client, "nightly")) == 1
         assert remove_schedules(client, "nightly") == 1 and list_schedules(client, "nightly") == []
-        assert sync_schedules(client, store.save("nightly", _spec(["normalise"], []))) == []
+        assert sync_schedules(client, store.save("nightly", _spec(["normalise"], [], store=fleet[1]))) == []
 
 
 def _where(fleet) -> dict:  # noqa: F811
     """The locations `schedule-workflow` checks a firing against."""
-    return {"store": str(fleet[0]), "ingest": fleet[1], "presets_dir": None}
+    return {"store": str(fleet[0]), "presets_dir": None}
 
 
 def _file(fleet, name: str, steps: list[str], triggers: list[dict] | None = None,  # noqa: F811
@@ -88,7 +88,7 @@ def _file(fleet, name: str, steps: list[str], triggers: list[dict] | None = None
     from tests.test_workflow_runner import write_workflow
 
     return str(write_workflow(fleet[2], name, steps, triggers=[_TRIGGER] if triggers is None else triggers,
-                              input_binding={"ingest_prefix": prefix}))
+                              input_binding={"store": fleet[1], "ingest_prefix": prefix}))
 
 
 def test_scheduling_stores_the_copy_and_its_schedules_together(fleet, saved_preset, monkeypatch) -> None:  # noqa: F811
@@ -160,7 +160,7 @@ def test_a_firing_extracts_the_prefix_and_runs_the_workflow_unowned_and_stamped(
     _inbox(fleet)
     ensure_workflow_schema(None)
     with WorkflowStore(None) as store:
-        stored = store.save("nightly", _spec(["normalise"], [_TRIGGER, {"cron": "0 5 * * *"}], "inbox"))
+        stored = store.save("nightly", _spec(["normalise"], [_TRIGGER, {"cron": "0 5 * * *"}], "inbox", store=fleet[1]))
     client = dbos_app.open_client(None)
     _fire_all_at_once(client, stored)  # two triggers, one instant: one run
     work(fleet, idle_timeout=4)
@@ -188,7 +188,7 @@ def test_a_firing_that_cannot_complete_queues_nothing(fleet, saved_preset) -> No
     store_dir, ingest, tmp = fleet
     ensure_workflow_schema(None)
     with WorkflowStore(None) as store:
-        store.save("bad", _spec(["pii"], []))
+        store.save("bad", _spec(["pii"], [], store=fleet[1]))
     ingest_store = RemoteStore.from_uri(ingest)
     workflows.set_context(workflows.WorkerContext(
         _minimal_config(tmp), RemoteStore.from_uri(str(store_dir)), ingest_store, ingest, None))
@@ -196,7 +196,7 @@ def test_a_firing_that_cannot_complete_queues_nothing(fleet, saved_preset) -> No
     before = database.read_bytes()
     try:
         with pytest.raises(WorkflowRefusedError):
-            workflows._fire("bad-20261012T000000Z", {"workflow_id": "bad"})
+            workflows._fire("bad-20261012T000000Z", {"workflow_id": "bad", "store": ingest})
     finally:
         workflows.set_context(None)
     with RunBoard(None) as board:
@@ -222,7 +222,7 @@ def test_a_firing_whose_dispatch_fails_leaves_its_extraction_running_and_the_run
 
     ensure_workflow_schema(None)
     with WorkflowStore(None) as store:
-        stored = store.save("wf", _spec(["normalise"]))
+        stored = store.save("wf", _spec(["normalise"], store=fleet[1]))
     real, down = workflow_dispatch.dispatch_workflow, [True]
 
     def dispatch(stored, **kw):
@@ -252,12 +252,12 @@ def test_a_firing_refuses_a_run_whose_batches_were_cancelled(fleet, saved_preset
     _, ingest, _ = fleet
     ensure_workflow_schema(None)
     with WorkflowStore(None) as store:
-        stored = store.save("wf", _spec(["normalise"], []))
+        stored = store.save("wf", _spec(["normalise"], [], store=fleet[1]))
     with RunBoard(None) as board:
         board.enqueue("r1", [batch(ingest)])
     dbos_app.open_client(None).cancel_workflow(dbos_app.batch_id("r1", 1))
     with pytest.raises(WorkflowRefusedError) as e:  # a replayed firing would attach to it and never run
-        fire_workflow(stored, run_id="r1", ingest=RemoteStore.from_uri(ingest), ingest_root=ingest,
+        fire_workflow(stored, run_id="r1", ingest=RemoteStore.from_uri(ingest),
                       **_firing_args(fleet))
     assert e.value.code is RefusalCode.BATCHES_CANCELLED
     with RunBoard(None) as board:
@@ -267,7 +267,7 @@ def test_a_firing_refuses_a_run_whose_batches_were_cancelled(fleet, saved_preset
 def test_a_failed_firing_is_on_the_board_under_its_run(fleet, saved_preset) -> None:  # noqa: F811
     ensure_workflow_schema(None)
     with WorkflowStore(None) as store:
-        stored = store.save("bad", _spec(["pii"]))
+        stored = store.save("bad", _spec(["pii"], store=fleet[1]))
     client = dbos_app.open_client(None)
     _fire_all_at_once(client, stored)
     work(fleet, idle_timeout=3)
@@ -289,7 +289,7 @@ def test_two_firings_never_conflict_and_each_dry_run_matches_its_dispatch(
     _inbox(fleet)
     ensure_workflow_schema(None)
     with WorkflowStore(None) as store:
-        store.save("nightly", _spec(["normalise"], [], "inbox"))
+        store.save("nightly", _spec(["normalise"], [], "inbox", store=fleet[1]))
     calls: list[dict] = []
     real = workflow_dispatch.dispatch_workflow
 
@@ -302,7 +302,7 @@ def test_two_firings_never_conflict_and_each_dry_run_matches_its_dispatch(
         _minimal_config(tmp), RemoteStore.from_uri(str(store_dir)), RemoteStore.from_uri(ingest), ingest, None))
     try:
         for run_id in ("nightly-1", "nightly-2", "nightly-2"):  # the repeat: two triggers, one instant
-            workflows._fire(run_id, {"workflow_id": "nightly"})
+            workflows._fire(run_id, {"workflow_id": "nightly", "store": ingest})
     finally:
         workflows.set_context(None)
     for dry, real_call in zip(calls[::2], calls[1::2], strict=True):
@@ -331,3 +331,29 @@ def test_a_workflow_its_firing_would_refuse_is_not_scheduled(
     assert f"[{code}]" in caplog.text
     assert list_schedules(dbos_app.open_client(None), "wf") == []
     assert cmd_schedule_workflow(argparse.Namespace(**{**vars(args), "store": None})) == 1  # nothing to check against
+
+
+def test_a_firing_runs_only_on_a_worker_on_the_workflows_input_store(fleet, saved_preset) -> None:  # noqa: F811
+    ensure_workflow_schema(None)
+    with WorkflowStore(None) as store:
+        stored = store.save("elsewhere", _spec(["normalise"], store="s3://another-inbox"))
+    client = dbos_app.open_client(None)
+    _fire_all_at_once(client, stored)
+    work(fleet, idle_timeout=2)  # this worker's ingest root is not the workflow's store
+    queued = client.list_workflows(queue_name=dbos_app.firing_queue("s3://another-inbox"), load_input=False)
+    assert [w.status for w in queued] == ["ENQUEUED"]
+    with RunBoard(None) as board:
+        assert board.runs() == []
+
+
+def test_a_scheduled_workflow_must_name_its_input_store(fleet, saved_preset, caplog) -> None:  # noqa: F811
+    import argparse
+
+    from tests.test_workflow_runner import write_workflow
+    from womblex.cli.workflow import cmd_schedule_workflow
+
+    path = write_workflow(fleet[2], "nowhere", ["normalise"], triggers=[_TRIGGER])
+    args = argparse.Namespace(workflow=str(path), dsn=None, remove=False, status=False, **_where(fleet))
+    assert cmd_schedule_workflow(args) == 1
+    assert "[spec_invalid]" in caplog.text and "input_binding.store" in caplog.text
+    assert list_schedules(dbos_app.open_client(None), "nowhere") == []

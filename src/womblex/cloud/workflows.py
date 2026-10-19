@@ -309,6 +309,9 @@ def _fire(run_id: str, context: dict[str, Any]) -> dict[str, Any]:
     from womblex.cloud.workflow_store import WorkflowStore
 
     ctx = _context()
+    if (context.get("store") or "").rstrip("/") != ctx.ingest_root.rstrip("/"):  # routing keeps this from happening
+        raise RuntimeError(f"firing of {context['workflow_id']!r} reached a worker on {ctx.ingest_root}, "
+                           f"not the workflow's input store {context.get('store')}")
     with WorkflowStore(ctx.dsn) as wf_store:
         stored = wf_store.get(context["workflow_id"])
     if stored is None:
@@ -317,7 +320,7 @@ def _fire(run_id: str, context: dict[str, Any]) -> dict[str, Any]:
     try:
         sent = fire_workflow(
             stored, run_id=run_id, resolve_preset=preset_resolver(Path(presets) if presets else None),
-            store=ctx.store, ingest=ctx.ingest, ingest_root=ctx.ingest_root, dsn=ctx.dsn,
+            store=ctx.store, ingest=ctx.ingest, dsn=ctx.dsn,
         )
     except WorkflowRefusedError as e:  # the board shows the message, so it carries the code
         raise WorkflowRefusedError(f"[{e.code.value}] {e}", e.issues, code=e.code, steps=e.steps) from e
@@ -338,7 +341,7 @@ def run_scheduled(scheduled_time: datetime, context: dict[str, Any]) -> dict[str
     attrs: dict[str, Any] = {"run_id": run_id, "kind": dbos_app.KIND_TRIGGER,
                              "workflow_id": context["workflow_id"]}
     with SetWorkflowID(dbos_app.trigger_id(run_id)), SetWorkflowAttributes(attrs):
-        DBOS.enqueue_workflow(dbos_app.DOWNSTREAM_QUEUE, fire_trigger, run_id, context)
+        DBOS.enqueue_workflow(dbos_app.firing_queue(context.get("store") or ""), fire_trigger, run_id, context)
     return {"run_id": run_id, "firing": dbos_app.trigger_id(run_id)}
 
 

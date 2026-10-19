@@ -43,8 +43,13 @@ class WorkflowStep(StrictModel):
 
 
 class WorkflowInputBinding(StrictModel):
-    """Where a run's documents come from — the same two knobs `enqueue_extraction` takes."""
+    """Where a run's documents come from: the input store, and the two knobs `enqueue_extraction` takes.
 
+    `store` is the URI a firing lists and extracts from; only workers whose ingest root it is run
+    the firing (`dbos_app.firing_queue`). Credentials come from the worker, never the workflow.
+    """
+
+    store: str | None = None
     ingest_prefix: str | None = None
     batch_size: int = Field(default=50, ge=1)
 

@@ -150,16 +150,18 @@ def _firing_kwargs(
     store: RemoteStore, dsn: str | None,
 ) -> dict[str, Any]:
     return {"resolve_preset": resolve_preset, "run_id": run_id, "store_uri": None, "store": store,
-            "dsn": dsn, "acted_on": ("triggers", "input_binding.ingest_prefix")}
+            "dsn": dsn, "acted_on": ("triggers", "input_binding.store", "input_binding.ingest_prefix")}
 
 
 def check_firing(
     stored: StoredWorkflow, *, run_id: str, resolve_preset: Callable[[str], Preset | None],
-    store: RemoteStore, ingest: RemoteStore, ingest_root: str, dsn: str | None,
+    store: RemoteStore, dsn: str | None, ingest: RemoteStore | None = None,
 ) -> list[str]:
     """Every check a firing makes before it writes a row; the keys it would extract.
 
-    A dry-run dispatch, a safe input prefix, and at least one document. Raises
+    A dry-run dispatch, a named input store, a safe input prefix, and at least one document
+    there. *ingest* is the input store opened with the caller's credentials (a worker's own);
+    `None` opens it from the workflow's URI. Raises
     `WorkflowRefusedError`; a firing and `schedule-workflow` both call it, so a workflow is
     refused at scheduling for exactly what its firing would refuse.
     """
@@ -167,11 +169,16 @@ def check_firing(
     from womblex.cloud.dispatch import supported_keys
 
     dispatch_workflow(stored, dry_run=True, **_firing_kwargs(stored, run_id, resolve_preset, store, dsn))
+    if not (ingest_root := stored.spec.input_binding.store):
+        raise WorkflowRefusedError(f"workflow {stored.id!r}: a scheduled workflow names its input store "
+                                   "(input_binding.store)", code=RefusalCode.SPEC_INVALID)
     try:
         prefix = normalise_prefix(stored.spec.input_binding.ingest_prefix)
     except ValueError as e:
         raise WorkflowRefusedError(f"workflow {stored.id!r}: {e}", code=RefusalCode.SPEC_INVALID) from e
-    location, keys = supported_keys(ingest, ingest_root, prefix)
+    from womblex.store.remote import RemoteStore
+
+    location, keys = supported_keys(ingest or RemoteStore.from_uri(ingest_root), ingest_root, prefix)
     if not keys:
         raise WorkflowRefusedError(f"workflow {stored.id!r}: no supported documents under {location}",
                                    code=RefusalCode.NO_DOCUMENTS)
@@ -185,7 +192,6 @@ def fire_workflow(
     resolve_preset: Callable[[str], Preset | None],
     store: RemoteStore,
     ingest: RemoteStore,
-    ingest_root: str,
     dsn: str | None,
 ) -> WorkflowDispatch:
     """One firing of a standing trigger: extract the input prefix into *run_id*, then dispatch the steps.
@@ -199,9 +205,9 @@ def fire_workflow(
     from womblex.cloud.jobs import RunBoard
 
     keys = check_firing(stored, run_id=run_id, resolve_preset=resolve_preset, store=store,
-                        ingest=ingest, ingest_root=ingest_root, dsn=dsn)
+                        ingest=ingest, dsn=dsn)
     binding = stored.spec.input_binding
-    specs = batch_specs(keys, shard_prefix=f"runs/{run_id}/documents", ingest_root=ingest_root,
+    specs = batch_specs(keys, shard_prefix=f"runs/{run_id}/documents", ingest_root=binding.store or "",
                         batch_size=binding.batch_size, max_attempts=3)
     with RunBoard(dsn) as board:
         if cancelled := board.cancelled_batches(run_id):  # a replayed firing: they would never run

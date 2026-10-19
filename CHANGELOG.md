@@ -9,6 +9,7 @@ Entries are terse by design; rationale lives in the PR/commit history.
 ## [Unreleased]
 
 ### Changed
+- **A workflow names its input store — trust plan, Phase R item R.3b (D9).** `input_binding.store` is the store a firing lists and extracts from. Its schedules put the firing on that store's queue (`dbos_app.firing_queue`), which only a worker whose ingest root it is serves; a scheduled workflow without one is refused. `schedule-workflow` loses `--ingest`.
 - **Workflows are files — trust plan, Phase R item R.3 (D1, D10).** `validate`, `plan`, `run-workflow`, `dispatch-workflow` and `schedule-workflow` take a workflow file's path (`cloud/workflow_file.py`; YAML, `name` beside the spec fields, unknown keys refused) instead of a stored id, and `configs/workflows/nightly.yaml` is an example. Only `schedule-workflow` stores a copy, for its firings: it saves the copy and syncs the schedules in one action (`workflow_schedules.schedule_workflow`), and `--remove` deletes the copy too. `--dsn` leaves `validate`, `plan` and `run-workflow`.
 
 ### Removed

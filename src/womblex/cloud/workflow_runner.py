@@ -203,6 +203,7 @@ def not_acted_on(stored: StoredWorkflow) -> tuple[str, ...]:
     return tuple(
         name for name, present in (
             ("triggers", spec.triggers),
+            ("input_binding.store", spec.input_binding.store),
             ("input_binding.ingest_prefix", spec.input_binding.ingest_prefix),
         ) if present
     )
