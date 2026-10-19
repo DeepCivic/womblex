@@ -148,6 +148,33 @@ def _latest_attempts(rows: list[WorkflowStatus]) -> list[WorkflowStatus]:
             if not (attempt := dbos_app.stage_attempt(s.workflow_id)) or attempt[1] == newest[attempt[0]]]
 
 
+def _rollup(rows: list[WorkflowStatus]) -> list[tuple[WorkflowStatus, str]]:
+    """Each row a run's rollup counts, with the status it counts as: its latest attempt's.
+
+    Superseded stage attempts are dropped. A failed coordinator whose stages' latest attempts
+    have all succeeded since counts `done`, and so does a failed firing whose stages were
+    dispatched by hand: the coordinator then carries their outcome. Rows keep their own status
+    in `list_jobs`; only the run's counts follow the repair.
+    """
+    latest = _latest_attempts(rows)
+    stage_status = {(_attr(s, "run_id", ""), a[0]): _board_status(s)
+                    for s in latest if (a := dbos_app.stage_attempt(s.workflow_id))}
+    dispatched = {(_attr(s, "run_id", ""), _attr(s, "firing"))
+                  for s in latest if _attr(s, "kind") == dbos_app.KIND_DOWNSTREAM}
+    out: list[tuple[WorkflowStatus, str]] = []
+    for s in latest:
+        status, kind, run = _board_status(s), _attr(s, "kind"), _attr(s, "run_id", "")
+        if status == "failed" and kind == dbos_app.KIND_DOWNSTREAM:
+            scope = dbos_app.stage_scope(_attr(s, "firing"), _attr(s, "workflow_digest"))
+            stages = _attr(s, "stages") or []
+            if stages and all(stage_status.get((run, dbos_app.stage_id(run, st, scope))) == "done" for st in stages):
+                status = "done"
+        elif status == "failed" and kind == dbos_app.KIND_TRIGGER and (run, _attr(s, "firing")) in dispatched:
+            status = "done"
+        out.append((s, status))
+    return out
+
+
 def _attempt_number(status: WorkflowStatus) -> int:
     attempt = dbos_app.stage_attempt(status.workflow_id)
     return attempt[1] if attempt else 0
@@ -439,8 +466,8 @@ class RunBoard:
         return self._list(run_id, owner=owner, **kwargs)
 
     def stats(self, run_id: str | None = None, *, owner: str | None = None) -> dict[str, int]:
-        """Count jobs by status (optionally for one run, one owner)."""
-        return dict(Counter(_board_status(s) for s in _latest_attempts(self._rows(run_id, owner))))
+        """Count jobs by status (optionally for one run, one owner), each by its latest attempt (`_rollup`)."""
+        return dict(Counter(status for _, status in _rollup(self._rows(run_id, owner))))
 
     def runs(
         self, owner: str | None = None, *, run_id: str | None = None, limit: int = 100,
@@ -450,16 +477,16 @@ class RunBoard:
         *owner* narrows to one caller's runs; ``None`` lists every run,
         including CLI- and console-submitted ones that have no owner.
         """
-        grouped: dict[str, list[WorkflowStatus]] = {}
-        for s in _latest_attempts(self._rows(run_id, owner)):
-            grouped.setdefault(_attr(s, "run_id", ""), []).append(s)
+        grouped: dict[str, list[tuple[WorkflowStatus, str]]] = {}
+        for s, status in _rollup(self._rows(run_id, owner)):
+            grouped.setdefault(_attr(s, "run_id", ""), []).append((s, status))
         summaries = [
             RunSummary(
-                rid, _attr(rows[0], "owner"),
-                dict(Counter(_board_status(s) for s in rows)),
-                _iso(min(s.created_at or 0 for s in rows)),
-                _iso(max(s.updated_at or 0 for s in rows)),
-                _orphaned(rows),
+                rid, _attr(rows[0][0], "owner"),
+                dict(Counter(status for _, status in rows)),
+                _iso(min(s.created_at or 0 for s, _ in rows)),
+                _iso(max(s.updated_at or 0 for s, _ in rows)),
+                _orphaned([s for s, _ in rows]),
             )
             for rid, rows in grouped.items() if rid
         ]

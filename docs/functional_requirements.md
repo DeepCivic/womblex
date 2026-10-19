@@ -576,6 +576,29 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 
 **Out of scope:** managing workflows through the API, pruning changed or deleted documents, resolving the source of a changed file's earlier version (its bytes are gone from the store, so `SourceResolver` reads it as `hash_mismatch`), workflow owners, backfill of missed firings, and destinations (each kind returns with the merge that delivers it).
 
+## 28. Fleet Runs — Honour the Dispatch, Report the Truth
+
+**As** an operator, or a system submitting work,
+**I want** fleet runs to use the config they were sent with, run only on workers checked for them, and show their real status after a fix,
+**so that** fleet results match local ones and a repaired run no longer reads as failed.
+
+**Given** a run dispatched from the CLI, the console, the API or a workflow
+**When** workers process it, a stage fails, or the operator retries a failed stage
+**Then** every stage runs under the dispatched config on a worker checked for it, a retry redoes only affected units, and the run shows its real status.
+
+**Acceptance criteria:**
+
+- Once every failed stage has been retried successfully, the run shows `done`.
+- A scheduled firing whose dispatch failed and was later completed shows its real status, not `failed`.
+
+**TO-DO:**
+
+- **Only a workflow's stages run under the config they were dispatched with;** any other fleet stage runs under the config of the worker that claims it.
+- **A worker serves a stage its model check did not cover, and a run no live worker can serve is not refused before launch.**
+- **Retrying a stage that ran after a failure redoes every unit,** not only the affected ones.
+
+**Out of scope:** automatic retries, and retrying from the API or console.
+
 ## Outstanding
 
 Requirements not yet fully met. The detail lives in the **TO-DO** block under each requirement; this list is the index. When a gap is closed (or the criterion is deliberately narrowed), its TO-DO block and its entry here are removed in the same PR.
@@ -589,5 +612,6 @@ Requirements not yet fully met. The detail lives in the **TO-DO** block under ea
 - **Requirement 13 (Money Annotation):** the money span row carries no merge extent or header-row coordinate.
 - **Requirements 17 and 21 (Corpus Inspector; Console Design System):** `DocumentGrid.svelte` is not virtualised and emits no `aria-rowcount`.
 - **Requirement 23 (Egress Bundle):** a run ingested from an object store is refused rather than resolving its sources from that store.
+- **Requirement 28 (Fleet Runs):** fleet stages outside a workflow run under the worker's config, work reaches workers not checked for it, and a later stage's retry redoes every unit.
 
 ---

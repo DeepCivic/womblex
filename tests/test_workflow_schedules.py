@@ -240,8 +240,10 @@ def test_a_firing_whose_dispatch_fails_leaves_its_extraction_running_and_the_run
     assert f"dispatch-workflow <the wf workflow file> --run-id wf --firing {firing}" in caplog.text
     down[0] = False  # the operator dispatches the firing's stages: the run is no longer orphaned
     real(stored, run_id=run.run_id, store_uri=None, firing=firing, **_firing_args(fleet))
+    work(fleet, idle_timeout=3)
     with RunBoard(None) as board:
-        assert not board.runs()[0].orphaned
+        (run,) = board.runs()
+    assert not run.orphaned and run.counts == {"done": 4}  # repaired by hand: the firing no longer counts failed
 
 
 def test_a_replayed_firing_refuses_its_own_cancelled_batches(fleet, saved_preset) -> None:  # noqa: F811

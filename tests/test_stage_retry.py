@@ -56,6 +56,11 @@ def _attempts(stage):
         return board.stage_attempts("r1")[stage]
 
 
+def board_jobs(run_id: str) -> list:
+    with RunBoard(None) as board:
+        return board.list_jobs(run_id)
+
+
 def _retry(fleet, stage="normalise", **kw):
     with RunBoard(None) as board:
         return retry_stage(board, "r1", stage, config=_minimal_config(fleet[2]), **kw)
@@ -79,8 +84,9 @@ def test_a_failed_stage_is_forked_from_its_first_failed_unit(fleet, monkeypatch)
     assert rows["r1:stage:normalise"].retried_by == "r1:stage:normalise:retry:1"
     assert rows["r1:stage:normalise:retry:1"].status == "done"
     assert rows["r1:stage:normalise:retry:1"].retried_by is None
-    assert stats == {"done": 3, "failed": 1}  # two batches + stage retry; the coordinator's record stays
+    assert stats == {"done": 4}  # two batches, the stage's retry, and the coordinator it repaired
     assert run.counts == stats
+    assert {r.kind: r.status for r in board_jobs("r1") if r.kind == "downstream"} == {"downstream": "failed"}
 
 
 def test_a_second_retry_is_the_next_attempt(fleet, monkeypatch):
