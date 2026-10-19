@@ -173,7 +173,7 @@ Terms the requirements below use, as the code defines them.
 - A document error is isolated, recorded in the manifest, and does not stop its batch.
 - Stages can be dispatched independently from the CLI; idempotent queueing keeps dependent stages in order.
 - `womblex retry-stage` forks a failed distributed stage from its first failed unit, so finished units are not rerun.
-- A retry is a launch, refused before the fork with one of these codes: `not_found` (no such run or stage, or the run is another owner's), `still_running`, `not_failed`, `earlier_failed` (an earlier stage's latest attempt failed), `already_retried`, `config_invalid`, `step_order` (an input is missing or out of order), or `no_worker` (no live worker passes the model check for the stage).
+- A retry is a launch, refused before the fork with one of these codes: `not_found` (no such run or stage, or the run is another owner's), `still_running`, `not_failed`, `earlier_failed` (an earlier stage's latest attempt failed), `already_retried`, `config_invalid`, or `step_order` (an input is missing or out of order). It is also refused before the fork when no live worker passes the model check for the stage.
 - A stage that ran after a failure is retryable once the failed stage's latest attempt has succeeded, earliest stage first. Its retry redoes only its affected units, so finished work is not paid for again.
 - Logs can be JSON lines (`--log-format json` or `WOMBLEX_LOG_FORMAT=json`) with no added dependency; worker and batch records carry `run_id`, `job_id`, `stage` and `source_hash` where known. The default text format is unchanged.
 
@@ -266,7 +266,7 @@ Terms the requirements below use, as the code defines them.
 - `corpus/` mirrors the run's shard directory, every downstream sidecar included, plus `manifest.parquet`, unchanged.
 - Raw sources are written to `sources/<source_hash><ext>`, deduplicated by hash.
 - `source_index.parquet` has one row per document (`source_hash`, `doc_id`, `filename`, `ext`, `raw_key`, and a status of `resolved`, `hash_mismatch`, `not_found`, `unsupported_basis` or `upload_failed`); `raw_key` is null where no file was produced.
-- Source resolution never aborts the export: a source whose status is `not_found`, `hash_mismatch`, `unsupported_basis` (a records-ingested source, which has no file to resolve) or `upload_failed` is reported in the index and in `egress_manifest.json`.
+- Source resolution never aborts the export: a source whose status is `not_found`, `hash_mismatch`, `unsupported_basis` or `upload_failed` is reported in the index and in `egress_manifest.json`.
 - `egress_manifest.json` carries the contract version and a per-document resolution report.
 - A corpus-only export (`--no-sources` / `--corpus-only`) skips resolution and writes no `sources/` or `source_index.parquet`.
 - `--source-root` resolves sources for a moved corpus; `--run-id` defaults to the run root's name and must agree with the run's stamp, if any.
@@ -393,7 +393,7 @@ Terms the requirements below use, as the code defines them.
 - Config submitted through the API, console or CLI governs how stages run, not only which run.
 - A worker serves a stage only once its model check passes for that stage.
 - A run no live worker can serve is refused before launch.
-- A retry is refused before the fork with the codes Requirement 14 lists.
+- A retry is refused before the fork for each refusal Requirement 14 lists.
 - Retrying a failed stage makes later stages redo only their affected units; finished work is not sent to a paid service again.
 - Once every failed stage has been retried successfully, the run shows `done`.
 - A scheduled firing whose dispatch failed and was later completed shows its real status, not `failed`.
