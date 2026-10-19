@@ -178,8 +178,9 @@ def owned_prefix(owner: str | None, input_prefix: str | None) -> str:
 
 def batch_specs(
     keys: list[str], *, shard_prefix: str, ingest_root: str, batch_size: int, max_attempts: int,
+    start: int = 1,
 ) -> list[JobSpec]:
-    """*keys* split into `batch_size` extraction batches, numbered from 1."""
+    """*keys* split into `batch_size` extraction batches, numbered from *start*."""
     from womblex.cloud.jobs import JobSpec
 
     if batch_size < 1:
@@ -187,7 +188,7 @@ def batch_specs(
     return [
         JobSpec(batch_num=n, input_keys=keys[i : i + batch_size], shard_prefix=shard_prefix,
                 max_attempts=max_attempts, ingest_root=ingest_root)
-        for n, i in enumerate(range(0, len(keys), batch_size), start=1)
+        for n, i in enumerate(range(0, len(keys), batch_size), start=start)
     ]
 
 

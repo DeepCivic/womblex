@@ -342,8 +342,9 @@ class StageDiscoveryError(Exception):
 
 def plan_units(
     contract: StageContract, store: RemoteStore, shard_prefix: str, config: WomblexConfig,
+    *, bases: list[str] | None = None,
 ) -> list[list[str]]:
-    """The units *contract* runs over: one per base, or one run-wide unit.
+    """The units *contract* runs over: one per base, or one run-wide unit; only *bases*, if named.
 
     Refuses before any unit is attempted when the config selects a strict input
     some base lacks (:class:`InputContractError`), or when there is nothing to
@@ -351,7 +352,7 @@ def plan_units(
     workflow records each finished unit itself, so a re-run does not repeat it.
     """
     present = set(store.list_files(shard_prefix, "*.parquet"))
-    stems = remote_bases(sorted(present))
+    stems = [s for s in remote_bases(sorted(present)) if bases is None or s in bases]
     if not stems:
         raise StageDiscoveryError(
             f"No batch bases under {shard_prefix} — expected extraction siblings "

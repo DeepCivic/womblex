@@ -235,9 +235,11 @@ def _stage_config(workflow: dict[str, Any] | None) -> WomblexConfig:
     )
 
 
-def _plan(stage: str, shard_prefix: str, workflow: dict[str, Any] | None = None) -> list[list[str]]:
+def _plan(
+    stage: str, shard_prefix: str, workflow: dict[str, Any] | None = None, bases: list[str] | None = None,
+) -> list[list[str]]:
     ctx = _context()
-    return plan_units(STAGE_CONTRACTS[stage], ctx.store, shard_prefix, _stage_config(workflow))
+    return plan_units(STAGE_CONTRACTS[stage], ctx.store, shard_prefix, _stage_config(workflow), bases=bases)
 
 
 def _unit(
@@ -268,9 +270,9 @@ def _unit(
 @DBOS.workflow(name=dbos_app.STAGE_WORKFLOW)
 def run_stage(
     run_id: str, stage: str, shard_prefix: str, max_attempts: int,
-    workflow: dict[str, Any] | None = None,
+    workflow: dict[str, Any] | None = None, bases: list[str] | None = None,
 ) -> dict[str, Any]:
-    units = DBOS.run_step({"name": "plan"}, _plan, stage, shard_prefix, workflow)
+    units = DBOS.run_step({"name": "plan"}, _plan, stage, shard_prefix, workflow, bases)
     published = 0
     checksums: dict[str, str] = {}
     failed: list[str] = []
@@ -297,12 +299,12 @@ def run_stage(
 # --- scheduled firings ---------------------------------------------------------
 
 
-def scheduled_run_id(workflow_id: str, scheduled_time: datetime) -> str:
-    """`<workflow id>-<UTC firing time>`: two triggers firing at the same instant share a run."""
-    return f"{workflow_id}-{scheduled_time.astimezone(UTC):%Y%m%dT%H%M%SZ}"
+def firing_label(scheduled_time: datetime) -> str:
+    """The UTC firing time: two triggers firing at the same instant share a firing."""
+    return f"{scheduled_time.astimezone(UTC):%Y%m%dT%H%M%SZ}"
 
 
-def _fire(run_id: str, context: dict[str, Any]) -> dict[str, Any]:
+def _fire(run_id: str, context: dict[str, Any], firing: str) -> dict[str, Any]:
     """Load the stored workflow and fire it (`workflow_dispatch.fire_workflow`)."""
     from womblex.cloud.workflow_dispatch import fire_workflow
     from womblex.cloud.workflow_runner import WorkflowRefusedError, preset_resolver
@@ -319,30 +321,30 @@ def _fire(run_id: str, context: dict[str, Any]) -> dict[str, Any]:
     presets = os.environ.get("WOMBLEX_UI_PRESETS_DIR")
     try:
         sent = fire_workflow(
-            stored, run_id=run_id, resolve_preset=preset_resolver(Path(presets) if presets else None),
+            stored, run_id=run_id, firing=firing, resolve_preset=preset_resolver(Path(presets) if presets else None),
             store=ctx.store, ingest=ctx.ingest, dsn=ctx.dsn,
         )
     except WorkflowRefusedError as e:  # the board shows the message, so it carries the code
         raise WorkflowRefusedError(f"[{e.code.value}] {e}", e.issues, code=e.code, steps=e.steps) from e
-    return {"run_id": run_id, "stages": list(sent.stages)}
+    return {"run_id": run_id, "firing": firing, "stages": list(sent.stages), "batches": sent.bases}
 
 
 @DBOS.workflow(name=dbos_app.TRIGGER_WORKFLOW)
-def fire_trigger(run_id: str, context: dict[str, Any]) -> dict[str, Any]:
-    return DBOS.run_step({"name": "fire"}, _fire, run_id, context)
+def fire_trigger(run_id: str, context: dict[str, Any], firing: str) -> dict[str, Any]:
+    return DBOS.run_step({"name": "fire"}, _fire, run_id, context, firing)
 
 
 @DBOS.workflow(name=dbos_app.SCHEDULED_WORKFLOW)
 def run_scheduled(scheduled_time: datetime, context: dict[str, Any]) -> dict[str, str]:
-    """Start the firing as `<run>:trigger` with the run's id, so a firing that fails is on the
-    board under its run, not only as DBOS's unattributed `sched-…` row. A workflow has no owner,
-    so the run is admin-only, like a CLI run."""
-    run_id = scheduled_run_id(context["workflow_id"], scheduled_time)
+    """Start the firing as `<run>:trigger:<firing>`, so a firing that fails is on the board under its
+    run, not only as DBOS's unattributed `sched-…` row. A workflow's firings append to one run,
+    named for the workflow. A workflow has no owner, so the run is admin-only, like a CLI run."""
+    run_id, firing = context["workflow_id"], firing_label(scheduled_time)
     attrs: dict[str, Any] = {"run_id": run_id, "kind": dbos_app.KIND_TRIGGER,
-                             "workflow_id": context["workflow_id"]}
-    with SetWorkflowID(dbos_app.trigger_id(run_id)), SetWorkflowAttributes(attrs):
-        DBOS.enqueue_workflow(dbos_app.firing_queue(context.get("store") or ""), fire_trigger, run_id, context)
-    return {"run_id": run_id, "firing": dbos_app.trigger_id(run_id)}
+                             "workflow_id": context["workflow_id"], "firing": firing}
+    with SetWorkflowID(dbos_app.trigger_id(run_id, firing)), SetWorkflowAttributes(attrs):
+        DBOS.enqueue_workflow(dbos_app.firing_queue(context.get("store") or ""), fire_trigger, run_id, context, firing)
+    return {"run_id": run_id, "firing": dbos_app.trigger_id(run_id, firing)}
 
 
 # --- coordinator -------------------------------------------------------------
@@ -358,9 +360,11 @@ def _unsettled_batches(run_id: str) -> int:
 @DBOS.workflow(name=dbos_app.DOWNSTREAM_WORKFLOW)
 def run_downstream(
     run_id: str, stages: list[str], shard_prefix: str, max_attempts: int, owner: str | None,
-    workflow: dict[str, Any] | None = None,
+    workflow: dict[str, Any] | None = None, firing: str | None = None, bases: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Run *stages* over the run once its extraction has settled, in the order given.
+
+    A scheduled *firing* runs them over its own batch *bases* only, as stages of its own.
 
     A failed batch does not hold the run: its absence surfaces as the
     not-ready or missing-input error of the stage that needed it, for that
@@ -381,14 +385,17 @@ def run_downstream(
             attrs["owner"] = owner
         if workflow is not None:
             attrs["workflow_digest"] = workflow["digest"]
+        if firing is not None:
+            attrs["firing"] = firing
         if failed:
             attrs["ran_after_failed"] = list(failed)
         # Enqueued by name, not registered: the workers that serve the stage
         # own the queue's settings.
-        with SetWorkflowID(dbos_app.stage_id(run_id, stage)), SetWorkflowAttributes(attrs):
+        scope = dbos_app.stage_scope(firing, workflow["digest"] if workflow else None)
+        with SetWorkflowID(dbos_app.stage_id(run_id, stage, scope)), SetWorkflowAttributes(attrs):
             handle = DBOS.enqueue_workflow(
                 dbos_app.stage_queue(stage), run_stage, run_id, stage, shard_prefix, max_attempts,
-                workflow,
+                workflow, bases,
             )
         try:
             results.append({**handle.get_result(), "ran_after_failed": list(failed)})

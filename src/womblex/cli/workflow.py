@@ -59,6 +59,8 @@ def _register_dispatch(p: argparse.ArgumentParser) -> None:
     p.add_argument("--output-prefix", default=None, help="Default: runs/<run-id>")
     p.add_argument("--max-attempts", type=int, default=3)
     p.add_argument("--dry-run", action="store_true", help="Run every check, write no queue row")
+    p.add_argument("--firing", default=None,
+                   help="A scheduled firing whose stages failed to dispatch: run the steps over its batches only")
     p.add_argument("--dsn", default=None,
                    help="DBOS system database holding the queue "
                         "(or $WOMBLEX_DB_DSN / $DATABASE_URL). Default: the local SQLite file.")
@@ -252,7 +254,7 @@ def cmd_dispatch_workflow(args: argparse.Namespace) -> int:
             stored, resolve_preset=_preset_resolver(args),  # type: ignore[arg-type]
             run_id=args.run_id, store_uri=args.store or os.environ.get("WOMBLEX_STORE_URI"),
             dsn=dsn, output_prefix=args.output_prefix, max_attempts=args.max_attempts,
-            dry_run=args.dry_run,
+            dry_run=args.dry_run, firing=getattr(args, "firing", None),
         )
     except WorkflowRefusedError as e:
         logger.error("[%s] %s", e.code.value, e)
@@ -269,11 +271,8 @@ def cmd_dispatch_workflow(args: argparse.Namespace) -> int:
 
 def _check_firing(args: argparse.Namespace, stored, dsn: str | None) -> bool:  # type: ignore[no-untyped-def]
     """Run the checks a firing would make, so a workflow it would refuse is not scheduled."""
-    from datetime import UTC, datetime
-
     from womblex.cloud.workflow_dispatch import check_firing
     from womblex.cloud.workflow_runner import WorkflowRefusedError
-    from womblex.cloud.workflows import scheduled_run_id
     from womblex.store.remote import RemoteStore
 
     store_uri = args.store or os.environ.get("WOMBLEX_STORE_URI")
@@ -282,7 +281,7 @@ def _check_firing(args: argparse.Namespace, stored, dsn: str | None) -> bool:  #
         return False
     try:
         check_firing(
-            stored, run_id=scheduled_run_id(stored.id, datetime.now(UTC)),
+            stored, run_id=stored.id,
             resolve_preset=_preset_resolver(args),  # type: ignore[arg-type]
             store=RemoteStore.from_uri(store_uri), dsn=dsn,
         )

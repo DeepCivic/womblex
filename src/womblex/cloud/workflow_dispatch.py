@@ -48,6 +48,8 @@ class WorkflowDispatch:
     shard_prefix: str
     newly_enqueued: int
     dry_run: bool
+    firing: str | None = None
+    bases: list[str] | None = None  # a firing's own batches; None is every batch of the run
 
 
 def dispatch_workflow(
@@ -62,12 +64,16 @@ def dispatch_workflow(
     dry_run: bool = False,
     store: RemoteStore | None = None,
     acted_on: tuple[str, ...] = (),
+    firing: str | None = None,
 ) -> WorkflowDispatch:
     """Check *stored* against the store and the board, then enqueue it for *run_id*.
 
     Raises `WorkflowRefusedError` before any row is written. *dry_run* runs every check and
     writes nothing. *acted_on* names spec fields the caller acts on itself (a firing), so
-    they are not warned as left alone.
+    they are not warned as left alone. A scheduled *firing* runs the steps over the batches it
+    queued, under stage ids of its own; a workflow dispatched outside a firing runs them over
+    every batch, under ids scoped by its digest (`dbos_app.stage_scope`), so a run worked under
+    another workflow runs this one rather than returning that one's results.
     """
     def refuse(message: str, code: RefusalCode, **kw: object) -> WorkflowRefusedError:
         return WorkflowRefusedError(f"workflow {stored.id!r}: {message}", code=code, **kw)  # type: ignore[arg-type]
@@ -121,27 +127,19 @@ def dispatch_workflow(
     # A dry run does not create the local database just to find it empty.
     unread = dry_run and not dsn and not local_database_path().exists()
     with nullcontext() if unread else RunBoard(dsn) as board:
-        clash = {
-            s: sorted(str(d) for d in ds - {stored.digest})
-            for s, ds in (board.stage_workflow_digests(run_id).items() if board else ())
-            if s in stages and ds - {stored.digest}
-        }
-        if clash:
-            raise refuse(
-                f"run {run_id!r} already dispatched {', '.join(sorted(clash))} under a different "
-                "workflow (or none); a finished stage would return its recorded result, not run "
-                "this one. Use a new run id.", RefusalCode.RUN_CONFLICT,
-                steps=tuple((s, ", ".join(d)) for s, d in sorted(clash.items())),
-            )
+        bases = None if firing is None or board is None else [
+            f"batch-{n:04d}" for n in board.firing_batches(run_id, firing)]
+        if firing is not None and not dry_run and not bases:
+            raise refuse(f"run {run_id!r} has no batches from firing {firing!r}", RefusalCode.NO_DOCUMENTS)
         newly = 0 if dry_run or board is None else board.enqueue_stages(
             run_id, list(stages), shard_prefix, max_attempts=max_attempts,
             workflow={"id": stored.id, "digest": stored.digest, "preset": stored.spec.preset,
-                      "config": overlay},
+                      "config": overlay}, firing=firing, bases=bases,
         )
     if left := [f for f in not_acted_on(stored) if f not in acted_on]:
         logger.warning("workflow %s: %s stored but not acted on by dispatch", stored.id, ", ".join(left))
     return WorkflowDispatch(
-        run_id, stored.id, stored.digest, stages, shard_prefix, newly, dry_run,
+        run_id, stored.id, stored.digest, stages, shard_prefix, newly, dry_run, firing, bases,
     )
 
 
@@ -189,17 +187,22 @@ def fire_workflow(
     stored: StoredWorkflow,
     *,
     run_id: str,
+    firing: str,
     resolve_preset: Callable[[str], Preset | None],
     store: RemoteStore,
     ingest: RemoteStore,
     dsn: str | None,
 ) -> WorkflowDispatch:
-    """One firing of a standing trigger: extract the input prefix into *run_id*, then dispatch the steps.
+    """One firing of a standing trigger: append the input prefix's new documents to *run_id*, then
+    dispatch the steps over them.
 
-    The launch, so every check runs first (`check_firing`, then that the run has no cancelled
-    batches a re-enqueue would attach to) and a firing that cannot complete writes no row. A
+    A document is new when the run has not queued its key with its current fingerprint
+    (`RemoteStore.fingerprints`), so a changed file is a new document and the earlier version
+    stays. A firing with nothing new queues and dispatches nothing. A replayed *firing* reuses
+    the batches it queued. The launch, so every check runs first (`check_firing`, then that this
+    firing's batches were not cancelled) and a firing that cannot complete writes no row. A
     dispatch that fails after the batches are queued leaves them running: the run reads
-    `orphaned` on the board until its stages are dispatched.
+    `orphaned` on the board until the firing's stages are dispatched.
     """
     from womblex.cloud.dispatch import batch_specs
     from womblex.cloud.jobs import RunBoard
@@ -207,21 +210,30 @@ def fire_workflow(
     keys = check_firing(stored, run_id=run_id, resolve_preset=resolve_preset, store=store,
                         ingest=ingest, dsn=dsn)
     binding = stored.spec.input_binding
-    specs = batch_specs(keys, shard_prefix=f"runs/{run_id}/documents", ingest_root=binding.store or "",
-                        batch_size=binding.batch_size, max_attempts=3)
+    prints = ingest.fingerprints(keys)
     with RunBoard(dsn) as board:
-        if cancelled := board.cancelled_batches(run_id):  # a replayed firing: they would never run
-            raise WorkflowRefusedError(f"run {run_id!r} has cancelled batches ({', '.join(cancelled)}); "
-                                       "use a new run id", code=RefusalCode.BATCHES_CANCELLED)
-        board.enqueue(run_id, specs)
+        if cancelled := board.cancelled_batches(run_id, firing):  # a replayed firing: they would never run
+            raise WorkflowRefusedError(f"firing {firing} of run {run_id!r} has cancelled batches "
+                                       f"({', '.join(cancelled)})", code=RefusalCode.BATCHES_CANCELLED)
+        if not board.firing_batches(run_id, firing):
+            seen = board.seen_inputs(run_id)
+            new = [k for k in keys if (k, prints[k]) not in seen]
+            if not new:
+                logger.info("workflow %s: no new documents under its input prefix; firing %s runs nothing",
+                            stored.id, firing)
+                return WorkflowDispatch(run_id, stored.id, stored.digest, (), "", 0, False, firing, [])
+            specs = batch_specs(new, shard_prefix=f"runs/{run_id}/documents", ingest_root=binding.store or "",
+                                batch_size=binding.batch_size, max_attempts=3, start=board.next_batch_num(run_id))
+            board.enqueue(run_id, specs, firing=firing, fingerprints=prints)
     try:
-        sent = dispatch_workflow(stored, **_firing_kwargs(stored, run_id, resolve_preset, store, dsn))
+        sent = dispatch_workflow(stored, firing=firing, **_firing_kwargs(stored, run_id, resolve_preset, store, dsn))
     except Exception:
-        logger.error("firing of run %s failed after queueing its batches; extraction runs on and the run reads "
-                     "orphaned: dispatch its stages with `womblex dispatch-workflow <the %s workflow file> --run-id %s --store <store>`",
-                     run_id, stored.id, run_id)
+        logger.error("firing %s of run %s failed after queueing its batches; extraction runs on and the run reads "
+                     "orphaned: dispatch its stages with `womblex dispatch-workflow <the %s workflow file> --run-id %s "
+                     "--firing %s --store <store>`", firing, run_id, stored.id, run_id, firing)
         raise
-    logger.info("workflow %s fired: run %s, %d doc(s), stages %s", stored.id, run_id, len(keys), ", ".join(sent.stages))
+    logger.info("workflow %s fired: run %s, firing %s, batches %s, stages %s", stored.id, run_id, firing,
+                ", ".join(sent.bases or ()), ", ".join(sent.stages))
     return sent
 
 

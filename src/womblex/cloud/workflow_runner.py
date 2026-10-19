@@ -68,11 +68,8 @@ class RefusalCode(str, Enum):
     NO_DOCUMENTS = "no_documents"
     """A firing found no supported document under its ingest prefix."""
 
-    RUN_CONFLICT = "run_conflict"
-    """The run already dispatched a stage under a different workflow digest."""
-
     BATCHES_CANCELLED = "batches_cancelled"
-    """A firing's run already holds cancelled batches, which a re-enqueue would attach to and never run."""
+    """A replayed firing's own batches were cancelled; re-queueing would attach to them and never run."""
 
 
 class WorkflowRefusedError(Exception):

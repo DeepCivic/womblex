@@ -566,10 +566,14 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - Step order is checked before launch: a step whose input is missing, produced later, or rewritten later is refused with a stable code.
 - Once a step has run, a failed step does not stop the steps after it; each later step records the failure it follows, and the exit code is non-zero.
 - Every sidecar a workflow step writes carries the workflow's digest, and the run record lists the workflows observed in its files.
-- `dispatch-workflow` queues the steps for the fleet, refused before any row for anything the local runner refuses and for a step the fleet cannot run, an order the coordinator would change, or a run already worked under another digest; workers run each stage under the workflow's config.
-- `schedule-workflow` saves the workflow and syncs its schedules in one action, so stored triggers and the queue's schedules always match; each firing reads the saved copy on a worker that uses the workflow's input store (`input_binding.store`), extracts the input prefix into a fresh run and dispatches the workflow, refused before any row when the prefix holds no document. A workflow has no owner; the runs it starts are admin-only, like CLI runs. `schedule-workflow` runs the same checks first (`check_firing`, against `--store` and the workflow's input store), so a workflow its firing would refuse is not scheduled.
+- `dispatch-workflow` queues the steps for the fleet, refused before any row for anything the local runner refuses and for a step the fleet cannot run, or an order the coordinator would change; workers run each stage under the workflow's config.
+- `schedule-workflow` saves the workflow and syncs its schedules in one action, so stored triggers and the queue's schedules always match; each firing reads the saved copy on a worker that uses the workflow's input store (`input_binding.store`), refused before any row when the prefix holds no document.
+- A scheduled workflow appends to one run: each firing processes only documents the run has not seen, and never reprocesses or re-pays for one it has.
+- After an edit and reschedule, the new version applies to new documents only; earlier documents keep their results.
+- A firing with no new documents runs nothing and logs that.
+- A file whose content changed is a new document; the earlier version stays in the run. A workflow has no owner; the runs it starts are admin-only, like CLI runs. `schedule-workflow` runs the same checks first (`check_firing`, against `--store` and the workflow's input store), so a workflow its firing would refuse is not scheduled.
 
-**Out of scope:** managing workflows through the API, incremental firings (only documents not seen before), workflow owners, backfill of missed firings, and destinations (each kind returns with the merge that delivers it).
+**Out of scope:** managing workflows through the API, pruning changed or deleted documents, workflow owners, backfill of missed firings, and destinations (each kind returns with the merge that delivers it).
 
 ## Outstanding
 

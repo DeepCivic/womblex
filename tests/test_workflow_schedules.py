@@ -169,7 +169,7 @@ def test_a_firing_extracts_the_prefix_and_runs_the_workflow_unowned_and_stamped(
         runs = board.runs()
         assert board.runs(owner="alice") == []  # a workflow's run is admin-only
         rows = board._list(runs[0].run_id)
-    assert len(runs) == 1 and runs[0].run_id.startswith("nightly-")
+    assert len(runs) == 1 and runs[0].run_id == "nightly"  # the workflow's one run
     kinds = sorted((s.attributes or {}).get("kind") for s in rows)
     assert kinds == ["batch", "downstream", "stage", "trigger"]  # one firing ran, the other attached
     assert all("owner" not in (s.attributes or {}) for s in rows)  # no row the firing made has an owner
@@ -196,7 +196,7 @@ def test_a_firing_that_cannot_complete_queues_nothing(fleet, saved_preset) -> No
     before = database.read_bytes()
     try:
         with pytest.raises(WorkflowRefusedError):
-            workflows._fire("bad-20261012T000000Z", {"workflow_id": "bad", "store": ingest})
+            workflows._fire("bad", {"workflow_id": "bad", "store": ingest}, "20261012T000000Z")
     finally:
         workflows.set_context(None)
     with RunBoard(None) as board:
@@ -236,14 +236,15 @@ def test_a_firing_whose_dispatch_fails_leaves_its_extraction_running_and_the_run
     with RunBoard(None) as board:
         (run,) = board.runs()
     assert run.counts == {"done": 1, "failed": 1} and run.orphaned  # the batch ran; the firing failed
-    assert f"dispatch-workflow <the wf workflow file> --run-id {run.run_id}" in caplog.text
-    down[0] = False  # the operator dispatches the stages: the run is no longer orphaned
-    real(stored, run_id=run.run_id, store_uri=None, **_firing_args(fleet))
+    (firing,) = {(j.id.rsplit(":", 1)[-1]) for j in RunBoard(None).list_jobs(run.run_id) if j.kind == "trigger"}
+    assert f"dispatch-workflow <the wf workflow file> --run-id wf --firing {firing}" in caplog.text
+    down[0] = False  # the operator dispatches the firing's stages: the run is no longer orphaned
+    real(stored, run_id=run.run_id, store_uri=None, firing=firing, **_firing_args(fleet))
     with RunBoard(None) as board:
         assert not board.runs()[0].orphaned
 
 
-def test_a_firing_refuses_a_run_whose_batches_were_cancelled(fleet, saved_preset) -> None:  # noqa: F811
+def test_a_replayed_firing_refuses_its_own_cancelled_batches(fleet, saved_preset) -> None:  # noqa: F811
     from tests.test_workflows import batch
     from womblex.cloud.workflow_dispatch import fire_workflow
     from womblex.cloud.workflow_runner import RefusalCode, WorkflowRefusedError
@@ -254,10 +255,10 @@ def test_a_firing_refuses_a_run_whose_batches_were_cancelled(fleet, saved_preset
     with WorkflowStore(None) as store:
         stored = store.save("wf", _spec(["normalise"], [], store=fleet[1]))
     with RunBoard(None) as board:
-        board.enqueue("r1", [batch(ingest)])
+        board.enqueue("r1", [batch(ingest)], firing="f1")
     dbos_app.open_client(None).cancel_workflow(dbos_app.batch_id("r1", 1))
     with pytest.raises(WorkflowRefusedError) as e:  # a replayed firing would attach to it and never run
-        fire_workflow(stored, run_id="r1", ingest=RemoteStore.from_uri(ingest),
+        fire_workflow(stored, run_id="r1", firing="f1", ingest=RemoteStore.from_uri(ingest),
                       **_firing_args(fleet))
     assert e.value.code is RefusalCode.BATCHES_CANCELLED
     with RunBoard(None) as board:
@@ -274,13 +275,13 @@ def test_a_failed_firing_is_on_the_board_under_its_run(fleet, saved_preset) -> N
     with RunBoard(None) as board:
         (run, *_) = board.runs()
         (row,) = board.list_jobs(run.run_id)
-    assert run.run_id.startswith("bad-") and run.counts == {"failed": 1}
+    assert run.run_id == "bad" and run.counts == {"failed": 1}
     assert row.kind == "trigger" and "[stage_not_dispatchable]" in (row.error or "")
 
 
-def test_two_firings_never_conflict_and_each_dry_run_matches_its_dispatch(
-    fleet, saved_preset, monkeypatch, caplog,  # noqa: F811
-) -> None:
+def test_firings_append_only_new_documents_to_one_run(fleet, saved_preset, monkeypatch, caplog) -> None:  # noqa: F811
+    import logging
+
     from tests.test_cloud import _minimal_config
     from womblex.cloud import workflow_dispatch, workflows
     from womblex.store.remote import RemoteStore
@@ -297,20 +298,35 @@ def test_two_firings_never_conflict_and_each_dry_run_matches_its_dispatch(
         calls.append(kw)
         return real(stored, **kw)
 
+    def fire(*firings: str) -> None:
+        workflows.set_context(workflows.WorkerContext(
+            _minimal_config(tmp), RemoteStore.from_uri(str(store_dir)), RemoteStore.from_uri(ingest), ingest, None))
+        try:
+            for f in firings:
+                workflows._fire("nightly", {"workflow_id": "nightly", "store": ingest}, f)
+        finally:
+            workflows.set_context(None)
+
     monkeypatch.setattr(workflow_dispatch, "dispatch_workflow", recording)
-    workflows.set_context(workflows.WorkerContext(
-        _minimal_config(tmp), RemoteStore.from_uri(str(store_dir)), RemoteStore.from_uri(ingest), ingest, None))
-    try:
-        for run_id in ("nightly-1", "nightly-2", "nightly-2"):  # the repeat: two triggers, one instant
-            workflows._fire(run_id, {"workflow_id": "nightly", "store": ingest})
-    finally:
-        workflows.set_context(None)
-    for dry, real_call in zip(calls[::2], calls[1::2], strict=True):
-        assert dry.pop("dry_run") is True and "dry_run" not in real_call and dry == real_call
+    with caplog.at_level(logging.INFO):
+        fire("1", "1", "2")  # a replayed firing reuses its batches; one with nothing new runs nothing
+        inbox = Path(ingest) / "inbox"
+        (inbox / "more.csv").write_text("name,role\nBob,Clerk\n")
+        (inbox / "people.csv").write_text("name,role\nAlice,Secretary\n")  # changed: a new document
+        fire("3")
+    real_calls = [c for c in calls if not c.get("dry_run")]
+    assert [c["firing"] for c in real_calls] == ["1", "1", "3"]
     with RunBoard(None) as board:
-        coordinators = [r for r in board.list_jobs() if r.kind == "downstream"]
-    assert sorted(r.run_id for r in coordinators) == ["nightly-1", "nightly-2"]
-    assert "not acted on" not in caplog.text  # the firing acts on the input prefix
+        jobs = board.list_jobs("nightly")
+        assert board.firing_batches("nightly", "1") == [1] and board.firing_batches("nightly", "3") == [2]
+        assert len(board.seen_inputs("nightly")) == 3  # both versions of people.csv, and more.csv
+    assert sorted(j.id for j in jobs if j.kind == "batch") == ["nightly:batch:0001", "nightly:batch:0002"]
+    assert len([j for j in jobs if j.kind == "downstream"]) == 2
+    assert "no new documents under its input prefix; firing 2 runs nothing" in caplog.text
+    work(fleet, idle_timeout=4)
+    (third,) = dbos_app.open_client(None).list_workflows(workflow_ids=["nightly:fire-3:stage:normalise"])
+    assert third.output["units"] == 1  # the third firing's stage ran over its own batch alone
+    assert "not acted on" not in caplog.text  # the firing acts on the input store and prefix
 
 
 @pytest.mark.parametrize("steps, prefix, code", [

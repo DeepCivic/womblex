@@ -74,24 +74,7 @@ def test_a_dry_run_creates_no_database(fleet, monkeypatch):  # noqa: F811
     assert not fresh.parent.exists()
 
 
-@pytest.mark.parametrize("first", ["plain", "other workflow"])
-def test_a_queued_coordinator_under_another_workflow_is_a_conflict(fleet, first):  # noqa: F811
-    """Caught before any worker has run the first one, so it has no stage rows yet."""
-    with RunBoard(None) as board:
-        if first == "plain":
-            board.enqueue_stages("r1", ["normalise"], "runs/r1/documents")
-        else:
-            _dispatch(fleet, ["normalise"], config=_NORMALISED)
-        rows = board.list_jobs("r1")
-        assert [r.kind for r in rows] == ["downstream"]
-        with pytest.raises(WorkflowRefusedError) as e:
-            _dispatch(fleet, ["normalise", "chunk"], config={**_NORMALISED, "chunking": {"chunk_size": 9}})
-        assert e.value.code is RefusalCode.RUN_CONFLICT
-        assert [s for s, _ in e.value.steps] == ["normalise"]
-        assert len(board.list_jobs("r1")) == len(rows)
-
-
-def test_a_workflow_runs_on_the_fleet_and_a_different_one_cannot_follow_it(fleet):  # noqa: F811
+def test_a_workflow_runs_on_the_fleet_and_a_different_one_runs_its_own_stages(fleet):  # noqa: F811
     store, ingest, _ = fleet
     config = {"processing": {"text_source": "normalised"}, "chunking": {"chunk_size": 8}}
     with RunBoard(None) as board:
@@ -104,9 +87,11 @@ def test_a_workflow_runs_on_the_fleet_and_a_different_one_cannot_follow_it(fleet
     assert meta[b"womblex.workflow_digest"] == first.digest.encode()
 
     assert _dispatch(fleet, ["normalise", "chunk"], config=config).newly_enqueued == 0  # same workflow
-    with pytest.raises(WorkflowRefusedError) as e:  # same run, other recipe
-        _dispatch(fleet, ["normalise", "chunk"], config={**config, "chunking": {"chunk_size": 9}})
-    assert e.value.code is RefusalCode.RUN_CONFLICT
+    second = _dispatch(fleet, ["normalise", "chunk"], config={**config, "chunking": {"chunk_size": 9}})
+    assert second.newly_enqueued == 2  # same run, other recipe: its own stages, not the first's results
+    work(fleet, idle_timeout=3)
+    meta = pq.read_metadata(str(Path(str(store)) / "runs/r1/documents/batch-0001.chunks.parquet")).metadata
+    assert meta[b"womblex.workflow_digest"] == second.digest.encode()
 
 
 def test_cli_exit_codes_and_one_line_per_refusal(fleet, caplog, monkeypatch):  # noqa: F811

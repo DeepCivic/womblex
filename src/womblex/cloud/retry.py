@@ -132,7 +132,7 @@ def retry_stage(
         raise RetryRefusedError(f"the stage's inputs are not there: {e}", RetryCode.STEP_ORDER) from e
 
     original, number = dbos_app.stage_attempt(latest.workflow_id) or (latest.workflow_id, 0)
-    new_id = dbos_app.stage_retry_id(run_id, stage, number + 1)
+    new_id = dbos_app.stage_retry_id(original, number + 1)
     start = board.first_failed_step(latest.workflow_id)
     try:
         board.fork_stage(latest.workflow_id, stage, new_id, start)

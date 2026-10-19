@@ -282,6 +282,16 @@ class RemoteStore:
         prefix = self.root + "/"
         return [m.removeprefix(prefix) for m in matches if m != self.root]
 
+    def fingerprints(self, keys: list[str]) -> dict[str, str]:
+        """Each of *keys* with a fingerprint of its current content: the store's ETag or checksum
+        where it keeps one, else size and modification time. A changed object changes it."""
+        out: dict[str, str] = {}
+        for key in keys:
+            info = self.fs.info(self._full(key))  # type: ignore[attr-defined]
+            tag = info.get("ETag") or info.get("etag") or info.get("md5") or info.get("crc32c")
+            out[key] = str(tag).strip('"') if tag else f"{info.get('size')}:{info.get('mtime') or info.get('LastModified')}"
+        return out
+
     def find(self, rel: str) -> list[str]:
         """Every object key under *rel*, recursively and store-relative — no pseudo-directories."""
         prefix = self.root + "/"

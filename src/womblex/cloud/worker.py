@@ -115,7 +115,10 @@ def run_worker(
     DBOS.launch()
     for name, concurrency in served.items():
         # Queue settings live in the system database: the serving worker's win.
-        DBOS.register_queue(name, worker_concurrency=concurrency, on_conflict="always_update")
+        # One firing at a time per input store, so two firings never number the same batch.
+        firing = name == dbos_app.firing_queue(ingest_root)
+        DBOS.register_queue(name, worker_concurrency=concurrency, global_concurrency=1 if firing else None,
+                            on_conflict="always_update")
 
     names = list(served)
     baseline = _completed(names, worker_id)

@@ -36,7 +36,7 @@ its steps write.
 | `womblex validate FILE [--shards DIR] [--json]` | Every check a run makes before its first step, and nothing else. Exit 1 if it would be refused. |
 | `womblex plan FILE --shards DIR [--assume-price enrich=…]` | Which steps would run or skip, and the exact tokens `enrich` and `embed` would send. Calls no paid API; a cost appears only for a price you supply. |
 | `womblex run-workflow FILE --shards DIR` | Run the steps over a local shard directory. Refused before the first step, never halted after it: a failed step is recorded and the later steps still run. |
-| `womblex dispatch-workflow FILE --run-id R --store URI [--dry-run]` | Queue the steps for the fleet; the run receives the whole workflow, so nothing is stored. Refused before any queue row for anything the local runner refuses, a step the fleet does not dispatch (`layout`, `pii`, `quality`), an order the coordinator would change, or a run already worked under another workflow. |
+| `womblex dispatch-workflow FILE --run-id R --store URI [--dry-run]` | Queue the steps for the fleet; the run receives the whole workflow, so nothing is stored. Refused before any queue row for anything the local runner refuses, a step the fleet does not dispatch (`layout`, `pii`, `quality`), or an order the coordinator would change. A workflow dispatched over a run another workflow worked runs its own stages. |
 | `womblex schedule-workflow FILE [--store URI]` | Store the copy the firings read and make the queue's schedules equal its triggers, in one action; a workflow with no triggers is unscheduled and its copy deleted. Refuses a workflow its firing would refuse (no input store, an unsafe input prefix, no documents, a failing dry-run dispatch). |
 | `womblex schedule-workflow FILE\|NAME --remove \| --status` | Unschedule the workflow and delete its stored copy, or list its schedules. Takes the name when the file is gone. |
 
@@ -52,13 +52,14 @@ coordinator runs stages in that order: `normalise`, `spellfix`, `enrich`, `chunk
 At each cron time a worker on the workflow's input store starts a firing from the
 stored copy; a worker on another store never runs it, and credentials are the worker's own.
 The firing it runs the same checks as scheduling,
-queues the extraction batches for run `<name>-<UTC time>`, then dispatches the steps
-under the workflow's recipe. If the dispatch fails after the batches are queued, the
-batches run on and the run reads `orphaned` (`womblex jobs`, `/v1/runs`) until you
-dispatch its steps with `womblex dispatch-workflow FILE --run-id <run> --store <uri>`.
-A firing refuses a run that already holds cancelled batches.
-It re-extracts the whole prefix every time; there is no "only new documents" and no
-backfill of missed firings. Deleting a workflow file does not unschedule it: run
+appends to the run named for the workflow: it queues extraction only for documents
+the run has not seen (a changed file is a new document; the earlier version stays),
+then dispatches the steps over those batches alone, under the workflow as it stands
+at that firing. A firing with nothing new runs nothing and says so. If the dispatch
+fails after the batches are queued, the batches run on and the run reads `orphaned`
+(`womblex jobs`, `/v1/runs`) until you dispatch that firing's steps with
+`womblex dispatch-workflow FILE --run-id <name> --firing <UTC time> --store <uri>`.
+There is no backfill of missed firings. Deleting a workflow file does not unschedule it: run
 `schedule-workflow <name> --remove`.
 
 ## When a stage fails
