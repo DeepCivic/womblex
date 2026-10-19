@@ -260,7 +260,8 @@ def _unit(
         # workflow resumes in a process that has none.
         run_ctx = prepare_stage_context(contract, config)
         try:
-            with workflow_context(workflow["digest"]) if workflow else nullcontext():
+            with (workflow_context(workflow["digest"], workflow.get("id"), workflow.get("spec"))
+                  if workflow else nullcontext()):
                 return run_unit(contract, config, run_ctx, ctx.store, shard_prefix, unit, ctx.ingest)
         except NotReady as nr:
             producer = PRODUCER_OF.get(nr.suffix, "the upstream stage")

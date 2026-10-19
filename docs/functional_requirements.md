@@ -565,7 +565,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - `validate` runs exactly the checks `run-workflow` runs before its first step, and writes nothing; `plan` counts the requests and tokens its paid steps would send, calling no paid API.
 - Step order is checked before launch: a step whose input is missing, produced later, or rewritten later is refused with a stable code.
 - Once a step has run, a failed step does not stop the steps after it; each later step records the failure it follows, and the exit code is non-zero.
-- Every sidecar a workflow step writes carries the workflow's digest, and the run record lists the workflows observed in its files.
+- Every output names the workflow that wrote it, and the run record holds the workflow's name and full spec.
 - `dispatch-workflow` queues the steps for the fleet, refused before any row for anything the local runner refuses and for a step the fleet cannot run, or an order the coordinator would change; workers run each stage under the workflow's config.
 - `schedule-workflow` saves the workflow and syncs its schedules in one action, so stored triggers and the queue's schedules always match; each firing reads the saved copy on a worker that uses the workflow's input store (`input_binding.store`), refused before any row when the prefix holds no document. `schedule-workflow` runs the same checks first (`check_firing`, against `--store` and the workflow's input store), so a workflow its firing would refuse is not scheduled.
 - A scheduled workflow appends to one run: each firing processes only documents the run has not seen, and never reprocesses or re-pays for one it has.

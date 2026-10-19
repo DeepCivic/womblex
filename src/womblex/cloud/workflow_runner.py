@@ -323,7 +323,7 @@ def run_workflow_local(
         )
     logger.info("workflow %s (%s): %s over %s", stored.id, stored.digest, " -> ".join(s.stage for s in stored.spec.steps), shard_dir)
 
-    with workflow_context(stored.digest):
+    with workflow_context(stored.digest, stored.id, stored.spec.model_dump(mode="json")):
         for step, ctx in zip(stored.spec.steps, contexts, strict=True):
             ctx.source_root, ctx.force = source_root, force
             earlier = tuple(s.stage for s in result.steps if s.status == "failed")

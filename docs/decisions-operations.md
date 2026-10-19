@@ -110,6 +110,9 @@ Phase 2 merge 5 (`cloud/workflow_plan.py`).
 - **Free earlier steps are produced in a scratch symlink directory** (`normalise`, `spellfix`, `chunk` sans AI chunking), so a fresh-extraction workflow gets a real embed count. An input only a paid step produces is `pending`, never guessed.
 - **No model probe and no rate card.** Plan stops at `check_workflow`; `--assume-price` is the caller's rate, labelled an assumption. `skip` is only what is knowable offline (`layout` by fingerprint).
 
+### A run records its whole workflow (Phase R, D11)
+2026-10, Phase R item R.9. Only the digest was recorded, and once the workflow file changed nothing said what that digest had been. `workflow_context` now carries the workflow's name and full spec beside its digest, and `sidecar_footer` writes them as `womblex.workflow` (JSON) on every file a workflow step writes, locally and on the fleet, where the dispatch carries the spec. The run record (version 7) lists each observed workflow's `name` and `spec` beside its digest and stages; files written before the key give `null` for both.
+
 ### The workflow digest is a contextvar, observed in the record
 Phase 2 merge 6. `sidecar_footer` is the one place every stage's writer already takes its stamp, so the digest rides it through `workflow_context` rather than a parameter on a dozen writers. A contextvar, not a global, so two workflows in one worker process cannot stamp each other's files. It is written even where the shard is unstamped (it is a fact about the write; the run id is not claimed). The run record lists workflows *observed* in files, like stages, never those merely stored.
 

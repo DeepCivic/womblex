@@ -115,7 +115,7 @@ swappable-slot model (`docs/model-plugins.md`) each slot actually built, by
 slot, name, and the distribution and version that supplied it
 (`read_footer_slot_models`); `womblex.model_check` records the pre-run model
 check's result (`read_footer_model_check`); `womblex.workflow_digest` names the
-stored workflow whose step wrote a sidecar (locally through `run-workflow`, or on a worker for a stage dispatched with the workflow) (`read_footer_stamp`),
+workflow whose step wrote a sidecar (locally through `run-workflow`, or on a worker for a stage dispatched with the workflow) and `womblex.workflow` holds that workflow's name and full spec as JSON (`read_footer_stamp`),
 absent from extraction files and from sidecars written outside a workflow. Each is written only when it has a
 value — a process that loaded, built or checked nothing writes no key — and
 all are additive metadata, so a reader that ignores them reads the file

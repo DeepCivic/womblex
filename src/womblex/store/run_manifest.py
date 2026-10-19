@@ -83,8 +83,10 @@ RUN_MANIFEST_FILENAME = "manifest.parquet"
 #: Version 6 adds ``workflows`` — each ``womblex.workflow_digest`` the files
 #: carry with the stages that wrote under it — so an empty list means no file
 #: was written by ``run-workflow``, not a record that predates the key.
+#: Version 7 adds each workflow's ``name`` and full ``spec`` (Phase R, D11), read from the
+#: ``womblex.workflow`` key its files carry; ``null`` for files written before that key.
 RUN_RECORD_KEY = f"{NAMESPACE}.run_record"
-RUN_RECORD_VERSION = 6
+RUN_RECORD_VERSION = 7
 
 #: What one observed parquet contributes: its footer key-value metadata and its
 #: row count. A caller that reads files where they live supplies these rather
@@ -240,18 +242,22 @@ def _observed_models(footers: FooterList) -> list[dict]:
 
 
 def _observed_workflows(footers: FooterList) -> list[dict]:
-    """The stored workflows whose digest the run's files carry, with the stages they wrote.
+    """The workflows whose digest the run's files carry: name, full spec and the stages they wrote.
 
-    Observed from the files like the stages are: a file written by `run-workflow` says so,
-    a workflow that was only stored is absent. Two digests means two workflows (or one
-    edited between runs) touched the directory, and both are listed.
+    Observed from the files like the stages are: a file a workflow wrote says so, a workflow
+    that was only stored is absent. Two digests means two workflows (or one edited between
+    firings) touched the run, and both are listed.
     """
     stages: dict[str, set[str]] = {}
+    whole: dict[str, dict] = {}
     for meta, _rows in footers:
         stamp = read_footer_stamp(meta)
         if digest := stamp.get("workflow_digest"):
             stages.setdefault(digest, set()).add(stamp.get("stage", ""))
-    return [{"digest": d, "stages": sorted(s for s in stages[d] if s)} for d in sorted(stages)]
+            if "workflow" in stamp:
+                whole.setdefault(digest, json.loads(stamp["workflow"]))
+    return [{"digest": d, "name": whole.get(d, {}).get("name"), "spec": whole.get(d, {}).get("spec"),
+             "stages": sorted(s for s in stages[d] if s)} for d in sorted(stages)]
 
 
 def _observed_slot_models(footers: FooterList) -> list[dict]:

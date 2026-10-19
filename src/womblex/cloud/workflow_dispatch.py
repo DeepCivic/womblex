@@ -142,7 +142,7 @@ def dispatch_workflow(
         newly = 0 if dry_run or board is None else board.enqueue_stages(
             run_id, list(stages), shard_prefix, max_attempts=max_attempts,
             workflow={"id": stored.id, "digest": stored.digest, "preset": stored.spec.preset,
-                      "config": overlay}, firing=firing, bases=bases,
+                      "config": overlay, "spec": stored.spec.model_dump(mode="json")}, firing=firing, bases=bases,
         )
     if left := [f for f in not_acted_on(stored) if f not in acted_on]:
         logger.warning("workflow %s: %s stored but not acted on by dispatch", stored.id, ", ".join(left))

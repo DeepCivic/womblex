@@ -489,7 +489,7 @@ def test_a_dispatched_workflow_runs_its_stages_under_its_own_config_and_digest(f
     import pyarrow.parquet as pq
 
     store, ingest, _ = fleet
-    wf = {"id": "wf", "digest": "sha256:feed", "preset": "recipe",
+    wf = {"id": "wf", "digest": "sha256:feed", "preset": "recipe", "spec": {"preset": "recipe"},
           "config": {"chunking": {"chunk_size": 8}}}
     with RunBoard(None) as board:
         for run in ("r1", "r2"):
@@ -522,7 +522,8 @@ def test_a_dispatched_workflow_runs_its_stages_under_its_own_config_and_digest(f
             store=str(store), run_id=run, output_prefix=None,
             dsn=dbos_app.system_database_url(None))) == 0
     manifest = out / "runs/r2/manifest.parquet"
-    assert read_run_record(manifest)["workflows"] == [{"digest": "sha256:feed", "stages": ["chunk"]}]
+    assert read_run_record(manifest)["workflows"] == [  # the name and spec travelled with the dispatch
+        {"digest": "sha256:feed", "name": "wf", "spec": {"preset": "recipe"}, "stages": ["chunk"]}]
     assert b"womblex.workflow_digest" not in pq.read_metadata(str(manifest)).metadata
     assert read_run_record(out / "runs/r1/manifest.parquet")["workflows"] == []
 

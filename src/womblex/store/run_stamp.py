@@ -70,6 +70,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -91,23 +92,28 @@ MODEL_CHECK_KEY = f"{NAMESPACE}.model_check"
 SLOT_MODELS_KEY = f"{NAMESPACE}.slot_models"
 PRESET_KEY = f"{NAMESPACE}.preset"
 WORKFLOW_DIGEST_KEY = f"{NAMESPACE}.workflow_digest"
+#: The workflow's name and full spec, as JSON (Phase R, D11): the digest alone is lost once the
+#: workflow file changes, so every file a workflow writes carries what the digest stands for.
+WORKFLOW_KEY = f"{NAMESPACE}.workflow"
 
-_workflow_digest: ContextVar[str | None] = ContextVar("womblex_workflow_digest", default=None)
+_workflow: ContextVar[tuple[str, str | None] | None] = ContextVar("womblex_workflow", default=None)
 
 
 @contextmanager
-def workflow_context(digest: str) -> Iterator[None]:
-    """Mark every sidecar written inside the block as produced by the workflow *digest*.
+def workflow_context(digest: str, name: str | None = None, spec: Mapping[str, Any] | None = None) -> Iterator[None]:
+    """Mark every sidecar written inside the block as produced by the workflow *digest*, *name*d,
+    with *spec*.
 
     Beside `config_digest`, which says how the stages were configured: this says which
-    stored workflow (preset reference, steps, config overlay) ran them. It is a contextvar
+    workflow (preset reference, steps, config overlay) ran them. It is a contextvar
     so concurrent runs in one process cannot stamp each other's files.
     """
-    token = _workflow_digest.set(digest)
+    whole = json.dumps({"name": name, "spec": spec}, sort_keys=True) if name is not None else None
+    token = _workflow.set((digest, whole))
     try:
         yield
     finally:
-        _workflow_digest.reset(token)
+        _workflow.reset(token)
 
 # Excluded from the digest: see the module docstring. `paths` is deployment
 # location and `dataset.run_id` is the run's own identity, already a key;
@@ -271,6 +277,7 @@ def read_footer_stamp(metadata: Mapping[bytes, bytes] | None) -> dict[str, str]:
         (STAGE_KEY, "stage"),
         (PRESET_KEY, "preset"),
         (WORKFLOW_DIGEST_KEY, "workflow_digest"),
+        (WORKFLOW_KEY, "workflow"),
     )
     return {name: decoded[key] for key, name in names if key in decoded}
 
@@ -402,9 +409,12 @@ def sidecar_footer(base_path: Path, stage: str) -> dict[bytes, bytes] | None:
     """:func:`stamp_for_sidecar` as footer metadata, for a writer to pass on."""
     stamp = stamp_for_sidecar(base_path, stage)
     meta = stamp.footer_metadata() if stamp is not None else None
-    if (digest := _workflow_digest.get()) is not None:
-        # A workflow digest is a fact about this write even where the run cannot be named.
+    if (current := _workflow.get()) is not None:
+        # A workflow is a fact about this write even where the run cannot be named.
+        digest, whole = current
         meta = {**(meta or {}), WORKFLOW_DIGEST_KEY.encode(): digest.encode()}
+        if whole is not None:
+            meta[WORKFLOW_KEY.encode()] = whole.encode()
     return meta
 
 
@@ -419,6 +429,7 @@ __all__ = [
     "STAGE_KEY",
     "VERSION_KEY",
     "WORKFLOW_DIGEST_KEY",
+    "WORKFLOW_KEY",
     "RunStamp",
     "config_digest",
     "read_footer_model_check",
