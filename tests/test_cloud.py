@@ -34,6 +34,7 @@ pytest.importorskip("fsspec")
 def test_is_remote_uri():
     assert is_remote_uri("s3://bucket/x")
     assert is_remote_uri("gs://bucket/x")
+    assert is_remote_uri("s3a://bucket/x")
     assert not is_remote_uri("/tmp/x")
     assert not is_remote_uri("file:///tmp/x")
 

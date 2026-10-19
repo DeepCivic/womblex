@@ -28,7 +28,7 @@ from womblex.utils.checksum import sha256_file
 
 logger = logging.getLogger(__name__)
 
-_REMOTE_PROTOCOLS = ("s3://", "gs://", "gcs://", "az://", "abfs://")
+_REMOTE_PROTOCOLS = ("s3://", "s3a://", "gs://", "gcs://", "az://", "abfs://")
 
 
 def is_remote_uri(uri: str) -> bool:
