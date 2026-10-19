@@ -461,6 +461,33 @@ class RunBoard:
                   if st["error"] is not None]
         return min(failed, default=1)
 
+    def unfinished_bases(self, workflow_id: str) -> list[str] | None:
+        """The bases a stage attempt planned and did not finish; `None` when it recorded no plan."""
+        steps = self._client.list_workflow_steps(workflow_id)
+        plan = next((st for st in steps if st["function_name"] == "plan"), None)
+        if plan is None or plan["error"] is not None or not isinstance(plan["output"], list):
+            return None
+        done = {st["function_name"].removeprefix("unit:") for st in steps
+                if st["function_name"].startswith("unit:") and st["error"] is None}
+        return [b for unit in plan["output"] for b in unit if (unit[0] if len(unit) == 1 else "run") not in done]
+
+    def rerun_stage(
+        self, workflow_id: str, stage: str, new_id: str, bases: list[str] | None, models: str = "",
+    ) -> bool:
+        """A new attempt, *new_id*, of *workflow_id*'s stage over *bases* alone (`None`: every base),
+        with its recorded arguments and attributes, less `ran_after_failed`: it runs on input that
+        is now complete. False, and nothing enqueued, if *new_id* already exists."""
+        if self._client.list_workflows(workflow_ids=[new_id], load_input=False, load_output=False):
+            return False
+        (s,) = self._client.list_workflows(workflow_ids=[workflow_id], load_input=False, load_output=False)
+        args = self.stage_arguments(workflow_id)
+        attrs = {k: v for k, v in (s.attributes or {}).items() if k != "ran_after_failed"}
+        options: EnqueueOptions = {"workflow_name": dbos_app.STAGE_WORKFLOW, "queue_name": dbos_app.stage_queue(stage, models),
+                                   "workflow_id": new_id, "attributes": attrs}
+        self._client.enqueue(options, args["run_id"], stage, args["shard_prefix"], args["max_attempts"],
+                             args.get("workflow"), bases, args.get("config"))
+        return True
+
     def fork_stage(self, workflow_id: str, stage: str, new_id: str, start_step: int, models: str = "") -> None:
         """Fork *workflow_id* from *start_step* as *new_id* on the stage's queue for *models*.
 

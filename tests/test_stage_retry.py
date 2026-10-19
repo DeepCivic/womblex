@@ -186,9 +186,12 @@ def test_stages_that_ran_after_a_failure_are_offered_once_it_is_cured(fleet, mon
         _retry(fleet, "chunk")
     assert e.value.code is RetryCode.EARLIER_FAILED
     work(fleet, idle_timeout=2)
+    fault.fix()
     again = _retry(fleet, "chunk")
-    assert again.retry_id == "r1:stage:chunk:retry:1" and again.start_step == 1
+    assert again.retry_id == "r1:stage:chunk:retry:1" and again.start_step is None
+    assert again.bases == ("batch-0002",)  # only the unit normalise had not finished
     work(fleet, idle_timeout=2)
+    assert fault.calls == [("chunk", ["batch-0002"])]  # batch-0001's chunks are not paid for again
     with pytest.raises(RetryRefusedError) as e:  # re-run since: nothing left to offer
         _retry(fleet, "chunk")
     assert e.value.code is RetryCode.NOT_FAILED

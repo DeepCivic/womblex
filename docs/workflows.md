@@ -68,4 +68,5 @@ There is no backfill of missed firings. Deleting a workflow file does not unsche
 A failed stage does not stop the stages after it; the run finishes and says which
 failed. Retry one with `womblex retry-stage --run-id R --stage S --config C`: it
 resumes from the first failed unit, and stages that ran after the failure are offered
-a retry once it succeeds (D-2.1).
+a retry once it succeeds (D-2.1), which redoes only the units the failure left them
+without.
