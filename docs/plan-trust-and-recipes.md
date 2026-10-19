@@ -2,326 +2,520 @@
 
 *Status: in progress, October 2026.*
 
-Phase 1 is finished. Phase 2 is finished but has design mistakes, and Phase R fixes them before Phase 3 starts.
+Phase 1 is done. Phase 2 is done but has design mistakes; Phase R repairs them before Phase 3.
 
 ## Target state
-This is what Womblex does once every item in this plan is done. Each requirement below is the whole requirement as it stands at the end of the plan, in the form the requirements document (functional_requirements.md) uses. Requirements this plan does not touch are not repeated, and gaps recorded in the requirements document that this plan does not close stay there. The requirements document's Outstanding list has no entry for Requirement 23 or Requirement 27.
+What Womblex does once this plan is done. Each requirement is given whole, as it will read in [functional_requirements.md](functional_requirements.md); requirements the plan does not touch are omitted, and gaps it does not close stay recorded there. At the end, the Outstanding list has no entry for Requirements 23 or 27.
 
 ### 2. Scale-Out and Environment-Agnostic Execution
 
-**As** a user,
-**I want** to spread processing across cloud machines and move steps between my own machine and the cloud,
-**so that** I get more throughput without rewriting jobs or reading documents again.
+**Paid:** Launches workers that run every paid stage the run's config enables (Requirements 10, 12, 29, the `embed` stage, `mistral-ocr`). An Isaacus SageMaker deployment is billed by AWS while its endpoint runs, called or not.
 
-**Given** cloud file storage and a queue database (Postgres, or a local SQLite file)
-**When** the operator queues work and starts more cloud machines
-**Then** the machines take groups of documents at the same time without doubling up, write the standard set of files, and write the run's document list when the steps finish.
+**As** a user,
+**I want** to scale the pipeline to a cluster and move stages between local and cloud environments,
+**so that** I gain throughput without rewriting jobs or re-extracting documents.
+
+**Given** a configured object store and a DBOS system database (Postgres, or a local SQLite file)
+**When** the operator enqueues work and starts additional workers
+**Then** workers claim batches concurrently without duplication, write the standard shard layout, and write the run manifest when the stages finish.
 
 **Acceptance criteria:**
 
-- Cloud machines and local runs process a group of documents with the same code and write the same files in the same layout.
-- Work runs through the queue, so a group is never processed twice, work that finished is not run again, and machines can be added or removed at any time.
-- A cloud run's files can be copied to a local machine and read unchanged by the local step commands.
-- A step runs directly over cloud storage under the same rules as over local files.
-- Local and cloud storage addresses both work.
-- Writing a step's results to cloud storage is all or nothing. Every output exists before any is published. A set left incomplete by a failed upload never looks complete, so the next run redoes that group and overwrites it. A step that replaces its own results does so in one action, so an interrupted publish leaves the previous results intact.
-- When a cloud run's steps finish, Womblex writes the run's document list by itself. The command that writes it by hand still works, and running it again changes nothing.
+- Cloud workers and local runs use identical batch-processing logic and output identical shard layouts.
+- Work runs as DBOS workflows, so a batch is never double-processed, a unit that finished is not run again, and workers can scale dynamically.
+- Distributed run shards can be synced locally and consumed unchanged by local per-stage commands.
+- A stage can execute in place over object storage under the same contract as local execution.
+- Standard local and cloud storage URIs resolve natively.
+- Object-storage writes are all-or-none per unit: every declared output exists before any is published, and a unit left partial by a failed upload never reads as complete, so the next run redoes and overwrites it. A failed unit is recorded and the rest of the run continues. A stage that rewrites outputs in place commits atomically, so an interrupted publish leaves the previous outputs intact.
+- A distributed run writes `<run>/manifest.parquet` when its stages finish. `womblex finalize` still writes it on demand, with the same result.
 
-### 12. Knowledge Graph and External Enrichment
+### 3. Ingest-First Data Flow and Operation Composition
+
+**Paid:** Composes stages that include paid ones: `enrich`, `embed`, AI chunking in `chunk`, and `mistral-ocr` in extraction. None runs unless configured.
 
 **As** a user,
-**I want** named people, organisations and their relationships found by an outside service and joined into one graph,
-**so that** every mention points to the piece of text it appears in, whatever order the steps ran in.
+**I want** a clear two-phase execution model (ingest first, then optional composed operations),
+**so that** workflows are predictable and invalid stage configurations fail early.
 
-**Given** text split into pieces and the outside service's credentials
-**When** the operator runs the steps that find names and build the graph
-**Then** names are found, retrying when the service limits requests, and a graph links each name to the pieces of text it appears in, without changing what earlier steps wrote.
+**Given** raw input files and a chosen set of downstream operations
+**When** the pipeline is executed
+**Then** ingest runs first to produce base extraction results, followed by caller-composed downstream operations in any order the stage-dependency DAG permits.
 
 **Acceptance criteria:**
 
-- The step that finds names calls the configured service (by default Kanon-2 through Isaacus, retrying when the service limits requests). Only a service that returns a full document keeps it for reuse when text is split using AI. With any other service, text is split on Womblex's own machines and no paid call is made in its place.
-- Building the graph produces its points and connections, and a separate set of links from each mention to the piece of text it appears in.
-- The step that re-links mentions to pieces of text saves its links in a file of its own, marked with the exact version of the pieces it linked to. It never changes the files earlier steps wrote.
-- Anyone reading the results can tell when the links no longer match the current pieces of text, and the matching links are used wherever they exist.
-- Runs made before re-linking had a file of its own are read exactly as before.
-- Re-linking gives the same result each time it runs, and never skips its work only because its file already exists.
+- Ingest is format-dependent and strictly precedes any transform operation.
+- Operations are independent functions that callers compose directly based on business need.
+- Stage ordering is a **partial order** (a dependency DAG), not a single fixed sequence: a stage is a valid next step whenever the inputs it requires already exist. The default dispatch order is one valid topological sort of that DAG, not the sole valid execution order.
+- Each operation enforces its preconditions as required-input edges.
+- A config-disabled stage acts as a passthrough without raising an error.
+- A failed stage preflight (a missing reference register, an unresolvable enrichment deployment, a failed model check) refuses before any document is processed.
+- Invalid compositions (a stage run before the inputs it requires exist, or with a config-selected strict input missing) fail early, with a message naming the producing stage.
+- Register ingests and text-only extraction (`extract` → `.txt`) are terminal — they have no valid downstream text stages.
+
+### 5. PDF and Image Extraction with OCR Quality Controls
+
+**Paid:** With `mistral-ocr` as the OCR engine, every OCR'd page is a billed AWS Bedrock call (Mistral Pixtral Large). The default engine (PaddleOCR) and Ollama run locally and cost nothing per call.
+
+**As** a user,
+**I want** reliable text extraction from native, scanned, hybrid, and redacted visual documents,
+**so that** the corpus accurately reflects content despite poor scan quality.
+
+**Given** a PDF or image input
+**When** extraction runs through the page-level orchestrator
+**Then** native text is extracted directly, scanned regions undergo OCR with preprocessing, and low-confidence results are flagged.
+
+**Acceptance criteria:**
+
+- Native document pages extract selectable text and logical structure directly.
+- Scanned pages undergo layout analysis, deskewing, and dynamic binarisation prior to OCR.
+- OCR processes producing an average confidence score below an acceptable threshold (e.g., 40%) raise a warning.
+- The extraction outputs distinct elements (paragraphs, headings, tables, forms, images) with logical reading order preserved.
+
+### 10. Chunking, and AI Chunking When Asked For
+
+**Paid:** AI chunking (`chunking.chunking_model`) calls the Kanon-2 Enricher, billed per call, for each document with no matching persisted Document. Default chunking (semchunk, local) costs nothing.
+
+**As** a user,
+**I want** extracted text split into token-bounded chunks by semchunk, locally,
+**so that** downstream analysis fits model limits, and chunking costs nothing unless I switch on AI chunking.
+
+**Given** an extraction result
+**When** the operator runs the chunking stage
+**Then** narrative text and tables are split by semchunk within the token budget and saved as a chunks sidecar.
+
+**Acceptance criteria:**
+
+- Chunking is semchunk, an open-source library (MIT) that runs locally. The tokeniser that measures chunk size is a dataset config choice (any Hugging Face tokeniser, or a callable). Default chunking needs no network and no key.
+- Narrative text and markdown-converted tables are chunked independently, each chunk tagged with its kind.
+- Redaction markers split across a chunk boundary are repaired.
+- AI chunking is a semchunk mode that only `chunking.chunking_model` switches on. It takes its boundaries from a Kanon-2 Enricher Document, so it is a paid feature unless a matching Document already exists.
+- A Document the `enrich` stage persisted is reused, with no call, when its text is byte-identical to the narrative being chunked.
+- Where no persisted Document matches, the chunk stage makes the Enricher call itself, because `chunking_model` asked for AI chunking. Every such call is logged per document, counted in the chunks footer and counted by `plan`. Nothing calls it a fallback.
+- AI chunking needs an enrichment provider that returns a Document. With any other provider, `chunking_model` is set aside with a warning and chunking is semchunk's local splitting.
+- A run with AI chunking whose Isaacus deployment cannot serve the Enricher is refused before launch.
+
+### 11. PII Detection and Masking
+
+**Paid:** Makes no paid call, but its main candidate source is the enrichment graph, the output of a paid stage (Requirement 12). Without enrichment, only the opt-in regex backstop detects anything.
+
+**As** a user,
+**I want** PII detected, masked, and retained reversibly for authorised audits,
+**so that** sensitive data is protected for publication without destroying internal provenance.
+
+**Given** a chunked shard directory, normally already enriched
+**When** the operator runs the PII stage
+**Then** sensitive spans are replaced with typed tags, generating an auditable sidecar and a clean-text layer.
+
+**Acceptance criteria:**
+
+- On the per-stage path (`womblex pii`), candidates are the enrichment graph's person and address entities, mapped onto narrative chunks, and each table's own enrichment mapped onto that table's chunks. The regex/context backstop runs only when `pii.use_regex_backstop` is set (default `false`); with no enrichment and the backstop off, nothing is detected. Each `*.clean_text.parquet` row carries `mask_status`: `masked` (a span was replaced), `no_entity` (a candidate source covered the chunk and found nothing) or `not_masked` (no candidate source covered it, so the text is verbatim), so unmasked text is never labelled masked.
+- The stage is terminal: it runs after enrich and embed, never rewrites `*.chunks.parquet`, and writes the masked layer as a separate `*.clean_text.parquet` (when `pii.write_clean_text`, the default).
+- The in-memory PII operation runs at a configurable point (`pii.pipeline_point`): before enrichment it uses the regex/context detector, and after enrichment it merges graph spans with it.
+- Identified PII spans in the clean-text layer are replaced with normalised typed tags (e.g., `<PERSON_1>`).
+- The spans are written to an independent Parquet sidecar (`*.pii_spans.parquet`) that retains each span's original text plus its evidence reference (the span's position in the source, at the precision the stage could establish) and graph `entity_id` — the audit record from which an authorised reversal can be reconstructed against the clean-text layer. The sidecar is a reversal-enabling audit layer; no automatic un-masking operation is implemented.
+
+### 12. Enrichment and Knowledge Graph — Orchestration
+
+**Paid:** Each request to the enrichment provider is billed when the provider is a paid model, as the default Kanon-2 Enricher is (Requirement 29). Graph refresh is local and costs nothing.
+
+**As** a user,
+**I want** whichever enrichment provider is configured driven the same way, and its entities and relationships joined to my chunks,
+**so that** mentions map back to their source chunks whatever the provider and whatever the run order.
+
+**Given** an extraction result and a configured enrichment provider
+**When** the operator runs enrichment, and graph refresh after any rechunk
+**Then** Womblex sends each document to the provider within the limits the provider declares, writes what the provider returns as sidecars, and links each mention to its chunk without rewriting earlier stages' files.
+
+**Acceptance criteria:**
+
+- Womblex owns, for every provider alike: packing requests to the provider's declared limits (texts per request, token ceiling, the provider's own token counter), sending each table's markdown as its own text beside the narrative, splitting a text only when it exceeds the provider's declared ceiling, offset-merging the parts, the entity, edge and metadata sidecars, evidence references, and the mention-to-chunk links.
+- Retries, back-off and fitting long input to the model are the provider adapter's concern; Womblex adds none of its own around a provider.
+- A request that still fails is recorded against its documents, and the rest of the stage continues.
+- The provider's entities and relationships are written as returned. Womblex does not build or alter the provider's graph; the mention-to-chunk link layer is the one part Womblex derives, from character offsets, for any provider.
+- Graph refresh writes its links to a sidecar of its own, stamped with the chunk version it linked against, and never rewrites earlier stages' files.
+- Readers can tell when refreshed links no longer match the current chunks, and use the matching links wherever they exist.
+- Runs written before the refresh sidecar existed read as before.
+- Graph refresh is idempotent and never skips on file existence alone.
+- Enrichment is not chunking. Whether chunking reuses an enrichment result is Requirement 10's, never this stage's.
 
 ### 14. Batch Processing, Resiliency, and Operational Controls
 
-**As** a user,
-**I want** reliable groups of documents, saved progress, and separate controls for each step from the command line and the web console,
-**so that** I can manage large runs, recover from failures and inspect results easily.
+**Paid:** A retry or resume reruns stages; each unit of a paid stage it redoes is billed again.
 
-**Given** a configured run, on a local machine or in the cloud
-**When** the operator uses the command line or the web console
-**Then** documents are processed in separate groups that can resume, each step can be started on its own, and results can be inspected.
+**As** a user,
+**I want** reliable batching, checkpointing, and discrete execution controls (CLI/UI),
+**so that** I can manage large runs, recover from failures, and inspect outputs easily.
+
+**Given** a configured run (local or distributed)
+**When** the operator uses the CLI or Web UI
+**Then** documents process in isolated, resumable batches, with independent stage controls and inspection.
 
 **Acceptance criteria:**
 
-- Documents are processed in groups of a set size. Results are added and progress is saved as each group finishes.
-- Resuming an interrupted run picks up from the saved progress and skips documents already done.
-- An error in one document stays with that document. It is recorded in the document list and does not stop the rest of its group.
-- Each step can be started on its own from the command line. Queueing the same work twice changes nothing, so steps that depend on each other run in the right order.
-- The retry command retries a failed cloud step from its first failed piece of work, so pieces that finished are not run again.
-- A retry is a new start. It is refused before anything starts if the step is unknown, still running, not failed, or belongs to another client's run, and for any reason a new run would be refused: its settings, its AI models, no running machine checked for it, or inputs missing from storage.
-- A step that ran after a failure ran on incomplete results. Once the failed step's latest try has succeeded, that later step can be retried too, in the order the operator runs them. Its retry redoes only the groups of documents the failure affected, and work that finished correctly is not sent to a paid service again.
-- Logs can be written as one JSON record per line, with no extra software. Records from cloud machines and groups carry the run, job, step and document where known, and the default text log is unchanged.
+- Processing occurs in configurable batches, appending results and writing a checkpoint as each batch completes.
+- Resuming an interrupted run reconciles checkpoints and skips completed documents.
+- A document error is isolated, recorded in the manifest, and does not stop its batch.
+- Stages can be dispatched independently from the CLI; idempotent queueing keeps dependent stages in order.
+- `womblex retry-stage` forks a failed distributed stage from its first failed unit, so finished units are not rerun.
+- A retry is a launch: before the fork it is refused for a stage that is unknown, still running, not failed or owned by another owner, and for anything a dispatch refuses (config, models, no live worker serving the stage, missing inputs).
+- A stage that ran after a failure is retryable once the failed stage's latest attempt has succeeded, earliest stage first. Its retry redoes only the units the failure affected, so finished work is not paid for again.
+- Logs can be JSON lines (`--log-format json` or `WOMBLEX_LOG_FORMAT=json`) with no added dependency; worker and batch records carry `run_id`, `job_id`, `stage` and `source_hash` where known. The default text format is unchanged.
 
 ### 16. Dashboard — Queue and Stage Progress
 
 **As** an administrator,
-**I want** a dashboard of the queue and each step's progress for one run,
-**so that** I can watch throughput and spot stuck jobs while running or debugging a run, without touching the queue.
+**I want** a run-scoped dashboard of queue state and per-stage progress,
+**so that** I can monitor throughput and spot stalled jobs without touching the queue.
 
-**Given** a chosen run, with an optional queue and the run's own saved progress for each step
-**When** the operator opens the dashboard
-**Then** it shows the run's status sentence, the queue counts and each step's progress, refreshing while the browser tab is visible and pausing while it is hidden.
+**Given** a selected run, with an optional job queue and the run's per-stage checkpoints
+**When** the operator opens the Dashboard
+**Then** it shows the run's status sentence, queue counts and per-stage completion, polling while the tab is visible.
 
 **Acceptance criteria:**
 
-- Queue and step state come from what the pipeline already writes: the queue and each step's saved progress. With no queue set up, the dashboard uses the saved progress.
-- A run's status is shown as one plain sentence, built from the exact counts of work done, waiting and failed at each step. The counts are shown beside it.
-- The sentence uses the same status words as the web API (pending, running, done, failed and cancelled), plus a warning when a scheduled run could not start its steps.
-- The command line, the web API and the dashboard all show the same sentence for the same run.
-- Job status uses the exact words the system writes (pending, running, done, failed and cancelled), plus stale for running work with no update past the staleness limit, and skipped.
-- A retried step counts once. The run's counts use its latest try, and the try a retry replaced stays listed as failed, naming the retry that followed it.
-- The run's history record, which other tools use to track where data came from, reports the run's real outcome: finished, failed or cancelled.
-- The dashboard only names a stuck job. The queue recovers it when its machine restarts, and the dashboard never re-queues, cancels or takes work itself.
-- Refreshing pauses while the browser tab is hidden, so a console left in the background stops querying the queue.
-- Each step's progress is shown in the pipeline's declared order.
-- Logs for the run's groups and steps are listed newest first, and each can be opened on its own.
+- Queue and stage state come from what the pipeline already writes (the job queue and per-stage checkpoints); with no queue, the dashboard falls back to checkpoints.
+- A run's status is one sentence built from exact per-stage counts of done, pending and failed work, shown beside the counts. The CLI, API and dashboard show the same sentence.
+- The sentence uses the API's status words (`pending` / `running` / `done` / `failed` / `cancelled`), plus a warning when a scheduled firing could not dispatch its stages.
+- Job status uses the values the system writes, plus `stale` for a running workflow past the staleness threshold, and `skipped`.
+- A retried stage counts once: counts take its latest attempt, and the superseded attempt stays listed `failed` with `retried_by` naming the next.
+- The run record's lineage event reports the run's real outcome (complete, failed or cancelled), not always complete.
+- The dashboard only names a stalled job; DBOS recovers it when its executor restarts. The dashboard never requeues, cancels or claims work.
+- Polling pauses while the browser tab is hidden.
+- Per-stage progress renders in pipeline order.
+- Batch and stage logs are listed newest first and are individually viewable.
+
+### 19. Pipeline Composer — Configuration, Validation, and Dispatch
+
+**Paid:** Dispatching a composed pipeline launches its enabled paid stages.
+
+**As** a developer or administrator,
+**I want** to compose and validate a pipeline configuration visually and dispatch an admin run from it,
+**so that** I can author correct configs and enqueue work without hand-editing YAML or re-implementing guardrails.
+
+**Given** the served stage graph and the `WomblexConfig` JSON Schema
+**When** the operator edits the config form and presses to enqueue or run downstream stages
+**Then** the config is validated and dispatched through the same code paths the CLI uses, writing queue rows byte-identical to the documented commands.
+
+**Acceptance criteria:**
+
+- The stage graph is rendered from the served `STAGE_CONTRACTS` (nodes wired by their required-input edges); disabled stages drop to reduced opacity while keeping their edges so a broken chain reads as a gap.
+- The form is rendered from `WomblexConfig`'s JSON Schema, and validation plus YAML download go through the same `WomblexConfig` construction the CLI's config loader uses — the console cannot accept a config the CLI would reject.
+- Named presets are offered as starting points; operator-authored presets can be saved when a presets directory is configured, and preset saving refuses cleanly when it is not.
+- Enqueuing an extraction run and dispatching downstream stages call the same enabled-stage gate and queue-enqueue paths as the equivalent CLI commands, and dispatch is idempotent per `(run_id, stage)`.
+- Which downstream stages run is decided server-side (never re-derived in the frontend); the result panel reports what was dispatched in claim order, and irreversible or run-scoped stages (PII, quality) remain undispatchable.
+- Runs dispatched from the console carry no owner, so through the service API they are visible to `admin` callers only.
 
 ### 22. Service API — Submission and Retrieval
 
-**As** a developer connecting another system,
-**I want** a web API, signed in by token, to upload documents, submit runs and read their results,
-**so that** my software can use Womblex as a service without access to the machine it runs on.
+**Paid:** A submitted run launches the paid stages its config enables, billed to the operator's accounts, not the caller's.
 
-**Given** the web service connected to storage, the queue and a document upload location, with a list of clients
-**When** a caller presents a service token, uploads documents, submits a run and checks on it
-**Then** the run is queued as the caller's and uses the settings the caller sent, and its status, files and text can be read only by that caller or an administrator, limited by permission and by how sensitive each file is.
+**As** a developer integrating another system,
+**I want** an authenticated HTTP API to upload documents, submit runs, and read their results,
+**so that** my software can use Womblex as a service without shell access to its host.
+
+**Given** `womblex serve` bound to a store, a job queue and an ingest location, with a client registry
+**When** a caller presents a service token, uploads documents, submits a run and polls it
+**Then** the run is queued under the caller's ownership and runs under the submitted config, and its status, files and text are readable only by that caller (or an admin), gated by scope and file sensitivity.
 
 **Acceptance criteria:**
 
-- Every endpoint except health and readiness needs a bearer token whose SHA-256 fingerprint is in the client list. A missing or unknown token is refused with 401, and tokens are compared in constant time.
-- Permissions are submit, read, read_raw and admin, where admin includes the rest. A request outside the caller's permissions is refused with 403.
-- The service does not start with an empty client list unless run with `--insecure-no-auth`, and listens only on the local machine by default.
-- An upload is written to `<ingest>/<client_id>/<upload_id>/`, keeping only bare file names. An unusable, repeated or unsupported name is refused with 400 and nothing is written, an over-limit request is refused with 413, and the response names the folder to submit.
-- A client that is not an administrator submits runs only over its own folder (403 otherwise). The server makes each run's identifier, and it is unique even when submissions arrive at the same time.
-- Submitted settings, a named preset or settings of the caller's own, are checked before anything is queued (400 on failure). Every part of the run uses them: they control how each step works, not only which steps run. Settings that turn on no later steps give a run that only reads the text.
-- A run belongs to the client that submitted it. Another client's run is reported as not found (404), an administrator sees every run, and runs started from the command line, the web console or a workflow have no owner and are visible to administrators only. A run never has more than one owner.
-- Document text comes from the version with personal details hidden by default. The original text layers need read_raw, decided by how sensitive each layer is under the data contract.
-- A run's file listing gives each file's row count, contract version and sensitivity, so a caller can fetch the Parquet files directly under the data contract.
-- A run's status is the same one-sentence status the command line and the dashboard show, with the counts beside it.
-- A run started from a workflow that names a web address sends its notices to that address. Callers can still check a run's status themselves, and a caller with no web address does so.
-- Readiness reports whether storage and the queue can be reached, and answers 503 when either is down. Every other endpoint answers 503, not 500, when the queue, storage or upload location cannot be reached.
-- The API's published description is fixed by a test, so a breaking change shows in review.
+- Every `/v1` endpoint except `health` and `ready` requires a bearer token whose SHA-256 is in the registry; a missing or unknown token is 401. Tokens are compared in constant time.
+- Scopes are `submit`, `read`, `read_raw` and `admin` (which implies the rest); a request outside the caller's scopes is 403.
+- The service refuses to start with an empty registry unless run with `--insecure-no-auth`, and binds to loopback by default.
+- An upload is written to `<ingest>/<client_id>/<upload_id>/`, bare file names only. An unusable, repeated or unsupported name is 400 with nothing written, an over-limit request is 413, and the response names the `input_prefix` to submit.
+- A non-admin caller submits runs only over its own `<client_id>/` tree (403 otherwise). The run id is minted server-side and unique under concurrent submissions.
+- A submitted `preset` or `config` is validated before any queue row (400 on failure) and governs every stage of the run, not only which stages run. A config enabling no downstream stage is an extraction-only run.
+- A run belongs to the client that submitted it: another client's run is 404, an admin sees all runs, and runs dispatched from the CLI, the console or a workflow carry no owner and are admin-only. A run never has mixed ownership.
+- Document text defaults to the masked layer; raw layers (`chunks`, `elements`) require `read_raw`, by the layer's contract sensitivity.
+- File listings report each file's row count, `contract_version` and `sensitivity`.
+- A run's status is the same sentence the CLI and dashboard show, with its counts.
+- A run started by a workflow that names a webhook sends its events there. Polling still works.
+- `ready` reports store and queue reachability and answers 503 when either is down; any other endpoint answers 503, not 500, when the queue, store or ingest location is unreachable.
+- The OpenAPI surface is pinned by a test.
 
 ### 23. Egress Bundle — Export to Downstream Consumers
 
 **As** an operator handing a run to another system,
-**I want** one finished run exported with its original documents as an export package that describes itself,
-**so that** other systems can review and reuse the results beside the originals without calling back into Womblex.
+**I want** one finished run exported with its raw sources as a self-describing bundle,
+**so that** consumers can reuse the corpus beside its sources without calling back into Womblex.
 
-**Given** a finished run, kept on a local machine or in cloud storage
-**When** the operator runs the export command with a destination
-**Then** an export package is written at the destination holding the unchanged results, one copy of each original document, an index of the originals and a description file, and Womblex stops.
+**Given** a finished run root, local or in an object store
+**When** the operator runs `womblex egress <run> --to <dest>`
+**Then** a bundle is written holding the unchanged corpus, deduplicated raw sources, a source index and a descriptor, and Womblex stops.
 
 **Acceptance criteria:**
 
-- The destination can be any storage address (a local folder, S3, MinIO or GCS), all through the same code.
-- `corpus/` copies the run's results folder in full, including every later step's files, plus the run's document list, unchanged.
-- Original documents are written to `sources/<source_hash><ext>`, one copy per fingerprint. Two documents with the same fingerprint share one file.
-- `source_index.parquet` has one row per document with `source_hash`, `doc_id`, `filename`, `ext`, `raw_key` and a status of `resolved`, `hash_mismatch`, `not_found`, `unsupported_basis` or `upload_failed`. `raw_key` is empty wherever no file was written.
-- A problem with one original never stops the export. A missing, mismatched, pre-extracted or failed-upload original is reported in the index and in `egress_manifest.json`.
-- `egress_manifest.json` holds the contract version and a report for each document.
-- A results-only export (`--no-sources` / `--corpus-only`) does not look for originals and writes no `sources/` or `source_index.parquet`.
-- `--source-root` finds the originals for results that have been moved. `--run-id` defaults to the run folder's name and must match the run's own record, if it has one.
-- Exporting again into an existing package removes original files the new export neither wrote nor tried to write, and leaves an original whose upload failed untouched.
-- A run kept in cloud storage is copied directly from one cloud location to another, with no local copy first.
-- For a run whose documents were uploaded to cloud storage, each original is fetched from where it was first uploaded, by its recorded location, and checked against its recorded fingerprint, with the same statuses for each document.
-- Womblex writes the export package and nothing beyond it: it does not keep old packages, serve them, or take back corrections made to them. Sending the package to a place a workflow names is Requirement 27.
+- The destination may be any `RemoteStore` URI (local directory, S3, MinIO, GCS) through one code path.
+- `corpus/` mirrors the run's shard directory, every downstream sidecar included, plus `manifest.parquet`, unchanged.
+- Raw sources are written to `sources/<source_hash><ext>`, deduplicated by hash.
+- `source_index.parquet` has one row per document (`source_hash`, `doc_id`, `filename`, `ext`, `raw_key`, and a status of `resolved`, `hash_mismatch`, `not_found`, `unsupported_basis` or `upload_failed`); `raw_key` is null where no file was produced.
+- Source resolution never aborts the export: a missing, mismatched, records-ingested or failed-upload source is reported in the index and in `egress_manifest.json`.
+- `egress_manifest.json` carries the contract version and a per-document resolution report.
+- A corpus-only export (`--no-sources` / `--corpus-only`) skips resolution and writes no `sources/` or `source_index.parquet`.
+- `--source-root` resolves sources for a moved corpus; `--run-id` defaults to the run root's name and must agree with the run's stamp, if any.
+- Re-exporting removes source files the fresh export neither wrote nor attempted, and leaves a failed-upload source untouched.
+- A run held in an object store is copied store to store, with no local staging.
+- A run ingested from an object store resolves each source from that store by `source_relpath`, checked against `source_hash`, with the same statuses.
+- Womblex writes the bundle and nothing downstream of it: no retention, serving or write-back. Delivery to a workflow's destinations is Requirement 27.
 
-### 27. Workflows — Set Up Once, Check First, Run Anywhere
+### 24. Swappable Models Without a Schema Change
+
+**Paid:** The OCR, enrichment and embedding slots can hold paid models; swapping a slot can add or remove a paid call.
+
+**As** a user with my own models, local or API-backed,
+**I want** to swap the model behind a pipeline slot without forking Womblex,
+**so that** I can use models suited to my corpus while a packaged CPU-friendly group stays the default.
+
+**Given** an installed package that registers a model for a slot
+**When** the operator names that model in the config
+**Then** the run uses it in place of the default, with no change to any Parquet schema.
+
+**Acceptance criteria:**
+
+- Swappable slots: OCR engine, layout analyser, PII context model, chunk tokeniser, spellfix dictionary, enrichment provider, and embedding provider.
+- An enrichment provider declares its limits (texts per request, token ceiling, token counter, network need, whether it returns a Document). Womblex keeps the packing, splitting above a declared ceiling, table pass, sidecars, evidence and chunk mapping (Requirement 12); retries and long-input handling stay inside the provider's adapter. A provider changes who recognises entities and nothing downstream. The Isaacus adapter is Requirement 29. An embedding provider declares its texts per request and network need. Only a provider that needs Isaacus is gated on an Isaacus deployment.
+- Installing a third-party model package makes its models selectable by name, with no change to Womblex's own dependencies.
+- The built-in models (PaddleOCR, Mistral, Ollama, PP-DocLayout-M) keep their existing names and aliases.
+- An installed package can supply model files, and they resolve offline the same way bundled models do.
+- A config names registered models only; an unknown name is an error that lists the known names. Import paths are refused.
+- An engine's own options pass through to it unchanged, and Womblex adds no per-library toggles.
+- An OCR model may return either regions or page markdown, and the pipeline handles each the same way it handles the built-in engines of that kind.
+- A layout model emits the Womblex `block_type` vocabulary, checked by a conformance test.
+- The layout model applies to redaction detection as well as extraction.
+- Changing the PII context model is supported. The docs state that `context_similarity_threshold` must be recalibrated when it changes.
+- With no plugin configured, `content_digest` is unchanged on every synthetic fixture.
+- The model-plugin guide documents each slot's interface and how a package registers a model, with a minimal example.
+
+**Out of scope:** model provenance (26), container-image packaging of plugins, and slots that need a Parquet schema change, each needing its own requirement (25 and 26, and the rest): AI chunking with a non-Isaacus model, graph-driven PII detection, link-stage candidates, `graph_refresh`, the enrichment token-budget tokeniser, per-page or per-element OCR engine recording.
+
+### 25. Pre-Run Model Check
+
+**Paid:** The check sends one minimal request to each paid model an enabled stage uses (Kanon-2 Enricher, Kanon-2 Embedder, Mistral on Bedrock), at `load` and `smoke` alike, and each is billed. Ollama's check is free.
 
 **As** an operator,
-**I want** to write down a set of processing steps once and run it on my own machine, in the cloud, or on a timetable,
-**so that** every run follows the same steps, problems are caught before any money is spent, a timetable only pays for new documents, and the results reach the systems that use them.
+**I want** configured models checked before any document is processed,
+**so that** a run never fails part-way, or mixes models, because a model was missing.
 
-**Given** a workflow file that lists the starting settings, any changes to them, where the documents are, the steps to run, when to run them and where to send the results
-**When** the operator checks, prices, runs, sends to the cloud, or schedules the workflow
-**Then** any problem is reported before the first step starts, each scheduled run handles only new documents, every output shows which workflow made it, and each place named receives the results.
-
-**Acceptance criteria:**
-
-- A workflow is a plain text file. Creating or changing one needs no programming.
-- Every command checks the file first and rejects anything it does not recognise.
-- Changing only the layout or comments in the file does not change its identity.
-- Settings in the workflow are added on top of its starting settings, and the result is checked as a whole.
-- The check command runs every test a real run would run before its first step, and changes nothing.
-- The pricing command shows how much text each paid step would send, including every step that uses a paid service, and counts text the way each service counts it. It does not use any paid service itself. Steps that run on our own machines are shown as free.
-- Steps listed in the wrong order are rejected before anything runs, with a clear reason.
-- If a step fails after the run has started, the other steps still run. Each later step notes the failure, and the run is reported as failed.
-- Every output file shows which workflow made it. The full workflow is kept with the run, so it can be read even after the file has changed.
-- Sending a workflow to the cloud is rejected before anything starts if it would be rejected on a local machine, uses a step the cloud cannot run, or lists steps in an order the cloud would change.
-- Scheduling a workflow saves a copy of it and sets its timetable in one action. The saved times and the real timetable always match.
-- Scheduling runs every check a scheduled run would make, against the document location named in the workflow. A workflow that would fail is not scheduled.
-- Each scheduled run uses the saved copy and reads from the document location named in the workflow, whichever machine runs it.
-- A scheduled workflow keeps adding to one run. Each time it runs, it processes only documents the run has not seen before.
-- A document already in the run is never processed again or sent to a paid service again.
-- After a workflow is changed and scheduled again, the new version applies to new documents only. Earlier documents keep their results.
-- If there are no new documents, nothing runs and the log says so.
-- A file whose contents have changed counts as a new document. The earlier version stays in the run.
-- A workflow has no owner. Only administrators can see the runs it starts, as with runs started from the command line.
-- When a workflow includes the step that hides personal details, cloud runs carry it out. Runs started without a workflow never include it.
-- A workflow can name places to send its results: cloud file storage, a Postgres database with search vectors, and a web address that receives notices.
-- The workflow names where Womblex can find passwords and keys, never the passwords or keys themselves. No secret is ever written in the workflow file or in the copy Womblex keeps.
-- Every place is checked before the run starts. Its passwords and keys must be available, and the software it needs must be installed. If a check fails, the run does not start.
-- Sending to the database needs the step that creates search vectors. Sending text with personal details hidden needs the step that hides them. A workflow missing the step it needs does not start.
-- Results are sent after the last step, even if a step failed. Results sent after a failure say which steps failed.
-- If sending fails, Womblex tries again a set number of times, then records the failure on the run. A failed send never stops the run.
-- When a failed step is retried successfully, Womblex shows how to resend the results. A resend replaces what was sent before: files are rewritten and database rows are updated, not duplicated.
-- Sending to cloud file storage writes the same export package as Requirement 23. Each place decides whether the original documents are included.
-- Sending to the database writes one row per piece of text, with its search vector. Text with personal details hidden is sent by default. The original text is sent only where the workflow asks for it, and each row says which version it holds.
-- Sending to a web address sends five kinds of notice: all documents read in, a step finished or failed, the run finished, results sent, and sending failed. Each notice is signed with a secret key kept on the machine, so the receiver can trust it.
-- Each notice gives the run's status in the same words the web API uses. No notice is sent for each document or group of documents.
-- The run's summary record lists every send.
-
-**Out of scope:** removing documents that have changed or been deleted, catching up on scheduled times that were missed, managing workflows through the web API, workflow owners, sending each step's results to a different place, databases other than Postgres with search vectors (each needs its own requirement), setting up notice addresses through the web API, and taking corrections back from the systems that receive the results.
-
-### 28. Cloud Runs — Do What Was Asked, Report What Happened
-
-**As** an operator, or a system that sends work to Womblex,
-**I want** work sent to the cloud to use the settings I chose, run only on machines that can handle it, and show its real status after a fix,
-**so that** cloud results match local results, and a fixed run is no longer shown as failed.
-
-**Given** a run sent to the cloud from the command line, the web console, the web API or a workflow
-**When** the cloud machines process it, a step fails, or the operator retries a failed step
-**Then** every part of the run uses the settings that were sent, runs only on a machine checked for it, redoes only the work a failure affected, and shows its real status.
+**Given** a config that names models for one or more slots
+**When** a run, worker, or API submission starts
+**Then** each named model is checked, and a failure stops the run before its first document with the reason.
 
 **Acceptance criteria:**
 
-- Every part of a cloud run uses the settings it was sent with. A machine's own settings only say where its files are kept.
-- Settings sent through the web API, the web console or the command line control how the run works, not just which steps it includes.
-- A cloud machine only runs a step after checking it has the AI models that step needs.
-- If no running machine can do part of the work, the run is rejected before anything starts.
-- A retry is rejected before it starts for any reason a new run would be rejected.
-- When a failed step is retried, later steps redo only the groups of documents the failure affected. Work that already finished correctly is not sent to a paid service again.
-- Once every failed step in a run has been retried successfully, the run shows as done.
-- A scheduled run whose steps could not be started at first shows its real status once they are started, not "failed".
+- The check has three levels, set by `processing.models_check` or `--models-check`: `off`; `load` (resolve and load the models, the default); `smoke` (also run one inference on a small built-in input).
+- `womblex run` checks the models of every enabled stage before batch one, before any output is written, so a run whose later stages cannot complete does not start.
+- A worker checks at startup and refuses jobs whose models fail the check, through the existing refused path. A job is refused only for the models it needs: a batch for the extraction models, a stage job for that stage's.
+- A model behind a service is checked with one minimal request at either level: each Isaacus model an enabled stage calls (enrich, embed, AI chunking), and an API-backed OCR engine (Bedrock, Ollama), so a run whose later paid stage cannot reach its service does not start.
+- An API submission checks only that each named model is registered, because the API host may not carry the models.
+- Downstream stage preflight includes the model check, including the standalone `chunk`, `pii`, `spellfix` and `redact` commands, which check before writing anything.
+- The existing in-slot fallback (PaddleOCR v5 to the wheel's v4) stays, and the check reports which variant resolved.
+- The check result is written into the run record.
 
-**Out of scope:** retrying steps automatically, and retrying from the web API or the web console.
+### 27. Workflows — Check, Run, Dispatch, Schedule and Deliver
+
+**Paid:** `run-workflow`, `dispatch-workflow` and every scheduled firing launch the workflow's paid steps; each firing is billed for the documents it processes. `validate` and `plan` make no paid call.
+
+**As** an operator,
+**I want** to declare a recipe of stages once and run it locally, on the fleet or on a schedule,
+**so that** every run follows the same steps, refusals happen before any spend, scheduled firings pay only for new documents, and results reach downstream systems.
+
+**Given** a workflow file (preset, config overlay, input location, ordered steps, triggers and destinations)
+**When** the operator validates, plans, runs, dispatches or schedules it
+**Then** every refusal happens before the first step, each firing processes only new documents, every output names its workflow, and each destination receives the results.
+
+**Acceptance criteria:**
+
+- A workflow is a plain-text file; creating or editing one needs no code.
+- Every command validates the file first and rejects unknown keys.
+- The workflow digest ignores formatting and comments.
+- Its `config` is laid over its preset's key by key and validated as a full config.
+- `validate` runs every check `run-workflow` runs before its first step, and writes nothing.
+- `plan` counts the tokens and requests of every paid call, AI chunking included, with each provider's own token counter, and shows local steps as free. It calls no paid API.
+- Out-of-order steps are refused before launch with a stable code.
+- Once a step has run, a failed step does not stop later steps; each records the failure it follows, and the run exits non-zero.
+- Every output names the workflow that wrote it, and the run record holds the workflow's name and full spec.
+- `dispatch-workflow` is refused before any row for anything the local runner refuses, a step the fleet cannot run, or an order the coordinator would change.
+- `schedule-workflow` saves the workflow and syncs its schedules in one action, so stored triggers and DBOS schedules always match. It runs every check a firing makes, against the workflow's input location, and does not schedule a workflow a firing would refuse.
+- Each firing runs the saved copy against the workflow's input location, on a worker that uses that store.
+- A scheduled workflow appends to one run: each firing processes only documents the run has not seen, and never reprocesses or re-pays for one it has.
+- After an edit and reschedule, the new version applies to new documents only; earlier documents keep their results.
+- A firing with no new documents runs nothing and logs that.
+- A file whose content changed is a new document; the earlier version stays in the run.
+- A workflow has no owner; the runs it starts are admin-only, like CLI runs.
+- Fleet runs perform `pii` when a workflow includes it; runs without a workflow never do.
+- A workflow can name destinations: an object store, a Postgres database with embeddings, and a webhook.
+- A workflow names where secrets are found, never the secrets. No secret is written to the file or the stored copy.
+- Every destination is checked before launch (its secrets resolve, its dependencies are installed); a failed check refuses the run.
+- A Postgres destination requires the `embed` step, and sending masked text requires `pii`; a workflow missing either is refused before launch.
+- Results are delivered after the last step, even when a step failed, and a delivery after a failure names the failed steps.
+- A failed delivery is retried a set number of times, then recorded on the run. It never stops the run.
+- After a failed stage is retried successfully, the retry command prints how to redeliver. Redelivery replaces: files are rewritten and rows upserted.
+- An object-store destination receives the Requirement 23 bundle; each destination chooses whether raw sources are included.
+- A Postgres destination gets one row per chunk with its embedding: masked text by default, raw only where the workflow asks, each row naming its layer.
+- A webhook receives five events: extraction settled, stage finished or failed, run finished, delivered, and delivery failed. Each is signed with a key held on the worker.
+- Events carry the run's status in the API's words. There are no per-document or per-batch events.
+- The run record lists every delivery.
+
+**Out of scope:** pruning changed or deleted documents, backfilling missed firings, managing workflows through the API, workflow owners, per-step destinations, databases other than Postgres (each needs its own requirement), registering webhooks through the API, and write-back from consumers.
+
+### 28. Fleet Runs — Honour the Dispatch, Report the Truth
+
+**Paid:** A retry redoes the affected units of paid stages, and each is billed again.
+
+**As** an operator, or a system submitting work,
+**I want** fleet runs to use the config they were sent with, run only on workers checked for them, and show their real status after a fix,
+**so that** fleet results match local ones and a repaired run no longer reads as failed.
+
+**Given** a run dispatched from the CLI, the console, the API or a workflow
+**When** workers process it, a stage fails, or the operator retries a failed stage
+**Then** every stage runs under the dispatched config on a worker checked for it, a retry redoes only affected units, and the run shows its real status.
+
+**Acceptance criteria:**
+
+- Every stage of a fleet run runs under the config it was dispatched with; a worker's own config supplies only its paths.
+- Config submitted through the API, console or CLI governs how stages run, not only which run.
+- A worker serves a stage only once its model check passes for that stage.
+- A run no live worker can serve is refused before launch.
+- A retry is refused before the fork for anything a new dispatch would refuse.
+- Retrying a failed stage makes later stages redo only the units the failure affected; finished work is not sent to a paid service again.
+- Once every failed stage has been retried successfully, the run shows `done`.
+- A scheduled firing whose dispatch failed and was later completed shows its real status, not `failed`.
+
+**Out of scope:** automatic retries, and retrying from the API or console.
+
+### 29. Isaacus Enrichment Adapter
+
+**Paid:** Every request is a billed Kanon-2 Enricher call: per call on the hosted API, and through AWS for a SageMaker endpoint.
+
+**As** a user with an Isaacus deployment,
+**I want** Kanon-2 Enricher reached through a thin adapter over the Isaacus SDK,
+**so that** I get the API's own retry and long-input handling, and pay only for the calls I configured.
+
+**Given** the `enrichment` slot set to `kanon-2-enricher` and a declared Isaacus deployment (`ISAACUS_API_KEY`, or `ISAACUS_SAGEMAKER_ENDPOINTS`)
+**When** the `enrich` stage runs
+**Then** each request goes through the Isaacus SDK and each returned ILGS Document is converted to Womblex's enrichment result.
+
+**Acceptance criteria:**
+
+- Three things stay separate, in code and in docs. semchunk is an open-source library (MIT) that runs locally with no key. The Kanon-2 tokeniser is open source (Apache-2.0), vendored, and counts tokens locally with no call. Kanon-2 Enricher is a paid model, billed per call. Only the last is this adapter.
+- Retries, including on rate limits, are the SDK's (`max_retries`, upstream default unless the corpus has a measured reason to diverge); the adapter has no retry loop of its own.
+- Input longer than the model's context is handled by the API's `overflow_strategy` (passed through, `auto`). The adapter declares the API's limits (8 texts per request) and no token ceiling that makes Womblex split a document the API accepts whole.
+- The hosted API and SageMaker go through the same adapter. A deployment that serves no enricher endpoint is refused before the run.
+- Only the `enrich` stage calls the adapter, and only when configured. It is never a fallback for another provider or another stage.
+- The adapter declares that it returns a Document. The raw Document is written only when `persist_document` is set; what reads it is Requirement 10's.
+
+**Out of scope:** AI chunking (Requirement 10) and the Isaacus embedder (`embed`).
 
 ## How this plan works
-This plan lists only the work still to do. Finished work is recorded in the change log and the other project documents. The rules every piece of work follows, such as how large one change can be and the review at the end of each phase, are in the project guide (CLAUDE.md). Each item is removed from this plan when it is done, and the plan is deleted when the last item is done.
+The plan lists only outstanding work; finished work lives in the CHANGELOG and the docs. Merge size and the end-of-phase stocktake follow CLAUDE.md. An item is removed when done, and the plan is deleted with its last item.
 
-When a piece of work reverses an earlier decision, the old decision is deleted from the decision records. It is not kept as a rejected option. The list of mistakes below is the record of what went wrong.
+A change that reverses a decision deletes the old decision from the decision docs rather than keeping it as a rejected alternative. The mistakes list below is the record of what went wrong.
 
-Each work item names the requirements in the target state it delivers. When a piece of work meets a requirement, the requirement moves into the requirements document.
+Each work item names the target-state requirements it delivers. When an item meets a requirement, the requirement moves into the requirements document.
 
-## Words used in this plan
-- **Workflow:** a saved recipe. It names the settings to use, the steps to run, where the documents are, and when to run.
-- **Step:** one stage of processing, such as reading the text, finding names, or creating search vectors.
-- **Run:** one pass of processing over a set of documents.
-- **Group of documents:** the documents processed together as one unit within a run.
-- **Cloud machines:** the computers that process runs sent to the cloud.
-- **Paid service:** an outside service that charges for each piece of text it processes.
-- **Export package:** the folder of results, and optionally original documents, that Womblex prepares for another system.
-- **Scheduled run:** a run started automatically at a set time.
+**Paid features are tagged.** A requirement whose behaviour can start a call billed by a third party carries a **Paid:** line under its heading, saying what is billed and which setting switches it on. A requirement without one engages nothing paid. The paid models are the Kanon-2 Enricher and Kanon-2 Embedder (Isaacus, on the hosted API or a SageMaker endpoint) and Mistral Pixtral Large on AWS Bedrock (`mistral-ocr`). Everything else runs locally and costs nothing per call, including semchunk (MIT), the Kanon-2 tokeniser (Apache-2.0), PaddleOCR, PP-DocLayout-M and a self-hosted Ollama. A merge that adds, removes or changes a paid call updates the line in the same merge.
 
 ## Mistakes to avoid
-Phase 2 made each of these mistakes. Check every item in this plan, and every new plan, against this list before building.
+Phase 2 made each of these. Check every item, here and in future plans, against this list before building. Phase 2 made the first eight; the ninth has recurred in almost every merge.
 
-1. **Saving a setting before anything uses it.** Workflows got a "send results to" setting that did nothing, which led to questions about settings with no effect. *Rule:* a setting is added in the same piece of work that makes it do something.
-2. **Writing a file nobody reads.** Workflow "conditions" wrote a file of labels that nothing reads. The same labels can be worked out from the run's document list at any time. *Rule:* every new output names who reads it. Anything that can be worked out from saved data is worked out when needed, not saved again.
-3. **Automatic runs that pay twice.** Each scheduled run processes every document again and pays the outside service again for each one. *Rule:* anything that runs on its own processes only documents it has not seen before.
-4. **Taking away the operator's tools.** A workflow could only be created by writing program code. *Rule:* anything an operator sets up has a settings file and a command. An operator never writes code to use a feature.
-5. **A reason that was never delivered.** Workflows were stored in a database rather than a file because a file "cannot hold a timetable". The timetable was then built so that it repeats all the work every time (mistake 3). *Rule:* when a feature is the reason for a decision, that feature must work properly in the same phase, or the decision is reopened.
-6. **Stopping a run after it started, then undoing it.** Two changes stopped work part way through a run because of a single document. Both broke the rule that a run, once started, always finishes, and both had to be undone. *Rule:* every check that can stop a run happens before the run starts.
-7. **Passwords in saved settings.** A planned setting would have saved a database password inside the stored workflow. *Rule:* saved settings name where a password is kept, never the password itself.
-8. **Asking the owner questions the design already answers.** Reviews treated unfinished pieces as settled and asked the owner to choose between options. *Rule:* only ask the owner a question if the answer changes what users get. Anything the written design already answers is settled by the builder, who says where.
+1. **A setting before anything uses it.** Workflow `destinations` were stored and did nothing. *Rule:* a setting lands in the merge that makes it act.
+2. **A file nobody reads.** Workflow conditions wrote a label sidecar nothing reads, derivable from the manifest anyway. *Rule:* every new output names its reader; anything derivable is derived on read.
+3. **Automation that pays twice.** Each scheduled firing re-extracts every document and re-pays enrichment. *Rule:* anything that runs unattended processes only unseen documents.
+4. **Tools taken from the operator.** A workflow could only be created in code. *Rule:* anything an operator sets up has a file and a command.
+5. **A justification never delivered.** Workflows went into a database because a file "cannot hold a schedule", and the schedule then repeated all work (mistake 3). *Rule:* a feature that justifies a decision must work in the same phase, or the decision reopens.
+6. **Halting a run after launch, then reverting.** Two changes stopped a run mid-flight over one document; both were reverted. *Rule:* every refusal happens before launch.
+7. **Secrets in stored settings.** A planned destination would have stored a database password in the workflow. *Rule:* settings name where a secret lives, never the secret.
+8. **Asking the owner what the design answers.** Reviews treated open items as settled and asked the owner to pick options. *Rule:* ask only when the answer changes what users get; otherwise the builder decides and cites where the design says so.
+9. **Isaacus's open-source parts treated as its paid models.** Requirements and docs ran semchunk, the Kanon-2 tokeniser and the Kanon-2 Enricher together. They described enrichment as if Isaacus were the only provider, put AI chunking inside enrichment, and called a paid chunk-time call a "fallback". *Rule:* semchunk (MIT, local), the Kanon-2 tokeniser (Apache-2.0, local) and the Kanon-2 Enricher and Embedder (paid, per call) are named separately in every sentence that touches them. Enrichment is written provider-neutral, with Isaacus as one adapter. AI chunking belongs to chunking. Every paid call names the setting that asked for it.
 
 ## Phase R — Repairs
 
-### Decisions made on 17 October 2026
-Each piece of work records its decision in the operating decisions document and deletes any decision it reverses.
+### Decisions made 17 October 2026
+Each merge records its decision in [decisions-operations.md](decisions-operations.md) and deletes any decision it reverses.
 
-- **Decision 1. Workflows are files.** A workflow is a plain text settings file, and every workflow command takes the file's location. The file is the master copy. Womblex keeps its own copy only when a workflow is scheduled, because scheduled runs read that copy. Sending a workflow to the cloud keeps no copy, because the cloud run receives the whole workflow when it starts. This reverses the decision that workflows are created only through code.
-- **Decision 2. A scheduled workflow adds to one run instead of starting again.** Each scheduled run checks every file in the document folder, processes only the documents the run does not already have, and runs the steps on those new documents only. A file whose contents change counts as a new document, and the old version stays. Removing old versions is not part of this work.
-  Each scheduled run uses the workflow as it is when that run starts. After an edit, the new version applies to new documents only. The rule that refused a run already used by another version of a workflow is removed, because it no longer serves a purpose.
-- **Decision 3. Conditions are removed.** Everything they produced can be found from the run's document list.
-- **Decision 4. The "send results to" setting is removed.** It returns in Phase 3, once results can actually be sent.
+- **D1. Workflows are files.** Every workflow command takes a file path; the file is the master copy. Only scheduling stores a copy (firings read it). Dispatch stores none, since the run receives the whole workflow. Reverses code-only creation.
+- **D2. A scheduled workflow appends to one run.** Each firing lists the input location, processes only documents the run lacks, and runs the steps on those. A changed file is a new document; the old version stays (pruning is out of scope). Each firing uses the workflow as it stands at firing, so an edit applies to new documents only. The refusal of a run already worked under another workflow digest is removed.
+- **D3. Conditions are removed.** The manifest answers everything they labelled.
+- **D4. `destinations` is removed** until Phase 3 can deliver.
 
-### Decisions proposed on 17 October 2026, not yet made
-These fix problems found in a review of the work done between 10 and 17 October.
+### Decisions proposed 17 October 2026
+From a review of the work merged 10–17 October.
 
-- **Decision 5. A run's status reflects the latest try at each piece of work.** Today, a run whose failed step was retried successfully still shows as failed, and so does a scheduled run that was fixed by hand. After this change, both show their real status. This reverses the earlier rule that the original failure keeps counting.
-- **Decision 6. A retry redoes only the work the failure affected.** Today, retrying a step that ran after a failure redoes every group of documents and pays the outside service again for all of them. After this change, it redoes only the groups the failure affected.
-- **Decision 7. Every cloud run uses the settings it was sent with.** Today, only workflows do. Runs sent from the web API, the web console or the command line use each cloud machine's own settings, so the same run can behave differently on different machines. After this change, every run carries its settings with it. This reverses the part of Requirement 22 that says submitted settings only choose which steps run.
-- **Decision 8. Work goes only to machines checked for it.** Today, a machine checks only the AI models its own settings use, but accepts work that needs other models. After this change:
-  - each piece of work goes only to machines that have checked the models it needs;
-  - a machine checks the models for every step in its settings, whether or not that step is turned on;
-  - each machine records which kinds of work it accepts;
-  - if no running machine can do the work, the work is refused before anything starts;
-  - a retry runs every check a new run would.
-- **Decision 9. A workflow names where its documents are stored.** Today, a scheduled run reads from whichever storage the machine that picks it up uses. After this change, the workflow names the storage, and only machines that use it run the workflow. Passwords for the storage still come from the machine, never the workflow.
-- **Decision 10. Scheduling saves the workflow and its timetable together.** Today, a stored workflow can be changed without updating its timetable, so the saved times and the real timetable can differ. After this change, only scheduling saves a workflow, and it runs the checks and updates the timetable in the same action.
-- **Decision 11. A run records the whole workflow that made it.** Today, a run records only a code for the workflow's version, and once the workflow changes the original cannot be found. After this change, each output file and the run's summary record hold the workflow's name and full contents.
-- **Decision 12. The pricing command counts every paid call.** Today, it misses the paid calls made when text is split into pieces using AI, and it counts text for every outside service as if it were the default one. After this change:
-  - AI text-splitting calls are counted;
-  - text is counted the way each service counts it;
-  - steps that run on Womblex's own machines are shown as free.
-- **Decision 13. Workflows have no owner.** No command or screen lets anyone set an owner, so the owner setting does nothing, and it is removed. Runs started by a workflow are visible to administrators, as runs started from the command line are. An owner can be added back if the web API ever lets users create workflows. This reverses the rule that workflows are owned like runs.
+- **D5. Run status takes each unit's latest attempt.** Today a run whose failed stage was retried successfully, or a scheduled run repaired by hand, still reads `failed`. Reverses the rule that the original failure keeps counting.
+- **D6. A retry redoes only affected work.** Today retrying a stage that ran after a failure redoes every batch and re-pays for all of them.
+- **D7. Every fleet run carries its config.** Today only workflows do; API, console and CLI runs use each worker's own config, so one run can behave differently per worker. Reverses Requirement 22's "selects downstream stages only".
+- **D8. Work goes only to workers checked for it.** Today a worker checks only the models its own config enables, yet accepts work needing others. After:
+  - a unit is routed only to workers whose model check covers it;
+  - a worker checks the models for every stage in its config, enabled or not;
+  - each worker records the work it serves;
+  - work no live worker can serve is refused before launch;
+  - a retry runs every check a dispatch does.
+- **D9. A workflow names its input store.** Today a firing reads whichever store its worker uses. After, only workers on the named store run it. Credentials still come from the worker.
+- **D10. Scheduling saves the workflow and its schedules together.** Today a stored workflow can change without its schedules. After, only `schedule-workflow` saves, checking and syncing in one action.
+- **D11. A run records its whole workflow.** Today only the digest is recorded, and the spec is lost once the workflow changes. After, every sidecar and the run record carry the name and full spec.
+- **D12. `plan` counts every paid call.** Today it misses AI-chunking calls and counts every provider with the Kanon-2 tokeniser. After, AI chunking is counted, each provider's own counter is used, and local steps show as free.
+- **D13. Workflows have no owner.** Nothing sets one, so the field does nothing and is removed. Workflow runs are admin-only, like CLI runs. An owner returns if the API ever creates workflows. Reverses owner-scoped workflows.
 
 ### Work items
-Each item is one change that stays under the project's size limit. An item that grows too large is split into two changes that each work on their own.
+Each item is one merge under the size cap; an item that outgrows it splits into two that each stand alone.
 
-- **R.1 Remove conditions** (Decision 3; Requirement 27) from both local and cloud runs, with their documentation.
-- **R.2 Remove the "send results to" setting** (Decision 4; Requirement 27) and its open item in the requirements.
-- **R.2b Remove the workflow owner** (Decision 13; Requirements 22 and 27), including the owner check on scheduled runs.
-- **R.3 Workflows as files** (Decisions 1 and 10; Requirement 27). Every workflow command takes a file, and an example workflow is added beside the example settings. Only scheduling saves a copy, and it updates the timetable in the same action. The code example in the workflow guide is removed.
-- **R.3b A workflow names its document storage** (Decision 9; Requirement 27). Scheduled runs go only to machines that use that storage.
-- **R.4 Scheduled runs add only new documents** (Decision 2; Requirement 27), and the rule against a run used by two versions of a workflow is removed. If too large, the change to internal labels goes first and the new-documents-only behaviour second.
-- **R.5 Run status from the latest try** (Decision 5; Requirement 28).
-- **R.6 Every cloud run carries its settings** (Decision 7; Requirements 22 and 28), with the web API guide updated.
-- **R.7 Work goes only to checked machines** (Decision 8; Requirements 14 and 28). If too large, the way work is sorted goes first and the up-front refusal second.
-- **R.8 Retries redo only affected work** (Decision 6; Requirements 14 and 28).
-- **R.9 Runs record their whole workflow** (Decision 11; Requirement 27). The run's summary record gets a new version number.
-- **R.10 Pricing counts every paid call** (Decision 12; Requirement 27).
-- **R.11 End-of-phase review.**
+- **R.1 Remove conditions** (D3; Req 27), local and fleet, with their docs.
+- **R.2 Remove `destinations`** (D4; Req 27) and its TO-DO.
+- **R.2b Remove the workflow owner** (D13; Reqs 22, 27), including the firing's owner check.
+- **R.3 Workflows as files** (D1, D10; Req 27). Every command takes a file; an example workflow joins `configs/`. Only scheduling stores a copy, syncing schedules in the same action. The code example leaves the workflow guide.
+- **R.3b A workflow names its input store** (D9; Req 27). Firings route only to workers on that store.
+- **R.4 Firings append only new documents** (D2; Req 27); the mixed-digest refusal goes. If too large: the label change first, new-documents-only second.
+- **R.5 Run status from the latest attempt** (D5; Req 28).
+- **R.6 Every fleet run carries its config** (D7; Reqs 22, 28), with the API guide.
+- **R.7 Work only to checked workers** (D8; Reqs 14, 28). If too large: routing first, the up-front refusal second.
+- **R.8 Retries redo only affected work** (D6; Reqs 14, 28).
+- **R.9 Runs record their whole workflow** (D11; Req 27). The run record's version bumps.
+- **R.10 `plan` counts every paid call** (D12; Reqs 10, 27), AI chunking's included.
+- **R.11 Stocktake.**
 
-## Phase 3 — Sending results to other systems
-In Phase 3, a finished run sends its results to other systems by itself, to the places its workflow file names. Each piece of work adds one kind of place that works from start to finish. No kind of place can be named before Womblex can deliver to it.
+## Phase 3 — Delivery
+A finished run delivers its results to the destinations its workflow names. Each merge adds one destination kind end to end; no kind can be named before it delivers.
 
-### Decisions made on 17 October 2026
-Each is recorded with the piece of work that builds it.
+### Decisions made 17 October 2026
+Each is recorded with the merge that builds it.
 
-- **Cloud runs hide personal details when a workflow asks.** Runs started without a workflow still never include this step. This reverses the rule that cloud runs never include it.
-- **Cloud runs write their own document list when they finish.** The command that writes it by hand stays, and running it again changes nothing.
-- **A run kept in cloud storage is exported directly between cloud locations.** It no longer has to be copied to a local machine first.
-- **Status uses the web API's existing words** (pending, running, done, failed and cancelled, plus a warning for a scheduled run that could not start its steps). The status sentence, the notices and the run's history record all use them. This replaces a different set of words chosen earlier.
-- **Sending results follows the retry rules.** Results sent after a failure are marked with that failure. When the failed step is retried successfully, the retry command shows how to resend the results. Nothing is resent automatically.
-- **Places to send results are checked before the run starts.** Passwords, the signing key for notices and any extra software needed are checked alongside the AI model check.
-- **Sending to the database needs search vectors.** A workflow without the step that creates them is refused before it starts.
-- **The requirements for sending results belong in Requirement 27.**
+- **Fleet runs perform `pii` when a workflow asks.** Runs without a workflow still never do. Reverses "the fleet never runs `pii`".
+- **Fleet runs write their own manifest on finishing.** `womblex finalize` stays and is idempotent.
+- **An object-store run egresses store to store**, with no local staging.
+- **Status uses the API's existing words** (`pending` / `running` / `done` / `failed` / `cancelled`, plus a warning for a firing that could not dispatch), in the status sentence, events and lineage. Replaces an earlier vocabulary.
+- **Delivery follows the retry rules.** A delivery after a failure is marked with it; after a successful retry, `retry-stage` prints how to redeliver. Nothing redelivers automatically.
+- **Destinations are checked before launch**: secrets, the webhook signing key and extra dependencies, beside the model check.
+- **A Postgres destination requires embeddings**; a workflow without `embed` is refused before launch.
+- **Delivery requirements belong in Requirement 27.**
 
 ### Work items
-- **3.1 New software only.** The library for sending notices becomes part of the standard install, and the database's library becomes an optional add-on. This needs human approval.
-- **3.2a Cloud runs write their own document list** (Requirement 2). The command and the cloud use the same code.
-- **3.2b Export from cloud storage** (Requirement 23). A run kept in cloud storage is exported directly. Original documents are fetched from where they were first uploaded and checked against their recorded fingerprint.
-- **3.2c Sending to cloud file storage, and how sending works** (Requirement 27). The "send results to" setting returns, with cloud file storage as its only kind. Results are sent after the last step, even if a step failed, and a failed send is retried a set number of times. The run's summary record lists every send. A failed send is recorded on the run and never stops it. The up-front checks and the retry instructions are added here.
-- **3.3 Hiding personal details in cloud runs** (Requirement 27).
-- **3.4 Sending to a Postgres database with search vectors** (Requirement 27). The workflow names where the database password is kept. Each piece of text is one row, updated rather than duplicated when results are resent. Text with personal details hidden is sent by default, and original text only where the workflow asks, with each row saying which version it holds. A workflow that sends hidden text without the hiding step, or sends to the database without the search-vector step, is refused before it starts.
-- **3.5 Notices to a web address** (Requirements 22 and 27). Each notice is retried a set number of times and signed with a secret key kept on the machine.
-- **3.5.5 The export guide also covers sending results**, with a description of what is sent. Documentation only.
-- **3.6 End-of-phase review.**
+- **3.1 Dependencies only.** The webhook client becomes core and the Postgres driver an extra. Needs human approval.
+- **3.2a Fleet runs write their own manifest** (Req 2), through the same code as `finalize`.
+- **3.2b Egress from an object store** (Req 23): store-to-store copy; sources fetched by `source_relpath` and checked against `source_hash`.
+- **3.2c Object-store destination and the delivery mechanism** (Req 27). `destinations` returns with this kind only. Delivery after the last step, even on failure; bounded retries; failures recorded on the run, never stopping it; every delivery in the run record. The pre-launch checks and redelivery hint land here.
+- **3.3 `pii` in fleet runs** (Req 27).
+- **3.4 Postgres destination with embeddings** (Req 27). The workflow names where the password lives. One row per chunk, upserted on redelivery; masked text by default, raw only on request, each row naming its layer. Masked text without `pii`, or Postgres without `embed`, is refused before launch.
+- **3.5 Webhook events** (Reqs 22, 27), with bounded retries and signing by a key held on the worker.
+- **3.5.5 Egress guide covers delivery**, including what is sent. Docs only.
+- **3.6 Stocktake.**
 
 ## Phase 4 — Day-to-day operation
 
+### Decisions made 19 October 2026
+Each is recorded in [decisions.md](decisions.md) with the merge that builds it.
+
+- **Isaacus's parts are named separately.** semchunk is open source (MIT) and local. The Kanon-2 tokeniser is open source (Apache-2.0, per its Hugging Face card) and local. The Kanon-2 Enricher and Embedder are paid models, billed per call.
+- **Enrichment is two requirements.** Requirement 12 is what Womblex does for any provider. Requirement 29 is the Isaacus adapter.
+- **The Isaacus adapter is thin.** Retries are the SDK's own (429 and 5xx, `max_retries`). Long input is the API's `overflow_strategy`. The adapter declares the API's limit of 8 texts per request and no smaller split ceiling.
+- **AI chunking belongs to chunking.** A chunk-time Enricher call is paid work that `chunking_model` asked for. It is logged and counted, never called a fallback.
+
 ### Work items
-- **4.0 Split one large command-line file.** The command that lists jobs moves to its own file, because the current file is near the size limit. Commands and output do not change.
-- **4.1 One-sentence run status** (Requirements 16 and 22). One plain sentence for each run, built from the exact counts at each step, shown by the command line, the web API and the web console. The run's history record reports finished, failed or cancelled, instead of always finished.
-- **4.2 A separate file for re-linked names** (Requirement 12). The step that re-links names to text writes its own file, marked with the exact version of the text it linked to, and readers use it where it matches. Until 4.3, the step also keeps rewriting the old files.
-- **4.3 Re-linking stops changing earlier results** (Requirement 12). Older runs are read as before. The page-layout step keeps replacing its own file.
-- **4.3.5 Documentation for 4.2 and 4.3.**
-- **4.4 Final review.** The list of mistakes moves to the dead-ends document. The rest of this plan moves into the decision records and the change log, and the plan is deleted.
+- **4.0 Split `cli/cloud.py`.** `jobs` moves to its own module ahead of the cap; commands and output are unchanged.
+- **4.1 One-sentence run status** (Reqs 16, 22), from exact per-stage counts, shown by the CLI, API and console. The lineage event reports complete, failed or cancelled instead of always complete.
+- **4.2 Graph refresh writes its own sidecar** (Req 12), stamped with the chunk version it linked against; readers use it where it matches. Until 4.3 it also keeps rewriting the old files.
+- **4.3 Graph refresh stops rewriting earlier files** (Req 12). Older runs read as before. `layout` still replaces its own sidecar.
+- **4.3.5 Docs for 4.2 and 4.3.**
+- **4.3.6 The Isaacus adapter goes thin** (Reqs 12, 29). The retry loops in `analyse/enrich.py` and `analyse/embed.py` are deleted in favour of the SDK's `max_retries`. The adapter declares the API's limits (8 texts per request, no split ceiling below what the API accepts), and Womblex splits only above a declared ceiling.
+- **4.3.7 AI chunking says when it pays** (Req 10). Every chunk-time Enricher call is logged per document and counted in the `*.chunks.parquet` footer. Code, comments and logs stop calling it a fallback (`process/chunker.py`, `process/chunk_stage.py`).
+- **4.3.8 Docs name Isaacus's parts separately, and paid features are tagged** (Reqs 3, 5, 10, 11, 12, 19, 24, 25, 29). Docs only. Requirements 10, 12 and 29 move into [functional_requirements.md](functional_requirements.md). [models.md](models.md) records the tokeniser's Apache-2.0 licence. CLAUDE.md gets a Common Pitfalls entry with the three-way split and the **Paid:** tag rule. Requirements 3, 5, 11, 19, 24 and 25 move in as the target state gives them, with their **Paid:** lines, and [functional_requirements.md](functional_requirements.md) states the tag rule at its top. [decisions.md](decisions.md) records this phase's decisions. A grep for "fallback", "self-enrich" and "over Isaacus" across `docs/`, `src/` and CLAUDE.md is the evidence.
+- **4.4 Final stocktake.** The mistakes list moves to [decisions-dead-ends.md](decisions-dead-ends.md); the rest goes to the decision docs and CHANGELOG, and the plan is deleted.
