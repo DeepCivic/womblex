@@ -310,7 +310,7 @@ def _fire(run_id: str, context: dict[str, Any]) -> dict[str, Any]:
 
     ctx = _context()
     with WorkflowStore(ctx.dsn) as wf_store:
-        stored = wf_store.get(context["workflow_id"], owner=context.get("owner"))
+        stored = wf_store.get(context["workflow_id"])
     if stored is None:
         raise RuntimeError(f"scheduled workflow {context['workflow_id']!r} is no longer stored")
     presets = os.environ.get("WOMBLEX_UI_PRESETS_DIR")
@@ -331,13 +331,12 @@ def fire_trigger(run_id: str, context: dict[str, Any]) -> dict[str, Any]:
 
 @DBOS.workflow(name=dbos_app.SCHEDULED_WORKFLOW)
 def run_scheduled(scheduled_time: datetime, context: dict[str, Any]) -> dict[str, str]:
-    """Start the firing as `<run>:trigger` with the run's id and owner, so a firing that fails is
-    on the board under its run, not only as DBOS's unattributed `sched-…` row."""
+    """Start the firing as `<run>:trigger` with the run's id, so a firing that fails is on the
+    board under its run, not only as DBOS's unattributed `sched-…` row. A workflow has no owner,
+    so the run is admin-only, like a CLI run."""
     run_id = scheduled_run_id(context["workflow_id"], scheduled_time)
     attrs: dict[str, Any] = {"run_id": run_id, "kind": dbos_app.KIND_TRIGGER,
                              "workflow_id": context["workflow_id"]}
-    if context.get("owner") is not None:
-        attrs["owner"] = context["owner"]
     with SetWorkflowID(dbos_app.trigger_id(run_id)), SetWorkflowAttributes(attrs):
         DBOS.enqueue_workflow(dbos_app.DOWNSTREAM_QUEUE, fire_trigger, run_id, context)
     return {"run_id": run_id, "firing": dbos_app.trigger_id(run_id)}

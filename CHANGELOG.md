@@ -9,6 +9,7 @@ Entries are terse by design; rationale lives in the PR/commit history.
 ## [Unreleased]
 
 ### Removed
+- **The workflow owner — trust plan, Phase R item R.2b (D13).** Nothing set it. `WorkflowStore` takes no `owner` and `WorkflowOwnedError` is gone; a firing's rows carry no owner, so its run is admin-only like a CLI run, and the firing's `<owner>/` prefix check (`prefix_not_owned`) goes with it.
 - **The `destinations` field of a workflow — trust plan, Phase R item R.2 (D4).** Nothing delivered to a destination, so the field goes until Phase 3 delivers one. A stored workflow saved with destinations still loads, with them dropped and a warning.
 - **The `conditions` field of a workflow — trust plan, Phase R item R.1c (D3).** `cloud/workflow_conditions.py` is deleted and a workflow spec has no `conditions`. The manifest holds every column they named. A stored workflow saved with conditions still loads, with them dropped and a warning.
 - **`run-workflow` no longer labels workflow conditions — trust plan, Phase R item R.1b (D3).** No `*.conditions.parquet` is written (`store/conditions_output.py` is deleted); conditions are still checked when a workflow is saved or loaded, and `run-workflow` and `dispatch-workflow` warn that they are not acted on.

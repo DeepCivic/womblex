@@ -32,7 +32,7 @@ def _duplicated_steps() -> StoredWorkflow:
     """A row that would no longer pass `check_spec` (built past the validator)."""
     good = _stored(["normalise"]).spec
     spec = StoredWorkflowSpec.model_construct(**{**dict(good), "steps": good.steps * 2})
-    return StoredWorkflow("wf", None, spec, workflow_digest(spec), "", "")
+    return StoredWorkflow("wf", spec, workflow_digest(spec), "", "")
 
 
 @pytest.mark.parametrize(("steps", "kw", "code"), [

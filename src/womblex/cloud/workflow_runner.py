@@ -65,9 +65,6 @@ class RefusalCode(str, Enum):
     ORDER_NOT_PIPELINE = "order_not_pipeline"
     """The fleet runs stages in pipeline order, so a list in another order is not dispatched."""
 
-    PREFIX_NOT_OWNED = "prefix_not_owned"
-    """A firing's ingest prefix is outside its owner's own `<owner>/` tree."""
-
     NO_DOCUMENTS = "no_documents"
     """A firing found no supported document under its ingest prefix."""
 

@@ -44,7 +44,7 @@ def _stored(steps: list[str], **extra) -> StoredWorkflow:
     spec = validate_workflow_spec({
         "preset": _PRESET.name, "steps": [{"stage": s} for s in steps], **extra,
     })
-    return StoredWorkflow("wf", None, spec, workflow_digest(spec), "", "")
+    return StoredWorkflow("wf", spec, workflow_digest(spec), "", "")
 
 
 @pytest.fixture

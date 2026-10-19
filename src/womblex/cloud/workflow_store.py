@@ -57,7 +57,7 @@ class WorkflowTrigger(StrictModel):
 
 
 class StoredWorkflowSpec(StrictModel):
-    """The validated shape of a workflow's definition — everything but id/owner/timestamps."""
+    """The validated shape of a workflow's definition — everything but id and timestamps."""
 
     preset: str
     config: dict[str, Any] = Field(default_factory=dict)
@@ -159,16 +159,11 @@ def workflow_digest(spec: StoredWorkflowSpec) -> str:
     return "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
 
 
-class WorkflowOwnedError(Exception):
-    """A workflow id is already owned by a different owner."""
-
-
 @dataclass(frozen=True)
 class StoredWorkflow:
     """One workflow row as read."""
 
     id: str
-    owner: str | None
     spec: StoredWorkflowSpec
     digest: str
     created_at: str
@@ -185,7 +180,6 @@ def _ddl() -> Any:
     return sa.Table(
         _TABLE, metadata,
         sa.Column("id", sa.Text, primary_key=True),
-        sa.Column("owner", sa.Text, nullable=True),
         sa.Column("spec_json", sa.Text, nullable=False),
         sa.Column("digest", sa.Text, nullable=False),
         sa.Column("created_at", sa.Text, nullable=False),
@@ -220,7 +214,6 @@ def _spec_from_row(workflow_id: str, spec_json: str) -> StoredWorkflowSpec:
 def _row_to_stored(row: Any) -> StoredWorkflow:
     return StoredWorkflow(
         id=row.id,
-        owner=row.owner,
         spec=_spec_from_row(row.id, row.spec_json),
         digest=row.digest,
         created_at=row.created_at,
@@ -259,14 +252,11 @@ class WorkflowStore:
 
         return conn.execute(sa.select(self._table).where(self._table.c.id == workflow_id)).first()
 
-    def save(self, workflow_id: str, spec: StoredWorkflowSpec, *, owner: str | None = None) -> StoredWorkflow:
+    def save(self, workflow_id: str, spec: StoredWorkflowSpec) -> StoredWorkflow:
         """Create or replace *workflow_id*'s definition.
 
         Raises `ValueError` if *workflow_id* is unsafe or the spec fails `check_spec`
-        (`pydantic.ValidationError` for a bad config overlay), `WorkflowOwnedError`
-        if it already exists under a different owner (mirrors
-        `cloud.jobs.RunBoard`'s owner check on runs) — an unscoped caller
-        (`owner=None`) is not checked and inherits the existing owner.
+        (`pydantic.ValidationError` for a bad config overlay).
         """
         import sqlalchemy.exc
 
@@ -274,26 +264,22 @@ class WorkflowStore:
             raise ValueError(f"unsafe workflow id: {workflow_id!r}")
         check_spec(spec)
         try:
-            self._write(workflow_id, spec, owner)
+            self._write(workflow_id, spec)
         except sqlalchemy.exc.IntegrityError:
-            # A concurrent save created the row first; the retry sees it and checks its owner.
-            self._write(workflow_id, spec, owner)
+            # A concurrent save created the row first; the retry replaces it.
+            self._write(workflow_id, spec)
         stored = self.get(workflow_id)
         assert stored is not None  # just written and committed
         return stored
 
-    def _write(self, workflow_id: str, spec: StoredWorkflowSpec, owner: str | None) -> None:
+    def _write(self, workflow_id: str, spec: StoredWorkflowSpec) -> None:
         import sqlalchemy as sa
 
         now = datetime.now(UTC).isoformat()
         with self._engine.begin() as conn:
             existing = self._get_row(conn, workflow_id)
-            if existing is not None and owner is not None and existing.owner != owner:
-                raise WorkflowOwnedError(f"workflow {workflow_id!r} is owned by another owner")
-            row_owner = owner if owner is not None else (existing.owner if existing else None)
             created_at = existing.created_at if existing is not None else now
             values = {
-                "owner": row_owner,
                 "spec_json": json.dumps(spec.model_dump(mode="json")),
                 "digest": workflow_digest(spec),
                 "created_at": created_at,
@@ -306,35 +292,26 @@ class WorkflowStore:
             else:
                 conn.execute(sa.insert(self._table).values(id=workflow_id, **values))
 
-    def get(self, workflow_id: str, *, owner: str | None = None) -> StoredWorkflow | None:
-        """One workflow by id, or `None` if absent or owned by someone else."""
+    def get(self, workflow_id: str) -> StoredWorkflow | None:
+        """One workflow by id, or `None` if absent."""
         with self._engine.connect() as conn:
             row = self._get_row(conn, workflow_id)
-        if row is None or (owner is not None and row.owner != owner):
-            return None
-        return _row_to_stored(row)
+        return None if row is None else _row_to_stored(row)
 
-    def list(self, *, owner: str | None = None) -> list[StoredWorkflow]:
-        """Every workflow (optionally narrowed to one owner), oldest first."""
+    def list(self) -> list[StoredWorkflow]:
+        """Every workflow, oldest first."""
         import sqlalchemy as sa
 
         stmt = sa.select(self._table).order_by(self._table.c.created_at)
-        if owner is not None:
-            stmt = stmt.where(self._table.c.owner == owner)
         with self._engine.connect() as conn:
             rows = conn.execute(stmt).fetchall()
         return [_row_to_stored(r) for r in rows]
 
-    def delete(self, workflow_id: str, *, owner: str | None = None) -> None:
-        """Delete *workflow_id*. No-op if absent. Raises `WorkflowOwnedError` for another owner's workflow."""
+    def delete(self, workflow_id: str) -> None:
+        """Delete *workflow_id*. No-op if absent."""
         import sqlalchemy as sa
 
         with self._engine.begin() as conn:
-            existing = self._get_row(conn, workflow_id)
-            if existing is None:
-                return
-            if owner is not None and existing.owner != owner:
-                raise WorkflowOwnedError(f"workflow {workflow_id!r} is owned by another owner")
             conn.execute(sa.delete(self._table).where(self._table.c.id == workflow_id))
 
 
@@ -342,7 +319,6 @@ __all__ = [
     "StoredWorkflow",
     "StoredWorkflowSpec",
     "WorkflowInputBinding",
-    "WorkflowOwnedError",
     "WorkflowStep",
     "WorkflowStore",
     "WorkflowTrigger",

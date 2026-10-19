@@ -17,13 +17,13 @@ from womblex.cloud.workflow_store import WorkflowStore, ensure_workflow_schema, 
 spec = validate_workflow_spec({
     "preset": "DEFAULT-Isaacus",                      # a built-in preset, or one saved under --presets-dir
     "config": {"chunking": {"chunk_size": 512}},      # laid over the preset's config, key by key
-    "input_binding": {"ingest_prefix": "alice/inbox", "batch_size": 50},
+    "input_binding": {"ingest_prefix": "inbox", "batch_size": 50},
     "steps": [{"stage": "normalise"}, {"stage": "enrich"}, {"stage": "chunk"}, {"stage": "embed"}],
     "triggers": [{"cron": "0 2 * * *", "timezone": "Australia/Sydney"}],
 })
 ensure_workflow_schema(None)                          # None: the local SQLite file; else a DSN
 with WorkflowStore(None) as store:
-    store.save("nightly", spec, owner="alice")        # owner None is an unscoped (CLI/console) workflow
+    store.save("nightly", spec)                       # a workflow has no owner; its runs are admin-only
 ```
 
 `validate_workflow_spec` refuses what could never run: an unknown stage, a stage
@@ -48,7 +48,7 @@ sidecar its steps write.
 | `womblex plan <id> --shards DIR [--assume-price enrich=…]` | Which steps would run or skip, and the exact tokens `enrich` and `embed` would send. Calls no paid API; a cost appears only for a price you supply. |
 | `womblex run-workflow <id> --shards DIR` | Run the steps over a local shard directory. Refused before the first step, never halted after it: a failed step is recorded and the later steps still run. |
 | `womblex dispatch-workflow <id> --run-id R --store URI [--dry-run]` | Queue the steps for the fleet. Refused before any queue row for anything the local runner refuses, a step the fleet does not dispatch (`layout`, `pii`, `quality`), an order the coordinator would change, or a run already worked under another workflow. |
-| `womblex schedule-workflow <id> [--store URI --ingest URI] [--remove \| --status]` | Make the queue's schedules equal the workflow's triggers. Refuses a workflow its firing would refuse (an input prefix outside the owner's tree, no documents, a failing dry-run dispatch). |
+| `womblex schedule-workflow <id> [--store URI --ingest URI] [--remove \| --status]` | Make the queue's schedules equal the workflow's triggers. Refuses a workflow its firing would refuse (an unsafe input prefix, no documents, a failing dry-run dispatch). |
 
 `run-workflow` runs the steps in the order listed. It refuses an order in which a
 step reads a required input that is missing, produced only by a later step, or

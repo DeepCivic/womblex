@@ -445,7 +445,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - An upload is written to `<ingest>/<client_id>/<upload_id>/` keeping only bare file names; an unusable, repeated, or unsupported name is 400 with nothing written, an over-limit request is 413, and the response names the folder to submit as `input_prefix`.
 - A non-admin caller can submit runs only over its own `<client_id>/` tree (403 otherwise); the run id is minted server-side and unique across concurrent submissions.
 - A submitted `preset` or `config` is validated before any queue row is written (400 on failure) and selects downstream stages only; a config enabling none is an extraction-only run.
-- A run belongs to the client that submitted it: another client's run is 404, an admin sees all runs, and runs dispatched from the CLI or console carry no owner and are visible to admins only. A run never has mixed ownership.
+- A run belongs to the client that submitted it: another client's run is 404, an admin sees all runs, and runs dispatched from the CLI, the console or a workflow carry no owner and are visible to admins only. A run never has mixed ownership.
 - Document text defaults to the masked layer; raw layers (`chunks`, `elements`) require `read_raw`, decided by the layer's contract sensitivity.
 - Run file listings report each file's row count, `contract_version`, and `sensitivity`, so a caller can fetch Parquet directly under the data contract.
 - `ready` reports store and queue reachability and answers 503 when either is down; an unreachable queue, store, or ingest location on any other endpoint is 503, not 500.
@@ -558,16 +558,16 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 
 **Acceptance criteria:**
 
-- A workflow is stored in the database the queue uses, owner-scoped like runs, and checked on save and again on load (steps, cron and timezone, config overlay); its digest is stable over its spec.
+- A workflow is stored in the database the queue uses and checked on save and again on load (steps, cron and timezone, config overlay); its digest is stable over its spec.
 - Its own `config` is laid over its preset's key by key, and the whole is validated as a full config.
 - `validate` runs exactly the checks `run-workflow` runs before its first step, and writes nothing; `plan` counts the requests and tokens its paid steps would send, calling no paid API.
 - Step order is checked before launch: a step whose input is missing, produced later, or rewritten later is refused with a stable code.
 - Once a step has run, a failed step does not stop the steps after it; each later step records the failure it follows, and the exit code is non-zero.
 - Every sidecar a workflow step writes carries the workflow's digest, and the run record lists the workflows observed in its files.
 - `dispatch-workflow` queues the steps for the fleet, refused before any row for anything the local runner refuses and for a step the fleet cannot run, an order the coordinator would change, or a run already worked under another digest; workers run each stage under the workflow's config.
-- `schedule-workflow` makes the queue's schedules equal the workflow's cron triggers; each firing extracts the input prefix into a fresh run and dispatches the workflow, refused before any row when the prefix is outside the owner's tree or holds no document. `schedule-workflow` runs the same checks first (`check_firing`, against `--store` / `--ingest`), so a workflow its firing would refuse is not scheduled.
+- `schedule-workflow` makes the queue's schedules equal the workflow's cron triggers; each firing extracts the input prefix into a fresh run and dispatches the workflow, refused before any row when the prefix holds no document. A workflow has no owner; the runs it starts are admin-only, like CLI runs. `schedule-workflow` runs the same checks first (`check_firing`, against `--store` / `--ingest`), so a workflow its firing would refuse is not scheduled.
 
-**Out of scope:** a command or API that saves a workflow (one is saved through `WorkflowStore` in code), incremental firings (only documents not seen before), backfill of missed firings, and destinations (each kind returns with the merge that delivers it).
+**Out of scope:** a command or API that saves a workflow (one is saved through `WorkflowStore` in code), incremental firings (only documents not seen before), workflow owners, backfill of missed firings, and destinations (each kind returns with the merge that delivers it).
 
 ## Outstanding
 

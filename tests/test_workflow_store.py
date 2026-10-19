@@ -6,7 +6,6 @@ import pytest
 from pydantic import ValidationError
 
 from womblex.cloud.workflow_store import (
-    WorkflowOwnedError,
     WorkflowStore,
     ensure_workflow_schema,
     is_safe_workflow_id,
@@ -142,41 +141,20 @@ def test_save_rejects_unsafe_id(store) -> None:
         store.save("../escape", spec)
 
 
-def test_save_update_same_owner_replaces(store) -> None:
+def test_save_update_replaces(store) -> None:
     spec_a = validate_workflow_spec(_MINIMAL)
     spec_b = validate_workflow_spec({**_MINIMAL, "steps": [{"stage": "chunk"}]})
-    store.save("wf-1", spec_a, owner="alice")
+    store.save("wf-1", spec_a)
     first = store.get("wf-1")
-    updated = store.save("wf-1", spec_b, owner="alice")
+    updated = store.save("wf-1", spec_b)
     assert updated.created_at == first.created_at
     assert updated.digest == workflow_digest(spec_b)
 
 
-def test_owner_conflict_on_save_and_delete(store) -> None:
-    spec = validate_workflow_spec(_MINIMAL)
-    store.save("wf-1", spec, owner="alice")
-    with pytest.raises(WorkflowOwnedError):
-        store.save("wf-1", spec, owner="bob")
-    with pytest.raises(WorkflowOwnedError):
-        store.delete("wf-1", owner="bob")
-    store.save("wf-1", spec, owner=None)  # unscoped caller is not checked
-
-
-def test_save_losing_an_insert_race_checks_the_winners_owner(store, monkeypatch) -> None:
-    spec = validate_workflow_spec(_MINIMAL)
-    store.save("wf-1", spec, owner="alice")
+def test_save_losing_an_insert_race_replaces_the_winner(store, monkeypatch) -> None:
+    store.save("wf-1", validate_workflow_spec(_MINIMAL))
     real_get_row = store._get_row
-    calls = iter([None])  # the first read misses alice's row, as a racing save would
+    calls = iter([None])  # the first read misses the row, as a racing save would
     monkeypatch.setattr(store, "_get_row", lambda conn, wid: next(calls, real_get_row(conn, wid)))
-    with pytest.raises(WorkflowOwnedError):
-        store.save("wf-1", spec, owner="bob")
-
-
-def test_get_and_list_scoped_to_owner(store) -> None:
-    spec = validate_workflow_spec(_MINIMAL)
-    store.save("wf-1", spec, owner="alice")
-    store.save("wf-2", spec, owner="bob")
-    assert store.get("wf-1", owner="bob") is None
-    assert store.get("wf-1", owner="alice") is not None
-    assert [w.id for w in store.list(owner="alice")] == ["wf-1"]
-    assert {w.id for w in store.list()} == {"wf-1", "wf-2"}
+    spec = validate_workflow_spec({**_MINIMAL, "steps": [{"stage": "chunk"}]})
+    assert store.save("wf-1", spec).digest == workflow_digest(spec)

@@ -58,7 +58,6 @@ def dispatch_workflow(
     store_uri: str | None,
     dsn: str | None,
     output_prefix: str | None = None,
-    owner: str | None = None,
     max_attempts: int = 3,
     dry_run: bool = False,
     store: RemoteStore | None = None,
@@ -135,7 +134,7 @@ def dispatch_workflow(
                 steps=tuple((s, ", ".join(d)) for s, d in sorted(clash.items())),
             )
         newly = 0 if dry_run or board is None else board.enqueue_stages(
-            run_id, list(stages), shard_prefix, max_attempts=max_attempts, owner=owner,
+            run_id, list(stages), shard_prefix, max_attempts=max_attempts,
             workflow={"id": stored.id, "digest": stored.digest, "preset": stored.spec.preset,
                       "config": overlay},
         )
@@ -151,7 +150,7 @@ def _firing_kwargs(
     store: RemoteStore, dsn: str | None,
 ) -> dict[str, Any]:
     return {"resolve_preset": resolve_preset, "run_id": run_id, "store_uri": None, "store": store,
-            "dsn": dsn, "owner": stored.owner, "acted_on": ("triggers", "input_binding.ingest_prefix")}
+            "dsn": dsn, "acted_on": ("triggers", "input_binding.ingest_prefix")}
 
 
 def check_firing(
@@ -160,18 +159,18 @@ def check_firing(
 ) -> list[str]:
     """Every check a firing makes before it writes a row; the keys it would extract.
 
-    A dry-run dispatch, the owner's prefix, and at least one document. Raises
+    A dry-run dispatch, a safe input prefix, and at least one document. Raises
     `WorkflowRefusedError`; a firing and `schedule-workflow` both call it, so a workflow is
     refused at scheduling for exactly what its firing would refuse.
     """
-    from womblex.cloud.dispatch import PrefixNotOwned, owned_prefix, supported_keys
+    from womblex.cli._shared import normalise_prefix
+    from womblex.cloud.dispatch import supported_keys
 
     dispatch_workflow(stored, dry_run=True, **_firing_kwargs(stored, run_id, resolve_preset, store, dsn))
     try:
-        prefix = owned_prefix(stored.owner, stored.spec.input_binding.ingest_prefix)
+        prefix = normalise_prefix(stored.spec.input_binding.ingest_prefix)
     except ValueError as e:
-        code = RefusalCode.PREFIX_NOT_OWNED if isinstance(e, PrefixNotOwned) else RefusalCode.SPEC_INVALID
-        raise WorkflowRefusedError(f"workflow {stored.id!r}: {e}", code=code) from e
+        raise WorkflowRefusedError(f"workflow {stored.id!r}: {e}", code=RefusalCode.SPEC_INVALID) from e
     location, keys = supported_keys(ingest, ingest_root, prefix)
     if not keys:
         raise WorkflowRefusedError(f"workflow {stored.id!r}: no supported documents under {location}",
@@ -208,7 +207,7 @@ def fire_workflow(
         if cancelled := board.cancelled_batches(run_id):  # a replayed firing: they would never run
             raise WorkflowRefusedError(f"run {run_id!r} has cancelled batches ({', '.join(cancelled)}); "
                                        "use a new run id", code=RefusalCode.BATCHES_CANCELLED)
-        board.enqueue(run_id, specs, owner=stored.owner)
+        board.enqueue(run_id, specs)
     try:
         sent = dispatch_workflow(stored, **_firing_kwargs(stored, run_id, resolve_preset, store, dsn))
     except Exception:
