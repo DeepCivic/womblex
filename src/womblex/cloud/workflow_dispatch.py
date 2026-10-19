@@ -7,10 +7,9 @@ the spec, preset and config (`workflow_runner`), the step order against the stor
 listing (`workflow_order.check_dispatch_order`), and three things only a fleet has to
 say: the stage is not dispatchable, the list is not in pipeline order (the coordinator
 sorts, so another order would not be the order the workflow declares), or the run
-already ran a stage under a different workflow. The workflow's resolved overlay,
-digest and conditions travel with the dispatch (`enqueue_stages(workflow=…)`), so workers
-run the stages under that recipe and stamp its digest, and the coordinator labels the
-conditions once extraction settles.
+already ran a stage under a different workflow. The workflow's resolved overlay and
+digest travel with the dispatch (`enqueue_stages(workflow=…)`), so workers run the
+stages under that recipe and stamp its digest.
 """
 
 from __future__ import annotations
@@ -138,7 +137,7 @@ def dispatch_workflow(
         newly = 0 if dry_run or board is None else board.enqueue_stages(
             run_id, list(stages), shard_prefix, max_attempts=max_attempts, owner=owner,
             workflow={"id": stored.id, "digest": stored.digest, "preset": stored.spec.preset,
-                      "config": overlay, "conditions": [c.model_dump() for c in stored.spec.conditions]},
+                      "config": overlay},
         )
     if left := [f for f in not_acted_on(stored) if f not in acted_on]:
         logger.warning("workflow %s: %s stored but not acted on by dispatch", stored.id, ", ".join(left))
@@ -195,8 +194,7 @@ def fire_workflow(
     The launch, so every check runs first (`check_firing`, then that the run has no cancelled
     batches a re-enqueue would attach to) and a firing that cannot complete writes no row. A
     dispatch that fails after the batches are queued leaves them running: the run reads
-    `orphaned` on the board until its stages are dispatched. The coordinator labels the
-    conditions once extraction settles.
+    `orphaned` on the board until its stages are dispatched.
     """
     from womblex.cloud.dispatch import batch_specs
     from womblex.cloud.jobs import RunBoard

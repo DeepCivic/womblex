@@ -40,7 +40,7 @@ sidecar its steps write.
 | `config` | Overlay on the preset's config: mappings merge, anything else replaces, `null` drops a key to its default. |
 | `input_binding` | `ingest_prefix` (the documents a firing extracts) and `batch_size`. Extraction is not a step. |
 | `steps` | Downstream stages, each at most once, run in the order listed (`dispatch-workflow` needs pipeline order). |
-| `conditions` | `column op value` over manifest columns; they label each document `holds` / `fails` / `unevaluable` and never refuse, halt or narrow a run. |
+| `conditions` | `column op value` over manifest columns; they label each document `holds` / `fails` / `unevaluable` and never refuse, halt or narrow a run. Labelled by `run-workflow` only; the fleet does not label. |
 | `destinations` | Stored, not acted on yet. |
 | `triggers` | Cron expressions scheduled by `schedule-workflow`. |
 

@@ -156,59 +156,6 @@ def test_a_failed_stage_does_not_stop_the_stages_after_it(fleet, monkeypatch):
     assert RemoteStore.from_uri(str(store)).exists("runs/r1/documents/batch-0001.chunks.parquet")
 
 
-def _conditioned(fleet, conditions) -> tuple[RunBoard, dict]:
-    """Run r1 with one batch and a dispatched workflow carrying *conditions* through `normalise`."""
-    _, ingest, _ = fleet
-    wf = {"id": "wf", "digest": "sha256:feed", "preset": "recipe", "config": {}, "conditions": conditions}
-    with RunBoard(None) as board:
-        board.enqueue("r1", [batch(ingest)])
-        board.enqueue_stages("r1", ["normalise"], "runs/r1/documents", workflow=wf)
-        work(fleet, idle_timeout=2)
-        return board, {r.stage or r.kind: r for r in board.list_jobs("r1")}
-
-
-def test_the_coordinator_labels_conditions_once_extraction_settles_and_runs_on(fleet):
-    import json
-
-    import pyarrow.parquet as pq
-
-    from womblex.store.conditions_output import OUTCOMES_KEY
-
-    store, _, _ = fleet
-    _, jobs = _conditioned(fleet, [{"column": "status", "op": "eq", "value": "no-such-status"}])
-    assert jobs["downstream"].status == "done" and jobs["normalise"].status == "done"
-    key = "runs/r1/documents/batch-0001.conditions.parquet"
-    footer = pq.read_schema(store / key).metadata
-    outcomes = json.loads(footer[OUTCOMES_KEY.encode()])
-    assert outcomes["fails"] >= 1 and outcomes["holds"] == 0  # labelled, and the stage still ran
-    assert footer[b"womblex.workflow_digest"] == b"sha256:feed"
-    with RunBoard(None) as board:
-        assert key in board.file_checksums("r1").checksums
-
-
-def test_a_labelling_failure_in_the_coordinator_is_logged_and_the_stages_run(fleet, monkeypatch, caplog):
-    from womblex.cloud import workflow_conditions
-
-    def boom(*_):
-        raise OSError("store gone")
-
-    monkeypatch.setattr(workflow_conditions, "label_store", boom)
-    _, jobs = _conditioned(fleet, [{"column": "status", "op": "eq", "value": "ok"}])
-    assert jobs["downstream"].status == "done" and jobs["normalise"].status == "done"
-    assert "conditions not labelled" in caplog.text
-
-
-def test_a_later_coordinators_condition_labels_carry_the_newest_digest():
-    key = "k/b1.conditions.parquet"
-    rows = [
-        _Row("r1:downstream:new", "SUCCESS", [], kind="downstream", created_at=2),
-        _Row("r1:downstream:old", "SUCCESS", [], kind="downstream", created_at=1),
-    ]
-    steps = {wid: [{"function_id": 1, "output": {key: digest}, "error": None}]
-             for wid, digest in (("r1:downstream:new", "bb"), ("r1:downstream:old", "aa"))}
-    assert _board(rows, steps).file_checksums("r1").checksums == {key: "bb"}
-
-
 def test_an_engine_error_is_not_carried_as_a_units_failure():
     from dbos import error as dbos_error
 

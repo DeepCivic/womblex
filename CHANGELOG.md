@@ -8,6 +8,9 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 ## [Unreleased]
 
+### Removed
+- **The fleet no longer labels workflow conditions — trust plan, Phase R item R.1a (D3).** `dispatch-workflow` stops carrying a workflow's conditions, the coordinator has no labelling step, `workflow_conditions.label_store` is deleted and `RunBoard.file_checksums` reads no coordinator output. The local runner still labels until R.1b removes conditions.
+
 ### Added
 - **Stocktake S-2 closes Phase 2 of the trust plan.** Phase 2's section leaves `docs/plan-trust-and-recipes.md`; the limits the stored-workflows phase recorded are each retired or recorded as kept boundaries in `decisions-operations.md`. No code.
 - **A doc-currency test — trust plan, Phase 2 item 2.3.7 (D-2.5).** `tests/test_doc_currency.py` fails when the README command table and the CLI parser's subcommands differ, when CLAUDE.md's module table names a path that is not in `src/womblex`, or when a new module has no row. It found no drift in the tables as they stand.

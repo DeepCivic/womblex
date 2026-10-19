@@ -6,8 +6,7 @@ identity columns). Each document is labelled against each condition — `holds`,
 `unevaluable` where its manifest cell is null — in a `*.conditions.parquet` beside its
 batch, and the counts are logged. That is the whole semantics:
 
-- the local runner labels before its first step, the fleet's coordinator once the run's
-  extraction settles and before its first stage;
+- the local runner labels before its first step; the fleet does not label;
 - a condition never refuses, halts or narrows a run: a document that fails one is labelled
   and the run goes on over every document (one document never decides a run);
 - it never selects documents or skips a step, so no condition can disable `pii` or any other
@@ -24,19 +23,17 @@ from __future__ import annotations
 import json
 import logging
 import operator
-import tempfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 
-from womblex.store.conditions_output import CONDITIONS_SUFFIX, FAILS, HOLDS, UNEVALUABLE, write_conditions
+from womblex.store.conditions_output import FAILS, HOLDS, UNEVALUABLE, write_conditions
 from womblex.store.output import MANIFEST_SCHEMA, read_manifest
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from womblex.cloud.workflow_store import WorkflowCondition
-    from womblex.store.remote import RemoteStore
 
 logger = logging.getLogger(__name__)
 
@@ -129,26 +126,10 @@ def label_shard_dir(workflow_id: str, conditions: Sequence[WorkflowCondition], s
     return rows
 
 
-def label_store(
-    workflow_id: str, conditions: Sequence[WorkflowCondition], store: RemoteStore, shard_prefix: str,
-) -> dict[str, str]:
-    """`label_shard_dir` over a run in an object store: stage in its manifests, label, publish the labels.
-
-    Returns each published key with its SHA-256.
-    """
-    with tempfile.TemporaryDirectory(prefix="womblex-cond-") as tmp:
-        scratch = Path(tmp)
-        for key in store.list_files(shard_prefix, f"*{_MANIFEST_SUFFIX}"):
-            store.download_file(key, scratch / key.rsplit("/", 1)[-1])
-        label_shard_dir(workflow_id, conditions, scratch)
-        return store.upload_glob(scratch, f"*{CONDITIONS_SUFFIX}", shard_prefix)
-
-
 __all__ = [
     "CONDITION_COLUMNS",
     "check_conditions_static",
     "label_manifest",
     "label_shard_dir",
-    "label_store",
     "log_outcomes",
 ]

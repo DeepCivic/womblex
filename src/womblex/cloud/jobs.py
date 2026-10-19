@@ -481,12 +481,6 @@ class RunBoard:
                 # A step that stopped part-way may have published without returning.
                 undigested.append(s.workflow_id)
             checksums.update(digests)
-        # A coordinator publishes only its condition labels, from a step that never fails.
-        for s in every:
-            if _attr(s, "kind") == dbos_app.KIND_DOWNSTREAM:
-                for step in self._client.list_workflow_steps(s.workflow_id):
-                    if step["error"] is None and _is_digest_map(output := step["output"]):
-                        checksums.update(output)
         return FileChecksums(checksums, sorted(undigested))
 
     def stale_jobs(
