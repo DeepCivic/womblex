@@ -8,6 +8,9 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 ## [Unreleased]
 
+### Added
+- **Stocktake S-R closes Phase R of the trust plan.** Docs brought in line with the repaired workflows (workflow files, no owner, no conditions or destinations, config carried by every fleet run); two stale docstrings corrected. The plan file itself is unchanged. No other code.
+
 ### Changed
 - **`plan` counts every paid call — trust plan, Phase R item R.10 (D12).** AI chunking's chunk-time Enricher calls are counted (`chunk_stage.plan_ai_chunking`), embed tokens use the embedding provider's own counter (`EmbeddingLimits.token_counter`), and each step is marked paid or free (local). `--assume-price chunk=…` prices AI chunking. Under AI chunking, table markdown now chunks in token mode as designed (`chunk_batch`), so no table is sent to the Enricher.
 - **Runs record their whole workflow — trust plan, Phase R item R.9 (D11).** Every file a workflow step writes carries `womblex.workflow` (the workflow's name and full spec, as JSON) beside its digest, and the run record lists each workflow's `name` and `spec`; the record's version is 7.

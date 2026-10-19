@@ -1,10 +1,12 @@
-"""The stored workflow object: schema, validation, and its table.
+"""The workflow object: schema, validation, and the table of copies `schedule-workflow` stores.
 
-A *workflow* is a named, persisted recipe kept in the database DBOS's own tables
-live in (`dbos_app.system_database_url`), so a local run needs no second database.
+A *workflow* is a named recipe whose master copy is a file (`workflow_file`); the copy a
+schedule's firings read is kept in the database DBOS's own tables live in
+(`dbos_app.system_database_url`), so a local run needs no second database.
 
-Schema and storage only (`docs/decisions-operations.md`, Phase 2 merge 1):
-`triggers` are scheduled by `workflow_schedules`, and nothing here runs a workflow. The table is created if absent; there is no versioned migration yet.
+Schema and storage only (`docs/decisions-operations.md`, "A workflow is a file"): `triggers`
+are scheduled by `workflow_schedules`, and nothing here runs a workflow. The table is created
+if absent; there is no versioned migration yet.
 """
 
 from __future__ import annotations

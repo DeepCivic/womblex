@@ -58,7 +58,7 @@ that submitted them.
 
 - A run owned by another client answers 404, as an unknown run does.
 - `admin` sees every run. An admin's submitted run carries no owner.
-- Runs dispatched from the CLI or console carry no owner, so through the API
+- Runs dispatched from the CLI, the console or a workflow carry no owner, so through the API
   they are visible to `admin` only.
 - A run never has mixed ownership: the queue refuses an enqueue that names a
   different owner (`RunOwnedError`).

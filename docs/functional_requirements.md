@@ -505,7 +505,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - With no plugin configured, `content_digest` is unchanged on every synthetic fixture.
 - The model-plugin guide documents each slot's interface and how a package registers a model, with a minimal example.
 
-**Out of scope:** model provenance (26), `/v1` submission controls (a submitted config only selects stages; workers run under the operator's config), container-image packaging of plugins, and slots that need a Parquet schema change, each needing its own requirement (25 and 26, and the rest): AI chunking with a non-Isaacus model, graph-driven PII detection, link-stage candidates, `graph_refresh`, the enrichment token-budget tokeniser, per-page or per-element OCR engine recording.
+**Out of scope:** model provenance (26), container-image packaging of plugins, and slots that need a Parquet schema change, each needing its own requirement (25 and 26, and the rest): AI chunking with a non-Isaacus model, graph-driven PII detection, link-stage candidates, `graph_refresh`, the enrichment token-budget tokeniser, per-page or per-element OCR engine recording.
 
 ## 25. Pre-Run Model Check
 

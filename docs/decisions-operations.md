@@ -1,6 +1,6 @@
 # Operating decisions
 
-The durable "why" behind operating Womblex: distributed execution, stored workflows, source resolution, deployment and the service surface.
+The durable "why" behind operating Womblex: distributed execution, workflows, source resolution, deployment and the service surface.
 
 ### Distributed execution — stage-in/stage-out, not a filesystem abstraction
 Cloud scale-out (2026-06) reuses the existing batch shape rather than rewriting
@@ -87,7 +87,7 @@ engines".
 - *Rejected:* **extending the preset** with steps. One schema and no new storage, but it mixes how a stage behaves with what runs, and leaves nothing for a standing trigger to act on.
 - *Rejected:* **a workflow kept only in the database.** A schedule needs a copy its firings can read, but the operator edits and reviews a file; keeping both, with the file the master, gives each its job.
 
-### A stored workflow runs locally: validate on save and load, refuse before work, record after
+### A workflow runs locally: validate on save and load, refuse before work, record after
 Phase 2 merge 2 (`cloud/workflow_runner.py`). Three calls the merge-1 review left open.
 
 - **Validation sits at both ends.** `WorkflowStore.save` runs `check_spec` so a spec built without `validate_workflow_spec` cannot be stored unchecked, and the runner runs it again on load, because a row can outlive the rule it passed (a stage renamed or removed). The cost is a few dictionary checks. An unknown preset name still passes the save-time check: it may be an operator-saved preset the store cannot read, so the runner resolves it and refuses there.
@@ -118,7 +118,7 @@ Phase 2 merge 5 (`cloud/workflow_plan.py`).
 Phase 2 merge 6. `sidecar_footer` is the one place every stage's writer already takes its stamp, so the digest rides it through `workflow_context` rather than a parameter on a dozen writers. A contextvar, not a global, so two workflows in one worker process cannot stamp each other's files. It is written even where the shard is unstamped (it is a fact about the write; the run id is not claimed). The run record lists workflows *observed* in files, like stages, never those merely stored.
 
 ### A dispatched workflow's config travels as a workflow argument
-Phase 2 merge 7a. A worker's config is process state, so a stored workflow dispatched to the fleet would otherwise run under whatever config each worker was started with. The resolved overlay (`combine_config(preset, spec.config)`) goes to the coordinator and each stage as a plain-JSON argument, and the worker builds the config with the same `config_from_overlay` the local runner uses (recipe sections from the overlay, schema defaults elsewhere, the worker's own `paths`), so local and fleet stages run under identical settings. Not the worker's config merged under the overlay: that would make a stage's behaviour depend on which worker claimed it. The workflow digest is part of the coordinator id, and a workflow's stage ids are scoped by it (`dbos_app.stage_scope`), so a *changed* workflow dispatched over a run runs its own stages rather than returning another's recorded result.
+Phase 2 merge 7a. A worker's config is process state, so a workflow dispatched to the fleet would otherwise run under whatever config each worker was started with. The resolved overlay (`combine_config(preset, spec.config)`) goes to the coordinator and each stage as a plain-JSON argument, and the worker builds the config with the same `config_from_overlay` the local runner uses (recipe sections from the overlay, schema defaults elsewhere, the worker's own `paths`), so local and fleet stages run under identical settings. Not the worker's config merged under the overlay: that would make a stage's behaviour depend on which worker claimed it. The workflow digest is part of the coordinator id, and a workflow's stage ids are scoped by it (`dbos_app.stage_scope`), so a *changed* workflow dispatched over a run runs its own stages rather than returning another's recorded result.
 
 ### Dispatching a workflow refuses what the coordinator would quietly change
 Phase 2 merge 7b. Two fleet-specific refusals, because the coordinator is not the local runner: it sorts stages by `PIPELINE_ORDER` (so a workflow listed in another order would run in an order it did not declare: `order_not_pipeline`), and it dispatches only `DOWNSTREAM_STAGES` (so `pii`, `quality`, `layout` are `stage_not_dispatchable`; `pii` is never on the queue). The third, `run_conflict` (a run already worked under another workflow digest), is gone (Phase R, D2): stage ids are scoped by firing or digest, so nothing returns another workflow's result. Re-dispatching the same workflow is the same coordinator and attaches. `--dry-run` runs every check and writes nothing: no row, no schema, and no local database file where none exists.
