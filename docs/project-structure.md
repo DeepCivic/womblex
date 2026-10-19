@@ -133,7 +133,6 @@ womblex/
 │   │   ├── enrichment_doc.py     # *.enrichment_doc.parquet — raw ILGS Document, for AI-chunking reuse
 │   │   ├── evidence.py      # The shared evidence-reference columns, anchor levels, `evidence_check` labels, `evidence()` builder, legacy back-fill
 │   │   ├── pii_output.py    # pii_spans + clean_text parquet schemas + IO
-│   │   ├── conditions_output.py # *.conditions.parquet — a workflow's per-document condition labels
 │   │   ├── normalise_output.py   # *.normalised_text.parquet schema + IO
 │   │   ├── spellfix_output.py    # *.spellfix_text.parquet + *.spellfix_corrections.parquet schemas + IO
 │   │   ├── quality_output.py     # *.chunk_quality.parquet schema + IO
@@ -169,7 +168,7 @@ womblex/
 │   │   ├── stage_runner.py     # Execute a contract against an object store
 │   │   ├── workflow_store.py   # Stored workflow object (preset ref, input binding, steps, conditions, destinations, triggers) — schema, validation, its table
 │   │   ├── workflow_order.py   # Up-front step-order check — inputs on disk or produced earlier, stable refusal codes
-│   │   ├── workflow_conditions.py # Workflow conditions — manifest-column labels per document, never a gate
+│   │   ├── workflow_conditions.py # Workflow conditions — checked, not acted on (being removed, D3)
 │   │   ├── workflow_schedules.py # Standing triggers — a workflow's cron triggers as DBOS schedules (sync/list/remove)
 │   │   ├── workflow_dispatch.py # `dispatch-workflow` — a stored workflow to the fleet; refuse before any row
 │   │   ├── workflow_plan.py    # `womblex plan` — steps to run or skip and exact enrich/embed token counts, offline

@@ -7,9 +7,8 @@ that cannot complete spends nothing. Once a step has run nothing halts: a failed
 is recorded and logged, later steps still run labelled with the failures they follow,
 and the exit code is the account. Steps run in list order, and the order is checked first
 (`workflow_order`): an input no earlier step produces, or that a later step will rewrite,
-refuses the workflow with stable codes. Conditions label each document before the first step
-(`workflow_conditions`); they never refuse. Destinations and triggers are not acted on here, and
-the log says so.
+refuses the workflow with stable codes. Conditions, destinations and triggers are not acted
+on here, and the log says so.
 """
 
 from __future__ import annotations
@@ -207,6 +206,7 @@ def not_acted_on(stored: StoredWorkflow) -> tuple[str, ...]:
     spec = stored.spec
     return tuple(
         name for name, present in (
+            ("conditions", spec.conditions),
             ("destinations", spec.destinations),
             ("triggers", spec.triggers),
             ("input_binding.ingest_prefix", spec.input_binding.ingest_prefix),
@@ -317,8 +317,6 @@ def run_workflow_local(
     logger.info("workflow %s (%s): %s over %s", stored.id, stored.digest, " -> ".join(s.stage for s in stored.spec.steps), shard_dir)
 
     with workflow_context(stored.digest):
-        if stored.spec.conditions:
-            _label_conditions(stored, shard_dir)
         for step, ctx in zip(stored.spec.steps, contexts, strict=True):
             ctx.source_root, ctx.force = source_root, force
             earlier = tuple(s.stage for s in result.steps if s.status == "failed")
@@ -334,16 +332,6 @@ def run_workflow_local(
                 error, status = f"{type(e).__name__}: {e}", "failed"
             result.steps.append(StepOutcome(step.stage, status, summary, error, earlier))
     return result
-
-
-def _label_conditions(stored: StoredWorkflow, shard_dir: Path) -> None:
-    """Label the documents against the conditions; launched, so a failure here is logged, never raised."""
-    from womblex.cloud.workflow_conditions import label_shard_dir
-
-    try:
-        label_shard_dir(stored.id, stored.spec.conditions, shard_dir)
-    except Exception:
-        logger.exception("workflow %s: conditions not labelled; the steps run regardless", stored.id)
 
 
 __all__ = [

@@ -1,41 +1,23 @@
-"""A workflow's conditions: labels over the run's manifest, never a gate.
+"""A workflow's conditions: checked when saved and loaded, and not acted on.
 
-A condition is `column op value` over a **manifest column** (`MANIFEST_SCHEMA`: the
-document-level extraction profile Womblex persists — method, counts, status — and the
-identity columns). Each document is labelled against each condition — `holds`, `fails`, or
-`unevaluable` where its manifest cell is null — in a `*.conditions.parquet` beside its
-batch, and the counts are logged. That is the whole semantics:
-
-- the local runner labels before its first step; the fleet does not label;
-- a condition never refuses, halts or narrows a run: a document that fails one is labelled
-  and the run goes on over every document (one document never decides a run);
-- it never selects documents or skips a step, so no condition can disable `pii` or any other
-  step (a condition has no step field to name one);
-- a condition that could never be evaluated — a column outside the manifest, a value of the
-  wrong type, an order operator on text — is refused when the workflow is saved and again
-  when it is loaded, before launch, which is the only time anything refuses.
-
-The per-page profile (`PageProfile`) is not persisted, so it is not a condition column.
+A condition is `column op value` over a manifest column. Conditions no longer label anything
+(Phase R, D3): the manifest holds every column they labelled, so a reader filters it instead.
+They are still checked, so a stored workflow that names one loads or refuses as before, and
+the runner and dispatch warn that they are not acted on. Phase R item R.1c removes them.
 """
 
 from __future__ import annotations
 
-import json
-import logging
 import operator
 from collections.abc import Callable, Sequence
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 
-from womblex.store.conditions_output import FAILS, HOLDS, UNEVALUABLE, write_conditions
-from womblex.store.output import MANIFEST_SCHEMA, read_manifest
+from womblex.store.output import MANIFEST_SCHEMA
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from womblex.cloud.workflow_store import WorkflowCondition
-
-logger = logging.getLogger(__name__)
 
 #: column -> "number" | "text", from the manifest schema itself.
 CONDITION_COLUMNS: dict[str, str] = {
@@ -46,7 +28,6 @@ CONDITION_COLUMNS: dict[str, str] = {
 _ORDER: dict[str, Callable[[Any, Any], bool]] = {
     "gt": operator.gt, "gte": operator.ge, "lt": operator.lt, "lte": operator.le,
 }
-_MANIFEST_SUFFIX = "._manifest.parquet"
 
 
 def check_conditions_static(conditions: Sequence[WorkflowCondition]) -> None:
@@ -68,68 +49,4 @@ def check_conditions_static(conditions: Sequence[WorkflowCondition]) -> None:
             raise ValueError(f"condition {c.column} {c.op}: order operators need a number column")
 
 
-def _outcome(c: WorkflowCondition, cell: Any) -> str:
-    if cell is None:
-        return UNEVALUABLE
-    if c.op in ("in", "not_in"):
-        held = (cell in c.value) == (c.op == "in")
-    elif c.op in ("eq", "ne"):
-        held = (cell == c.value) == (c.op == "eq")
-    else:
-        held = _ORDER[c.op](cell, c.value)
-    return HOLDS if held else FAILS
-
-
-def label_manifest(conditions: Sequence[WorkflowCondition], manifest: pa.Table) -> list[dict]:
-    """One `*.conditions.parquet` row per document and condition."""
-    hashes = manifest.column("source_hash").to_pylist()
-    docs = manifest.column("doc_id").to_pylist()
-    rows: list[dict] = []
-    for i, c in enumerate(conditions):
-        for h, d, cell in zip(hashes, docs, manifest.column(c.column).to_pylist(), strict=True):
-            rows.append({
-                "source_hash": h, "doc_id": d, "condition_index": i, "column": c.column, "op": c.op,
-                "value": json.dumps(c.value), "cell": None if cell is None else json.dumps(cell),
-                "outcome": _outcome(c, cell),
-            })
-    return rows
-
-
-def log_outcomes(workflow_id: str, conditions: Sequence[WorkflowCondition], rows: list[dict]) -> None:
-    """Warn, per condition, how many documents fail it or cannot be evaluated (a few named)."""
-    if not rows:
-        logger.warning("workflow %s: no manifest rows, so no document was labelled", workflow_id)
-        return
-    for i, c in enumerate(conditions):
-        mine = [r for r in rows if r["condition_index"] == i]
-        bad = {o: [r["doc_id"] for r in mine if r["outcome"] == o] for o in (FAILS, UNEVALUABLE)}
-        if not any(bad.values()):
-            logger.info("workflow %s: %s %s %r holds for all %d document(s)",
-                        workflow_id, c.column, c.op, c.value, len(mine))
-            continue
-        logger.warning(
-            "workflow %s: %s %s %r — %d of %d document(s) fail it, %d unevaluable (e.g. %s); "
-            "labelled, the run goes on", workflow_id, c.column, c.op, c.value, len(bad[FAILS]),
-            len(mine), len(bad[UNEVALUABLE]), ", ".join(str(d) for d in (bad[FAILS] + bad[UNEVALUABLE])[:3]),
-        )
-
-
-def label_shard_dir(workflow_id: str, conditions: Sequence[WorkflowCondition], shard_dir: Path) -> list[dict]:
-    """Label every batch's documents, writing `batch-NNNN.conditions.parquet` beside each manifest."""
-    rows: list[dict] = []
-    for manifest in sorted(shard_dir.glob(f"*{_MANIFEST_SUFFIX}")):
-        base = shard_dir / f"{manifest.name.removesuffix(_MANIFEST_SUFFIX)}.parquet"
-        batch = label_manifest(conditions, read_manifest(base))
-        write_conditions(batch, base, workflow_id)
-        rows.extend(batch)
-    log_outcomes(workflow_id, conditions, rows)
-    return rows
-
-
-__all__ = [
-    "CONDITION_COLUMNS",
-    "check_conditions_static",
-    "label_manifest",
-    "label_shard_dir",
-    "log_outcomes",
-]
+__all__ = ["CONDITION_COLUMNS", "check_conditions_static"]

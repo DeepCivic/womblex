@@ -165,7 +165,7 @@ def test_warns_about_stored_but_unacted_parts(shards: Path, caplog: pytest.LogCa
     )
     with caplog.at_level(logging.WARNING):
         result = run_workflow_local(stored, shards, resolve_preset=_resolve)
-    assert result.not_acted_on == ("destinations", "triggers")
+    assert result.not_acted_on == ("conditions", "destinations", "triggers")
     assert "stored but not acted on" in caplog.text
     assert result.exit_code == 0
 
