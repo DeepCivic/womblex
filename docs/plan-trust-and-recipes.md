@@ -9,8 +9,6 @@ What Womblex does once this plan is done. Each requirement is given whole, as it
 
 ### 2. Scale-Out and Environment-Agnostic Execution
 
-**Paid:** Launches workers that run every paid stage the run's config enables (Requirements 10, 12, 29, the `embed` stage, `mistral-ocr`). An Isaacus SageMaker deployment is billed by AWS while its endpoint runs, called or not.
-
 **As** a user,
 **I want** to scale the pipeline to a cluster and move stages between local and cloud environments,
 **so that** I gain throughput without rewriting jobs or re-extracting documents.
@@ -26,121 +24,32 @@ What Womblex does once this plan is done. Each requirement is given whole, as it
 - Distributed run shards can be synced locally and consumed unchanged by local per-stage commands.
 - A stage can execute in place over object storage under the same contract as local execution.
 - Standard local and cloud storage URIs resolve natively.
-- Object-storage writes are all-or-none per unit: every declared output exists before any is published, and a unit left partial by a failed upload never reads as complete, so the next run redoes and overwrites it. A failed unit is recorded and the rest of the run continues. A stage that rewrites outputs in place commits atomically, so an interrupted publish leaves the previous outputs intact.
+- Object-storage writes are all-or-none per unit: every declared output exists before any is published, and a unit left partial by a failed upload never reads as complete, so the next run redoes and overwrites it. 
+- A failed unit is recorded and the rest of the run continues. 
+- A stage that rewrites outputs in place commits atomically, so an interrupted publish leaves the previous outputs intact.
 - A distributed run writes `<run>/manifest.parquet` when its stages finish. `womblex finalize` still writes it on demand, with the same result.
 
-### 3. Ingest-First Data Flow and Operation Composition
-
-**Paid:** Composes stages that include paid ones: `enrich`, `embed`, AI chunking in `chunk`, and `mistral-ocr` in extraction. None runs unless configured.
+### 12. Knowledge Graph and External Enrichment
 
 **As** a user,
-**I want** a clear two-phase execution model (ingest first, then optional composed operations),
-**so that** workflows are predictable and invalid stage configurations fail early.
+**I want** entities and relationships extracted via external APIs and joined into one document graph,
+**so that** mentions map back to their source chunks regardless of run order.
 
-**Given** raw input files and a chosen set of downstream operations
-**When** the pipeline is executed
-**Then** ingest runs first to produce base extraction results, followed by caller-composed downstream operations in any order the stage-dependency DAG permits.
+**Given** a chunked extraction result and configured enrichment credentials
+**When** the operator runs enrichment and graph generation
+**Then** entities are extracted, retrying on API limits, and a graph links entities to chunks without rewriting earlier stages' files.
 
 **Acceptance criteria:**
 
-- Ingest is format-dependent and strictly precedes any transform operation.
-- Operations are independent functions that callers compose directly based on business need.
-- Stage ordering is a **partial order** (a dependency DAG), not a single fixed sequence: a stage is a valid next step whenever the inputs it requires already exist. The default dispatch order is one valid topological sort of that DAG, not the sole valid execution order.
-- Each operation enforces its preconditions as required-input edges.
-- A config-disabled stage acts as a passthrough without raising an error.
-- A failed stage preflight (a missing reference register, an unresolvable enrichment deployment, a failed model check) refuses before any document is processed.
-- Invalid compositions (a stage run before the inputs it requires exist, or with a config-selected strict input missing) fail early, with a message naming the producing stage.
-- Register ingests and text-only extraction (`extract` → `.txt`) are terminal — they have no valid downstream text stages.
-
-### 5. PDF and Image Extraction with OCR Quality Controls
-
-**Paid:** With `mistral-ocr` as the OCR engine, every OCR'd page is a billed AWS Bedrock call (Mistral Pixtral Large). The default engine (PaddleOCR) and Ollama run locally and cost nothing per call.
-
-**As** a user,
-**I want** reliable text extraction from native, scanned, hybrid, and redacted visual documents,
-**so that** the corpus accurately reflects content despite poor scan quality.
-
-**Given** a PDF or image input
-**When** extraction runs through the page-level orchestrator
-**Then** native text is extracted directly, scanned regions undergo OCR with preprocessing, and low-confidence results are flagged.
-
-**Acceptance criteria:**
-
-- Native document pages extract selectable text and logical structure directly.
-- Scanned pages undergo layout analysis, deskewing, and dynamic binarisation prior to OCR.
-- OCR processes producing an average confidence score below an acceptable threshold (e.g., 40%) raise a warning.
-- The extraction outputs distinct elements (paragraphs, headings, tables, forms, images) with logical reading order preserved.
-
-### 10. Chunking, and AI Chunking When Asked For
-
-**Paid:** AI chunking (`chunking.chunking_model`) calls the Kanon-2 Enricher, billed per call, for each document with no matching persisted Document. Default chunking (semchunk, local) costs nothing.
-
-**As** a user,
-**I want** extracted text split into token-bounded chunks by semchunk, locally,
-**so that** downstream analysis fits model limits, and chunking costs nothing unless I switch on AI chunking.
-
-**Given** an extraction result
-**When** the operator runs the chunking stage
-**Then** narrative text and tables are split by semchunk within the token budget and saved as a chunks sidecar.
-
-**Acceptance criteria:**
-
-- Chunking is semchunk, an open-source library (MIT) that runs locally. The tokeniser that measures chunk size is a dataset config choice (any Hugging Face tokeniser, or a callable). Default chunking needs no network and no key.
-- Narrative text and markdown-converted tables are chunked independently, each chunk tagged with its kind.
-- Redaction markers split across a chunk boundary are repaired.
-- AI chunking is a semchunk mode that only `chunking.chunking_model` switches on. It takes its boundaries from a Kanon-2 Enricher Document, so it is a paid feature unless a matching Document already exists.
-- A Document the `enrich` stage persisted is reused, with no call, when its text is byte-identical to the narrative being chunked.
-- Where no persisted Document matches, the chunk stage makes the Enricher call itself, because `chunking_model` asked for AI chunking. Every such call is logged per document, counted in the chunks footer and counted by `plan`. Nothing calls it a fallback.
-- AI chunking needs an enrichment provider that returns a Document. With any other provider, `chunking_model` is set aside with a warning and chunking is semchunk's local splitting.
-- A run with AI chunking whose Isaacus deployment cannot serve the Enricher is refused before launch.
-
-### 11. PII Detection and Masking
-
-**Paid:** Makes no paid call, but its main candidate source is the enrichment graph, the output of a paid stage (Requirement 12). Without enrichment, only the opt-in regex backstop detects anything.
-
-**As** a user,
-**I want** PII detected, masked, and retained reversibly for authorised audits,
-**so that** sensitive data is protected for publication without destroying internal provenance.
-
-**Given** a chunked shard directory, normally already enriched
-**When** the operator runs the PII stage
-**Then** sensitive spans are replaced with typed tags, generating an auditable sidecar and a clean-text layer.
-
-**Acceptance criteria:**
-
-- On the per-stage path (`womblex pii`), candidates are the enrichment graph's person and address entities, mapped onto narrative chunks, and each table's own enrichment mapped onto that table's chunks. The regex/context backstop runs only when `pii.use_regex_backstop` is set (default `false`); with no enrichment and the backstop off, nothing is detected. Each `*.clean_text.parquet` row carries `mask_status`: `masked` (a span was replaced), `no_entity` (a candidate source covered the chunk and found nothing) or `not_masked` (no candidate source covered it, so the text is verbatim), so unmasked text is never labelled masked.
-- The stage is terminal: it runs after enrich and embed, never rewrites `*.chunks.parquet`, and writes the masked layer as a separate `*.clean_text.parquet` (when `pii.write_clean_text`, the default).
-- The in-memory PII operation runs at a configurable point (`pii.pipeline_point`): before enrichment it uses the regex/context detector, and after enrichment it merges graph spans with it.
-- Identified PII spans in the clean-text layer are replaced with normalised typed tags (e.g., `<PERSON_1>`).
-- The spans are written to an independent Parquet sidecar (`*.pii_spans.parquet`) that retains each span's original text plus its evidence reference (the span's position in the source, at the precision the stage could establish) and graph `entity_id` — the audit record from which an authorised reversal can be reconstructed against the clean-text layer. The sidecar is a reversal-enabling audit layer; no automatic un-masking operation is implemented.
-
-### 12. Enrichment and Knowledge Graph — Orchestration
-
-**Paid:** Each request to the enrichment provider is billed when the provider is a paid model, as the default Kanon-2 Enricher is (Requirement 29). Graph refresh is local and costs nothing.
-
-**As** a user,
-**I want** whichever enrichment provider is configured driven the same way, and its entities and relationships joined to my chunks,
-**so that** mentions map back to their source chunks whatever the provider and whatever the run order.
-
-**Given** an extraction result and a configured enrichment provider
-**When** the operator runs enrichment, and graph refresh after any rechunk
-**Then** Womblex sends each document to the provider within the limits the provider declares, writes what the provider returns as sidecars, and links each mention to its chunk without rewriting earlier stages' files.
-
-**Acceptance criteria:**
-
-- Womblex owns, for every provider alike: packing requests to the provider's declared limits (texts per request, token ceiling, the provider's own token counter), sending each table's markdown as its own text beside the narrative, splitting a text only when it exceeds the provider's declared ceiling, offset-merging the parts, the entity, edge and metadata sidecars, evidence references, and the mention-to-chunk links.
-- Retries, back-off and fitting long input to the model are the provider adapter's concern; Womblex adds none of its own around a provider.
-- A request that still fails is recorded against its documents, and the rest of the stage continues.
-- The provider's entities and relationships are written as returned. Womblex does not build or alter the provider's graph; the mention-to-chunk link layer is the one part Womblex derives, from character offsets, for any provider.
+- Enrichment sends each document's text, in token-budgeted batches, to the configured provider (default Kanon-2 over Isaacus) and retries on rate limits.
+- Only a provider that returns a Document persists one for AI-chunking reuse. With any other, chunking is semchunk's local splitting and no paid call replaces it.
+- Graph generation builds nodes and edges, with a separate mention-to-chunk link layer.
 - Graph refresh writes its links to a sidecar of its own, stamped with the chunk version it linked against, and never rewrites earlier stages' files.
 - Readers can tell when refreshed links no longer match the current chunks, and use the matching links wherever they exist.
 - Runs written before the refresh sidecar existed read as before.
 - Graph refresh is idempotent and never skips on file existence alone.
-- Enrichment is not chunking. Whether chunking reuses an enrichment result is Requirement 10's, never this stage's.
 
 ### 14. Batch Processing, Resiliency, and Operational Controls
-
-**Paid:** A retry or resume reruns stages; each unit of a paid stage it redoes is billed again.
 
 **As** a user,
 **I want** reliable batching, checkpointing, and discrete execution controls (CLI/UI),
@@ -184,30 +93,7 @@ What Womblex does once this plan is done. Each requirement is given whole, as it
 - Per-stage progress renders in pipeline order.
 - Batch and stage logs are listed newest first and are individually viewable.
 
-### 19. Pipeline Composer — Configuration, Validation, and Dispatch
-
-**Paid:** Dispatching a composed pipeline launches its enabled paid stages.
-
-**As** a developer or administrator,
-**I want** to compose and validate a pipeline configuration visually and dispatch an admin run from it,
-**so that** I can author correct configs and enqueue work without hand-editing YAML or re-implementing guardrails.
-
-**Given** the served stage graph and the `WomblexConfig` JSON Schema
-**When** the operator edits the config form and presses to enqueue or run downstream stages
-**Then** the config is validated and dispatched through the same code paths the CLI uses, writing queue rows byte-identical to the documented commands.
-
-**Acceptance criteria:**
-
-- The stage graph is rendered from the served `STAGE_CONTRACTS` (nodes wired by their required-input edges); disabled stages drop to reduced opacity while keeping their edges so a broken chain reads as a gap.
-- The form is rendered from `WomblexConfig`'s JSON Schema, and validation plus YAML download go through the same `WomblexConfig` construction the CLI's config loader uses — the console cannot accept a config the CLI would reject.
-- Named presets are offered as starting points; operator-authored presets can be saved when a presets directory is configured, and preset saving refuses cleanly when it is not.
-- Enqueuing an extraction run and dispatching downstream stages call the same enabled-stage gate and queue-enqueue paths as the equivalent CLI commands, and dispatch is idempotent per `(run_id, stage)`.
-- Which downstream stages run is decided server-side (never re-derived in the frontend); the result panel reports what was dispatched in claim order, and irreversible or run-scoped stages (PII, quality) remain undispatchable.
-- Runs dispatched from the console carry no owner, so through the service API they are visible to `admin` callers only.
-
 ### 22. Service API — Submission and Retrieval
-
-**Paid:** A submitted run launches the paid stages its config enables, billed to the operator's accounts, not the caller's.
 
 **As** a developer integrating another system,
 **I want** an authenticated HTTP API to upload documents, submit runs, and read their results,
@@ -258,62 +144,7 @@ What Womblex does once this plan is done. Each requirement is given whole, as it
 - A run ingested from an object store resolves each source from that store by `source_relpath`, checked against `source_hash`, with the same statuses.
 - Womblex writes the bundle and nothing downstream of it: no retention, serving or write-back. Delivery to a workflow's destinations is Requirement 27.
 
-### 24. Swappable Models Without a Schema Change
-
-**Paid:** The OCR, enrichment and embedding slots can hold paid models; swapping a slot can add or remove a paid call.
-
-**As** a user with my own models, local or API-backed,
-**I want** to swap the model behind a pipeline slot without forking Womblex,
-**so that** I can use models suited to my corpus while a packaged CPU-friendly group stays the default.
-
-**Given** an installed package that registers a model for a slot
-**When** the operator names that model in the config
-**Then** the run uses it in place of the default, with no change to any Parquet schema.
-
-**Acceptance criteria:**
-
-- Swappable slots: OCR engine, layout analyser, PII context model, chunk tokeniser, spellfix dictionary, enrichment provider, and embedding provider.
-- An enrichment provider declares its limits (texts per request, token ceiling, token counter, network need, whether it returns a Document). Womblex keeps the packing, splitting above a declared ceiling, table pass, sidecars, evidence and chunk mapping (Requirement 12); retries and long-input handling stay inside the provider's adapter. A provider changes who recognises entities and nothing downstream. The Isaacus adapter is Requirement 29. An embedding provider declares its texts per request and network need. Only a provider that needs Isaacus is gated on an Isaacus deployment.
-- Installing a third-party model package makes its models selectable by name, with no change to Womblex's own dependencies.
-- The built-in models (PaddleOCR, Mistral, Ollama, PP-DocLayout-M) keep their existing names and aliases.
-- An installed package can supply model files, and they resolve offline the same way bundled models do.
-- A config names registered models only; an unknown name is an error that lists the known names. Import paths are refused.
-- An engine's own options pass through to it unchanged, and Womblex adds no per-library toggles.
-- An OCR model may return either regions or page markdown, and the pipeline handles each the same way it handles the built-in engines of that kind.
-- A layout model emits the Womblex `block_type` vocabulary, checked by a conformance test.
-- The layout model applies to redaction detection as well as extraction.
-- Changing the PII context model is supported. The docs state that `context_similarity_threshold` must be recalibrated when it changes.
-- With no plugin configured, `content_digest` is unchanged on every synthetic fixture.
-- The model-plugin guide documents each slot's interface and how a package registers a model, with a minimal example.
-
-**Out of scope:** model provenance (26), container-image packaging of plugins, and slots that need a Parquet schema change, each needing its own requirement (25 and 26, and the rest): AI chunking with a non-Isaacus model, graph-driven PII detection, link-stage candidates, `graph_refresh`, the enrichment token-budget tokeniser, per-page or per-element OCR engine recording.
-
-### 25. Pre-Run Model Check
-
-**Paid:** The check sends one minimal request to each paid model an enabled stage uses (Kanon-2 Enricher, Kanon-2 Embedder, Mistral on Bedrock), at `load` and `smoke` alike, and each is billed. Ollama's check is free.
-
-**As** an operator,
-**I want** configured models checked before any document is processed,
-**so that** a run never fails part-way, or mixes models, because a model was missing.
-
-**Given** a config that names models for one or more slots
-**When** a run, worker, or API submission starts
-**Then** each named model is checked, and a failure stops the run before its first document with the reason.
-
-**Acceptance criteria:**
-
-- The check has three levels, set by `processing.models_check` or `--models-check`: `off`; `load` (resolve and load the models, the default); `smoke` (also run one inference on a small built-in input).
-- `womblex run` checks the models of every enabled stage before batch one, before any output is written, so a run whose later stages cannot complete does not start.
-- A worker checks at startup and refuses jobs whose models fail the check, through the existing refused path. A job is refused only for the models it needs: a batch for the extraction models, a stage job for that stage's.
-- A model behind a service is checked with one minimal request at either level: each Isaacus model an enabled stage calls (enrich, embed, AI chunking), and an API-backed OCR engine (Bedrock, Ollama), so a run whose later paid stage cannot reach its service does not start.
-- An API submission checks only that each named model is registered, because the API host may not carry the models.
-- Downstream stage preflight includes the model check, including the standalone `chunk`, `pii`, `spellfix` and `redact` commands, which check before writing anything.
-- The existing in-slot fallback (PaddleOCR v5 to the wheel's v4) stays, and the check reports which variant resolved.
-- The check result is written into the run record.
-
 ### 27. Workflows — Check, Run, Dispatch, Schedule and Deliver
-
-**Paid:** `run-workflow`, `dispatch-workflow` and every scheduled firing launch the workflow's paid steps; each firing is billed for the documents it processes. `validate` and `plan` make no paid call.
 
 **As** an operator,
 **I want** to declare a recipe of stages once and run it locally, on the fleet or on a schedule,
@@ -360,8 +191,6 @@ What Womblex does once this plan is done. Each requirement is given whole, as it
 
 ### 28. Fleet Runs — Honour the Dispatch, Report the Truth
 
-**Paid:** A retry redoes the affected units of paid stages, and each is billed again.
-
 **As** an operator, or a system submitting work,
 **I want** fleet runs to use the config they were sent with, run only on workers checked for them, and show their real status after a fix,
 **so that** fleet results match local ones and a repaired run no longer reads as failed.
@@ -383,29 +212,6 @@ What Womblex does once this plan is done. Each requirement is given whole, as it
 
 **Out of scope:** automatic retries, and retrying from the API or console.
 
-### 29. Isaacus Enrichment Adapter
-
-**Paid:** Every request is a billed Kanon-2 Enricher call: per call on the hosted API, and through AWS for a SageMaker endpoint.
-
-**As** a user with an Isaacus deployment,
-**I want** Kanon-2 Enricher reached through a thin adapter over the Isaacus SDK,
-**so that** I get the API's own retry and long-input handling, and pay only for the calls I configured.
-
-**Given** the `enrichment` slot set to `kanon-2-enricher` and a declared Isaacus deployment (`ISAACUS_API_KEY`, or `ISAACUS_SAGEMAKER_ENDPOINTS`)
-**When** the `enrich` stage runs
-**Then** each request goes through the Isaacus SDK and each returned ILGS Document is converted to Womblex's enrichment result.
-
-**Acceptance criteria:**
-
-- Three things stay separate, in code and in docs. semchunk is an open-source library (MIT) that runs locally with no key. The Kanon-2 tokeniser is open source (Apache-2.0), vendored, and counts tokens locally with no call. Kanon-2 Enricher is a paid model, billed per call. Only the last is this adapter.
-- Retries, including on rate limits, are the SDK's (`max_retries`, upstream default unless the corpus has a measured reason to diverge); the adapter has no retry loop of its own.
-- Input longer than the model's context is handled by the API's `overflow_strategy` (passed through, `auto`). The adapter declares the API's limits (8 texts per request) and no token ceiling that makes Womblex split a document the API accepts whole.
-- The hosted API and SageMaker go through the same adapter. A deployment that serves no enricher endpoint is refused before the run.
-- Only the `enrich` stage calls the adapter, and only when configured. It is never a fallback for another provider or another stage.
-- The adapter declares that it returns a Document. The raw Document is written only when `persist_document` is set; what reads it is Requirement 10's.
-
-**Out of scope:** AI chunking (Requirement 10) and the Isaacus embedder (`embed`).
-
 ## How this plan works
 The plan lists only outstanding work; finished work lives in the CHANGELOG and the docs. Merge size and the end-of-phase stocktake follow CLAUDE.md. An item is removed when done, and the plan is deleted with its last item.
 
@@ -413,10 +219,8 @@ A change that reverses a decision deletes the old decision from the decision doc
 
 Each work item names the target-state requirements it delivers. When an item meets a requirement, the requirement moves into the requirements document.
 
-**Paid features are tagged.** A requirement whose behaviour can start a call billed by a third party carries a **Paid:** line under its heading, saying what is billed and which setting switches it on. A requirement without one engages nothing paid. The paid models are the Kanon-2 Enricher and Kanon-2 Embedder (Isaacus, on the hosted API or a SageMaker endpoint) and Mistral Pixtral Large on AWS Bedrock (`mistral-ocr`). Everything else runs locally and costs nothing per call, including semchunk (MIT), the Kanon-2 tokeniser (Apache-2.0), PaddleOCR, PP-DocLayout-M and a self-hosted Ollama. A merge that adds, removes or changes a paid call updates the line in the same merge.
-
 ## Mistakes to avoid
-Phase 2 made each of these. Check every item, here and in future plans, against this list before building. Phase 2 made the first eight; the ninth has recurred in almost every merge.
+Phase 2 made each of these. Check every item, here and in future plans, against this list before building.
 
 1. **A setting before anything uses it.** Workflow `destinations` were stored and did nothing. *Rule:* a setting lands in the merge that makes it act.
 2. **A file nobody reads.** Workflow conditions wrote a label sidecar nothing reads, derivable from the manifest anyway. *Rule:* every new output names its reader; anything derivable is derived on read.
@@ -426,7 +230,6 @@ Phase 2 made each of these. Check every item, here and in future plans, against 
 6. **Halting a run after launch, then reverting.** Two changes stopped a run mid-flight over one document; both were reverted. *Rule:* every refusal happens before launch.
 7. **Secrets in stored settings.** A planned destination would have stored a database password in the workflow. *Rule:* settings name where a secret lives, never the secret.
 8. **Asking the owner what the design answers.** Reviews treated open items as settled and asked the owner to pick options. *Rule:* ask only when the answer changes what users get; otherwise the builder decides and cites where the design says so.
-9. **Isaacus's open-source parts treated as its paid models.** Requirements and docs ran semchunk, the Kanon-2 tokeniser and the Kanon-2 Enricher together. They described enrichment as if Isaacus were the only provider, put AI chunking inside enrichment, and called a paid chunk-time call a "fallback". *Rule:* semchunk (MIT, local), the Kanon-2 tokeniser (Apache-2.0, local) and the Kanon-2 Enricher and Embedder (paid, per call) are named separately in every sentence that touches them. Enrichment is written provider-neutral, with Isaacus as one adapter. AI chunking belongs to chunking. Every paid call names the setting that asked for it.
 
 ## Phase R — Repairs
 
@@ -470,7 +273,7 @@ Each item is one merge under the size cap; an item that outgrows it splits into 
 - **R.7 Work only to checked workers** (D8; Reqs 14, 28). If too large: routing first, the up-front refusal second.
 - **R.8 Retries redo only affected work** (D6; Reqs 14, 28).
 - **R.9 Runs record their whole workflow** (D11; Req 27). The run record's version bumps.
-- **R.10 `plan` counts every paid call** (D12; Reqs 10, 27), AI chunking's included.
+- **R.10 `plan` counts every paid call** (D12; Req 27).
 - **R.11 Stocktake.**
 
 ## Phase 3 — Delivery
@@ -501,21 +304,10 @@ Each is recorded with the merge that builds it.
 
 ## Phase 4 — Day-to-day operation
 
-### Decisions made 19 October 2026
-Each is recorded in [decisions.md](decisions.md) with the merge that builds it.
-
-- **Isaacus's parts are named separately.** semchunk is open source (MIT) and local. The Kanon-2 tokeniser is open source (Apache-2.0, per its Hugging Face card) and local. The Kanon-2 Enricher and Embedder are paid models, billed per call.
-- **Enrichment is two requirements.** Requirement 12 is what Womblex does for any provider. Requirement 29 is the Isaacus adapter.
-- **The Isaacus adapter is thin.** Retries are the SDK's own (429 and 5xx, `max_retries`). Long input is the API's `overflow_strategy`. The adapter declares the API's limit of 8 texts per request and no smaller split ceiling.
-- **AI chunking belongs to chunking.** A chunk-time Enricher call is paid work that `chunking_model` asked for. It is logged and counted, never called a fallback.
-
 ### Work items
 - **4.0 Split `cli/cloud.py`.** `jobs` moves to its own module ahead of the cap; commands and output are unchanged.
 - **4.1 One-sentence run status** (Reqs 16, 22), from exact per-stage counts, shown by the CLI, API and console. The lineage event reports complete, failed or cancelled instead of always complete.
 - **4.2 Graph refresh writes its own sidecar** (Req 12), stamped with the chunk version it linked against; readers use it where it matches. Until 4.3 it also keeps rewriting the old files.
 - **4.3 Graph refresh stops rewriting earlier files** (Req 12). Older runs read as before. `layout` still replaces its own sidecar.
 - **4.3.5 Docs for 4.2 and 4.3.**
-- **4.3.6 The Isaacus adapter goes thin** (Reqs 12, 29). The retry loops in `analyse/enrich.py` and `analyse/embed.py` are deleted in favour of the SDK's `max_retries`. The adapter declares the API's limits (8 texts per request, no split ceiling below what the API accepts), and Womblex splits only above a declared ceiling.
-- **4.3.7 AI chunking says when it pays** (Req 10). Every chunk-time Enricher call is logged per document and counted in the `*.chunks.parquet` footer. Code, comments and logs stop calling it a fallback (`process/chunker.py`, `process/chunk_stage.py`).
-- **4.3.8 Docs name Isaacus's parts separately, and paid features are tagged** (Reqs 3, 5, 10, 11, 12, 19, 24, 25, 29). Docs only. Requirements 10, 12 and 29 move into [functional_requirements.md](functional_requirements.md). [models.md](models.md) records the tokeniser's Apache-2.0 licence. CLAUDE.md gets a Common Pitfalls entry with the three-way split and the **Paid:** tag rule. Requirements 3, 5, 11, 19, 24 and 25 move in as the target state gives them, with their **Paid:** lines, and [functional_requirements.md](functional_requirements.md) states the tag rule at its top. [decisions.md](decisions.md) records this phase's decisions. A grep for "fallback", "self-enrich" and "over Isaacus" across `docs/`, `src/` and CLAUDE.md is the evidence.
 - **4.4 Final stocktake.** The mistakes list moves to [decisions-dead-ends.md](decisions-dead-ends.md); the rest goes to the decision docs and CHANGELOG, and the plan is deleted.
