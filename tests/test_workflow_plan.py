@@ -98,7 +98,7 @@ def test_cli_json_prices_and_exit_codes(shards: Path, tmp_path: Path, capsys: py
     assert body["steps"][1]["tokens"]["basis"] == "simulated"
     assert cmd_plan(args(json=False, assume_price=["embed=3"])) == 0
     assert "ASSUMPTION" in capsys.readouterr().out
-    assert cmd_plan(args(assume_price=["chunk=1"])) == 1
+    assert cmd_plan(args(assume_price=["money=1"])) == 1
     write_workflow(tmp_path, "refused", ["embed"])  # chunks are not on disk
     for name, code in (("absent", "workflow_unavailable"), ("refused", "step_order")):  # still one JSON object
         capsys.readouterr()
@@ -115,3 +115,40 @@ def test_layout_skips_only_when_every_sidecar_carries_the_fingerprint(shards: Pa
         for base in _batch_bases(shards):
             write_layout_regions([], base, replace(fp, dpi=dpi), redaction_consumed=False)
         assert plan_workflow(stored, shards, resolve_preset=_resolve).steps[0].action == action
+
+
+def test_local_steps_are_free_and_paid_ones_are_counted(shards: Path) -> None:  # noqa: F811
+    plan = plan_workflow(_stored(["normalise", "chunk", "embed"], config=_NORMALISED), shards, resolve_preset=_resolve)
+    assert [(s.stage, s.paid) for s in plan.steps] == [("normalise", False), ("chunk", False), ("embed", True)]
+    assert plan.steps[1].tokens is None and plan.steps[2].tokens is not None
+
+
+def test_ai_chunking_calls_are_counted_in_the_enrichers_own_tokens(shards: Path) -> None:  # noqa: F811
+    stored = _stored(["chunk"], config={"chunking": {"chunking_model": "kanon-2-enricher"},
+                                        "enrichment": {"enabled": True}})
+    (step,) = plan_workflow(stored, shards, resolve_preset=_resolve, prices={"chunk": 4.0}).steps
+    t = step.tokens
+    assert step.paid and t is not None and t.basis == "on_disk"
+    narrative, _ = _load_narratives(_batch_bases(shards)[0], "elements")
+    counter = TokenCounter(EnrichmentConfig().tokenizer)
+    assert t.requests == t.detail["documents"] == len([n for n in narrative.values() if n.strip()])
+    assert t.tokens == sum(counter.count_batch([n for n in narrative.values() if n.strip()]))
+    assert t.detail["reused_documents"] == 0 and t.assumed_cost == pytest.approx(t.tokens / 1e6 * 4.0)
+
+
+def test_an_embedding_provider_with_no_token_counter_is_counted_by_texts(
+    shards: Path, monkeypatch: pytest.MonkeyPatch,  # noqa: F811
+) -> None:
+    from womblex.analyse import embed
+
+    real = embed.make_embedding_provider
+
+    def uncounted(config, client=None):
+        provider = real(config, client)
+        return replace(provider, limits=replace(provider.limits, token_counter=None))
+
+    monkeypatch.setattr(embed, "make_embedding_provider", uncounted)
+    monkeypatch.setattr("womblex.analyse.embed_stage.make_embedding_provider", uncounted)
+    t = plan_workflow(_stored(["chunk", "embed"]), shards, resolve_preset=_resolve, prices={"embed": 2.0}).steps[1].tokens
+    assert t is not None and t.tokens is None and t.texts > 0 and "no token counter" in t.note
+    assert t.assumed_cost is None

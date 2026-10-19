@@ -562,7 +562,8 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - Every command validates the file first (steps, cron and timezone, config overlay) and rejects unknown keys.
 - The workflow digest ignores formatting and comments.
 - Its own `config` is laid over its preset's key by key, and the whole is validated as a full config.
-- `validate` runs exactly the checks `run-workflow` runs before its first step, and writes nothing; `plan` counts the requests and tokens its paid steps would send, calling no paid API.
+- `validate` runs exactly the checks `run-workflow` runs before its first step, and writes nothing.
+- `plan` counts the tokens and requests of every paid call, AI chunking included, with each provider's own token counter, and shows local steps as free. It calls no paid API.
 - Step order is checked before launch: a step whose input is missing, produced later, or rewritten later is refused with a stable code.
 - Once a step has run, a failed step does not stop the steps after it; each later step records the failure it follows, and the exit code is non-zero.
 - Every sidecar a workflow step writes names the workflow that wrote it, and the run record holds the workflow's name and full spec. Extraction files name none: extraction is not a workflow step (see the data contract).

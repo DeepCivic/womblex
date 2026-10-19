@@ -46,7 +46,7 @@ def _register_plan(p: argparse.ArgumentParser) -> None:
     p.add_argument("--shards", type=Path, required=True,
                    help="Local shard dir the steps would run over.")
     p.add_argument("--assume-price", action="append", default=[], metavar="STAGE=USD_PER_MILLION",
-                   help="An assumed rate for `enrich` or `embed` tokens (repeatable). Womblex holds no "
+                   help="An assumed rate for `enrich`, `embed` or `chunk` (AI chunking) tokens (repeatable). Womblex holds no "
                         "rate card: any cost shown is this assumption times the exact token count.")
     p.add_argument("--json", action="store_true", help="Print the plan as one JSON object")
 
@@ -182,8 +182,8 @@ def _parse_prices(items: list[str]) -> dict[str, float]:
     out: dict[str, float] = {}
     for item in items:
         stage, _, value = item.partition("=")
-        if stage not in ("enrich", "embed"):
-            raise ValueError(f"--assume-price takes enrich=… or embed=…, got {item!r}")
+        if stage not in ("enrich", "embed", "chunk"):
+            raise ValueError(f"--assume-price takes enrich=…, embed=… or chunk=…, got {item!r}")
         out[stage] = float(value)
     return out
 
@@ -222,13 +222,16 @@ def cmd_plan(args: argparse.Namespace) -> int:
         return 0
     print(f"workflow {plan.workflow_id} ({plan.digest}) over {plan.shard_dir}")
     for s in plan.steps:
-        print(f"  {s.action:<4} {s.stage}" + (f" — {s.reason}" if s.reason else ""))
+        print(f"  {s.action:<4} {s.stage} [{'paid' if s.paid else 'free, local'}]"
+              + (f" — {s.reason}" if s.reason else ""))
         if (t := s.tokens) is not None:
             if t.basis in ("pending", "unavailable"):
                 print(f"       tokens: {t.basis}: {t.note}")
+            elif t.tokens is None:
+                print(f"       {t.texts:,} text(s) in {t.requests:,} request(s) [{t.basis}]; tokens not counted: {t.note}")
             else:
                 print(f"       tokens: {t.tokens:,} over {t.texts:,} text(s) in {t.requests:,} "
-                      f"request(s) [{t.basis}, offline kanon-2 tokeniser]")
+                      f"request(s) [{t.basis}, the provider's own token counter]")
             if t.assumed_cost is not None:
                 print(f"       cost: ${t.assumed_cost:,.2f} — ASSUMPTION: ${t.assumed_price_per_million}/M "
                       "tokens supplied by --assume-price; not a published rate")

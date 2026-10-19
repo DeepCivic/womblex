@@ -28,12 +28,13 @@ at chunk time and is the only path that needs a configured deployment
 
 from __future__ import annotations
 
+import json
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
-from womblex.config import ChunkingConfig
+from womblex.config import ChunkingConfig, WomblexConfig
 from womblex.ingest.elements import BBox, Cell, Element
 from womblex.process.chunker import (
     ChunkInput,
@@ -314,6 +315,46 @@ def _load_narrative_overrides(
                 "self-enriching instead.", source_hash, e,
             )
     return overrides or None
+
+
+@dataclass
+class AIChunkingPlan:
+    """What AI chunking would send at chunk time, counted offline (`womblex plan`): one Enricher
+    call per document no persisted Document's text matches, tokens by the provider's own counter."""
+
+    documents: int = 0
+    calls: int = 0
+    reused: int = 0
+    tokens: int = 0
+
+
+def plan_ai_chunking(shard_dir: Path, config: WomblexConfig) -> AIChunkingPlan:
+    """Count the chunk-time Enricher calls `chunk_shards` would make under *config*; calls nothing.
+
+    The reuse test is the stage's: a persisted Document is reused only when its text is
+    byte-identical to the narrative. Raises `MissingOverlayError` as the stage does.
+    """
+    from womblex.analyse.enrich import make_enrichment_provider
+    from womblex.analyse.enrich_stage import _load_narratives
+
+    text_source = config.processing.text_source
+    bases = _batch_bases(shard_dir)
+    require_overlays(bases, text_source)
+    counter = make_enrichment_provider(config.enrichment, None, None).limits.token_counter
+    plan = AIChunkingPlan()
+    for base in bases:
+        narratives, _ = _load_narratives(base, text_source)
+        persisted = {h: json.loads(doc).get("text") for h, (_, doc) in read_enrichment_docs(base).items() if doc}
+        for source_hash, text in narratives.items():
+            if not text.strip():
+                continue
+            plan.documents += 1
+            if persisted.get(source_hash) == text:
+                plan.reused += 1
+            else:
+                plan.calls += 1
+                plan.tokens += counter.count_batch([text])[0]
+    return plan
 
 
 # ---------------------------------------------------------------------------

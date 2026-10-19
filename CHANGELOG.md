@@ -9,6 +9,7 @@ Entries are terse by design; rationale lives in the PR/commit history.
 ## [Unreleased]
 
 ### Changed
+- **`plan` counts every paid call — trust plan, Phase R item R.10 (D12).** AI chunking's chunk-time Enricher calls are counted (`chunk_stage.plan_ai_chunking`), embed tokens use the embedding provider's own counter (`EmbeddingLimits.token_counter`), and each step is marked paid or free (local). `--assume-price chunk=…` prices AI chunking.
 - **Runs record their whole workflow — trust plan, Phase R item R.9 (D11).** Every file a workflow step writes carries `womblex.workflow` (the workflow's name and full spec, as JSON) beside its digest, and the run record lists each workflow's `name` and `spec`; the record's version is 7.
 - **A retry redoes only affected work — trust plan, Phase R item R.8 (D6).** Retrying a stage that ran after a failure starts a new attempt over the units the failed stage had not finished (`RunBoard.unfinished_bases` / `rerun_stage`), not every batch, so finished work is not paid for again. Requirement 28 is met.
 - **Work no live worker serves is refused before launch — trust plan, Phase R item R.7b (D8).** Every dispatch (API 409, console, `enqueue`, `enqueue-stages`, `dispatch-workflow`, a firing) and `retry-stage` checks, before any row, that a live worker serves each queue its work needs under the run's config (`worker_registry.require_served`); `no_worker` joins the workflow and retry refusal codes.

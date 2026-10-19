@@ -106,7 +106,8 @@ Phase 2 merge 4 (`cloud/workflow_validate.py`). The plan left the report's shape
 ### `womblex plan` counts, it does not price
 Phase 2 merge 5 (`cloud/workflow_plan.py`).
 
-- **Counts come from the stages' own request builders**, so no packing logic can drift. Embed tokens use the kanon-2 tokenizer (`EmbeddingConfig` carries none).
+- **Counts come from the stages' own request builders**, so no packing logic can drift, in each provider's own tokens (Phase R, D12): the enrichment provider's declared `token_counter`, and the embedding provider's (`EmbeddingLimits.token_counter`; the Isaacus embedder declares the Kanon-2 tokeniser). A provider that declares no counter has its texts and requests counted, not its tokens.
+- **Every paid call is counted (Phase R, R.10).** AI chunking's chunk-time Enricher calls are (`chunk_stage.plan_ai_chunking`: one per document no persisted Document's text matches, the stage's own reuse test), and a step that calls no paid service is marked free.
 - **Free earlier steps are produced in a scratch symlink directory** (`normalise`, `spellfix`, `chunk` sans AI chunking), so a fresh-extraction workflow gets a real embed count. An input only a paid step produces is `pending`, never guessed.
 - **No model probe and no rate card.** Plan stops at `check_workflow`; `--assume-price` is the caller's rate, labelled an assumption. `skip` is only what is knowable offline (`layout` by fingerprint).
 
