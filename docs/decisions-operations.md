@@ -83,9 +83,9 @@ engines".
 - **D-4.2 Graph-refresh writes its own sidecar,** keyed by the chunks' digest, and stops rewriting the enrichment sidecars. Enrich's files stay as enrich stamped them, and a reader can tell when the refresh no longer matches the chunks. *Rejected:* a version in the file name, which says that the file changed but not which chunks it matches.
 
 ### A workflow is a stored object, not an extended preset or a recipe file
-2026-10; D8 of the trust-and-recipes plan, shipped as Phase 2 merges 1–9b (`cloud/workflow_store.py`). A preset is a partial config applied once per run; it holds no step sequence, inputs, conditions or destinations. A stored workflow references a preset and adds those, in its own table in the database DBOS uses, owner-scoped as runs are, its digest stamped beside `config_digest`. The up-front ordering check (D4) shipped with it (merge 3), so local and fleet runs got it at once.
+2026-10; D8 of the trust-and-recipes plan, shipped as Phase 2 merges 1–9b (`cloud/workflow_store.py`). A preset is a partial config applied once per run; it holds no step sequence, inputs or destinations. A stored workflow references a preset and adds those, in its own table in the database DBOS uses, owner-scoped as runs are, its digest stamped beside `config_digest`. The up-front ordering check (D4) shipped with it (merge 3), so local and fleet runs got it at once.
 
-- *Rejected:* **extending the preset** with steps, conditions and destinations. One schema and no new storage, but it mixes how a stage behaves with what runs and where results go, and leaves nothing for a standing trigger to act on.
+- *Rejected:* **extending the preset** with steps and destinations. One schema and no new storage, but it mixes how a stage behaves with what runs and where results go, and leaves nothing for a standing trigger to act on.
 - *Rejected:* **a recipe file** in the user's repository. Diffable, with no storage or lifecycle, and promotable later, but it cannot carry standing triggers; event subscriptions would be declared per run.
 
 ### A stored workflow runs locally: validate on save and load, refuse before work, record after

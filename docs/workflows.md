@@ -1,8 +1,8 @@
 # Stored workflows
 
 A stored workflow is a named recipe: a preset, optional config changes, the
-downstream steps to run in order, and optionally conditions, destinations and
-cron triggers. It is kept in the database DBOS's own tables live in (Postgres
+downstream steps to run in order, and optionally destinations and cron
+triggers. It is kept in the database DBOS's own tables live in (Postgres
 for a fleet, a local SQLite file otherwise). The "why" is in
 [decisions-operations.md](decisions-operations.md) ("Trust and recipes").
 
@@ -28,9 +28,8 @@ with WorkflowStore(None) as store:
 ```
 
 `validate_workflow_spec` refuses what could never run: an unknown stage, a stage
-listed twice, a bad cron expression or timezone, a config that does not validate,
-a condition on a column outside the manifest. `WorkflowStore.save` runs the same
-checks, and the id must be a single safe token (letters, digits, `.`, `_`, `-`).
+listed twice, a bad cron expression or timezone, or a config that does not validate.
+`WorkflowStore.save` runs the same checks, and the id must be a single safe token (letters, digits, `.`, `_`, `-`).
 The workflow's digest (`sha256:…`) is over the spec, and is stamped on every
 sidecar its steps write.
 
@@ -40,7 +39,6 @@ sidecar its steps write.
 | `config` | Overlay on the preset's config: mappings merge, anything else replaces, `null` drops a key to its default. |
 | `input_binding` | `ingest_prefix` (the documents a firing extracts) and `batch_size`. Extraction is not a step. |
 | `steps` | Downstream stages, each at most once, run in the order listed (`dispatch-workflow` needs pipeline order). |
-| `conditions` | Checked, not acted on, and being removed: filter `manifest.parquet` instead. |
 | `destinations` | Stored, not acted on yet. |
 | `triggers` | Cron expressions scheduled by `schedule-workflow`. |
 

@@ -4,15 +4,15 @@ A *workflow* is a named, persisted recipe kept in the database DBOS's own tables
 live in (`dbos_app.system_database_url`), so a local run needs no second database.
 
 Schema and storage only (`docs/decisions-operations.md`, Phase 2 merge 1):
-`destinations` round-trip but are not dispatched (`conditions` label documents through
-`workflow_conditions`), `triggers` are scheduled by `workflow_schedules`, and nothing here runs a
-workflow. The table is created if absent; there is no versioned migration yet.
+`destinations` round-trip but are not dispatched, `triggers` are scheduled by
+`workflow_schedules`, and nothing here runs a workflow. The table is created if absent; there is no versioned migration yet.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -24,6 +24,8 @@ from pydantic import Field
 from womblex.cloud import dbos_app
 from womblex.cloud.stage_contracts import STAGE_NAMES
 from womblex.config.process import StrictModel
+
+logger = logging.getLogger(__name__)
 
 #: A workflow id becomes a primary key and, later, a DBOS schedule name: constrained like
 #: a preset name or run id (`ui.presets.is_safe_preset_name`, `store.retention.is_safe_run_id`).
@@ -48,14 +50,6 @@ class WorkflowInputBinding(StrictModel):
     batch_size: int = Field(default=50, ge=1)
 
 
-class WorkflowCondition(StrictModel):
-    """A label over a manifest column, recorded per document; it never gates a run (`workflow_conditions`)."""
-
-    column: str
-    op: Literal["eq", "ne", "in", "not_in", "gt", "gte", "lt", "lte"]
-    value: Any
-
-
 class WorkflowDestination(StrictModel):
     """A delivery target beside egress. Stored, not dispatched — Phase 3's concern."""
 
@@ -77,7 +71,6 @@ class StoredWorkflowSpec(StrictModel):
     config: dict[str, Any] = Field(default_factory=dict)
     input_binding: WorkflowInputBinding = Field(default_factory=WorkflowInputBinding)
     steps: tuple[WorkflowStep, ...]
-    conditions: tuple[WorkflowCondition, ...] = ()
     destinations: tuple[WorkflowDestination, ...] = ()
     triggers: tuple[WorkflowTrigger, ...] = ()
 
@@ -152,10 +145,7 @@ def check_spec(spec: StoredWorkflowSpec) -> None:
     `validate_workflow_spec` is not stored unchecked) and by the runner on load
     (a row written before a stage was renamed or removed is refused, not run).
     """
-    from womblex.cloud.workflow_conditions import check_conditions_static
-
     _check_steps(spec)
-    check_conditions_static(spec.conditions)
     _check_triggers(spec)
     _check_config_overlay(spec)
 
@@ -224,11 +214,23 @@ def ensure_workflow_schema(dsn: str | None) -> None:
         engine.dispose()
 
 
+#: Spec fields a row may still hold from before they were removed; dropped on read, warned if set.
+_RETIRED_FIELDS = ("conditions",)
+
+
+def _spec_from_row(workflow_id: str, spec_json: str) -> StoredWorkflowSpec:
+    raw = json.loads(spec_json)
+    for name in _RETIRED_FIELDS:
+        if raw.pop(name, None):
+            logger.warning("workflow %s: stored %s are no longer supported and are ignored", workflow_id, name)
+    return StoredWorkflowSpec(**raw)
+
+
 def _row_to_stored(row: Any) -> StoredWorkflow:
     return StoredWorkflow(
         id=row.id,
         owner=row.owner,
-        spec=StoredWorkflowSpec(**json.loads(row.spec_json)),
+        spec=_spec_from_row(row.id, row.spec_json),
         digest=row.digest,
         created_at=row.created_at,
         updated_at=row.updated_at,
@@ -348,7 +350,6 @@ class WorkflowStore:
 __all__ = [
     "StoredWorkflow",
     "StoredWorkflowSpec",
-    "WorkflowCondition",
     "WorkflowDestination",
     "WorkflowInputBinding",
     "WorkflowOwnedError",

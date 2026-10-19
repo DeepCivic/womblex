@@ -552,13 +552,13 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 **I want** to save a named recipe of steps over a preset and run it locally, on the fleet or on a schedule,
 **so that** a run's sequence is declared once, checked before it spends anything, and recorded in what it writes.
 
-**Given** a stored workflow (a preset reference, input binding, ordered steps, conditions, destinations and triggers)
+**Given** a stored workflow (a preset reference, input binding, ordered steps, destinations and triggers)
 **When** the operator validates, plans, runs, dispatches or schedules it
 **Then** everything that can refuse does so before the first step, and the files each step writes name the workflow.
 
 **Acceptance criteria:**
 
-- A workflow is stored in the database the queue uses, owner-scoped like runs, and checked on save and again on load (steps, cron and timezone, config overlay, conditions); its digest is stable over its spec.
+- A workflow is stored in the database the queue uses, owner-scoped like runs, and checked on save and again on load (steps, cron and timezone, config overlay); its digest is stable over its spec.
 - Its own `config` is laid over its preset's key by key, and the whole is validated as a full config.
 - `validate` runs exactly the checks `run-workflow` runs before its first step, and writes nothing; `plan` counts the requests and tokens its paid steps would send, calling no paid API.
 - Step order is checked before launch: a step whose input is missing, produced later, or rewritten later is refused with a stable code.

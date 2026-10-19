@@ -36,7 +36,7 @@ def test_validate_minimal_spec() -> None:
     spec = validate_workflow_spec(_MINIMAL)
     assert [s.stage for s in spec.steps] == ["enrich", "chunk"]
     assert spec.preset == "DEFAULT-Isaacus"
-    assert spec.conditions == spec.destinations == spec.triggers == ()
+    assert spec.destinations == spec.triggers == ()
 
 
 @pytest.mark.parametrize(("steps", "match"), [
@@ -73,15 +73,13 @@ def test_validate_overlay_ignores_run_identity_like_a_preset() -> None:
     validate_workflow_spec(raw)  # dropped by `_validate_overlay`, not a TypeError
 
 
-def test_validate_round_trips_conditions_destinations_and_triggers() -> None:
+def test_validate_round_trips_destinations_and_triggers() -> None:
     raw = {
         **_MINIMAL,
-        "conditions": [{"column": "ext", "op": "eq", "value": ".pdf"}],
         "destinations": [{"kind": "webhook", "target": "https://example.invalid/hook"}],
         "triggers": [{"cron": "0 0 * * *"}],
     }
     spec = validate_workflow_spec(raw)
-    assert spec.conditions[0].column == "ext"
     assert spec.destinations[0].kind == "webhook"
     assert spec.triggers[0].cron == "0 0 * * *"
 
@@ -122,6 +120,20 @@ def test_round_trip_save_get_list_delete(store) -> None:
     store.delete("wf-1")
     assert store.get("wf-1") is None
     assert store.list() == []
+
+
+def test_a_row_saved_with_a_retired_field_still_loads(store, caplog) -> None:
+    import json
+
+    import sqlalchemy as sa
+
+    store.save("wf-old", validate_workflow_spec(_MINIMAL))
+    raw = {**_MINIMAL, "conditions": [{"column": "ext", "op": "eq", "value": ".pdf"}]}
+    with store._engine.begin() as conn:
+        conn.execute(sa.update(store._table).values(spec_json=json.dumps(raw)))
+    fetched = store.get("wf-old")
+    assert fetched is not None and [s.stage for s in fetched.spec.steps] == ["enrich", "chunk"]
+    assert "stored conditions are no longer supported" in caplog.text
 
 
 def test_save_rejects_unsafe_id(store) -> None:
