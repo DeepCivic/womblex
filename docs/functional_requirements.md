@@ -444,7 +444,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - The service refuses to start with an empty registry unless explicitly run with `--insecure-no-auth`, and binds to loopback by default.
 - An upload is written to `<ingest>/<client_id>/<upload_id>/` keeping only bare file names; an unusable, repeated, or unsupported name is 400 with nothing written, an over-limit request is 413, and the response names the folder to submit as `input_prefix`.
 - A non-admin caller can submit runs only over its own `<client_id>/` tree (403 otherwise); the run id is minted server-side and unique across concurrent submissions.
-- A submitted `preset` or `config` is validated before any queue row is written (400 on failure) and selects downstream stages only; a config enabling none is an extraction-only run.
+- A submitted `preset` or `config` is validated before any queue row is written (400 on failure) and governs every stage of the run, not only which stages run; a config enabling none is an extraction-only run.
 - A run belongs to the client that submitted it: another client's run is 404, an admin sees all runs, and runs dispatched from the CLI, the console or a workflow carry no owner and are visible to admins only. A run never has mixed ownership.
 - Document text defaults to the masked layer; raw layers (`chunks`, `elements`) require `read_raw`, decided by the layer's contract sensitivity.
 - Run file listings report each file's row count, `contract_version`, and `sensitivity`, so a caller can fetch Parquet directly under the data contract.
@@ -590,12 +590,13 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 
 **Acceptance criteria:**
 
+- Every stage of a fleet run runs under the config it was dispatched with; a worker's own config supplies only its store, paths, credentials and model locations.
+- Config submitted through the API, console or CLI governs how stages run, not only which run.
 - Once every failed stage has been retried successfully, the run shows `done`.
 - A scheduled firing whose dispatch failed and was later completed shows its real status, not `failed`.
 
 **TO-DO:**
 
-- **Only a workflow's stages run under the config they were dispatched with;** any other fleet stage runs under the config of the worker that claims it.
 - **A worker serves a stage its model check did not cover, and a run no live worker can serve is not refused before launch.**
 - **Retrying a stage that ran after a failure redoes every unit,** not only the affected ones.
 
@@ -614,6 +615,6 @@ Requirements not yet fully met. The detail lives in the **TO-DO** block under ea
 - **Requirement 13 (Money Annotation):** the money span row carries no merge extent or header-row coordinate.
 - **Requirements 17 and 21 (Corpus Inspector; Console Design System):** `DocumentGrid.svelte` is not virtualised and emits no `aria-rowcount`.
 - **Requirement 23 (Egress Bundle):** a run ingested from an object store is refused rather than resolving its sources from that store.
-- **Requirement 28 (Fleet Runs):** fleet stages outside a workflow run under the worker's config, work reaches workers not checked for it, and a later stage's retry redoes every unit.
+- **Requirement 28 (Fleet Runs):** work reaches workers not checked for it, and a later stage's retry redoes every unit.
 
 ---

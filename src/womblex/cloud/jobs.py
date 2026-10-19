@@ -308,10 +308,12 @@ class RunBoard:
     def enqueue(
         self, run_id: str, jobs: list[JobSpec], *, owner: str | None = None,
         firing: str | None = None, fingerprints: dict[str, str] | None = None,
+        config: dict[str, Any] | None = None,
     ) -> int:
         """Enqueue *jobs* for *run_id*; idempotent per batch number.
 
-        A scheduled *firing* labels its batches, each with its keys' *fingerprints*, so a
+        *config* (`workflow_runner.config_payload`) is the config the batches extract under, on
+        any worker. A scheduled *firing* labels its batches, each with its keys' *fingerprints*, so a
         later firing of the same run can tell which documents it has already seen.
 
         Returns the number of batches that were not already on the board.
@@ -335,7 +337,7 @@ class RunBoard:
                 "attributes": attrs,
             }
             sends.append((options, (run_id, spec.batch_num, spec.input_keys, spec.shard_prefix,
-                                    spec.ingest_root, spec.max_attempts)))
+                                    spec.ingest_root, spec.max_attempts, config)))
         inserted = self._enqueue(sends)
         logger.info("Enqueued %d new job(s) for run %s (of %d submitted)",
                     inserted, run_id, len(jobs))
@@ -344,9 +346,12 @@ class RunBoard:
     def enqueue_stages(
         self, run_id: str, stages: list[str], shard_prefix: str, *,
         max_attempts: int = 3, owner: str | None = None, workflow: dict[str, Any] | None = None,
-        firing: str | None = None, bases: list[str] | None = None,
+        firing: str | None = None, bases: list[str] | None = None, config: dict[str, Any] | None = None,
     ) -> int:
         """Enqueue the coordinator that runs *stages* in pipeline order for *run_id*.
+
+        *config* (`workflow_runner.config_payload`) is the config every stage runs under, on any
+        worker, when no *workflow* is given.
 
         A scheduled *firing* runs its stages over its own batch *bases* only, under stage
         ids of its own, so a run a workflow appends to never re-runs an earlier firing's work.
@@ -382,8 +387,8 @@ class RunBoard:
                 run_id, ordered, workflow["digest"] if workflow else None, firing),
             "attributes": attrs,
         }
-        args: tuple = (run_id, ordered, shard_prefix, max_attempts, row_owner, workflow)
-        fresh = self._enqueue([(options, args + ((firing, bases) if firing else ()))])
+        fresh = self._enqueue([(options, (run_id, ordered, shard_prefix, max_attempts, row_owner, workflow,
+                                          firing, bases, config))])
         newly = len(ordered) if fresh else 0
         logger.info("Enqueued %d new stage job(s) for run %s (of %d submitted)",
                     newly, run_id, len(stages))
@@ -430,12 +435,12 @@ class RunBoard:
                 found[stage] = rows
         return found
 
-    def stage_arguments(self, workflow_id: str) -> tuple[str, dict[str, Any] | None]:
-        """A stage workflow's recorded `shard_prefix` and dispatched `workflow` overlay."""
+    def stage_arguments(self, workflow_id: str) -> dict[str, Any]:
+        """A stage workflow's recorded arguments by name (`shard_prefix`, `workflow`, `bases`, `config`)."""
         (s,) = self._client.list_workflows(workflow_ids=[workflow_id], load_input=True, load_output=False)
         given = s.input or {"args": (), "kwargs": {}}  # read by name, whether passed by position or keyword
-        named = dict(zip(("run_id", "stage", "shard_prefix", "max_attempts", "workflow"), given["args"])) | given["kwargs"]
-        return named["shard_prefix"], named.get("workflow")
+        names = ("run_id", "stage", "shard_prefix", "max_attempts", "workflow", "bases", "config")
+        return dict(zip(names, given["args"])) | given["kwargs"]
 
     def first_failed_step(self, workflow_id: str) -> int:
         """The function id of the workflow's first failed step; 1 (the whole workflow) when none is recorded."""

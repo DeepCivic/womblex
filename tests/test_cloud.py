@@ -580,7 +580,7 @@ class _CapturingQueue:
     def __exit__(self, *_exc: object) -> None:
         pass
 
-    def enqueue(self, _run_id: str, specs: list) -> int:
+    def enqueue(self, _run_id: str, specs: list, *, config: dict | None = None) -> int:
         _CapturingQueue.keys = [k for s in specs for k in s.input_keys]
         return len(specs)
 

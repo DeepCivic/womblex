@@ -25,6 +25,7 @@ from womblex.cloud.workflow_runner import (
     RefusalCode,
     WorkflowRefusedError,
     config_from_overlay,
+    config_payload,
     not_acted_on,
     workflow_overlay,
 )
@@ -233,7 +234,8 @@ def fire_workflow(
                 return WorkflowDispatch(run_id, stored.id, stored.digest, (), "", 0, False, firing, [], unchanged)
             specs = batch_specs(new, shard_prefix=shard_prefix, ingest_root=binding.store or "",
                                 batch_size=binding.batch_size, max_attempts=3, start=board.next_batch_num(run_id))
-            board.enqueue(run_id, specs, firing=firing, fingerprints=prints)
+            recipe = config_from_overlay(stored.spec.preset, workflow_overlay(stored, resolve_preset))
+            board.enqueue(run_id, specs, firing=firing, fingerprints=prints, config=config_payload(recipe))
     try:
         sent = dispatch_workflow(stored, firing=firing, **_firing_kwargs(stored, run_id, resolve_preset, store, dsn))
     except Exception:

@@ -34,7 +34,7 @@ class _FakeQueue:
     def __exit__(self, *exc: object) -> None:
         pass
 
-    def enqueue(self, run_id: str, specs: list, *, owner: str | None = None) -> int:
+    def enqueue(self, run_id: str, specs: list, *, owner: str | None = None, config: dict | None = None) -> int:
         self.enqueued = (run_id, specs)
         return len(specs)
 

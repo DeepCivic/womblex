@@ -25,16 +25,19 @@ RUNS = {
 
 class FakeQueue:
     written: ClassVar[list[tuple]] = []
+    configs: ClassVar[list[dict | None]] = []
 
     def __init__(self, dsn: str, **_kw: object) -> None:
         pass
 
-    def enqueue(self, run_id, specs, *, owner=None):
+    def enqueue(self, run_id, specs, *, owner=None, config=None):
         FakeQueue.written.append(("batches", run_id, len(specs), owner))
+        FakeQueue.configs.append(config)
         return len(specs)
 
-    def enqueue_stages(self, run_id, stages, shard_prefix, *, max_attempts=3, owner=None):
+    def enqueue_stages(self, run_id, stages, shard_prefix, *, max_attempts=3, owner=None, config=None):
         FakeQueue.written.append(("stages", run_id, tuple(stages), owner))
+        FakeQueue.configs.append(config)
         return len(stages)
 
     def __enter__(self) -> Self:
@@ -178,13 +181,17 @@ def test_admin_may_name_any_prefix_and_owns_nothing(client):
 
 
 def test_config_stages_are_enqueued_with_the_owner(client):
-    config = {"chunking": {"enabled": True}, "money": {"enabled": False}}
+    config = {"chunking": {"enabled": True, "chunk_size": 77}, "money": {"enabled": False}}
+    FakeQueue.configs.clear()
     resp = client.post(
         "/v1/runs", headers=auth("ta"), json={"input_prefix": "alice/up1", "config": config},
     )
     run_id = resp.json()["run_id"]
     assert resp.json()["stages"] == ["chunk"]
     assert FakeQueue.written[1] == ("stages", run_id, ("chunk",), "alice")
+    # the submitted config governs extraction and every stage, on whichever worker claims them
+    assert [c["chunking"]["chunk_size"] for c in FakeQueue.configs] == [77, 77]
+    assert all("paths" not in c for c in FakeQueue.configs)
 
 
 def test_unsatisfiable_stage_order_is_refused_with_codes_before_any_row(client):

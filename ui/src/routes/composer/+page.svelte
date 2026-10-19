@@ -249,8 +249,8 @@
 	}
 
 	// Hand the composed run into the queue — the composer is the only dispatch
-	// surface. The queue carries no config;
-	// workers read their own `--config` at launch. Ingest and output are
+	// surface. The run carries the composed config, which every worker extracts
+	// under. Ingest and output are
 	// deployment settings owned by the Resources Console, so this sends no
 	// prefix — the whole configured ingest root is the input — only the optional
 	// run id and the batching controls, through the same `enqueueExtraction` the
@@ -262,6 +262,7 @@
 		enqueueResult = null;
 		try {
 			const res = await enqueueExtraction({
+				config,
 				run_id: enqueueRunId.trim() || undefined,
 				batch_size: batchSize,
 				max_attempts: maxAttempts

@@ -95,10 +95,12 @@ pins its operation and model surface so breaking changes show in review.
   `batch_size` (default 50).
 - A non-admin caller's `input_prefix` must be its `<client_id>` folder or under
   it (403 otherwise).
-- The config is validated before any queue row is written (400). It selects
-  stages only; workers run them under their own config, as with
-  `womblex enqueue-stages`. A config enabling no stage is an extraction-only
-  run.
+- The config is validated before any queue row is written (400). It governs
+  every stage of the run, extraction included: the run carries it, and each
+  worker that claims its work runs under it, supplying only its own store,
+  paths, credentials and model locations. A config enabling no stage is an
+  extraction-only run; with neither `preset` nor `config` the run carries the
+  default config.
 - The run id is minted server-side: the timestamp id plus a random suffix.
 - A prefix with documents in nested folders is refused, as for every run.
 

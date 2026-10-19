@@ -13,8 +13,8 @@ Uploads (``POST /v1/uploads``) store documents under the caller's own
 Submission writes queue rows only, through the console's dispatch
 (:mod:`womblex.cloud.dispatch`): the run id is minted here, a non-admin
 caller's ``input_prefix`` must sit under its own client id, and the config is
-validated before any row is written. The config selects downstream stages; the
-workers run them under their own config, as for ``womblex enqueue-stages``.
+validated before any row is written. The config governs every stage of the run: the
+workers run extraction and each downstream stage under it, whichever worker claims them.
 """
 from __future__ import annotations
 
@@ -208,7 +208,7 @@ def create_api_app(
                 dispatch.check_stage_order(settings, cast(dict, config), stages, run_id)
             run = dispatch.enqueue_extraction(
                 settings, input_prefix=prefix, run_id=run_id,
-                batch_size=body.batch_size, owner=caller.owner,
+                batch_size=body.batch_size, owner=caller.owner, config=config,
             )
             written = True
             if stages:

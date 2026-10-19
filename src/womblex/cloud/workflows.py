@@ -163,9 +163,11 @@ def _logged[T](
 
 def _extract(
     run_id: str, batch_num: int, input_keys: list[str], shard_prefix: str, ingest_root: str,
+    config: dict[str, Any] | None = None,
 ) -> dict[str, str]:
-    """Stage this batch's inputs, extract them, publish the shards; return key -> SHA-256."""
+    """Stage this batch's inputs, extract them under the run's config, publish the shards; return key -> SHA-256."""
     ctx = _context()
+    run_config = _stage_config(None, config)
 
     def body(root: Path) -> dict[str, str]:
         shards_dir = root / "shards"
@@ -176,14 +178,14 @@ def _extract(
         declared = ingest_root or ctx.ingest_root
         provenance = (
             IngestProvenance.declare(
-                declared, ctx.config.dataset.name,
+                declared, run_config.dataset.name,
                 relpaths=dict(zip(files, input_keys, strict=True)),
             )
             if declared else None
         )
-        stamp = RunStamp.declare(run_id, ctx.config, stage="extract") if run_id.strip() else None
+        stamp = RunStamp.declare(run_id, run_config, stage="extract") if run_id.strip() else None
         outcome = process_batch(
-            files, ctx.config, batch_num=batch_num, shard_dir=shards_dir,
+            files, run_config, batch_num=batch_num, shard_dir=shards_dir,
             provenance=provenance, stamp=stamp,
         )
         # Glob off the shard path the batch reported, so the naming scheme lives
@@ -201,11 +203,11 @@ def _extract(
 @DBOS.workflow(name=dbos_app.EXTRACT_WORKFLOW)
 def extract_batch(
     run_id: str, batch_num: int, input_keys: list[str], shard_prefix: str,
-    ingest_root: str, max_attempts: int,
+    ingest_root: str, max_attempts: int, config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     recorded = DBOS.run_step(
         _retry("extract", max_attempts), _extract,
-        run_id, batch_num, input_keys, shard_prefix, ingest_root,
+        run_id, batch_num, input_keys, shard_prefix, ingest_root, config,
     )
     return {"published": len(recorded), "checksums": _digests(recorded)}
 
@@ -219,35 +221,36 @@ def _digests(recorded: Any) -> dict[str, str]:
 # --- stages ------------------------------------------------------------------
 
 
-def _stage_config(workflow: dict[str, Any] | None) -> WomblexConfig:
-    """The config a stage runs under: the worker's own, or a dispatched workflow's recipe.
+def _stage_config(workflow: dict[str, Any] | None, config: dict[str, Any] | None = None) -> WomblexConfig:
+    """The config a run's work runs under: a dispatched workflow's recipe, or the config the run
+    was dispatched with (Phase R, D7), each with this worker's `paths`.
 
-    A workflow's overlay is built exactly as the local runner builds it
-    (`config_from_overlay`), keeping this worker's `paths`.
+    A workflow's overlay is built exactly as the local runner builds it (`config_from_overlay`).
+    A row enqueued before runs carried their config has neither, and runs under the worker's own.
     """
-    ctx = _context()
-    if workflow is None:
-        return ctx.config
-    from womblex.cloud.workflow_runner import config_from_overlay
+    from womblex.cloud.workflow_runner import config_from_overlay, config_from_payload
 
-    return config_from_overlay(
-        workflow["preset"], workflow["config"], ctx.config.paths.model_dump(mode="json"),
-    )
+    ctx = _context()
+    paths = ctx.config.paths.model_dump(mode="json")
+    if workflow is not None:
+        return config_from_overlay(workflow["preset"], workflow["config"], paths)
+    return config_from_payload(config, paths) if config is not None else ctx.config
 
 
 def _plan(
     stage: str, shard_prefix: str, workflow: dict[str, Any] | None = None, bases: list[str] | None = None,
+    config: dict[str, Any] | None = None,
 ) -> list[list[str]]:
     ctx = _context()
-    return plan_units(STAGE_CONTRACTS[stage], ctx.store, shard_prefix, _stage_config(workflow), bases=bases)
+    return plan_units(STAGE_CONTRACTS[stage], ctx.store, shard_prefix, _stage_config(workflow, config), bases=bases)
 
 
 def _unit(
     stage: str, run_id: str, shard_prefix: str, unit: list[str],
-    workflow: dict[str, Any] | None = None,
+    workflow: dict[str, Any] | None = None, run_config: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     ctx = _context()
-    config = _stage_config(workflow)
+    config = _stage_config(workflow, run_config)
     contract = STAGE_CONTRACTS[stage]
     label = unit[0] if len(unit) == 1 else f"{len(unit)}-bases"
 
@@ -270,9 +273,9 @@ def _unit(
 @DBOS.workflow(name=dbos_app.STAGE_WORKFLOW)
 def run_stage(
     run_id: str, stage: str, shard_prefix: str, max_attempts: int,
-    workflow: dict[str, Any] | None = None, bases: list[str] | None = None,
+    workflow: dict[str, Any] | None = None, bases: list[str] | None = None, config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    units = DBOS.run_step({"name": "plan"}, _plan, stage, shard_prefix, workflow, bases)
+    units = DBOS.run_step({"name": "plan"}, _plan, stage, shard_prefix, workflow, bases, config)
     published = 0
     checksums: dict[str, str] = {}
     failed: list[str] = []
@@ -281,7 +284,7 @@ def run_stage(
         try:
             recorded = DBOS.run_step(
                 _retry(f"unit:{label}", max_attempts), _unit, stage, run_id, shard_prefix, unit,
-                workflow,
+                workflow, config,
             )
         except Exception as e:  # one bad unit must not stop the others
             failed.append(f"{label} ({_carried(e)})")
@@ -371,6 +374,7 @@ def _unsettled_batches(run_id: str) -> int:
 def run_downstream(
     run_id: str, stages: list[str], shard_prefix: str, max_attempts: int, owner: str | None,
     workflow: dict[str, Any] | None = None, firing: str | None = None, bases: list[str] | None = None,
+    config: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Run *stages* over the run once its extraction has settled, in the order given.
 
@@ -405,7 +409,7 @@ def run_downstream(
         with SetWorkflowID(dbos_app.stage_id(run_id, stage, scope)), SetWorkflowAttributes(attrs):
             handle = DBOS.enqueue_workflow(
                 dbos_app.stage_queue(stage), run_stage, run_id, stage, shard_prefix, max_attempts,
-                workflow, bases,
+                workflow, bases, config,
             )
         try:
             results.append({**handle.get_result(), "ran_after_failed": list(failed)})

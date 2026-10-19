@@ -145,6 +145,18 @@ def config_from_overlay(
     })
 
 
+def config_payload(config: WomblexConfig) -> dict[str, Any]:
+    """What a fleet run carries of *config* (Phase R, D7): everything but `paths`, which are each worker's."""
+    return config.model_dump(mode="json", exclude={"paths"})
+
+
+def config_from_payload(payload: dict[str, Any], paths: dict[str, Any]) -> WomblexConfig:
+    """The config a fleet run was dispatched with, on the worker that runs it, with that worker's *paths*."""
+    from womblex.config import WomblexConfig
+
+    return WomblexConfig.model_validate({**payload, "paths": paths})
+
+
 def preset_resolver(presets_dir: Path | None) -> Callable[[str], Preset | None]:
     """Resolve a preset name: an operator-saved one in *presets_dir* shadows a built-in.
 
@@ -334,6 +346,8 @@ __all__ = [
     "WorkflowRunResult",
     "check_workflow",
     "config_from_overlay",
+    "config_from_payload",
+    "config_payload",
     "not_acted_on",
     "prepare_workflow",
     "preset_resolver",

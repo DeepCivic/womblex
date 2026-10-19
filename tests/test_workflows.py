@@ -51,6 +51,26 @@ def work(fleet, **kw) -> int:
     )
 
 
+def test_a_run_extracts_and_runs_its_stages_under_the_config_it_carries(fleet):
+    """Not the worker's: each worker supplies only its store and paths (Phase R, D7)."""
+    import pyarrow.parquet as pq
+
+    from tests.test_cloud import _minimal_config
+    from womblex.cloud.workflow_runner import config_payload
+    from womblex.store.run_stamp import PRESET_KEY
+
+    store, ingest, tmp = fleet
+    carried = _minimal_config(tmp).model_copy(update={"dataset": _minimal_config(tmp).dataset.model_copy(
+        update={"name": "carried"})})
+    with RunBoard(None) as board:
+        board.enqueue("r1", [batch(ingest)], config=config_payload(carried))
+        board.enqueue_stages("r1", ["normalise"], "runs/r1/documents", config=config_payload(carried))
+        work(fleet, idle_timeout=2)
+    out = Path(str(store)) / "runs/r1/documents"
+    for role in ("elements", "normalised_text"):
+        assert pq.read_metadata(str(out / f"batch-0001.{role}.parquet")).metadata[PRESET_KEY.encode()] == b"carried"
+
+
 def test_a_worker_runs_a_batch_and_records_it_done(fleet):
     store, ingest, _ = fleet
     with RunBoard(None) as board:

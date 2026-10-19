@@ -83,7 +83,9 @@ def _register_enqueue(p: argparse.ArgumentParser) -> None:
         help="Store-relative dir holding source documents. Optional with --ingest "
              "(default: the whole ingest root); required without it.",
     )
-    p.add_argument("--config", type=Path, help="Config YAML (sources processing.batch_size)")
+    p.add_argument("--config", type=Path,
+                   help="Config YAML the run extracts under on every worker (and processing.batch_size); "
+                        "omitted, the default config")
     p.add_argument("--run-id", default=None, help="Run identifier (default: auto timestamp)")
     p.add_argument(
         "--output-prefix", default=None,
@@ -125,16 +127,12 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
         )
         return 1
 
-    batch_size = args.batch_size
-    if batch_size is None:
-        if args.config is not None:
-            from womblex.config import load_config
+    from womblex.cloud.workflow_runner import config_payload
+    from womblex.config import WomblexConfig, load_config
 
-            batch_size = load_config(args.config).processing.batch_size
-        else:
-            from womblex.config import ProcessingConfig
-
-            batch_size = ProcessingConfig().batch_size
+    config = load_config(args.config) if args.config is not None else WomblexConfig.model_validate(
+        {"dataset": {"name": "enqueue"}, "paths": {"input_root": ".", "output_root": ".", "checkpoint_dir": "."}})
+    batch_size = args.batch_size if args.batch_size is not None else config.processing.batch_size
     if batch_size < 1:
         logger.error("batch-size must be >= 1")
         return 1
@@ -168,13 +166,14 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
 
     ensure_schema(dsn)
     with RunBoard(dsn) as board:
-        inserted = board.enqueue(run_id, specs)
+        inserted = board.enqueue(run_id, specs, config=config_payload(config))
 
     logger.info(
         "run_id=%s: %d document(s) -> %d batch(es), %d newly enqueued. Shards -> %s/%s",
         run_id, len(keys), len(specs), inserted, store_uri, shard_prefix,
     )
-    logger.info("Start workers with: womblex worker --store %s --config <cfg>", store_uri)
+    logger.info("Start workers with: womblex worker --store %s --config <cfg> (its paths and models; "
+                "the run carries its own config)", store_uri)
     return 0
 
 
@@ -399,6 +398,7 @@ def cmd_enqueue_stages(args: argparse.Namespace) -> int:
     """
     from womblex.cloud.dbos_app import ensure_schema
     from womblex.cloud.jobs import RunBoard
+    from womblex.cloud.workflow_runner import config_payload
     from womblex.config import load_config
     from womblex.pipeline_order import enabled_downstream_stages, in_pipeline_order
 
@@ -440,6 +440,7 @@ def cmd_enqueue_stages(args: argparse.Namespace) -> int:
     with RunBoard(dsn) as board:
         inserted = board.enqueue_stages(
             args.run_id, list(stages), shard_prefix, max_attempts=args.max_attempts,
+            config=config_payload(config),
         )
     logger.info(
         "%d of %d stage(s) newly dispatched (the rest were already dispatched). "

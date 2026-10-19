@@ -94,13 +94,14 @@ def _check_retryable(attempts: dict[str, list[WorkflowStatus]], run_id: str, sta
             f"{latest.workflow_id} succeeded and ran on output no retry has changed", RetryCode.NOT_FAILED)
 
 
-def _stage_config(base: WomblexConfig, workflow: dict[str, Any] | None) -> WomblexConfig:
+def _stage_config(base: WomblexConfig, workflow: dict[str, Any] | None, run: dict[str, Any] | None) -> WomblexConfig:
     """The config the original attempt ran under, as the worker builds it (`workflows._stage_config`)."""
-    if workflow is None:
-        return base
-    from womblex.cloud.workflow_runner import config_from_overlay
+    from womblex.cloud.workflow_runner import config_from_overlay, config_from_payload
 
-    return config_from_overlay(workflow["preset"], workflow["config"], base.paths.model_dump(mode="json"))
+    paths = base.paths.model_dump(mode="json")
+    if workflow is not None:
+        return config_from_overlay(workflow["preset"], workflow["config"], paths)
+    return config_from_payload(run, paths) if run is not None else base
 
 
 def retry_stage(
@@ -120,9 +121,10 @@ def retry_stage(
     attempts = board.stage_attempts(run_id, owner=owner)
     _check_retryable(attempts, run_id, stage)
     latest = _latest(attempts, stage)
-    shard_prefix, workflow = board.stage_arguments(latest.workflow_id)
+    recorded = board.stage_arguments(latest.workflow_id)
+    shard_prefix = recorded["shard_prefix"]
     try:
-        stage_config = _stage_config(config, workflow)
+        stage_config = _stage_config(config, recorded.get("workflow"), recorded.get("config"))
         check_registered(stage_config)  # registration only: this host may not carry the workers' models
     except ValueError as e:
         raise RetryRefusedError(f"config does not load: {e}", RetryCode.CONFIG_INVALID) from e
