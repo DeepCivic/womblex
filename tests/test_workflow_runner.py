@@ -160,11 +160,10 @@ def test_warns_about_stored_but_unacted_parts(shards: Path, caplog: pytest.LogCa
     stored = _stored(
         ["normalise"],
         triggers=[{"cron": "0 3 * * *"}],
-        destinations=[{"kind": "webhook", "target": "https://example.invalid/hook"}],
     )
     with caplog.at_level(logging.WARNING):
         result = run_workflow_local(stored, shards, resolve_preset=_resolve)
-    assert result.not_acted_on == ("destinations", "triggers")
+    assert result.not_acted_on == ("triggers",)
     assert "stored but not acted on" in caplog.text
     assert result.exit_code == 0
 

@@ -4,8 +4,7 @@ A *workflow* is a named, persisted recipe kept in the database DBOS's own tables
 live in (`dbos_app.system_database_url`), so a local run needs no second database.
 
 Schema and storage only (`docs/decisions-operations.md`, Phase 2 merge 1):
-`destinations` round-trip but are not dispatched, `triggers` are scheduled by
-`workflow_schedules`, and nothing here runs a workflow. The table is created if absent; there is no versioned migration yet.
+`triggers` are scheduled by `workflow_schedules`, and nothing here runs a workflow. The table is created if absent; there is no versioned migration yet.
 """
 
 from __future__ import annotations
@@ -16,7 +15,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Literal, Self
+from typing import Any, Self
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import Field
@@ -50,13 +49,6 @@ class WorkflowInputBinding(StrictModel):
     batch_size: int = Field(default=50, ge=1)
 
 
-class WorkflowDestination(StrictModel):
-    """A delivery target beside egress. Stored, not dispatched — Phase 3's concern."""
-
-    kind: Literal["object_store", "postgres", "webhook"]
-    target: str
-
-
 class WorkflowTrigger(StrictModel):
     """A standing cron trigger. Stored, not scheduled — see the module docstring."""
 
@@ -71,7 +63,6 @@ class StoredWorkflowSpec(StrictModel):
     config: dict[str, Any] = Field(default_factory=dict)
     input_binding: WorkflowInputBinding = Field(default_factory=WorkflowInputBinding)
     steps: tuple[WorkflowStep, ...]
-    destinations: tuple[WorkflowDestination, ...] = ()
     triggers: tuple[WorkflowTrigger, ...] = ()
 
 
@@ -215,7 +206,7 @@ def ensure_workflow_schema(dsn: str | None) -> None:
 
 
 #: Spec fields a row may still hold from before they were removed; dropped on read, warned if set.
-_RETIRED_FIELDS = ("conditions",)
+_RETIRED_FIELDS = ("conditions", "destinations")
 
 
 def _spec_from_row(workflow_id: str, spec_json: str) -> StoredWorkflowSpec:
@@ -350,7 +341,6 @@ class WorkflowStore:
 __all__ = [
     "StoredWorkflow",
     "StoredWorkflowSpec",
-    "WorkflowDestination",
     "WorkflowInputBinding",
     "WorkflowOwnedError",
     "WorkflowStep",

@@ -552,7 +552,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 **I want** to save a named recipe of steps over a preset and run it locally, on the fleet or on a schedule,
 **so that** a run's sequence is declared once, checked before it spends anything, and recorded in what it writes.
 
-**Given** a stored workflow (a preset reference, input binding, ordered steps, destinations and triggers)
+**Given** a stored workflow (a preset reference, input binding, ordered steps and triggers)
 **When** the operator validates, plans, runs, dispatches or schedules it
 **Then** everything that can refuse does so before the first step, and the files each step writes name the workflow.
 
@@ -567,11 +567,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - `dispatch-workflow` queues the steps for the fleet, refused before any row for anything the local runner refuses and for a step the fleet cannot run, an order the coordinator would change, or a run already worked under another digest; workers run each stage under the workflow's config.
 - `schedule-workflow` makes the queue's schedules equal the workflow's cron triggers; each firing extracts the input prefix into a fresh run and dispatches the workflow, refused before any row when the prefix is outside the owner's tree or holds no document. `schedule-workflow` runs the same checks first (`check_firing`, against `--store` / `--ingest`), so a workflow its firing would refuse is not scheduled.
 
-**TO-DO:**
-
-- **Destinations are stored but not acted on.**
-
-**Out of scope:** a command or API that saves a workflow (one is saved through `WorkflowStore` in code), incremental firings (only documents not seen before) and backfill of missed firings.
+**Out of scope:** a command or API that saves a workflow (one is saved through `WorkflowStore` in code), incremental firings (only documents not seen before), backfill of missed firings, and destinations (each kind returns with the merge that delivers it).
 
 ## Outstanding
 
@@ -586,6 +582,5 @@ Requirements not yet fully met. The detail lives in the **TO-DO** block under ea
 - **Requirement 13 (Money Annotation):** the money span row carries no merge extent or header-row coordinate.
 - **Requirements 17 and 21 (Corpus Inspector; Console Design System):** `DocumentGrid.svelte` is not virtualised and emits no `aria-rowcount`.
 - **Requirement 23 (Egress Bundle):** a run ingested from an object store is refused rather than resolving its sources from that store.
-- **Requirement 27 (Stored Workflows):** destinations are not acted on.
 
 ---

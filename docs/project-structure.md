@@ -166,7 +166,7 @@ womblex/
 │   │   ├── worker.py           # run_worker() — launch DBOS, join the queues this process can serve
 │   │   ├── stage_contracts.py  # Declarative StageContract per downstream stage (inputs/outputs/scope)
 │   │   ├── stage_runner.py     # Execute a contract against an object store
-│   │   ├── workflow_store.py   # Stored workflow object (preset ref, input binding, steps, destinations, triggers) — schema, validation, its table
+│   │   ├── workflow_store.py   # Stored workflow object (preset ref, input binding, steps, triggers) — schema, validation, its table
 │   │   ├── workflow_order.py   # Up-front step-order check — inputs on disk or produced earlier, stable refusal codes
 │   │   ├── workflow_schedules.py # Standing triggers — a workflow's cron triggers as DBOS schedules (sync/list/remove)
 │   │   ├── workflow_dispatch.py # `dispatch-workflow` — a stored workflow to the fleet; refuse before any row

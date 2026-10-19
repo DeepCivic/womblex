@@ -1,8 +1,7 @@
 # Stored workflows
 
 A stored workflow is a named recipe: a preset, optional config changes, the
-downstream steps to run in order, and optionally destinations and cron
-triggers. It is kept in the database DBOS's own tables live in (Postgres
+downstream steps to run in order, and optionally cron triggers. It is kept in the database DBOS's own tables live in (Postgres
 for a fleet, a local SQLite file otherwise). The "why" is in
 [decisions-operations.md](decisions-operations.md) ("Trust and recipes").
 
@@ -39,7 +38,6 @@ sidecar its steps write.
 | `config` | Overlay on the preset's config: mappings merge, anything else replaces, `null` drops a key to its default. |
 | `input_binding` | `ingest_prefix` (the documents a firing extracts) and `batch_size`. Extraction is not a step. |
 | `steps` | Downstream stages, each at most once, run in the order listed (`dispatch-workflow` needs pipeline order). |
-| `destinations` | Stored, not acted on yet. |
 | `triggers` | Cron expressions scheduled by `schedule-workflow`. |
 
 ## Checking, running and dispatching
