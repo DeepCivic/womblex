@@ -7,8 +7,8 @@ module-responsibility table in [`../CLAUDE.md`](../CLAUDE.md).
 
 ```
 womblex/
-├── configs/           # Dataset-specific configurations
-├── docs/              # Architecture docs, ADRs, accuracy reports, the deployment-image audit, the consumer contract (contract.md), the service API (service-api.md), the egress bundle (egress.md), stored workflows (workflows.md), the design decisions by concern (decisions.md for the library, decisions-operations.md for operating it, decisions-dead-ends.md for dead-ends, limitations and the backlog)
+├── configs/           # Dataset-specific configurations; workflows/ holds an example workflow file
+├── docs/              # Architecture docs, ADRs, accuracy reports, the deployment-image audit, the consumer contract (contract.md), the service API (service-api.md), the egress bundle (egress.md), workflow files (workflows.md), the design decisions by concern (decisions.md for the library, decisions-operations.md for operating it, decisions-dead-ends.md for dead-ends, limitations and the backlog)
 ├── fixtures/synthetic/  # Generated test fixtures (generate.py + its committed output; see its README)
 ├── models/            # Locally pre-downloaded models, resolved by utils/models.py (see models.md)
 ├── ui/                # Console SPA frontend (SvelteKit), built into the console image by Dockerfile.ui
@@ -168,6 +168,7 @@ womblex/
 │   │   ├── stage_runner.py     # Execute a contract against an object store
 │   │   ├── workflow_store.py   # Stored workflow object (preset ref, input binding, steps, triggers) — schema, validation, its table
 │   │   ├── workflow_order.py   # Up-front step-order check — inputs on disk or produced earlier, stable refusal codes
+│   │   ├── workflow_file.py    # A workflow file — the master copy every workflow command reads (YAML, unknown keys refused)
 │   │   ├── workflow_schedules.py # Standing triggers — a workflow's cron triggers as DBOS schedules (sync/list/remove)
 │   │   ├── workflow_dispatch.py # `dispatch-workflow` — a stored workflow to the fleet; refuse before any row
 │   │   ├── workflow_plan.py    # `womblex plan` — steps to run or skip and exact enrich/embed token counts, offline

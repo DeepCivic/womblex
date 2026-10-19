@@ -161,13 +161,13 @@ def workflow_digest(spec: StoredWorkflowSpec) -> str:
 
 @dataclass(frozen=True)
 class StoredWorkflow:
-    """One workflow row as read."""
+    """One workflow as read: from its file (`workflow_file`), or a scheduled copy's row."""
 
     id: str
     spec: StoredWorkflowSpec
     digest: str
-    created_at: str
-    updated_at: str
+    created_at: str = ""
+    updated_at: str = ""
 
 
 _TABLE = "womblex_workflows"

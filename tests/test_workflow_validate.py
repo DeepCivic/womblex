@@ -9,11 +9,10 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_workflow_runner import _PRESET, _resolve, _stored, shards  # noqa: F401
+from tests.test_workflow_runner import _PRESET, _resolve, _stored, shards, write_workflow  # noqa: F401
 from womblex.cloud.stage_contracts import STAGE_CONTRACTS
 from womblex.cloud.workflow_order import OrderCode
 from womblex.cloud.workflow_runner import RefusalCode, WorkflowRefusedError, run_workflow_local
-from womblex.cloud.workflow_store import WorkflowStore, ensure_workflow_schema
 from womblex.cloud.workflow_validate import validate_workflow
 
 _NORMALISED = {"processing": {"text_source": "normalised"}}
@@ -67,23 +66,23 @@ def test_without_shards_only_the_step_order_is_checked() -> None:
 def test_cli_json_and_exit_codes(shards: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:  # noqa: F811
     from womblex.cli.workflow import cmd_validate
 
-    dsn = f"sqlite:///{tmp_path}/wf.db"
-    ensure_workflow_schema(dsn)
-    with WorkflowStore(dsn) as store:
-        store.save("good", _stored(["normalise"]).spec)
-        store.save("misordered", _stored(["chunk", "normalise"], config=_NORMALISED).spec)
+    write_workflow(tmp_path, "good", ["normalise"])
+    write_workflow(tmp_path, "misordered", ["chunk", "normalise"], config=_NORMALISED)
+    write_workflow(tmp_path, "unknown-key", ["normalise"], webhook="https://example.invalid")
     from womblex.ui.presets import build_preset_record, preset_filename, serialise_preset_record
 
     record, _ = build_preset_record(name=_PRESET.name, description="", formats=(), config=_PRESET.config)
     (tmp_path / preset_filename(_PRESET.name)).write_text(serialise_preset_record(record))
 
-    def args(wid: str, **kw) -> argparse.Namespace:
-        base = {"workflow_id": wid, "shards": shards, "dsn": dsn, "presets_dir": tmp_path,
+    def args(name: str, **kw) -> argparse.Namespace:
+        base = {"workflow": tmp_path / f"{name}.yaml", "shards": shards, "presets_dir": tmp_path,
                 "models_check": None, "json": True}
         return argparse.Namespace(**{**base, **kw})
 
     assert cmd_validate(args("missing")) == 1
     assert json.loads(capsys.readouterr().out)["code"] == RefusalCode.WORKFLOW_UNAVAILABLE.value
+    assert cmd_validate(args("unknown-key")) == 1  # an unknown key is refused, never ignored
+    assert json.loads(capsys.readouterr().out)["code"] == RefusalCode.SPEC_INVALID.value
     assert cmd_validate(args("good")) == 0
     body = json.loads(capsys.readouterr().out)
     assert body["valid"] is True and body["stages"] == ["normalise"]

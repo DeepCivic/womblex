@@ -113,30 +113,27 @@ def test_cli_exit_codes_and_one_line_per_refusal(fleet, caplog, monkeypatch):  #
     import argparse
     import logging
 
-    from tests.test_workflow_runner import _PRESET
+    from tests.test_workflow_runner import _PRESET, write_workflow
     from womblex.cli.workflow import cmd_dispatch_workflow
-    from womblex.cloud.workflow_store import WorkflowStore, ensure_workflow_schema
     from womblex.ui.presets import build_preset_record, preset_filename, serialise_preset_record
 
     store, _, tmp = fleet
-    ensure_workflow_schema(None)
-    with WorkflowStore(None) as saved:
-        saved.save("good", _stored(["normalise"], config=_NORMALISED).spec)
-        saved.save("misordered", _stored(["chunk", "normalise"], config=_NORMALISED).spec)
+    write_workflow(tmp, "good", ["normalise"], config=_NORMALISED)
+    write_workflow(tmp, "misordered", ["chunk", "normalise"], config=_NORMALISED)
     record, _ = build_preset_record(name=_PRESET.name, description="", formats=(), config=_PRESET.config)
     (tmp / preset_filename(_PRESET.name)).write_text(serialise_preset_record(record))
 
     def run(wid: str, **kw) -> tuple[int, list[str]]:
         caplog.clear()
         args = argparse.Namespace(**{
-            "workflow_id": wid, "run_id": "r1", "store": str(store), "output_prefix": None,
+            "workflow": tmp / f"{wid}.yaml", "run_id": "r1", "store": str(store), "output_prefix": None,
             "max_attempts": 3, "dry_run": False, "dsn": None, "presets_dir": tmp, **kw})
         with caplog.at_level(logging.INFO):
             rc = cmd_dispatch_workflow(args)
         return rc, [r.getMessage() for r in caplog.records if r.name == "womblex"]
 
     rc, lines = run("missing")
-    assert rc == 1 and lines == ["no stored workflow 'missing'"]
+    assert rc == 1 and len(lines) == 1 and lines[0].startswith("could not read workflow file ")
     rc, lines = run("misordered")
     assert rc == 1 and len(lines) == 1 and lines[0].startswith("[order_not_pipeline] ")
     rc, lines = run("good", dry_run=True)

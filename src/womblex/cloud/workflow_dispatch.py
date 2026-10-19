@@ -212,7 +212,7 @@ def fire_workflow(
         sent = dispatch_workflow(stored, **_firing_kwargs(stored, run_id, resolve_preset, store, dsn))
     except Exception:
         logger.error("firing of run %s failed after queueing its batches; extraction runs on and the run reads "
-                     "orphaned: dispatch its stages with `womblex dispatch-workflow %s --run-id %s --store <store>`",
+                     "orphaned: dispatch its stages with `womblex dispatch-workflow <the %s workflow file> --run-id %s --store <store>`",
                      run_id, stored.id, run_id)
         raise
     logger.info("workflow %s fired: run %s, %d doc(s), stages %s", stored.id, run_id, len(keys), ", ".join(sent.stages))

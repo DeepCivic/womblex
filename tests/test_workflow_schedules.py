@@ -83,7 +83,50 @@ def _where(fleet) -> dict:  # noqa: F811
     return {"store": str(fleet[0]), "ingest": fleet[1], "presets_dir": None}
 
 
-def test_remove_and_status_work_after_the_workflow_is_deleted(
+def _file(fleet, name: str, steps: list[str], triggers: list[dict] | None = None,  # noqa: F811
+          prefix: str | None = None) -> str:
+    from tests.test_workflow_runner import write_workflow
+
+    return str(write_workflow(fleet[2], name, steps, triggers=[_TRIGGER] if triggers is None else triggers,
+                              input_binding={"ingest_prefix": prefix}))
+
+
+def test_scheduling_stores_the_copy_and_its_schedules_together(fleet, saved_preset, monkeypatch) -> None:  # noqa: F811
+    import argparse
+
+    from womblex.cli.workflow import cmd_schedule_workflow
+    from womblex.cloud import workflow_schedules
+
+    path = _file(fleet, "nightly", ["normalise"], [_TRIGGER, {"cron": "0 5 * * *"}])
+    args = argparse.Namespace(workflow=path, dsn=None, remove=False, status=False, **_where(fleet))
+    assert cmd_schedule_workflow(args) == 0
+    with WorkflowStore(None) as store:
+        first = store.get("nightly")
+    assert first is not None and len(first.spec.triggers) == 2
+    assert len(list_schedules(dbos_app.open_client(None), "nightly")) == 2
+
+    _file(fleet, "nightly", ["normalise"], [_TRIGGER])  # the operator edits the file
+    def boom(*_: object) -> None:
+        raise OSError("db gone")
+
+    with monkeypatch.context() as m, pytest.raises(OSError):
+        m.setattr(workflow_schedules, "sync_schedules", boom)
+        cmd_schedule_workflow(args)
+    with WorkflowStore(None) as store:  # the copy the firings read still matches its schedules
+        assert store.get("nightly").digest == first.digest
+    assert cmd_schedule_workflow(args) == 0
+    with WorkflowStore(None) as store:
+        assert len(store.get("nightly").spec.triggers) == 1
+    assert len(list_schedules(dbos_app.open_client(None), "nightly")) == 1
+
+    _file(fleet, "nightly", ["normalise"], [])  # no triggers: unscheduled, and nothing stored
+    assert cmd_schedule_workflow(args) == 0
+    with WorkflowStore(None) as store:
+        assert store.get("nightly") is None
+    assert list_schedules(dbos_app.open_client(None), "nightly") == []
+
+
+def test_remove_and_status_work_after_the_workflow_file_is_deleted(
     fleet, saved_preset, capsys, monkeypatch,  # noqa: F811
 ) -> None:
     import argparse
@@ -93,21 +136,21 @@ def test_remove_and_status_work_after_the_workflow_is_deleted(
     fresh = fleet[2] / "none" / "dbos.sqlite"
     with monkeypatch.context() as m:  # --status changes nothing, not even by creating a database
         m.setenv("WOMBLEX_DBOS_PATH", str(fresh))
-        assert cmd_schedule_workflow(argparse.Namespace(workflow_id="x", dsn=None, remove=False, status=True)) == 0
+        assert cmd_schedule_workflow(argparse.Namespace(workflow="x", dsn=None, remove=False, status=True)) == 0
     assert not fresh.parent.exists()
-    ensure_workflow_schema(None)
-    with WorkflowStore(None) as store:
-        store.save("gone", _spec(["normalise"], [_TRIGGER, {"cron": "0 5 * * *"}]))
-    args = argparse.Namespace(workflow_id="gone", dsn=None, remove=False, status=False, **_where(fleet))
+    path = _file(fleet, "gone", ["normalise"], [_TRIGGER, {"cron": "0 5 * * *"}])
+    args = argparse.Namespace(workflow=path, dsn=None, remove=False, status=False, **_where(fleet))
     assert cmd_schedule_workflow(args) == 0
-    with WorkflowStore(None) as store:
-        store.delete("gone")
-    assert cmd_schedule_workflow(args) == 1  # syncing needs the stored triggers
+    Path(path).unlink()
+    assert cmd_schedule_workflow(args) == 1  # syncing needs the file
     capsys.readouterr()
-    assert cmd_schedule_workflow(argparse.Namespace(**{**vars(args), "status": True})) == 0
+    by_name = argparse.Namespace(**{**vars(args), "workflow": "gone"})
+    assert cmd_schedule_workflow(argparse.Namespace(**{**vars(by_name), "status": True})) == 0
     assert capsys.readouterr().out.count("womblex-wf:gone:") == 2
-    assert cmd_schedule_workflow(argparse.Namespace(**{**vars(args), "remove": True})) == 0
+    assert cmd_schedule_workflow(argparse.Namespace(**{**vars(by_name), "remove": True})) == 0
     assert list_schedules(dbos_app.open_client(None), "gone") == []
+    with WorkflowStore(None) as store:
+        assert store.get("gone") is None
 
 
 def test_a_firing_extracts_the_prefix_and_runs_the_workflow_unowned_and_stamped(
@@ -193,7 +236,7 @@ def test_a_firing_whose_dispatch_fails_leaves_its_extraction_running_and_the_run
     with RunBoard(None) as board:
         (run,) = board.runs()
     assert run.counts == {"done": 1, "failed": 1} and run.orphaned  # the batch ran; the firing failed
-    assert f"dispatch-workflow wf --run-id {run.run_id}" in caplog.text
+    assert f"dispatch-workflow <the wf workflow file> --run-id {run.run_id}" in caplog.text
     down[0] = False  # the operator dispatches the stages: the run is no longer orphaned
     real(stored, run_id=run.run_id, store_uri=None, **_firing_args(fleet))
     with RunBoard(None) as board:
@@ -281,11 +324,9 @@ def test_a_workflow_its_firing_would_refuse_is_not_scheduled(
 
     from womblex.cli.workflow import cmd_schedule_workflow
 
-    ensure_workflow_schema(None)
-    with WorkflowStore(None) as store:
-        store.save("wf", _spec(steps, prefix=prefix))
+    path = _file(fleet, "wf", steps, prefix=prefix)
     (Path(fleet[1]) / "empty").mkdir()
-    args = argparse.Namespace(workflow_id="wf", dsn=None, remove=False, status=False, **_where(fleet))
+    args = argparse.Namespace(workflow=path, dsn=None, remove=False, status=False, **_where(fleet))
     assert cmd_schedule_workflow(args) == 1
     assert f"[{code}]" in caplog.text
     assert list_schedules(dbos_app.open_client(None), "wf") == []

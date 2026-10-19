@@ -9,12 +9,11 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_workflow_runner import _PRESET, _resolve, _stored, shards  # noqa: F401
+from tests.test_workflow_runner import _PRESET, _resolve, _stored, shards, write_workflow  # noqa: F401
 from womblex.analyse.embed_stage import plan_embedding
 from womblex.analyse.enrich_stage import _load_narratives
 from womblex.cloud.stage_contracts import STAGE_CONTRACTS
 from womblex.cloud.workflow_plan import plan_workflow
-from womblex.cloud.workflow_store import WorkflowStore, ensure_workflow_schema
 from womblex.config import EnrichmentConfig
 from womblex.process.chunk_stage import _batch_bases
 from womblex.utils.token_packer import TokenCounter
@@ -85,15 +84,12 @@ def test_cli_json_prices_and_exit_codes(shards: Path, tmp_path: Path, capsys: py
     from womblex.cli.workflow import cmd_plan
     from womblex.ui.presets import build_preset_record, preset_filename, serialise_preset_record
 
-    dsn = f"sqlite:///{tmp_path}/wf.db"
-    ensure_workflow_schema(dsn)
-    with WorkflowStore(dsn) as store:
-        store.save("w", _stored(["chunk", "embed"]).spec)
+    write_workflow(tmp_path, "w", ["chunk", "embed"])
     record, _ = build_preset_record(name=_PRESET.name, description="", formats=(), config=_PRESET.config)
     (tmp_path / preset_filename(_PRESET.name)).write_text(serialise_preset_record(record))
 
     def args(**kw) -> argparse.Namespace:
-        base = {"workflow_id": "w", "shards": shards, "dsn": dsn, "presets_dir": tmp_path,
+        base = {"workflow": tmp_path / "w.yaml", "shards": shards, "presets_dir": tmp_path,
                 "models_check": None, "assume_price": [], "json": True}
         return argparse.Namespace(**{**base, **kw})
 
@@ -103,11 +99,10 @@ def test_cli_json_prices_and_exit_codes(shards: Path, tmp_path: Path, capsys: py
     assert cmd_plan(args(json=False, assume_price=["embed=3"])) == 0
     assert "ASSUMPTION" in capsys.readouterr().out
     assert cmd_plan(args(assume_price=["chunk=1"])) == 1
-    with WorkflowStore(dsn) as store:
-        store.save("refused", _stored(["embed"]).spec)  # chunks are not on disk
-    for wid, code in (("absent", "workflow_unavailable"), ("refused", "step_order")):  # still one JSON object
+    write_workflow(tmp_path, "refused", ["embed"])  # chunks are not on disk
+    for name, code in (("absent", "workflow_unavailable"), ("refused", "step_order")):  # still one JSON object
         capsys.readouterr()
-        assert cmd_plan(args(workflow_id=wid)) == 1 and json.loads(capsys.readouterr().out)["code"] == code
+        assert cmd_plan(args(workflow=tmp_path / f"{name}.yaml")) == 1 and json.loads(capsys.readouterr().out)["code"] == code
 
 
 def test_layout_skips_only_when_every_sidecar_carries_the_fingerprint(shards: Path) -> None:  # noqa: F811

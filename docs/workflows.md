@@ -1,40 +1,29 @@
-# Stored workflows
+# Workflows
 
-A stored workflow is a named recipe: a preset, optional config changes, the
-downstream steps to run in order, and optionally cron triggers. It is kept in the database DBOS's own tables live in (Postgres
-for a fleet, a local SQLite file otherwise). The "why" is in
-[decisions-operations.md](decisions-operations.md) ("Trust and recipes").
+A workflow is a named recipe in a YAML file: a preset, optional config changes,
+the downstream steps to run in order, and optionally cron triggers. The file is
+the master copy: every workflow command takes its path, and creating or editing
+one needs no code. Only `schedule-workflow` stores a copy, in the database DBOS's
+own tables live in (Postgres for a fleet, a local SQLite file otherwise), because
+its firings read it. The "why" is in [decisions-operations.md](decisions-operations.md)
+("A workflow is a file").
 
-**A workflow is saved only through code.** There is no `womblex workflow save`,
-`list`, `show` or `delete`, and no workflow ships by default (D-2.2). The commands
-below read a workflow by id; `WorkflowStore` writes it.
+## Writing one
 
-## Saving one
+[`configs/workflows/nightly.yaml`](../configs/workflows/nightly.yaml) is an example,
+with the commands that use it in its comments.
 
-```python
-from womblex.cloud.workflow_store import WorkflowStore, ensure_workflow_schema, validate_workflow_spec
-
-spec = validate_workflow_spec({
-    "preset": "DEFAULT-Isaacus",                      # a built-in preset, or one saved under --presets-dir
-    "config": {"chunking": {"chunk_size": 512}},      # laid over the preset's config, key by key
-    "input_binding": {"ingest_prefix": "inbox", "batch_size": 50},
-    "steps": [{"stage": "normalise"}, {"stage": "enrich"}, {"stage": "chunk"}, {"stage": "embed"}],
-    "triggers": [{"cron": "0 2 * * *", "timezone": "Australia/Sydney"}],
-})
-ensure_workflow_schema(None)                          # None: the local SQLite file; else a DSN
-with WorkflowStore(None) as store:
-    store.save("nightly", spec)                       # a workflow has no owner; its runs are admin-only
-```
-
-`validate_workflow_spec` refuses what could never run: an unknown stage, a stage
-listed twice, a bad cron expression or timezone, or a config that does not validate.
-`WorkflowStore.save` runs the same checks, and the id must be a single safe token (letters, digits, `.`, `_`, `-`).
-The workflow's digest (`sha256:…`) is over the spec, and is stamped on every
-sidecar its steps write.
+Every command checks the file first and refuses what could never run: an unknown
+key, an unknown stage, a stage listed twice, a bad cron expression or timezone,
+or a config that does not validate. A workflow has no owner; the runs it starts
+are admin-only, like CLI runs. Its digest (`sha256:…`) is over the parsed spec,
+so formatting and comments do not change it, and is stamped on every sidecar
+its steps write.
 
 | Field | Meaning |
 |---|---|
-| `preset` | The base config. `dataset` and `paths` are never taken from the workflow. |
+| `name` | The workflow's id: its schedules, its stored copy and its runs are named for it. |
+| `preset` | The base config, a built-in preset or one saved under `--presets-dir`. `dataset` and `paths` are never taken from the workflow. |
 | `config` | Overlay on the preset's config: mappings merge, anything else replaces, `null` drops a key to its default. |
 | `input_binding` | `ingest_prefix` (the documents a firing extracts) and `batch_size`. Extraction is not a step. |
 | `steps` | Downstream stages, each at most once, run in the order listed (`dispatch-workflow` needs pipeline order). |
@@ -44,11 +33,12 @@ sidecar its steps write.
 
 | Command | What it does |
 |---|---|
-| `womblex validate <id> [--shards DIR] [--json]` | Every check a run makes before its first step, and nothing else. Exit 1 if it would be refused. |
-| `womblex plan <id> --shards DIR [--assume-price enrich=…]` | Which steps would run or skip, and the exact tokens `enrich` and `embed` would send. Calls no paid API; a cost appears only for a price you supply. |
-| `womblex run-workflow <id> --shards DIR` | Run the steps over a local shard directory. Refused before the first step, never halted after it: a failed step is recorded and the later steps still run. |
-| `womblex dispatch-workflow <id> --run-id R --store URI [--dry-run]` | Queue the steps for the fleet. Refused before any queue row for anything the local runner refuses, a step the fleet does not dispatch (`layout`, `pii`, `quality`), an order the coordinator would change, or a run already worked under another workflow. |
-| `womblex schedule-workflow <id> [--store URI --ingest URI] [--remove \| --status]` | Make the queue's schedules equal the workflow's triggers. Refuses a workflow its firing would refuse (an unsafe input prefix, no documents, a failing dry-run dispatch). |
+| `womblex validate FILE [--shards DIR] [--json]` | Every check a run makes before its first step, and nothing else. Exit 1 if it would be refused. |
+| `womblex plan FILE --shards DIR [--assume-price enrich=…]` | Which steps would run or skip, and the exact tokens `enrich` and `embed` would send. Calls no paid API; a cost appears only for a price you supply. |
+| `womblex run-workflow FILE --shards DIR` | Run the steps over a local shard directory. Refused before the first step, never halted after it: a failed step is recorded and the later steps still run. |
+| `womblex dispatch-workflow FILE --run-id R --store URI [--dry-run]` | Queue the steps for the fleet; the run receives the whole workflow, so nothing is stored. Refused before any queue row for anything the local runner refuses, a step the fleet does not dispatch (`layout`, `pii`, `quality`), an order the coordinator would change, or a run already worked under another workflow. |
+| `womblex schedule-workflow FILE [--store URI --ingest URI]` | Store the copy the firings read and make the queue's schedules equal its triggers, in one action; a workflow with no triggers is unscheduled and its copy deleted. Refuses a workflow its firing would refuse (an unsafe input prefix, no documents, a failing dry-run dispatch). |
+| `womblex schedule-workflow FILE\|NAME --remove \| --status` | Unschedule the workflow and delete its stored copy, or list its schedules. Takes the name when the file is gone. |
 
 `run-workflow` runs the steps in the order listed. It refuses an order in which a
 step reads a required input that is missing, produced only by a later step, or
@@ -59,15 +49,15 @@ coordinator runs stages in that order: `normalise`, `spellfix`, `enrich`, `chunk
 
 ## A trigger firing
 
-At each cron time a worker starts a firing: it runs the same checks as scheduling,
-queues the extraction batches for run `<id>-<UTC time>`, then dispatches the steps
+At each cron time a worker starts a firing from the stored copy: it runs the same checks as scheduling,
+queues the extraction batches for run `<name>-<UTC time>`, then dispatches the steps
 under the workflow's recipe. If the dispatch fails after the batches are queued, the
 batches run on and the run reads `orphaned` (`womblex jobs`, `/v1/runs`) until you
-dispatch its steps with `womblex dispatch-workflow <id> --run-id <run> --store <uri>`.
+dispatch its steps with `womblex dispatch-workflow FILE --run-id <run> --store <uri>`.
 A firing refuses a run that already holds cancelled batches.
 It re-extracts the whole prefix every time; there is no "only new documents" and no
-backfill of missed firings. Deleting a workflow does not unschedule it: run
-`schedule-workflow <id> --remove`.
+backfill of missed firings. Deleting a workflow file does not unschedule it: run
+`schedule-workflow <name> --remove`.
 
 ## When a stage fails
 

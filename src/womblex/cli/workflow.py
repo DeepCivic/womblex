@@ -1,5 +1,5 @@
-"""Workflow CLI subcommands: ``run-workflow`` runs a stored workflow's steps over a local shard dir;
-``validate`` runs every check that run makes before its first step, and nothing else."""
+"""Workflow CLI subcommands, each over a workflow file (`cloud.workflow_file`): ``run-workflow``,
+``validate``, ``plan``, ``dispatch-workflow``, and ``schedule-workflow``, the one that stores a copy."""
 
 from __future__ import annotations
 
@@ -16,10 +16,7 @@ logger = logging.getLogger("womblex")
 
 
 def _add_workflow_arguments(p: argparse.ArgumentParser) -> None:
-    p.add_argument("workflow_id", help="Stored workflow")
-    p.add_argument("--dsn", default=None,
-                   help="Database the workflow is stored in: the DBOS system database URL "
-                        "(or $WOMBLEX_DB_DSN / $DATABASE_URL). Default: the local SQLite file.")
+    p.add_argument("workflow", type=Path, help="Workflow file (YAML)")
     p.add_argument("--presets-dir", type=Path, default=None,
                    help="Directory of operator-saved presets (or $WOMBLEX_UI_PRESETS_DIR). "
                         "Built-in presets always resolve.")
@@ -55,7 +52,7 @@ def _register_plan(p: argparse.ArgumentParser) -> None:
 
 
 def _register_dispatch(p: argparse.ArgumentParser) -> None:
-    p.add_argument("workflow_id", help="Stored workflow to dispatch")
+    p.add_argument("workflow", type=Path, help="Workflow file (YAML) to dispatch")
     p.add_argument("--run-id", required=True, help="Run whose extraction the stages follow")
     p.add_argument("--store", default=None,
                    help="Object-store URI the run's shards are in (or $WOMBLEX_STORE_URI)")
@@ -63,14 +60,15 @@ def _register_dispatch(p: argparse.ArgumentParser) -> None:
     p.add_argument("--max-attempts", type=int, default=3)
     p.add_argument("--dry-run", action="store_true", help="Run every check, write no queue row")
     p.add_argument("--dsn", default=None,
-                   help="DBOS system database holding the workflow and the queue "
+                   help="DBOS system database holding the queue "
                         "(or $WOMBLEX_DB_DSN / $DATABASE_URL). Default: the local SQLite file.")
     p.add_argument("--presets-dir", type=Path, default=None,
                    help="Directory of operator-saved presets (or $WOMBLEX_UI_PRESETS_DIR).")
 
 
 def _register_schedule(p: argparse.ArgumentParser) -> None:
-    p.add_argument("workflow_id", help="Stored workflow whose cron triggers to (un)schedule")
+    p.add_argument("workflow", help="Workflow file (YAML) to schedule; with --remove or --status, "
+                                    "its file or its name")
     p.add_argument("--dsn", default=None,
                    help="DBOS system database (or $WOMBLEX_DB_DSN / $DATABASE_URL). Default: the local SQLite file.")
     p.add_argument("--store", default=None,
@@ -81,24 +79,29 @@ def _register_schedule(p: argparse.ArgumentParser) -> None:
     p.add_argument("--presets-dir", type=Path, default=None,
                    help="Directory of operator-saved presets (or $WOMBLEX_UI_PRESETS_DIR).")
     mode = p.add_mutually_exclusive_group()
-    mode.add_argument("--remove", action="store_true", help="Unschedule every trigger of the workflow")
+    mode.add_argument("--remove", action="store_true",
+                      help="Unschedule every trigger of the workflow and delete its stored copy")
     mode.add_argument("--status", action="store_true", help="List its schedules; change nothing")
 
 
 def _load_workflow(args: argparse.Namespace):  # type: ignore[no-untyped-def]
-    """The stored workflow named by *args*, or `None` (the reason is logged)."""
-    from womblex.cloud.workflow_store import WorkflowStore
+    """The workflow in the file *args* names, or `None` (the reason is logged and kept on *args*)."""
+    from womblex.cloud.workflow_file import WorkflowFileError, load_workflow_file
 
-    dsn = args.dsn or os.environ.get("WOMBLEX_DB_DSN") or os.environ.get("DATABASE_URL")
     try:
-        with WorkflowStore(dsn) as store:
-            stored = store.get(args.workflow_id)
-    except Exception as e:
-        logger.error("could not read workflow %r: %s", args.workflow_id, e)
+        return load_workflow_file(Path(args.workflow))
+    except WorkflowFileError as e:
+        logger.error("%s", e)
+        args.file_error = e
         return None
-    if stored is None:
-        logger.error("no stored workflow %r", args.workflow_id)
-    return stored
+
+
+def _file_refusal(args: argparse.Namespace):  # type: ignore[no-untyped-def]
+    """The refusal a workflow file that did not load stands for, with its stable code."""
+    from womblex.cloud.workflow_runner import RefusalCode, WorkflowRefusedError
+
+    code = RefusalCode.SPEC_INVALID if args.file_error.readable else RefusalCode.WORKFLOW_UNAVAILABLE
+    return WorkflowRefusedError(str(args.file_error), code=code)
 
 
 def _preset_resolver(args: argparse.Namespace) -> Callable[[str], object]:
@@ -135,7 +138,6 @@ def cmd_run_workflow(args: argparse.Namespace) -> int:
 
 def cmd_validate(args: argparse.Namespace) -> int:
     """Run a workflow's pre-run checks without running it; exit 1 if it would be refused."""
-    from womblex.cloud.workflow_runner import RefusalCode
     from womblex.cloud.workflow_validate import validate_workflow
 
     if args.shards is not None and not args.shards.is_dir():
@@ -144,10 +146,9 @@ def cmd_validate(args: argparse.Namespace) -> int:
     stored = _load_workflow(args)
     if stored is None:
         if args.json:  # a script reading stdout gets a report, not nothing
+            refusal = _file_refusal(args)
             print(json.dumps({
-                "workflow_id": args.workflow_id, "valid": False,
-                "code": RefusalCode.WORKFLOW_UNAVAILABLE.value,
-                "message": "no stored workflow by that id, or the store could not be read",
+                "workflow_id": None, "valid": False, "code": refusal.code.value, "message": str(refusal),
             }, indent=2))
         return 1
     report = validate_workflow(
@@ -190,7 +191,7 @@ def _parse_prices(items: list[str]) -> dict[str, float]:
 def cmd_plan(args: argparse.Namespace) -> int:
     """Say what a workflow would run and spend, calling no paid API; exit 1 if it would be refused."""
     from womblex.cloud.workflow_plan import plan_workflow
-    from womblex.cloud.workflow_runner import RefusalCode, WorkflowRefusedError
+    from womblex.cloud.workflow_runner import WorkflowRefusedError
 
     if not args.shards.is_dir():
         logger.error("--shards path is not a directory: %s", args.shards)
@@ -203,8 +204,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
     stored = _load_workflow(args)
     try:
         if stored is None:
-            raise WorkflowRefusedError("no stored workflow by that id, or the store could not be read",
-                                       code=RefusalCode.WORKFLOW_UNAVAILABLE)
+            raise _file_refusal(args)
         plan = plan_workflow(
             stored, args.shards, resolve_preset=_preset_resolver(args), prices=prices,  # type: ignore[arg-type]
         )
@@ -214,7 +214,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
         for issue in e.issues:
             logger.error("[%s] %s", issue.code.value, issue.message)
         if args.json:  # a script reading stdout gets an answer, as `validate --json` does
-            print(json.dumps({"workflow_id": args.workflow_id, "refused": True, "code": e.code.value,
+            print(json.dumps({"workflow_id": stored.id if stored else None, "refused": True, "code": e.code.value,
                               "message": str(e), "issues": [i.as_dict() for i in e.issues]}, indent=2))
         return 1
     if args.json:
@@ -297,47 +297,68 @@ def _check_firing(args: argparse.Namespace, stored, dsn: str | None) -> bool:  #
     return True
 
 
+def _workflow_name(arg: str) -> str | None:
+    """The workflow *arg* names: its file's `name`, else *arg* itself as a name (`None` if neither)."""
+    from womblex.cloud.workflow_store import is_safe_workflow_id
+
+    if Path(arg).is_file():
+        stored = _load_workflow(argparse.Namespace(workflow=arg))
+        return stored.id if stored else None
+    if is_safe_workflow_id(arg):
+        return arg
+    logger.error("%s is neither a workflow file nor a workflow name", arg)
+    return None
+
+
 def cmd_schedule_workflow(args: argparse.Namespace) -> int:
-    """Make the board's schedules for a stored workflow equal its triggers (workers fire them)."""
+    """Store a workflow's copy and make the board's schedules equal its triggers (workers fire them)."""
     from womblex.cloud import dbos_app
-    from womblex.cloud.workflow_schedules import list_schedules, remove_schedules, sync_schedules
+    from womblex.cloud.workflow_schedules import list_schedules, schedule_workflow, unschedule_workflow
+    from womblex.cloud.workflow_store import WorkflowStore, ensure_workflow_schema
 
     dsn = args.dsn or os.environ.get("WOMBLEX_DB_DSN") or os.environ.get("DATABASE_URL")
-    # --status and --remove go by id alone: deleting a workflow leaves its schedules behind.
+    # --status and --remove take a name too: a workflow's file may be gone while its schedules stay.
     if args.status or args.remove:
         stored = None
+        if (name := _workflow_name(args.workflow)) is None:
+            return 1
     elif (stored := _load_workflow(args)) is None:
         return 1
+    else:
+        name = stored.id
     if stored is not None and stored.spec.triggers and not _check_firing(args, stored, dsn):
         return 1
     if args.status and not dsn and not dbos_app.local_database_path().exists():
         return 0  # nothing scheduled, and --status creates no database to say so
-    if not args.status:
-        dbos_app.ensure_schema(dsn)
-    client = dbos_app.open_client(dsn)
+    client = dbos_app.open_client(dsn) if args.status else None
     if args.status:
-        for s in list_schedules(client, args.workflow_id):
+        for s in list_schedules(client, name):  # type: ignore[arg-type]
             print(f"{s['schedule_name']}  {s['schedule']} {s.get('cron_timezone') or 'UTC'}  "
                   f"{s['status']}  last fired {s.get('last_fired_at') or 'never'}")
         return 0
-    if args.remove:
-        print(f"unscheduled {remove_schedules(client, args.workflow_id)} trigger(s) of {args.workflow_id}")
-        return 0
-    assert stored is not None  # neither --status nor --remove
-    names = sync_schedules(client, stored)
-    print(f"{stored.id}: {len(names)} trigger(s) scheduled" + (f" ({', '.join(names)})" if names else ""))
+    dbos_app.ensure_schema(dsn)
+    ensure_workflow_schema(dsn)
+    client = dbos_app.open_client(dsn)
+    with WorkflowStore(dsn) as wf_store:
+        if args.remove:
+            print(f"unscheduled {unschedule_workflow(client, wf_store, name)} trigger(s) of {name}")
+            return 0
+        assert stored is not None  # neither --status nor --remove
+        names = schedule_workflow(client, wf_store, stored)
+    print(f"{stored.id} ({stored.digest}): {len(names)} trigger(s) scheduled"
+          + (f" ({', '.join(names)}); its copy is stored for the firings" if names else "; nothing stored"))
     return 0
 
 
 COMMANDS = [
-    Command("run-workflow", "Run a stored workflow's steps over a local shard directory",
+    Command("run-workflow", "Run a workflow file's steps over a local shard directory",
             _register_run_workflow, cmd_run_workflow),
-    Command("dispatch-workflow", "Queue a stored workflow's steps for the fleet (object-store run)",
+    Command("dispatch-workflow", "Queue a workflow file's steps for the fleet (object-store run)",
             _register_dispatch, cmd_dispatch_workflow),
-    Command("schedule-workflow", "Schedule a stored workflow's cron triggers on the queue (workers fire them)",
+    Command("schedule-workflow", "Store a workflow file's copy and schedule its cron triggers (workers fire them)",
             _register_schedule, cmd_schedule_workflow),
-    Command("plan", "Say what a stored workflow would run and spend, calling no paid API",
+    Command("plan", "Say what a workflow file would run and spend, calling no paid API",
             _register_plan, cmd_plan),
-    Command("validate", "Check a stored workflow would run, without running it",
+    Command("validate", "Check a workflow file would run, without running it",
             _register_validate, cmd_validate),
 ]

@@ -8,6 +8,9 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 ## [Unreleased]
 
+### Changed
+- **Workflows are files — trust plan, Phase R item R.3 (D1, D10).** `validate`, `plan`, `run-workflow`, `dispatch-workflow` and `schedule-workflow` take a workflow file's path (`cloud/workflow_file.py`; YAML, `name` beside the spec fields, unknown keys refused) instead of a stored id, and `configs/workflows/nightly.yaml` is an example. Only `schedule-workflow` stores a copy, for its firings: it saves the copy and syncs the schedules in one action (`workflow_schedules.schedule_workflow`), and `--remove` deletes the copy too. `--dsn` leaves `validate`, `plan` and `run-workflow`.
+
 ### Removed
 - **The workflow owner — trust plan, Phase R item R.2b (D13).** Nothing set it. `WorkflowStore` takes no `owner` and `WorkflowOwnedError` is gone; a firing's rows carry no owner, so its run is admin-only like a CLI run, and the firing's `<owner>/` prefix check (`prefix_not_owned`) goes with it.
 - **The `destinations` field of a workflow — trust plan, Phase R item R.2 (D4).** Nothing delivered to a destination, so the field goes until Phase 3 delivers one. A stored workflow saved with destinations still loads, with them dropped and a warning.

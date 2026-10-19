@@ -546,28 +546,30 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - A model the pre-run check builds only to confirm it loads is not recorded as used — a run whose check built the model but whose stages never actually called it shows no entry for it; only a run's own build of it does.
 - Benchmark reports (womblex-benchmark) name the models that produced them, suites can run against a named model, and `docs/accuracy/` stays labelled as the default group.
 
-## 27. Stored Workflows — Check, Run, Dispatch and Schedule
+## 27. Workflows — Check, Run, Dispatch and Schedule
 
 **As** an operator,
-**I want** to save a named recipe of steps over a preset and run it locally, on the fleet or on a schedule,
+**I want** to declare a named recipe of steps over a preset in a file and run it locally, on the fleet or on a schedule,
 **so that** a run's sequence is declared once, checked before it spends anything, and recorded in what it writes.
 
-**Given** a stored workflow (a preset reference, input binding, ordered steps and triggers)
+**Given** a workflow file (a name, a preset reference, input binding, ordered steps and triggers)
 **When** the operator validates, plans, runs, dispatches or schedules it
 **Then** everything that can refuse does so before the first step, and the files each step writes name the workflow.
 
 **Acceptance criteria:**
 
-- A workflow is stored in the database the queue uses and checked on save and again on load (steps, cron and timezone, config overlay); its digest is stable over its spec.
+- A workflow is a plain-text file; creating or editing one needs no code.
+- Every command validates the file first (steps, cron and timezone, config overlay) and rejects unknown keys.
+- The workflow digest ignores formatting and comments.
 - Its own `config` is laid over its preset's key by key, and the whole is validated as a full config.
 - `validate` runs exactly the checks `run-workflow` runs before its first step, and writes nothing; `plan` counts the requests and tokens its paid steps would send, calling no paid API.
 - Step order is checked before launch: a step whose input is missing, produced later, or rewritten later is refused with a stable code.
 - Once a step has run, a failed step does not stop the steps after it; each later step records the failure it follows, and the exit code is non-zero.
 - Every sidecar a workflow step writes carries the workflow's digest, and the run record lists the workflows observed in its files.
 - `dispatch-workflow` queues the steps for the fleet, refused before any row for anything the local runner refuses and for a step the fleet cannot run, an order the coordinator would change, or a run already worked under another digest; workers run each stage under the workflow's config.
-- `schedule-workflow` makes the queue's schedules equal the workflow's cron triggers; each firing extracts the input prefix into a fresh run and dispatches the workflow, refused before any row when the prefix holds no document. A workflow has no owner; the runs it starts are admin-only, like CLI runs. `schedule-workflow` runs the same checks first (`check_firing`, against `--store` / `--ingest`), so a workflow its firing would refuse is not scheduled.
+- `schedule-workflow` saves the workflow and syncs its schedules in one action, so stored triggers and the queue's schedules always match; each firing reads the saved copy, extracts the input prefix into a fresh run and dispatches the workflow, refused before any row when the prefix holds no document. A workflow has no owner; the runs it starts are admin-only, like CLI runs. `schedule-workflow` runs the same checks first (`check_firing`, against `--store` / `--ingest`), so a workflow its firing would refuse is not scheduled.
 
-**Out of scope:** a command or API that saves a workflow (one is saved through `WorkflowStore` in code), incremental firings (only documents not seen before), workflow owners, backfill of missed firings, and destinations (each kind returns with the merge that delivers it).
+**Out of scope:** managing workflows through the API, incremental firings (only documents not seen before), workflow owners, backfill of missed firings, and destinations (each kind returns with the merge that delivers it).
 
 ## Outstanding
 
