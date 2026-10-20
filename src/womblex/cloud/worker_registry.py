@@ -132,4 +132,13 @@ def require_served(dsn: str | None, needed: dict[str, str]) -> None:
             "config names the same models and whose model check passes for them")
 
 
-__all__ = ["LIVE_SECONDS", "NoLiveWorker", "WorkerRegistry", "needed_queues", "require_served"]
+def unserved(dsn: str | None, needed: dict[str, str]) -> str | None:
+    """The refusal `require_served` would raise for *needed*, or `None` when live workers serve it all."""
+    try:
+        require_served(dsn, needed)
+    except NoLiveWorker as e:
+        return str(e)
+    return None
+
+
+__all__ = ["LIVE_SECONDS", "NoLiveWorker", "WorkerRegistry", "needed_queues", "require_served", "unserved"]

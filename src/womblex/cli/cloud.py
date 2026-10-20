@@ -161,12 +161,10 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
 
     specs = batch_specs(keys, shard_prefix=shard_prefix, ingest_root=root,
                         batch_size=batch_size, max_attempts=args.max_attempts)
-    from womblex.cloud.worker_registry import NoLiveWorker, needed_queues, require_served
+    from womblex.cloud.worker_registry import needed_queues, unserved
 
-    try:
-        require_served(dsn, needed_queues(config, ingest_root=root))
-    except NoLiveWorker as e:
-        logger.error("%s", e)
+    if refusal := unserved(dsn, needed_queues(config, ingest_root=root)):
+        logger.error("%s", refusal)
         return 1
 
     ensure_schema(dsn)
@@ -438,12 +436,10 @@ def cmd_enqueue_stages(args: argparse.Namespace) -> int:
         for issue in e.issues:
             logger.error("[%s] %s", issue.code.value, issue.message)
         return 1
-    from womblex.cloud.worker_registry import NoLiveWorker, needed_queues, require_served
+    from womblex.cloud.worker_registry import needed_queues, unserved
 
-    try:
-        require_served(dsn, needed_queues(config, stages))
-    except NoLiveWorker as e:
-        logger.error("%s", e)
+    if refusal := unserved(dsn, needed_queues(config, stages)):
+        logger.error("%s", refusal)
         return 1
     if args.dry_run:
         return 0

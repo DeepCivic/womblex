@@ -637,6 +637,26 @@ def test_a_prefix_scoping_to_nothing_is_not_a_licence_to_list_the_whole_store(
     assert _CapturingQueue.keys is None
 
 
+
+def test_enqueue_is_refused_before_any_row_when_no_live_worker_serves_the_run(tmp_path, monkeypatch, caplog):
+    """`womblex enqueue` makes the dispatch's live-worker check (Phase R, D8): exit 1, nothing queued."""
+    import womblex.cloud.jobs as jobs_module
+    from womblex.cli import cloud
+    from womblex.cloud import dbos_app, worker_registry
+
+    def none_live(_dsn, needed):
+        raise worker_registry.NoLiveWorker(f"no live worker serves {', '.join(needed)}")
+
+    monkeypatch.setattr(jobs_module, "RunBoard", _CapturingQueue)
+    monkeypatch.setattr(dbos_app, "ensure_schema", lambda _dsn: None)
+    monkeypatch.setattr(worker_registry, "require_served", none_live)
+    (tmp_path / "inbox" / "2026-08").mkdir(parents=True)
+    (tmp_path / "inbox" / "2026-08" / "a.pdf").write_bytes(b"%PDF-1.4\n")
+
+    _CapturingQueue.keys = None
+    assert cloud.cmd_enqueue(_enqueue_args(tmp_path, "2026-08")) == 1
+    assert _CapturingQueue.keys is None and "no live worker serves extraction" in caplog.text
+
 def test_the_worker_side_dispatch_helpers_import_without_fastapi():
     """fastapi is the `ui`/`api` extra; a base-install worker must still import these."""
     import subprocess
