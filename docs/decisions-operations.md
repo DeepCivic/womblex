@@ -129,7 +129,6 @@ A run is launched, then it lands. Everything that can refuse does so before laun
 ### Workflow conditions are removed (Phase R, D3)
 2026-10, Phase R items R.1a (the fleet stops labelling), R.1b (`run-workflow` stops labelling) and R.1c (the field goes). A condition labelled each document `holds`, `fails` or `unevaluable` against a manifest column, in a `*.conditions.parquet` sidecar that nothing read. Every column it labelled is in `manifest.parquet`, so a reader filters the manifest instead. Reverses Phase 2 merges 8 and 9a.
 
-- *Rejected, do not re-attempt:* **a condition that refuses the run** when one document fails it, and **a condition that gates after launch**. One document never decides a run, and nothing stops a launched run.
 ### Workflow destinations are removed until they deliver (Phase R, D4)
 2026-10, Phase R item R.2. `destinations` was stored on a workflow and nothing delivered to it, so the field is removed with its TO-DO; Phase 3 brings it back one destination kind at a time, each in the merge that delivers it. A stored row that still holds destinations loads with them dropped and a warning.
 
