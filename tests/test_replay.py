@@ -52,6 +52,6 @@ def test_status_on_a_postgres_database_no_writer_has_migrated_prints_nothing(cap
     from womblex.cli.workflow import cmd_schedule_workflow
 
     with fresh_database() as url:
-        args = argparse.Namespace(workflow_id="x", dsn=url, remove=False, status=True)
+        args = argparse.Namespace(workflow="x", dsn=url, remove=False, status=True)
         assert cmd_schedule_workflow(args) == 0
     assert capsys.readouterr().out == ""
