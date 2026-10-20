@@ -5,7 +5,8 @@ An extraction batch stages its inputs from the ingest store, runs the shared
 publishes the shards. A stage plans its units (one per batch base, or one for
 the whole run), then runs each as its own step, so a unit that finished is
 recorded and a re-run starts after it. The coordinator waits for the run's
-extraction to settle, then runs the requested stages in pipeline order.
+extraction to settle, runs the requested stages in pipeline order, then writes
+the run's ``manifest.parquet`` through the code `womblex finalize` runs.
 
 A launched run is never stopped part-way (`docs/decisions-operations.md`, "A run is an
 arrow"): a unit that fails does not stop the stage's other units, and a stage
@@ -35,6 +36,7 @@ from dbos import error as dbos_error
 
 from womblex.batch import process_batch
 from womblex.cloud import dbos_app
+from womblex.cloud.finalize import NoShardManifests, finalize_run, published_checksums
 from womblex.cloud.stage_contracts import PRODUCER_OF, STAGE_CONTRACTS
 from womblex.cloud.stage_runner import (
     InputContractError,
@@ -118,7 +120,7 @@ def _context() -> WorkerContext:
 
 def _not_a_failure_to_retry(e: BaseException) -> bool:
     """A missing input is a wiring fact, not a transient fault: retrying cannot fix it."""
-    return not isinstance(e, NotReady | StageNotReady | InputContractError)
+    return not isinstance(e, NotReady | StageNotReady | InputContractError | NoShardManifests)
 
 
 def _retry(name: str, max_attempts: int) -> StepOptions:
@@ -372,6 +374,19 @@ def _unsettled_batches(run_id: str) -> int:
     ))
 
 
+def _finalize(run_id: str, shard_prefix: str) -> str:
+    """Write the run's ``manifest.parquet`` over every batch present, as `womblex finalize` does."""
+    from womblex.cloud.jobs import RunBoard
+
+    ctx = _context()
+    output_prefix = _output_prefix(shard_prefix)
+    with RunBoard(ctx.dsn) as board:
+        checksums, undigested = published_checksums(board, run_id, output_prefix)
+    written = finalize_run(ctx.store, output_prefix, checksums=checksums, undigested=undigested)
+    logger.info("run %s: wrote %s from %d shard manifest(s)", run_id, written.manifest_key, written.shard_manifests)
+    return written.manifest_key
+
+
 @DBOS.workflow(name=dbos_app.DOWNSTREAM_WORKFLOW)
 def run_downstream(
     run_id: str, stages: list[str], shard_prefix: str, max_attempts: int, owner: str | None,
@@ -387,7 +402,9 @@ def run_downstream(
     batch only. A failed stage does not stop the stages after it: each runs
     over what exists, recorded with the failures it follows (`ran_after_failed`
     on its row, as the local runner records), and the coordinator fails last
-    if any did, naming them.
+    if any did, naming them. Its last step writes the run's ``manifest.parquet``
+    (`cloud/finalize.py`), after a failed stage too; a manifest it could not
+    write is named among the failures.
     """
     while DBOS.run_step({"name": "await-extraction"}, _unsettled_batches, run_id):
         DBOS.sleep(SETTLE_POLL_SECONDS)
@@ -421,11 +438,21 @@ def run_downstream(
             results.append({"stage": stage, "error": _carried(e), "ran_after_failed": list(failed)})
             logger.warning("run %s: %s failed; later stages still run: %s", run_id, stage, results[-1]["error"])
             failed.append(stage)
+    # Last, and whatever failed: the manifest covers every batch present (Requirement 2).
+    unwritten = ""
+    try:
+        DBOS.run_step(_retry("finalize", max_attempts), _finalize, run_id, shard_prefix)
+    except Exception as e:  # recorded, as a failed stage is; the run has landed either way
+        unwritten = f"the run manifest was not written ({_carried(e)}); `womblex finalize` writes it"
+        logger.warning("run %s: %s", run_id, unwritten)
     if failed:
         after = [f"{r['stage']} after {', '.join(r['ran_after_failed'])}"
                  for r in results if r["ran_after_failed"]]
         raise RunIncomplete(
             f"run {run_id}: stage(s) {', '.join(failed)} failed; every stage ran"
             + (f"; ran after a failure: {'; '.join(after)}" if after else "")
+            + (f"; {unwritten}" if unwritten else "")
         )
+    if unwritten:
+        raise RunIncomplete(f"run {run_id}: every stage finished, but {unwritten}")
     return results

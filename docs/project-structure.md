@@ -19,6 +19,7 @@ womblex/
 │   │   ├── _shared.py      # Command NamedTuple, setup_logging, select_supported / discover_files, normalise_prefix, check_stage_models
 │   │   ├── pipeline.py     # run, extract, chunk, manifest subcommands
 │   │   ├── cloud.py        # enqueue / enqueue-stages / worker / jobs / finalize / run-stage / egress subcommands
+│   │   ├── finalize.py         # finalize_run() — a run's manifest.parquet in its store; `womblex finalize` and the coordinator's last step
 │   │   ├── retry.py        # retry-stage subcommand
 │   │   ├── serve.py        # serve subcommand (the `/v1` service API)
 │   │   ├── api_token.py    # api-token subcommand

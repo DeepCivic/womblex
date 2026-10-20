@@ -31,7 +31,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 
 **Given** a configured object store and a DBOS system database (Postgres, or a local SQLite file)
 **When** the operator enqueues work and starts additional workers
-**Then** workers claim batches concurrently without duplication, writing the standard shard layout.
+**Then** workers claim batches concurrently without duplication, write the standard shard layout, and write the run manifest when the stages finish.
 
 **Acceptance criteria:**
 
@@ -41,6 +41,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - A stage can execute in-place over object storage using the exact same contract as local file execution.
 - The pipeline natively resolves standard local and cloud storage URIs.
 - Object-storage stage writes are all-or-none per stage: every declared output must exist before any is published; a set left partial by a failed upload never reads as complete, so the next run redoes that base and overwrites it; and a stage that rewrites outputs in place commits atomically, so an interrupted publish leaves the previous outputs intact.
+- A distributed run writes `<run>/manifest.parquet` when its stages finish. `womblex finalize` still writes it on demand, with the same result.
 
 **TO-DO:**
 

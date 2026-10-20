@@ -54,6 +54,9 @@ def cmd_retry_stage(args: argparse.Namespace) -> int:
     else:
         logger.info("%s retried as %s, from step %d of %s", args.stage, retry.retry_id,
                     retry.start_step, retry.forked_from)
+    # The coordinator wrote the run manifest before this retry; it does not run again.
+    logger.info("Once %s succeeds, rewrite the run manifest:\n  womblex finalize --run-id %s%s",
+                retry.retry_id, args.run_id, f" --store {store_uri}" if store_uri else "")
     if retry.later:
         where = f" --config {args.config}" + (f" --store {store_uri}" if store_uri else "")
         logger.info(

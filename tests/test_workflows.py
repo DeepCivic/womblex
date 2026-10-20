@@ -431,6 +431,46 @@ def test_finalize_records_the_checksum_of_every_published_file(fleet):
     assert not any("file checksums" in gap for gap in record["partial"])
 
 
+def test_the_coordinator_writes_the_run_manifest_as_finalize_does(fleet):
+    """Requirement 2: a fleet run writes `<run>/manifest.parquet` when its stages finish, and
+    `womblex finalize` still writes it on demand, with the same result."""
+    import argparse
+
+    from womblex.cli.cloud import cmd_finalize
+    from womblex.store.run_manifest import read_run_record
+
+    store_root, ingest, _ = fleet
+    with RunBoard(None) as board:
+        board.enqueue("r1", [batch(ingest)])
+        board.enqueue_stages("r1", ["normalise"], "runs/r1/documents")
+        work(fleet, idle_timeout=2)
+        assert board.stats("r1") == {"done": 3}
+    manifest = store_root / "runs/r1/manifest.parquet"
+    by_coordinator = read_run_record(manifest)
+    assert {"batch-0001.normalised_text.parquet", "batch-0001.elements.parquet"} <= {
+        f["key"].rsplit("/", 1)[-1] for f in by_coordinator["files"]}
+    assert cmd_finalize(argparse.Namespace(
+        store=str(store_root), run_id="r1", output_prefix=None, dsn=dbos_app.system_database_url(None))) == 0
+    again = read_run_record(manifest)
+    assert (again["files"], again["stages"]) == (by_coordinator["files"], by_coordinator["stages"])
+
+
+def test_a_manifest_the_coordinator_cannot_write_is_named_not_hidden(fleet, monkeypatch):
+    def unwritable(*_a, **_k):
+        raise OSError("store refused the upload")
+
+    monkeypatch.setattr(workflows, "finalize_run", unwritable)
+    store_root, ingest, _ = fleet
+    with RunBoard(None) as board:
+        board.enqueue("r1", [batch(ingest)])
+        board.enqueue_stages("r1", ["normalise"], "runs/r1/documents", max_attempts=1)
+        work(fleet, idle_timeout=2)
+        (coordinator,) = [r for r in board.list_jobs("r1") if r.kind == "downstream"]
+    assert coordinator.status == "failed"
+    assert "run manifest was not written" in (coordinator.error or "")
+    assert (store_root / "runs/r1/documents/batch-0001.normalised_text.parquet").exists()
+
+
 class _Row:
     def __init__(self, wid, status, output, kind="batch", created_at=0):
         self.workflow_id, self.status, self.output = wid, status, output

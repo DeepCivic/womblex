@@ -9,6 +9,7 @@ Entries are terse by design; rationale lives in the PR/commit history.
 ## [Unreleased]
 
 ### Added
+- **Fleet runs write their own manifest — trust plan, Phase 3 item 3.2a (Requirement 2).** The coordinator's last step writes `<run>/manifest.parquet` and its run record, after a failed stage too, through the same code as `womblex finalize` (`cloud/finalize.py`); a manifest it cannot write is named in the coordinator's error. `finalize` stays for extraction-only runs and after a retry, which now prints the line. Upgrading: let running coordinators finish before upgrading workers (the coordinator gains a step).
 - **Delivery dependencies — trust plan, Phase 3 item 3.1 (D-3.4).** `httpx` is declared in core for webhook delivery (it was already locked through the Isaacus SDK and imported directly), and a `[pgvector]` extra adds `pgvector` for the Postgres destination. Nothing uses either yet; `uv.lock` gains `pgvector` only.
 - **Stocktake S-R closes Phase R of the trust plan.** Docs brought in line with the repaired workflows (workflow files, no owner, no conditions or destinations, config carried by every fleet run); two stale docstrings corrected. The plan file itself is unchanged. No other code.
 
