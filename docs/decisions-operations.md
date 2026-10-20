@@ -129,7 +129,6 @@ A run is launched, then it lands. Everything that can refuse does so before laun
 ### Workflow conditions are removed (Phase R, D3)
 2026-10, Phase R items R.1a (the fleet stops labelling), R.1b (`run-workflow` stops labelling) and R.1c (the field goes). A condition labelled each document `holds`, `fails` or `unevaluable` against a manifest column, in a `*.conditions.parquet` sidecar that nothing read. Every column it labelled is in `manifest.parquet`, so a reader filters the manifest instead. Reverses Phase 2 merges 8 and 9a.
 
-- *Rejected, do not re-attempt:* **a condition that refuses the run** when one document fails it, and **a condition that gates after launch**. One document never decides a run, and nothing stops a launched run.
 ### A trigger fires a dispatch
 Phase 2 merge 9b (#197, re-landed after it merged into a stacked base that had already merged). A DBOS schedule per trigger, firing `womblex.run_scheduled` on the coordinator queue every worker serves. The firing is the run's launch (`check_firing`, then the batches, then the dispatch): id `<workflow id>-<UTC firing time>`, `input_binding.ingest_prefix` listed through the same `supported_keys` the console uses, owner copied from the stored workflow.
 
