@@ -8,6 +8,9 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 ## [Unreleased]
 
+### Changed
+- **Graph refresh stops rewriting earlier files — trust plan, Phase 4 item 4.3 (Requirement 12, D-4.2).** `graph-refresh` writes only `*.graph_links.parquet`; `*.enrichment_entities.parquet` and `*.graph_edges.parquet` stay as enrich wrote them, and the stage no longer needs the edges file. It is a plain sidecar producer on the fleet (`StageContract.skip_if_output_present=False` keeps a stale links file from skipping a rechunked base); `layout` is the one in-place stage. `GraphRefreshResult.edges_added` becomes `links_written`; the unused `write_enrichment_entities_rows` and `write_graph_edges_rows` are deleted. Runs refreshed before this read as before.
+
 ### Added
 - **Graph refresh writes its own sidecar — trust plan, Phase 4 item 4.2 (Requirement 12, D-4.2).** `graph-refresh` writes `*.graph_links.parquet` (`store/graph_links_output.py`): one row per narrative mention with the chunks it overlaps, stamped with the digest of the chunks it linked against. `load_entity_mentions` and `load_graph_edges` take the links while that digest matches the chunks beside them and fall back to the earlier sidecars otherwise. It still rewrites the earlier files until 4.3.
 - **One-sentence run status — trust plan, Phase 4 item 4.1 (Requirements 16, 22, D-4.1).** `cloud/run_status.py` builds a run's status as one sentence from exact per-stage counts (`Run r1 is running (extract: 4 done; chunk: 1 done, 2 pending).`), in the API's state words with a warning for a firing that could not dispatch. `womblex jobs --run-id`, `/v1/runs` (additive `summary`) and the console dashboard show it. `womblex manifest --lineage --dsn` reports the run's real outcome (`COMPLETE` / `FAIL` / `ABORT`) instead of always `COMPLETE`.

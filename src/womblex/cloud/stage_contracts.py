@@ -166,6 +166,9 @@ class StageContract:
     # The stage re-reads the source documents, not just the shards: the runner
     # hands it a fetcher for the ingest store (`RunContext.source_fetcher`).
     needs_sources: bool = False
+    # Whether published outputs let the runner skip a base. False for a stage whose inputs can
+    # change under outputs it already wrote (graph-refresh after a rechunk).
+    skip_if_output_present: bool = True
 
     def requires_isaacus_api(self, config: WomblexConfig) -> bool:
         """Whether *config* makes this stage call the Isaacus API at runtime."""
@@ -539,15 +542,14 @@ STAGE_CONTRACTS: dict[str, StageContract] = {
     "graph-refresh": StageContract(
         name="graph-refresh",
         scope=StageScope.PER_BATCH,
-        mutation=MutationMode.IN_PLACE,
-        required_inputs=(
-            ENRICHMENT_ENTITIES_SUFFIX, GRAPH_EDGES_SUFFIX, CHUNKS_SUFFIX, MANIFEST_SUFFIX,
-        ),
+        mutation=MutationMode.SIDECAR,
+        required_inputs=(ENRICHMENT_ENTITIES_SUFFIX, CHUNKS_SUFFIX, MANIFEST_SUFFIX),
         conditional_inputs=_no_conditional,
-        # Its own links sidecar, and (until it stops) both earlier sidecars rewritten in place.
-        outputs=lambda _c: (GRAPH_LINKS_SUFFIX, ENRICHMENT_ENTITIES_SUFFIX, GRAPH_EDGES_SUFFIX),
+        outputs=lambda _c: (GRAPH_LINKS_SUFFIX,),
         run=_run_graph_refresh,
         checkpoint_dirname=".graph-refresh-checkpoint",
+        # A rechunk leaves a links file that no longer matches its chunks.
+        skip_if_output_present=False,
     ),
     "quality": StageContract(
         name="quality",

@@ -65,15 +65,13 @@ def test_missing_input_names_its_producer(tmp_path: Path) -> None:
     assert "add 'normalise' before 'chunk'" in issues[0].message
 
 
-def test_in_place_steps_neither_satisfy_nor_invalidate(tmp_path: Path) -> None:
+def test_graph_refresh_needs_entities_it_cannot_create_and_leaves_them_fresh(tmp_path: Path) -> None:
     cfg = _config(tmp_path)
-    # graph-refresh rewrites entities it must already have; it cannot create them.
     present = present_from_names([*_EXTRACTION, "b1.chunks.parquet"])
     assert {i.suffix for i in check_step_order(["graph-refresh"], cfg, present=present)} == {
-        ".enrichment_entities.parquet", ".graph_edges.parquet"}
-    # ...and a link before it is not made stale by its in-place rewrite.
-    held = present_from_names([*_EXTRACTION, "b1.chunks.parquet", "b1.enrichment_entities.parquet",
-                               "b1.graph_edges.parquet"])
+        ".enrichment_entities.parquet"}
+    # ...and a link before it is not made stale: it writes a sidecar of its own.
+    held = present_from_names([*_EXTRACTION, "b1.chunks.parquet", "b1.enrichment_entities.parquet"])
     assert check_step_order(["link", "graph-refresh"], cfg, present=held) == []
 
 
