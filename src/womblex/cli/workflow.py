@@ -395,11 +395,15 @@ def cmd_deliver(args: argparse.Namespace) -> int:
             logger.error("No store URI (pass --store or set WOMBLEX_STORE_URI)")
             return 1
         prefix = (args.output_prefix or f"runs/{args.run_id}").strip("/")
-        run = RemoteStore.from_uri(store_uri).sub(prefix)
+        store = RemoteStore.from_uri(store_uri)
+        dsn = args.dsn or os.environ.get("WOMBLEX_DB_DSN") or os.environ.get("DATABASE_URL")
+        # As the coordinator does: the manifest first, so the bundle holds one covering a retry
+        # made since the run finished, then again so the run record lists these deliveries.
+        finalize_from_board(store, args.run_id, prefix, dsn)
+        run = store.sub(prefix)
         outcomes = deliver(stored, run, args.run_id)
         record_deliveries(run, outcomes)
-        dsn = args.dsn or os.environ.get("WOMBLEX_DB_DSN") or os.environ.get("DATABASE_URL")
-        finalize_from_board(RemoteStore.from_uri(store_uri), args.run_id, prefix, dsn)
+        finalize_from_board(store, args.run_id, prefix, dsn)
     for o in outcomes:
         logger.info("deliver %s: %s%s", o.destination, o.status, f" — {o.error}" if o.error else "")
     return 1 if any(o.status != "delivered" for o in outcomes) else 0
