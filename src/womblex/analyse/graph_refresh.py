@@ -11,9 +11,11 @@ Both inputs carry character offsets into the same reassembled narrative
 **deterministic and API-free**: for every entity mention it finds the
 overlapping narrative chunk(s) and
 
-- rewrites the entities sidecar with ``chunk_index`` populated (first
+- writes ``*.graph_links.parquet``, its own sidecar stamped with the digest of the
+  chunks it linked against (readers use it only while that digest matches), and
+- still rewrites the entities sidecar with ``chunk_index`` populated (first
   overlapping chunk, matching the enrich-time semantics), and
-- rewrites the graph-edges sidecar, replacing any ``mentioned_in`` edges with
+- still rewrites the graph-edges sidecar, replacing any ``mentioned_in`` edges with
   freshly computed entity→chunk edges (all other edges — hierarchy,
   citations, cross-references — are preserved untouched).
 
@@ -40,6 +42,7 @@ from womblex.store.enrichment_output import (
     write_graph_edges_rows,
 )
 from womblex.store.evidence import TABLE_LAYER
+from womblex.store.graph_links_output import write_graph_links
 from womblex.store.output import chunks_path_for, read_chunks, read_manifest
 
 logger = logging.getLogger(__name__)
@@ -95,6 +98,7 @@ def refresh_graph_edges(
         entity_rows = entities_table.to_pylist()
         refreshed_rows, mention_edges, docs = _relink_mentions(entity_rows, chunks_by_hash)
 
+        write_graph_links(_link_rows(refreshed_rows, chunks_by_hash), base)
         write_enrichment_entities_rows(refreshed_rows, base)
         _rewrite_graph_edges(base, mention_edges)
 
@@ -171,6 +175,22 @@ def _relink_mentions(
             docs_with_edges.add(source_hash)
 
     return refreshed, edges, len(docs_with_edges)
+
+
+def _link_rows(
+    refreshed: list[dict], chunks_by_hash: dict[str, list[tuple[int, int, int]]],
+) -> list[dict]:
+    """The `*.graph_links.parquet` rows: one per narrative mention, with every chunk it overlaps."""
+    return [
+        {
+            "source_hash": r["source_hash"], "entity_id": r["entity_id"],
+            "mention_start": r["mention_start"], "mention_end": r["mention_end"],
+            "chunk_index": r["chunk_index"],
+            "chunk_indices": _overlapping_chunks(
+                r["mention_start"], r["mention_end"], chunks_by_hash.get(r["source_hash"], [])),
+        }
+        for r in refreshed if r.get("text_layer") != TABLE_LAYER
+    ]
 
 
 def _overlapping_chunks(

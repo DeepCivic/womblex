@@ -36,6 +36,7 @@ from womblex.store.enrichment_output import (
     write_graph_edges_shard,
 )
 from womblex.store.entity_links_output import write_entity_links
+from womblex.store.graph_links_output import write_graph_links
 from womblex.store.money_output import write_money_columns, write_money_spans
 from womblex.store.normalise_output import write_normalised_text
 from womblex.store.output import (
@@ -71,6 +72,7 @@ SIDECAR_WRITERS: list[tuple[object, str]] = [
     (write_enrichment_doc_shard, "enrich"),
     (write_enrichment_entities_rows, "graph-refresh"),
     (write_graph_edges_rows, "graph-refresh"),
+    (write_graph_links, "graph-refresh"),
     (write_embeddings, "embed"),
     (write_money_spans, "money"),
     (write_money_columns, "money"),

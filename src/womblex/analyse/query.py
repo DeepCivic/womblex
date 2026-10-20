@@ -16,7 +16,9 @@ from pathlib import Path
 
 import pyarrow.parquet as pq
 
+from womblex.store.enrichment_output import ENRICHMENT_ENTITIES_SUFFIX, GRAPH_EDGES_SUFFIX
 from womblex.store.evidence import TABLE_LAYER
+from womblex.store.graph_links_output import read_matching_links
 
 logger = logging.getLogger(__name__)
 
@@ -48,11 +50,30 @@ class Edge:
     properties: dict[str, str] = field(default_factory=dict)
 
 
+def _matching_links(path: Path, suffix: str) -> dict[tuple[str, str, int, int], list[int]] | None:
+    """Refresh's links for the batch *path* belongs to, as (hash, entity, start, end) -> chunks.
+
+    ``None`` unless they were computed against the chunks now beside them (`read_matching_links`).
+    """
+    if not path.name.endswith(suffix):
+        return None
+    links = read_matching_links(path.with_name(path.name.removesuffix(suffix) + ".parquet"))
+    if links is None:
+        return None
+    return {(r["source_hash"], r["entity_id"], r["mention_start"], r["mention_end"]): r["chunk_indices"]
+            for r in links.to_pylist()}
+
+
 def load_entity_mentions(path: Path) -> list[EntityMention]:
-    """Load entity mentions from a Parquet file."""
+    """Load entity mentions from a Parquet file.
+
+    Where the batch's `*.graph_links.parquet` matches its chunks, a narrative mention's
+    ``chunk_index`` is the link's; otherwise it is the file's own.
+    """
     table = pq.read_table(str(path))
+    links = _matching_links(path, ENRICHMENT_ENTITIES_SUFFIX)
     layers = table.column("text_layer") if "text_layer" in table.schema.names else None
-    return [
+    mentions = [
         EntityMention(
             source_hash=table.column("source_hash")[i].as_py(),
             entity_id=table.column("entity_id")[i].as_py(),
@@ -67,11 +88,21 @@ def load_entity_mentions(path: Path) -> list[EntityMention]:
         )
         for i in range(len(table))
     ]
+    if links is not None:
+        for m in mentions:
+            if m.text_layer != TABLE_LAYER and (chunks := links.get((m.source_hash, m.entity_id, m.mention_start, m.mention_end))) is not None:
+                m.chunk_index = chunks[0] if chunks else -1
+    return mentions
 
 
 def load_graph_edges(path: Path) -> list[Edge]:
-    """Load graph edges from a Parquet file."""
+    """Load graph edges from a Parquet file.
+
+    Where the batch's `*.graph_links.parquet` matches its chunks, its ``mentioned_in`` edges
+    are derived from the links in place of the file's own.
+    """
     table = pq.read_table(str(path))
+    links = _matching_links(path, GRAPH_EDGES_SUFFIX)
     edges: list[Edge] = []
     for i in range(len(table)):
         props: dict[str, str] = {}
@@ -86,6 +117,13 @@ def load_graph_edges(path: Path) -> list[Edge]:
             relation=table.column("relation")[i].as_py(),
             properties=props,
         ))
+    if links is None:
+        return edges
+    edges = [e for e in edges if e.relation != "mentioned_in"]
+    for (source_hash, entity_id, start, end), chunks in links.items():
+        for ci in chunks:
+            edges += [Edge(source_hash, f"{source_hash}:{entity_id}", f"{source_hash}:chunk:{ci}",
+                           "mentioned_in", {key: str(value)}) for key, value in (("start", start), ("end", end))]
     return edges
 
 

@@ -48,6 +48,7 @@ from womblex.store.enrichment_output import (
     GRAPH_EDGES_SUFFIX,
 )
 from womblex.store.entity_links_output import ENTITY_LINKS_SUFFIX
+from womblex.store.graph_links_output import GRAPH_LINKS_SUFFIX
 from womblex.store.layout_output import LAYOUT_REGIONS_SUFFIX
 from womblex.store.money_output import MONEY_COLUMNS_SUFFIX, MONEY_SPANS_SUFFIX
 from womblex.store.normalise_output import NORMALISED_TEXT_SUFFIX
@@ -543,8 +544,8 @@ STAGE_CONTRACTS: dict[str, StageContract] = {
             ENRICHMENT_ENTITIES_SUFFIX, GRAPH_EDGES_SUFFIX, CHUNKS_SUFFIX, MANIFEST_SUFFIX,
         ),
         conditional_inputs=_no_conditional,
-        # A subset of the inputs: the stage rewrites both sidecars in place.
-        outputs=lambda _c: (ENRICHMENT_ENTITIES_SUFFIX, GRAPH_EDGES_SUFFIX),
+        # Its own links sidecar, and (until it stops) both earlier sidecars rewritten in place.
+        outputs=lambda _c: (GRAPH_LINKS_SUFFIX, ENRICHMENT_ENTITIES_SUFFIX, GRAPH_EDGES_SUFFIX),
         run=_run_graph_refresh,
         checkpoint_dirname=".graph-refresh-checkpoint",
     ),

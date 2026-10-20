@@ -46,6 +46,7 @@ ROLE_SENSITIVITY: dict[str, Sensitivity] = {
     "enrichment_entities": "raw",
     "enrichment_doc": "raw",
     "graph_edges": "raw",
+    "graph_links": "raw",
     "entity_links": "raw",
     "pii_spans": "raw",
     # Corpus-declared provenance columns: content unknown, so not claimed safe.

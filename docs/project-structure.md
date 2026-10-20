@@ -138,6 +138,7 @@ womblex/
 │   │   ├── spellfix_output.py    # *.spellfix_text.parquet + *.spellfix_corrections.parquet schemas + IO
 │   │   ├── quality_output.py     # *.chunk_quality.parquet schema + IO
 │   │   ├── embed_output.py  # *.embeddings.parquet schema + IO
+│   │   ├── graph_links_output.py # *.graph_links.parquet schema + IO, chunks digest, matching-links read
 │   │   ├── entity_links_output.py # *.entity_links.parquet schema + IO (mention grain; doc grain derived on read)
 │   │   ├── layout_output.py # *.layout_regions.parquet schema + IO, LayoutFingerprint and its footer keys
 │   │   ├── money_output.py  # *.money_spans.parquet (decimal128 values) + *.money_columns.parquet schemas + IO
