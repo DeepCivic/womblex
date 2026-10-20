@@ -360,13 +360,22 @@ def stamp_from_footers(paths: Iterable[Path], stage: str) -> RunStamp | None:
     more than one run — a stamp naming one of several runs would be worse than
     no stamp, which is the rule the ingest-root footer already follows.
     """
+    def footers() -> Iterator[Mapping[bytes, bytes] | None]:
+        for path in paths:
+            try:
+                yield pq.read_schema(str(path)).metadata
+            except (OSError, pa.ArrowInvalid):  # absent, unreadable, or not parquet
+                continue
+
+    return stamp_from_metadata(footers(), stage)
+
+
+def stamp_from_metadata(footers: Iterable[Mapping[bytes, bytes] | None], stage: str) -> RunStamp | None:
+    """:func:`stamp_from_footers` over footers already read (an object store's, read in place)."""
     seen: set[tuple[str, str]] = set()
     preset = ""
-    for path in paths:
-        try:
-            existing = read_footer_stamp(pq.read_schema(str(path)).metadata)
-        except (OSError, pa.ArrowInvalid):  # absent, unreadable, or not parquet
-            continue
+    for metadata in footers:
+        existing = read_footer_stamp(metadata)
         if run_id := existing.get("run_id", ""):
             seen.add((run_id, existing.get("config_digest", "")))
             preset = existing.get("preset", "") or preset
@@ -439,5 +448,6 @@ __all__ = [
     "sidecar_footer",
     "stamp_for_sidecar",
     "stamp_from_footers",
+    "stamp_from_metadata",
     "workflow_context",
 ]

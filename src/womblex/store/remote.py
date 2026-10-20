@@ -232,6 +232,10 @@ class RemoteStore:
         fs, root = fsspec.core.url_to_fs(uri, **opts)
         return cls(fs=fs, root=root.rstrip("/"))
 
+    def sub(self, prefix: str) -> RemoteStore:
+        """The same store rooted at *prefix* under this one: a run's own directory, say."""
+        return RemoteStore(fs=self.fs, root=self._full(prefix))
+
     def _full(self, rel: str) -> str:
         rel = rel.strip("/")
         return f"{self.root}/{rel}" if rel else self.root
@@ -257,6 +261,10 @@ class RemoteStore:
             logger.warning("could not read parquet footer for %s: %s", rel, exc)
             return None
         return meta.metadata, meta.num_rows
+
+    def open(self, rel: str) -> BinaryIO:
+        """Open an object for reading in place, with no staging: a store-to-store copy streams it."""
+        return cast(BinaryIO, self.fs.open(self._full(rel), "rb"))  # type: ignore[attr-defined]
 
     def read_text(self, rel: str, *, encoding: str = "utf-8") -> str:
         """Read a small text object in place (no staging) — e.g. a saved preset."""

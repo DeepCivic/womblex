@@ -8,17 +8,21 @@ is recorded and logged, later steps still run labelled with the failures they fo
 and the exit code is the account. Steps run in list order, and the order is checked first
 (`workflow_order`): an input no earlier step produces, or that a later step will rewrite,
 refuses the workflow with stable codes. Triggers are not acted on here, and the log says so.
+After the last step, failed or not, the run is delivered to the workflow's destinations
+(`cloud/delivery.py`), each checked before the first step.
 """
 
 from __future__ import annotations
 
 import logging
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
+from womblex.cloud.delivery import DeliveryOutcome, check_destinations, deliver, record_deliveries
 from womblex.cloud.stage_contracts import STAGE_CONTRACTS, RunContext
 from womblex.cloud.stage_runner import (
     StagePreconditionError,
@@ -60,7 +64,7 @@ class RefusalCode(str, Enum):
     """A step's preflight, Isaacus or model check failed; `steps` names each."""
 
     STAGE_NOT_DISPATCHABLE = "stage_not_dispatchable"
-    """The fleet runs only `DOWNSTREAM_STAGES`; `steps` names the others (`layout`, `pii`, `quality`)."""
+    """The fleet runs only `WORKFLOW_FLEET_STAGES`; `steps` names the others (`layout`, `quality`)."""
 
     ORDER_NOT_PIPELINE = "order_not_pipeline"
     """The fleet runs stages in pipeline order, so a list in another order is not dispatched."""
@@ -73,6 +77,9 @@ class RefusalCode(str, Enum):
 
     BATCHES_CANCELLED = "batches_cancelled"
     """A replayed firing's own batches were cancelled; re-queueing would attach to them and never run."""
+
+    DESTINATION_UNAVAILABLE = "destination_unavailable"
+    """A destination's secrets do not resolve or its dependencies are not installed; the message names each."""
 
 
 class WorkflowRefusedError(Exception):
@@ -115,10 +122,12 @@ class WorkflowRunResult:
     digest: str
     steps: list[StepOutcome] = field(default_factory=list)
     not_acted_on: tuple[str, ...] = ()
+    deliveries: list[DeliveryOutcome] = field(default_factory=list)
 
     @property
     def exit_code(self) -> int:
-        return 1 if any(s.status == "failed" for s in self.steps) else 0
+        failed = any(s.status == "failed" for s in self.steps) or any(d.status != "delivered" for d in self.deliveries)
+        return 1 if failed else 0
 
     def log(self) -> None:
         for s in self.steps:
@@ -126,6 +135,8 @@ class WorkflowRunResult:
             if s.ran_after_failed:
                 line += f" (ran after failed: {', '.join(s.ran_after_failed)})"
             logger.info("%s", line)
+        for d in self.deliveries:
+            logger.info("  deliver %s: %s%s", d.destination, d.status, f" — {d.error}" if d.error else "")
         failed = [s.stage for s in self.steps if s.status == "failed"]
         logger.info("workflow %s (%s): %d step(s), %d failed %s",
                     self.workflow_id, self.digest, len(self.steps), len(failed), failed or "")
@@ -268,11 +279,13 @@ def prepare_workflow(
     resolve_preset: Callable[[str], Preset | None],
     present: Present | None,
     models_check: str | None = None,
+    shard_dir: Path | None = None,
 ) -> PreparedWorkflow:
     """The one pre-run path: `check_workflow`, then every step's context.
 
     Shared by `run_workflow_local` and `womblex validate`, so they refuse alike. *present*
-    is the disk state (`None`: unknown, so only the order among the steps is checked).
+    is the disk state (`None`: unknown, so only the order among the steps is checked), and
+    *shard_dir* the directory the steps run over, where known.
     Raises `WorkflowRefusedError`, naming every step whose preconditions failed.
     """
     config, stages = check_workflow(
@@ -290,6 +303,16 @@ def prepare_workflow(
             f"workflow {stored.id!r}: " + "; ".join(m for _, m in failures),
             code=RefusalCode.STEP_PRECONDITION, steps=tuple(failures),
         )
+    if problems := check_destinations(stored.spec.destinations):
+        raise WorkflowRefusedError(
+            f"workflow {stored.id!r}: " + "; ".join(f"destination {d}: {m}" for d, m in problems),
+            code=RefusalCode.DESTINATION_UNAVAILABLE,
+        )
+    if stored.spec.destinations and shard_dir is not None and shard_dir.name != "documents":
+        raise WorkflowRefusedError(
+            f"workflow {stored.id!r} delivers a run, so it runs over a run's documents/ directory, not {shard_dir}",
+            code=RefusalCode.DESTINATION_UNAVAILABLE,
+        )
     return PreparedWorkflow(config, stages, contexts, optional_order_warnings(stages, config))
 
 
@@ -305,11 +328,12 @@ def run_workflow_local(
     """Run *stored*'s steps in list order over *shard_dir*.
 
     Raises `WorkflowRefusedError` before any step runs; after that, returns a
-    `WorkflowRunResult` whatever the steps did.
+    `WorkflowRunResult` whatever the steps did. A workflow with destinations delivers the run
+    whose ``documents/`` *shard_dir* is once the steps are done.
     """
     prepared = prepare_workflow(
         stored, resolve_preset=resolve_preset, models_check=models_check,
-        present=present_from_names(p.name for p in shard_dir.glob("*.parquet")),
+        present=present_from_names(p.name for p in shard_dir.glob("*.parquet")), shard_dir=shard_dir,
     )
     config, contexts = prepared.config, prepared.contexts
     for warning in prepared.order_warnings:
@@ -323,6 +347,11 @@ def run_workflow_local(
         )
     logger.info("workflow %s (%s): %s over %s", stored.id, stored.digest, " -> ".join(s.stage for s in stored.spec.steps), shard_dir)
 
+    from womblex.cloud.webhook import RunEvents
+
+    run_id = local_run_id(shard_dir)
+    events = RunEvents(stored, run_id, f"{run_id}:local-{uuid.uuid4().hex[:12]}")
+    events.emit("extraction_settled", "running")  # a local run's extraction is done before its steps
     with workflow_context(stored.digest, stored.id, stored.spec.model_dump(mode="json")):
         for step, ctx in zip(stored.spec.steps, contexts, strict=True):
             ctx.source_root, ctx.force = source_root, force
@@ -338,7 +367,57 @@ def run_workflow_local(
                 logger.exception("%s: failed", step.stage)
                 error, status = f"{type(e).__name__}: {e}", "failed"
             result.steps.append(StepOutcome(step.stage, status, summary, error, earlier))
+            events.emit("stage_failed" if status == "failed" else "stage_finished", "running", step.stage,
+                        stage=step.stage, error=error, ran_after_failed=list(earlier))
+    if stored.spec.destinations:
+        result.deliveries = deliver_local(stored, shard_dir, tuple(s.stage for s in result.steps if s.status == "failed"))
+    for o in result.deliveries:
+        events.emit("delivered" if o.status == "delivered" else "delivery_failed", "running", o.destination,
+                    destination=o.destination, error=o.error, after_failed=o.after_failed)
+    # The run's status as the board words it: its steps', not its deliveries' (those have their own events).
+    events.emit("run_finished", "failed" if any(s.status == "failed" for s in result.steps) else "done")
+    if events.active:
+        result.deliveries += _record_local(shard_dir, events.records())
     return result
+
+
+def local_run_id(shard_dir: Path) -> str:
+    """The run a local shard directory holds: its stamp's run id, else its run root's name."""
+    from womblex.store.run_stamp import stamp_from_footers
+
+    stamp = stamp_from_footers(sorted(shard_dir.glob("*._manifest.parquet")), "egress")
+    return stamp.run_id if stamp else shard_dir.parent.name
+
+
+def _record_local(shard_dir: Path, outcomes: list[DeliveryOutcome]) -> list[DeliveryOutcome]:
+    """Record *outcomes* on the local run and rewrite its manifest so the run record lists them."""
+    from womblex.store.remote import RemoteStore
+    from womblex.store.run_manifest import write_run_manifest
+
+    try:
+        record_deliveries(RemoteStore.from_uri(str(shard_dir.parent)), outcomes)
+        write_run_manifest(shard_dir)
+    except Exception:  # the run has finished; a record that could not be written is logged
+        logger.exception("delivery records could not be written under %s", shard_dir.parent)
+    return outcomes
+
+
+def deliver_local(stored: StoredWorkflow, shard_dir: Path, failed: tuple[str, ...] = ()) -> list[DeliveryOutcome]:
+    """Deliver the local run whose ``documents/`` is *shard_dir*: the manifest first, so the bundle
+    holds a current one, then each destination, its record, and the manifest again, so the run
+    record lists the deliveries. *failed* names the failed steps it follows. Never raises."""
+    from womblex.store.run_manifest import write_run_manifest
+
+    try:
+        write_run_manifest(shard_dir)
+        outcomes = deliver(stored, shard_dir.parent, local_run_id(shard_dir), after_failed=failed)
+        _record_local(shard_dir, outcomes)
+    except Exception:  # the steps have run; nothing here may stop or unwind them
+        logger.exception("workflow %s: delivery could not complete", stored.id)
+        return [DeliveryOutcome(d.name, d.kind, str(getattr(d, "uri", None) or getattr(d, "table", "")), stored.id,
+                                "failed", 0, list(failed), error="delivery could not complete; see the log")
+                for d in stored.spec.destinations]
+    return outcomes
 
 
 __all__ = [
@@ -351,6 +430,8 @@ __all__ = [
     "config_from_overlay",
     "config_from_payload",
     "config_payload",
+    "deliver_local",
+    "local_run_id",
     "not_acted_on",
     "prepare_workflow",
     "preset_resolver",

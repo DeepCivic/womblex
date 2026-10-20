@@ -179,7 +179,7 @@ def test_a_firing_extracts_the_prefix_and_runs_the_workflow_unowned_and_stamped(
 
 
 def test_a_firing_that_cannot_complete_queues_nothing(fleet, saved_preset) -> None:  # noqa: F811
-    """The firing body, outside DBOS: `pii` is never dispatched, so it raises before any row."""
+    """The firing body, outside DBOS: `quality` is never dispatched, so it raises before any row."""
     from tests.test_cloud import _minimal_config
     from womblex.cloud import workflows
     from womblex.cloud.workflow_runner import WorkflowRefusedError
@@ -188,7 +188,7 @@ def test_a_firing_that_cannot_complete_queues_nothing(fleet, saved_preset) -> No
     store_dir, ingest, tmp = fleet
     ensure_workflow_schema(None)
     with WorkflowStore(None) as store:
-        store.save("bad", _spec(["pii"], [], store=fleet[1]))
+        store.save("bad", _spec(["quality"], [], store=fleet[1]))
     ingest_store = RemoteStore.from_uri(ingest)
     workflows.set_context(workflows.WorkerContext(
         _minimal_config(tmp), RemoteStore.from_uri(str(store_dir)), ingest_store, ingest, None))
@@ -270,7 +270,7 @@ def test_a_replayed_firing_refuses_its_own_cancelled_batches(fleet, saved_preset
 def test_a_failed_firing_is_on_the_board_under_its_run(fleet, saved_preset) -> None:  # noqa: F811
     ensure_workflow_schema(None)
     with WorkflowStore(None) as store:
-        stored = store.save("bad", _spec(["pii"], store=fleet[1]))
+        stored = store.save("bad", _spec(["quality"], store=fleet[1]))
     client = dbos_app.open_client(None)
     _fire_all_at_once(client, stored)
     work(fleet, idle_timeout=3)
@@ -332,7 +332,7 @@ def test_firings_append_only_new_documents_to_one_run(fleet, saved_preset, monke
 
 
 @pytest.mark.parametrize("steps, prefix, code", [
-    (["pii"], None, "stage_not_dispatchable"),  # the dry-run dispatch the firing makes
+    (["quality"], None, "stage_not_dispatchable"),  # the dry-run dispatch the firing makes
     (["normalise"], "empty", "no_documents"),
 ])
 def test_a_workflow_its_firing_would_refuse_is_not_scheduled(

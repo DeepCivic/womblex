@@ -529,8 +529,12 @@ def _read_shard(shard_path: Path, role: str) -> pa.Table:
     so those back-fill as empty strings (``_MANIFEST_BACKFILL``); ``content_digest``
     and ``table_cells.bbox`` back-fill as null (``_BACKFILL``).
     """
+    return conform_shard(pq.read_table(str(shard_path)), role, str(shard_path))
+
+
+def conform_shard(raw: pa.Table, role: str, label: str) -> pa.Table:
+    """:func:`_read_shard` over a table already read (an object store's); *label* names it in errors."""
     schema = _SHARD_SCHEMA[role]
-    raw = pq.read_table(str(shard_path))
     missing = [f.name for f in schema if f.name not in raw.schema.names]
     if not missing:
         return raw.select([f.name for f in schema]).cast(schema)
@@ -543,7 +547,7 @@ def _read_shard(shard_path: Path, role: str) -> pa.Table:
     hard = [name for name in missing if name not in empty_fill + null_fill]
     if hard:
         raise ValueError(
-            f"shard {shard_path} missing columns {hard}; schema bump without compat shim?"
+            f"shard {label} missing columns {hard}; schema bump without compat shim?"
         )
     for name in missing:
         typ = schema.field(name).type

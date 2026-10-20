@@ -145,7 +145,9 @@ womblex/
 │   │   ├── source_provenance.py  # Ingest root + source relpath, and their womblex.* Parquet footer keys
 │   │   ├── source_resolver.py    # SourceResolver — resolve a published row's source_hash back to its source file
 │   │   ├── egress_output.py      # source_index.parquet schema + IO for the egress bundle (self-contained)
-│   │   ├── egress.py             # build_bundle() — export one finished local run's corpus + resolved raw sources to any RemoteStore destination (contract: docs/egress.md; CLI verb `womblex egress`)
+│   │   ├── delivery_record.py    # <run>/deliveries/<destination>.json — one record per workflow destination, listed by the run record
+│   │   ├── egress_sources.py     # A bundle's raw sources, one outcome per source_hash — a local corpus (SourceResolver) or the object store the run was ingested from, by source_relpath
+│   │   ├── egress.py             # build_bundle() — export one finished run (local or in a store) store to store with its resolved raw sources, to any RemoteStore destination (contract: docs/egress.md; CLI verb `womblex egress`)
 │   │   ├── build_info.py    # BuildInfo — package version + source commit, or unavailable with a reason
 │   │   ├── run_stamp.py     # RunStamp — run id / version / commit / config digest / stage / preset (config name) / loaded models / slot models (distribution + version), as womblex.* footer keys; workflow_context → womblex.workflow_digest on a workflow step's sidecars
 │   │   ├── content_digest.py # content_digest(elements): the manifest's determinism handle (kind / order / text / cells / fields / sheet cells / meta)
@@ -160,6 +162,10 @@ womblex/
 │   ├── cloud/                  # Distributed run support — `womblex enqueue` / `enqueue-stages` / `worker` / `jobs` / `finalize` / `run-stage` / `egress`
 │   │   ├── dbos_app.py         # DBOS wiring — system database URL, queue/workflow names and ids, client
 │   │   ├── jobs.py             # RunBoard — enqueue + read runs over DBOS workflows; run `owner` scoping; stage attempts and the fork
+│   │   ├── destination_postgres.py # A workflow's Postgres destination — one row per embedded chunk, masked by default, upserted
+│   │   ├── webhook.py          # A workflow's webhook destination — six run events, signed, resent under one id, recorded
+│   │   ├── delivery.py         # Deliver a finished run to its workflow's destinations — checked before launch, bounded retries, recorded on the run
+│   │   ├── finalize.py         # finalize_run() — a run's manifest.parquet in its store; `womblex finalize` and the coordinator's last step
 │   │   ├── retry.py            # retry_stage() — fork a failed stage from its first failed unit, refusing before the fork
 │   │   ├── workflows.py        # extract_batch / run_stage / run_downstream workflows; a dispatched workflow's stage runs under its overlay and digest
 │   │   ├── dispatch.py         # enqueue_extraction / enqueue_downstream_stages (owner=), downstream_stages gate + guard — shared by the console and the service API

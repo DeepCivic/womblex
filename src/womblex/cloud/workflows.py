@@ -5,7 +5,9 @@ An extraction batch stages its inputs from the ingest store, runs the shared
 publishes the shards. A stage plans its units (one per batch base, or one for
 the whole run), then runs each as its own step, so a unit that finished is
 recorded and a re-run starts after it. The coordinator waits for the run's
-extraction to settle, then runs the requested stages in pipeline order.
+extraction to settle, runs the requested stages in pipeline order, then writes
+the run's ``manifest.parquet`` through the code `womblex finalize` runs and, for a
+workflow that names destinations, delivers the run to them (`cloud/delivery.py`).
 
 A launched run is never stopped part-way (`docs/decisions-operations.md`, "A run is an
 arrow"): a unit that fails does not stop the stage's other units, and a stage
@@ -25,7 +27,7 @@ import os
 import tempfile
 from collections.abc import Callable
 from contextlib import nullcontext
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -35,6 +37,7 @@ from dbos import error as dbos_error
 
 from womblex.batch import process_batch
 from womblex.cloud import dbos_app
+from womblex.cloud.finalize import NoShardManifests, finalize_from_board
 from womblex.cloud.stage_contracts import PRODUCER_OF, STAGE_CONTRACTS
 from womblex.cloud.stage_runner import (
     InputContractError,
@@ -118,7 +121,7 @@ def _context() -> WorkerContext:
 
 def _not_a_failure_to_retry(e: BaseException) -> bool:
     """A missing input is a wiring fact, not a transient fault: retrying cannot fix it."""
-    return not isinstance(e, NotReady | StageNotReady | InputContractError)
+    return not isinstance(e, NotReady | StageNotReady | InputContractError | NoShardManifests)
 
 
 def _retry(name: str, max_attempts: int) -> StepOptions:
@@ -372,6 +375,57 @@ def _unsettled_batches(run_id: str) -> int:
     ))
 
 
+def _finalize(run_id: str, shard_prefix: str) -> str:
+    """Write the run's ``manifest.parquet`` over every batch present, as `womblex finalize` does."""
+    ctx = _context()
+    written = finalize_from_board(ctx.store, run_id, _output_prefix(shard_prefix), ctx.dsn)
+    logger.info("run %s: wrote %s from %d shard manifest(s)", run_id, written.manifest_key, written.shard_manifests)
+    return written.manifest_key
+
+
+def _deliver(run_id: str, shard_prefix: str, workflow: dict[str, Any], failed: list[str]) -> list[dict[str, Any]]:
+    """Deliver the run to its workflow's destinations; each outcome, as its record holds it. Never raises."""
+    from womblex.cloud.delivery import deliver, dispatched_workflow
+
+    run = _context().store.sub(_output_prefix(shard_prefix))
+    return [asdict(o) for o in deliver(dispatched_workflow(workflow), run, run_id, after_failed=tuple(failed))]
+
+
+def _emit(run_id: str, workflow: dict[str, Any], event: str, event_id: str, status: str,
+          fields: dict[str, Any]) -> list[dict[str, Any]]:
+    """Send one run event to the workflow's webhooks (`cloud/webhook.py`); never raises."""
+    from womblex.cloud.delivery import dispatched_workflow
+    from womblex.cloud.webhook import emit
+
+    return emit(dispatched_workflow(workflow), run_id, event, event_id, status, **fields)
+
+
+def _run_status(run_id: str) -> str:
+    """The run's status in the API's words, this coordinator, still running, left out."""
+    from womblex.cloud.jobs import RunBoard, run_state
+
+    with RunBoard(_context().dsn) as board:
+        counts = board.stats(run_id)
+    counts["running"] = max(counts.get("running", 0) - 1, 0)
+    return run_state(counts)
+
+
+def _record(run_id: str, shard_prefix: str, workflow: dict[str, Any], delivered: list[dict[str, Any]],
+            sent: list[dict[str, Any]]) -> None:
+    """Record each delivery and each webhook's events, then rewrite the manifest so the run record
+    lists them. Logs, never raises: the deliveries have happened."""
+    from womblex.cloud.delivery import DeliveryOutcome, dispatched_workflow, record_deliveries
+    from womblex.cloud.webhook import webhook_records
+
+    run = _context().store.sub(_output_prefix(shard_prefix))
+    outcomes = [DeliveryOutcome(**d) for d in delivered] + webhook_records(dispatched_workflow(workflow), sent)
+    try:
+        record_deliveries(run, outcomes)
+        _finalize(run_id, shard_prefix)
+    except Exception:
+        logger.exception("run %s: delivery records could not be written", run_id)
+
+
 @DBOS.workflow(name=dbos_app.DOWNSTREAM_WORKFLOW)
 def run_downstream(
     run_id: str, stages: list[str], shard_prefix: str, max_attempts: int, owner: str | None,
@@ -387,10 +441,28 @@ def run_downstream(
     batch only. A failed stage does not stop the stages after it: each runs
     over what exists, recorded with the failures it follows (`ran_after_failed`
     on its row, as the local runner records), and the coordinator fails last
-    if any did, naming them.
+    if any did, naming them. Then it writes the run's ``manifest.parquet``
+    (`cloud/finalize.py`), after a failed stage too; a manifest it could not
+    write is named among the failures. Last, a dispatched workflow's run is
+    delivered to its destinations; a failed delivery is recorded, not raised.
+    A workflow's webhooks are sent the run's events as they happen, each a
+    recorded step whose id is this coordinator's, so a recovery does not resend.
     """
     while DBOS.run_step({"name": "await-extraction"}, _unsettled_batches, run_id):
         DBOS.sleep(SETTLE_POLL_SECONDS)
+    destinations = (workflow or {}).get("spec", {}).get("destinations") or []
+    hooks = any(d.get("kind") == "webhook" for d in destinations)
+    sent: list[dict[str, Any]] = []
+
+    def event(name: str, subject: str = "", status: str = "running", **fields: Any) -> None:
+        """One run event to the workflow's webhooks, as a recorded step, so a recovered coordinator
+        does not send it again; its id is this coordinator's, so a resend keeps it."""
+        if workflow is not None and hooks:
+            key = f"{name}:{subject}" if subject else name
+            sent.extend(DBOS.run_step({"name": f"event:{key}"}, _emit, run_id, workflow, name,
+                                      f"{DBOS.workflow_id}:{key}", status, fields))
+
+    event("extraction_settled")
 
     results: list[dict[str, Any]] = []
     failed: list[str] = []
@@ -420,12 +492,35 @@ def run_downstream(
         except Exception as e:  # a failed stage must not stop the ones after it
             results.append({"stage": stage, "error": _carried(e), "ran_after_failed": list(failed)})
             logger.warning("run %s: %s failed; later stages still run: %s", run_id, stage, results[-1]["error"])
+            event("stage_failed", stage, stage=stage, error=results[-1]["error"], ran_after_failed=list(failed))
             failed.append(stage)
+        else:  # outside the try, so an event step that raised could never mark a finished stage failed
+            event("stage_finished", stage, stage=stage, ran_after_failed=list(failed))
+    # Last, and whatever failed: the manifest covers every batch present (Requirement 2).
+    unwritten = ""
+    try:
+        DBOS.run_step(_retry("finalize", max_attempts), _finalize, run_id, shard_prefix)
+    except Exception as e:  # recorded, as a failed stage is; the run has landed either way
+        unwritten = f"the run manifest was not written ({_carried(e)}); `womblex finalize` writes it"
+        logger.warning("run %s: %s", run_id, unwritten)
+    if workflow is not None and destinations:
+        # After a failed stage too, and never failing the run: each destination's outcome is its own
+        # record (`cloud/delivery.py`), marked with the failed stages it follows.
+        delivered = DBOS.run_step({"name": "deliver"}, _deliver, run_id, shard_prefix, workflow, failed)
+        for o in delivered:
+            event("delivered" if o["status"] == "delivered" else "delivery_failed", o["destination"],
+                  destination=o["destination"], error=o["error"], after_failed=o["after_failed"])
+        if hooks:
+            event("run_finished", status=DBOS.run_step({"name": "run-status"}, _run_status, run_id))
+        DBOS.run_step({"name": "record-deliveries"}, _record, run_id, shard_prefix, workflow, delivered, sent)
     if failed:
         after = [f"{r['stage']} after {', '.join(r['ran_after_failed'])}"
                  for r in results if r["ran_after_failed"]]
         raise RunIncomplete(
             f"run {run_id}: stage(s) {', '.join(failed)} failed; every stage ran"
             + (f"; ran after a failure: {'; '.join(after)}" if after else "")
+            + (f"; {unwritten}" if unwritten else "")
         )
+    if unwritten:
+        raise RunIncomplete(f"run {run_id}: every stage finished, but {unwritten}")
     return results

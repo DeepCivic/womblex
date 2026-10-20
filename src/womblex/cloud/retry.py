@@ -67,6 +67,7 @@ class StageRetry:
     start_step: int | None
     later: tuple[str, ...]
     bases: tuple[str, ...] | None = None
+    workflow: str | None = None  # the workflow whose destinations a redelivery would replace
 
 
 def _latest(attempts: dict[str, list[WorkflowStatus]], stage: str) -> WorkflowStatus:
@@ -173,14 +174,21 @@ def retry_stage(
         logger.info("run %s: %s re-run over %s as %s (original %s)", run_id, stage,
                     ", ".join(bases) if bases is not None else "every unit", new_id, original)
         return StageRetry(run_id, stage, new_id, latest.workflow_id, None, _ran_after(attempts, stage),
-                          tuple(bases) if bases is not None else None)
+                          tuple(bases) if bases is not None else None, _delivering(recorded))
     start = board.first_failed_step(latest.workflow_id)
     try:
         board.fork_stage(latest.workflow_id, stage, new_id, start, models)
     except sqlalchemy.exc.IntegrityError as e:  # two retries raced for the same attempt number
         raise RetryRefusedError(f"{new_id} already exists", RetryCode.ALREADY_RETRIED) from e
     logger.info("run %s: %s forked from step %d as %s (original %s)", run_id, stage, start, new_id, original)
-    return StageRetry(run_id, stage, new_id, latest.workflow_id, start, _ran_after(attempts, stage))
+    return StageRetry(run_id, stage, new_id, latest.workflow_id, start, _ran_after(attempts, stage),
+                      workflow=_delivering(recorded))
+
+
+def _delivering(recorded: dict[str, Any]) -> str | None:
+    """The id of the workflow the stage was dispatched under, when it names destinations."""
+    workflow = recorded.get("workflow") or {}
+    return workflow.get("id") if (workflow.get("spec") or {}).get("destinations") else None
 
 
 __all__ = ["RetryCode", "RetryRefusedError", "StageRetry", "retry_stage"]

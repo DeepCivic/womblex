@@ -20,6 +20,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
+from womblex.cloud.delivery import check_destinations
 from womblex.cloud.workflow_order import StageOrderError, check_dispatch_order
 from womblex.cloud.workflow_runner import (
     RefusalCode,
@@ -30,7 +31,7 @@ from womblex.cloud.workflow_runner import (
     workflow_overlay,
 )
 from womblex.cloud.workflow_store import StoredWorkflow, check_spec
-from womblex.pipeline_order import DOWNSTREAM_STAGES, in_pipeline_order
+from womblex.pipeline_order import WORKFLOW_FLEET_STAGES, in_pipeline_order
 from womblex.store.retention import is_safe_run_id
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -93,7 +94,7 @@ def dispatch_workflow(
         raise refuse(f"its config does not load: {e}", RefusalCode.CONFIG_INVALID) from e
 
     stages = tuple(s.stage for s in stored.spec.steps)
-    if bad := [s for s in stages if s not in DOWNSTREAM_STAGES]:
+    if bad := [s for s in stages if s not in WORKFLOW_FLEET_STAGES]:
         raise refuse(
             f"the fleet does not dispatch {', '.join(bad)} (run them with `run-stage`, or "
             "`run-workflow` locally)", RefusalCode.STAGE_NOT_DISPATCHABLE,
@@ -105,6 +106,8 @@ def dispatch_workflow(
             "the coordinator runs stages in pipeline order, so reorder the steps",
             RefusalCode.ORDER_NOT_PIPELINE,
         )
+    if problems := check_destinations(stored.spec.destinations):  # on this host; a firing checks on its worker
+        raise refuse("; ".join(f"destination {d}: {m}" for d, m in problems), RefusalCode.DESTINATION_UNAVAILABLE)
     from womblex.utils.model_check import check_registered
 
     try:

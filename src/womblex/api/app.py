@@ -48,7 +48,7 @@ from womblex.api.models import (
 from womblex.cli._shared import SUPPORTED_EXTENSIONS, select_supported
 from womblex.cloud import dispatch
 from womblex.cloud.dispatch import QUEUE_CONNECT_TIMEOUT
-from womblex.cloud.jobs import RunBoard, RunSummary
+from womblex.cloud.jobs import RunBoard, RunSummary, run_state
 from womblex.cloud.worker_registry import NoLiveWorker
 from womblex.cloud.workflow_order import StageOrderError
 from womblex.store.contract import read_footer_contract
@@ -65,18 +65,6 @@ RUN_LIMIT = 1000
 
 #: The default cap on one upload request's total size.
 MAX_UPLOAD_BYTES = 256 * 1024 * 1024
-
-
-def run_state(counts: dict[str, int]) -> str:
-    """Collapse a status rollup into one state; any failed job fails the run, and a finished run
-    with a cancelled job is cancelled."""
-    if counts.get("failed"):
-        return "failed"
-    if counts.get("running") or (counts.get("pending") and counts.get("done")):
-        return "running"
-    if counts.get("pending"):
-        return "pending"
-    return "cancelled" if counts.get("cancelled") else "done"
 
 
 def mint_run_id() -> str:

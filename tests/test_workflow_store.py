@@ -132,7 +132,7 @@ def test_a_row_saved_with_a_retired_field_still_loads(store, caplog) -> None:
     fetched = store.get("wf-old")
     assert fetched is not None and [s.stage for s in fetched.spec.steps] == ["enrich", "chunk"]
     assert "stored conditions are no longer supported" in caplog.text
-    assert "stored destinations are no longer supported" in caplog.text
+    assert "stored destinations predate the current kinds" in caplog.text
     assert fetched.digest == workflow_digest(fetched.spec)  # not the digest stored with the field
     assert "recomputed" in caplog.text
 

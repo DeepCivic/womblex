@@ -114,6 +114,12 @@ DOWNSTREAM_STAGES: tuple[str, ...] = (
 )
 
 
+#: What a dispatched workflow may name: the downstream stages, and `pii` (Phase 3). A workflow
+#: names `pii` deliberately, step by step, which is the deliberate act its absence from
+#: `DOWNSTREAM_STAGES` asks for; a run dispatched without a workflow still never masks.
+WORKFLOW_FLEET_STAGES: tuple[str, ...] = (*DOWNSTREAM_STAGES, "pii")
+
+
 def _normalise_wanted(config: WomblexConfig) -> bool:
     """Whether anything downstream reads the normalised overlay.
 
@@ -158,6 +164,7 @@ def enabled_downstream_stages(config: WomblexConfig) -> tuple[str, ...]:
 __all__ = [
     "DOWNSTREAM_STAGES",
     "PIPELINE_ORDER",
+    "WORKFLOW_FLEET_STAGES",
     "enabled_downstream_stages",
     "in_pipeline_order",
     "sort_by_pipeline",

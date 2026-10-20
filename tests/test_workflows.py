@@ -431,6 +431,124 @@ def test_finalize_records_the_checksum_of_every_published_file(fleet):
     assert not any("file checksums" in gap for gap in record["partial"])
 
 
+def test_the_coordinator_writes_the_run_manifest_as_finalize_does(fleet):
+    """Requirement 2: a fleet run writes `<run>/manifest.parquet` when its stages finish, and
+    `womblex finalize` still writes it on demand, with the same result."""
+    import argparse
+
+    from womblex.cli.cloud import cmd_finalize
+    from womblex.store.run_manifest import read_run_record
+
+    store_root, ingest, _ = fleet
+    with RunBoard(None) as board:
+        board.enqueue("r1", [batch(ingest)])
+        board.enqueue_stages("r1", ["normalise"], "runs/r1/documents")
+        work(fleet, idle_timeout=2)
+        assert board.stats("r1") == {"done": 3}
+    manifest = store_root / "runs/r1/manifest.parquet"
+    by_coordinator = read_run_record(manifest)
+    assert {"batch-0001.normalised_text.parquet", "batch-0001.elements.parquet"} <= {
+        f["key"].rsplit("/", 1)[-1] for f in by_coordinator["files"]}
+    assert cmd_finalize(argparse.Namespace(
+        store=str(store_root), run_id="r1", output_prefix=None, dsn=dbos_app.system_database_url(None))) == 0
+    again = read_run_record(manifest)
+    assert (again["files"], again["stages"]) == (by_coordinator["files"], by_coordinator["stages"])
+
+
+def test_a_manifest_the_coordinator_cannot_write_is_named_not_hidden(fleet, monkeypatch):
+    def unwritable(*_a, **_k):
+        raise OSError("store refused the upload")
+
+    monkeypatch.setattr(workflows, "finalize_from_board", unwritable)
+    store_root, ingest, _ = fleet
+    with RunBoard(None) as board:
+        board.enqueue("r1", [batch(ingest)])
+        board.enqueue_stages("r1", ["normalise"], "runs/r1/documents", max_attempts=1)
+        work(fleet, idle_timeout=2)
+        (coordinator,) = [r for r in board.list_jobs("r1") if r.kind == "downstream"]
+    assert coordinator.status == "failed"
+    assert "run manifest was not written" in (coordinator.error or "")
+    assert (store_root / "runs/r1/documents/batch-0001.normalised_text.parquet").exists()
+
+
+def test_a_dispatched_workflow_is_delivered_after_its_stages_and_recorded(fleet):
+    """Requirement 27 on the fleet: the coordinator delivers the bundle, records it on the run, and
+    the run record lists it."""
+    import json
+
+    from womblex.store.run_manifest import read_run_record
+
+    store_root, ingest, tmp = fleet
+    dest = tmp / "handoff"
+    spec = {"preset": "recipe", "steps": [{"stage": "normalise"}],
+            "destinations": [{"kind": "object_store", "name": "archive", "uri": str(dest)}]}
+    wf = {"id": "wf", "digest": "sha256:feed", "preset": "recipe", "spec": spec, "config": {}}
+    with RunBoard(None) as board:
+        board.enqueue("r1", [batch(ingest)])
+        board.enqueue_stages("r1", ["normalise"], "runs/r1/documents", workflow=wf)
+        work(fleet, idle_timeout=2)
+        assert board.stats("r1") == {"done": 3}
+    bundle = dest / "r1"
+    assert list((bundle / "corpus").glob("*.normalised_text.parquet"))
+    assert json.loads((bundle / "egress_manifest.json").read_text())["sources_by_status"] == {"resolved": 1}
+    saved = json.loads((store_root / "runs/r1/deliveries/archive.json").read_text())
+    assert (saved["status"], saved["after_failed"]) == ("delivered", [])
+    record = read_run_record(store_root / "runs/r1/manifest.parquet")
+    assert [d["destination"] for d in record["deliveries"]] == ["archive"]
+
+
+def test_a_fleet_run_with_a_failed_stage_still_delivers_and_names_it(fleet, monkeypatch):
+    import json
+
+    store_root, ingest, tmp = fleet
+    _failing_units(monkeypatch, lambda stage, unit: stage == "normalise")
+    spec = {"preset": "recipe", "steps": [{"stage": "normalise"}],
+            "destinations": [{"kind": "object_store", "name": "archive", "uri": str(tmp / "handoff"),
+                              "include_sources": False}]}
+    wf = {"id": "wf", "digest": "sha256:feed", "preset": "recipe", "spec": spec, "config": {}}
+    with RunBoard(None) as board:
+        board.enqueue("r1", [batch(ingest)])
+        board.enqueue_stages("r1", ["normalise"], "runs/r1/documents", workflow=wf, max_attempts=1)
+        work(fleet, idle_timeout=2)
+        (coordinator,) = [r for r in board.list_jobs("r1") if r.kind == "downstream"]
+    assert coordinator.status == "failed"
+    saved = json.loads((store_root / "runs/r1/deliveries/archive.json").read_text())
+    assert (saved["status"], saved["after_failed"]) == ("delivered", ["normalise"])
+    marker = json.loads((tmp / "handoff/r1/egress_manifest.json").read_text())["delivery"]
+    assert marker["after_failed"] == ["normalise"]
+
+
+@pytest.mark.parametrize("fails", [True, False])
+def test_a_fleet_run_sends_its_events_once_each_and_records_them(fleet, monkeypatch, fails):
+    """Requirement 27 on the fleet: the coordinator sends each event as a recorded step, the
+    run's status in the API's words (the coordinator, still running, left out), and the
+    webhook's record lists them."""
+    import json
+
+    import httpx
+
+    from tests.test_webhook import _HOOK, _Receiver
+
+    store_root, ingest, _ = fleet
+    got = _Receiver()
+    monkeypatch.setattr(httpx, "post", got)
+    monkeypatch.setenv(_HOOK["secret_env"], "s3cret")
+    _failing_units(monkeypatch, lambda stage, unit: fails and stage == "normalise")
+    spec = {"preset": "recipe", "steps": [{"stage": "normalise"}], "destinations": [_HOOK]}
+    wf = {"id": "wf", "digest": "sha256:feed", "preset": "recipe", "spec": spec, "config": {}}
+    with RunBoard(None) as board:
+        board.enqueue("r1", [batch(ingest)])
+        board.enqueue_stages("r1", ["normalise"], "runs/r1/documents", workflow=wf, max_attempts=1)
+        work(fleet, idle_timeout=2)
+    bodies = [b for b, _, _ in got.calls]
+    stage, status = ("stage_failed", "failed") if fails else ("stage_finished", "done")
+    assert [(b["event"], b["status"]) for b in bodies] == [
+        ("extraction_settled", "running"), (stage, "running"), ("run_finished", status)]
+    assert bodies[1]["stage"] == "normalise" and len({b["event_id"] for b in bodies}) == 3
+    saved = json.loads((store_root / "runs/r1/deliveries/hook.json").read_text())
+    assert [e["event"] for e in saved["events"]] == ["extraction_settled", stage, "run_finished"]
+
+
 class _Row:
     def __init__(self, wid, status, output, kind="batch", created_at=0):
         self.workflow_id, self.status, self.output = wid, status, output

@@ -36,7 +36,7 @@ def _duplicated_steps() -> StoredWorkflow:
 
 
 @pytest.mark.parametrize(("steps", "kw", "code"), [
-    (["pii"], {}, RefusalCode.STAGE_NOT_DISPATCHABLE),
+    (["quality"], {}, RefusalCode.STAGE_NOT_DISPATCHABLE),
     (["layout"], {}, RefusalCode.STAGE_NOT_DISPATCHABLE),
     (["chunk", "normalise"], {"config": _NORMALISED}, RefusalCode.ORDER_NOT_PIPELINE),
     (["chunk"], {"config": _NORMALISED}, RefusalCode.STEP_ORDER),
@@ -106,6 +106,21 @@ def test_a_workflow_runs_on_the_fleet_and_a_different_one_runs_its_own_stages(fl
     work(fleet, idle_timeout=3)
     meta = pq.read_metadata(str(Path(str(store)) / "runs/r1/documents/batch-0001.chunks.parquet")).metadata
     assert meta[b"womblex.workflow_digest"] == second.digest.encode()
+
+
+def test_a_workflow_that_names_pii_masks_on_the_fleet(fleet):  # noqa: F811
+    """Phase 3, item 3.3: a fleet run performs `pii` when its workflow names the step."""
+    store, ingest, _ = fleet
+    with RunBoard(None) as board:
+        board.enqueue("r1", [batch(ingest)])
+    dispatched = _dispatch(fleet, ["chunk", "pii"])
+    assert dispatched.stages == ("chunk", "pii")
+    work(fleet, idle_timeout=3)
+    with RunBoard(None) as board:
+        assert {r.stage: r.status for r in board.list_jobs("r1") if r.kind == "stage"} == {
+            "chunk": "done", "pii": "done"}
+    clean = Path(str(store)) / "runs/r1/documents/batch-0001.clean_text.parquet"
+    assert pq.read_metadata(str(clean)).metadata[b"womblex.workflow_digest"] == dispatched.digest.encode()
 
 
 def test_cli_exit_codes_and_one_line_per_refusal(fleet, caplog, monkeypatch):  # noqa: F811

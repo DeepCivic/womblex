@@ -40,6 +40,18 @@ _STATUS = {
 }
 
 
+def run_state(counts: dict[str, int]) -> str:
+    """Collapse a status rollup into one state; any failed job fails the run, and a finished run
+    with a cancelled job is cancelled. The API's words, which webhook events use too."""
+    if counts.get("failed"):
+        return "failed"
+    if counts.get("running") or (counts.get("pending") and counts.get("done")):
+        return "running"
+    if counts.get("pending"):
+        return "pending"
+    return "cancelled" if counts.get("cancelled") else "done"
+
+
 @dataclass
 class JobSpec:
     """A batch to enqueue: which input keys, and where its shards go."""
@@ -635,4 +647,5 @@ __all__ = [
     "RunSummary",
     "Throughput",
     "WorkerState",
+    "run_state",
 ]

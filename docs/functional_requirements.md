@@ -31,7 +31,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 
 **Given** a configured object store and a DBOS system database (Postgres, or a local SQLite file)
 **When** the operator enqueues work and starts additional workers
-**Then** workers claim batches concurrently without duplication, writing the standard shard layout.
+**Then** workers claim batches concurrently without duplication, write the standard shard layout, and write the run manifest when the stages finish.
 
 **Acceptance criteria:**
 
@@ -41,6 +41,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - A stage can execute in-place over object storage using the exact same contract as local file execution.
 - The pipeline natively resolves standard local and cloud storage URIs.
 - Object-storage stage writes are all-or-none per stage: every declared output must exist before any is published; a set left partial by a failed upload never reads as complete, so the next run redoes that base and overwrites it; and a stage that rewrites outputs in place commits atomically, so an interrupted publish leaves the previous outputs intact.
+- A distributed run writes `<run>/manifest.parquet` when its stages finish. `womblex finalize` still writes it on demand, with the same result.
 
 **TO-DO:**
 
@@ -448,6 +449,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - A run belongs to the client that submitted it: another client's run is 404, an admin sees all runs, and runs dispatched from the CLI, the console or a workflow carry no owner and are visible to admins only. A run never has mixed ownership.
 - Document text defaults to the masked layer; raw layers (`chunks`, `elements`) require `read_raw`, decided by the layer's contract sensitivity.
 - Run file listings report each file's row count, `contract_version`, and `sensitivity`, so a caller can fetch Parquet directly under the data contract.
+- A run started by a workflow that names a webhook sends its events there (Requirement 27). Polling still works.
 - `ready` reports store and queue reachability and answers 503 when either is down; an unreachable queue, store, or ingest location on any other endpoint is 503, not 500.
 - The OpenAPI surface is pinned by a test so breaking changes are visible in review.
 
@@ -457,7 +459,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 **I want** one finished run exported with its raw source documents as a self-describing bundle,
 **so that** consumers can review and reuse the extracted corpus alongside its sources without calling back into Womblex.
 
-**Given** a finished local run root (holding `documents/` and `manifest.parquet`)
+**Given** a finished run root (holding `documents/` and `manifest.parquet`), local or in an object store
 **When** the operator runs `womblex egress <run> --to <dest>`
 **Then** a bundle is written under `<dest>/<bundle_prefix>/` holding the unchanged corpus, deduplicated raw sources, a source index, and a descriptor, and Womblex stops.
 
@@ -472,12 +474,9 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - A corpus-only export (`--no-sources` / `--corpus-only`) skips resolution and writes no `sources/` or `source_index.parquet`.
 - `--source-root` resolves sources from a moved corpus; `--run-id` defaults to the run root's directory name and must agree with the run's own stamp, if it has one.
 - Re-exporting into an existing bundle removes source files the fresh export neither wrote nor attempted, and leaves a source whose upload failed untouched.
+- A run held in an object store is copied store to store, with no local staging.
 - A run ingested from an object store resolves each source from that store by the manifest's `source_relpath`, checked against `source_hash`, with the same per-document statuses.
 - Womblex writes the bundle and nothing downstream of it: no retention, serving, or write-back of consumer corrections.
-
-**TO-DO:**
-
-- **Object-store runs are refused (re: "resolves each source from that store").** `build_bundle` needs a single `file://` ingest root, so a run ingested from an object store is refused before anything is written; stage it locally first.
 
 ## 24. Swappable Models Without a Schema Change
 
@@ -552,7 +551,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 **I want** to declare a named recipe of steps over a preset in a file and run it locally, on the fleet or on a schedule,
 **so that** a run's sequence is declared once, checked before it spends anything, and recorded in what it writes.
 
-**Given** a workflow file (a name, a preset reference, input binding, ordered steps and triggers)
+**Given** a workflow file (a name, a preset reference, input binding, ordered steps, triggers and destinations)
 **When** the operator validates, plans, runs, dispatches or schedules it
 **Then** everything that can refuse does so before the first step, and the files each step writes name the workflow.
 
@@ -574,8 +573,21 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - A firing with no new documents runs nothing and logs that.
 - A file whose content changed is a new document; the earlier version stays in the run. A file rewritten with the same bytes is not a new document.
 - A workflow has no owner; the runs it starts are admin-only, like CLI runs.
+- Fleet runs perform `pii` when a workflow includes it; runs without a workflow never do.
+- A workflow can name destinations: an object store, a Postgres database with embeddings, and a webhook.
+- An object-store destination receives the Requirement 23 bundle; each destination chooses whether raw sources are included.
+- A Postgres destination gets one row per chunk with its embedding: masked text by default, raw only where the workflow asks, each row naming its layer.
+- A Postgres destination requires the `embed` step, and sending masked text requires `pii`; a workflow missing either is refused before launch.
+- A workflow names where secrets are found, never the secrets. No secret is written to the file or the stored copy.
+- Every destination is checked before launch (its secrets resolve, its dependencies are installed); a failed check refuses the run.
+- Results are delivered after the last step, even when a step failed, and a delivery after a failure names the failed steps.
+- A failed delivery is retried a set number of times, then recorded on the run. It never stops the run.
+- After a failed stage is retried successfully, the retry command prints how to redeliver. Redelivery replaces: files are rewritten and rows upserted.
+- A webhook receives six events: `extraction_settled`, `stage_finished`, `stage_failed`, `run_finished`, `delivered` and `delivery_failed`. Each carries an `event_id` (kept when the event is resent, so the receiver can drop a duplicate), the `run_id` and the run's status in the API's words, and is signed with a key held where the run executes.
+- There are no per-document or per-batch events.
+- The run record lists every delivery.
 
-**Out of scope:** managing workflows through the API, pruning changed or deleted documents, resolving the source of a changed file's earlier version (its bytes are gone from the store, so `SourceResolver` reads it as `hash_mismatch`), workflow owners, backfill of missed firings, and destinations (each kind returns with the merge that delivers it).
+**Out of scope:** managing workflows through the API, pruning changed or deleted documents, resolving the source of a changed file's earlier version (its bytes are gone from the store, so `SourceResolver` reads it as `hash_mismatch`), workflow owners, backfill of missed firings, and databases other than Postgres (each needs its own requirement).
 
 ## 28. Fleet Runs — Honour the Dispatch, Report the Truth
 
@@ -614,6 +626,5 @@ Requirements not yet fully met. The detail lives in the **TO-DO** block under ea
 - **Requirement 9 (Redaction Handling):** no redaction `pipeline_point`, and the E2E `run` path writes no `*.redactions.parquet`.
 - **Requirement 13 (Money Annotation):** the money span row carries no merge extent or header-row coordinate.
 - **Requirements 17 and 21 (Corpus Inspector; Console Design System):** `DocumentGrid.svelte` is not virtualised and emits no `aria-rowcount`.
-- **Requirement 23 (Egress Bundle):** a run ingested from an object store is refused rather than resolving its sources from that store.
 
 ---

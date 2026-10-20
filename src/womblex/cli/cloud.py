@@ -18,7 +18,6 @@ from __future__ import annotations
 import argparse
 import logging
 import os
-import tempfile
 from pathlib import Path
 
 from womblex.cli._shared import (
@@ -278,15 +277,13 @@ def _register_finalize(p: argparse.ArgumentParser) -> None:
 def cmd_finalize(args: argparse.Namespace) -> int:
     """Consolidate a distributed run's shard manifests into one run manifest.
 
-    ``womblex run`` writes ``<run_root>/manifest.parquet`` at the end of a local
-    run; a distributed run has no single end, so this is the explicit
-    finalisation step. Run it once the fleet has drained: it downloads every
-    ``*._manifest.parquet`` shard, consolidates them, and uploads
-    ``<output-prefix>/manifest.parquet`` back to the store. Idempotent — safe to
-    re-run as more batches land.
+    The coordinator writes ``<output-prefix>/manifest.parquet`` itself once the
+    run's stages finish; this writes it on demand, through the same code
+    (`cloud/finalize.py`) — for an extraction-only run, or after a retry.
+    Idempotent — safe to re-run as more batches land.
     """
+    from womblex.cloud.finalize import NoShardManifests, finalize_run, published_checksums
     from womblex.store.remote import RemoteStore
-    from womblex.store.run_manifest import RUN_MANIFEST_FILENAME, write_run_manifest
 
     store_uri = _resolve_store(args)
     if not store_uri:
@@ -294,7 +291,6 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         return 1
 
     output_prefix = (args.output_prefix or f"runs/{args.run_id}").strip("/")
-    shard_prefix = f"{output_prefix}/documents"
     store = RemoteStore.from_uri(store_uri)
 
     dsn = _resolve_dsn(args)
@@ -305,16 +301,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
 
         with RunBoard(dsn) as board:
             stats = board.stats(args.run_id)
-            published = board.file_checksums(args.run_id)
-        # Run-relative, so the record reads the same wherever the store is mounted.
-        # An empty board read is a run recorded before checksums, not a run of no files.
-        checksums = {
-            k.removeprefix(f"{output_prefix}/"): v for k, v in published.checksums.items()
-        } or None
-        undigested = published.undigested
-        if undigested:
-            logger.warning("%d job(s) may have published files with no checksum: %s",
-                           len(undigested), ", ".join(undigested))
+            checksums, undigested = published_checksums(board, args.run_id, output_prefix)
         unfinished = stats.get("pending", 0) + stats.get("running", 0)
         if unfinished:
             logger.warning(
@@ -327,37 +314,13 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         logger.warning("no --dsn: the run record will carry no file checksums "
                        "(they are read from the workflow outputs)")
 
-    manifest_keys = store.list_files(shard_prefix, "*._manifest.parquet")
-    if not manifest_keys:
-        logger.error("No *._manifest.parquet under %s/%s", store_uri, shard_prefix)
+    try:
+        result = finalize_run(store, output_prefix, checksums=checksums, undigested=undigested)
+    except NoShardManifests as e:
+        logger.error("%s in %s", e, store_uri)
         return 1
-
-    # The run record is built from every shard's footer, but only the manifests
-    # are staged in — so the footers are read where the shards actually live.
-    # Without this the record would name extraction and nothing else, and a
-    # missing stage is indistinguishable from one that never ran: silent, which
-    # is the one thing the record must not be.
-    shard_keys = store.list_files(shard_prefix, "*.parquet")
-    footers = [
-        observed
-        for observed in (store.read_parquet_footer(k) for k in shard_keys)
-        if observed is not None
-    ]
-    logger.info("Read %d/%d shard footer(s) for the run record",
-                len(footers), len(shard_keys))
-
-    with tempfile.TemporaryDirectory(prefix="womblex-finalize-") as tmp:
-        docs = Path(tmp) / "documents"
-        store.download_to_dir(manifest_keys, docs)
-        local_manifest = write_run_manifest(
-            docs, footers=footers, checksums=checksums, undigested=undigested,
-        )
-        store.upload_file(local_manifest, f"{output_prefix}/{RUN_MANIFEST_FILENAME}")
-
-    logger.info(
-        "Finalised run %s: %d shard manifest(s) -> %s/%s/%s",
-        args.run_id, len(manifest_keys), store_uri, output_prefix, RUN_MANIFEST_FILENAME,
-    )
+    logger.info("Finalised run %s: %d shard manifest(s) -> %s/%s",
+                args.run_id, result.shard_manifests, store_uri, result.manifest_key)
     return 0
 
 
@@ -617,9 +580,9 @@ def _warn_if_draining(args: argparse.Namespace, run_id: str) -> None:
 
 def _register_egress(p: argparse.ArgumentParser) -> None:
     p.add_argument(
-        "run", type=Path,
-        help="Finished local run root (holds `documents/` and `manifest.parquet`, "
-             "as `womblex run` or `womblex manifest` produces).",
+        "run",
+        help="Finished run root (holds `documents/` and `manifest.parquet`): a local "
+             "directory, or an object-store URI copied store to store.",
     )
     p.add_argument("--to", required=True, help="Destination RemoteStore URI (a local dir, s3://, …)")
     p.add_argument(
@@ -649,25 +612,30 @@ def _register_egress(p: argparse.ArgumentParser) -> None:
 
 
 def cmd_egress(args: argparse.Namespace) -> int:
-    """Export one finished local run into an egress bundle at any destination.
+    """Export one finished run into an egress bundle at any destination.
 
     The producer half of the Womblex/Numbatch/Echidnet bundle contract
     (`docs/egress.md`): writes `<bundle>/corpus/`, resolves and copies raw
     `<bundle>/sources/`, and writes `source_index.parquet` +
     `egress_manifest.json`, then stops — no retention, serving, versioning, or
-    auth. Sources resolve against a *local* run only; a distributed run is
-    staged locally first (e.g. `womblex finalize` then a sync-down).
+    auth. A run held in an object store is copied store to store, and sources
+    ingested from an object store are fetched from it by `source_relpath`.
     """
     from womblex.store.egress import build_bundle
-    from womblex.store.remote import RemoteStore
+    from womblex.store.remote import RemoteStore, is_remote_uri
 
-    run_root: Path = args.run
-    if not run_root.is_dir():
-        logger.error("run root is not a directory: %s", run_root)
-        return 1
-    # abspath, not resolve(): normalises `.`/`..` (whose `.name` is empty or
-    # `..`) without following a symlinked run root to another name.
-    run_id = args.run_id or Path(os.path.abspath(run_root)).name
+    run_root: Path | str
+    if is_remote_uri(str(args.run)):
+        run_root = str(args.run).rstrip("/")
+        run_id = args.run_id or run_root.rsplit("/", 1)[-1]
+    else:
+        run_root = Path(args.run)
+        if not run_root.is_dir():
+            logger.error("run root is not a directory: %s", run_root)
+            return 1
+        # abspath, not resolve(): normalises `.`/`..` (whose `.name` is empty or
+        # `..`) without following a symlinked run root to another name.
+        run_id = args.run_id or Path(os.path.abspath(run_root)).name
 
     try:
         store = RemoteStore.from_uri(args.to)
@@ -705,6 +673,6 @@ COMMANDS = [
             _register_enqueue_stages, cmd_enqueue_stages),
     Command("run-stage", "Run a downstream shard stage against object storage",
             _register_run_stage, cmd_run_stage),
-    Command("egress", "Export one finished local run into an egress bundle",
+    Command("egress", "Export one finished run into an egress bundle",
             _register_egress, cmd_egress),
 ]
