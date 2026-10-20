@@ -97,9 +97,13 @@ time cannot contain mention→chunk edges (no chunks exist yet), and
 `enrichment_entities.chunk_index` is `-1`. `analyse/graph_refresh.py` closes the
 gap **offline** after chunking: entity mention spans and chunk offsets share the
 same narrative coordinate space, so overlap is deterministic and API-free. It
-rewrites `chunk_index` and replaces the `mentioned_in` edges while preserving
-hierarchy/citation/cross-reference edges; idempotent by construction. Only
-entity mentions are relinked — segment/cross-reference chunk edges need the full
+writes the result to its own `*.graph_links.parquet`, stamped with the digest of
+the chunks it linked against, and rewrites neither enrich file (D-4.2 in
+[decisions-operations.md](decisions-operations.md)); idempotent by construction.
+A reader (`analyse/query.py`) takes the links while the digest matches the chunks
+beside them and otherwise reads enrich's files, so a rechunk costs nothing but a
+refresh and a run refreshed by an older build reads as before. Only entity
+mentions are linked — segment/cross-reference chunk edges need the full
 `EnrichmentResult` and are out of scope.
 
 ### Reference registers — dedicated ingests; document formats — generic

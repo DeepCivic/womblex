@@ -234,7 +234,7 @@ element's `elem_order` as a document-order anchor (see below).
 | `entity_type` | Entity subtype (`natural`, `corporate`, `politic`, `country`, `state`, etc.) |
 | `role` | Person role (`seller`, `buyer`, `other`, …); empty for non-person entities |
 | `mention_start`, `mention_end` | Offset of this single mention in the text named by `text_layer` |
-| `chunk_index` | Narrative chunk this mention falls in; `-1` if not mapped to a chunk, and always `-1` for a table mention |
+| `chunk_index` | Narrative chunk this mention falls in at enrich time; `-1` if not mapped to a chunk, and always `-1` for a table mention. `graph-refresh` leaves it alone; its links are in `graph_links.parquet` |
 | `text_layer` | The text the offsets index: the narrative under its element-text layer (`elements` / `normalised` / `spellfix`), or `table_markdown` for a table enriched on its own. Null on files written before contract 1.4 (narrative) |
 | `mention_text` | The text of this mention (`name` is the entity's, the same for every mention). Null on files written before contract 1.5 |
 | `elem_order`, `sheet` | The table element, or the spreadsheet sheet, a `table_markdown` mention lies in; null for narrative mentions |
@@ -248,6 +248,16 @@ element's `elem_order` as a document-order anchor (see below).
 | `target_id` | Target node identifier |
 | `relation` | Relationship type |
 | `prop_key`, `prop_value` | One edge-property pair per row; empty-string pair for edges with no properties |
+
+**graph_links.parquet** — one row per narrative mention (from `graph-refresh`)
+
+| Column | Description |
+|--------|-------------|
+| `source_hash`, `entity_id`, `mention_start`, `mention_end` | The mention in `enrichment_entities.parquet` |
+| `chunk_index` | First narrative chunk the mention overlaps; `-1` if none |
+| `chunk_indices` | Every narrative chunk the mention overlaps |
+
+The footer's `womblex.chunks_digest` is the digest of the chunks the links were computed against; readers use the file only while the chunks beside it still hash to it.
 
 **enrichment_meta.parquet** — one row per enriched document
 

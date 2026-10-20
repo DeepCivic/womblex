@@ -55,7 +55,7 @@ pii (post_enrich.)   run_pii_cleaning       chunks + enrichment        chunk tex
 | `spellfix` | `.elements`, `.table_cells`, `._manifest` | `.normalised_text` (chains on it when present) | `.spellfix_text`, `.spellfix_corrections` |
 | `enrich` | `.elements`, `._manifest` | `text_source` overlay (strict); `.chunks` (adds mention→chunk edges) | `.enrichment_entities`, `.enrichment_meta`, `.graph_edges` (+ `.enrichment_doc` when `persist_document` or `chunking_model`) |
 | `chunk` | `.elements`, `.table_cells`, `._manifest` | `text_source` overlay (strict); `.enrichment_doc` when `chunking_model` is set | `.chunks` |
-| `graph-refresh` | `.enrichment_entities`, `.graph_edges`, `.chunks`, `._manifest` | — | `.enrichment_entities`, `.graph_edges` (rewritten in place) |
+| `graph-refresh` | `.enrichment_entities`, `.chunks`, `._manifest` | — | `.graph_links` |
 | `embed` | `.chunks`, `._manifest` | — | `.embeddings` |
 | `money` | `.elements`, `.table_cells`, `._manifest` | `text_source` overlay (strict; `money.text_source` outranks `processing.text_source`) | `.money_spans`, `.money_columns` |
 | `link` | `.enrichment_entities`, `._manifest` | — | `.entity_links` |
@@ -94,7 +94,7 @@ Notes:
 
 - `pii` is terminal. It runs after enrich and embed, reads `*.chunks.parquet` and never rewrites it, and writes the masked layer as a separate `*.clean_text.parquet`. `embed` reads `*.chunks.parquet` too — never the masked text — so embedding before or after `pii` produces the same vectors; the order matters because masking is irreversible and nothing downstream of it should need raw text.
 - `chunk → enrich` is valid: enrich reassembles the narrative from the element stream, and present chunks only add mention→chunk edges. Running enrich first is the default because AI chunking can then reuse its Document.
-- `graph-refresh` needs both enrichment and chunks; it rebuilds mention→chunk edges after chunking, in place, and is never skipped on output existence.
+- `graph-refresh` needs both enrichment and chunks; it links each narrative mention to the chunks it overlaps in its own `*.graph_links.parquet`, stamped with the digest of the chunks it linked against, and rewrites no earlier file. It is never skipped because the links file exists: a rechunk leaves one that no longer matches.
 - `money` is an offline annotation: API-free, it reads only the extraction Parquet (`*.elements.parquet` + `*.table_cells.parquet`, never `*.chunks.parquet` or the graph) and never rewrites element or chunk text, so it may run anywhere after `extract` and produces byte-identical output whether run before or after `enrich` / `graph-refresh`. Its narrative offsets index the same `processing.text_source` space as enrichment mentions and chunks, so amounts join to the chunk a mention falls in by an offset overlap performed downstream, not by the money stage. Its own resumable checkpoint means re-running over a directory the earlier stages already wrote to annotates only batches without a money sidecar yet.
 - CSV/XLSX extraction follows the shard row; the documented spreadsheet path is `extract → money`.
 
@@ -121,7 +121,7 @@ a declared cleaning layer it did not apply.
 
 ```
 chunk / enrich / money without extract — no extraction shards to discover
-graph-refresh without enrich or chunk — needs .enrichment_entities, .graph_edges and .chunks
+graph-refresh without enrich or chunk — needs .enrichment_entities and .chunks
 embed / pii / quality without chunk — no .chunks
 link without enrich — no .enrichment_entities
 pii (post_enrichment, in memory) without enrichment — graph-driven PII needs a graph

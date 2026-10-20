@@ -121,7 +121,7 @@ womblex/
 │   │   ├── enrich.py        # Isaacus enrichment wrappers (kanon-2-enricher)
 │   │   ├── enrich_stage.py  # enrich_shards() — drives `womblex enrich --shards`; writes *.enrichment_entities.parquet
 │   │   ├── enrich_merge.py  # Stitch per-segment results of a split long document back into one
-│   │   ├── graph_refresh.py # refresh_graph_edges() — offline mention→chunk edge rebuild after AI chunking
+│   │   ├── graph_refresh.py # refresh_graph_edges() — offline mention→chunk links (*.graph_links.parquet) after chunking
 │   │   ├── embed.py         # Thin wrapper over Isaacus embeddings.create (kanon-2-embedder)
 │   │   ├── embed_stage.py   # embed_shards() — drives `womblex embed --shards`; writes *.embeddings.parquet
 │   │   ├── graph.py         # build_document_graph() — entity graph construction from enrichment results

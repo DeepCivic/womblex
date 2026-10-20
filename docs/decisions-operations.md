@@ -80,6 +80,7 @@ engines".
 - **D-3.4 Dependencies.** `httpx` is declared in core and pgvector's client sits in a `[pgvector]` extra, landed as their own merge.
 - **D-4.1 Plain-language status.** One sentence per run, derived from the exact per-stage counts, which stay. Its words are the API's (`pending` / `running` / `done` / `failed` / `cancelled`, plus a warning for a firing that could not dispatch its stages), shared with the webhook events and the lineage event types (Phase 3, "Status uses the API's existing words", which replaced an earlier vocabulary; the webhook events use them as built in 3.5). Shown by `womblex jobs --run`, an additive `summary` on `/v1/runs/{id}`, and the console.
 - **D-4.2 Graph-refresh writes its own sidecar,** keyed by the chunks' digest, and stops rewriting the enrichment sidecars. Enrich's files stay as enrich stamped them, and a reader can tell when the refresh no longer matches the chunks. *Rejected:* a version in the file name, which says that the file changed but not which chunks it matches.
+  *As built (4.2, 4.3).* `store/graph_links_output.py`: one row per narrative mention with the first and every overlapping chunk index, the footer key `womblex.chunks_digest` holding a SHA-256 over the batch's chunk rows (identity, offsets, text). The `mentioned_in` edges are not stored; a reader derives them from the links (mention, chunk, the mention's offsets). `read_matching_links` returns the links only while the chunks beside them still hash to the stamped digest, and `load_entity_mentions` / `load_graph_edges` use them then and enrich's files otherwise. 4.2 wrote the links beside the old rewrite; 4.3 removed the rewrite and the edges file as a required input.
 
 ### A workflow is a file; scheduling stores a copy (Phase R, D1 and D10)
 2026-10; D8 of the trust-and-recipes plan, as repaired by Phase R item R.3. A preset is a partial config applied once per run; it holds no step sequence or inputs. A workflow references a preset and adds those, in a YAML file (`cloud/workflow_file.py`) that is the master copy: `validate`, `plan`, `run-workflow`, `dispatch-workflow` and `schedule-workflow` each take its path, and unknown keys are refused. Its digest, over the parsed spec, is stamped beside `config_digest`. Dispatch stores nothing, since the run receives the whole workflow. Only `schedule-workflow` stores a copy, in the database DBOS uses, because its firings read it: it checks the firing, saves the copy and syncs the schedules in one action (`workflow_schedules.schedule_workflow`), putting the previous copy back if the sync fails, so a stored copy never disagrees with its schedules. Reverses Phase 2's code-only creation (D-2.2, deleted): a workflow could only be saved through `WorkflowStore` in code, and a stored copy could change without its schedules.
@@ -233,15 +234,13 @@ Decisions inside it:
   `run-stage … && next-step`.
 - **`manifest` is excluded**, because `finalize` is it. Duplicating it in the
   runner inventory would give one job two commands.
-- **`graph-refresh` is modelled explicitly as an in-place mutator.** Its outputs
-  (`*.enrichment_entities.parquet`, `*.graph_edges.parquet`) are a *subset* of
-  its inputs, so it breaks the disjoint required-input/produced-output model that
-  output-exists skip depends on. Rather than exclude it, the contract carries
-  `MutationMode.IN_PLACE`: never skipped, both sidecars re-uploaded
-  unconditionally, correctness resting on the stage's existing idempotency
-  (recomputing from the same character offsets yields the same `chunk_index` and
-  the same `mentioned_in` edges). Atomicity is the same all-or-nothing publish,
-  so a mid-batch failure leaves the store untouched.
+- **`graph-refresh` writes a sidecar of its own** (Phase 4, D-4.2). It was
+  modelled as an in-place mutator because it rewrote two sidecars it also read;
+  it now writes `*.graph_links.parquet` alone, so it is an ordinary sidecar
+  producer and `layout` is the one `IN_PLACE` stage. Output-exists skip would
+  wrongly skip a rechunked base, so its contract sets
+  `skip_if_output_present=False` and it recomputes on every run (cheap,
+  deterministic, idempotent) rather than trusting the file's existence.
 - **`quality` is run-scoped, not per-batch.** Per-batch execution is not a weaker
   version of the same output; it is a differently-meaning column with the same
   name. `_cluster_ids` numbers clusters `0,1,2,…` in first-occurrence order

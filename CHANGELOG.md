@@ -9,6 +9,7 @@ Entries are terse by design; rationale lives in the PR/commit history.
 ## [Unreleased]
 
 ### Changed
+- **Docs for graph refresh's own sidecar — trust plan, Phase 4 item 4.3.5.** The contract, dataflow, composable-design, decisions and architecture docs describe `*.graph_links.parquet` and the readers' digest check; the in-place decision is replaced by D-4.2 as built. Docs only.
 - **Graph refresh stops rewriting earlier files — trust plan, Phase 4 item 4.3 (Requirement 12, D-4.2).** `graph-refresh` writes only `*.graph_links.parquet`; `*.enrichment_entities.parquet` and `*.graph_edges.parquet` stay as enrich wrote them, and the stage no longer needs the edges file. It is a plain sidecar producer on the fleet (`StageContract.skip_if_output_present=False` keeps a stale links file from skipping a rechunked base); `layout` is the one in-place stage. `GraphRefreshResult.edges_added` becomes `links_written`; the unused `write_enrichment_entities_rows` and `write_graph_edges_rows` are deleted. Runs refreshed before this read as before.
 
 ### Added

@@ -17,7 +17,7 @@ Input File
         ▼  (Downstream stages over the shard dir — `run-stage` / `enqueue-stages`, in PIPELINE_ORDER)
         ├─ enrich        — Isaacus enrichment (needs elements + manifest; chunks optional)
         ├─ chunk         — split text into token-bounded chunks
-        ├─ graph-refresh — offline mention→chunk edge rebuild
+        ├─ graph-refresh — offline mention→chunk links (own sidecar)
         └─ pii           — mask graph PII spans as numbered <PERSON_n> tags in *.clean_text.parquet (terminal, after enrich + embed)
 ```
 
