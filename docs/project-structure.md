@@ -162,6 +162,7 @@ womblex/
 │   ├── cloud/                  # Distributed run support — `womblex enqueue` / `enqueue-stages` / `worker` / `jobs` / `finalize` / `run-stage` / `egress`
 │   │   ├── dbos_app.py         # DBOS wiring — system database URL, queue/workflow names and ids, client
 │   │   ├── jobs.py             # RunBoard — enqueue + read runs over DBOS workflows; run `owner` scoping; stage attempts and the fork
+│   │   ├── delivery.py         # Deliver a finished run to its workflow's destinations — checked before launch, bounded retries, recorded on the run
 │   │   ├── finalize.py         # finalize_run() — a run's manifest.parquet in its store; `womblex finalize` and the coordinator's last step
 │   │   ├── retry.py            # retry_stage() — fork a failed stage from its first failed unit, refusing before the fork
 │   │   ├── workflows.py        # extract_batch / run_stage / run_downstream workflows; a dispatched workflow's stage runs under its overlay and digest
