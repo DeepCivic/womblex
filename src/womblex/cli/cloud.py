@@ -128,10 +128,8 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
         return 1
 
     from womblex.cloud.workflow_runner import config_payload
-    from womblex.config import WomblexConfig, load_config
 
-    config = load_config(args.config) if args.config is not None else WomblexConfig.model_validate(
-        {"dataset": {"name": "enqueue"}, "paths": {"input_root": ".", "output_root": ".", "checkpoint_dir": "."}})
+    config = _runner_config(args.config)  # the run carries it; omitted, the defaults `run-stage` uses
     batch_size = args.batch_size if args.batch_size is not None else config.processing.batch_size
     if batch_size < 1:
         logger.error("batch-size must be >= 1")
@@ -487,11 +485,11 @@ def _register_run_stage(p: argparse.ArgumentParser) -> None:
 
 
 def _runner_config(config_path: Path | None):  # type: ignore[no-untyped-def]
-    """Load the config, or a defaults instance when ``--config`` is omitted.
+    """Load the config, or a defaults instance when ``--config`` is omitted (`run-stage`, `enqueue`).
 
-    The runner never reads ``dataset`` / ``paths`` — it operates on a shard
-    prefix — but ``WomblexConfig`` requires them, so absent a config file we
-    supply placeholders and let every stage section fall back to its defaults.
+    ``WomblexConfig`` requires ``dataset`` / ``paths``, so absent a config file we
+    supply placeholders (a run carries no ``paths``, and ``runner`` is its preset
+    name) and let every stage section fall back to its defaults.
     """
     from womblex.config import WomblexConfig, load_config
 
