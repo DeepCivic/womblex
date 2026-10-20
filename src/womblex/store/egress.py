@@ -56,7 +56,13 @@ from womblex.store.egress_output import (
     SOURCES_DIRNAME,
     write_source_index,
 )
-from womblex.store.egress_sources import UPLOAD_FAILED, LocalSources, StoreSources, declared_root
+from womblex.store.egress_sources import (
+    UPLOAD_FAILED,
+    LocalSources,
+    StoreSources,
+    declared_root,
+    local_or_uri,
+)
 from womblex.store.output import conform_shard
 from womblex.store.remote import RemoteStore, is_remote_uri
 from womblex.store.retention import is_safe_run_id
@@ -237,6 +243,7 @@ def _sources(
         if all(hash_basis_for(str(m or "")) != HASH_BASIS_FILE_BYTES for m in methods):
             return StoreSources(manifest, None)
         source_root = declared_root(manifest)
+    source_root = local_or_uri(source_root)
     if isinstance(source_root, str) and is_remote_uri(source_root):
         ingest = RemoteStore.from_uri(source_root)
         try:  # an unreadable store is refused here, before the first write, not found row by row
