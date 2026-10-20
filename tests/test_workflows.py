@@ -497,6 +497,27 @@ def test_a_dispatched_workflow_is_delivered_after_its_stages_and_recorded(fleet)
     assert [d["destination"] for d in record["deliveries"]] == ["archive"]
 
 
+def test_a_fleet_run_with_a_failed_stage_still_delivers_and_names_it(fleet, monkeypatch):
+    import json
+
+    store_root, ingest, tmp = fleet
+    _failing_units(monkeypatch, lambda stage, unit: stage == "normalise")
+    spec = {"preset": "recipe", "steps": [{"stage": "normalise"}],
+            "destinations": [{"kind": "object_store", "name": "archive", "uri": str(tmp / "handoff"),
+                              "include_sources": False}]}
+    wf = {"id": "wf", "digest": "sha256:feed", "preset": "recipe", "spec": spec, "config": {}}
+    with RunBoard(None) as board:
+        board.enqueue("r1", [batch(ingest)])
+        board.enqueue_stages("r1", ["normalise"], "runs/r1/documents", workflow=wf, max_attempts=1)
+        work(fleet, idle_timeout=2)
+        (coordinator,) = [r for r in board.list_jobs("r1") if r.kind == "downstream"]
+    assert coordinator.status == "failed"
+    saved = json.loads((store_root / "runs/r1/deliveries/archive.json").read_text())
+    assert (saved["status"], saved["after_failed"]) == ("delivered", ["normalise"])
+    marker = json.loads((tmp / "handoff/r1/egress_manifest.json").read_text())["delivery"]
+    assert marker["after_failed"] == ["normalise"]
+
+
 class _Row:
     def __init__(self, wid, status, output, kind="batch", created_at=0):
         self.workflow_id, self.status, self.output = wid, status, output
