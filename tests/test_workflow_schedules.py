@@ -388,3 +388,43 @@ def test_a_schedule_synced_before_input_stores_is_refused_not_stranded(fleet, sa
         (row,) = board.list_jobs(run.run_id)
     assert run.counts == {"failed": 1} and row.kind == "trigger"
     assert "[spec_invalid]" in (row.error or "") and "schedule-workflow" in (row.error or "")
+
+
+def test_a_rewrite_of_the_same_bytes_is_not_queued_again(fleet, saved_preset, caplog) -> None:  # noqa: F811
+    """Its fingerprint moves (new mtime) but its bytes hash to the run's recorded source_hash."""
+    import logging
+    import os
+
+    from tests.test_cloud import _minimal_config
+    from womblex.cloud import workflows
+    from womblex.store.remote import RemoteStore
+
+    store_dir, ingest, tmp = fleet
+    _inbox(fleet)
+    ensure_workflow_schema(None)
+    with WorkflowStore(None) as store:
+        store.save("nightly", _spec(["normalise"], [], "inbox", store=fleet[1]))
+
+    def fire(firing: str) -> None:
+        workflows.set_context(workflows.WorkerContext(
+            _minimal_config(tmp), RemoteStore.from_uri(str(store_dir)), RemoteStore.from_uri(ingest), ingest, None))
+        try:
+            workflows._fire("nightly", {"workflow_id": "nightly", "store": ingest}, firing)
+        finally:
+            workflows.set_context(None)
+
+    people = Path(ingest) / "inbox" / "people.csv"
+    fire("1")
+    work(fleet, idle_timeout=4)  # extracted: the run's manifest records the file's source_hash
+    people.write_bytes(people.read_bytes())  # the same bytes, copied over again
+    stat = people.stat()
+    os.utime(people, (stat.st_atime + 60, stat.st_mtime + 60))
+    with caplog.at_level(logging.INFO):
+        fire("2")
+    assert "rewritten with the same bytes" in caplog.text
+    with RunBoard(None) as board:
+        assert board.firing_batches("nightly", "2") == []
+    people.write_text("name,role\nAlice,Secretary\n")  # different bytes: a new document
+    fire("3")
+    with RunBoard(None) as board:
+        assert board.firing_batches("nightly", "3") == [2]

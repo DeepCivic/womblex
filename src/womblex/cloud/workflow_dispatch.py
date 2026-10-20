@@ -197,32 +197,36 @@ def fire_workflow(
     dispatch the steps over them.
 
     A document is new when the run has not queued its key with its current fingerprint
-    (`RemoteStore.fingerprints`), so a changed file is a new document and the earlier version
-    stays. A firing with nothing new queues and dispatches nothing. A replayed *firing* reuses
+    (`RemoteStore.fingerprints`) and, for a seen key whose fingerprint moved, its bytes differ from
+    the run's recorded `source_hash` (`_changed_content`), so a changed file is a new document, the
+    earlier version stays, and a rewrite of the same bytes is not re-paid. A firing with nothing new queues and dispatches nothing. A replayed *firing* reuses
     the batches it queued. The launch, so every check runs first (`check_firing`, then that this
     firing's batches were not cancelled) and a firing that cannot complete writes no row. A
     dispatch that fails after the batches are queued leaves them running: the run reads
     `orphaned` on the board until the firing's stages are dispatched.
     """
+    from womblex.cli._shared import normalise_prefix
     from womblex.cloud.dispatch import batch_specs
     from womblex.cloud.jobs import RunBoard
 
     keys = check_firing(stored, run_id=run_id, resolve_preset=resolve_preset, store=store,
                         ingest=ingest, dsn=dsn)
     binding = stored.spec.input_binding
-    prints = ingest.fingerprints(keys)
+    shard_prefix = f"runs/{run_id}/documents"
     with RunBoard(dsn) as board:
         if cancelled := board.cancelled_batches(run_id, firing):  # a replayed firing: they would never run
             raise WorkflowRefusedError(f"firing {firing} of run {run_id!r} has cancelled batches "
                                        f"({', '.join(cancelled)})", code=RefusalCode.BATCHES_CANCELLED)
-        if not board.firing_batches(run_id, firing):
+        if not board.firing_batches(run_id, firing):  # a replay reuses its batches and fingerprints nothing
+            prints = ingest.fingerprints(keys, under=normalise_prefix(binding.ingest_prefix))
             seen = board.seen_inputs(run_id)
             new = [k for k in keys if (k, prints[k]) not in seen]
+            new = _changed_content(stored.id, new, {k for k, _ in seen}, ingest, store, shard_prefix)
             if not new:
                 logger.info("workflow %s: no new documents under its input prefix; firing %s runs nothing",
                             stored.id, firing)
                 return WorkflowDispatch(run_id, stored.id, stored.digest, (), "", 0, False, firing, [])
-            specs = batch_specs(new, shard_prefix=f"runs/{run_id}/documents", ingest_root=binding.store or "",
+            specs = batch_specs(new, shard_prefix=shard_prefix, ingest_root=binding.store or "",
                                 batch_size=binding.batch_size, max_attempts=3, start=board.next_batch_num(run_id))
             board.enqueue(run_id, specs, firing=firing, fingerprints=prints)
     try:
@@ -235,6 +239,38 @@ def fire_workflow(
     logger.info("workflow %s fired: run %s, firing %s, batches %s, stages %s", stored.id, run_id, firing,
                 ", ".join(sent.bases or ()), ", ".join(sent.stages))
     return sent
+
+
+def _changed_content(
+    workflow_id: str, new: list[str], seen_keys: set[str], ingest: RemoteStore, store: RemoteStore,
+    shard_prefix: str,
+) -> list[str]:
+    """*new* without the seen keys whose bytes are unchanged, so a rewrite of the same bytes is not re-paid.
+
+    A seen key's fingerprint can move while its bytes stay (a re-copy, a multipart re-upload), so
+    its bytes are hashed and compared with the `source_hash` the run's manifests record for it. A
+    key with no manifest row (its earlier batch still extracting, or failed) cannot be compared and
+    is queued, so a changed file is never held back.
+    """
+    import tempfile
+    from pathlib import Path
+
+    import pyarrow.parquet as pq
+
+    moved = [k for k in new if k in seen_keys]
+    if not moved:
+        return new
+    recorded: dict[str, set[str]] = {}
+    with tempfile.TemporaryDirectory(prefix="womblex-seen-") as tmp:
+        for key in store.list_files(shard_prefix, "*._manifest.parquet"):
+            local = store.download_file(key, Path(tmp) / key.rsplit("/", 1)[-1])
+            rows = pq.read_table(local, columns=["source_relpath", "source_hash"]).to_pylist()
+            for row in rows:
+                recorded.setdefault(row["source_relpath"], set()).add(row["source_hash"])
+    same = {k for k in moved if k in recorded and ingest.sha256(k) in recorded[k]}
+    for key in sorted(same):
+        logger.info("workflow %s: %s was rewritten with the same bytes; not queued again", workflow_id, key)
+    return [k for k in new if k not in same]
 
 
 __all__ = ["WorkflowDispatch", "check_firing", "dispatch_workflow", "fire_workflow"]

@@ -282,15 +282,33 @@ class RemoteStore:
         prefix = self.root + "/"
         return [m.removeprefix(prefix) for m in matches if m != self.root]
 
-    def fingerprints(self, keys: list[str]) -> dict[str, str]:
+    def fingerprints(self, keys: list[str], under: str = "") -> dict[str, str]:
         """Each of *keys* with a fingerprint of its current content: the store's ETag or checksum
-        where it keeps one, else size and modification time. A changed object changes it."""
+        where it keeps one, else size and modification time. A changed object changes it, but
+        so can a rewrite of the same bytes, so a caller that must not re-pay compares content.
+
+        Read from one recursive listing of *under* (the keys' common prefix); a key the listing
+        does not return gets its own metadata call.
+        """
+        prefix = self.root + "/"
+        found = self.fs.find(self._full(under), detail=True)  # type: ignore[attr-defined]
+        listed = {path.removeprefix(prefix): info for path, info in found.items()}
         out: dict[str, str] = {}
         for key in keys:
-            info = self.fs.info(self._full(key))  # type: ignore[attr-defined]
+            info = listed.get(key) or self.fs.info(self._full(key))  # type: ignore[attr-defined]
             tag = info.get("ETag") or info.get("etag") or info.get("md5") or info.get("crc32c")
             out[key] = str(tag).strip('"') if tag else f"{info.get('size')}:{info.get('mtime') or info.get('LastModified')}"
         return out
+
+    def sha256(self, rel: str) -> str:
+        """SHA-256 of the object's bytes, the basis a manifest's `source_hash` uses."""
+        import hashlib
+
+        h = hashlib.sha256()
+        with self.fs.open(self._full(rel), "rb") as f:  # type: ignore[attr-defined]
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        return h.hexdigest()
 
     def find(self, rel: str) -> list[str]:
         """Every object key under *rel*, recursively and store-relative — no pseudo-directories."""
