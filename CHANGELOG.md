@@ -9,7 +9,7 @@ Entries are terse by design; rationale lives in the PR/commit history.
 ## [Unreleased]
 
 ### Removed
-- **The fleet no longer labels workflow conditions — trust plan, Phase R item R.1a (D3).** `dispatch-workflow` stops carrying a workflow's conditions, the coordinator has no labelling step, `workflow_conditions.label_store` is deleted and `RunBoard.file_checksums` reads no coordinator output. The local runner still labels until R.1b removes conditions.
+- **The fleet no longer labels workflow conditions — trust plan, Phase R item R.1a (D3).** `dispatch-workflow` stops carrying a workflow's conditions, the coordinator has no labelling step, `workflow_conditions.label_store` is deleted and `RunBoard.file_checksums` reads no coordinator output. The local runner still labels until R.1b removes conditions. Upgrading: let running coordinators finish before upgrading workers; DBOS derives the application version from the workflow source, so a coordinator the earlier code started is recovered only by a worker running that code.
 
 ### Added
 - **Stocktake S-2 closes Phase 2 of the trust plan.** Phase 2's section leaves `docs/plan-trust-and-recipes.md`; the limits the stored-workflows phase recorded are each retired or recorded as kept boundaries in `decisions-operations.md`. No code.
