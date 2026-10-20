@@ -578,6 +578,8 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 
 ## 28. Fleet Runs — Honour the Dispatch, Report the Truth
 
+**Paid:** A retry redoes the affected units of paid stages, and each is billed again.
+
 **As** an operator, or a system submitting work,
 **I want** fleet runs to use the config they were sent with, run only on workers checked for them, and show their real status after a fix,
 **so that** fleet results match local ones and a repaired run no longer reads as failed.

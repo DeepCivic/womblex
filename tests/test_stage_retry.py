@@ -230,3 +230,18 @@ def test_a_firings_retry_is_named_under_its_own_firing() -> None:
     base, number = dbos_app.stage_attempt("r1:fire-2:stage:normalise:retry:1")
     assert (base, number) == ("r1:fire-2:stage:normalise", 1)
     assert dbos_app.stage_retry_id(base, number + 1) == "r1:fire-2:stage:normalise:retry:2"
+
+
+@pytest.mark.parametrize(("firing", "prefix"), [(None, "r1"), ("20261020T0100", "r1:fire-20261020T0100")])
+def test_a_coordinator_counts_done_only_once_every_stage_it_ran_has_succeeded(firing, prefix) -> None:
+    """A partly repaired run still reads failed; a firing's coordinator is matched to its own stages."""
+    from tests.test_workflows import _board, _Row
+
+    coordinator = _Row("r1:downstream", "ERROR", None, kind="downstream", created_at=1)
+    coordinator.attributes.update(stages=["normalise", "chunk"], firing=firing)
+    rows = [coordinator] + [_Row(f"{prefix}:stage:{wid}", status, None, kind="stage", created_at=n)
+                            for n, (wid, status) in enumerate([("normalise", "ERROR"), ("chunk", "ERROR"),
+                                                               ("normalise:retry:1", "SUCCESS")], 2)]
+    assert _board(rows).stats("r1") == {"failed": 2, "done": 1}  # chunk has not been repaired
+    rows.append(_Row(f"{prefix}:stage:chunk:retry:1", "SUCCESS", None, kind="stage", created_at=5))
+    assert _board(rows).stats("r1") == {"done": 3}
