@@ -208,19 +208,28 @@ def ensure_workflow_schema(dsn: str | None) -> None:
 _RETIRED_FIELDS = ("conditions", "destinations")
 
 
-def _spec_from_row(workflow_id: str, spec_json: str) -> StoredWorkflowSpec:
+def _spec_from_row(workflow_id: str, spec_json: str) -> tuple[StoredWorkflowSpec, bool]:
+    """The row's spec, and whether a retired field that was set had to be dropped."""
     raw = json.loads(spec_json)
+    dropped = False
     for name in _RETIRED_FIELDS:
         if raw.pop(name, None):
+            dropped = True
             logger.warning("workflow %s: stored %s are no longer supported and are ignored", workflow_id, name)
-    return StoredWorkflowSpec(**raw)
+    return StoredWorkflowSpec(**raw), dropped
 
 
 def _row_to_stored(row: Any) -> StoredWorkflow:
+    spec, dropped = _spec_from_row(row.id, row.spec_json)
+    digest = row.digest
+    if dropped:  # the stored digest covers the dropped field; stamp the spec that will run
+        digest = workflow_digest(spec)
+        logger.warning("workflow %s: digest %s recomputed as %s without the retired fields",
+                       row.id, row.digest, digest)
     return StoredWorkflow(
         id=row.id,
-        spec=_spec_from_row(row.id, row.spec_json),
-        digest=row.digest,
+        spec=spec,
+        digest=digest,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )

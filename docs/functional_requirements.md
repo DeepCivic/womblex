@@ -571,7 +571,8 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - A scheduled workflow appends to one run: each firing processes only documents the run has not seen, and never reprocesses or re-pays for one it has.
 - After an edit and reschedule, the new version applies to new documents only; earlier documents keep their results.
 - A firing with no new documents runs nothing and logs that.
-- A file whose content changed is a new document; the earlier version stays in the run. A workflow has no owner; the runs it starts are admin-only, like CLI runs. `schedule-workflow` runs the same checks first (`check_firing`, against `--store` and the workflow's input store), so a workflow its firing would refuse is not scheduled.
+- A file whose content changed is a new document; the earlier version stays in the run. `schedule-workflow` runs the same checks first (`check_firing`, against `--store` and the workflow's input store), so a workflow its firing would refuse is not scheduled.
+- A workflow has no owner; the runs it starts are admin-only, like CLI runs.
 
 **Out of scope:** managing workflows through the API, pruning changed or deleted documents, workflow owners, backfill of missed firings, and destinations (each kind returns with the merge that delivers it).
 
