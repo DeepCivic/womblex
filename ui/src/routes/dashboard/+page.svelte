@@ -246,6 +246,9 @@
 		{#if data.queue}
 			<section class="flex flex-col gap-3">
 				<h2 class="font-display text-sm">Job queue</h2>
+				{#if data.queue.summary}
+					<p class="text-sm">{data.queue.summary}</p>
+				{/if}
 				<!-- KPI tiles: the exact queue counts, plus total and throughput.
 				     Throughput is derived from `updated_at` deltas, no new
 				     schema. -->

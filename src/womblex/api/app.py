@@ -121,6 +121,7 @@ def _status(run: RunSummary) -> RunStatus:
     return RunStatus(
         run_id=run.run_id, state=run_state(run.counts), counts=run.counts,  # type: ignore[arg-type]
         total=run.total, created_at=run.created_at, updated_at=run.updated_at, orphaned=run.orphaned,
+        summary=run.sentence,
     )
 
 

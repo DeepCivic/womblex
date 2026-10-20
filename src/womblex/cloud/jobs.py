@@ -16,13 +16,14 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Self, TypeGuard
 
 import sqlalchemy.exc
 
 from womblex.cloud import dbos_app
+from womblex.cloud.run_status import run_sentence, stage_counts
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from dbos import EnqueueOptions, WorkflowStatus
@@ -93,10 +94,16 @@ class RunSummary:
     created_at: str | None
     updated_at: str | None
     orphaned: bool = False  # extraction queued by a firing that failed before its stages were dispatched
+    stages: dict[str, dict[str, int]] = field(default_factory=dict)  # status counts per stage (`run_status`)
 
     @property
     def total(self) -> int:
         return sum(self.counts.values())
+
+    @property
+    def sentence(self) -> str:
+        """The run's status as one sentence (`run_status.run_sentence`)."""
+        return run_sentence(self.run_id, run_state(self.counts), self.stages, orphaned=self.orphaned)
 
 
 class RunOwnedError(Exception):
@@ -544,6 +551,7 @@ class RunBoard:
                 _iso(min(s.created_at or 0 for s, _ in rows)),
                 _iso(max(s.updated_at or 0 for s, _ in rows)),
                 _orphaned([s for s, _ in rows]),
+                stage_counts((_attr(s, "kind"), _attr(s, "stage"), status) for s, status in rows),
             )
             for rid, rows in grouped.items() if rid
         ]

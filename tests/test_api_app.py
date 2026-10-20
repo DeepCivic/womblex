@@ -412,7 +412,7 @@ def test_openapi_surface_is_pinned(client):
             "RunManifest": ["documents", "run_id"],
             "RunMetrics": ["run_id", "stats", "throughput", "workers"],
             "RunRequest": ["batch_size", "config", "input_prefix", "preset"],
-            "RunStatus": ["counts", "created_at", "orphaned", "run_id", "state", "total", "updated_at"],
+            "RunStatus": ["counts", "created_at", "orphaned", "run_id", "state", "summary", "total", "updated_at"],
             "RunSubmitted": ["batch_count", "document_count", "run_id", "stages"],
             "UploadAccepted": ["bytes", "files", "input_prefix", "upload_id"],
             "Body_upload_v1_uploads_post": ["files"],

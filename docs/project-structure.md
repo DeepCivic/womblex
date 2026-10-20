@@ -166,6 +166,7 @@ womblex/
 │   │   ├── destination_postgres.py # A workflow's Postgres destination — one row per embedded chunk, masked by default, upserted
 │   │   ├── webhook.py          # A workflow's webhook destination — six run events, signed, resent under one id, recorded
 │   │   ├── delivery.py         # Deliver a finished run to its workflow's destinations — checked before launch, bounded retries, recorded on the run
+│   │   ├── run_status.py       # run_sentence() — a run's status as one sentence from exact per-stage counts
 │   │   ├── finalize.py         # finalize_run() — a run's manifest.parquet in its store; `womblex finalize` and the coordinator's last step
 │   │   ├── retry.py            # retry_stage() — fork a failed stage from its first failed unit, refusing before the fork
 │   │   ├── workflows.py        # extract_batch / run_stage / run_downstream workflows; a dispatched workflow's stage runs under its overlay and digest

@@ -319,13 +319,16 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 
 **Given** a selected run, with an optional job queue and the run's own per-stage checkpoints
 **When** the operator opens the Dashboard
-**Then** it presents queue counts and per-stage completion, polling while the tab is visible and pausing while it is hidden.
+**Then** it shows the run's status sentence, queue counts and per-stage completion, polling while the tab is visible and pausing while it is hidden.
 
 **Acceptance criteria:**
 
 - Queue and stage state are read from sources the pipeline already writes (the job queue and per-stage checkpoints); with no queue configured, the dashboard falls back to checkpoints.
+- A run's status is one sentence built from exact per-stage counts of done, pending and failed work, shown beside the counts. The CLI (`womblex jobs --run-id`), the API and the dashboard show the same sentence.
+- The sentence uses the API's status words (`pending` / `running` / `done` / `failed` / `cancelled`), plus a warning when a scheduled firing could not dispatch its stages.
 - Job status is rendered with the exact values the system writes (`pending` / `running` / `done` / `failed` / `cancelled`), plus `stale` for a running workflow with no update past the staleness threshold, and `skipped`.
 - A retried stage counts once: the run's counts take its latest attempt, and the attempt a retry superseded stays listed `failed` with `retried_by` naming the next.
+- The run record's lineage event (`womblex manifest --lineage` with `--dsn`) reports the run's real outcome (`COMPLETE`, `FAIL` or `ABORT`), not always complete; without a queue to ask, its status is `unknown`.
 - The dashboard only *names* a stalled job; DBOS recovers it when its executor restarts, and the dashboard never requeues, cancels, or claims work itself.
 - Polling is paused while the browser tab is hidden so a backgrounded console stops hitting the queue.
 - Per-stage progress renders in the declared pipeline order rather than an ad-hoc frontend ordering.
@@ -449,6 +452,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - A run belongs to the client that submitted it: another client's run is 404, an admin sees all runs, and runs dispatched from the CLI, the console or a workflow carry no owner and are visible to admins only. A run never has mixed ownership.
 - Document text defaults to the masked layer; raw layers (`chunks`, `elements`) require `read_raw`, decided by the layer's contract sensitivity.
 - Run file listings report each file's row count, `contract_version`, and `sensitivity`, so a caller can fetch Parquet directly under the data contract.
+- A run's status is the same sentence the CLI and dashboard show (`summary`), with its counts.
 - A run started by a workflow that names a webhook sends its events there (Requirement 27). Polling still works.
 - `ready` reports store and queue reachability and answers 503 when either is down; an unreachable queue, store, or ingest location on any other endpoint is 503, not 500.
 - The OpenAPI surface is pinned by a test so breaking changes are visible in review.

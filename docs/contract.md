@@ -124,7 +124,9 @@ unchanged. No column is added for any.
 The run record in `manifest.parquet`'s footer can be exported as an OpenLineage
 2-0-2 `RunEvent` (`womblex manifest --shards DIR --lineage OUT`). It carries the
 record's own facts, with the run id, file keys and digests, models and services
-in `womblex_*` facets, and no document text.
+in `womblex_*` facets, and no document text. With `--dsn` the event type follows the
+run's outcome on the job queue (`COMPLETE`, `FAIL` or `ABORT`); without it the event is
+`COMPLETE` and its `status` facet is `unknown`.
 
 ## Safe to hand onward
 

@@ -34,8 +34,18 @@ def run_uuid(run_id: str) -> str:
     return str(uuid.uuid5(_RUN_NAMESPACE, run_id))
 
 
-def run_event(record: dict[str, Any], *, namespace: str = "womblex") -> dict[str, Any]:
-    """The OpenLineage RunEvent for *record*; *namespace* is the job's namespace."""
+#: The API's run words -> OpenLineage event types.
+EVENT_TYPES = {"done": "COMPLETE", "failed": "FAIL", "cancelled": "ABORT"}
+
+
+def run_event(
+    record: dict[str, Any], *, namespace: str = "womblex", state: str | None = None,
+) -> dict[str, Any]:
+    """The OpenLineage RunEvent for *record*; *namespace* is the job's namespace.
+
+    *state* is the run's outcome in the API's words (done, failed or cancelled); a run still
+    pending or running has no outcome to report and raises `LineageError`.
+    """
     run = record.get("run")
     if not run or not run.get("run_id"):
         raise LineageError("the run record names no run (its shards carry no run stamp)")
@@ -44,6 +54,8 @@ def run_event(record: dict[str, Any], *, namespace: str = "womblex") -> dict[str
     def facet(**fields: Any) -> dict[str, Any]:
         return {"_producer": producer, "_schemaURL": _FACET_SCHEMA, **fields}
 
+    if state is not None and state not in EVENT_TYPES:
+        raise LineageError(f"the run is {state}, so it has no outcome to report yet")
     inputs = record.get("inputs") or {}
     run_id = run["run_id"]
     files = record.get("files")
@@ -54,7 +66,7 @@ def run_event(record: dict[str, Any], *, namespace: str = "womblex") -> dict[str
         else [{"namespace": f"womblex:{run_id}", "name": "documents", "facets": {}}]
     )
     return {
-        "eventType": "COMPLETE",
+        "eventType": EVENT_TYPES[state] if state else "COMPLETE",
         "eventTime": record["generated_at"],
         "producer": producer,
         "schemaURL": _EVENT_SCHEMA,
@@ -66,6 +78,7 @@ def run_event(record: dict[str, Any], *, namespace: str = "womblex") -> dict[str
                 record_version=record.get("record_version"),
                 image=record.get("image"), model_check=record.get("model_check", []),
                 partial=record.get("partial", []),
+                status=state or "unknown",
             )},
         },
         "job": {
@@ -91,4 +104,4 @@ def run_event(record: dict[str, Any], *, namespace: str = "womblex") -> dict[str
     }
 
 
-__all__ = ["SPEC_URL", "LineageError", "run_event", "run_uuid"]
+__all__ = ["EVENT_TYPES", "SPEC_URL", "LineageError", "run_event", "run_uuid"]
