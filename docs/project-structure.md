@@ -18,7 +18,8 @@ womblex/
 │   │   ├── __main__.py     # `python -m womblex.cli` → main()
 │   │   ├── _shared.py      # Command NamedTuple, setup_logging, select_supported / discover_files, normalise_prefix, check_stage_models
 │   │   ├── pipeline.py     # run, extract, chunk, manifest subcommands
-│   │   ├── cloud.py        # enqueue / enqueue-stages / worker / jobs / finalize / run-stage / egress subcommands
+│   │   ├── cloud.py        # enqueue / enqueue-stages / worker / finalize / run-stage / egress subcommands
+│   │   ├── jobs.py         # jobs subcommand (queue status)
 │   │   ├── retry.py        # retry-stage subcommand
 │   │   ├── serve.py        # serve subcommand (the `/v1` service API)
 │   │   ├── api_token.py    # api-token subcommand

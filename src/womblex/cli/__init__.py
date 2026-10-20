@@ -47,6 +47,7 @@ from womblex.cli import (
     embed,
     ground_truth,
     ingest,
+    jobs,
     link,
     money,
     normalise,
@@ -71,6 +72,7 @@ logger = logging.getLogger("womblex")
 ALL_COMMANDS = [
     *pipeline.COMMANDS,
     *cloud.COMMANDS,
+    *jobs.COMMANDS,
     *retry.COMMANDS,
     *redact.COMMANDS,
     *link.COMMANDS,

@@ -1,5 +1,5 @@
 """Cloud CLI subcommands: ``enqueue`` (plan batches), ``enqueue-stages`` (queue
-the downstream stages), ``worker`` (process), ``jobs`` (status).
+the downstream stages), ``worker`` (process); ``jobs`` (status) is in ``cli/jobs.py``.
 
 Distributed counterpart to ``womblex run``. ``enqueue`` lists source documents
 in an object store, splits them into batches, and enqueues one DBOS workflow
@@ -222,40 +222,6 @@ def cmd_worker(args: argparse.Namespace) -> int:
         idle_timeout=args.idle_timeout,
     )
     logger.info("worker exiting: %d job(s) completed", completed)
-    return 0
-
-
-# --- jobs --------------------------------------------------------------------
-
-
-def _register_jobs(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--dsn", default=None, help=_DSN_HELP)
-    p.add_argument("--run-id", default=None, help="Limit to one run (default: all runs)")
-    p.add_argument("--create-schema", action="store_true",
-                   help="Create the DBOS system tables first (enqueue always does; `jobs` "
-                        "only reads, so use this to provision an empty database)")
-
-
-def cmd_jobs(args: argparse.Namespace) -> int:
-    from womblex.cloud.dbos_app import ensure_schema
-    from womblex.cloud.jobs import RunBoard
-
-    dsn = _resolve_dsn(args)
-    if args.create_schema:
-        ensure_schema(dsn)
-    with RunBoard(dsn) as board:
-        stats = board.stats(args.run_id)
-        orphaned = [r.run_id for r in board.runs(run_id=args.run_id, limit=10_000) if r.orphaned]
-
-    scope = f"run {args.run_id}" if args.run_id else "all runs"
-    if not stats:
-        logger.info("No jobs (%s)", scope)
-        return 0
-    total = sum(stats.values())
-    parts = ", ".join(f"{status}={count}" for status, count in sorted(stats.items()))
-    logger.info("Jobs (%s): %s (total %d)", scope, parts, total)
-    if orphaned:
-        logger.warning("Orphaned (a firing queued extraction, then failed before its stages): %s", ", ".join(orphaned))
     return 0
 
 
@@ -666,7 +632,6 @@ def cmd_egress(args: argparse.Namespace) -> int:
 COMMANDS = [
     Command("enqueue", "Plan batches into the cloud job queue", _register_enqueue, cmd_enqueue),
     Command("worker", "Process batches from the cloud job queue", _register_worker, cmd_worker),
-    Command("jobs", "Show cloud job-queue status", _register_jobs, cmd_jobs),
     Command("finalize", "Consolidate a distributed run's manifest in object storage",
             _register_finalize, cmd_finalize),
     Command("enqueue-stages", "Queue a run's downstream stages for the workers",
