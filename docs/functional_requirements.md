@@ -573,15 +573,18 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - A file whose content changed is a new document; the earlier version stays in the run. A file rewritten with the same bytes is not a new document.
 - A workflow has no owner; the runs it starts are admin-only, like CLI runs.
 - Fleet runs perform `pii` when a workflow includes it; runs without a workflow never do.
-- A workflow can name an object-store destination, which receives the Requirement 23 bundle; each destination chooses whether raw sources are included.
+- A workflow can name destinations: an object store and a Postgres database with embeddings.
+- An object-store destination receives the Requirement 23 bundle; each destination chooses whether raw sources are included.
+- A Postgres destination gets one row per chunk with its embedding: masked text by default, raw only where the workflow asks, each row naming its layer.
+- A Postgres destination requires the `embed` step, and sending masked text requires `pii`; a workflow missing either is refused before launch.
 - A workflow names where secrets are found, never the secrets. No secret is written to the file or the stored copy.
 - Every destination is checked before launch (its secrets resolve, its dependencies are installed); a failed check refuses the run.
 - Results are delivered after the last step, even when a step failed, and a delivery after a failure names the failed steps.
 - A failed delivery is retried a set number of times, then recorded on the run. It never stops the run.
-- After a failed stage is retried successfully, the retry command prints how to redeliver. Redelivery replaces: files are rewritten.
+- After a failed stage is retried successfully, the retry command prints how to redeliver. Redelivery replaces: files are rewritten and rows upserted.
 - The run record lists every delivery.
 
-**Out of scope:** managing workflows through the API, pruning changed or deleted documents, resolving the source of a changed file's earlier version (its bytes are gone from the store, so `SourceResolver` reads it as `hash_mismatch`), workflow owners, backfill of missed firings, and destination kinds other than an object store (each returns with the merge that delivers it).
+**Out of scope:** managing workflows through the API, pruning changed or deleted documents, resolving the source of a changed file's earlier version (its bytes are gone from the store, so `SourceResolver` reads it as `hash_mismatch`), workflow owners, backfill of missed firings, and databases other than Postgres (each needs its own requirement).
 
 ## 28. Fleet Runs — Honour the Dispatch, Report the Truth
 

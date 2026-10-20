@@ -11,7 +11,8 @@ dependencies its URI needs are installed. A check that fails refuses the run, li
 model check.
 
 An object-store destination receives the run's egress bundle (`store/egress.py`) under the run
-id, with or without raw sources as the destination chooses.
+id, with or without raw sources as the destination chooses. A Postgres destination receives one
+row per embedded chunk with its embedding (`cloud/destination_postgres.py`).
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ from womblex.store.delivery_record import delivery_key, dump_delivery
 from womblex.store.remote import RemoteStore
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from womblex.cloud.workflow_store import StoredWorkflow, WorkflowDestination
+    from womblex.cloud.workflow_store import ObjectStoreDestination, StoredWorkflow, WorkflowDestination
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +45,18 @@ def check_destinations(destinations: tuple[WorkflowDestination, ...]) -> list[tu
     every one can. Opens nothing remote and sends nothing."""
     import fsspec
 
+    from womblex.cloud.workflow_store import PostgresDestination
+
     problems: list[tuple[str, str]] = []
     for d in destinations:
+        if isinstance(d, PostgresDestination):
+            if not os.environ.get(d.dsn_env):
+                problems.append((d.name, f"environment variable {d.dsn_env} not set"))
+            try:
+                import pgvector.psycopg  # noqa: F401
+            except ImportError:
+                problems.append((d.name, "pgvector is not installed (install womblex[pgvector])"))
+            continue
         if d.credentials is not None:
             unset = [v for v in (d.credentials.key_env, d.credentials.secret_env) if not os.environ.get(v)]
             if unset:
@@ -64,7 +75,7 @@ class DeliveryOutcome:
 
     destination: str
     kind: str
-    uri: str
+    uri: str  # an object store's URI, or a Postgres destination's table
     workflow: str
     status: str  # "delivered" | "failed"
     attempts: int
@@ -73,10 +84,12 @@ class DeliveryOutcome:
     error: str | None = None
     documents: int | None = None
     sources_by_status: dict[str, int] = field(default_factory=dict)
+    rows: int | None = None  # a Postgres destination's chunk rows, and those left out for want of text
+    rows_skipped: int | None = None
     delivered_at: str = ""
 
 
-def _open(d: WorkflowDestination) -> RemoteStore:
+def _open(d: ObjectStoreDestination) -> RemoteStore:
     creds = (os.environ[d.credentials.key_env], os.environ[d.credentials.secret_env]) if d.credentials else None
     return RemoteStore.from_uri(d.uri, credentials=creds)
 
@@ -90,18 +103,18 @@ def deliver(
 
     *after_failed* names the workflow's failed steps; a delivery made after them says so.
     """
-    from womblex.store.egress import build_bundle
+    from womblex.cloud.workflow_store import ObjectStoreDestination
 
     outcomes: list[DeliveryOutcome] = []
     for d in stored.spec.destinations:
-        outcome = DeliveryOutcome(d.name, d.kind, d.uri, stored.id, "failed", 0, list(after_failed),
-                                  d.include_sources)
+        where = d.uri if isinstance(d, ObjectStoreDestination) else d.table
+        outcome = DeliveryOutcome(d.name, d.kind, where, stored.id, "failed", 0, list(after_failed),
+                                  d.include_sources if isinstance(d, ObjectStoreDestination) else False)
         marker = {"workflow": stored.id, "destination": d.name, "after_failed": list(after_failed)}
         for attempt in range(1, attempts + 1):
             outcome.attempts = attempt
             try:
-                bundle = build_bundle(run_root, _open(d), run_id=run_id, include_sources=d.include_sources,
-                                      delivery=marker)
+                _deliver_one(d, run_root, run_id, marker, outcome)
             except Exception as e:  # recorded, never raised: a delivery does not stop the run
                 outcome.error = f"{type(e).__name__}: {e}"
                 logger.warning("delivery to %s, attempt %d of %d, failed: %s", d.name, attempt, attempts,
@@ -110,14 +123,31 @@ def deliver(
                     time.sleep(backoff * 2 ** (attempt - 1))
                 continue
             outcome.status, outcome.error = "delivered", None
-            outcome.documents, outcome.sources_by_status = bundle.documents, bundle.sources_by_status
             break
         outcome.delivered_at = datetime.now(UTC).isoformat(timespec="seconds")
         if after_failed:
             logger.warning("delivered to %s after failed step(s) %s", d.name, ", ".join(after_failed))
-        logger.info("delivery to %s (%s): %s after %d attempt(s)", d.name, d.uri, outcome.status, outcome.attempts)
+        logger.info("delivery to %s (%s): %s after %d attempt(s)", d.name, where, outcome.status, outcome.attempts)
         outcomes.append(outcome)
     return outcomes
+
+
+def _deliver_one(
+    d: WorkflowDestination, run_root: Path | str | RemoteStore, run_id: str, marker: dict[str, Any],
+    outcome: DeliveryOutcome,
+) -> None:
+    """One attempt at *d*, its counts written onto *outcome*; raises on failure."""
+    from womblex.cloud.workflow_store import PostgresDestination
+    from womblex.store.egress import build_bundle, open_run
+
+    if isinstance(d, PostgresDestination):
+        from womblex.cloud.destination_postgres import deliver_postgres
+
+        written = deliver_postgres(d, open_run(run_root), run_id)
+        outcome.rows, outcome.rows_skipped = written.rows, written.skipped
+        return
+    bundle = build_bundle(run_root, _open(d), run_id=run_id, include_sources=d.include_sources, delivery=marker)
+    outcome.documents, outcome.sources_by_status = bundle.documents, bundle.sources_by_status
 
 
 def record_deliveries(run: RemoteStore, outcomes: list[DeliveryOutcome]) -> None:

@@ -110,7 +110,7 @@ def build_bundle(
     *delivery* (a workflow destination's name, the workflow, and the failed steps it was
     delivered after) is written into ``egress_manifest.json``, so a bundle says what it follows.
     """
-    run = _open_run(run_root)
+    run = open_run(run_root)
     if not run.exists(RUN_MANIFEST_FILENAME):
         raise FileNotFoundError(
             f"{run.root}/{RUN_MANIFEST_FILENAME} is missing — finalise the run "
@@ -186,7 +186,7 @@ def build_bundle(
     )
 
 
-def _open_run(run_root: Path | str | RemoteStore) -> RemoteStore:
+def open_run(run_root: Path | str | RemoteStore) -> RemoteStore:
     """The run's files as a store: an object store's in place, a local directory through fsspec's
     local backend, so both are copied by one code path."""
     if isinstance(run_root, RemoteStore):
@@ -277,4 +277,5 @@ __all__ = [
     "UPLOAD_FAILED",
     "EgressResult",
     "build_bundle",
+    "open_run",
 ]

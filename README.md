@@ -48,6 +48,7 @@ on 3.13).
 pip install womblex          # the whole pipeline, CPU-only
 pip install womblex[api]     # + the /v1 service API (womblex serve)
 pip install womblex[ui]      # + the admin console (womblex ui)
+pip install womblex[pgvector] # + a workflow's Postgres destination (pgvector)
 ```
 
 The wheel ships only the small model artefacts. The larger local models

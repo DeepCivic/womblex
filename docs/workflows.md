@@ -28,18 +28,25 @@ its steps write.
 | `input_binding` | `store` (the input store a firing lists and extracts from; a scheduled workflow must name it, spelt exactly as the workers' `--ingest`, or `--store` where they have none, since firings are routed by that string), `ingest_prefix` (the documents under it a firing extracts) and `batch_size`. Extraction is not a step. |
 | `steps` | Downstream stages, each at most once, run in the order listed (`dispatch-workflow` needs pipeline order). |
 | `triggers` | Cron expressions scheduled by `schedule-workflow`. |
-| `destinations` | Where the run is delivered after its last step. One kind so far, `object_store`: `name`, `uri`, `include_sources` (default `true`) and optional `credentials` (`key_env` and `secret_env`, the environment variables holding an S3 key and secret, never the values). |
+| `destinations` | Where the run is delivered after its last step. `object_store`: `name`, `uri`, `include_sources` (default `true`) and optional `credentials` (`key_env` and `secret_env`, the environment variables holding an S3 key and secret, never the values). `postgres`: `name`, `dsn_env` (the environment variable holding the connection string), `table` (default `womblex_chunks`) and `text_layer` (`masked`, the default, or `raw`). |
 
 ## Delivery
 
 After the last step, whether or not a step failed, the run is delivered to each
 destination: an `object_store` gets the run's egress bundle ([egress.md](egress.md))
-under `<uri>/<run id>/`. A delivery after a failed step says so, in the bundle's
+under `<uri>/<run id>/`. A `postgres` destination gets one row per embedded chunk
+with its embedding (a pgvector column; `pip install womblex[pgvector]`): the masked
+`clean_text` by default, the raw chunk text only with `text_layer: raw`, each row
+naming its layer and, when masked, its `mask_status`. A chunk the layer holds no
+text for is left out and counted, never sent from the other layer. A Postgres
+destination needs the `embed` step, and masked text the `pii` step; a workflow
+without them is refused. A delivery after a failed step says so, in the bundle's
 `egress_manifest.json` (`delivery.after_failed`) and in its record. Each destination
 is tried three times, with backoff; a delivery that still fails is recorded and
 never stops the run, and the exit code is non-zero. Every delivery is recorded as
 `<run>/deliveries/<name>.json` and listed in the run record. Delivering again
-replaces the bundle and the record.
+replaces the bundle, upserts the rows (and removes the run's rows it did not write) and
+replaces the record.
 
 Each destination is checked before the first step: its credentials' environment
 variables are set and its URI's storage backend is installed; a failure refuses

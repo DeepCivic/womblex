@@ -17,7 +17,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Literal, Self
+from typing import Annotated, Any, Literal, Self
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -86,8 +86,24 @@ class ObjectStoreDestination(StrictModel):
     credentials: StoreCredentials | None = None
 
 
+class PostgresDestination(StrictModel):
+    """Upsert one row per embedded chunk, with its embedding, into `table` (`cloud/destination_postgres.py`).
+
+    `dsn_env` names the environment variable holding the connection string, never the string.
+    `text_layer` is `masked` (the `pii` step's clean text; the default) or `raw` (the chunk text).
+    """
+
+    kind: Literal["postgres"]
+    name: str
+    dsn_env: str
+    table: str = "womblex_chunks"
+    text_layer: Literal["masked", "raw"] = "masked"
+
+
 #: The destination kinds a workflow can name, each added in the merge that delivers to it.
-WorkflowDestination = ObjectStoreDestination
+WorkflowDestination = Annotated[ObjectStoreDestination | PostgresDestination, Field(discriminator="kind")]
+
+_TABLE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$")
 
 
 class StoredWorkflowSpec(StrictModel):
@@ -138,9 +154,18 @@ def _check_destinations(spec: StoredWorkflowSpec) -> None:
             raise ValueError(f"destination name must be one safe token, got {name!r}")
     if repeated := sorted({n for n in names if names.count(n) > 1}):
         raise ValueError(f"destination name(s) used more than once: {repeated}")
+    stages = {s.stage for s in spec.steps}
     for d in spec.destinations:
-        if "@" in urlsplit(d.uri).netloc:
+        if isinstance(d, ObjectStoreDestination) and "@" in urlsplit(d.uri).netloc:
             raise ValueError(f"destination {d.name!r}: a URI names no credentials; use `credentials`")
+        if isinstance(d, PostgresDestination):
+            if not _TABLE_NAME.match(d.table):
+                raise ValueError(f"destination {d.name!r}: table must be `name` or `schema.name`, got {d.table!r}")
+            if "embed" not in stages:
+                raise ValueError(f"destination {d.name!r}: a Postgres destination needs the `embed` step")
+            if d.text_layer == "masked" and "pii" not in stages:
+                raise ValueError(f"destination {d.name!r}: masked text needs the `pii` step "
+                                 "(or `text_layer: raw` to send the chunk text)")
 
 
 def combine_config(preset_config: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
@@ -385,6 +410,7 @@ class WorkflowStore:
 
 __all__ = [
     "ObjectStoreDestination",
+    "PostgresDestination",
     "StoreCredentials",
     "StoredWorkflow",
     "StoredWorkflowSpec",
