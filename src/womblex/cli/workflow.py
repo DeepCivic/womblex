@@ -110,7 +110,7 @@ def _preset_resolver(args: argparse.Namespace) -> Callable[[str], object]:
 
 
 def cmd_run_workflow(args: argparse.Namespace) -> int:
-    """Run a stored workflow's steps in order; exit 1 if it was refused or any step failed."""
+    """Run a workflow file's steps in order; exit 1 if it was refused or any step failed."""
     from womblex.cloud.workflow_runner import WorkflowRefusedError, run_workflow_local
 
     if not args.shards.is_dir():
@@ -239,7 +239,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
 
 
 def cmd_dispatch_workflow(args: argparse.Namespace) -> int:
-    """Queue a stored workflow's steps for the fleet; exit 1 if it is refused before any row."""
+    """Queue a workflow file's steps for the fleet; exit 1 if it is refused before any row."""
     from womblex.cloud.workflow_dispatch import dispatch_workflow
     from womblex.cloud.workflow_runner import WorkflowRefusedError
 
@@ -294,11 +294,15 @@ def _check_firing(args: argparse.Namespace, stored, dsn: str | None) -> bool:  #
 
 def _workflow_name(arg: str) -> str | None:
     """The workflow *arg* names: its file's `name`, else *arg* itself as a name (`None` if neither)."""
+    from womblex.cloud.workflow_file import WorkflowFileError, workflow_file_name
     from womblex.cloud.workflow_store import is_safe_workflow_id
 
     if Path(arg).is_file():
-        stored = _load_workflow(argparse.Namespace(workflow=arg))
-        return stored.id if stored else None
+        try:
+            return workflow_file_name(Path(arg))
+        except WorkflowFileError as e:
+            logger.error("%s", e)
+            return None
     if is_safe_workflow_id(arg):
         return arg
     logger.error("%s is neither a workflow file nor a workflow name", arg)

@@ -1,4 +1,4 @@
-"""Local multi-stage runner: execute a stored workflow's steps over a shard directory.
+"""Local multi-stage runner: execute a workflow file's steps over a shard directory.
 
 Per step it composes what `womblex run-stage --shards` uses (`prepare_stage_context`,
 `run_stage_local`); no `*_shards()` call is made here. Everything that can refuse does
@@ -48,7 +48,7 @@ class RefusalCode(str, Enum):
     """Stable codes for a refusal that is not an ordering issue (those carry `OrderCode`)."""
 
     WORKFLOW_UNAVAILABLE = "workflow_unavailable"
-    """No stored workflow by that id, or the store could not be read (`womblex validate --json`)."""
+    """The workflow file could not be read (`womblex validate --json`, `womblex plan --json`)."""
 
     SPEC_INVALID = "spec_invalid"
     PRESET_UNKNOWN = "preset_unknown"

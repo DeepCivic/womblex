@@ -128,7 +128,6 @@ A run is launched, then it lands. Everything that can refuse does so before laun
 ### Workflow conditions are removed (Phase R, D3)
 2026-10, Phase R items R.1a (the fleet stops labelling), R.1b (`run-workflow` stops labelling) and R.1c (the field goes). A condition labelled each document `holds`, `fails` or `unevaluable` against a manifest column, in a `*.conditions.parquet` sidecar that nothing read. Every column it labelled is in `manifest.parquet`, so a reader filters the manifest instead. Reverses Phase 2 merges 8 and 9a.
 
-- *Rejected, do not re-attempt:* **a condition that refuses the run** when one document fails it, and **a condition that gates after launch**. One document never decides a run, and nothing stops a launched run.
 ### A workflow names its input store (Phase R, D9)
 2026-10, Phase R item R.3b. A firing used to read whichever ingest store its worker was started with, so the same workflow listed different documents on different workers. `input_binding.store` names the store; a schedule puts its firing on that store's `firing_queue`, which only a worker whose ingest root it is serves, and the firing refuses (before any row) a workflow that names none. Credentials still come from the worker: the workflow names where documents are, never a secret. `schedule-workflow --ingest` is gone, since the workflow says where its documents are.
 

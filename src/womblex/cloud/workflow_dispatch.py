@@ -1,4 +1,4 @@
-"""Object-store execution of a stored workflow: dispatch its steps to the fleet.
+"""Object-store execution of a workflow: dispatch its steps to the fleet.
 
 The fleet's counterpart to `run_workflow_local`, through the coordinator path
 (`RunBoard.enqueue_stages` -> `run_downstream`). Everything that can refuse does so
