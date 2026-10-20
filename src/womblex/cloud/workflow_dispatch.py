@@ -105,6 +105,9 @@ def dispatch_workflow(
             "the coordinator runs stages in pipeline order, so reorder the steps",
             RefusalCode.ORDER_NOT_PIPELINE,
         )
+    if stored.spec.destinations:  # refused rather than dispatched and never delivered
+        raise refuse("fleet runs do not deliver to destinations; run it with `run-workflow`",
+                     RefusalCode.DESTINATION_UNAVAILABLE)
     from womblex.utils.model_check import check_registered
 
     try:

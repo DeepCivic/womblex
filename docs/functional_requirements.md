@@ -550,7 +550,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 **I want** to declare a named recipe of steps over a preset in a file and run it locally, on the fleet or on a schedule,
 **so that** a run's sequence is declared once, checked before it spends anything, and recorded in what it writes.
 
-**Given** a workflow file (a name, a preset reference, input binding, ordered steps and triggers)
+**Given** a workflow file (a name, a preset reference, input binding, ordered steps, triggers and destinations)
 **When** the operator validates, plans, runs, dispatches or schedules it
 **Then** everything that can refuse does so before the first step, and the files each step writes name the workflow.
 
@@ -572,8 +572,18 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - A firing with no new documents runs nothing and logs that.
 - A file whose content changed is a new document; the earlier version stays in the run. A file rewritten with the same bytes is not a new document.
 - A workflow has no owner; the runs it starts are admin-only, like CLI runs.
+- A workflow can name an object-store destination, which receives the Requirement 23 bundle; each destination chooses whether raw sources are included.
+- A workflow names where secrets are found, never the secrets. No secret is written to the file or the stored copy.
+- Every destination is checked before launch (its secrets resolve, its dependencies are installed); a failed check refuses the run.
+- Results are delivered after the last step, even when a step failed, and a delivery after a failure names the failed steps.
+- A failed delivery is retried a set number of times, then recorded on the run. It never stops the run.
+- The run record lists every delivery.
 
-**Out of scope:** managing workflows through the API, pruning changed or deleted documents, resolving the source of a changed file's earlier version (its bytes are gone from the store, so `SourceResolver` reads it as `hash_mismatch`), workflow owners, backfill of missed firings, and destinations (each kind returns with the merge that delivers it).
+**TO-DO:**
+
+- **The fleet does not deliver.** `dispatch-workflow` and `schedule-workflow` refuse a workflow with destinations; the coordinator's delivery, and `retry-stage`'s redelivery hint, are the next merge.
+
+**Out of scope:** managing workflows through the API, pruning changed or deleted documents, resolving the source of a changed file's earlier version (its bytes are gone from the store, so `SourceResolver` reads it as `hash_mismatch`), workflow owners, backfill of missed firings, and destination kinds other than an object store (each returns with the merge that delivers it).
 
 ## 28. Fleet Runs — Honour the Dispatch, Report the Truth
 
@@ -612,5 +622,6 @@ Requirements not yet fully met. The detail lives in the **TO-DO** block under ea
 - **Requirement 9 (Redaction Handling):** no redaction `pipeline_point`, and the E2E `run` path writes no `*.redactions.parquet`.
 - **Requirement 13 (Money Annotation):** the money span row carries no merge extent or header-row coordinate.
 - **Requirements 17 and 21 (Corpus Inspector; Console Design System):** `DocumentGrid.svelte` is not virtualised and emits no `aria-rowcount`.
+- **Requirement 27 (Workflows):** the fleet does not deliver to a workflow's destinations.
 
 ---

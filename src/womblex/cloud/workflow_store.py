@@ -17,10 +17,11 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Self
+from typing import Any, Literal, Self
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import Field
+from pydantic import Field, ValidationError
 
 from womblex.cloud import dbos_app
 from womblex.cloud.stage_contracts import STAGE_NAMES
@@ -63,6 +64,32 @@ class WorkflowTrigger(StrictModel):
     timezone: str | None = None
 
 
+class StoreCredentials(StrictModel):
+    """Where an object store's key and secret are found: the names of two environment variables,
+    never the values (a workflow names where a secret lives, never the secret)."""
+
+    key_env: str
+    secret_env: str
+
+
+class ObjectStoreDestination(StrictModel):
+    """Deliver the run's egress bundle (`store/egress.py`) to `uri`, under the run id.
+
+    `credentials` names where an S3 key and secret are found; without it the store's own
+    environment applies, as for any store.
+    """
+
+    kind: Literal["object_store"]
+    name: str
+    uri: str
+    include_sources: bool = True
+    credentials: StoreCredentials | None = None
+
+
+#: The destination kinds a workflow can name, each added in the merge that delivers to it.
+WorkflowDestination = ObjectStoreDestination
+
+
 class StoredWorkflowSpec(StrictModel):
     """The validated shape of a workflow's definition — everything but id and timestamps."""
 
@@ -71,6 +98,7 @@ class StoredWorkflowSpec(StrictModel):
     input_binding: WorkflowInputBinding = Field(default_factory=WorkflowInputBinding)
     steps: tuple[WorkflowStep, ...]
     triggers: tuple[WorkflowTrigger, ...] = ()
+    destinations: tuple[WorkflowDestination, ...] = ()
 
 
 def _check_steps(spec: StoredWorkflowSpec) -> None:
@@ -101,6 +129,18 @@ def _check_triggers(spec: StoredWorkflowSpec) -> None:
                 ZoneInfo(trigger.timezone)
             except (ZoneInfoNotFoundError, ValueError) as e:
                 raise ValueError(f"unknown timezone: {trigger.timezone!r}") from e
+
+
+def _check_destinations(spec: StoredWorkflowSpec) -> None:
+    names = [d.name for d in spec.destinations]
+    for name in names:
+        if not is_safe_workflow_id(name):
+            raise ValueError(f"destination name must be one safe token, got {name!r}")
+    if repeated := sorted({n for n in names if names.count(n) > 1}):
+        raise ValueError(f"destination name(s) used more than once: {repeated}")
+    for d in spec.destinations:
+        if "@" in urlsplit(d.uri).netloc:
+            raise ValueError(f"destination {d.name!r}: a URI names no credentials; use `credentials`")
 
 
 def combine_config(preset_config: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
@@ -145,6 +185,7 @@ def check_spec(spec: StoredWorkflowSpec) -> None:
     """
     _check_steps(spec)
     _check_triggers(spec)
+    _check_destinations(spec)
     _check_config_overlay(spec)
 
 
@@ -162,6 +203,8 @@ def validate_workflow_spec(raw: dict[str, Any]) -> StoredWorkflowSpec:
 def workflow_digest(spec: StoredWorkflowSpec) -> str:
     """``sha256:…`` over *spec* — the same canonical-JSON recipe as `store.run_stamp.config_digest`."""
     payload = spec.model_dump(mode="json")
+    if not payload["destinations"]:  # a workflow that names none keeps the digest it had before they existed
+        del payload["destinations"]
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
 
@@ -207,18 +250,27 @@ def ensure_workflow_schema(dsn: str | None) -> None:
 
 
 #: Spec fields a row may still hold from before they were removed; dropped on read, warned if set.
-_RETIRED_FIELDS = ("conditions", "destinations")
+_RETIRED_FIELDS = ("conditions",)
 
 
 def _spec_from_row(workflow_id: str, spec_json: str) -> tuple[StoredWorkflowSpec, bool]:
-    """The row's spec, and whether a retired field that was set had to be dropped."""
+    """The row's spec, and whether a retired field that was set had to be dropped.
+
+    Destinations stored before Phase R removed them have another shape; they are dropped too.
+    """
     raw = json.loads(spec_json)
     dropped = False
     for name in _RETIRED_FIELDS:
         if raw.pop(name, None):
             dropped = True
             logger.warning("workflow %s: stored %s are no longer supported and are ignored", workflow_id, name)
-    return StoredWorkflowSpec(**raw), dropped
+    try:
+        return StoredWorkflowSpec(**raw), dropped
+    except ValidationError:
+        if not raw.pop("destinations", None):
+            raise
+        logger.warning("workflow %s: stored destinations predate the current kinds and are ignored", workflow_id)
+        return StoredWorkflowSpec(**raw), True
 
 
 def _row_to_stored(row: Any) -> StoredWorkflow:
@@ -332,8 +384,11 @@ class WorkflowStore:
 
 
 __all__ = [
+    "ObjectStoreDestination",
+    "StoreCredentials",
     "StoredWorkflow",
     "StoredWorkflowSpec",
+    "WorkflowDestination",
     "WorkflowInputBinding",
     "WorkflowStep",
     "WorkflowStore",

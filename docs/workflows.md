@@ -28,6 +28,24 @@ its steps write.
 | `input_binding` | `store` (the input store a firing lists and extracts from; a scheduled workflow must name it, spelt exactly as the workers' `--ingest`, or `--store` where they have none, since firings are routed by that string), `ingest_prefix` (the documents under it a firing extracts) and `batch_size`. Extraction is not a step. |
 | `steps` | Downstream stages, each at most once, run in the order listed (`dispatch-workflow` needs pipeline order). |
 | `triggers` | Cron expressions scheduled by `schedule-workflow`. |
+| `destinations` | Where the run is delivered after its last step. One kind so far, `object_store`: `name`, `uri`, `include_sources` (default `true`) and optional `credentials` (`key_env` and `secret_env`, the environment variables holding an S3 key and secret, never the values). |
+
+## Delivery
+
+After the last step, whether or not a step failed, the run is delivered to each
+destination: an `object_store` gets the run's egress bundle ([egress.md](egress.md))
+under `<uri>/<run id>/`. A delivery after a failed step says so, in the bundle's
+`egress_manifest.json` (`delivery.after_failed`) and in its record. Each destination
+is tried three times, with backoff; a delivery that still fails is recorded and
+never stops the run, and the exit code is non-zero. Every delivery is recorded as
+`<run>/deliveries/<name>.json` and listed in the run record. Delivering again
+replaces the bundle and the record.
+
+Each destination is checked before the first step: its credentials' environment
+variables are set and its URI's storage backend is installed; a failure refuses
+the run with `destination_unavailable`. A workflow that delivers runs over a run's
+`documents/` directory. The fleet does not deliver yet, so `dispatch-workflow` and
+`schedule-workflow` refuse a workflow with destinations.
 
 ## Checking, running and dispatching
 

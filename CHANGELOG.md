@@ -8,6 +8,9 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 ## [Unreleased]
 
+### Added
+- **Workflow destinations: object store, delivered by `run-workflow` — trust plan, Phase 3 item 3.2c, second part (Requirement 27).** A workflow can name `object_store` destinations (`uri`, `include_sources`, `credentials` naming environment variables). Each is checked before launch (`destination_unavailable`: an unset variable or a missing storage backend). After the last step, failed or not, the run's egress bundle is delivered to each, marked with the failed steps it follows, tried three times, then recorded; a failed delivery never stops the run and makes the exit code non-zero. Records land in `<run>/deliveries/` and the run record. `dispatch-workflow` and `schedule-workflow` refuse destinations until the fleet delivers.
+
 ### Changed
 - **The run record lists deliveries — trust plan, Phase 3 item 3.2c, first part.** Record version 8 adds `deliveries`, read from `<run>/deliveries/<destination>.json` (`store/delivery_record.py`); an empty list means no delivery was made. `build_bundle(delivery=…)` writes a `delivery` block (workflow, destination, the failed steps it follows) into `egress_manifest.json`. Nothing delivers yet; the next merge brings workflow destinations back.
 - **Egress reads its run through a store — trust plan, Phase 3 item 3.2b, first half.** `build_bundle` reads the run's files through a `RemoteStore` (fsspec's local backend) and copies the corpus by stream, and source copying is one outcome per `source_hash` (`store/egress_sources.py`). No behaviour change; the second half adds runs and sources held in an object store. Helpers beside it: `RemoteStore.open`, `run_stamp.stamp_from_metadata`, `output.conform_shard`.
