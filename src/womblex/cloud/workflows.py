@@ -457,6 +457,10 @@ def run_downstream(
     except Exception as e:  # recorded, as a failed stage is; the run has landed either way
         unwritten = f"the run manifest was not written ({_carried(e)}); `womblex finalize` writes it"
         logger.warning("run %s: %s", run_id, unwritten)
+    if workflow is not None and workflow.get("spec", {}).get("destinations"):
+        # After a failed stage too, and never failing the run: each destination's outcome is its own
+        # record (`cloud/delivery.py`), marked with the failed stages it follows.
+        DBOS.run_step({"name": "deliver"}, _deliver, run_id, shard_prefix, workflow, failed)
     if failed:
         after = [f"{r['stage']} after {', '.join(r['ran_after_failed'])}"
                  for r in results if r["ran_after_failed"]]
@@ -465,9 +469,6 @@ def run_downstream(
             + (f"; ran after a failure: {'; '.join(after)}" if after else "")
             + (f"; {unwritten}" if unwritten else "")
         )
-    if workflow is not None and workflow.get("spec", {}).get("destinations"):
-        # Never fails the run: each destination's outcome is its own record (`cloud/delivery.py`).
-        DBOS.run_step({"name": "deliver"}, _deliver, run_id, shard_prefix, workflow, failed)
     if unwritten:
         raise RunIncomplete(f"run {run_id}: every stage finished, but {unwritten}")
     return results
