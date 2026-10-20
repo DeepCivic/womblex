@@ -1142,6 +1142,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pgvector"
+version = "0.5.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f8/23/96aa38899fbf8e103766db608d6e42acac269a96e08f3003fe9da3396fed/pgvector-0.5.1.tar.gz", hash = "sha256:94998a54b801b1075d623b8fa677fcb8210a7977b88f8e2203ab115c155af2e4", size = 35714, upload-time = "2026-10-09T01:50:22.779Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a2/8d/a9c2a531da0ebb54b4a7174450e8534a39db112a141ae3a437de28420111/pgvector-0.5.1-py3-none-any.whl", hash = "sha256:ec5bcd5ffaefe6ecb2dcc9564ca921d284564b969183bc837a144604773af8ea", size = 31056, upload-time = "2026-10-09T01:50:21.614Z" },
+]
+
+[[package]]
 name = "pillow"
 version = "12.3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2039,6 +2048,7 @@ dependencies = [
     { name = "boto3" },
     { name = "dbos" },
     { name = "fsspec" },
+    { name = "httpx" },
     { name = "isaacus" },
     { name = "isaacus-sagemaker" },
     { name = "markdown-it-py" },
@@ -2070,6 +2080,7 @@ all = [
     { name = "fastapi" },
     { name = "httpx" },
     { name = "mypy" },
+    { name = "pgvector" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "python-multipart" },
@@ -2090,6 +2101,9 @@ dev = [
     { name = "reportlab" },
     { name = "ruff" },
 ]
+pgvector = [
+    { name = "pgvector" },
+]
 ui = [
     { name = "fastapi" },
     { name = "uvicorn" },
@@ -2102,6 +2116,7 @@ requires-dist = [
     { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.115" },
     { name = "fastapi", marker = "extra == 'ui'", specifier = ">=0.115" },
     { name = "fsspec", specifier = ">=2024.0" },
+    { name = "httpx", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
     { name = "isaacus", specifier = ">=0.19" },
     { name = "isaacus-sagemaker", specifier = ">=0.1.4" },
@@ -2113,6 +2128,7 @@ requires-dist = [
     { name = "openpyxl" },
     { name = "pandas", specifier = ">=2.0" },
     { name = "pdfplumber", specifier = "==0.11.10" },
+    { name = "pgvector", marker = "extra == 'pgvector'", specifier = ">=0.3" },
     { name = "pillow", specifier = ">=10.0" },
     { name = "presidio-anonymizer", specifier = ">=2.2" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.1" },
@@ -2135,9 +2151,9 @@ requires-dist = [
     { name = "tqdm" },
     { name = "uvicorn", marker = "extra == 'api'", specifier = ">=0.30" },
     { name = "uvicorn", marker = "extra == 'ui'", specifier = ">=0.30" },
-    { name = "womblex", extras = ["cloud", "ui", "api", "dev"], marker = "extra == 'all'" },
+    { name = "womblex", extras = ["cloud", "ui", "api", "pgvector", "dev"], marker = "extra == 'all'" },
 ]
-provides-extras = ["local", "cloud", "ui", "api", "dev", "all"]
+provides-extras = ["local", "cloud", "ui", "api", "pgvector", "dev", "all"]
 
 [[package]]
 name = "wrapt"

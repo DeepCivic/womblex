@@ -9,6 +9,7 @@ Entries are terse by design; rationale lives in the PR/commit history.
 ## [Unreleased]
 
 ### Added
+- **Delivery dependencies — trust plan, Phase 3 item 3.1 (D-3.4).** `httpx` is declared in core for webhook delivery (it was already locked through the Isaacus SDK and imported directly), and a `[pgvector]` extra adds `pgvector` for the Postgres destination. Nothing uses either yet; `uv.lock` gains `pgvector` only.
 - **Stocktake S-R closes Phase R of the trust plan.** Docs brought in line with the repaired workflows (workflow files, no owner, no conditions or destinations, config carried by every fleet run); two stale docstrings corrected. The plan file itself is unchanged. No other code.
 
 ### Changed

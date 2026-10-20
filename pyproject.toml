@@ -74,6 +74,10 @@ dependencies = [
     # the cloud/ queue, worker and stage runner. SQLite system database on a
     # local run, so the base install still needs no database server.
     "dbos>=3.2.0",
+    # Webhook delivery (docs/decisions-operations.md, D-3.4). Already locked through
+    # the Isaacus SDK and imported by the Ollama OCR reader and the Isaacus
+    # connectivity check; declared because Womblex now calls it directly.
+    "httpx>=0.27",
 ]
 
 [project.optional-dependencies]
@@ -118,6 +122,15 @@ api = [
     "python-multipart>=0.0.9",
 ]
 
+# Postgres destination - pip install womblex[pgvector]
+# A workflow's Postgres destination writes one row per chunk with its embedding
+# into a pgvector column (docs/decisions-operations.md, D-3.4). psycopg is core
+# (the job queue); this adds pgvector's adapters for it. Per-destination: an
+# install that delivers nowhere else carries nothing extra.
+pgvector = [
+    "pgvector>=0.3",
+]
+
 # Development tools - pip install womblex[dev]
 dev = [
     "pytest>=8.0",
@@ -137,7 +150,7 @@ dev = [
 ]
 
 # Full install - pip install womblex[all]
-all = ["womblex[cloud,ui,api,dev]"]  # [local] is empty; isaacus + Bedrock OCR + AWS SDK are core
+all = ["womblex[cloud,ui,api,pgvector,dev]"]  # [local] is empty; isaacus + Bedrock OCR + AWS SDK are core
 
 [project.urls]
 Homepage = "https://github.com/DeepCivic/womblex"
@@ -241,6 +254,8 @@ module = [
     "botocore.*",
     "psycopg",
     "psycopg.*",
+    "pgvector",
+    "pgvector.*",
     "torch",
     "torch.*",
 ]
