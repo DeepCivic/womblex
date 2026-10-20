@@ -107,7 +107,7 @@ class TestReuseGuard:
         override = _FakeDoc(text="alpha beta gamma")
         assert _resolve_narrative_input(doc, {"A": override}) is override
 
-    def test_mismatched_text_falls_back_to_string(self, caplog) -> None:
+    def test_mismatched_text_uses_the_string(self, caplog) -> None:
         doc = ChunkInput(source_hash="A", narrative="alpha beta gamma")
         override = _FakeDoc(text="alpha beta DIFFERENT")
         with caplog.at_level(logging.WARNING):
@@ -200,3 +200,64 @@ class TestConfigAutoEnable:
             enrichment=EnrichmentConfig(enabled=False),
         )
         assert cfg.enrichment.persist_document is False
+
+
+# ---------------------------------------------------------------------------
+# AI chunking says when it pays: logged per document, counted in the footer
+# ---------------------------------------------------------------------------
+
+
+class _Sizer:
+    chunk_size = 3
+
+    @staticmethod
+    def token_counter(text: str) -> int:
+        return len(text.split())
+
+
+class TestEnricherCalls:
+    def test_a_call_is_counted_for_each_long_narrative_no_document_matches(self) -> None:
+        from womblex.process.chunk_stage import _enricher_calls
+
+        inputs = [
+            ChunkInput(source_hash="reused", narrative="one two three four"),
+            ChunkInput(source_hash="stale", narrative="one two three four five"),
+            ChunkInput(source_hash="short", narrative="one two"),
+            ChunkInput(source_hash="empty", narrative="  "),
+        ]
+        overrides = {"reused": _FakeDoc(text="one two three four"), "stale": _FakeDoc(text="other")}
+        calls, reused = _enricher_calls(inputs, overrides, _Sizer, None)
+        assert calls == {"stale": 1} and reused == {"reused"}  # "short" fits a chunk: semchunk splits nothing
+
+
+def test_the_chunk_stage_logs_each_enricher_call_and_counts_them_in_the_footer(tmp_path, monkeypatch, caplog) -> None:
+    import pyarrow.parquet as pq
+
+    from womblex.ingest.records import RecordFieldMapping, ingest_records
+    from womblex.process import chunk_stage
+    from womblex.store.output import AI_CHUNKING_CALLS_KEY
+
+    class _AiChunker(_RecordingChunker):
+        chunk_size = 3
+        chunking_model = "kanon-2-enricher"
+
+    shards = tmp_path / "documents"
+    ingest_records([{"version_id": "doc-1", "text": "one two three four five"}], shards,
+                   RecordFieldMapping(id_field="version_id", text_field="text"))
+    monkeypatch.setattr(chunk_stage, "resolve_tokenizer", lambda *a, **k: object())
+    monkeypatch.setattr(chunk_stage, "isaacus_available", lambda: True)
+    monkeypatch.setattr(chunk_stage, "make_ai_chunking_client", lambda model: None)
+    monkeypatch.setattr(chunk_stage, "create_chunker", lambda **k: _AiChunker())
+
+    with caplog.at_level(logging.INFO):
+        chunk_stage.chunk_shards(shards, ChunkingConfig(chunking_model="kanon-2-enricher", chunk_size=3))
+    footer = pq.read_metadata(str(next(shards.glob("*.chunks.parquet")))).metadata
+    assert footer[AI_CHUNKING_CALLS_KEY] == b"1"
+    assert "AI chunking calls the Enricher 1 time(s) for doc-1" in caplog.text
+    assert "fallback" not in caplog.text.lower()
+
+    other = tmp_path / "plain"
+    ingest_records([{"version_id": "doc-1", "text": "one two three four five"}], other,
+                   RecordFieldMapping(id_field="version_id", text_field="text"))
+    chunk_stage.chunk_shards(other, ChunkingConfig(chunk_size=3))
+    assert AI_CHUNKING_CALLS_KEY not in pq.read_metadata(str(next(other.glob("*.chunks.parquet")))).metadata

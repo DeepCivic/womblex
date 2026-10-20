@@ -208,7 +208,7 @@ def _chunk_conditional(config: WomblexConfig) -> tuple[ConditionalInput, ...]:
     inputs = _overlay_input(config.processing.text_source)
     if ai_chunking_model(config):
         # Ordering requirement, not a hard dependency: without the sidecar the
-        # chunker self-enriches (double cost, same output). Warn, don't fail.
+        # chunker calls the Enricher itself (double cost, same output). Warn, don't fail.
         inputs += (
             ConditionalInput(
                 ENRICHMENT_DOC_SUFFIX,

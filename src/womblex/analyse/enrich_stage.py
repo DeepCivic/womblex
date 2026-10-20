@@ -33,8 +33,8 @@ table's markdown (``text_layer='table_markdown'``). ``enrichment.include_tables`
 switches the pass off.
 
 Split documents are not persisted for AI-chunking reuse (no single ILGS
-Document spans the full narrative); the chunk stage self-enriches those few
-long-tail docs. All other docs persist normally when ``persist_document``.
+Document spans the full narrative); the chunk stage makes the Enricher call for those few
+long-tail docs when AI chunking is on. All other docs persist normally when ``persist_document``.
 """
 
 from __future__ import annotations

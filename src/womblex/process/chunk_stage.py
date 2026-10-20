@@ -161,6 +161,10 @@ def chunk_shards(
                 _load_narrative_overrides(base, text_source)
                 if chunking_config.chunking_model else None
             )
+            enricher_calls = (
+                _log_enricher_calls(base, inputs, overrides or {}, chunker, chunking_config, doc_ids_by_hash)
+                if chunking_config.chunking_model else None
+            )
             chunks_by_hash = chunk_batch(
                 inputs,
                 chunker,
@@ -178,10 +182,11 @@ def chunk_shards(
             # account for this batch, and still advance the checkpoint so
             # resume doesn't re-attempt forever.
             rows = []
+            enricher_calls = 0 if chunking_config.chunking_model else None
             chunked_now = 0
             chunks_now = 0
 
-        write_chunks(rows, base)
+        write_chunks(rows, base, ai_chunking_calls=enricher_calls)
         batches_written += 1
         docs_chunked += chunked_now
         total_chunks += chunks_now
@@ -281,7 +286,7 @@ def _load_narrative_overrides(
     Returns ``{source_hash: Document}`` for chunk_batch's ``narrative_overrides``
     (the byte-identity guard there decides whether each is actually reused), or
     ``None`` when no sidecar exists / the SDK is unavailable — both cases fall
-    back to semchunk self-enrich. The stamped ``text_source`` is used only as a
+    to a chunk-time Enricher call. The stamped ``text_source`` is used only as a
     cheap pre-filter; a stamp mismatch is logged but still passed through, since
     the authoritative guard is byte-identity of ``Document.text``.
     """
@@ -293,7 +298,7 @@ def _load_narrative_overrides(
     except ImportError:
         logger.warning(
             "chunk reuse: isaacus SDK not importable; cannot rehydrate "
-            "persisted Documents for %s — self-enriching instead.", base_path.stem,
+            "persisted Documents for %s — AI chunking calls the Enricher instead.", base_path.stem,
         )
         return None
 
@@ -312,7 +317,7 @@ def _load_narrative_overrides(
         except Exception as e:  # corrupt blob — skip, fall back per doc
             logger.warning(
                 "chunk reuse: could not rehydrate Document for %s (%s); "
-                "self-enriching instead.", source_hash, e,
+                "AI chunking calls the Enricher instead.", source_hash, e,
             )
     return overrides or None
 
@@ -338,17 +343,59 @@ def _effective_chunk_size(chunk_size: int, overlap: float | None) -> int:
     return chunk_size
 
 
-def plan_ai_chunking(shard_dir: Path, config: WomblexConfig) -> AIChunkingPlan:
-    """Count the chunk-time Enricher calls `chunk_shards` would make under *config*; calls nothing.
+def _enricher_calls(
+    inputs: list[ChunkInput], overrides: dict[str, object], sizer: object, overlap: float | None,
+) -> tuple[dict[str, int], set[str]]:
+    """The Enricher calls AI chunking makes for *inputs*, per document, and the documents that reuse one.
 
-    Mirrors the stage: the same inputs (`_build_inputs_for_batch`), the same reuse test (a
-    rehydrated Document from `_load_narrative_overrides` whose text is byte-identical to the
-    narrative) and semchunk's own rule — a narrative is enriched only when it holds more tokens
-    than the chunk size, in one call per million-character prechunk. Tables chunk in token mode
-    and are never enriched (`chunk_batch`). Raises `MissingOverlayError` as the stage does.
+    A narrative reuses a persisted Document when its text is byte-identical to the narrative
+    (`chunk_batch`'s guard); otherwise semchunk's own rule applies: it enriches only a narrative
+    holding more tokens than the chunk size, in one call per million-character prechunk. Tables
+    chunk in token mode and are never enriched.
     """
     import semchunk
 
+    limit = _effective_chunk_size(sizer.chunk_size, overlap)  # type: ignore[attr-defined]
+    calls: dict[str, int] = {}
+    reused: set[str] = set()
+    for doc in inputs:
+        text = doc.narrative
+        if not text.strip():
+            continue
+        if getattr(overrides.get(doc.source_hash), "text", None) == text:
+            reused.add(doc.source_hash)
+        elif sizer.token_counter(text) > limit:  # type: ignore[attr-defined]
+            prechunks = semchunk.chunk(text, chunk_size=1_000_000, token_counter=len, memoize=False) \
+                if len(text) > 1_000_000 else [text]
+            calls[doc.source_hash] = len(prechunks)
+    return calls, reused
+
+
+def _log_enricher_calls(
+    base: Path, inputs: list[ChunkInput], overrides: dict[str, object], chunker: object,
+    chunking_config: ChunkingConfig, doc_ids_by_hash: dict[str, str],
+) -> int:
+    """Log each document AI chunking will call the Enricher for, before it is called; return the call count."""
+    calls, reused = _enricher_calls(inputs, overrides, chunker, chunking_config.overlap)
+    for source_hash, n in calls.items():
+        logger.info(
+            "chunk_shards: AI chunking calls the Enricher %d time(s) for %s: chunking.chunking_model=%r "
+            "asked for it and no persisted Document matches its narrative",
+            n, doc_ids_by_hash.get(source_hash, source_hash), chunking_config.chunking_model,
+        )
+    logger.info(
+        "chunk_shards: %s AI chunking: %d Enricher call(s) for %d document(s), %d reused a persisted Document",
+        base.stem, sum(calls.values()), len(calls), len(reused),
+    )
+    return sum(calls.values())
+
+
+def plan_ai_chunking(shard_dir: Path, config: WomblexConfig) -> AIChunkingPlan:
+    """Count the chunk-time Enricher calls `chunk_shards` would make under *config*; calls nothing.
+
+    Mirrors the stage: the same inputs (`_build_inputs_for_batch`) and the same `_enricher_calls`
+    rule. Raises `MissingOverlayError` as the stage does.
+    """
     from womblex.analyse.enrich import make_enrichment_provider
 
     chunking = config.chunking
@@ -363,22 +410,15 @@ def plan_ai_chunking(shard_dir: Path, config: WomblexConfig) -> AIChunkingPlan:
     counter = make_enrichment_provider(config.enrichment, None, None).limits.token_counter
     plan = AIChunkingPlan()
 
-    limit = _effective_chunk_size(sizer.chunk_size, chunking.overlap)
     for base in bases:
         inputs, _ = _build_inputs_for_batch(base, False, text_source)
         overrides = _load_narrative_overrides(base, text_source) or {}
-        for doc in inputs:
-            plan.documents += 1
-            text = doc.narrative
-            if not text.strip():
-                continue
-            if getattr(overrides.get(doc.source_hash), "text", None) == text:
-                plan.reused += 1
-            elif sizer.token_counter(text) > limit:  # otherwise semchunk splits it by tokens alone
-                prechunks = semchunk.chunk(text, chunk_size=1_000_000, token_counter=len, memoize=False) \
-                    if len(text) > 1_000_000 else [text]
-                plan.calls += len(prechunks)
-                plan.tokens += counter.count_batch([text])[0]
+        calls, reused = _enricher_calls(inputs, overrides, sizer, chunking.overlap)
+        plan.documents += len(inputs)
+        plan.reused += len(reused)
+        plan.calls += sum(calls.values())
+        by_hash = {d.source_hash: d.narrative for d in inputs}
+        plan.tokens += sum(counter.count_batch([by_hash[h]])[0] for h in calls)
     return plan
 
 

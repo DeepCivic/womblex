@@ -70,8 +70,8 @@ def write_enrichment_doc_shard(
 def read_enrichment_docs(base_path: Path) -> dict[str, tuple[str, str]]:
     """Return ``{source_hash: (text_source, document_json)}`` for a shard base.
 
-    Missing sidecar → empty dict (the chunk stage then falls back to
-    self-enrich for that batch). Accepts either a shard base path or the
+    Missing sidecar → empty dict (the chunk stage then makes the Enricher
+    call for each document of that batch). Accepts either a shard base path or the
     sidecar path itself.
     """
     p = Path(base_path)

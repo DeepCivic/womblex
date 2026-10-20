@@ -646,7 +646,7 @@ class WomblexConfig(StrictModel):
         the raw ILGS Document and the chunk stage reuses it (docs/decisions-dead-ends.md).
         When both are on we auto-enable ``enrichment.persist_document`` and warn
         only about the ordering the config can't enforce: enrich must run before
-        chunk, else chunk self-enriches (the double-enrich falls back per doc).
+        chunk, else chunk makes its own Enricher call (a second paid call per document).
         """
         if self.chunking.chunking_model and self.enrichment.enabled:
             self.enrichment.persist_document = True
@@ -654,7 +654,7 @@ class WomblexConfig(StrictModel):
                 "chunking.chunking_model=%r + enrichment.enabled: auto-enabled "
                 "enrichment.persist_document so chunk reuses the enrich stage's "
                 "Document. Run `enrich` BEFORE `chunk` — otherwise the reuse "
-                "sidecar is absent and chunk self-enriches (double cost).",
+                "sidecar is absent and chunk calls the Enricher itself (double cost).",
                 self.chunking.chunking_model,
             )
         return self

@@ -441,15 +441,24 @@ def chunks_path_for(base_path: Path) -> Path:
     return base_path.parent / f"{base_path.stem}{CHUNKS_SUFFIX}"
 
 
-def write_chunks(rows: list[dict], output_path: Path) -> Path:
+#: Footer key counting the Kanon-2 Enricher calls AI chunking made for the batch; written only
+#: when `chunking.chunking_model` is set (absent means no AI chunking, not zero calls).
+AI_CHUNKING_CALLS_KEY = b"womblex.ai_chunking_calls"
+
+
+def write_chunks(rows: list[dict], output_path: Path, *, ai_chunking_calls: int | None = None) -> Path:
     """Write a batch's chunk rows to ``batch-NNNN.chunks.parquet``.
 
     ``rows`` must match :data:`CHUNKS_SCHEMA`. Empty input produces an
     empty-but-schema-correct file so downstream readers can glob safely.
+    ``ai_chunking_calls`` is the number of chunk-time Enricher calls, recorded in the footer.
     """
     target = chunks_path_for(output_path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    _write_rows(rows, target, CHUNKS_SCHEMA, metadata=sidecar_footer(output_path, "chunk"))
+    metadata = dict(sidecar_footer(output_path, "chunk") or {})
+    if ai_chunking_calls is not None:
+        metadata[AI_CHUNKING_CALLS_KEY] = str(ai_chunking_calls).encode()
+    _write_rows(rows, target, CHUNKS_SCHEMA, metadata=metadata or None)
     logger.info("Wrote chunks shard %s: rows=%d", target.name, len(rows))
     return target
 
