@@ -260,3 +260,43 @@ def test_a_coordinator_counts_done_only_once_every_stage_it_ran_has_succeeded(fi
     assert _board(rows).stats("r1") == {"failed": 2, "done": 1}  # chunk has not been repaired
     rows.append(_Row(f"{prefix}:stage:chunk:retry:1", "SUCCESS", None, kind="stage", created_at=5))
     assert _board(rows).stats("r1") == {"done": 3}
+
+
+def _steps(plan, **units):
+    """Recorded steps of a stage attempt: its `plan`, then each `unit:<label>` and whether it failed."""
+    return [{"function_name": "plan", "output": plan, "error": None}] + [
+        {"function_name": f"unit:{label}", "output": {}, "error": RuntimeError("boom") if failed else None}
+        for label, failed in units.items()]
+
+
+@pytest.mark.parametrize(("steps", "unfinished"), [
+    (_steps([["batch-0001"], ["batch-0002"]], **{"batch-0001": False, "batch-0002": True}), ["batch-0002"]),
+    (_steps([["batch-0001"], ["batch-0002"]], **{"batch-0001": False}), ["batch-0002"]),  # never reached
+    (_steps([["batch-0001", "batch-0002"]], run=True), ["batch-0001", "batch-0002"]),  # a whole-run unit
+    (_steps([["batch-0001", "batch-0002"]], run=False), []),
+    ([], None),  # no plan recorded: every base
+])
+def test_unfinished_bases_reads_the_attempts_plan_and_units(steps, unfinished) -> None:
+    from tests.test_workflows import _board
+
+    assert _board([], {"r1:stage:normalise": steps}).unfinished_bases("r1:stage:normalise") == unfinished
+
+
+def test_a_stage_that_ran_after_a_failure_redoes_only_what_each_failure_left() -> None:
+    from tests.test_workflows import _board, _Row
+    from womblex.cloud.retry import _affected
+
+    def row(wid, status, created, **attrs):
+        r = _Row(wid, status, None, kind="stage", created_at=created)
+        r.attributes.update(attrs)
+        return r
+
+    steps = {"r1:stage:normalise": _steps([["batch-0001"], ["batch-0002"]], **{"batch-0001": False, "batch-0002": True}),
+             "r1:stage:spellfix": _steps([["batch-0001"], ["batch-0003"]], **{"batch-0001": False, "batch-0003": True})}
+    attempts = {"normalise": [row("r1:stage:normalise", "ERROR", 1)],
+                "spellfix": [row("r1:stage:spellfix", "ERROR", 2)]}
+    chunk = row("r1:stage:chunk", "SUCCESS", 3, ran_after_failed=["normalise", "spellfix"])
+    board = _board([], steps)
+    assert _affected(board, attempts, chunk, None) == ["batch-0002", "batch-0003"]
+    assert _affected(board, attempts, chunk, ["batch-0002", "batch-0004"]) == ["batch-0002"]  # its own bases only
+    assert _affected(_board([], {}), attempts, chunk, ["batch-0002"]) == ["batch-0002"]  # no plan: all it ran
