@@ -26,6 +26,7 @@ class _FakeQueue:
     def __init__(self, dsn: str, **_kw: object) -> None:
         self.dsn = dsn
         self.enqueued: tuple[str, list] | None = None
+        self.config: dict | None = None
         _FakeQueue.last = self
 
     def __enter__(self) -> Self:
@@ -35,7 +36,7 @@ class _FakeQueue:
         pass
 
     def enqueue(self, run_id: str, specs: list, *, owner: str | None = None, config: dict | None = None) -> int:
-        self.enqueued = (run_id, specs)
+        self.enqueued, self.config = (run_id, specs), config
         return len(specs)
 
 
@@ -162,6 +163,23 @@ class TestExecuteApi:
         assert [len(s.input_keys) for s in specs] == [2, 2, 1]
         assert all(s.shard_prefix == "runs/run-exec/documents" for s in specs)
         assert all(s.ingest_root == str(ingest_root) for s in specs)
+
+    def test_the_composed_config_is_what_the_batches_extract_under(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The extraction press carries the composer's config to every worker (Phase R, D7)."""
+        pytest.importorskip("fsspec")
+        monkeypatch.setattr("womblex.cloud.jobs.RunBoard", _FakeQueue)
+        ingest_root = tmp_path / "inbox"
+        _seed_store_inputs(ingest_root, "", ["doc.pdf"])
+        client = TestClient(create_app(
+            store_uri=str(tmp_path / "store"), ingest_uri=str(ingest_root), db_dsn="postgresql://x/y",
+        ))
+        resp = client.post("/api/execute/enqueue", json={"run_id": "run-exec",
+                                                          "config": {"chunking": {"chunk_size": 77}}})
+        assert resp.status_code == 200
+        carried = _FakeQueue.last.config  # type: ignore[union-attr]
+        assert carried is not None and carried["chunking"]["chunk_size"] == 77 and "paths" not in carried
 
     def test_enqueue_refuses_a_nested_ingest_layout(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
