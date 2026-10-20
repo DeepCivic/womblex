@@ -20,10 +20,10 @@ Resolution reuses :class:`~womblex.store.source_resolver.SourceResolver`, so
 this module's own: ``upload_failed``, for a source that resolved but whose
 copy to the destination raised — isolated per source so one bad upload does
 not abort the export (``source_index.parquet`` and ``egress_manifest.json``
-still get written). Every write is a ``RemoteStore.upload_file`` off a local
-path, so a local directory and an object-store URI are one code path. Scoped
-to a local run, as ``SourceResolver`` is: a distributed run is staged locally
-first.
+still get written). The run is read through a ``RemoteStore`` (fsspec's local
+backend) and every write goes through one, so a local directory and an
+object-store URI are one code path. Scoped to a local run, as
+``SourceResolver`` is (``store/egress_sources.py``).
 
 Re-exporting into a bundle folder that already has a ``sources/`` directory
 (a re-run over an updated corpus) removes any file under it that the new
@@ -44,6 +44,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pyarrow as pa
+import pyarrow.parquet as pq
 
 from womblex import __version__
 from womblex.store.contract import CONTRACT_VERSION
@@ -51,31 +52,20 @@ from womblex.store.egress_output import (
     EGRESS_STAGE,
     SOURCE_INDEX_FILENAME,
     SOURCES_DIRNAME,
-    raw_key_for,
     write_source_index,
 )
+from womblex.store.egress_sources import UPLOAD_FAILED, LocalSources
+from womblex.store.output import conform_shard
 from womblex.store.remote import RemoteStore
 from womblex.store.retention import is_safe_run_id
 from womblex.store.run_manifest import RUN_MANIFEST_FILENAME
-from womblex.store.run_stamp import stamp_from_footers
-from womblex.store.source_resolver import (
-    HASH_BASIS_FILE_BYTES,
-    Resolution,
-    SourceResolver,
-    hash_basis_for,
-    load_manifest,
-)
+from womblex.store.run_stamp import stamp_from_metadata
+from womblex.store.source_resolver import HASH_BASIS_FILE_BYTES, SourceResolver, hash_basis_for
 
 logger = logging.getLogger(__name__)
 
 CORPUS_DIRNAME = "corpus"
 EGRESS_MANIFEST_FILENAME = "egress_manifest.json"
-
-#: A source that resolved but whose copy to the destination raised. Not part
-#: of :mod:`womblex.store.source_resolver`'s vocabulary — it happens at
-#: upload time, after resolution has already succeeded.
-UPLOAD_FAILED = "upload_failed"
-
 
 @dataclass(frozen=True)
 class EgressResult:
@@ -100,28 +90,30 @@ def build_bundle(
 ) -> EgressResult:
     """Export the local run at *run_root* into a bundle under *store*.
 
-    *run_root* is a finished ``womblex run`` output directory (``documents/``
-    shard files plus ``manifest.parquet`` at its root); raises
+    *run_root* is a finished run's output directory (``documents/`` shard files
+    plus ``manifest.parquet`` at its root), read through a ``RemoteStore``. Raises
     ``FileNotFoundError`` if either is missing — an unfinalised run has no
     manifest to build a bundle from.
 
     *bundle_prefix* defaults to *run_id*. *source_root* overrides where raw
-    sources resolve from, as in :meth:`SourceResolver.for_run` (a moved corpus).
+    sources resolve from (a moved corpus), as in :meth:`SourceResolver.for_run`.
     ``include_sources=False`` resolves nothing and writes neither ``sources/``
     nor ``source_index.parquet`` — the "corpus-only" export. Raises
     ``ValueError``, before any write, if *run_id* disagrees with the run's stamp
-    or sources are wanted with no single local root to resolve against.
+    or sources are wanted with no single root to resolve against.
     """
-    run_root = Path(run_root)
-    shard_dir = run_root / "documents"
-    manifest_path = run_root / RUN_MANIFEST_FILENAME
-    if not manifest_path.is_file():
+    run = _open_run(run_root)
+    if not run.exists(RUN_MANIFEST_FILENAME):
         raise FileNotFoundError(
-            f"{manifest_path} is missing — finalise the run "
-            "(`womblex manifest --shards` or the end of `womblex run`) before egress"
+            f"{run.root}/{RUN_MANIFEST_FILENAME} is missing — finalise the run "
+            "(`womblex manifest --shards`, `womblex finalize`, or the end of the run) before egress"
         )
-    if not shard_dir.is_dir():
-        raise FileNotFoundError(f"{shard_dir} is missing — nothing to bundle")
+    # Recursive and not filtered to `*.parquet`: any file `documents/` holds
+    # (a nested subfolder, a non-parquet sidecar) is part of the corpus, not
+    # just its top-level shards.
+    if not run.exists("documents"):
+        raise FileNotFoundError(f"{run.root}/documents is missing — nothing to bundle")
+    shard_keys = sorted(run.find("documents"))
 
     prefix = (bundle_prefix or run_id).strip("/")
     if not prefix or not all(is_safe_run_id(segment) for segment in prefix.split("/")):
@@ -133,66 +125,39 @@ def build_bundle(
 
     # Everything that can refuse the export is checked before the first write,
     # so a refusal never leaves a half-built bundle at the destination.
-    # Recursive and not filtered to `*.parquet`: any file `documents/` holds
-    # (a nested subfolder, a non-parquet sidecar) is part of the corpus, not
-    # just its top-level shards.
-    shard_paths = sorted(p for p in shard_dir.rglob("*") if p.is_file())
-    corpus_paths = shard_paths + [manifest_path]
-    stamp = stamp_from_footers(corpus_paths, EGRESS_STAGE)
+    corpus_keys = [*shard_keys, RUN_MANIFEST_FILENAME]
+    footers = (meta for key in corpus_keys if key.endswith(".parquet")
+               if (meta := run.read_parquet_footer(key)) is not None)
+    stamp = stamp_from_metadata((m for m, _ in footers), EGRESS_STAGE)
     if stamp is not None and stamp.run_id != run_id:
         raise ValueError(f"run_id {run_id!r} does not match the run's own stamp {stamp.run_id!r}")
-    manifest = load_manifest(run_root)
+    with run.open(RUN_MANIFEST_FILENAME) as handle:
+        manifest = conform_shard(pq.read_table(handle), "manifest", f"{run.root}/{RUN_MANIFEST_FILENAME}")
     rows = manifest.select(["source_hash", "doc_id", "filename", "ext"]).to_pylist()
-    resolver = _resolver(run_root, manifest, source_root) if include_sources else None
+    sources = _sources(Path(run_root), manifest, source_root) if include_sources else None
 
-    for path in shard_paths:
-        rel = path.relative_to(shard_dir).as_posix()
-        store.upload_file(path, f"{corpus_prefix}/{rel}")
-    store.upload_file(manifest_path, f"{corpus_prefix}/{manifest_path.name}")
-    logger.info("Copied %d corpus file(s) -> %s/%s", len(corpus_paths), store.root, corpus_prefix)
+    for key in corpus_keys:
+        with run.open(key) as handle:
+            store.write_stream(handle, f"{corpus_prefix}/{key.removeprefix('documents/')}")
+    logger.info("Copied %d corpus file(s) -> %s/%s", len(corpus_keys), store.root, corpus_prefix)
 
     sources_copied = 0
     by_status: dict[str, int] = {}
-    if resolver is not None:
-        resolutions: dict[str, Resolution] = {r.source_hash: r for r in resolver.resolve_all()}
-        # Keyed by source_hash: rows sharing one hash can disagree on `ext`, so
-        # every such row's raw_key comes from the one file uploaded — its own
-        # suffix, lowercased as the manifest's `ext` is.
-        raw_keys: dict[str, str] = {}
-        # source_hash -> the key its upload attempted this export but raised
-        # on. Left alone by the stale-file cleanup below, same as `raw_keys`'
-        # values — its destination content (if any landed before the failure)
-        # is of unknown provenance, so it is neither claimed by the new index
-        # nor deleted out from under it.
-        failed_keys: dict[str, str] = {}
+    if sources is not None:
+        # One outcome per hash: rows sharing one hash can disagree on `ext`, so
+        # every such row's raw_key comes from the one file copied.
+        outcomes = {h: sources.copy(h, store, prefix) for h in dict.fromkeys(r["source_hash"] for r in rows)}
         index_rows: list[dict] = []
         for row in rows:
-            source_hash = row["source_hash"]
-            resolution = resolutions.get(source_hash)
-            status: str = resolution.status if resolution is not None else "not_found"
-            raw_key = None
-            if resolution is not None and resolution.ok and resolution.path is not None:
-                if source_hash not in raw_keys and source_hash not in failed_keys:
-                    candidate_key = raw_key_for(source_hash, resolution.path.suffix.lower())
-                    try:
-                        store.upload_file(resolution.path, f"{prefix}/{candidate_key}")
-                    except Exception:
-                        logger.warning(
-                            "failed to upload source for source_hash=%s (doc_id=%s)",
-                            source_hash, row["doc_id"], exc_info=True,
-                        )
-                        failed_keys[source_hash] = candidate_key
-                    else:
-                        raw_keys[source_hash] = candidate_key
-                        sources_copied += 1
-                if source_hash in raw_keys:
-                    raw_key = raw_keys[source_hash]
-                elif source_hash in failed_keys:
-                    status = UPLOAD_FAILED
-            by_status[status] = by_status.get(status, 0) + 1
-            index_rows.append({**row, "raw_key": raw_key, "status": status})
+            outcome = outcomes[row["source_hash"]]
+            by_status[outcome.status] = by_status.get(outcome.status, 0) + 1
+            index_rows.append({**row, "raw_key": outcome.raw_key, "status": outcome.status})
+        sources_copied = sum(1 for o in outcomes.values() if o.raw_key is not None)
 
-        keep = set(raw_keys.values()) | set(failed_keys.values())
+        # A failed upload's key is kept too: its destination content (if any
+        # landed before the failure) is of unknown provenance, so it is neither
+        # claimed by the new index nor deleted out from under it.
+        keep = {o.attempted for o in outcomes.values() if o.attempted}
         _clean_stale_sources(store, prefix, keep=keep)
 
         with tempfile.TemporaryDirectory(prefix="womblex-egress-") as tmp:
@@ -208,9 +173,15 @@ def build_bundle(
 
     return EgressResult(
         run_id=run_id, bundle_prefix=prefix, documents=len(rows),
-        corpus_files=len(corpus_paths), sources_copied=sources_copied,
+        corpus_files=len(corpus_keys), sources_copied=sources_copied,
         sources_by_status=by_status,
     )
+
+
+def _open_run(run_root: Path) -> RemoteStore:
+    """The run's files as a store, through fsspec's local backend, so the corpus is copied the
+    way the bundle is written."""
+    return RemoteStore.from_uri(str(Path(run_root).expanduser().resolve()))
 
 
 def _clean_stale_sources(store: RemoteStore, prefix: str, *, keep: set[str]) -> None:
@@ -243,17 +214,15 @@ def _clean_stale_sources(store: RemoteStore, prefix: str, *, keep: set[str]) -> 
         logger.info("Removed %d stale source file(s) from a previous export", removed)
 
 
-def _resolver(
-    run_root: Path, manifest: pa.Table, source_root: str | Path | None,
-) -> SourceResolver:
-    """The run's resolver. A run with no file-hashed row never reads a root (every
-    row is ``unsupported_basis``), so a records ingest with no ``ingest_root`` exports."""
+def _sources(run_root: Path, manifest: pa.Table, source_root: str | Path | None) -> LocalSources:
+    """The run's sources. A run with no file-hashed row never reads a root (every row is
+    ``unsupported_basis``), so a records ingest with no ``ingest_root`` exports."""
     methods = manifest.column("extraction_method").to_pylist()
     if source_root is None and all(
         hash_basis_for(str(m or "")) != HASH_BASIS_FILE_BYTES for m in methods
     ):
-        return SourceResolver(manifest, run_root)
-    return SourceResolver.for_run(run_root, root=source_root)
+        return LocalSources(SourceResolver(manifest, run_root))
+    return LocalSources(SourceResolver.for_run(run_root, root=source_root))
 
 
 def _write_egress_manifest(

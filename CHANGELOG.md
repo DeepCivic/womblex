@@ -8,6 +8,9 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 ## [Unreleased]
 
+### Changed
+- **Egress reads its run through a store — trust plan, Phase 3 item 3.2b, first half.** `build_bundle` reads the run's files through a `RemoteStore` (fsspec's local backend) and copies the corpus by stream, and source copying is one outcome per `source_hash` (`store/egress_sources.py`). No behaviour change; the second half adds runs and sources held in an object store. Helpers beside it: `RemoteStore.open`, `run_stamp.stamp_from_metadata`, `output.conform_shard`.
+
 ### Added
 - **Fleet runs write their own manifest — trust plan, Phase 3 item 3.2a (Requirement 2).** The coordinator's last step writes `<run>/manifest.parquet` and its run record, after a failed stage too, through the same code as `womblex finalize` (`cloud/finalize.py`); a manifest it cannot write is named in the coordinator's error. `finalize` stays for extraction-only runs and after a retry, which now prints the line. Upgrading: let running coordinators finish before upgrading workers (the coordinator gains a step).
 - **Delivery dependencies — trust plan, Phase 3 item 3.1 (D-3.4).** `httpx` is declared in core for webhook delivery (it was already locked through the Isaacus SDK and imported directly), and a `[pgvector]` extra adds `pgvector` for the Postgres destination. Nothing uses either yet; `uv.lock` gains `pgvector` only.

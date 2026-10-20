@@ -258,6 +258,10 @@ class RemoteStore:
             return None
         return meta.metadata, meta.num_rows
 
+    def open(self, rel: str) -> BinaryIO:
+        """Open an object for reading in place, with no staging: a store-to-store copy streams it."""
+        return cast(BinaryIO, self.fs.open(self._full(rel), "rb"))  # type: ignore[attr-defined]
+
     def read_text(self, rel: str, *, encoding: str = "utf-8") -> str:
         """Read a small text object in place (no staging) — e.g. a saved preset."""
         with self.fs.open(self._full(rel), "r", encoding=encoding) as handle:  # type: ignore[attr-defined]
