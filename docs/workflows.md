@@ -40,7 +40,10 @@ with its embedding (a pgvector column; `pip install womblex[pgvector]`): the mas
 naming its layer and, when masked, its `mask_status`. A chunk the layer holds no
 text for is left out and counted, never sent from the other layer. A Postgres
 destination needs the `embed` step, and masked text the `pii` step; a workflow
-without them is refused. A delivery after a failed step says so, in the bundle's
+without them is refused. The table is created if absent, and the `vector` extension
+with it; pgvector lets only a superuser create the extension, so for any other role
+run `CREATE EXTENSION vector` in that database once beforehand, or every delivery
+fails with `permission denied`. A delivery after a failed step says so, in the bundle's
 `egress_manifest.json` (`delivery.after_failed`) and in its record. Each destination
 is tried three times, with backoff; a delivery that still fails is recorded and
 never stops the run, and the exit code is non-zero. Every delivery is recorded as
