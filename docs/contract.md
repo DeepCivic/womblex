@@ -7,7 +7,7 @@ column-level schemas are in [extraction.md](extraction.md).
 
 ## Contract version
 
-`womblex.contract_version` (currently `2.0`, `store/contract.CONTRACT_VERSION`)
+`womblex.contract_version` (currently `3.0`, `store/contract.CONTRACT_VERSION`)
 is in the footer of every pipeline Parquet and in `egress_manifest.json`. It is
 versioned apart from the package: a release that changes no schema leaves it
 alone.
@@ -16,6 +16,7 @@ alone.
 |---|---|---|
 | Additive column | minor | Readers back-fill older files (`_MANIFEST_NULL_BACKFILL` style) |
 | Rename or removal | major | Reader shim as for `_CHUNKS_BACKFILL`, kept for the old major |
+| Retired file role | major | The role is no longer written; a file of that role an older major wrote keeps the `womblex.sensitivity` in its own footer |
 
 A file with no `contract_version` key was written before the contract existed
 and is read as `1.0`-compatible.
@@ -43,7 +44,6 @@ the single source). An unknown role reads as `raw`.
 | `money_spans` | `source_hash` plus the evidence reference | none |
 | `money_columns` | `source_hash` plus `column_id` (`parent_elem_order` / `sheet`) | none |
 | `layout_regions` | `(source_hash, page)`; boxes are normalised like element `bbox` ([layout.md](layout.md)) | none |
-| `conditions` | `source_hash` to `_manifest`, one row per document and workflow condition (`condition_index`), naming the workflow (`workflow_id`) — the last one with conditions to run over the batch; `outcome` is `holds`, `fails` or `unevaluable` (null manifest cell), counted in the `womblex.condition_outcomes` footer. A label, never a gate | none |
 | `redactions`, `source_index` | `source_hash` | none |
 | `provenance` | `source_hash` | raw |
 
@@ -79,13 +79,18 @@ the receipt. The text a `span` row is checked against is `text` (`mention_text`
 on `entity_links`). `womblex verify-evidence <run>` recomputes every row's check
 over a finished run and reports the counts (exit 2 if any receipt fails).
 
-The major bump removed `start_char` / `end_char` / `text_source` / `parent_elem_order`
+The 2.0 bump removed `start_char` / `end_char` / `text_source` / `parent_elem_order`
 / `row` / `col` from `money_spans` (now `char_start`, `char_end`, `text_layer`,
 `elem_order`, `cell_row`, `cell_col`), `start` / `end` (chunk-relative) from
 `pii_spans`, and `mention_start` / `mention_end` from `entity_links`. Readers
 back-fill an older file: a money span keeps its narrative offsets (`span`) or its
 cell (`element`); a PII span reads as `chunk`; a link reads as `span` when its shard has the elements and no text-layer overlay (the offsets can then only be the verbatim narrative's) and as `document` otherwise. A PII
 span's position in its chunk is `char_start - chunk.start_char` for a `span` row.
+
+
+The 3.0 bump retired the `conditions` role (Phase R, D3): no `*.conditions.parquet` is
+written, and `manifest.parquet` holds every column a condition labelled. A file of that
+role a 2.x run wrote keeps `womblex.sensitivity: none` in its own footer.
 
 ## Determinism
 
@@ -110,7 +115,7 @@ swappable-slot model (`docs/model-plugins.md`) each slot actually built, by
 slot, name, and the distribution and version that supplied it
 (`read_footer_slot_models`); `womblex.model_check` records the pre-run model
 check's result (`read_footer_model_check`); `womblex.workflow_digest` names the
-stored workflow whose step wrote a sidecar (locally through `run-workflow`, or on a worker for a stage dispatched with the workflow) (`read_footer_stamp`),
+workflow whose step wrote a sidecar (locally through `run-workflow`, or on a worker for a stage dispatched with the workflow) and `womblex.workflow` holds that workflow's name and full spec as JSON (`read_footer_stamp`),
 absent from extraction files and from sidecars written outside a workflow. Each is written only when it has a
 value — a process that loaded, built or checked nothing writes no key — and
 all are additive metadata, so a reader that ignores them reads the file

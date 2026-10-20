@@ -8,16 +8,21 @@ decides what stops. A model belongs to a *scope* — ``extract``, or the stage t
 uses it — so a worker can refuse a job for a model it needs and not for one it
 does not.
 
-A model that lives behind a service has nothing to load short of calling it,
-so at ``load`` and ``smoke`` alike it gets one minimal request: each Isaacus
-model an enabled stage calls (enrich, embed, AI chunking) is sent one short
-sentence, and a registered model exposing ``ping()`` (the Bedrock and Ollama
-OCR readers) has it called. That is what stops a run that would fail at a
-paid later stage before its first document.
+A model that lives behind a service has nothing to load short of calling it.
+Each Isaacus model an enabled stage calls (enrich, embed, AI chunking) is
+checked for connectivity at ``load``, with no billed request: a deployment
+that serves it is configured and answers, and its key is taken as active
+(``isaacus_client.check_reachable``). At ``smoke`` it is also sent one short
+sentence, a billed request, and a warning names each one before it is sent. A
+registered model exposing ``ping()`` (the Bedrock and Ollama OCR readers) has
+it called at either level, with the same warning when the ping is billed
+(``ping_is_billed``). That stops a run that would fail at a paid later stage
+before its first document.
 """
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 import json
 import logging
@@ -187,7 +192,8 @@ def _candidates(config: WomblexConfig) -> list[tuple[str, str, str, dict[str, An
     return out
 
 
-def _enabled_scopes(config: WomblexConfig) -> set[str]:
+def enabled_scopes(config: WomblexConfig) -> set[str]:
+    """Extraction and each stage *config* enables."""
     return {
         SCOPE_EXTRACT,
         *(s for s, on in (
@@ -210,7 +216,7 @@ def configured_models(
     """
     for module in _BUILTIN_MODULES:
         importlib.import_module(module)
-    wanted = _enabled_scopes(config) if scopes is None else set(scopes)
+    wanted = enabled_scopes(config) if scopes is None else set(scopes)
     merged: dict[tuple[str, str, str], tuple[dict[str, Any], list[str]]] = {}
     for scope, slot, name, options in _candidates(config):
         if scope not in wanted:
@@ -235,7 +241,7 @@ def isaacus_models(
     from womblex.analyse.embed import calls_isaacus as embedding_calls_isaacus
     from womblex.analyse.enrich import ai_chunking_model, calls_isaacus
 
-    wanted = _enabled_scopes(config) if scopes is None else set(scopes)
+    wanted = enabled_scopes(config) if scopes is None else set(scopes)
     found: dict[str, list[str]] = {}
     for scope, model in (
         (SCOPE_ENRICH, config.enrichment.model if calls_isaacus(config.enrichment.model) else None),
@@ -245,6 +251,19 @@ def isaacus_models(
         if model and scope in wanted:
             found.setdefault(model, []).append(scope)
     return [ModelUse(ISAACUS, m, {}, tuple(s)) for m, s in found.items()]
+
+
+def models_key(config: WomblexConfig, scope: str) -> str:
+    """A short digest of the models *config* uses for *scope*, `""` when it uses none.
+
+    The identity work is routed by (Phase R, D8): a queue named with it is joined only by a
+    worker whose own config names the same models and whose check of them passed.
+    """
+    uses = [*configured_models(config, [scope]), *isaacus_models(config, [scope])]
+    if not uses:
+        return ""
+    ident = sorted((u.slot, u.name.strip().lower(), json.dumps(u.options, sort_keys=True, default=str)) for u in uses)
+    return hashlib.sha256(json.dumps(ident).encode()).hexdigest()[:10]
 
 
 def check_registered(config: WomblexConfig) -> None:
@@ -393,7 +412,14 @@ def _check_isaacus(use: ModelUse, level: CheckLevel) -> SlotCheck:
     source = "isaacus-sagemaker" if sagemaker_configured() else "isaacus-api"
     base = {"slot": use.slot, "name": use.name, "scopes": use.scopes, "level": level}
     try:
-        _ping_isaacus(use)
+        if level is CheckLevel.SMOKE:
+            logger.warning("model check (smoke): sending one billed request to Isaacus model %r to verify it; "
+                           "processing.models_check=load checks it without a billed request", use.name)
+            _ping_isaacus(use)
+        else:
+            from womblex.utils.isaacus_client import check_reachable
+
+            check_reachable(use.name)
     except Exception as exc:  # the SDK, boto3 and httpx raise their own types
         return SlotCheck(
             **base, ok=False, source=source,  # type: ignore[arg-type]
@@ -419,6 +445,8 @@ def _check_one(use: ModelUse, level: CheckLevel) -> SlotCheck:
         model = _load(use)
         variant = getattr(model, "model_variant", None)
         if callable(ping := getattr(model, "ping", None)):
+            if getattr(model, "ping_is_billed", False):
+                logger.warning("model check: sending one billed request to %s %r to verify it", use.slot, use.name)
             ping()  # a model behind a service: reachable, authorised, served
         if level is CheckLevel.SMOKE:
             _smoke(use, model)
@@ -463,9 +491,12 @@ def check_models(
     level: CheckLevel | str | None = None,
     *,
     scopes: Iterable[str] | None = None,
+    isaacus_scopes: Iterable[str] | None = None,
 ) -> ModelCheckResult:
     """Check the models *config* names for *scopes* (every enabled stage if ``None``).
 
+    *isaacus_scopes* narrows the Isaacus models checked (a worker checks every stage's local
+    models, but an Isaacus model only for a stage its config enables); ``None`` is *scopes*.
     *level* defaults to ``config.processing.models_check``. Never raises on a
     model failure; see :meth:`ModelCheckResult.raise_for_failures`.
 
@@ -482,7 +513,8 @@ def check_models(
     if chosen is CheckLevel.OFF:
         _OFF_REQUESTED = True
         return ModelCheckResult(chosen)
-    uses = [*configured_models(config, scopes), *isaacus_models(config, scopes)]
+    scopes = list(scopes) if scopes is not None else None
+    uses = [*configured_models(config, scopes), *isaacus_models(config, scopes if isaacus_scopes is None else isaacus_scopes)]
     with suppress_use_recording(), suppress_recording():
         checks = [_check_one(use, chosen) for use in uses]
     for check in checks:
@@ -518,7 +550,9 @@ __all__ = [
     "check_models",
     "check_registered",
     "configured_models",
+    "enabled_scopes",
     "footer_payload",
     "isaacus_models",
+    "models_key",
     "reset_model_check",
 ]

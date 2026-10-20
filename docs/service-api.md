@@ -58,7 +58,7 @@ that submitted them.
 
 - A run owned by another client answers 404, as an unknown run does.
 - `admin` sees every run. An admin's submitted run carries no owner.
-- Runs dispatched from the CLI or console carry no owner, so through the API
+- Runs dispatched from the CLI, the console or a workflow carry no owner, so through the API
   they are visible to `admin` only.
 - A run never has mixed ownership: the queue refuses an enqueue that names a
   different owner (`RunOwnedError`).
@@ -95,10 +95,15 @@ pins its operation and model surface so breaking changes show in review.
   `batch_size` (default 50).
 - A non-admin caller's `input_prefix` must be its `<client_id>` folder or under
   it (403 otherwise).
-- The config is validated before any queue row is written (400). It selects
-  stages only; workers run them under their own config, as with
-  `womblex enqueue-stages`. A config enabling no stage is an extraction-only
-  run.
+- The config is validated before any queue row is written (400). It governs
+  every stage of the run, extraction included: the run carries it, and each
+  worker that claims its work runs under it, supplying only its own store,
+  paths, credentials and model locations. A config enabling no stage is an
+  extraction-only run; with neither `preset` nor `config` the run carries the
+  default config.
+- A run no live worker serves (its extraction, or a stage it enables, under
+  its config) is refused with 409 before any queue row: start a worker whose
+  config names the same models.
 - The run id is minted server-side: the timestamp id plus a random suffix.
 - A prefix with documents in nested folders is refused, as for every run.
 

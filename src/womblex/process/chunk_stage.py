@@ -29,11 +29,12 @@ at chunk time and is the only path that needs a configured deployment
 from __future__ import annotations
 
 import logging
+import math
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
-from womblex.config import ChunkingConfig
+from womblex.config import ChunkingConfig, WomblexConfig
 from womblex.ingest.elements import BBox, Cell, Element
 from womblex.process.chunker import (
     ChunkInput,
@@ -314,6 +315,71 @@ def _load_narrative_overrides(
                 "self-enriching instead.", source_hash, e,
             )
     return overrides or None
+
+
+@dataclass
+class AIChunkingPlan:
+    """What AI chunking would send at chunk time, counted offline (`womblex plan`): the Enricher
+    calls semchunk makes for each narrative no persisted Document is reused for, tokens by the
+    enrichment provider's own counter."""
+
+    documents: int = 0
+    calls: int = 0
+    reused: int = 0
+    tokens: int = 0
+
+
+def _effective_chunk_size(chunk_size: int, overlap: float | None) -> int:
+    """semchunk's chunk size once overlap is taken out (its `chunk`'s own arithmetic)."""
+    if overlap:
+        absolute = math.floor(chunk_size * overlap) if overlap < 1 else min(int(overlap), chunk_size - 1)
+        if absolute:
+            return min(absolute, chunk_size - absolute)
+    return chunk_size
+
+
+def plan_ai_chunking(shard_dir: Path, config: WomblexConfig) -> AIChunkingPlan:
+    """Count the chunk-time Enricher calls `chunk_shards` would make under *config*; calls nothing.
+
+    Mirrors the stage: the same inputs (`_build_inputs_for_batch`), the same reuse test (a
+    rehydrated Document from `_load_narrative_overrides` whose text is byte-identical to the
+    narrative) and semchunk's own rule — a narrative is enriched only when it holds more tokens
+    than the chunk size, in one call per million-character prechunk. Tables chunk in token mode
+    and are never enriched (`chunk_batch`). Raises `MissingOverlayError` as the stage does.
+    """
+    import semchunk
+
+    from womblex.analyse.enrich import make_enrichment_provider
+
+    chunking = config.chunking
+    text_source = config.processing.text_source
+    bases = _batch_bases(shard_dir)
+    require_overlays(bases, text_source)
+    sizer = create_chunker(
+        tokenizer=resolve_tokenizer(chunking.tokenizer, chunking.tokenizer_options),
+        chunk_size=chunking.chunk_size, tokenizer_kwargs=chunking.tokenizer_kwargs,
+        memoize=chunking.memoize, cache_maxsize=chunking.cache_maxsize, max_token_chars=chunking.max_token_chars,
+    )
+    counter = make_enrichment_provider(config.enrichment, None, None).limits.token_counter
+    plan = AIChunkingPlan()
+
+    limit = _effective_chunk_size(sizer.chunk_size, chunking.overlap)
+    for base in bases:
+        inputs, _ = _build_inputs_for_batch(base, False, text_source)
+        overrides = _load_narrative_overrides(base, text_source) or {}
+        for doc in inputs:
+            plan.documents += 1
+            text = doc.narrative
+            if not text.strip():
+                continue
+            if getattr(overrides.get(doc.source_hash), "text", None) == text:
+                plan.reused += 1
+            elif sizer.token_counter(text) > limit:  # otherwise semchunk splits it by tokens alone
+                prechunks = semchunk.chunk(text, chunk_size=1_000_000, token_counter=len, memoize=False) \
+                    if len(text) > 1_000_000 else [text]
+                plan.calls += len(prechunks)
+                plan.tokens += counter.count_batch([text])[0]
+    return plan
 
 
 # ---------------------------------------------------------------------------

@@ -29,6 +29,11 @@ def test_every_file_a_workflow_writes_carries_its_digest(shards: Path) -> None: 
     written = [p for p in shards.glob("*.parquet") if p.name not in before]
     assert {"." + p.name.split(".", 1)[1] for p in written} >= set(_NEW)
     assert {_digest(p) for p in written} == {stored.digest}
+    import json
+
+    whole = {json.loads(read_footer_stamp(pq.read_metadata(str(p)).metadata)["workflow"]) == {
+        "name": stored.id, "spec": stored.spec.model_dump(mode="json")} for p in written}
+    assert whole == {True}  # every file names the workflow and carries its full spec
     assert all(_digest(p) is None for p in shards.glob("*.elements.parquet"))  # extraction is not the workflow's
     assert sidecar_footer(shards / "batch-0001.parquet", "chunk") is None  # the context ended with the run
 
@@ -47,7 +52,8 @@ def test_run_record_names_the_workflow_and_its_stages(tmp_path: Path) -> None:
     assert run_workflow_local(stored, out, resolve_preset=_resolve).exit_code == 0
     record = read_run_record(write_run_manifest(out))
     assert record is not None
-    assert record["workflows"] == [{"digest": stored.digest, "stages": ["chunk", "normalise"]}]
+    assert record["workflows"] == [{"digest": stored.digest, "name": stored.id,
+                                    "spec": stored.spec.model_dump(mode="json"), "stages": ["chunk", "normalise"]}]
 
 
 def test_no_digest_outside_a_workflow_and_the_context_resets(tmp_path: Path) -> None:

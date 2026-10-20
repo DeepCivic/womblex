@@ -32,7 +32,7 @@ def _duplicated_steps() -> StoredWorkflow:
     """A row that would no longer pass `check_spec` (built past the validator)."""
     good = _stored(["normalise"]).spec
     spec = StoredWorkflowSpec.model_construct(**{**dict(good), "steps": good.steps * 2})
-    return StoredWorkflow("wf", None, spec, workflow_digest(spec), "", "")
+    return StoredWorkflow("wf", spec, workflow_digest(spec), "", "")
 
 
 @pytest.mark.parametrize(("steps", "kw", "code"), [
@@ -67,31 +67,28 @@ def test_dry_run_checks_and_queues_nothing(fleet):  # noqa: F811
         assert board.list_jobs("r1") == []
 
 
-def test_a_dry_run_creates_no_database(fleet, monkeypatch):  # noqa: F811
+def test_a_dry_run_creates_no_database_and_is_refused_with_no_worker_recorded(fleet, monkeypatch):  # noqa: F811
     fresh = fleet[2] / "none" / "dbos.sqlite"
     monkeypatch.setenv("WOMBLEX_DBOS_PATH", str(fresh))
-    assert _dispatch(fleet, ["normalise"], config=_NORMALISED, dry_run=True).newly_enqueued == 0
+    with pytest.raises(WorkflowRefusedError) as e:  # no worker has ever recorded itself there
+        _dispatch(fleet, ["normalise"], config=_NORMALISED, dry_run=True)
+    assert e.value.code is RefusalCode.NO_WORKER and "normalise" in str(e.value)
     assert not fresh.parent.exists()
 
 
-@pytest.mark.parametrize("first", ["plain", "other workflow"])
-def test_a_queued_coordinator_under_another_workflow_is_a_conflict(fleet, first):  # noqa: F811
-    """Caught before any worker has run the first one, so it has no stage rows yet."""
+def test_a_workflow_no_live_worker_serves_is_refused_before_any_row(fleet):  # noqa: F811
+    from womblex.cloud.worker_registry import WorkerRegistry
+
+    with WorkerRegistry(None) as registry:
+        registry.remove("standby")
+    with pytest.raises(WorkflowRefusedError) as e:
+        _dispatch(fleet, ["normalise"], config=_NORMALISED)
+    assert e.value.code is RefusalCode.NO_WORKER
     with RunBoard(None) as board:
-        if first == "plain":
-            board.enqueue_stages("r1", ["normalise"], "runs/r1/documents")
-        else:
-            _dispatch(fleet, ["normalise"], config=_NORMALISED)
-        rows = board.list_jobs("r1")
-        assert [r.kind for r in rows] == ["downstream"]
-        with pytest.raises(WorkflowRefusedError) as e:
-            _dispatch(fleet, ["normalise", "chunk"], config={**_NORMALISED, "chunking": {"chunk_size": 9}})
-        assert e.value.code is RefusalCode.RUN_CONFLICT
-        assert [s for s, _ in e.value.steps] == ["normalise"]
-        assert len(board.list_jobs("r1")) == len(rows)
+        assert board.list_jobs("r1") == []
 
 
-def test_a_workflow_runs_on_the_fleet_and_a_different_one_cannot_follow_it(fleet):  # noqa: F811
+def test_a_workflow_runs_on_the_fleet_and_a_different_one_runs_its_own_stages(fleet):  # noqa: F811
     store, ingest, _ = fleet
     config = {"processing": {"text_source": "normalised"}, "chunking": {"chunk_size": 8}}
     with RunBoard(None) as board:
@@ -104,39 +101,38 @@ def test_a_workflow_runs_on_the_fleet_and_a_different_one_cannot_follow_it(fleet
     assert meta[b"womblex.workflow_digest"] == first.digest.encode()
 
     assert _dispatch(fleet, ["normalise", "chunk"], config=config).newly_enqueued == 0  # same workflow
-    with pytest.raises(WorkflowRefusedError) as e:  # same run, other recipe
-        _dispatch(fleet, ["normalise", "chunk"], config={**config, "chunking": {"chunk_size": 9}})
-    assert e.value.code is RefusalCode.RUN_CONFLICT
+    second = _dispatch(fleet, ["normalise", "chunk"], config={**config, "chunking": {"chunk_size": 9}})
+    assert second.newly_enqueued == 2  # same run, other recipe: its own stages, not the first's results
+    work(fleet, idle_timeout=3)
+    meta = pq.read_metadata(str(Path(str(store)) / "runs/r1/documents/batch-0001.chunks.parquet")).metadata
+    assert meta[b"womblex.workflow_digest"] == second.digest.encode()
 
 
 def test_cli_exit_codes_and_one_line_per_refusal(fleet, caplog, monkeypatch):  # noqa: F811
     import argparse
     import logging
 
-    from tests.test_workflow_runner import _PRESET
+    from tests.test_workflow_runner import _PRESET, write_workflow
     from womblex.cli.workflow import cmd_dispatch_workflow
-    from womblex.cloud.workflow_store import WorkflowStore, ensure_workflow_schema
     from womblex.ui.presets import build_preset_record, preset_filename, serialise_preset_record
 
     store, _, tmp = fleet
-    ensure_workflow_schema(None)
-    with WorkflowStore(None) as saved:
-        saved.save("good", _stored(["normalise"], config=_NORMALISED).spec)
-        saved.save("misordered", _stored(["chunk", "normalise"], config=_NORMALISED).spec)
+    write_workflow(tmp, "good", ["normalise"], config=_NORMALISED)
+    write_workflow(tmp, "misordered", ["chunk", "normalise"], config=_NORMALISED)
     record, _ = build_preset_record(name=_PRESET.name, description="", formats=(), config=_PRESET.config)
     (tmp / preset_filename(_PRESET.name)).write_text(serialise_preset_record(record))
 
     def run(wid: str, **kw) -> tuple[int, list[str]]:
         caplog.clear()
         args = argparse.Namespace(**{
-            "workflow_id": wid, "run_id": "r1", "store": str(store), "output_prefix": None,
+            "workflow": tmp / f"{wid}.yaml", "run_id": "r1", "store": str(store), "output_prefix": None,
             "max_attempts": 3, "dry_run": False, "dsn": None, "presets_dir": tmp, **kw})
         with caplog.at_level(logging.INFO):
             rc = cmd_dispatch_workflow(args)
         return rc, [r.getMessage() for r in caplog.records if r.name == "womblex"]
 
     rc, lines = run("missing")
-    assert rc == 1 and lines == ["no stored workflow 'missing'"]
+    assert rc == 1 and len(lines) == 1 and lines[0].startswith("could not read workflow file ")
     rc, lines = run("misordered")
     assert rc == 1 and len(lines) == 1 and lines[0].startswith("[order_not_pipeline] ")
     rc, lines = run("good", dry_run=True)

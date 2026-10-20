@@ -173,9 +173,13 @@ which role (`linking`/`reference` config).
   artefact to digest establishable from the footer.
 - **Checked before the first document** (`processing.models_check`: `off` /
   `load` / `smoke`). A service-backed model has nothing to load, so each one an
-  enabled stage calls gets one minimal request (Isaacus models; `ping()` for
-  Bedrock / Ollama), so a paid later stage fails before the stages ahead of it
-  are paid for. The check is a probe, not use: it runs under
+  enabled stage calls is checked before a paid later stage can fail after the
+  stages ahead of it are paid for. At `load` an Isaacus model is checked for
+  connectivity with no billed request (a deployment that serves it is
+  configured and answers, its key taken as active); at `smoke` it is also sent
+  one billed request. `ping()` covers Bedrock (billed) and Ollama (free). A
+  warning names each billed request before it is sent (owner's decision,
+  20 October 2026). The check is a probe, not use: it runs under
   `suppress_use_recording` + `suppress_recording`, and a caching wrapper must
   test `recording_suppressed()` to bypass its cache, or the run's real build
   would hit the probe's instance and never record. Failures are collected per

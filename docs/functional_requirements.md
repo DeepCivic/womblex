@@ -288,7 +288,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - Resuming an interrupted run automatically reconciles checkpoints and skips already-completed documents.
 - Individual document errors are isolated, recorded in the manifest, and do not crash the wider batch.
 - CLI commands allow stages to be dispatched independently, with idempotent queueing ensuring dependent stages sequence properly.
-- `womblex retry-stage` retries a failed distributed stage by forking its workflow from the first failed unit, so the units that finished are not run again. A retry is a launch: it is refused, before anything is forked, for a stage that is unknown, still running, not failed, owned by another owner, or failing the checks a dispatch makes (its config and registered models, the inputs it needs in the store). A stage that ran after a failure ran on partial output, so once the failed stage's latest attempt has succeeded it is retryable too, in the order the operator runs them.
+- `womblex retry-stage` retries a failed distributed stage by forking its workflow from the first failed unit, so the units that finished are not run again. A retry is a launch: it is refused, before anything is forked, for a stage that is unknown, still running, not failed, owned by another owner, or failing the checks a dispatch makes (its config and registered models, the inputs it needs in the store, a live worker that passes the model check for the stage). A stage that ran after a failure ran on partial output, so once the failed stage's latest attempt has succeeded it is retryable too, in the order the operator runs them, and its retry redoes only its affected units, so finished work is not paid for again.
 - Logs can be emitted as JSON lines (`womblex --log-format json` or `WOMBLEX_LOG_FORMAT=json`) with no added dependency; worker and batch records carry `run_id`, `job_id`, `stage`, and `source_hash` where known, and the default text format is unchanged.
 
 ## 15. Web Console Shell, Navigation, and Deployment Modes
@@ -444,8 +444,8 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - The service refuses to start with an empty registry unless explicitly run with `--insecure-no-auth`, and binds to loopback by default.
 - An upload is written to `<ingest>/<client_id>/<upload_id>/` keeping only bare file names; an unusable, repeated, or unsupported name is 400 with nothing written, an over-limit request is 413, and the response names the folder to submit as `input_prefix`.
 - A non-admin caller can submit runs only over its own `<client_id>/` tree (403 otherwise); the run id is minted server-side and unique across concurrent submissions.
-- A submitted `preset` or `config` is validated before any queue row is written (400 on failure) and selects downstream stages only; a config enabling none is an extraction-only run.
-- A run belongs to the client that submitted it: another client's run is 404, an admin sees all runs, and runs dispatched from the CLI or console carry no owner and are visible to admins only. A run never has mixed ownership.
+- A submitted `preset` or `config` is validated before any queue row is written (400 on failure) and governs every stage of the run, not only which stages run; a config enabling none is an extraction-only run.
+- A run belongs to the client that submitted it: another client's run is 404, an admin sees all runs, and runs dispatched from the CLI, the console or a workflow carry no owner and are visible to admins only. A run never has mixed ownership.
 - Document text defaults to the masked layer; raw layers (`chunks`, `elements`) require `read_raw`, decided by the layer's contract sensitivity.
 - Run file listings report each file's row count, `contract_version`, and `sensitivity`, so a caller can fetch Parquet directly under the data contract.
 - `ready` reports store and queue reachability and answers 503 when either is down; an unreachable queue, store, or ingest location on any other endpoint is 503, not 500.
@@ -505,7 +505,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - With no plugin configured, `content_digest` is unchanged on every synthetic fixture.
 - The model-plugin guide documents each slot's interface and how a package registers a model, with a minimal example.
 
-**Out of scope:** model provenance (26), `/v1` submission controls (a submitted config only selects stages; workers run under the operator's config), container-image packaging of plugins, and slots that need a Parquet schema change, each needing its own requirement (25 and 26, and the rest): AI chunking with a non-Isaacus model, graph-driven PII detection, link-stage candidates, `graph_refresh`, the enrichment token-budget tokeniser, per-page or per-element OCR engine recording.
+**Out of scope:** model provenance (26), container-image packaging of plugins, and slots that need a Parquet schema change, each needing its own requirement (25 and 26, and the rest): AI chunking with a non-Isaacus model, graph-driven PII detection, link-stage candidates, `graph_refresh`, the enrichment token-budget tokeniser, per-page or per-element OCR engine recording.
 
 ## 25. Pre-Run Model Check
 
@@ -522,7 +522,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - The check has three levels, set by `processing.models_check` or `--models-check`: `off`; `load` (resolve and load the models, the default); `smoke` (also run one inference on a small built-in input).
 - `womblex run` checks the models of every enabled stage before batch one, before any output is written, so a run whose later stages cannot complete does not start.
 - A worker checks at startup and refuses jobs whose models fail the check, through the existing refused path. A job is refused only for the models it needs: a batch for the extraction models, a stage job for that stage's.
-- A model behind a service is checked with one minimal request at either level: each Isaacus model an enabled stage calls (enrich, embed, AI chunking), and an API-backed OCR engine (Bedrock, Ollama), so a run whose later paid stage cannot reach its service does not start.
+- A model behind a service is checked before any document, so a run whose later paid stage cannot reach its service does not start. Each Isaacus model an enabled stage calls (enrich, embed, AI chunking) is checked for connectivity at `load`, with no billed request: a deployment that serves it is configured and answers (the hosted API with a key set, taken as active; a SageMaker endpoint `InService`). At `smoke` it is also sent one minimal request, which is billed. An API-backed OCR engine is pinged at either level (Ollama free; Bedrock a one-token request, billed). A warning names every billed request before it is sent.
 - An API submission checks only that each named model is registered, because the API host may not carry the models.
 - Downstream stage preflight includes the model check, including the standalone `chunk`, `pii`, `spellfix` and `redact` commands, which check before writing anything.
 - The existing in-slot fallback (PaddleOCR v5 to the wheel's v4) stays, and the check reports which variant resolved.
@@ -546,33 +546,61 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - A model the pre-run check builds only to confirm it loads is not recorded as used — a run whose check built the model but whose stages never actually called it shows no entry for it; only a run's own build of it does.
 - Benchmark reports (womblex-benchmark) name the models that produced them, suites can run against a named model, and `docs/accuracy/` stays labelled as the default group.
 
-## 27. Stored Workflows — Check, Run, Dispatch and Schedule
+## 27. Workflows — Check, Run, Dispatch and Schedule
 
 **As** an operator,
-**I want** to save a named recipe of steps over a preset and run it locally, on the fleet or on a schedule,
+**I want** to declare a named recipe of steps over a preset in a file and run it locally, on the fleet or on a schedule,
 **so that** a run's sequence is declared once, checked before it spends anything, and recorded in what it writes.
 
-**Given** a stored workflow (a preset reference, input binding, ordered steps, conditions, destinations and triggers)
+**Given** a workflow file (a name, a preset reference, input binding, ordered steps and triggers)
 **When** the operator validates, plans, runs, dispatches or schedules it
 **Then** everything that can refuse does so before the first step, and the files each step writes name the workflow.
 
 **Acceptance criteria:**
 
-- A workflow is stored in the database the queue uses, owner-scoped like runs, and checked on save and again on load (steps, cron and timezone, config overlay, conditions); its digest is stable over its spec.
+- A workflow is a plain-text file; creating or editing one needs no code.
+- Every command validates the file first (steps, cron and timezone, config overlay) and rejects unknown keys.
+- The workflow digest ignores formatting and comments.
 - Its own `config` is laid over its preset's key by key, and the whole is validated as a full config.
-- `validate` runs exactly the checks `run-workflow` runs before its first step, and writes nothing; `plan` counts the requests and tokens its paid steps would send, calling no paid API.
+- `validate` runs exactly the checks `run-workflow` runs before its first step, and writes nothing.
+- `plan` counts the tokens and requests of every paid call, AI chunking included, with each provider's own token counter, and shows local steps as free. It calls no paid API.
 - Step order is checked before launch: a step whose input is missing, produced later, or rewritten later is refused with a stable code.
 - Once a step has run, a failed step does not stop the steps after it; each later step records the failure it follows, and the exit code is non-zero.
-- Conditions over manifest columns label each document `holds`, `fails` or `unevaluable` and never refuse, halt or narrow a run.
-- Every sidecar a workflow step writes carries the workflow's digest, and the run record lists the workflows observed in its files.
-- `dispatch-workflow` queues the steps for the fleet, refused before any row for anything the local runner refuses and for a step the fleet cannot run, an order the coordinator would change, or a run already worked under another digest; workers run each stage under the workflow's config.
-- `schedule-workflow` makes the queue's schedules equal the workflow's cron triggers; each firing extracts the input prefix into a fresh run and dispatches the workflow, refused before any row when the prefix is outside the owner's tree or holds no document. `schedule-workflow` runs the same checks first (`check_firing`, against `--store` / `--ingest`), so a workflow its firing would refuse is not scheduled.
+- Every sidecar a workflow step writes names the workflow that wrote it, and the run record holds the workflow's name and full spec. Extraction files name none: extraction is not a workflow step (see the data contract).
+- `dispatch-workflow` queues the steps for the fleet, refused before any row for anything the local runner refuses and for a step the fleet cannot run, or an order the coordinator would change; workers run each stage under the workflow's config.
+- `schedule-workflow` saves the workflow and syncs its schedules in one action, so stored triggers and the queue's schedules always match; each firing reads the saved copy on a worker that uses the workflow's input store (`input_binding.store`), refused before any row when the prefix holds no document. `schedule-workflow` runs the same checks first (`check_firing`, against `--store` and the workflow's input store), so a workflow its firing would refuse is not scheduled.
+- A scheduled workflow appends to one run: each firing processes only documents the run has not seen, and never reprocesses or re-pays for one it has.
+- After an edit and reschedule, the new version applies to new documents only; earlier documents keep their results.
+- A firing with no new documents runs nothing and logs that.
+- A file whose content changed is a new document; the earlier version stays in the run. A file rewritten with the same bytes is not a new document.
+- A workflow has no owner; the runs it starts are admin-only, like CLI runs.
 
-**TO-DO:**
+**Out of scope:** managing workflows through the API, pruning changed or deleted documents, resolving the source of a changed file's earlier version (its bytes are gone from the store, so `SourceResolver` reads it as `hash_mismatch`), workflow owners, backfill of missed firings, and destinations (each kind returns with the merge that delivers it).
 
-- **Destinations are stored but not acted on.**
+## 28. Fleet Runs — Honour the Dispatch, Report the Truth
 
-**Out of scope:** a command or API that saves a workflow (one is saved through `WorkflowStore` in code), incremental firings (only documents not seen before) and backfill of missed firings.
+**Paid:** A retry redoes the affected units of paid stages, and each is billed again.
+
+**As** an operator, or a system submitting work,
+**I want** fleet runs to use the config they were sent with, run only on workers checked for them, and show their real status after a fix,
+**so that** fleet results match local ones and a repaired run no longer reads as failed.
+
+**Given** a run dispatched from the CLI, the console, the API or a workflow
+**When** workers process it, a stage fails, or the operator retries a failed stage
+**Then** every stage runs under the dispatched config on a worker checked for it, a retry redoes only affected units, and the run shows its real status.
+
+**Acceptance criteria:**
+
+- Every stage of a fleet run runs under the config it was dispatched with; a worker's own config supplies only its store, paths, credentials and model locations.
+- Config submitted through the API, console or CLI governs how stages run, not only which run.
+- A worker serves a stage only once its model check passes for that stage: work is queued by the models the run's config names for it, and a worker checks the local models of every stage in its own config, enabled or not, and an Isaacus model only for a stage its config enables, and joins only the queues for the models it checked.
+- A run no live worker can serve is refused before launch.
+- A retry is refused before the fork for each refusal Requirement 14 lists.
+- Retrying a failed stage makes later stages redo only their affected units; finished work is not sent to a paid service again.
+- Once every failed stage has been retried successfully, the run shows `done`.
+- A scheduled firing whose dispatch failed and was later completed shows its real status, not `failed`.
+
+**Out of scope:** automatic retries, and retrying from the API or console.
 
 ## Outstanding
 
@@ -587,6 +615,5 @@ Requirements not yet fully met. The detail lives in the **TO-DO** block under ea
 - **Requirement 13 (Money Annotation):** the money span row carries no merge extent or header-row coordinate.
 - **Requirements 17 and 21 (Corpus Inspector; Console Design System):** `DocumentGrid.svelte` is not virtualised and emits no `aria-rowcount`.
 - **Requirement 23 (Egress Bundle):** a run ingested from an object store is refused rather than resolving its sources from that store.
-- **Requirement 27 (Stored Workflows):** destinations are not acted on.
 
 ---

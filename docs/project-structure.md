@@ -7,8 +7,8 @@ module-responsibility table in [`../CLAUDE.md`](../CLAUDE.md).
 
 ```
 womblex/
-├── configs/           # Dataset-specific configurations
-├── docs/              # Architecture docs, ADRs, accuracy reports, the deployment-image audit, the consumer contract (contract.md), the service API (service-api.md), the egress bundle (egress.md), stored workflows (workflows.md), the design decisions by concern (decisions.md for the library, decisions-operations.md for operating it, decisions-dead-ends.md for dead-ends, limitations and the backlog)
+├── configs/           # Dataset-specific configurations; workflows/ holds an example workflow file
+├── docs/              # Architecture docs, ADRs, accuracy reports, the deployment-image audit, the consumer contract (contract.md), the service API (service-api.md), the egress bundle (egress.md), workflow files (workflows.md), the design decisions by concern (decisions.md for the library, decisions-operations.md for operating it, decisions-dead-ends.md for dead-ends, limitations and the backlog)
 ├── fixtures/synthetic/  # Generated test fixtures (generate.py + its committed output; see its README)
 ├── models/            # Locally pre-downloaded models, resolved by utils/models.py (see models.md)
 ├── ui/                # Console SPA frontend (SvelteKit), built into the console image by Dockerfile.ui
@@ -32,7 +32,7 @@ womblex/
 │   │   ├── profile.py      # profile subcommand
 │   │   ├── demo.py         # seed-demo subcommand (publish the vendored demo run)
 │   │   ├── verify.py       # verify-shards, verify-evidence, resolve-source subcommands
-│   │   └── workflow.py     # run-workflow / validate / plan / dispatch-workflow subcommands (a stored workflow over a local shard dir; its pre-run checks alone)
+│   │   └── workflow.py     # run-workflow / validate / plan / dispatch-workflow / schedule-workflow subcommands, each over a workflow file
 │   ├── config/             # Pydantic config models (__init__: YAML loader + WomblexConfig; process.py: process-stage models)
 │   ├── pipeline_order.py   # PIPELINE_ORDER — what runs when; enabled_downstream_stages(config)
 │   ├── batch.py            # process_batch() — shared per-batch pipeline body (extract → optional redaction detection; extraction only)
@@ -133,7 +133,6 @@ womblex/
 │   │   ├── enrichment_doc.py     # *.enrichment_doc.parquet — raw ILGS Document, for AI-chunking reuse
 │   │   ├── evidence.py      # The shared evidence-reference columns, anchor levels, `evidence_check` labels, `evidence()` builder, legacy back-fill
 │   │   ├── pii_output.py    # pii_spans + clean_text parquet schemas + IO
-│   │   ├── conditions_output.py # *.conditions.parquet — a workflow's per-document condition labels
 │   │   ├── normalise_output.py   # *.normalised_text.parquet schema + IO
 │   │   ├── spellfix_output.py    # *.spellfix_text.parquet + *.spellfix_corrections.parquet schemas + IO
 │   │   ├── quality_output.py     # *.chunk_quality.parquet schema + IO
@@ -164,17 +163,18 @@ womblex/
 │   │   ├── retry.py            # retry_stage() — fork a failed stage from its first failed unit, refusing before the fork
 │   │   ├── workflows.py        # extract_batch / run_stage / run_downstream workflows; a dispatched workflow's stage runs under its overlay and digest
 │   │   ├── dispatch.py         # enqueue_extraction / enqueue_downstream_stages (owner=), downstream_stages gate + guard — shared by the console and the service API
-│   │   ├── worker.py           # run_worker() — launch DBOS, join the queues this process can serve
+│   │   ├── worker.py           # run_worker() — launch DBOS, join the queues this process can serve (keyed by the models it checked)
+│   │   ├── worker_registry.py  # womblex_workers — the queues each live worker serves
 │   │   ├── stage_contracts.py  # Declarative StageContract per downstream stage (inputs/outputs/scope)
 │   │   ├── stage_runner.py     # Execute a contract against an object store
-│   │   ├── workflow_store.py   # Stored workflow object (preset ref, input binding, steps, conditions, destinations, triggers) — schema, validation, its table
+│   │   ├── workflow_store.py   # Workflow object (preset ref, input binding, steps, triggers) — schema, validation, the scheduled copies' table
 │   │   ├── workflow_order.py   # Up-front step-order check — inputs on disk or produced earlier, stable refusal codes
-│   │   ├── workflow_conditions.py # Workflow conditions — manifest-column labels per document, never a gate
+│   │   ├── workflow_file.py    # A workflow file — the master copy every workflow command reads (YAML, unknown keys refused)
 │   │   ├── workflow_schedules.py # Standing triggers — a workflow's cron triggers as DBOS schedules (sync/list/remove)
-│   │   ├── workflow_dispatch.py # `dispatch-workflow` — a stored workflow to the fleet; refuse before any row
+│   │   ├── workflow_dispatch.py # `dispatch-workflow` — a workflow file to the fleet; refuse before any row
 │   │   ├── workflow_plan.py    # `womblex plan` — steps to run or skip and exact enrich/embed token counts, offline
 │   │   ├── workflow_validate.py # `womblex validate` — the runner's pre-run checks, read-only, a JSON-able report
-│   │   └── workflow_runner.py  # Local multi-stage runner — a stored workflow's steps through the stage functions; refuse before work, record after
+│   │   └── workflow_runner.py  # Local multi-stage runner — a workflow's steps through the stage functions; refuse before work, record after
 │   ├── api/                    # Service API (`womblex serve`)
 │   │   ├── app.py              # create_api_app() — `/v1` health/ready, run submit, list/detail, manifest, files, document text, metrics; owner-scoped
 │   │   ├── readers.py          # Document text rows by layer (masked / chunks / elements), read in place with a source_hash filter
@@ -198,7 +198,7 @@ womblex/
 │   └── utils/
 │       ├── metrics.py       # CER, WER, CER-s accuracy metrics (numpy-accelerated Levenshtein + spatial sort)
 │       ├── tabular_metrics.py # Tabular extraction accuracy (structural fidelity, data integrity)
-│       ├── model_check.py   # Pre-run model check: off/load/smoke per slot and scope, one minimal request per Isaacus model / service-backed model, remembered for the footer and run record
+│       ├── model_check.py   # Pre-run model check: off/load/smoke per slot and scope, Isaacus connectivity at load and one warned, billed request per model at smoke, a ping per service-backed OCR model, remembered for the footer and run record
 │       ├── model_registry.py # Named model registry per slot (OCR, layout, PII context, tokeniser, spellfix dictionary): built-in names + `womblex.models.<slot>` entry-point plugins; records which entry each slot actually built, with its distribution and version
 │       ├── models.py        # Local model path resolution (WOMBLEX_MODELS_DIR, _models/, models/ + HF snapshot layout) + load record with byte digests
 │       ├── checksum.py      # Streamed MD5 (register ingests) and SHA-256 (published run files) helpers

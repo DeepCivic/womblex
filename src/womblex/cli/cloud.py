@@ -83,7 +83,9 @@ def _register_enqueue(p: argparse.ArgumentParser) -> None:
         help="Store-relative dir holding source documents. Optional with --ingest "
              "(default: the whole ingest root); required without it.",
     )
-    p.add_argument("--config", type=Path, help="Config YAML (sources processing.batch_size)")
+    p.add_argument("--config", type=Path,
+                   help="Config YAML the run extracts under on every worker (and processing.batch_size); "
+                        "omitted, the default config")
     p.add_argument("--run-id", default=None, help="Run identifier (default: auto timestamp)")
     p.add_argument(
         "--output-prefix", default=None,
@@ -125,16 +127,10 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
         )
         return 1
 
-    batch_size = args.batch_size
-    if batch_size is None:
-        if args.config is not None:
-            from womblex.config import load_config
+    from womblex.cloud.workflow_runner import config_payload
 
-            batch_size = load_config(args.config).processing.batch_size
-        else:
-            from womblex.config import ProcessingConfig
-
-            batch_size = ProcessingConfig().batch_size
+    config = _runner_config(args.config)  # the run carries it; omitted, the defaults `run-stage` uses
+    batch_size = args.batch_size if args.batch_size is not None else config.processing.batch_size
     if batch_size < 1:
         logger.error("batch-size must be >= 1")
         return 1
@@ -165,16 +161,22 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
 
     specs = batch_specs(keys, shard_prefix=shard_prefix, ingest_root=root,
                         batch_size=batch_size, max_attempts=args.max_attempts)
+    from womblex.cloud.worker_registry import needed_queues, unserved
+
+    if refusal := unserved(dsn, needed_queues(config, ingest_root=root)):
+        logger.error("%s", refusal)
+        return 1
 
     ensure_schema(dsn)
     with RunBoard(dsn) as board:
-        inserted = board.enqueue(run_id, specs)
+        inserted = board.enqueue(run_id, specs, config=config_payload(config))
 
     logger.info(
         "run_id=%s: %d document(s) -> %d batch(es), %d newly enqueued. Shards -> %s/%s",
         run_id, len(keys), len(specs), inserted, store_uri, shard_prefix,
     )
-    logger.info("Start workers with: womblex worker --store %s --config <cfg>", store_uri)
+    logger.info("Start workers with: womblex worker --store %s --config <cfg> (its paths and models; "
+                "the run carries its own config)", store_uri)
     return 0
 
 
@@ -399,6 +401,7 @@ def cmd_enqueue_stages(args: argparse.Namespace) -> int:
     """
     from womblex.cloud.dbos_app import ensure_schema
     from womblex.cloud.jobs import RunBoard
+    from womblex.cloud.workflow_runner import config_payload
     from womblex.config import load_config
     from womblex.pipeline_order import enabled_downstream_stages, in_pipeline_order
 
@@ -433,6 +436,11 @@ def cmd_enqueue_stages(args: argparse.Namespace) -> int:
         for issue in e.issues:
             logger.error("[%s] %s", issue.code.value, issue.message)
         return 1
+    from womblex.cloud.worker_registry import needed_queues, unserved
+
+    if refusal := unserved(dsn, needed_queues(config, stages)):
+        logger.error("%s", refusal)
+        return 1
     if args.dry_run:
         return 0
 
@@ -440,6 +448,7 @@ def cmd_enqueue_stages(args: argparse.Namespace) -> int:
     with RunBoard(dsn) as board:
         inserted = board.enqueue_stages(
             args.run_id, list(stages), shard_prefix, max_attempts=args.max_attempts,
+            config=config_payload(config),
         )
     logger.info(
         "%d of %d stage(s) newly dispatched (the rest were already dispatched). "
@@ -486,11 +495,11 @@ def _register_run_stage(p: argparse.ArgumentParser) -> None:
 
 
 def _runner_config(config_path: Path | None):  # type: ignore[no-untyped-def]
-    """Load the config, or a defaults instance when ``--config`` is omitted.
+    """Load the config, or a defaults instance when ``--config`` is omitted (`run-stage`, `enqueue`).
 
-    The runner never reads ``dataset`` / ``paths`` — it operates on a shard
-    prefix — but ``WomblexConfig`` requires them, so absent a config file we
-    supply placeholders and let every stage section fall back to its defaults.
+    ``WomblexConfig`` requires ``dataset`` / ``paths``, so absent a config file we
+    supply placeholders (a run carries no ``paths``, and ``runner`` is its preset
+    name) and let every stage section fall back to its defaults.
     """
     from womblex.config import WomblexConfig, load_config
 

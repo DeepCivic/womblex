@@ -46,8 +46,11 @@ class EnqueueRequest(BaseModel):
     configured ingest root, which is the normal case.
     ``run_id`` omitted mints a fresh timestamped id; supplying an existing
     one resumes it, since enqueue is idempotent on ``(run_id, batch_num)``.
+    ``config`` is the composer's config, which the batches extract under on every
+    worker; omitted, the default config.
     """
 
+    config: dict[str, Any] = Field(default_factory=dict)
     input_prefix: str | None = None
     run_id: str | None = None
     batch_size: int = Field(50, ge=1)
@@ -99,6 +102,7 @@ def post_enqueue(
             run_id=body.run_id,
             batch_size=body.batch_size,
             max_attempts=body.max_attempts,
+            config=body.config,
         )
     except execute.ExecutionDisabled as e:
         raise HTTPException(status_code=_REASON_STATUS[e.reason], detail=e.detail) from e
@@ -112,9 +116,8 @@ class StageDispatchRequest(BaseModel):
 
     ``config`` is the composer's current form state — the same whole config
     ``POST /api/composer/validate`` takes — because *it* is what decides which
-    stages a run wants. The queue still carries no config: the rows name only
-    the stage, and the workers read their own ``--config`` at launch, exactly
-    as ``womblex enqueue-stages --config`` behaves.
+    stages a run wants, and every stage runs under it on whichever worker
+    claims it, exactly as ``womblex enqueue-stages --config`` behaves.
 
     ``run_id`` is required and never minted here. Stages run over shards that
     already exist, so there is no such thing as dispatching them for a run

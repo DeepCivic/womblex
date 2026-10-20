@@ -1,10 +1,13 @@
 """Standing triggers: a stored workflow's cron triggers as DBOS schedules.
 
 One DBOS schedule per trigger, named `womblex-wf:<workflow id>:<n>`, all firing
-`womblex.run_scheduled` on the always-served coordinator queue with a context naming the
-workflow and its owner. `sync_schedules` makes the board's schedules for a workflow equal its
+`womblex.run_scheduled` on the firing queue of the workflow's input store, so only a worker on
+that store runs it, with a context naming the workflow and its store. `sync_schedules` makes the board's schedules for a workflow equal its
 stored triggers (atomic apply, then delete the stale ones), so removing a trigger or the
 workflow's last trigger unschedules it. The firing itself is `workflows.run_scheduled`.
+
+`schedule_workflow` is the one place a workflow is stored (Phase R, D10): it saves the
+copy the firings read and syncs its schedules in one action, so the two never disagree.
 """
 
 from __future__ import annotations
@@ -15,7 +18,7 @@ import sqlalchemy.exc
 
 from womblex.cloud import dbos_app
 from womblex.cloud.jobs import schema_missing
-from womblex.cloud.workflow_store import StoredWorkflow
+from womblex.cloud.workflow_store import StoredWorkflow, WorkflowStore
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from dbos import DBOSClient
@@ -33,8 +36,8 @@ def schedule_inputs(stored: StoredWorkflow) -> list[dict[str, Any]]:
             "workflow_name": dbos_app.SCHEDULED_WORKFLOW,
             "schedule": t.cron,
             "cron_timezone": t.timezone,
-            "queue_name": dbos_app.DOWNSTREAM_QUEUE,
-            "context": {"workflow_id": stored.id, "owner": stored.owner, "trigger": i},
+            "queue_name": dbos_app.firing_queue(stored.spec.input_binding.store or ""),
+            "context": {"workflow_id": stored.id, "store": stored.spec.input_binding.store, "trigger": i},
             "automatic_backfill": False,
         }
         for i, t in enumerate(stored.spec.triggers)
@@ -71,4 +74,37 @@ def remove_schedules(client: DBOSClient, workflow_id: str) -> int:
     return len(names)
 
 
-__all__ = ["list_schedules", "remove_schedules", "schedule_inputs", "schedule_prefix", "sync_schedules"]
+def schedule_workflow(client: DBOSClient, wf_store: WorkflowStore, stored: StoredWorkflow) -> list[str]:
+    """Store *stored* as the copy its firings read and make its schedules equal its triggers.
+
+    A workflow with no triggers is unscheduled and its copy deleted. If the sync fails, the
+    previous copy is put back (or the new one deleted), so a firing never reads a copy its
+    schedules do not match; the error propagates.
+    """
+    previous = wf_store.get(stored.id)
+    if stored.spec.triggers:
+        wf_store.save(stored.id, stored.spec)
+    try:
+        names = sync_schedules(client, stored)
+    except Exception:
+        if previous is not None:
+            wf_store.save(previous.id, previous.spec)
+        elif stored.spec.triggers:
+            wf_store.delete(stored.id)
+        raise
+    if not stored.spec.triggers:
+        wf_store.delete(stored.id)
+    return names
+
+
+def unschedule_workflow(client: DBOSClient, wf_store: WorkflowStore, workflow_id: str) -> int:
+    """Remove *workflow_id*'s schedules and its stored copy; return how many schedules went."""
+    removed = remove_schedules(client, workflow_id)
+    wf_store.delete(workflow_id)
+    return removed
+
+
+__all__ = [
+    "list_schedules", "remove_schedules", "schedule_inputs", "schedule_prefix", "schedule_workflow",
+    "sync_schedules", "unschedule_workflow",
+]

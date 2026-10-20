@@ -54,6 +54,7 @@ export async function getIngestPreflight(
 // and supplying an existing one resumes it (enqueue is idempotent on
 // `(run_id, batch_num)`).
 export interface EnqueueRequest {
+	config?: Record<string, unknown>;
 	input_prefix?: string | null;
 	run_id?: string | null;
 	batch_size?: number;
@@ -103,9 +104,8 @@ export async function enqueueExtraction(
 }
 
 // The "run downstream stages" press. `config` is the composer's current form
-// state, because it is what decides which stages a run wants — the queue still
-// carries no config (rows name only the stage; workers read their own
-// `--config` at launch), exactly as `womblex enqueue-stages --config` behaves.
+// state: it decides which stages a run wants, and every stage runs under it on
+// whichever worker claims it, exactly as `womblex enqueue-stages --config` behaves.
 // `run_id` is required: stages run over shards that already exist.
 export interface StageDispatchRequest {
 	run_id: string;

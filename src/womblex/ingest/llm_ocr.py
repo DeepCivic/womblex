@@ -91,6 +91,8 @@ class MistralOCRReader:
 
     DEFAULT_MODEL_ID = "mistral.pixtral-large-2502-v1:0"
     DEFAULT_REGION = "us-east-1"
+    #: `ping` is a one-token Converse request, billed: the model check warns before it.
+    ping_is_billed = True
 
     def __init__(
         self,

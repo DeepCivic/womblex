@@ -1,22 +1,23 @@
-"""The stored workflow object: schema, validation, and its table.
+"""The workflow object: schema, validation, and the table of copies `schedule-workflow` stores.
 
-A *workflow* is a named, persisted recipe kept in the database DBOS's own tables
-live in (`dbos_app.system_database_url`), so a local run needs no second database.
+A *workflow* is a named recipe whose master copy is a file (`workflow_file`); the copy a
+schedule's firings read is kept in the database DBOS's own tables live in
+(`dbos_app.system_database_url`), so a local run needs no second database.
 
-Schema and storage only (`docs/decisions-operations.md`, Phase 2 merge 1):
-`destinations` round-trip but are not dispatched (`conditions` label documents through
-`workflow_conditions`), `triggers` are scheduled by `workflow_schedules`, and nothing here runs a
-workflow. The table is created if absent; there is no versioned migration yet.
+Schema and storage only (`docs/decisions-operations.md`, "A workflow is a file"): `triggers`
+are scheduled by `workflow_schedules`, and nothing here runs a workflow. The table is created
+if absent; there is no versioned migration yet.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Literal, Self
+from typing import Any, Self
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import Field
@@ -24,6 +25,8 @@ from pydantic import Field
 from womblex.cloud import dbos_app
 from womblex.cloud.stage_contracts import STAGE_NAMES
 from womblex.config.process import StrictModel
+
+logger = logging.getLogger(__name__)
 
 #: A workflow id becomes a primary key and, later, a DBOS schedule name: constrained like
 #: a preset name or run id (`ui.presets.is_safe_preset_name`, `store.retention.is_safe_run_id`).
@@ -42,25 +45,15 @@ class WorkflowStep(StrictModel):
 
 
 class WorkflowInputBinding(StrictModel):
-    """Where a run's documents come from — the same two knobs `enqueue_extraction` takes."""
+    """Where a run's documents come from: the input store, and the two knobs `enqueue_extraction` takes.
 
+    `store` is the URI a firing lists and extracts from; only workers whose ingest root it is run
+    the firing (`dbos_app.firing_queue`). Credentials come from the worker, never the workflow.
+    """
+
+    store: str | None = None
     ingest_prefix: str | None = None
     batch_size: int = Field(default=50, ge=1)
-
-
-class WorkflowCondition(StrictModel):
-    """A label over a manifest column, recorded per document; it never gates a run (`workflow_conditions`)."""
-
-    column: str
-    op: Literal["eq", "ne", "in", "not_in", "gt", "gte", "lt", "lte"]
-    value: Any
-
-
-class WorkflowDestination(StrictModel):
-    """A delivery target beside egress. Stored, not dispatched — Phase 3's concern."""
-
-    kind: Literal["object_store", "postgres", "webhook"]
-    target: str
 
 
 class WorkflowTrigger(StrictModel):
@@ -71,14 +64,12 @@ class WorkflowTrigger(StrictModel):
 
 
 class StoredWorkflowSpec(StrictModel):
-    """The validated shape of a workflow's definition — everything but id/owner/timestamps."""
+    """The validated shape of a workflow's definition — everything but id and timestamps."""
 
     preset: str
     config: dict[str, Any] = Field(default_factory=dict)
     input_binding: WorkflowInputBinding = Field(default_factory=WorkflowInputBinding)
     steps: tuple[WorkflowStep, ...]
-    conditions: tuple[WorkflowCondition, ...] = ()
-    destinations: tuple[WorkflowDestination, ...] = ()
     triggers: tuple[WorkflowTrigger, ...] = ()
 
 
@@ -152,10 +143,7 @@ def check_spec(spec: StoredWorkflowSpec) -> None:
     `validate_workflow_spec` is not stored unchecked) and by the runner on load
     (a row written before a stage was renamed or removed is refused, not run).
     """
-    from womblex.cloud.workflow_conditions import check_conditions_static
-
     _check_steps(spec)
-    check_conditions_static(spec.conditions)
     _check_triggers(spec)
     _check_config_overlay(spec)
 
@@ -178,20 +166,15 @@ def workflow_digest(spec: StoredWorkflowSpec) -> str:
     return "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
 
 
-class WorkflowOwnedError(Exception):
-    """A workflow id is already owned by a different owner."""
-
-
 @dataclass(frozen=True)
 class StoredWorkflow:
-    """One workflow row as read."""
+    """One workflow as read: from its file (`workflow_file`), or a scheduled copy's row."""
 
     id: str
-    owner: str | None
     spec: StoredWorkflowSpec
     digest: str
-    created_at: str
-    updated_at: str
+    created_at: str = ""
+    updated_at: str = ""
 
 
 _TABLE = "womblex_workflows"
@@ -204,7 +187,6 @@ def _ddl() -> Any:
     return sa.Table(
         _TABLE, metadata,
         sa.Column("id", sa.Text, primary_key=True),
-        sa.Column("owner", sa.Text, nullable=True),
         sa.Column("spec_json", sa.Text, nullable=False),
         sa.Column("digest", sa.Text, nullable=False),
         sa.Column("created_at", sa.Text, nullable=False),
@@ -224,12 +206,32 @@ def ensure_workflow_schema(dsn: str | None) -> None:
         engine.dispose()
 
 
+#: Spec fields a row may still hold from before they were removed; dropped on read, warned if set.
+_RETIRED_FIELDS = ("conditions", "destinations")
+
+
+def _spec_from_row(workflow_id: str, spec_json: str) -> tuple[StoredWorkflowSpec, bool]:
+    """The row's spec, and whether a retired field that was set had to be dropped."""
+    raw = json.loads(spec_json)
+    dropped = False
+    for name in _RETIRED_FIELDS:
+        if raw.pop(name, None):
+            dropped = True
+            logger.warning("workflow %s: stored %s are no longer supported and are ignored", workflow_id, name)
+    return StoredWorkflowSpec(**raw), dropped
+
+
 def _row_to_stored(row: Any) -> StoredWorkflow:
+    spec, dropped = _spec_from_row(row.id, row.spec_json)
+    digest = row.digest
+    if dropped:  # the stored digest covers the dropped field; stamp the spec that will run
+        digest = workflow_digest(spec)
+        logger.warning("workflow %s: digest %s recomputed as %s without the retired fields",
+                       row.id, row.digest, digest)
     return StoredWorkflow(
         id=row.id,
-        owner=row.owner,
-        spec=StoredWorkflowSpec(**json.loads(row.spec_json)),
-        digest=row.digest,
+        spec=spec,
+        digest=digest,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -266,14 +268,11 @@ class WorkflowStore:
 
         return conn.execute(sa.select(self._table).where(self._table.c.id == workflow_id)).first()
 
-    def save(self, workflow_id: str, spec: StoredWorkflowSpec, *, owner: str | None = None) -> StoredWorkflow:
+    def save(self, workflow_id: str, spec: StoredWorkflowSpec) -> StoredWorkflow:
         """Create or replace *workflow_id*'s definition.
 
         Raises `ValueError` if *workflow_id* is unsafe or the spec fails `check_spec`
-        (`pydantic.ValidationError` for a bad config overlay), `WorkflowOwnedError`
-        if it already exists under a different owner (mirrors
-        `cloud.jobs.RunBoard`'s owner check on runs) — an unscoped caller
-        (`owner=None`) is not checked and inherits the existing owner.
+        (`pydantic.ValidationError` for a bad config overlay).
         """
         import sqlalchemy.exc
 
@@ -281,26 +280,22 @@ class WorkflowStore:
             raise ValueError(f"unsafe workflow id: {workflow_id!r}")
         check_spec(spec)
         try:
-            self._write(workflow_id, spec, owner)
+            self._write(workflow_id, spec)
         except sqlalchemy.exc.IntegrityError:
-            # A concurrent save created the row first; the retry sees it and checks its owner.
-            self._write(workflow_id, spec, owner)
+            # A concurrent save created the row first; the retry replaces it.
+            self._write(workflow_id, spec)
         stored = self.get(workflow_id)
         assert stored is not None  # just written and committed
         return stored
 
-    def _write(self, workflow_id: str, spec: StoredWorkflowSpec, owner: str | None) -> None:
+    def _write(self, workflow_id: str, spec: StoredWorkflowSpec) -> None:
         import sqlalchemy as sa
 
         now = datetime.now(UTC).isoformat()
         with self._engine.begin() as conn:
             existing = self._get_row(conn, workflow_id)
-            if existing is not None and owner is not None and existing.owner != owner:
-                raise WorkflowOwnedError(f"workflow {workflow_id!r} is owned by another owner")
-            row_owner = owner if owner is not None else (existing.owner if existing else None)
             created_at = existing.created_at if existing is not None else now
             values = {
-                "owner": row_owner,
                 "spec_json": json.dumps(spec.model_dump(mode="json")),
                 "digest": workflow_digest(spec),
                 "created_at": created_at,
@@ -313,45 +308,33 @@ class WorkflowStore:
             else:
                 conn.execute(sa.insert(self._table).values(id=workflow_id, **values))
 
-    def get(self, workflow_id: str, *, owner: str | None = None) -> StoredWorkflow | None:
-        """One workflow by id, or `None` if absent or owned by someone else."""
+    def get(self, workflow_id: str) -> StoredWorkflow | None:
+        """One workflow by id, or `None` if absent."""
         with self._engine.connect() as conn:
             row = self._get_row(conn, workflow_id)
-        if row is None or (owner is not None and row.owner != owner):
-            return None
-        return _row_to_stored(row)
+        return None if row is None else _row_to_stored(row)
 
-    def list(self, *, owner: str | None = None) -> list[StoredWorkflow]:
-        """Every workflow (optionally narrowed to one owner), oldest first."""
+    def list(self) -> list[StoredWorkflow]:
+        """Every workflow, oldest first."""
         import sqlalchemy as sa
 
         stmt = sa.select(self._table).order_by(self._table.c.created_at)
-        if owner is not None:
-            stmt = stmt.where(self._table.c.owner == owner)
         with self._engine.connect() as conn:
             rows = conn.execute(stmt).fetchall()
         return [_row_to_stored(r) for r in rows]
 
-    def delete(self, workflow_id: str, *, owner: str | None = None) -> None:
-        """Delete *workflow_id*. No-op if absent. Raises `WorkflowOwnedError` for another owner's workflow."""
+    def delete(self, workflow_id: str) -> None:
+        """Delete *workflow_id*. No-op if absent."""
         import sqlalchemy as sa
 
         with self._engine.begin() as conn:
-            existing = self._get_row(conn, workflow_id)
-            if existing is None:
-                return
-            if owner is not None and existing.owner != owner:
-                raise WorkflowOwnedError(f"workflow {workflow_id!r} is owned by another owner")
             conn.execute(sa.delete(self._table).where(self._table.c.id == workflow_id))
 
 
 __all__ = [
     "StoredWorkflow",
     "StoredWorkflowSpec",
-    "WorkflowCondition",
-    "WorkflowDestination",
     "WorkflowInputBinding",
-    "WorkflowOwnedError",
     "WorkflowStep",
     "WorkflowStore",
     "WorkflowTrigger",

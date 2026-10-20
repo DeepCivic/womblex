@@ -9,12 +9,11 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_workflow_runner import _PRESET, _resolve, _stored, shards  # noqa: F401
+from tests.test_workflow_runner import _PRESET, _resolve, _stored, shards, write_workflow  # noqa: F401
 from womblex.analyse.embed_stage import plan_embedding
 from womblex.analyse.enrich_stage import _load_narratives
 from womblex.cloud.stage_contracts import STAGE_CONTRACTS
 from womblex.cloud.workflow_plan import plan_workflow
-from womblex.cloud.workflow_store import WorkflowStore, ensure_workflow_schema
 from womblex.config import EnrichmentConfig
 from womblex.process.chunk_stage import _batch_bases
 from womblex.utils.token_packer import TokenCounter
@@ -85,15 +84,12 @@ def test_cli_json_prices_and_exit_codes(shards: Path, tmp_path: Path, capsys: py
     from womblex.cli.workflow import cmd_plan
     from womblex.ui.presets import build_preset_record, preset_filename, serialise_preset_record
 
-    dsn = f"sqlite:///{tmp_path}/wf.db"
-    ensure_workflow_schema(dsn)
-    with WorkflowStore(dsn) as store:
-        store.save("w", _stored(["chunk", "embed"]).spec)
+    write_workflow(tmp_path, "w", ["chunk", "embed"])
     record, _ = build_preset_record(name=_PRESET.name, description="", formats=(), config=_PRESET.config)
     (tmp_path / preset_filename(_PRESET.name)).write_text(serialise_preset_record(record))
 
     def args(**kw) -> argparse.Namespace:
-        base = {"workflow_id": "w", "shards": shards, "dsn": dsn, "presets_dir": tmp_path,
+        base = {"workflow": tmp_path / "w.yaml", "shards": shards, "presets_dir": tmp_path,
                 "models_check": None, "assume_price": [], "json": True}
         return argparse.Namespace(**{**base, **kw})
 
@@ -102,12 +98,11 @@ def test_cli_json_prices_and_exit_codes(shards: Path, tmp_path: Path, capsys: py
     assert body["steps"][1]["tokens"]["basis"] == "simulated"
     assert cmd_plan(args(json=False, assume_price=["embed=3"])) == 0
     assert "ASSUMPTION" in capsys.readouterr().out
-    assert cmd_plan(args(assume_price=["chunk=1"])) == 1
-    with WorkflowStore(dsn) as store:
-        store.save("refused", _stored(["embed"]).spec)  # chunks are not on disk
-    for wid, code in (("absent", "workflow_unavailable"), ("refused", "step_order")):  # still one JSON object
+    assert cmd_plan(args(assume_price=["money=1"])) == 1
+    write_workflow(tmp_path, "refused", ["embed"])  # chunks are not on disk
+    for name, code in (("absent", "workflow_unavailable"), ("refused", "step_order")):  # still one JSON object
         capsys.readouterr()
-        assert cmd_plan(args(workflow_id=wid)) == 1 and json.loads(capsys.readouterr().out)["code"] == code
+        assert cmd_plan(args(workflow=tmp_path / f"{name}.yaml")) == 1 and json.loads(capsys.readouterr().out)["code"] == code
 
 
 def test_layout_skips_only_when_every_sidecar_carries_the_fingerprint(shards: Path) -> None:  # noqa: F811
@@ -120,3 +115,88 @@ def test_layout_skips_only_when_every_sidecar_carries_the_fingerprint(shards: Pa
         for base in _batch_bases(shards):
             write_layout_regions([], base, replace(fp, dpi=dpi), redaction_consumed=False)
         assert plan_workflow(stored, shards, resolve_preset=_resolve).steps[0].action == action
+
+
+def test_local_steps_are_free_and_paid_ones_are_counted(shards: Path) -> None:  # noqa: F811
+    plan = plan_workflow(_stored(["normalise", "chunk", "embed"], config=_NORMALISED), shards, resolve_preset=_resolve)
+    assert [(s.stage, s.paid) for s in plan.steps] == [("normalise", False), ("chunk", False), ("embed", True)]
+    assert plan.steps[1].tokens is None and plan.steps[2].tokens is not None
+
+
+def _ai_chunking(chunk_size: int) -> object:
+    return _stored(["chunk"], config={"chunking": {"chunking_model": "kanon-2-enricher", "chunk_size": chunk_size},
+                                      "enrichment": {"enabled": True}})
+
+
+@pytest.fixture
+def docx_shards(tmp_path: Path) -> Path:
+    """One batch holding a document with a narrative and tables (the register CSV has no narrative)."""
+    from tests._synthetic import BUDGET_DOCX
+    from womblex.batch import process_batch
+    from womblex.config import DatasetConfig, PathsConfig, WomblexConfig
+
+    out = tmp_path / "docx"
+    out.mkdir()
+    process_batch([BUDGET_DOCX], WomblexConfig(dataset=DatasetConfig(name="t"), paths=PathsConfig(
+        input_root=tmp_path, output_root=tmp_path, checkpoint_dir=tmp_path)), batch_num=1, shard_dir=out)
+    return out
+
+
+def _narratives(shard_dir: Path) -> dict[str, str]:
+    """Each document's non-blank narrative, as the chunk stage builds it."""
+    from womblex.process.chunk_stage import _build_inputs_for_batch
+
+    return {doc.source_hash: doc.narrative for base in _batch_bases(shard_dir)
+            for doc in _build_inputs_for_batch(base, True)[0] if doc.narrative.strip()}
+
+
+def test_ai_chunking_counts_each_narrative_over_the_chunk_size_in_the_enrichers_own_tokens(docx_shards: Path) -> None:
+    """semchunk enriches a narrative only when it exceeds the chunk size; tables chunk in token mode (Phase R, D12)."""
+    texts = list(_narratives(docx_shards).values())
+    (step,) = plan_workflow(_ai_chunking(1), docx_shards, resolve_preset=_resolve, prices={"chunk": 4.0}).steps
+    t = step.tokens
+    assert step.paid and t is not None and t.basis == "on_disk" and texts
+    assert t.requests == len(texts) and t.detail["reused_documents"] == 0  # every narrative is over one token
+    assert t.tokens == sum(TokenCounter(EnrichmentConfig().tokenizer).count_batch(texts))
+    assert t.assumed_cost == pytest.approx(t.tokens / 1e6 * 4.0)
+    (step,) = plan_workflow(_ai_chunking(100_000), docx_shards, resolve_preset=_resolve).steps
+    assert step.tokens is not None and step.tokens.requests == step.tokens.tokens == 0  # all fit: token splitting
+
+
+@pytest.mark.parametrize("readable", [True, False])
+def test_ai_chunking_reuses_only_a_persisted_document_the_stage_would(
+    docx_shards: Path, monkeypatch: pytest.MonkeyPatch, readable: bool,
+) -> None:
+    """The stage's reuse test: a rehydrated Document byte-identical to the narrative is reused; one the
+    stage cannot rehydrate is enriched again, so it is counted."""
+    from womblex.process import chunk_stage
+    from womblex.store.enrichment_doc import write_enrichment_doc_shard
+
+    narratives = _narratives(docx_shards)
+    chosen = next(iter(narratives))
+    if readable:
+        monkeypatch.setattr(chunk_stage, "_load_narrative_overrides",
+                            lambda _b, _s: {chosen: type("Doc", (), {"text": narratives[chosen]})()})
+    else:
+        write_enrichment_doc_shard([(chosen, "elements", "{not a document")], _batch_bases(docx_shards)[0])
+    t = plan_workflow(_ai_chunking(1), docx_shards, resolve_preset=_resolve).steps[0].tokens
+    assert t is not None and t.detail["reused_documents"] == int(readable)
+    assert t.requests == len(narratives) - int(readable)
+
+
+def test_an_embedding_provider_with_no_token_counter_is_counted_by_texts(
+    shards: Path, monkeypatch: pytest.MonkeyPatch,  # noqa: F811
+) -> None:
+    from womblex.analyse import embed
+
+    real = embed.make_embedding_provider
+
+    def uncounted(config, client=None):
+        provider = real(config, client)
+        return replace(provider, limits=replace(provider.limits, token_counter=None))
+
+    monkeypatch.setattr(embed, "make_embedding_provider", uncounted)
+    monkeypatch.setattr("womblex.analyse.embed_stage.make_embedding_provider", uncounted)
+    t = plan_workflow(_stored(["chunk", "embed"]), shards, resolve_preset=_resolve, prices={"embed": 2.0}).steps[1].tokens
+    assert t is not None and t.tokens is None and t.texts > 0 and "no token counter" in t.note
+    assert t.assumed_cost is None

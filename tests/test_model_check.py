@@ -520,7 +520,7 @@ class TestMarkdownEngines:
         assert check_models(self._cfg("md-empty"), "load", scopes=(SCOPE_EXTRACT,)).ok
 
 
-# --- models behind a service: one minimal request before any document -------
+# --- models behind a service: checked before any document ----------------------
 
 from types import SimpleNamespace
 
@@ -590,9 +590,9 @@ class TestIsaacus:
         # Plain chunking runs offline on the vendored tokeniser.
         assert isaacus_models(_config()) == []
 
-    def test_the_run_check_pings_every_model_and_records_it(self, fake_isaacus) -> None:
+    def test_smoke_sends_every_model_one_billed_request_and_records_it(self, fake_isaacus) -> None:
         made = fake_isaacus()
-        result = check_models(_config(**_PAID), "load", scopes=(SCOPE_ENRICH, SCOPE_EMBED))
+        result = check_models(_config(**_PAID), "smoke", scopes=(SCOPE_ENRICH, SCOPE_EMBED))
         assert result.ok
         kinds = sorted(c.calls[0][0] for c in made)
         assert kinds == ["embed", "enrich"]
@@ -608,7 +608,7 @@ class TestIsaacus:
     ) -> None:
         fake_isaacus(fail="401 invalid API key")
         cfg = _config(enrichment={"enabled": True}, spellfix={"enabled": True})
-        result = check_models(cfg, "load", scopes=(SCOPE_ENRICH,))
+        result = check_models(cfg, "smoke", scopes=(SCOPE_ENRICH,))
         (bad,) = result.failures
         assert "401 invalid API key" in bad.reason
         assert result.failures_for((SCOPE_ENRICH,)) and not result.failures_for((SCOPE_EXTRACT,))
@@ -675,3 +675,40 @@ class TestPing:
         else:
             with pytest.raises(RuntimeError, match="ollama pull"):
                 reader.ping()
+
+
+class TestRoutingByModels:
+    def test_a_worker_checks_the_models_of_a_stage_its_config_disables(self) -> None:
+        from womblex.cloud.worker import WORKER_SCOPES
+
+        config = _config(chunking={"enabled": False, "tokenizer": "some-other/tokenizer"})
+        assert "some-other/tokenizer" not in {u.name for u in configured_models(config)}  # a run checks enabled stages
+        assert "some-other/tokenizer" in {u.name for u in configured_models(config, WORKER_SCOPES)}
+
+    def test_work_is_queued_by_the_models_its_config_names_and_joined_by_a_worker_that_names_them(self) -> None:
+        from womblex.cloud import dbos_app
+        from womblex.cloud.worker import served_queues
+        from womblex.utils.model_check import ModelCheckResult, models_key
+
+        root, mine = "s3://bucket/inbox", _config()
+        other = _config(chunking={"tokenizer": "some-other/tokenizer"})
+        assert models_key(mine, "normalise") == ""  # a stage with no model keeps its plain queue
+        assert models_key(mine, "chunk") != models_key(other, "chunk")
+        served = served_queues(ModelCheckResult(CheckLevel.LOAD), root, mine)
+        assert dbos_app.stage_queue("chunk", models_key(mine, "chunk")) in served
+        assert dbos_app.stage_queue("chunk", models_key(other, "chunk")) not in served  # never checked for it
+        assert dbos_app.stage_queue("chunk") in served  # work enqueued before runs carried a config
+        assert dbos_app.extract_queue(root, models_key(mine, SCOPE_EXTRACT)) in served
+
+
+def test_the_worker_registry_names_the_queues_live_workers_serve(tmp_path: Path) -> None:
+    from womblex.cloud.worker_registry import WorkerRegistry
+
+    with WorkerRegistry(f"sqlite:///{tmp_path}/dbos.sqlite") as registry:
+        assert registry.live_queues() == {}
+        registry.record("w1", ["q-a", "q-b"])
+        registry.record("w2", ["q-b"])
+        assert registry.live_queues() == {"q-a": ["w1"], "q-b": ["w1", "w2"]}
+        assert registry.live_queues(within_seconds=-1) == {}  # none refreshed in time
+        registry.remove("w1")
+        assert registry.live_queues() == {"q-b": ["w2"]}

@@ -29,18 +29,18 @@ if TYPE_CHECKING:
 _TRIGGER = {"cron": "0 0 1 1 *", "timezone": "Australia/Sydney"}  # never fires within a test
 
 
-def _spec(steps: list[str], triggers: list[dict] | None = None, prefix: str | None = None):
+def _spec(steps: list[str], triggers: list[dict] | None = None, prefix: str | None = None, store: str | None = None):
     return validate_workflow_spec({
         "preset": _PRESET.name, "steps": [{"stage": s} for s in steps],
         "triggers": [_TRIGGER] if triggers is None else triggers,
-        "input_binding": {"ingest_prefix": prefix},
+        "input_binding": {"store": store, "ingest_prefix": prefix},
     })
 
 
-def _alices_inbox(fleet) -> None:  # noqa: F811
-    """An owned firing extracts only under `<owner>/`, so put the document there."""
-    (Path(fleet[1]) / "alice").mkdir()
-    (Path(fleet[1]) / "alice" / "people.csv").write_text("name,role\nAlice,Director\n")
+def _inbox(fleet) -> None:  # noqa: F811
+    """A document under `inbox/`, the prefix a firing extracts."""
+    (Path(fleet[1]) / "inbox").mkdir()
+    (Path(fleet[1]) / "inbox" / "people.csv").write_text("name,role\nAlice,Director\n")
 
 
 def _fire_all_at_once(client: DBOSClient, stored: StoredWorkflow) -> None:
@@ -66,24 +66,67 @@ def test_sync_makes_schedules_equal_triggers_and_remove_unschedules(fleet) -> No
     ensure_workflow_schema(None)
     with WorkflowStore(None) as store:
         client = dbos_app.open_client(None)
-        stored = store.save("nightly", _spec(["normalise"], [_TRIGGER, {"cron": "0 5 * * *"}]))
+        stored = store.save("nightly", _spec(["normalise"], [_TRIGGER, {"cron": "0 5 * * *"}], store=fleet[1]))
         assert len(sync_schedules(client, stored)) == 2
         assert sync_schedules(client, stored) == [s["schedule_name"] for s in list_schedules(client, "nightly")]
         assert {s["cron_timezone"] for s in list_schedules(client, "nightly")} == {"Australia/Sydney", None}
         assert list_schedules(client, "night") == []  # a prefix of the id is not the workflow
 
-        one = store.save("nightly", _spec(["normalise"], [_TRIGGER]))
+        one = store.save("nightly", _spec(["normalise"], [_TRIGGER], store=fleet[1]))
         assert len(sync_schedules(client, one)) == 1 and len(list_schedules(client, "nightly")) == 1
         assert remove_schedules(client, "nightly") == 1 and list_schedules(client, "nightly") == []
-        assert sync_schedules(client, store.save("nightly", _spec(["normalise"], []))) == []
+        assert sync_schedules(client, store.save("nightly", _spec(["normalise"], [], store=fleet[1]))) == []
 
 
 def _where(fleet) -> dict:  # noqa: F811
     """The locations `schedule-workflow` checks a firing against."""
-    return {"store": str(fleet[0]), "ingest": fleet[1], "presets_dir": None}
+    return {"store": str(fleet[0]), "presets_dir": None}
 
 
-def test_remove_and_status_work_after_the_workflow_is_deleted(
+def _file(fleet, name: str, steps: list[str], triggers: list[dict] | None = None,  # noqa: F811
+          prefix: str | None = None) -> str:
+    from tests.test_workflow_runner import write_workflow
+
+    return str(write_workflow(fleet[2], name, steps, triggers=[_TRIGGER] if triggers is None else triggers,
+                              input_binding={"store": fleet[1], "ingest_prefix": prefix}))
+
+
+def test_scheduling_stores_the_copy_and_its_schedules_together(fleet, saved_preset, monkeypatch) -> None:  # noqa: F811
+    import argparse
+
+    from womblex.cli.workflow import cmd_schedule_workflow
+    from womblex.cloud import workflow_schedules
+
+    path = _file(fleet, "nightly", ["normalise"], [_TRIGGER, {"cron": "0 5 * * *"}])
+    args = argparse.Namespace(workflow=path, dsn=None, remove=False, status=False, **_where(fleet))
+    assert cmd_schedule_workflow(args) == 0
+    with WorkflowStore(None) as store:
+        first = store.get("nightly")
+    assert first is not None and len(first.spec.triggers) == 2
+    assert len(list_schedules(dbos_app.open_client(None), "nightly")) == 2
+
+    _file(fleet, "nightly", ["normalise"], [_TRIGGER])  # the operator edits the file
+    def boom(*_: object) -> None:
+        raise OSError("db gone")
+
+    with monkeypatch.context() as m, pytest.raises(OSError):
+        m.setattr(workflow_schedules, "sync_schedules", boom)
+        cmd_schedule_workflow(args)
+    with WorkflowStore(None) as store:  # the copy the firings read still matches its schedules
+        assert store.get("nightly").digest == first.digest
+    assert cmd_schedule_workflow(args) == 0
+    with WorkflowStore(None) as store:
+        assert len(store.get("nightly").spec.triggers) == 1
+    assert len(list_schedules(dbos_app.open_client(None), "nightly")) == 1
+
+    _file(fleet, "nightly", ["normalise"], [])  # no triggers: unscheduled, and nothing stored
+    assert cmd_schedule_workflow(args) == 0
+    with WorkflowStore(None) as store:
+        assert store.get("nightly") is None
+    assert list_schedules(dbos_app.open_client(None), "nightly") == []
+
+
+def test_remove_and_status_work_after_the_workflow_file_is_deleted(
     fleet, saved_preset, capsys, monkeypatch,  # noqa: F811
 ) -> None:
     import argparse
@@ -93,44 +136,43 @@ def test_remove_and_status_work_after_the_workflow_is_deleted(
     fresh = fleet[2] / "none" / "dbos.sqlite"
     with monkeypatch.context() as m:  # --status changes nothing, not even by creating a database
         m.setenv("WOMBLEX_DBOS_PATH", str(fresh))
-        assert cmd_schedule_workflow(argparse.Namespace(workflow_id="x", dsn=None, remove=False, status=True)) == 0
+        assert cmd_schedule_workflow(argparse.Namespace(workflow="x", dsn=None, remove=False, status=True)) == 0
     assert not fresh.parent.exists()
-    ensure_workflow_schema(None)
-    with WorkflowStore(None) as store:
-        store.save("gone", _spec(["normalise"], [_TRIGGER, {"cron": "0 5 * * *"}]))
-    args = argparse.Namespace(workflow_id="gone", dsn=None, remove=False, status=False, **_where(fleet))
+    path = _file(fleet, "gone", ["normalise"], [_TRIGGER, {"cron": "0 5 * * *"}])
+    args = argparse.Namespace(workflow=path, dsn=None, remove=False, status=False, **_where(fleet))
     assert cmd_schedule_workflow(args) == 0
-    with WorkflowStore(None) as store:
-        store.delete("gone")
-    assert cmd_schedule_workflow(args) == 1  # syncing needs the stored triggers
+    Path(path).unlink()
+    assert cmd_schedule_workflow(args) == 1  # syncing needs the file
     capsys.readouterr()
-    assert cmd_schedule_workflow(argparse.Namespace(**{**vars(args), "status": True})) == 0
+    by_name = argparse.Namespace(**{**vars(args), "workflow": "gone"})
+    assert cmd_schedule_workflow(argparse.Namespace(**{**vars(by_name), "status": True})) == 0
     assert capsys.readouterr().out.count("womblex-wf:gone:") == 2
-    assert cmd_schedule_workflow(argparse.Namespace(**{**vars(args), "remove": True})) == 0
+    assert cmd_schedule_workflow(argparse.Namespace(**{**vars(by_name), "remove": True})) == 0
     assert list_schedules(dbos_app.open_client(None), "gone") == []
+    with WorkflowStore(None) as store:
+        assert store.get("gone") is None
 
 
-def test_a_firing_extracts_the_prefix_and_runs_the_workflow_owned_and_stamped(
+def test_a_firing_extracts_the_prefix_and_runs_the_workflow_unowned_and_stamped(
     fleet, saved_preset,  # noqa: F811
 ) -> None:
     store_dir, _, _ = fleet
-    _alices_inbox(fleet)
+    _inbox(fleet)
     ensure_workflow_schema(None)
     with WorkflowStore(None) as store:
-        stored = store.save("nightly", _spec(["normalise"], [_TRIGGER, {"cron": "0 5 * * *"}], "alice"),
-                            owner="alice")
+        stored = store.save("nightly", _spec(["normalise"], [_TRIGGER, {"cron": "0 5 * * *"}], "inbox", store=fleet[1]))
     client = dbos_app.open_client(None)
     _fire_all_at_once(client, stored)  # two triggers, one instant: one run
     work(fleet, idle_timeout=4)
 
     with RunBoard(None) as board:
-        runs = board.runs(owner="alice")
-        assert board.runs(owner="bob") == []
+        runs = board.runs()
+        assert board.runs(owner="alice") == []  # a workflow's run is admin-only
         rows = board._list(runs[0].run_id)
-    assert len(runs) == 1 and runs[0].run_id.startswith("nightly-")
+    assert len(runs) == 1 and runs[0].run_id == "nightly"  # the workflow's one run
     kinds = sorted((s.attributes or {}).get("kind") for s in rows)
     assert kinds == ["batch", "downstream", "stage", "trigger"]  # one firing ran, the other attached
-    assert all((s.attributes or {}).get("owner") == "alice" for s in rows)  # every row the firing made
+    assert all("owner" not in (s.attributes or {}) for s in rows)  # no row the firing made has an owner
     out = Path(str(store_dir)) / f"runs/{runs[0].run_id}/documents"
     meta = pq.read_metadata(str(out / "batch-0001.normalised_text.parquet")).metadata
     assert meta[b"womblex.workflow_digest"] == stored.digest.encode()
@@ -146,7 +188,7 @@ def test_a_firing_that_cannot_complete_queues_nothing(fleet, saved_preset) -> No
     store_dir, ingest, tmp = fleet
     ensure_workflow_schema(None)
     with WorkflowStore(None) as store:
-        store.save("bad", _spec(["pii"], []))
+        store.save("bad", _spec(["pii"], [], store=fleet[1]))
     ingest_store = RemoteStore.from_uri(ingest)
     workflows.set_context(workflows.WorkerContext(
         _minimal_config(tmp), RemoteStore.from_uri(str(store_dir)), ingest_store, ingest, None))
@@ -154,7 +196,7 @@ def test_a_firing_that_cannot_complete_queues_nothing(fleet, saved_preset) -> No
     before = database.read_bytes()
     try:
         with pytest.raises(WorkflowRefusedError):
-            workflows._fire("bad-20261012T000000Z", {"workflow_id": "bad", "owner": None})
+            workflows._fire("bad", {"workflow_id": "bad", "store": ingest}, "20261012T000000Z")
     finally:
         workflows.set_context(None)
     with RunBoard(None) as board:
@@ -180,7 +222,7 @@ def test_a_firing_whose_dispatch_fails_leaves_its_extraction_running_and_the_run
 
     ensure_workflow_schema(None)
     with WorkflowStore(None) as store:
-        stored = store.save("wf", _spec(["normalise"]))
+        stored = store.save("wf", _spec(["normalise"], store=fleet[1]))
     real, down = workflow_dispatch.dispatch_workflow, [True]
 
     def dispatch(stored, **kw):
@@ -194,14 +236,17 @@ def test_a_firing_whose_dispatch_fails_leaves_its_extraction_running_and_the_run
     with RunBoard(None) as board:
         (run,) = board.runs()
     assert run.counts == {"done": 1, "failed": 1} and run.orphaned  # the batch ran; the firing failed
-    assert f"dispatch-workflow wf --run-id {run.run_id}" in caplog.text
-    down[0] = False  # the operator dispatches the stages: the run is no longer orphaned
-    real(stored, run_id=run.run_id, store_uri=None, **_firing_args(fleet))
+    (firing,) = {(j.id.rsplit(":", 1)[-1]) for j in RunBoard(None).list_jobs(run.run_id) if j.kind == "trigger"}
+    assert f"dispatch-workflow <the wf workflow file> --run-id wf --firing {firing}" in caplog.text
+    down[0] = False  # the operator dispatches the firing's stages: the run is no longer orphaned
+    real(stored, run_id=run.run_id, store_uri=None, firing=firing, **_firing_args(fleet))
+    work(fleet, idle_timeout=3)
     with RunBoard(None) as board:
-        assert not board.runs()[0].orphaned
+        (run,) = board.runs()
+    assert not run.orphaned and run.counts == {"done": 4}  # repaired by hand: the firing no longer counts failed
 
 
-def test_a_firing_refuses_a_run_whose_batches_were_cancelled(fleet, saved_preset) -> None:  # noqa: F811
+def test_a_replayed_firing_refuses_its_own_cancelled_batches(fleet, saved_preset) -> None:  # noqa: F811
     from tests.test_workflows import batch
     from womblex.cloud.workflow_dispatch import fire_workflow
     from womblex.cloud.workflow_runner import RefusalCode, WorkflowRefusedError
@@ -210,12 +255,12 @@ def test_a_firing_refuses_a_run_whose_batches_were_cancelled(fleet, saved_preset
     _, ingest, _ = fleet
     ensure_workflow_schema(None)
     with WorkflowStore(None) as store:
-        stored = store.save("wf", _spec(["normalise"], []))
+        stored = store.save("wf", _spec(["normalise"], [], store=fleet[1]))
     with RunBoard(None) as board:
-        board.enqueue("r1", [batch(ingest)])
+        board.enqueue("r1", [batch(ingest)], firing="f1")
     dbos_app.open_client(None).cancel_workflow(dbos_app.batch_id("r1", 1))
     with pytest.raises(WorkflowRefusedError) as e:  # a replayed firing would attach to it and never run
-        fire_workflow(stored, run_id="r1", ingest=RemoteStore.from_uri(ingest), ingest_root=ingest,
+        fire_workflow(stored, run_id="r1", firing="f1", ingest=RemoteStore.from_uri(ingest),
                       **_firing_args(fleet))
     assert e.value.code is RefusalCode.BATCHES_CANCELLED
     with RunBoard(None) as board:
@@ -225,29 +270,29 @@ def test_a_firing_refuses_a_run_whose_batches_were_cancelled(fleet, saved_preset
 def test_a_failed_firing_is_on_the_board_under_its_run(fleet, saved_preset) -> None:  # noqa: F811
     ensure_workflow_schema(None)
     with WorkflowStore(None) as store:
-        stored = store.save("bad", _spec(["pii"]), owner="alice")
+        stored = store.save("bad", _spec(["pii"], store=fleet[1]))
     client = dbos_app.open_client(None)
     _fire_all_at_once(client, stored)
     work(fleet, idle_timeout=3)
     with RunBoard(None) as board:
-        (run, *_) = board.runs(owner="alice")
-        (row,) = board.list_jobs(run.run_id, owner="alice")
-    assert run.run_id.startswith("bad-") and run.counts == {"failed": 1}
+        (run, *_) = board.runs()
+        (row,) = board.list_jobs(run.run_id)
+    assert run.run_id == "bad" and run.counts == {"failed": 1}
     assert row.kind == "trigger" and "[stage_not_dispatchable]" in (row.error or "")
 
 
-def test_two_firings_never_conflict_and_each_dry_run_matches_its_dispatch(
-    fleet, saved_preset, monkeypatch, caplog,  # noqa: F811
-) -> None:
+def test_firings_append_only_new_documents_to_one_run(fleet, saved_preset, monkeypatch, caplog) -> None:  # noqa: F811
+    import logging
+
     from tests.test_cloud import _minimal_config
     from womblex.cloud import workflow_dispatch, workflows
     from womblex.store.remote import RemoteStore
 
     store_dir, ingest, tmp = fleet
-    _alices_inbox(fleet)
+    _inbox(fleet)
     ensure_workflow_schema(None)
     with WorkflowStore(None) as store:
-        store.save("nightly", _spec(["normalise"], [], "alice"), owner="alice")
+        store.save("nightly", _spec(["normalise"], [], "inbox", store=fleet[1]))
     calls: list[dict] = []
     real = workflow_dispatch.dispatch_workflow
 
@@ -255,20 +300,35 @@ def test_two_firings_never_conflict_and_each_dry_run_matches_its_dispatch(
         calls.append(kw)
         return real(stored, **kw)
 
+    def fire(*firings: str) -> None:
+        workflows.set_context(workflows.WorkerContext(
+            _minimal_config(tmp), RemoteStore.from_uri(str(store_dir)), RemoteStore.from_uri(ingest), ingest, None))
+        try:
+            for f in firings:
+                workflows._fire("nightly", {"workflow_id": "nightly", "store": ingest}, f)
+        finally:
+            workflows.set_context(None)
+
     monkeypatch.setattr(workflow_dispatch, "dispatch_workflow", recording)
-    workflows.set_context(workflows.WorkerContext(
-        _minimal_config(tmp), RemoteStore.from_uri(str(store_dir)), RemoteStore.from_uri(ingest), ingest, None))
-    try:
-        for run_id in ("nightly-1", "nightly-2", "nightly-2"):  # the repeat: two triggers, one instant
-            workflows._fire(run_id, {"workflow_id": "nightly", "owner": "alice"})
-    finally:
-        workflows.set_context(None)
-    for dry, real_call in zip(calls[::2], calls[1::2], strict=True):
-        assert dry.pop("dry_run") is True and "dry_run" not in real_call and dry == real_call
+    with caplog.at_level(logging.INFO):
+        fire("1", "1", "2")  # a replayed firing reuses its batches; one with nothing new runs nothing
+        inbox = Path(ingest) / "inbox"
+        (inbox / "more.csv").write_text("name,role\nBob,Clerk\n")
+        (inbox / "people.csv").write_text("name,role\nAlice,Secretary\n")  # changed: a new document
+        fire("3")
+    real_calls = [c for c in calls if not c.get("dry_run")]
+    assert [c["firing"] for c in real_calls] == ["1", "1", "3"]
     with RunBoard(None) as board:
-        coordinators = [r for r in board.list_jobs() if r.kind == "downstream"]
-    assert sorted(r.run_id for r in coordinators) == ["nightly-1", "nightly-2"]
-    assert "not acted on" not in caplog.text  # the firing acts on the input prefix
+        jobs = board.list_jobs("nightly")
+        assert board.firing_batches("nightly", "1") == [1] and board.firing_batches("nightly", "3") == [2]
+        assert len(board.seen_inputs("nightly")) == 3  # both versions of people.csv, and more.csv
+    assert sorted(j.id for j in jobs if j.kind == "batch") == ["nightly:batch:0001", "nightly:batch:0002"]
+    assert len([j for j in jobs if j.kind == "downstream"]) == 2
+    assert "no new documents under its input prefix; firing 2 runs nothing" in caplog.text
+    work(fleet, idle_timeout=4)
+    (third,) = dbos_app.open_client(None).list_workflows(workflow_ids=["nightly:fire-3:stage:normalise"])
+    assert third.output["units"] == 1  # the third firing's stage ran over its own batch alone
+    assert "not acted on" not in caplog.text  # the firing acts on the input store and prefix
 
 
 @pytest.mark.parametrize("steps, prefix, code", [
@@ -282,45 +342,126 @@ def test_a_workflow_its_firing_would_refuse_is_not_scheduled(
 
     from womblex.cli.workflow import cmd_schedule_workflow
 
-    ensure_workflow_schema(None)
-    with WorkflowStore(None) as store:
-        store.save("wf", _spec(steps, prefix=prefix))
+    path = _file(fleet, "wf", steps, prefix=prefix)
     (Path(fleet[1]) / "empty").mkdir()
-    args = argparse.Namespace(workflow_id="wf", dsn=None, remove=False, status=False, **_where(fleet))
+    args = argparse.Namespace(workflow=path, dsn=None, remove=False, status=False, **_where(fleet))
     assert cmd_schedule_workflow(args) == 1
     assert f"[{code}]" in caplog.text
     assert list_schedules(dbos_app.open_client(None), "wf") == []
     assert cmd_schedule_workflow(argparse.Namespace(**{**vars(args), "store": None})) == 1  # nothing to check against
 
 
-def test_an_owned_workflow_never_extracts_outside_its_owners_tree(
-    fleet, saved_preset, monkeypatch,  # noqa: F811
-) -> None:
-    """The API's rule for a submitted prefix holds for a firing, and nothing is scheduled or queued."""
+def test_a_firing_runs_only_on_a_worker_on_the_workflows_input_store(fleet, saved_preset) -> None:  # noqa: F811
+    ensure_workflow_schema(None)
+    with WorkflowStore(None) as store:
+        stored = store.save("elsewhere", _spec(["normalise"], store="s3://another-inbox"))
+    client = dbos_app.open_client(None)
+    _fire_all_at_once(client, stored)
+    work(fleet, idle_timeout=2)  # this worker's ingest root is not the workflow's store
+    queued = client.list_workflows(queue_name=dbos_app.firing_queue("s3://another-inbox"), load_input=False)
+    assert [w.status for w in queued] == ["ENQUEUED"]
+    with RunBoard(None) as board:
+        assert board.runs() == []
+
+
+def test_a_scheduled_workflow_must_name_its_input_store(fleet, saved_preset, caplog) -> None:  # noqa: F811
     import argparse
 
-    from tests.test_cloud import _minimal_config
+    from tests.test_workflow_runner import write_workflow
     from womblex.cli.workflow import cmd_schedule_workflow
+
+    path = write_workflow(fleet[2], "nowhere", ["normalise"], triggers=[_TRIGGER])
+    args = argparse.Namespace(workflow=str(path), dsn=None, remove=False, status=False, **_where(fleet))
+    assert cmd_schedule_workflow(args) == 1
+    assert "[spec_invalid]" in caplog.text and "input_binding.store" in caplog.text
+    assert list_schedules(dbos_app.open_client(None), "nowhere") == []
+
+
+def test_a_schedule_synced_before_input_stores_is_refused_not_stranded(fleet, saved_preset) -> None:  # noqa: F811
+    """Its context names no store: the firing is refused on the board, not left on a queue no worker serves."""
+    from datetime import UTC, datetime
+
+    client = dbos_app.open_client(None)
+    client.enqueue({"workflow_name": dbos_app.SCHEDULED_WORKFLOW, "queue_name": dbos_app.DOWNSTREAM_QUEUE},
+                   datetime.now(UTC), {"workflow_id": "old", "trigger": 0})  # the context schedules held then
+    work(fleet, idle_timeout=3)
+    with RunBoard(None) as board:
+        (run,) = board.runs()
+        (row,) = board.list_jobs(run.run_id)
+    assert run.counts == {"failed": 1} and row.kind == "trigger"
+    assert "[spec_invalid]" in (row.error or "") and "schedule-workflow" in (row.error or "")
+
+
+def test_a_rewrite_of_the_same_bytes_is_not_queued_again(fleet, saved_preset, caplog) -> None:  # noqa: F811
+    """Its fingerprint moves (new mtime) but its bytes hash to the run's recorded source_hash."""
+    import logging
+    import os
+
+    from tests.test_cloud import _minimal_config
     from womblex.cloud import workflows
-    from womblex.cloud.workflow_runner import RefusalCode, WorkflowRefusedError
     from womblex.store.remote import RemoteStore
 
     store_dir, ingest, tmp = fleet
+    _inbox(fleet)
     ensure_workflow_schema(None)
     with WorkflowStore(None) as store:
-        for wid, prefix in (("root", None), ("bobs", "bob")):
-            store.save(wid, _spec(["normalise"], [_TRIGGER], prefix), owner="alice")
-    for wid in ("root", "bobs"):
-        args = argparse.Namespace(workflow_id=wid, dsn=None, remove=False, status=False, **_where(fleet))
-        assert cmd_schedule_workflow(args) == 1
-        assert list_schedules(dbos_app.open_client(None), wid) == []
-    workflows.set_context(workflows.WorkerContext(
-        _minimal_config(tmp), RemoteStore.from_uri(str(store_dir)), RemoteStore.from_uri(ingest), ingest, None))
-    try:
-        with pytest.raises(WorkflowRefusedError) as e:
-            workflows._fire("bobs-1", {"workflow_id": "bobs", "owner": "alice"})
-    finally:
-        workflows.set_context(None)
-    assert e.value.code is RefusalCode.PREFIX_NOT_OWNED and "[prefix_not_owned]" in str(e.value)
+        store.save("nightly", _spec(["normalise"], [], "inbox", store=fleet[1]))
+
+    def fire(firing: str) -> None:
+        workflows.set_context(workflows.WorkerContext(
+            _minimal_config(tmp), RemoteStore.from_uri(str(store_dir)), RemoteStore.from_uri(ingest), ingest, None))
+        try:
+            workflows._fire("nightly", {"workflow_id": "nightly", "store": ingest}, firing)
+        finally:
+            workflows.set_context(None)
+
+    people = Path(ingest) / "inbox" / "people.csv"
+    fire("1")
+    work(fleet, idle_timeout=4)  # extracted: the run's manifest records the file's source_hash
+    people.write_bytes(people.read_bytes())  # the same bytes, copied over again
+    stat = people.stat()
+    os.utime(people, (stat.st_atime + 60, stat.st_mtime + 60))
+    with caplog.at_level(logging.INFO):
+        fire("2")
+    assert "rewritten with the same bytes" in caplog.text
     with RunBoard(None) as board:
-        assert board.runs() == []
+        assert board.firing_batches("nightly", "2") == []
+    people.write_text("name,role\nAlice,Secretary\n")  # different bytes: a new document
+    fire("3")
+    with RunBoard(None) as board:
+        assert board.firing_batches("nightly", "3") == [2]
+
+
+def test_a_file_found_unchanged_is_not_hashed_again(fleet, saved_preset, monkeypatch) -> None:  # noqa: F811
+    """A touched file with the same bytes is hashed once: the firing records its new fingerprint
+    (`unchanged`), so a later firing counts it seen (mistake 3: unattended work redoes nothing)."""
+    import os
+    from datetime import UTC, datetime
+
+    from womblex.store.remote import RemoteStore
+
+    _, ingest, _ = fleet
+    _inbox(fleet)
+    ensure_workflow_schema(None)
+    with WorkflowStore(None) as store:
+        store.save("nightly", _spec(["normalise"], [], "inbox", store=ingest))
+    hashed: list[str] = []
+    real = RemoteStore.sha256
+    monkeypatch.setattr(RemoteStore, "sha256", lambda self, key: hashed.append(key) or real(self, key))
+    client = dbos_app.open_client(None)
+
+    def fire(minute: int) -> None:  # a recorded firing, as a schedule starts it
+        client.enqueue({"workflow_name": dbos_app.SCHEDULED_WORKFLOW, "queue_name": dbos_app.DOWNSTREAM_QUEUE},
+                       datetime(2026, 10, 20, 1, minute, tzinfo=UTC), {"workflow_id": "nightly", "store": ingest})
+        work(fleet, idle_timeout=4)
+
+    people = Path(ingest) / "inbox" / "people.csv"
+    fire(0)
+    people.write_bytes(people.read_bytes())  # the same bytes, copied over again
+    stat = people.stat()
+    os.utime(people, (stat.st_atime + 60, stat.st_mtime + 60))
+    fire(1)
+    fire(2)
+    assert len(hashed) == 1  # the second firing hashed it; the third found its fingerprint seen
+    with RunBoard(None) as board:
+        assert board.next_batch_num("nightly") == 2  # one batch: the touched file was never queued again

@@ -42,9 +42,10 @@ class _FakeQueue:
 
     def enqueue_stages(
         self, run_id: str, stages: list[str], shard_prefix: str, *, max_attempts: int = 3,
-        owner: str | None = None,
+        owner: str | None = None, config: dict | None = None,
     ) -> int:
         self.staged = (run_id, stages, shard_prefix, max_attempts)
+        self.config = config
         return len(stages)
 
 
@@ -56,6 +57,8 @@ def _fake_schema(monkeypatch: pytest.MonkeyPatch) -> None:
         "womblex.cloud.dispatch.ensure_schema",
         lambda _dsn: setattr(_FakeQueue, "schema_ensured", True),
     )
+    # A live worker serves the work: the queue is faked, so is the registry it would be read from.
+    monkeypatch.setattr("womblex.cloud.worker_registry.require_served", lambda _dsn, _needed: None)
 
 
 def _client(tmp_path: Path, **kw: object) -> TestClient:
@@ -148,6 +151,7 @@ class TestStageDispatchPlan:
         assert queue is not None and queue.schema_ensured
         assert queue.staged == ("run-exec", ["enrich", "chunk", "embed"],
                                 "runs/run-exec/documents", 5)
+        assert queue.config is not None and "paths" not in queue.config  # the run carries its config
 
     def test_a_disabled_stage_is_not_dispatched(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

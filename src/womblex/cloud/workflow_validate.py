@@ -2,7 +2,7 @@
 
 It calls `prepare_workflow`, the path `run_workflow_local` takes, so the two refuse alike
 and carry the same stable codes. Read-only: no step runs and no sidecar is written. The
-model check at `load` or `smoke` makes the same minimal requests a run's would.
+model check makes the same requests a run's would: connectivity at `load`, a warned, billed request at `smoke`.
 """
 
 from __future__ import annotations

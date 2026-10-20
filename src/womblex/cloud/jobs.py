@@ -148,6 +148,33 @@ def _latest_attempts(rows: list[WorkflowStatus]) -> list[WorkflowStatus]:
             if not (attempt := dbos_app.stage_attempt(s.workflow_id)) or attempt[1] == newest[attempt[0]]]
 
 
+def _rollup(rows: list[WorkflowStatus]) -> list[tuple[WorkflowStatus, str]]:
+    """Each row a run's rollup counts, with the status it counts as: its latest attempt's.
+
+    Superseded stage attempts are dropped. A failed coordinator whose stages' latest attempts
+    have all succeeded since counts `done`, and so does a failed firing whose stages were
+    dispatched by hand: the coordinator then carries their outcome. Rows keep their own status
+    in `list_jobs`; only the run's counts follow the repair.
+    """
+    latest = _latest_attempts(rows)
+    stage_status = {(_attr(s, "run_id", ""), a[0]): _board_status(s)
+                    for s in latest if (a := dbos_app.stage_attempt(s.workflow_id))}
+    dispatched = {(_attr(s, "run_id", ""), _attr(s, "firing"))
+                  for s in latest if _attr(s, "kind") == dbos_app.KIND_DOWNSTREAM}
+    out: list[tuple[WorkflowStatus, str]] = []
+    for s in latest:
+        status, kind, run = _board_status(s), _attr(s, "kind"), _attr(s, "run_id", "")
+        if status == "failed" and kind == dbos_app.KIND_DOWNSTREAM:
+            scope = dbos_app.stage_scope(_attr(s, "firing"), _attr(s, "workflow_digest"))
+            stages = _attr(s, "stages") or []
+            if stages and all(stage_status.get((run, dbos_app.stage_id(run, st, scope))) == "done" for st in stages):
+                status = "done"
+        elif status == "failed" and kind == dbos_app.KIND_TRIGGER and (run, _attr(s, "firing")) in dispatched:
+            status = "done"
+        out.append((s, status))
+    return out
+
+
 def _attempt_number(status: WorkflowStatus) -> int:
     attempt = dbos_app.stage_attempt(status.workflow_id)
     return attempt[1] if attempt else 0
@@ -164,18 +191,29 @@ def _retried_by(rows: list[WorkflowStatus]) -> dict[str, str]:
 
 
 def _orphaned(rows: list[WorkflowStatus]) -> bool:
-    """A run whose firing failed after queueing its batches: extraction and no coordinator.
+    """A run with a firing that failed after queueing its batches: its extraction and no coordinator.
 
     Read from the rows themselves, so it holds even when the database that failed the
-    dispatch could not have taken a label either; dispatching the stages clears it.
+    dispatch could not have taken a label either; dispatching the firing's stages clears it.
     """
-    kinds = {_attr(s, "kind") for s in rows}
-    fired_and_failed = any(_attr(s, "kind") == dbos_app.KIND_TRIGGER and _board_status(s) == "failed" for s in rows)
-    return fired_and_failed and dbos_app.KIND_BATCH in kinds and dbos_app.KIND_DOWNSTREAM not in kinds
+    failed = {_attr(s, "firing") for s in rows if _attr(s, "kind") == dbos_app.KIND_TRIGGER and _board_status(s) == "failed"}
+    batched = {_attr(s, "firing") for s in rows if _attr(s, "kind") == dbos_app.KIND_BATCH}
+    dispatched = {_attr(s, "firing") for s in rows if _attr(s, "kind") == dbos_app.KIND_DOWNSTREAM}
+    return bool(failed & batched - dispatched)
 
 
 def _board_status(status: WorkflowStatus) -> str:
     return _STATUS.get(status.status, "failed")
+
+
+def queue_models(config: dict[str, Any] | None, scope: str) -> str:
+    """The models key (`model_check.models_key`) a run's *config* payload routes *scope*'s work by."""
+    if config is None:  # a run that carries no config: the unkeyed queue, served as before
+        return ""
+    from womblex.cloud.workflow_runner import config_from_payload
+    from womblex.utils.model_check import models_key
+
+    return models_key(config_from_payload(config, {"input_root": ".", "output_root": ".", "checkpoint_dir": "."}), scope)
 
 
 def _job_row(s: WorkflowStatus) -> JobRow:
@@ -277,28 +315,42 @@ class RunBoard:
             self._client.enqueue(options, *args)
         return len(set(ids) - present)
 
-    def enqueue(self, run_id: str, jobs: list[JobSpec], *, owner: str | None = None) -> int:
+    def enqueue(
+        self, run_id: str, jobs: list[JobSpec], *, owner: str | None = None,
+        firing: str | None = None, fingerprints: dict[str, str] | None = None,
+        config: dict[str, Any] | None = None,
+    ) -> int:
         """Enqueue *jobs* for *run_id*; idempotent per batch number.
+
+        *config* (`workflow_runner.config_payload`) is the config the batches extract under, on
+        any worker. A scheduled *firing* labels its batches, each with its keys' *fingerprints*, so a
+        later firing of the same run can tell which documents it has already seen.
 
         Returns the number of batches that were not already on the board.
         Raises :class:`RunOwnedError` if *owner* is named and the run already
         belongs to someone else, including a run with no owner.
         """
         row_owner = self._claim_run_owner(run_id, owner)
+        from womblex.utils.model_check import SCOPE_EXTRACT
+
+        models = queue_models(config, SCOPE_EXTRACT)
         sends = []
         for spec in jobs:
             attrs = {"run_id": run_id, "kind": dbos_app.KIND_BATCH, "batch_num": spec.batch_num,
                      "max_attempts": spec.max_attempts}
             if row_owner is not None:
                 attrs["owner"] = row_owner
+            if firing is not None:
+                attrs["firing"] = firing
+                attrs["fingerprints"] = {k: (fingerprints or {}).get(k, "") for k in spec.input_keys}
             options: EnqueueOptions = {
                 "workflow_name": dbos_app.EXTRACT_WORKFLOW,
-                "queue_name": dbos_app.extract_queue(spec.ingest_root),
+                "queue_name": dbos_app.extract_queue(spec.ingest_root, models),
                 "workflow_id": dbos_app.batch_id(run_id, spec.batch_num),
                 "attributes": attrs,
             }
             sends.append((options, (run_id, spec.batch_num, spec.input_keys, spec.shard_prefix,
-                                    spec.ingest_root, spec.max_attempts)))
+                                    spec.ingest_root, spec.max_attempts, config)))
         inserted = self._enqueue(sends)
         logger.info("Enqueued %d new job(s) for run %s (of %d submitted)",
                     inserted, run_id, len(jobs))
@@ -307,8 +359,15 @@ class RunBoard:
     def enqueue_stages(
         self, run_id: str, stages: list[str], shard_prefix: str, *,
         max_attempts: int = 3, owner: str | None = None, workflow: dict[str, Any] | None = None,
+        firing: str | None = None, bases: list[str] | None = None, config: dict[str, Any] | None = None,
     ) -> int:
         """Enqueue the coordinator that runs *stages* in pipeline order for *run_id*.
+
+        *config* (`workflow_runner.config_payload`) is the config every stage runs under, on any
+        worker, when no *workflow* is given.
+
+        A scheduled *firing* runs its stages over its own batch *bases* only, under stage
+        ids of its own, so a run a workflow appends to never re-runs an earlier firing's work.
 
         *workflow* (`id`, `digest`, `preset`, `config`: the resolved overlay) makes the fleet
         run the stages under that config and stamp its digest on what they write, rather
@@ -332,37 +391,40 @@ class RunBoard:
             attrs["owner"] = row_owner
         if workflow is not None:
             attrs["workflow_digest"] = workflow["digest"]
+        if firing is not None:
+            attrs["firing"] = firing
         options: EnqueueOptions = {
             "workflow_name": dbos_app.DOWNSTREAM_WORKFLOW,
             "queue_name": dbos_app.DOWNSTREAM_QUEUE,
             "workflow_id": dbos_app.downstream_id(
-                run_id, ordered, workflow["digest"] if workflow else None),
+                run_id, ordered, workflow["digest"] if workflow else None, firing),
             "attributes": attrs,
         }
-        fresh = self._enqueue(
-            [(options, (run_id, ordered, shard_prefix, max_attempts, row_owner, workflow))],
-        )
+        fresh = self._enqueue([(options, (run_id, ordered, shard_prefix, max_attempts, row_owner, workflow,
+                                          firing, bases, config))])
         newly = len(ordered) if fresh else 0
         logger.info("Enqueued %d new stage job(s) for run %s (of %d submitted)",
                     newly, run_id, len(stages))
         return newly
 
-    def stage_workflow_digests(self, run_id: str) -> dict[str, set[str | None]]:
-        """Each stage already dispatched for *run_id*, with the workflow digests it is under.
+    def seen_inputs(self, run_id: str) -> set[tuple[str, str]]:
+        """Every `(key, fingerprint)` *run_id*'s firings have seen: queued for extraction, or found to
+        hold bytes the run already has (a firing's recorded `unchanged`)."""
+        rows = self._list(run_id, load_output=True)
+        queued = {(k, fp) for s in rows if _attr(s, "kind") == dbos_app.KIND_BATCH
+                  for k, fp in (_attr(s, "fingerprints") or {}).items()}
+        return queued | {(k, fp) for s in rows if _attr(s, "kind") == dbos_app.KIND_TRIGGER
+                         and isinstance(s.output, dict) for k, fp in (s.output.get("unchanged") or {}).items()}
 
-        `None` is a stage dispatched without a workflow (`enqueue-stages`, the console). A
-        queued coordinator counts before it has enqueued its stages: it names them in its
-        `stages` attribute (a coordinator enqueued before that attribute is seen through
-        its stage rows only).
-        """
-        found: dict[str, set[str | None]] = {}
-        for s in self._list(run_id):
-            kind, digest = _attr(s, "kind"), _attr(s, "workflow_digest")
-            names = [_attr(s, "stage")] if kind == dbos_app.KIND_STAGE else (
-                _attr(s, "stages") or [] if kind == dbos_app.KIND_DOWNSTREAM else [])
-            for name in names:
-                found.setdefault(name, set()).add(digest)
-        return found
+    def firing_batches(self, run_id: str, firing: str) -> list[int]:
+        """The batch numbers *firing* queued in *run_id*: a replayed firing reuses them."""
+        return sorted(int(_attr(s, "batch_num", 0)) for s in self._list(run_id)
+                      if _attr(s, "kind") == dbos_app.KIND_BATCH and _attr(s, "firing") == firing)
+
+    def next_batch_num(self, run_id: str) -> int:
+        """One past the highest batch number in *run_id*, so a firing appends rather than attaches."""
+        return 1 + max((int(_attr(s, "batch_num", 0)) for s in self._list(run_id)
+                        if _attr(s, "kind") == dbos_app.KIND_BATCH), default=0)
 
     def stage_attempts(
         self, run_id: str, *, owner: str | None = None,
@@ -372,18 +434,26 @@ class RunBoard:
         Raises :class:`RunOwnedError` for a named *owner* that does not own the run.
         """
         self._claim_run_owner(run_id, owner)
-        found: dict[str, list[WorkflowStatus]] = {}
+        bases: dict[str, list[WorkflowStatus]] = {}
         for s in self._list(run_id):
-            if _attr(s, "kind") == dbos_app.KIND_STAGE:
-                found.setdefault(_attr(s, "stage"), []).append(s)
-        return {stage: sorted(rows, key=_attempt_number) for stage, rows in found.items()}
+            if _attr(s, "kind") == dbos_app.KIND_STAGE and (attempt := dbos_app.stage_attempt(s.workflow_id)):
+                bases.setdefault(attempt[0], []).append(s)
+        # A run a workflow appends to holds one base per firing; a stage's attempts are those of its
+        # newest unfinished firing (else its newest), so a retry reaches each failure in turn.
+        found: dict[str, list[WorkflowStatus]] = {}
+        for rows in sorted(bases.values(), key=lambda r: min(s.created_at or 0 for s in r)):
+            rows.sort(key=_attempt_number)
+            stage, current = _attr(rows[0], "stage"), found.get(_attr(rows[0], "stage"))
+            if current is None or _board_status(current[-1]) == "done" or _board_status(rows[-1]) != "done":
+                found[stage] = rows
+        return found
 
-    def stage_arguments(self, workflow_id: str) -> tuple[str, dict[str, Any] | None]:
-        """A stage workflow's recorded `shard_prefix` and dispatched `workflow` overlay."""
+    def stage_arguments(self, workflow_id: str) -> dict[str, Any]:
+        """A stage workflow's recorded arguments by name (`shard_prefix`, `workflow`, `bases`, `config`)."""
         (s,) = self._client.list_workflows(workflow_ids=[workflow_id], load_input=True, load_output=False)
         given = s.input or {"args": (), "kwargs": {}}  # read by name, whether passed by position or keyword
-        named = dict(zip(("run_id", "stage", "shard_prefix", "max_attempts", "workflow"), given["args"])) | given["kwargs"]
-        return named["shard_prefix"], named.get("workflow")
+        names = ("run_id", "stage", "shard_prefix", "max_attempts", "workflow", "bases", "config")
+        return dict(zip(names, given["args"])) | given["kwargs"]
 
     def first_failed_step(self, workflow_id: str) -> int:
         """The function id of the workflow's first failed step; 1 (the whole workflow) when none is recorded."""
@@ -391,8 +461,35 @@ class RunBoard:
                   if st["error"] is not None]
         return min(failed, default=1)
 
-    def fork_stage(self, workflow_id: str, stage: str, new_id: str, start_step: int) -> None:
-        """Fork *workflow_id* from *start_step* as *new_id* on the stage's queue.
+    def unfinished_bases(self, workflow_id: str) -> list[str] | None:
+        """The bases a stage attempt planned and did not finish; `None` when it recorded no plan."""
+        steps = self._client.list_workflow_steps(workflow_id)
+        plan = next((st for st in steps if st["function_name"] == "plan"), None)
+        if plan is None or plan["error"] is not None or not isinstance(plan["output"], list):
+            return None
+        done = {st["function_name"].removeprefix("unit:") for st in steps
+                if st["function_name"].startswith("unit:") and st["error"] is None}
+        return [b for unit in plan["output"] for b in unit if (unit[0] if len(unit) == 1 else "run") not in done]
+
+    def rerun_stage(
+        self, workflow_id: str, stage: str, new_id: str, bases: list[str] | None, models: str = "",
+    ) -> bool:
+        """A new attempt, *new_id*, of *workflow_id*'s stage over *bases* alone (`None`: every base),
+        with its recorded arguments and attributes, less `ran_after_failed`: it runs on input that
+        is now complete. False, and nothing enqueued, if *new_id* already exists."""
+        if self._client.list_workflows(workflow_ids=[new_id], load_input=False, load_output=False):
+            return False
+        (s,) = self._client.list_workflows(workflow_ids=[workflow_id], load_input=False, load_output=False)
+        args = self.stage_arguments(workflow_id)
+        attrs = {k: v for k, v in (s.attributes or {}).items() if k != "ran_after_failed"}
+        options: EnqueueOptions = {"workflow_name": dbos_app.STAGE_WORKFLOW, "queue_name": dbos_app.stage_queue(stage, models),
+                                   "workflow_id": new_id, "attributes": attrs}
+        self._client.enqueue(options, args["run_id"], stage, args["shard_prefix"], args["max_attempts"],
+                             args.get("workflow"), bases, args.get("config"))
+        return True
+
+    def fork_stage(self, workflow_id: str, stage: str, new_id: str, start_step: int, models: str = "") -> None:
+        """Fork *workflow_id* from *start_step* as *new_id* on the stage's queue for *models*.
 
         The steps before *start_step* are kept, and the fork carries the original's attributes
         (owner, workflow digest, the stages it ran after), so it reads as the same stage.
@@ -400,11 +497,13 @@ class RunBoard:
         from dbos import SetWorkflowID
 
         with SetWorkflowID(new_id):
-            self._client.fork_workflow(workflow_id, start_step, queue_name=dbos_app.stage_queue(stage))
+            self._client.fork_workflow(workflow_id, start_step, queue_name=dbos_app.stage_queue(stage, models))
 
-    def cancelled_batches(self, run_id: str) -> list[str]:
-        """*run_id*'s extraction batches that were cancelled: a re-enqueue would attach to them and never run."""
-        return [s.workflow_id for s in self._list(run_id, status="CANCELLED") if _attr(s, "kind") == dbos_app.KIND_BATCH]
+    def cancelled_batches(self, run_id: str, firing: str | None = None) -> list[str]:
+        """*run_id*'s extraction batches (*firing*'s alone, if named) that were cancelled: a
+        re-enqueue would attach to them and never run."""
+        return [s.workflow_id for s in self._list(run_id, status="CANCELLED")
+                if _attr(s, "kind") == dbos_app.KIND_BATCH and (firing is None or _attr(s, "firing") == firing)]
 
     # --- reads ----------------------------------------------------------------
 
@@ -412,8 +511,8 @@ class RunBoard:
         return self._list(run_id, owner=owner, **kwargs)
 
     def stats(self, run_id: str | None = None, *, owner: str | None = None) -> dict[str, int]:
-        """Count jobs by status (optionally for one run, one owner)."""
-        return dict(Counter(_board_status(s) for s in _latest_attempts(self._rows(run_id, owner))))
+        """Count jobs by status (optionally for one run, one owner), each by its latest attempt (`_rollup`)."""
+        return dict(Counter(status for _, status in _rollup(self._rows(run_id, owner))))
 
     def runs(
         self, owner: str | None = None, *, run_id: str | None = None, limit: int = 100,
@@ -423,16 +522,16 @@ class RunBoard:
         *owner* narrows to one caller's runs; ``None`` lists every run,
         including CLI- and console-submitted ones that have no owner.
         """
-        grouped: dict[str, list[WorkflowStatus]] = {}
-        for s in _latest_attempts(self._rows(run_id, owner)):
-            grouped.setdefault(_attr(s, "run_id", ""), []).append(s)
+        grouped: dict[str, list[tuple[WorkflowStatus, str]]] = {}
+        for s, status in _rollup(self._rows(run_id, owner)):
+            grouped.setdefault(_attr(s, "run_id", ""), []).append((s, status))
         summaries = [
             RunSummary(
-                rid, _attr(rows[0], "owner"),
-                dict(Counter(_board_status(s) for s in rows)),
-                _iso(min(s.created_at or 0 for s in rows)),
-                _iso(max(s.updated_at or 0 for s in rows)),
-                _orphaned(rows),
+                rid, _attr(rows[0][0], "owner"),
+                dict(Counter(status for _, status in rows)),
+                _iso(min(s.created_at or 0 for s, _ in rows)),
+                _iso(max(s.updated_at or 0 for s, _ in rows)),
+                _orphaned([s for s, _ in rows]),
             )
             for rid, rows in grouped.items() if rid
         ]
@@ -481,12 +580,6 @@ class RunBoard:
                 # A step that stopped part-way may have published without returning.
                 undigested.append(s.workflow_id)
             checksums.update(digests)
-        # A coordinator publishes only its condition labels, from a step that never fails.
-        for s in every:
-            if _attr(s, "kind") == dbos_app.KIND_DOWNSTREAM:
-                for step in self._client.list_workflow_steps(s.workflow_id):
-                    if step["error"] is None and _is_digest_map(output := step["output"]):
-                        checksums.update(output)
         return FileChecksums(checksums, sorted(undigested))
 
     def stale_jobs(

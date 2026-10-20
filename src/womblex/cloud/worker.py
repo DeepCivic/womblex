@@ -4,8 +4,14 @@ DBOS dequeues and runs the workflows in :mod:`womblex.cloud.workflows`; this
 module decides which queues a process may listen to and when it stops. A worker
 does not claim a job and hand it back: it simply never listens to a queue whose
 work it cannot do. An extraction queue is named for the ingest root it reads,
-so a worker wired to another root never sees that batch, and a stage queue is
-joined only when the models the stage needs pass this worker's model check.
+so a worker wired to another root never sees that batch, and extraction and
+stage queues are named for the models their work needs under the run's config
+(`model_check.models_key`), so a worker joins only those whose models its own
+config names and its model check passed (Phase R, D8). It checks the local models
+of every stage in its config, enabled or not, and an Isaacus model only for a
+stage its config enables, so no disabled stage costs a request; a stage whose
+Isaacus model it did not check is not served. It records the queues it serves
+(`worker_registry`).
 
 A stopped worker's unfinished workflows are recovered by DBOS when an executor
 with the same id launches again, which is why the default id is the host name
@@ -22,7 +28,21 @@ from womblex.cloud import dbos_app
 from womblex.cloud.stage_contracts import STAGE_CONTRACTS
 from womblex.config import WomblexConfig
 from womblex.store.remote import RemoteStore
-from womblex.utils.model_check import SCOPE_EXTRACT, ModelCheckResult, check_models
+from womblex.utils.model_check import (
+    SCOPE_EXTRACT,
+    CheckLevel,
+    ModelCheckResult,
+    check_models,
+    enabled_scopes,
+    isaacus_models,
+    models_key,
+)
+
+#: Every scope a worker checks: extraction and each stage, whether its config enables it or not.
+WORKER_SCOPES = (SCOPE_EXTRACT, *STAGE_CONTRACTS)
+
+#: Seconds between a worker's refreshes of its row in the worker registry.
+HEARTBEAT_SECONDS = 60.0
 
 logger = logging.getLogger(__name__)
 
@@ -31,23 +51,38 @@ def default_worker_id() -> str:
     return socket.gethostname()
 
 
-def served_queues(check: ModelCheckResult, ingest_root: str) -> dict[str, int]:
+def served_queues(
+    check: ModelCheckResult, ingest_root: str, config: WomblexConfig | None = None,
+) -> dict[str, int]:
     """Queue name -> concurrency for the queues this worker's models can serve.
 
     Only the models a queue's work needs count: a worker whose tokeniser is
-    broken still serves OCR batches. Coordinators are light and always served.
+    broken still serves OCR batches. Each passing scope joins its queue keyed by
+    the models *config* names for it, and the unkeyed one, which holds work
+    enqueued before runs carried their config. Coordinators, and the firings of
+    workflows whose input store is this worker's ingest root, are light and
+    always served. A stage whose Isaacus model went unchecked, because *config*
+    disables the stage, is not served.
     """
-    queues = {dbos_app.DOWNSTREAM_QUEUE: 4}
+    queues = {dbos_app.DOWNSTREAM_QUEUE: 4, dbos_app.firing_queue(ingest_root): 1}
     if check.failures_for((SCOPE_EXTRACT,)):
         logger.error("model check failed for extraction on this worker: %s", check.message())
     else:
-        queues[dbos_app.extract_queue(ingest_root)] = 1
+        for key in {"", models_key(config, SCOPE_EXTRACT) if config else ""}:
+            queues[dbos_app.extract_queue(ingest_root, key)] = 1
+    unchecked = set() if config is None or check.level is CheckLevel.OFF else (
+        {s for u in isaacus_models(config, WORKER_SCOPES) for s in u.scopes} - enabled_scopes(config))
     for stage in STAGE_CONTRACTS:
         bad = check.failures_for((stage,))
         if bad:
             logger.error("not serving stage %s: model check failed: %s", stage, check.message(bad))
-        else:
-            queues[dbos_app.stage_queue(stage)] = 1
+            continue
+        if stage in unchecked:
+            logger.info("not serving stage %s: its Isaacus model is checked only when this worker's config "
+                        "enables the stage", stage)
+            continue
+        for key in {"", models_key(config, stage) if config else ""}:
+            queues[dbos_app.stage_queue(stage, key)] = 1
     return queues
 
 
@@ -101,7 +136,8 @@ def run_worker(
 
     # Before launch, so a model this worker lacks is known up front: the queues
     # that need it are simply not joined.
-    served = served_queues(check_models(config), ingest_root)
+    served = served_queues(
+        check_models(config, scopes=WORKER_SCOPES, isaacus_scopes=enabled_scopes(config)), ingest_root, config)
     workflows.set_context(workflows.WorkerContext(config, store, ingest, ingest_root, dsn))
 
     DBOS(config={
@@ -114,14 +150,25 @@ def run_worker(
     DBOS.launch()
     for name, concurrency in served.items():
         # Queue settings live in the system database: the serving worker's win.
-        DBOS.register_queue(name, worker_concurrency=concurrency, on_conflict="always_update")
+        # One firing at a time per input store, so two firings never number the same batch.
+        firing = name == dbos_app.firing_queue(ingest_root)
+        DBOS.register_queue(name, worker_concurrency=concurrency, global_concurrency=1 if firing else None,
+                            on_conflict="always_update")
 
     names = list(served)
+    from womblex.cloud.worker_registry import WorkerRegistry
+
+    registry = WorkerRegistry(dsn)
+    registry.record(worker_id, names)
+    recorded_at = time.monotonic()
     baseline = _completed(names, worker_id)
     idle_since: float | None = None
     try:
         while True:
             time.sleep(poll_interval)
+            if time.monotonic() - recorded_at >= HEARTBEAT_SECONDS:
+                registry.record(worker_id, names)
+                recorded_at = time.monotonic()
             done = _completed(names, worker_id) - baseline
             if once and done:
                 break
@@ -136,6 +183,8 @@ def run_worker(
         logger.info("worker %s interrupted", worker_id)
     finally:
         completed = _completed(names, worker_id) - baseline
+        registry.remove(worker_id)
+        registry.close()
         DBOS.destroy()
         workflows.set_context(None)
     return completed

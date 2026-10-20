@@ -6,7 +6,6 @@ import pytest
 from pydantic import ValidationError
 
 from womblex.cloud.workflow_store import (
-    WorkflowOwnedError,
     WorkflowStore,
     ensure_workflow_schema,
     is_safe_workflow_id,
@@ -36,7 +35,7 @@ def test_validate_minimal_spec() -> None:
     spec = validate_workflow_spec(_MINIMAL)
     assert [s.stage for s in spec.steps] == ["enrich", "chunk"]
     assert spec.preset == "DEFAULT-Isaacus"
-    assert spec.conditions == spec.destinations == spec.triggers == ()
+    assert spec.triggers == ()
 
 
 @pytest.mark.parametrize(("steps", "match"), [
@@ -73,16 +72,12 @@ def test_validate_overlay_ignores_run_identity_like_a_preset() -> None:
     validate_workflow_spec(raw)  # dropped by `_validate_overlay`, not a TypeError
 
 
-def test_validate_round_trips_conditions_destinations_and_triggers() -> None:
+def test_validate_round_trips_triggers() -> None:
     raw = {
         **_MINIMAL,
-        "conditions": [{"column": "ext", "op": "eq", "value": ".pdf"}],
-        "destinations": [{"kind": "webhook", "target": "https://example.invalid/hook"}],
         "triggers": [{"cron": "0 0 * * *"}],
     }
     spec = validate_workflow_spec(raw)
-    assert spec.conditions[0].column == "ext"
-    assert spec.destinations[0].kind == "webhook"
     assert spec.triggers[0].cron == "0 0 * * *"
 
 
@@ -124,47 +119,44 @@ def test_round_trip_save_get_list_delete(store) -> None:
     assert store.list() == []
 
 
+def test_a_row_saved_with_a_retired_field_still_loads(store, caplog) -> None:
+    import json
+
+    import sqlalchemy as sa
+
+    store.save("wf-old", validate_workflow_spec(_MINIMAL))
+    raw = {**_MINIMAL, "conditions": [{"column": "ext", "op": "eq", "value": ".pdf"}],
+           "destinations": [{"kind": "webhook", "target": "https://example.invalid/hook"}]}
+    with store._engine.begin() as conn:
+        conn.execute(sa.update(store._table).values(spec_json=json.dumps(raw), digest="sha256:with-conditions"))
+    fetched = store.get("wf-old")
+    assert fetched is not None and [s.stage for s in fetched.spec.steps] == ["enrich", "chunk"]
+    assert "stored conditions are no longer supported" in caplog.text
+    assert "stored destinations are no longer supported" in caplog.text
+    assert fetched.digest == workflow_digest(fetched.spec)  # not the digest stored with the field
+    assert "recomputed" in caplog.text
+
+
 def test_save_rejects_unsafe_id(store) -> None:
     spec = validate_workflow_spec(_MINIMAL)
     with pytest.raises(ValueError, match="unsafe workflow id"):
         store.save("../escape", spec)
 
 
-def test_save_update_same_owner_replaces(store) -> None:
+def test_save_update_replaces(store) -> None:
     spec_a = validate_workflow_spec(_MINIMAL)
     spec_b = validate_workflow_spec({**_MINIMAL, "steps": [{"stage": "chunk"}]})
-    store.save("wf-1", spec_a, owner="alice")
+    store.save("wf-1", spec_a)
     first = store.get("wf-1")
-    updated = store.save("wf-1", spec_b, owner="alice")
+    updated = store.save("wf-1", spec_b)
     assert updated.created_at == first.created_at
     assert updated.digest == workflow_digest(spec_b)
 
 
-def test_owner_conflict_on_save_and_delete(store) -> None:
-    spec = validate_workflow_spec(_MINIMAL)
-    store.save("wf-1", spec, owner="alice")
-    with pytest.raises(WorkflowOwnedError):
-        store.save("wf-1", spec, owner="bob")
-    with pytest.raises(WorkflowOwnedError):
-        store.delete("wf-1", owner="bob")
-    store.save("wf-1", spec, owner=None)  # unscoped caller is not checked
-
-
-def test_save_losing_an_insert_race_checks_the_winners_owner(store, monkeypatch) -> None:
-    spec = validate_workflow_spec(_MINIMAL)
-    store.save("wf-1", spec, owner="alice")
+def test_save_losing_an_insert_race_replaces_the_winner(store, monkeypatch) -> None:
+    store.save("wf-1", validate_workflow_spec(_MINIMAL))
     real_get_row = store._get_row
-    calls = iter([None])  # the first read misses alice's row, as a racing save would
+    calls = iter([None])  # the first read misses the row, as a racing save would
     monkeypatch.setattr(store, "_get_row", lambda conn, wid: next(calls, real_get_row(conn, wid)))
-    with pytest.raises(WorkflowOwnedError):
-        store.save("wf-1", spec, owner="bob")
-
-
-def test_get_and_list_scoped_to_owner(store) -> None:
-    spec = validate_workflow_spec(_MINIMAL)
-    store.save("wf-1", spec, owner="alice")
-    store.save("wf-2", spec, owner="bob")
-    assert store.get("wf-1", owner="bob") is None
-    assert store.get("wf-1", owner="alice") is not None
-    assert [w.id for w in store.list(owner="alice")] == ["wf-1"]
-    assert {w.id for w in store.list()} == {"wf-1", "wf-2"}
+    spec = validate_workflow_spec({**_MINIMAL, "steps": [{"stage": "chunk"}]})
+    assert store.save("wf-1", spec).digest == workflow_digest(spec)

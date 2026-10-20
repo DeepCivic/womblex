@@ -25,7 +25,7 @@ from typing import Literal
 
 from womblex.store.source_provenance import NAMESPACE
 
-CONTRACT_VERSION = "2.0"
+CONTRACT_VERSION = "3.0"
 CONTRACT_VERSION_KEY = f"{NAMESPACE}.contract_version"
 SENSITIVITY_KEY = f"{NAMESPACE}.sensitivity"
 
@@ -63,7 +63,6 @@ ROLE_SENSITIVITY: dict[str, Sensitivity] = {
     "money_spans": "none",
     "money_columns": "none",
     "layout_regions": "none",
-    "conditions": "none",
 }
 
 

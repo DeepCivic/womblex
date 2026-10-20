@@ -36,7 +36,19 @@ def fleet(request, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     inbox.mkdir()
     (inbox / "people.csv").write_text("name,role\nAlice,Director\n")
     dbos_app.ensure_schema(None)
+    live_worker(tmp_path, str(inbox))
     return tmp_path / "store", str(inbox), tmp_path
+
+
+def live_worker(tmp: Path, ingest: str, worker_id: str = "standby") -> None:
+    """Record a live worker serving what the test worker's config does, as a running fleet has,
+    so a dispatch is not refused for want of one (`worker_registry.require_served`)."""
+    from womblex.cloud.worker import served_queues
+    from womblex.cloud.worker_registry import WorkerRegistry
+    from womblex.utils.model_check import CheckLevel, ModelCheckResult
+
+    with WorkerRegistry(None) as registry:
+        registry.record(worker_id, list(served_queues(ModelCheckResult(CheckLevel.LOAD), ingest, _minimal_config(tmp))))
 
 
 def batch(ingest: str, n: int = 1) -> JobSpec:
@@ -49,6 +61,26 @@ def work(fleet, **kw) -> int:
     return run_worker(
         None, str(store), _minimal_config(tmp), ingest_uri=ingest, poll_interval=0.2, **kw,
     )
+
+
+def test_a_run_extracts_and_runs_its_stages_under_the_config_it_carries(fleet):
+    """Not the worker's: each worker supplies only its store and paths (Phase R, D7)."""
+    import pyarrow.parquet as pq
+
+    from tests.test_cloud import _minimal_config
+    from womblex.cloud.workflow_runner import config_payload
+    from womblex.store.run_stamp import PRESET_KEY
+
+    store, ingest, tmp = fleet
+    carried = _minimal_config(tmp).model_copy(update={"dataset": _minimal_config(tmp).dataset.model_copy(
+        update={"name": "carried"})})
+    with RunBoard(None) as board:
+        board.enqueue("r1", [batch(ingest)], config=config_payload(carried))
+        board.enqueue_stages("r1", ["normalise"], "runs/r1/documents", config=config_payload(carried))
+        work(fleet, idle_timeout=2)
+    out = Path(str(store)) / "runs/r1/documents"
+    for role in ("elements", "normalised_text"):
+        assert pq.read_metadata(str(out / f"batch-0001.{role}.parquet")).metadata[PRESET_KEY.encode()] == b"carried"
 
 
 def test_a_worker_runs_a_batch_and_records_it_done(fleet):
@@ -154,59 +186,6 @@ def test_a_failed_stage_does_not_stop_the_stages_after_it(fleet, monkeypatch):
     assert attrs["chunk"]["ran_after_failed"] == ["normalise"]  # on the stage's own row
     assert "ran_after_failed" not in attrs["normalise"]
     assert RemoteStore.from_uri(str(store)).exists("runs/r1/documents/batch-0001.chunks.parquet")
-
-
-def _conditioned(fleet, conditions) -> tuple[RunBoard, dict]:
-    """Run r1 with one batch and a dispatched workflow carrying *conditions* through `normalise`."""
-    _, ingest, _ = fleet
-    wf = {"id": "wf", "digest": "sha256:feed", "preset": "recipe", "config": {}, "conditions": conditions}
-    with RunBoard(None) as board:
-        board.enqueue("r1", [batch(ingest)])
-        board.enqueue_stages("r1", ["normalise"], "runs/r1/documents", workflow=wf)
-        work(fleet, idle_timeout=2)
-        return board, {r.stage or r.kind: r for r in board.list_jobs("r1")}
-
-
-def test_the_coordinator_labels_conditions_once_extraction_settles_and_runs_on(fleet):
-    import json
-
-    import pyarrow.parquet as pq
-
-    from womblex.store.conditions_output import OUTCOMES_KEY
-
-    store, _, _ = fleet
-    _, jobs = _conditioned(fleet, [{"column": "status", "op": "eq", "value": "no-such-status"}])
-    assert jobs["downstream"].status == "done" and jobs["normalise"].status == "done"
-    key = "runs/r1/documents/batch-0001.conditions.parquet"
-    footer = pq.read_schema(store / key).metadata
-    outcomes = json.loads(footer[OUTCOMES_KEY.encode()])
-    assert outcomes["fails"] >= 1 and outcomes["holds"] == 0  # labelled, and the stage still ran
-    assert footer[b"womblex.workflow_digest"] == b"sha256:feed"
-    with RunBoard(None) as board:
-        assert key in board.file_checksums("r1").checksums
-
-
-def test_a_labelling_failure_in_the_coordinator_is_logged_and_the_stages_run(fleet, monkeypatch, caplog):
-    from womblex.cloud import workflow_conditions
-
-    def boom(*_):
-        raise OSError("store gone")
-
-    monkeypatch.setattr(workflow_conditions, "label_store", boom)
-    _, jobs = _conditioned(fleet, [{"column": "status", "op": "eq", "value": "ok"}])
-    assert jobs["downstream"].status == "done" and jobs["normalise"].status == "done"
-    assert "conditions not labelled" in caplog.text
-
-
-def test_a_later_coordinators_condition_labels_carry_the_newest_digest():
-    key = "k/b1.conditions.parquet"
-    rows = [
-        _Row("r1:downstream:new", "SUCCESS", [], kind="downstream", created_at=2),
-        _Row("r1:downstream:old", "SUCCESS", [], kind="downstream", created_at=1),
-    ]
-    steps = {wid: [{"function_id": 1, "output": {key: digest}, "error": None}]
-             for wid, digest in (("r1:downstream:new", "bb"), ("r1:downstream:old", "aa"))}
-    assert _board(rows, steps).file_checksums("r1").checksums == {key: "bb"}
 
 
 def test_an_engine_error_is_not_carried_as_a_units_failure():
@@ -510,7 +489,7 @@ def test_a_dispatched_workflow_runs_its_stages_under_its_own_config_and_digest(f
     import pyarrow.parquet as pq
 
     store, ingest, _ = fleet
-    wf = {"id": "wf", "digest": "sha256:feed", "preset": "recipe",
+    wf = {"id": "wf", "digest": "sha256:feed", "preset": "recipe", "spec": {"preset": "recipe"},
           "config": {"chunking": {"chunk_size": 8}}}
     with RunBoard(None) as board:
         for run in ("r1", "r2"):
@@ -543,7 +522,8 @@ def test_a_dispatched_workflow_runs_its_stages_under_its_own_config_and_digest(f
             store=str(store), run_id=run, output_prefix=None,
             dsn=dbos_app.system_database_url(None))) == 0
     manifest = out / "runs/r2/manifest.parquet"
-    assert read_run_record(manifest)["workflows"] == [{"digest": "sha256:feed", "stages": ["chunk"]}]
+    assert read_run_record(manifest)["workflows"] == [  # the name and spec travelled with the dispatch
+        {"digest": "sha256:feed", "name": "wf", "spec": {"preset": "recipe"}, "stages": ["chunk"]}]
     assert b"womblex.workflow_digest" not in pq.read_metadata(str(manifest)).metadata
     assert read_run_record(out / "runs/r1/manifest.parquet")["workflows"] == []
 

@@ -57,35 +57,57 @@ def system_database_url(dsn: str | None) -> str:
     return f"sqlite:///{path}"
 
 
-def extract_queue(ingest_root: str) -> str:
-    """The queue extraction batches reading *ingest_root* are enqueued on."""
-    digest = hashlib.sha256(ingest_root.rstrip("/").encode()).hexdigest()[:10]
-    return f"womblex-extract-{digest}"
+def _root(ingest_root: str) -> str:
+    return hashlib.sha256(ingest_root.rstrip("/").encode()).hexdigest()[:10]
 
 
-def stage_queue(stage: str) -> str:
-    return f"womblex-stage-{stage}"
+def extract_queue(ingest_root: str, models: str = "") -> str:
+    """The queue extraction batches reading *ingest_root* with the models keyed *models*
+    (`model_check.models_key`) are enqueued on."""
+    return f"womblex-extract-{_root(ingest_root)}" + (f"-{models}" if models else "")
+
+
+def firing_queue(ingest_root: str) -> str:
+    """The queue a scheduled firing of a workflow whose input store is *ingest_root* runs on."""
+    return f"womblex-fire-{_root(ingest_root)}"
+
+
+def stage_queue(stage: str, models: str = "") -> str:
+    """The queue *stage* is enqueued on when its work needs the models keyed *models*."""
+    return f"womblex-stage-{stage}" + (f"-{models}" if models else "")
 
 
 def batch_id(run_id: str, batch_num: int) -> str:
     return f"{run_id}:batch:{batch_num:04d}"
 
 
-def trigger_id(run_id: str) -> str:
-    """A scheduled firing's row on the board, under the run it starts."""
-    return f"{run_id}:trigger"
+def trigger_id(run_id: str, firing: str) -> str:
+    """A scheduled firing's row on the board, under the run it appends to."""
+    return f"{run_id}:trigger:{firing}"
 
 
-def stage_id(run_id: str, stage: str) -> str:
-    return f"{run_id}:stage:{stage}"
+def stage_scope(firing: str | None, workflow_digest: str | None) -> str | None:
+    """Whose stages these are: a scheduled firing's, a dispatched workflow's, or the run's own (`None`).
+
+    Scoped ids let a run hold a stage more than once, so a later firing or a changed workflow
+    runs its stages rather than attaching to an earlier dispatch's recorded result.
+    """
+    if firing:
+        return f"fire-{firing}"
+    return "wf-" + workflow_digest.removeprefix("sha256:")[:12] if workflow_digest else None
+
+
+def stage_id(run_id: str, stage: str, scope: str | None = None) -> str:
+    """A stage's first attempt in *scope* (`stage_scope`)."""
+    return f"{run_id}:{scope}:stage:{stage}" if scope else f"{run_id}:stage:{stage}"
 
 
 _STAGE_ATTEMPT = re.compile(r"^(?P<base>.+:stage:[^:]+)(?::retry:(?P<n>\d+))?$")
 
 
-def stage_retry_id(run_id: str, stage: str, attempt: int) -> str:
-    """Attempt *attempt* (1 is the first retry) of a stage; the original is :func:`stage_id`."""
-    return f"{stage_id(run_id, stage)}:retry:{attempt}"
+def stage_retry_id(original: str, attempt: int) -> str:
+    """Attempt *attempt* (1 is the first retry) of the stage whose first attempt is *original*."""
+    return f"{original}:retry:{attempt}"
 
 
 def stage_attempt(workflow_id: str) -> tuple[str, int] | None:
@@ -94,9 +116,12 @@ def stage_attempt(workflow_id: str) -> tuple[str, int] | None:
     return (m["base"], int(m["n"] or 0)) if m else None
 
 
-def downstream_id(run_id: str, stages: list[str], workflow_digest: str | None = None) -> str:
-    """Identifies one dispatch; the same stage list (under the same workflow) is the same coordinator."""
-    digest = hashlib.sha256(",".join([*stages, workflow_digest or ""]).encode()).hexdigest()[:8]
+def downstream_id(
+    run_id: str, stages: list[str], workflow_digest: str | None = None, firing: str | None = None,
+) -> str:
+    """Identifies one dispatch; the same stage list (under the same workflow, in the same firing)
+    is the same coordinator."""
+    digest = hashlib.sha256(",".join([*stages, workflow_digest or "", firing or ""]).encode()).hexdigest()[:8]
     return f"{run_id}:downstream:{digest}"
 
 

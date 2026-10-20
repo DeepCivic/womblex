@@ -1,10 +1,12 @@
 """`womblex plan`: what a workflow would run over a shard directory, and what it would spend.
 
 Offline: it stops at `check_workflow` (no model request, no client); `validate` probes
-models. Enrich and embed counts come from the stages' own request builders over the offline
-kanon-2 tokeniser. A free earlier step (`normalise`, `spellfix`, `chunk` without AI chunking)
-is produced in a scratch directory of symlinks so the count is over the layer the step would
-read; the shard directory is untouched. A price is the caller's assumed rate, labelled.
+models. Every paid call is counted (Phase R, D12): enrich and embed from the stages' own
+request builders, AI chunking's chunk-time Enricher calls (`chunk_stage.plan_ai_chunking`),
+each in the tokens of the provider's own counter; a step that calls no paid service is marked
+free. A free earlier step (`normalise`, `spellfix`, `chunk` without AI chunking) is produced in
+a scratch directory of symlinks so the count is over the layer the step would read; the shard
+directory is untouched. A price is the caller's assumed rate, labelled.
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 _FEEDS: dict[str, tuple[str, ...]] = {
     "enrich": ("normalise", "spellfix"),
     "embed": ("normalise", "spellfix", "chunk"),
+    "chunk": ("normalise", "spellfix"),  # counted only under AI chunking
 }
 
 
@@ -37,7 +40,7 @@ class TokenEstimate:
 
     basis: str  # on_disk | simulated | pending | unavailable
     note: str = ""
-    tokens: int = 0
+    tokens: int | None = 0  # None: the provider declares no token counter
     requests: int = 0
     texts: int = 0
     detail: dict[str, int] = field(default_factory=dict)
@@ -52,6 +55,7 @@ class StepPlan:
     reason: str = ""
     bases: int = 0
     rewrites: int = 0
+    paid: bool = False  # the step calls a paid service; otherwise it is free (local)
     tokens: TokenEstimate | None = None
 
 
@@ -102,6 +106,12 @@ def _estimate(stage: str, index: int, stages: list[str], config: WomblexConfig, 
             for s in sim:
                 STAGE_CONTRACTS[s].run(scratch, config, RunContext())
             basis = "simulated" if sim else "on_disk"
+            if stage == "chunk":
+                from womblex.process.chunk_stage import plan_ai_chunking
+
+                a = plan_ai_chunking(scratch, config)
+                return TokenEstimate(basis, tokens=a.tokens, requests=a.calls, texts=a.calls,
+                                     detail={"documents": a.documents, "reused_documents": a.reused})
             if stage == "enrich":
                 from womblex.analyse.enrich_stage import plan_enrichment
 
@@ -114,9 +124,28 @@ def _estimate(stage: str, index: int, stages: list[str], config: WomblexConfig, 
             from womblex.analyse.embed_stage import plan_embedding
 
             e = plan_embedding(scratch, config.embedding)
-            return TokenEstimate(basis, tokens=e.tokens, requests=e.requests, texts=e.chunks)
+            return TokenEstimate(basis, "" if e.tokens is not None else "the provider declares no token counter",
+                                 tokens=e.tokens, requests=e.requests, texts=e.chunks)
     except Exception as exc:  # a layer that is not there: the plan says so, never raises
         return TokenEstimate("unavailable", f"{type(exc).__name__}: {exc}")
+
+
+def _paid(stage: str, config: WomblexConfig) -> bool:
+    """Whether *stage* calls a paid service under *config*: a networked enrichment or embedding
+    provider, or AI chunking's chunk-time Enricher calls. Every other step runs locally."""
+    if stage == "enrich":
+        from womblex.analyse.enrich import make_enrichment_provider
+
+        return make_enrichment_provider(config.enrichment, None, None).limits.needs_network
+    if stage == "embed":
+        from womblex.analyse.embed import make_embedding_provider
+
+        return make_embedding_provider(config.embedding).limits.needs_network
+    if stage == "chunk":
+        from womblex.analyse.enrich import ai_chunking_model
+
+        return ai_chunking_model(config) is not None
+    return False
 
 
 def plan_workflow(
@@ -150,10 +179,11 @@ def plan_workflow(
                 plan.action, plan.reason = "skip", "every layout sidecar already carries this config's fingerprint"
             elif same:
                 plan.reason = f"{same} of {total} base(s) skipped (fingerprint unchanged)"
-        if stage in _FEEDS:
+        plan.paid = _paid(stage, config)
+        if stage in _FEEDS and plan.paid:
             plan.tokens = _estimate(stage, i, stages, config, shard_dir)
             price = (prices or {}).get(stage)
-            if price is not None and plan.tokens.basis in ("on_disk", "simulated"):  # no count, no cost
+            if price is not None and plan.tokens.tokens is not None and plan.tokens.basis in ("on_disk", "simulated"):
                 plan.tokens.assumed_price_per_million = price
                 plan.tokens.assumed_cost = plan.tokens.tokens / 1e6 * price
         steps.append(plan)

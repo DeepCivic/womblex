@@ -256,11 +256,42 @@ def _require_region(
         )
 
 
+def check_reachable(model: str, *, timeout: float = 10.0) -> None:
+    """Raise unless a deployment for *model* is configured and answers, with no billed request.
+
+    The hosted API needs ``ISAACUS_API_KEY`` set and its base URL (``ISAACUS_BASE_URL``, else
+    the SDK's) to answer an HTTP request; the key itself is taken as active. A SageMaker
+    deployment needs an endpoint that serves *model* and reports ``InService``
+    (``DescribeEndpoint``, a free control-plane call).
+    """
+    endpoints = endpoints_from_env()
+    if endpoints:
+        if unserved_models([model]):
+            raise ValueError(f"No SageMaker endpoint in {ENDPOINTS_ENV} serves {model}")
+        import boto3
+
+        endpoint = next(e for e in endpoints if is_model_served(model, [e]))
+        profile = os.environ.get(PROFILE_ENV) or None
+        session = boto3.Session(**({"profile_name": profile} if profile else {}))
+        region = endpoint.region or os.environ.get(REGION_ENV) or session.region_name
+        status = session.client("sagemaker", region_name=region).describe_endpoint(
+            EndpointName=endpoint.name)["EndpointStatus"]
+        if status != "InService":
+            raise RuntimeError(f"SageMaker endpoint {endpoint.name} is {status}, not InService")
+        return
+    if not (os.environ.get(API_KEY_ENV) or "").strip():
+        raise ValueError(f"{API_KEY_ENV} is not set, and {ENDPOINTS_ENV} declares no SageMaker endpoint")
+    import httpx
+
+    httpx.get(os.environ.get("ISAACUS_BASE_URL") or "https://api.isaacus.com/v1", timeout=timeout)  # any answer
+
+
 __all__ = [
     "ENDPOINTS_ENV",
     "PROFILE_ENV",
     "REGION_ENV",
     "SageMakerEndpoint",
+    "check_reachable",
     "endpoints_from_env",
     "is_model_served",
     "make_ai_chunking_client",

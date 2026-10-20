@@ -1,4 +1,4 @@
-"""Local multi-stage runner: execute a stored workflow's steps over a shard directory.
+"""Local multi-stage runner: execute a workflow file's steps over a shard directory.
 
 Per step it composes what `womblex run-stage --shards` uses (`prepare_stage_context`,
 `run_stage_local`); no `*_shards()` call is made here. Everything that can refuse does
@@ -7,9 +7,7 @@ that cannot complete spends nothing. Once a step has run nothing halts: a failed
 is recorded and logged, later steps still run labelled with the failures they follow,
 and the exit code is the account. Steps run in list order, and the order is checked first
 (`workflow_order`): an input no earlier step produces, or that a later step will rewrite,
-refuses the workflow with stable codes. Conditions label each document before the first step
-(`workflow_conditions`); they never refuse. Destinations and triggers are not acted on here, and
-the log says so.
+refuses the workflow with stable codes. Triggers are not acted on here, and the log says so.
 """
 
 from __future__ import annotations
@@ -50,7 +48,7 @@ class RefusalCode(str, Enum):
     """Stable codes for a refusal that is not an ordering issue (those carry `OrderCode`)."""
 
     WORKFLOW_UNAVAILABLE = "workflow_unavailable"
-    """No stored workflow by that id, or the store could not be read (`womblex validate --json`)."""
+    """The workflow file could not be read (`womblex validate --json`, `womblex plan --json`)."""
 
     SPEC_INVALID = "spec_invalid"
     PRESET_UNKNOWN = "preset_unknown"
@@ -67,17 +65,14 @@ class RefusalCode(str, Enum):
     ORDER_NOT_PIPELINE = "order_not_pipeline"
     """The fleet runs stages in pipeline order, so a list in another order is not dispatched."""
 
-    PREFIX_NOT_OWNED = "prefix_not_owned"
-    """A firing's ingest prefix is outside its owner's own `<owner>/` tree."""
-
     NO_DOCUMENTS = "no_documents"
     """A firing found no supported document under its ingest prefix."""
 
-    RUN_CONFLICT = "run_conflict"
-    """The run already dispatched a stage under a different workflow digest."""
+    NO_WORKER = "no_worker"
+    """No live worker serves a step's (or a firing's extraction's) work under the workflow's config."""
 
     BATCHES_CANCELLED = "batches_cancelled"
-    """A firing's run already holds cancelled batches, which a re-enqueue would attach to and never run."""
+    """A replayed firing's own batches were cancelled; re-queueing would attach to them and never run."""
 
 
 class WorkflowRefusedError(Exception):
@@ -153,6 +148,18 @@ def config_from_overlay(
     })
 
 
+def config_payload(config: WomblexConfig) -> dict[str, Any]:
+    """What a fleet run carries of *config* (Phase R, D7): everything but `paths`, which are each worker's."""
+    return config.model_dump(mode="json", exclude={"paths"})
+
+
+def config_from_payload(payload: dict[str, Any], paths: dict[str, Any]) -> WomblexConfig:
+    """The config a fleet run was dispatched with, on the worker that runs it, with that worker's *paths*."""
+    from womblex.config import WomblexConfig
+
+    return WomblexConfig.model_validate({**payload, "paths": paths})
+
+
 def preset_resolver(presets_dir: Path | None) -> Callable[[str], Preset | None]:
     """Resolve a preset name: an operator-saved one in *presets_dir* shadows a built-in.
 
@@ -207,8 +214,8 @@ def not_acted_on(stored: StoredWorkflow) -> tuple[str, ...]:
     spec = stored.spec
     return tuple(
         name for name, present in (
-            ("destinations", spec.destinations),
             ("triggers", spec.triggers),
+            ("input_binding.store", spec.input_binding.store),
             ("input_binding.ingest_prefix", spec.input_binding.ingest_prefix),
         ) if present
     )
@@ -316,9 +323,7 @@ def run_workflow_local(
         )
     logger.info("workflow %s (%s): %s over %s", stored.id, stored.digest, " -> ".join(s.stage for s in stored.spec.steps), shard_dir)
 
-    with workflow_context(stored.digest):
-        if stored.spec.conditions:
-            _label_conditions(stored, shard_dir)
+    with workflow_context(stored.digest, stored.id, stored.spec.model_dump(mode="json")):
         for step, ctx in zip(stored.spec.steps, contexts, strict=True):
             ctx.source_root, ctx.force = source_root, force
             earlier = tuple(s.stage for s in result.steps if s.status == "failed")
@@ -336,16 +341,6 @@ def run_workflow_local(
     return result
 
 
-def _label_conditions(stored: StoredWorkflow, shard_dir: Path) -> None:
-    """Label the documents against the conditions; launched, so a failure here is logged, never raised."""
-    from womblex.cloud.workflow_conditions import label_shard_dir
-
-    try:
-        label_shard_dir(stored.id, stored.spec.conditions, shard_dir)
-    except Exception:
-        logger.exception("workflow %s: conditions not labelled; the steps run regardless", stored.id)
-
-
 __all__ = [
     "PreparedWorkflow",
     "RefusalCode",
@@ -354,6 +349,8 @@ __all__ = [
     "WorkflowRunResult",
     "check_workflow",
     "config_from_overlay",
+    "config_from_payload",
+    "config_payload",
     "not_acted_on",
     "prepare_workflow",
     "preset_resolver",

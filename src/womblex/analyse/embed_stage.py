@@ -110,7 +110,7 @@ class EmbedPlan:
     """What `embed_shards` would send, counted offline."""
 
     chunks: int = 0
-    tokens: int = 0
+    tokens: int | None = 0  # None: the provider declares no token counter
     requests: int = 0
 
 
@@ -118,15 +118,17 @@ def plan_embedding(
     shard_dir: Path, embedding_config: EmbeddingConfig | None = None, *,
     token_counter: TokenCounter | None = None,
 ) -> EmbedPlan:
-    """Count the chunks, requests and tokens `embed_shards` would send; never calls the API."""
-    per_request = make_embedding_provider(embedding_config or EmbeddingConfig()).limits.max_texts_per_request
-    counter = token_counter or TokenCounter()
-    plan = EmbedPlan()
+    """Count the chunks, requests and tokens `embed_shards` would send, tokens by the provider's own
+    counter (`EmbeddingLimits.token_counter`); never calls the API."""
+    limits = make_embedding_provider(embedding_config or EmbeddingConfig()).limits
+    counter = token_counter or limits.token_counter
+    plan = EmbedPlan(tokens=0 if counter is not None else None)
     for base in _batch_bases(shard_dir):
         texts = [r["text"] for r in _chunk_rows(base)]
         plan.chunks += len(texts)
-        plan.tokens += sum(counter.count_batch(texts)) if texts else 0
-        plan.requests += -(-len(texts) // per_request)
+        if counter is not None and plan.tokens is not None and texts:
+            plan.tokens += sum(counter.count_batch(texts))
+        plan.requests += -(-len(texts) // limits.max_texts_per_request)
     return plan
 
 

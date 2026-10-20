@@ -137,6 +137,34 @@ def _guard(settings: UISettings, *, needs_ingest: bool = True) -> ExecutionCapab
     return cap
 
 
+def run_config(settings: UISettings, config: dict | None) -> dict:
+    """The config a run dispatched from *config* carries to every worker (Phase R, D7).
+
+    Built through the same construction `downstream_stages` validates with, so the workers run
+    the config *as the CLI would load it*; `{}` or `None` is the default config. Raises
+    ``pydantic.ValidationError`` on a config that would not load.
+    """
+    from womblex.cloud.workflow_runner import config_payload
+    from womblex.config import WomblexConfig
+    from womblex.ui.composer import deployment_paths
+
+    paths, _ = deployment_paths(settings)
+    return config_payload(WomblexConfig(**{"dataset": {"name": "console"}, **(config or {}), "paths": paths}))
+
+
+def check_served(
+    settings: UISettings, config: dict | None, stages: tuple[str, ...] = (), *, extraction: bool = False,
+) -> None:
+    """Refuse (`worker_registry.NoLiveWorker`, a ``ValueError``) a run under *config* whose
+    extraction or *stages* no live worker serves. Writes nothing, so a submit refuses before any row."""
+    from womblex.cloud.worker_registry import needed_queues, require_served
+    from womblex.cloud.workflow_runner import config_from_payload
+
+    validated = config_from_payload(run_config(settings, config), {"input_root": ".", "output_root": ".",
+                                                                    "checkpoint_dir": "."})
+    require_served(settings.db_dsn, needed_queues(validated, stages, settings.ingest_uri if extraction else None))
+
+
 def _supported_under(settings: UISettings, prefix: str) -> tuple[str, list[str]]:
     """The location *prefix* names, and the store keys a run there would ingest.
 
@@ -178,8 +206,9 @@ def owned_prefix(owner: str | None, input_prefix: str | None) -> str:
 
 def batch_specs(
     keys: list[str], *, shard_prefix: str, ingest_root: str, batch_size: int, max_attempts: int,
+    start: int = 1,
 ) -> list[JobSpec]:
-    """*keys* split into `batch_size` extraction batches, numbered from 1."""
+    """*keys* split into `batch_size` extraction batches, numbered from *start*."""
     from womblex.cloud.jobs import JobSpec
 
     if batch_size < 1:
@@ -187,7 +216,7 @@ def batch_specs(
     return [
         JobSpec(batch_num=n, input_keys=keys[i : i + batch_size], shard_prefix=shard_prefix,
                 max_attempts=max_attempts, ingest_root=ingest_root)
-        for n, i in enumerate(range(0, len(keys), batch_size), start=1)
+        for n, i in enumerate(range(0, len(keys), batch_size), start=start)
     ]
 
 
@@ -226,6 +255,7 @@ def enqueue_extraction(
     batch_size: int = 50,
     max_attempts: int = 3,
     owner: str | None = None,
+    config: dict | None = None,
 ) -> EnqueueResult:
     """Plan an extraction run into the queue — the "configure-and-run" action.
 
@@ -239,7 +269,8 @@ def enqueue_extraction(
     enqueues that count.
 
     *owner* is the service caller the run belongs to (``None`` for the CLI
-    and console); see `RunBoard.enqueue`.
+    and console); see `RunBoard.enqueue`. *config* is what the batches extract under on
+    every worker (`run_config`; omitted, the default config).
 
     Raises :class:`ExecutionDisabled` when the console cannot dispatch (the
     route maps it to 409) and ``ValueError`` on bad input (→ 400) — an unsafe
@@ -254,6 +285,8 @@ def enqueue_extraction(
 
     from womblex.cloud.jobs import RunBoard
 
+    payload = run_config(settings, config)
+    check_served(settings, config, extraction=True)
     ingest_uri = cast(str, settings.ingest_uri)
     location, keys = _supported_under(settings, normalise_prefix(input_prefix))
     if not keys:
@@ -266,7 +299,7 @@ def enqueue_extraction(
 
     ensure_schema(settings.db_dsn)
     with RunBoard(settings.db_dsn, connect_timeout=QUEUE_CONNECT_TIMEOUT) as board:
-        newly = board.enqueue(resolved_run_id, specs, owner=owner)
+        newly = board.enqueue(resolved_run_id, specs, owner=owner, config=payload)
 
     logger.info(
         "console enqueue: run_id=%s, %d doc(s) -> %d batch(es), %d newly enqueued",
@@ -374,7 +407,7 @@ def enqueue_downstream_stages(
     Exactly what ``womblex enqueue-stages --run-id … --config …`` does, reached
     from the screen that composed the config: the stages *config* enables
     (:func:`~womblex.pipeline_order.enabled_downstream_stages`), written as
-    queue rows for the workers to claim. The console still only writes rows —
+    queue rows for the workers to claim, each run under *config* (`run_config`). The console still only writes rows —
     execution stays on the fleet, with its retry and crash recovery, and no
     request here can become a command because there is no command.
 
@@ -413,10 +446,12 @@ def enqueue_downstream_stages(
     shard_prefix = f"runs/{run_id}/documents"
     if not order_checked:
         check_stage_order(settings, config, stages, run_id)
+    check_served(settings, config, stages)
     ensure_schema(settings.db_dsn)
     with RunBoard(settings.db_dsn, connect_timeout=QUEUE_CONNECT_TIMEOUT) as board:
         newly = board.enqueue_stages(
             run_id, list(stages), shard_prefix, max_attempts=max_attempts, owner=owner,
+            config=run_config(settings, config),
         )
 
     logger.info(

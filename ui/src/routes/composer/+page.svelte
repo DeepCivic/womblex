@@ -73,11 +73,10 @@
 	let savingDisabled = $state(false);
 
 	// Enqueue-from-composer. The composer is now
-	// the only dispatch surface. The queue carries no config — workers get theirs
-	// from their own `--config` at launch — and ingest/output locations are
-	// deployment settings owned by the Resources Console, not re-input here. So an
-	// enqueue is just the composed run's identity (`run_id`) plus batching
-	// controls; the whole configured ingest root is the input, so there is no
+	// the only dispatch surface. The run carries the composed config, which every
+	// worker extracts under, and ingest/output locations are deployment settings
+	// owned by the Resources Console, not re-input here. So an enqueue is the
+	// composed config, the run's identity (`run_id`) and batching controls; the whole configured ingest root is the input, so there is no
 	// prefix field. The read-only deployment strip shows where documents come from
 	// and how many are ready, fed by the ingest preflight.
 	let execStatus = $state<ExecutionStatus | null>(null);
@@ -249,8 +248,8 @@
 	}
 
 	// Hand the composed run into the queue — the composer is the only dispatch
-	// surface. The queue carries no config;
-	// workers read their own `--config` at launch. Ingest and output are
+	// surface. The run carries the composed config, which every worker extracts
+	// under. Ingest and output are
 	// deployment settings owned by the Resources Console, so this sends no
 	// prefix — the whole configured ingest root is the input — only the optional
 	// run id and the batching controls, through the same `enqueueExtraction` the
@@ -262,6 +261,7 @@
 		enqueueResult = null;
 		try {
 			const res = await enqueueExtraction({
+				config,
 				run_id: enqueueRunId.trim() || undefined,
 				batch_size: batchSize,
 				max_attempts: maxAttempts
@@ -548,9 +548,8 @@
 				<h2 class="font-display text-sm">Enqueue this run</h2>
 				<p class="mt-1 max-w-prose text-xs text-muted-foreground">
 					Plans an extraction run into the job queue over the whole configured ingest
-					location. Workers the platform brings up read their own <code>--config</code>
-					at launch — the queue carries no config, so this hands off only the run id
-					and batching. Change the ingest and output locations on the
+					location. The run carries this config: every worker that claims its work
+					extracts under it, supplying only its own paths, credentials and models. Change the ingest and output locations on the
 					<a href="/resources" class="underline">Resources Console</a>.
 				</p>
 			</div>

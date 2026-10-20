@@ -40,11 +40,21 @@ def _resolve(name: str) -> Preset | None:
     return _PRESET if name == _PRESET.name else None
 
 
+def write_workflow(directory: Path, name: str, steps: list[str], **extra) -> Path:
+    """A workflow file, as an operator writes one."""
+    import yaml
+
+    path = directory / f"{name}.yaml"
+    path.write_text(yaml.safe_dump(
+        {"name": name, "preset": _PRESET.name, "steps": [{"stage": s} for s in steps], **extra}))
+    return path
+
+
 def _stored(steps: list[str], **extra) -> StoredWorkflow:
     spec = validate_workflow_spec({
         "preset": _PRESET.name, "steps": [{"stage": s} for s in steps], **extra,
     })
-    return StoredWorkflow("wf", None, spec, workflow_digest(spec), "", "")
+    return StoredWorkflow("wf", spec, workflow_digest(spec), "", "")
 
 
 @pytest.fixture
@@ -159,13 +169,11 @@ def test_a_failed_step_is_recorded_and_later_steps_still_run(
 def test_warns_about_stored_but_unacted_parts(shards: Path, caplog: pytest.LogCaptureFixture) -> None:
     stored = _stored(
         ["normalise"],
-        conditions=[{"column": "ext", "op": "eq", "value": ".csv"}],
         triggers=[{"cron": "0 3 * * *"}],
-        destinations=[{"kind": "webhook", "target": "https://example.invalid/hook"}],
     )
     with caplog.at_level(logging.WARNING):
         result = run_workflow_local(stored, shards, resolve_preset=_resolve)
-    assert result.not_acted_on == ("destinations", "triggers")
+    assert result.not_acted_on == ("triggers",)
     assert "stored but not acted on" in caplog.text
     assert result.exit_code == 0
 
@@ -175,12 +183,9 @@ def test_cli_exit_codes(shards: Path, tmp_path: Path, monkeypatch: pytest.Monkey
 
     from womblex.cli.workflow import cmd_run_workflow
 
-    dsn = f"sqlite:///{tmp_path}/wf.db"
-    ensure_workflow_schema(dsn)
-    with WorkflowStore(dsn) as store:
-        store.save("good", _stored(["normalise"]).spec)
-    def args(wid: str, **kw) -> argparse.Namespace:
-        base = {"workflow_id": wid, "shards": shards, "dsn": dsn, "presets_dir": None,
+    write_workflow(tmp_path, "good", ["normalise"])
+    def args(name: str, **kw) -> argparse.Namespace:
+        base = {"workflow": tmp_path / f"{name}.yaml", "shards": shards, "presets_dir": None,
                 "ingest": None, "force": False, "models_check": None}
         return argparse.Namespace(**{**base, **kw})
 

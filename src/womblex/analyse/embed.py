@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from womblex.utils.model_registry import SLOT_EMBEDDING, record_use, register, resolve
+from womblex.utils.token_packer import TokenCounter
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from womblex.config import EmbeddingConfig
@@ -105,10 +106,15 @@ def _embed_batch(
 
 @dataclass(frozen=True)
 class EmbeddingLimits:
-    """What a provider declares, so the stage batches requests by it."""
+    """What a provider declares, so the stage batches requests by it and `plan` counts its tokens.
+
+    `token_counter` is the provider's own (`count_batch(texts) -> list[int]`); a provider that
+    declares none has its texts and requests counted, not its tokens.
+    """
 
     max_texts_per_request: int
     needs_network: bool
+    token_counter: TokenCounter | None = None
 
 
 class EmbeddingProvider(Protocol):
@@ -126,7 +132,8 @@ class IsaacusEmbedding:
 
     client: object
     config: EmbeddingConfig
-    limits: EmbeddingLimits = EmbeddingLimits(MAX_TEXTS_PER_REQUEST, needs_network=True)
+    limits: EmbeddingLimits = EmbeddingLimits(MAX_TEXTS_PER_REQUEST, needs_network=True,
+                                              token_counter=TokenCounter())  # Kanon-2's own, offline
     name: str = "isaacus"
 
     def embed(self, texts: list[str]) -> list[list[float]]:

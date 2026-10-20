@@ -89,7 +89,8 @@ offset-merged), `token_counter` (`count_batch(texts) -> list[int]`),
 `needs_network`, and `returns_document`.
 
 An embedding provider has a `name`, a `limits` (`EmbeddingLimits`:
-`max_texts_per_request`, `needs_network`) and `embed(texts) -> list[list[float]]`,
+`max_texts_per_request`, `needs_network`, and an optional `token_counter`
+`plan` counts its tokens with) and `embed(texts) -> list[list[float]]`,
 one vector per text in order.
 
 Womblex keeps everything around the call: request packing, long-document
