@@ -126,8 +126,9 @@ A document with no rows in the layer is 404.
 
 ## Out of scope
 
-Callbacks and webhooks (consumers poll), run cancellation, per-client quotas,
-Prometheus metrics.
+Registering a callback or webhook through the API (a caller polls; a run a
+workflow starts sends its events to the workflow's webhook, [workflows.md](workflows.md)),
+run cancellation, per-client quotas, Prometheus metrics.
 
 ## Verification
 
