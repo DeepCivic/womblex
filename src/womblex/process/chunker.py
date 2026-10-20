@@ -408,9 +408,11 @@ def chunk_batch(
                     )
                 )
 
-    if table_texts:
+    if table_texts:  # token mode, never AI chunking's paid call: a markdown grid has no semantics
+        tables_chunker = (semchunk.Chunker(chunker.chunk_size, chunker.token_counter)
+                          if getattr(chunker, "chunking_model", None) else chunker)
         t_chunks_all, t_offsets_all = _chunker_batch(
-            chunker, table_texts,
+            tables_chunker, table_texts,
             overlap=None, processes=processes, progress=False,
         )
         for (owner_idx, table_page, table_elem_order), chunks, offsets in zip(

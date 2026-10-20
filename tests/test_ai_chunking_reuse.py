@@ -144,6 +144,26 @@ class TestChunkBatchReuse:
         # Both still produce chunks keyed by source_hash.
         assert set(out) == {"A", "B"}
 
+    def test_tables_never_reach_an_ai_chunking_chunker(self) -> None:
+        """Table markdown chunks in token mode (docs/decisions-dead-ends.md), so AI chunking's paid
+        Enricher call is made for narratives alone."""
+        class _AIChunker(_RecordingChunker):
+            chunking_model, chunk_size = "kanon-2-enricher", 50
+
+            def __init__(self) -> None:
+                super().__init__()
+                self.calls: list[list[object]] = []
+
+            def __call__(self, texts, **kw):
+                self.calls.append(list(texts))
+                return super().__call__(texts, **kw)
+
+        chunker = _AIChunker()
+        table = "| a | b |\n|---|---|\n| 1 | 2 |"
+        out = chunk_batch([ChunkInput(source_hash="A", narrative="alpha beta", tables=[(None, 3, table)])], chunker)
+        assert chunker.calls == [["alpha beta"]]
+        assert [c.content_type for c in out["A"]] == ["narrative", "table"]
+
     def test_no_overrides_passes_plain_strings(self) -> None:
         inputs = [ChunkInput(source_hash="A", narrative="alpha beta")]
         chunker = _RecordingChunker()
