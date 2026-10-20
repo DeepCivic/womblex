@@ -192,6 +192,29 @@ def test_womblex_deliver_redelivers_and_refuses_what_it_cannot(run_root: Path, t
     assert deliver([{**_to(tmp_path), "uri": "nosuchscheme://x"}]) == 1
 
 
+def test_womblex_deliver_on_the_fleet_rewrites_the_manifest_before_it_delivers(tmp_path: Path, monkeypatch):
+    """A retry made since the run finished changed files the manifest lists, so the bundle must
+    carry a manifest written after it, as the coordinator's does."""
+    import argparse
+
+    import yaml
+
+    import womblex.cloud.delivery as delivery_module
+    import womblex.cloud.finalize as finalize_module
+    from womblex.cli.workflow import cmd_deliver
+
+    calls: list[str] = []
+    monkeypatch.setattr(finalize_module, "finalize_from_board", lambda *_a: calls.append("finalize"))
+    monkeypatch.setattr(delivery_module, "deliver", lambda *_a, **_k: calls.append("deliver") or [])
+    monkeypatch.setattr(delivery_module, "record_deliveries", lambda *_a: calls.append("record"))
+    path = tmp_path / "wf.yaml"
+    path.write_text(yaml.safe_dump({"name": "wf", "preset": "saved-offline", "steps": [{"stage": "normalise"}],
+                                    "destinations": [_to(tmp_path)]}))
+    assert cmd_deliver(argparse.Namespace(workflow=path, shards=None, run_id="r1", store=str(tmp_path / "store"),
+                                          output_prefix=None, dsn=None)) == 0
+    assert calls == ["finalize", "deliver", "record", "finalize"]
+
+
 def test_a_retry_names_the_workflow_to_redeliver():
     from womblex.cloud.retry import _delivering
 
