@@ -111,7 +111,7 @@ def test_a_redelivery_replaces_the_record(run_root: Path, tmp_path: Path):
 @pytest.mark.parametrize("destination, problem", [
     ({"credentials": {"key_env": "WOMBLEX_TEST_UNSET_KEY", "secret_env": "WOMBLEX_TEST_UNSET_SECRET"}},
      "WOMBLEX_TEST_UNSET_KEY, WOMBLEX_TEST_UNSET_SECRET not set"),
-    ({"uri": "nosuchscheme://bucket/x"}, "cannot write to nosuchscheme://"),
+    ({"uri": "az://container/x"}, "cannot write to az://"),  # adlfs is not installed
 ])
 def test_a_destination_that_cannot_be_reached_refuses_before_any_step(
     run_root: Path, tmp_path: Path, monkeypatch, destination: dict, problem: str,
@@ -128,17 +128,24 @@ def test_a_destination_that_cannot_be_reached_refuses_before_any_step(
 
 
 def test_a_workflow_that_delivers_runs_over_a_runs_documents(run_root: Path, tmp_path: Path):
+    from womblex.cloud.workflow_validate import validate_workflow
+
     other = tmp_path / "loose"
     (run_root / "documents").rename(other)
+    stored = _stored(["normalise"], destinations=[_to(tmp_path)])
     with pytest.raises(WorkflowRefusedError, match="documents/") as refused:
-        run_workflow_local(_stored(["normalise"], destinations=[_to(tmp_path)]), other, resolve_preset=_resolve)
+        run_workflow_local(stored, other, resolve_preset=_resolve)
     assert refused.value.code is RefusalCode.DESTINATION_UNAVAILABLE
+    report = validate_workflow(stored, resolve_preset=_resolve, shard_dir=other)  # refused alike
+    assert (report.valid, report.code) == (False, RefusalCode.DESTINATION_UNAVAILABLE.value)
 
 
 @pytest.mark.parametrize("destinations, message", [
     ([{"kind": "object_store", "name": "a", "uri": "s3://key:secret@bucket/x"}], "names no credentials"),
     ([{"kind": "object_store", "name": "a", "uri": "/x"}, {"kind": "object_store", "name": "a", "uri": "/y"}],
      "more than once"),
+    ([{"kind": "object_store", "name": "a", "uri": "s3:/bucket/x"}], "needs '://'"),
+    ([{"kind": "object_store", "name": "a", "uri": "ftp://host/x"}], "not one of"),
 ])
 def test_a_destination_never_holds_a_secret_and_names_are_unique(destinations: list, message: str):
     with pytest.raises(ValueError, match=message):
@@ -152,13 +159,12 @@ def test_an_unknown_destination_kind_is_refused():
 
 
 def test_a_workflow_with_no_destinations_keeps_its_digest():
+    """The digest this spec had before destinations existed, so its stage ids and stamps carry on."""
     spec = validate_workflow_spec({"preset": "p", "steps": [{"stage": "chunk"}]})
-    payload = spec.model_dump(mode="json")
-    del payload["destinations"]
-    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-    import hashlib
-
-    assert workflow_digest(spec) == "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
+    assert workflow_digest(spec) == "sha256:8215ebc4678e4e432680e153ff2675b3c54462c3871584eb1d4b0051b232d7d6"
+    named = validate_workflow_spec({"preset": "p", "steps": [{"stage": "chunk"}],
+                                    "destinations": [{"kind": "object_store", "name": "a", "uri": "/x"}]})
+    assert workflow_digest(named) != workflow_digest(spec)
 
 
 def test_dispatch_checks_destinations_before_any_row(tmp_path: Path):
