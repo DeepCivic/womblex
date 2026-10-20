@@ -341,7 +341,7 @@ class RunBoard:
         ordered = list(in_pipeline_order(stages))
         row_owner = self._claim_run_owner(run_id, owner)
         attrs: dict[str, Any] = {"run_id": run_id, "kind": dbos_app.KIND_DOWNSTREAM,
-                                 "max_attempts": max_attempts}
+                                 "max_attempts": max_attempts, "stages": ordered}
         if row_owner is not None:
             attrs["owner"] = row_owner
         if workflow is not None:
