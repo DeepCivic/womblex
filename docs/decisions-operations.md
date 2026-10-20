@@ -129,7 +129,6 @@ A run is launched, then it lands. Everything that can refuse does so before laun
 ### Workflow conditions are removed (Phase R, D3)
 2026-10, Phase R items R.1a (the fleet stops labelling), R.1b (`run-workflow` stops labelling) and R.1c (the field goes). A condition labelled each document `holds`, `fails` or `unevaluable` against a manifest column, in a `*.conditions.parquet` sidecar that nothing read. Every column it labelled is in `manifest.parquet`, so a reader filters the manifest instead. Reverses Phase 2 merges 8 and 9a.
 
-- *Rejected, do not re-attempt:* **a condition that refuses the run** when one document fails it, and **a condition that gates after launch**. One document never decides a run, and nothing stops a launched run.
 ### Workflows have no owner (Phase R, D13)
 2026-10, Phase R item R.2b. Nothing set a workflow's owner, so the field did nothing: it leaves the workflow table, the schedule context, the firing's rows and its prefix check (`prefix_not_owned` is gone). A workflow's run carries no owner and is admin-only, like a CLI run. An owner returns if the API ever creates workflows. Reverses owner-scoped stored workflows (Phase 2 merge 1) and the owned firing's `<owner>/` prefix rule (merge 9b).
 

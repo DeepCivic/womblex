@@ -62,6 +62,12 @@ Approaches tried and abandoned, library-general limitations, and the deferred ba
   | lakeFS | BUSL-1.1 | Reject | Not a permissive licence; a separate service |
   | OpenInference | Apache-2.0 | Reject for now | Model calls are Isaacus and Bedrock; JSON logs with run context already exist |
 
+- **Workflow conditions that refuse or gate a run — do not re-attempt.** A condition that
+  refused the run when one document failed it (Phase 2 merge 8's first cut), and one the
+  coordinator held as a gate once extraction settled, were both rejected before conditions
+  were removed (Phase R, D3). One document never decides a run, and nothing stops a
+  launched run; the manifest answers what a condition labelled.
+
 ## Known limitations (library-general)
 
 - **Residual low-confidence native-text table fabrication.** The
