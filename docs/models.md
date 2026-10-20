@@ -72,15 +72,17 @@ The default OCR engine is `paddleocr`, so a default run calls no hosted OCR.
 
 ### Isaacus: open source and paid
 
-Isaacus supplies two different kinds of thing, and only one of them costs money.
+Isaacus supplies three different kinds of thing, and only the last costs money.
 
-- **Open source, run locally, no key.** semchunk (MIT), the chunking engine every
-  chunk run uses; the Kanon-2 tokeniser, vendored in `_models/kanon-2-tokenizer/`
-  from Hugging Face `isaacus/kanon-2-tokenizer` (its licence is not recorded in
-  this repository); and the client SDKs `isaacus` (Apache-2.0) and
-  `isaacus-sagemaker` (MIT). The SDKs are core dependencies, but they do nothing
-  until a deployment is declared.
-- **Paid models, billed per call.** `kanon-2-enricher` (the `enrich` stage, and AI
+- **semchunk: open source (MIT), local, no key.** The chunking engine every
+  chunk run uses.
+- **The Kanon-2 tokeniser: open source (Apache-2.0, per its Hugging Face card),
+  local, no key.** Vendored in `_models/kanon-2-tokenizer/` from Hugging Face
+  `isaacus/kanon-2-tokenizer`; it counts tokens offline for chunk sizes and
+  request packing. Beside it, the client SDKs `isaacus` (Apache-2.0) and
+  `isaacus-sagemaker` (MIT) are core dependencies that do nothing until a
+  deployment is declared.
+- **The Kanon-2 Enricher and Embedder: paid models, billed per call.** `kanon-2-enricher` (the `enrich` stage, and AI
   chunking through `chunking.chunking_model`) and `kanon-2-embedder` (the `embed`
   stage), through the hosted API (`ISAACUS_API_KEY`) or a SageMaker Marketplace
   deployment billed through AWS.

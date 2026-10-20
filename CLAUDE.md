@@ -304,6 +304,11 @@ client.embeddings.create(..., task="retrieval/document")
 # For search queries
 client.embeddings.create(..., task="retrieval/query")
 ```
+### Isaacus's parts are three things, and only one is paid
+Name them separately in every sentence that touches them. **semchunk** is open source (MIT) and runs locally with no key. The **Kanon-2 tokeniser** is open source (Apache-2.0, per its Hugging Face card), vendored, and counts tokens locally with no call. The **Kanon-2 Enricher and Embedder** are paid models, billed per call, on the hosted API or a SageMaker endpoint. Enrichment is provider-neutral (Requirement 12) with Isaacus as one adapter (Requirement 29); AI chunking belongs to chunking (Requirement 10), and its chunk-time Enricher call is paid work that `chunking_model` asked for, never a "fallback". Every call names the setting that asked for it.
+
+A requirement whose behaviour can start a call billed by a third party carries a **Paid:** line under its heading, saying what is billed and which setting switches it on (`docs/functional_requirements.md` states the rule at its top). A requirement without one engages nothing paid. A change that adds, removes or changes a paid call updates the line in the same change.
+
 ### Native PDF text keeps line-end hyphens
 The pdfium text engine joins no line-end hyphen, as the MuPDF it replaced did under `TEXT_DEHYPHENATE`. The `dehyphenate` flag on `Page` text methods is accepted and changes nothing; a systematic fix belongs in a downstream cleaning stage, not the extractor.
 ### Text policy at the extraction boundary is verbatim

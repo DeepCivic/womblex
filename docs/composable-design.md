@@ -104,8 +104,9 @@ seam — a later stage consumes an earlier stage's sidecar rather than recomputi
 it when `chunking_model` is set, guarded by byte-identity of `Document.text` against
 the reassembled narrative. The reuse is an *ordering* requirement, not a hard
 dependency (the contract marks it non-strict): run out of order or without the
-sidecar and `chunk` self-enriches — as it does for a document enrich had to split,
-whose Document is never persisted.
+sidecar and `chunk` makes the Enricher call itself, which `chunking_model` asked for
+(logged per document and counted in the chunks footer) — as it does for a document
+enrich had to split, whose Document is never persisted.
 
 The `text_source` overlay is different. The contracts mark it **strict**, and a
 missing selected overlay refuses the whole stage before any base is processed.

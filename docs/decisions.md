@@ -578,3 +578,12 @@ be re-derivable, and the first pass's were not.
   concurrency over pdfium (a thread pool inside one worker, say), the fix is
   one process-wide `threading.Lock` around every pdfium call, not per-object
   isolation — the restriction is process-wide, not per-document.
+
+### Isaacus's parts are named separately, and the adapter is thin
+2026-10, decided 19 October for Phase 4 of the trust plan.
+
+- **Three things, named apart.** semchunk is open source (MIT) and local. The Kanon-2 tokeniser is open source (Apache-2.0, per its Hugging Face card) and local. The Kanon-2 Enricher and Embedder are paid models, billed per call. Docs and code had run the three together, so enrichment read as if Isaacus were the only provider and a paid chunk-time call was called a "fallback". Every sentence that touches them names which it means, and every paid call names the setting that asked for it ([functional_requirements.md](functional_requirements.md) tags each such requirement with a **Paid:** line).
+- **Enrichment is two requirements.** Requirement 12 is what Womblex does for any provider (packing to the provider's declared limits, the sidecars, the mention-to-chunk links). Requirement 29 is the Isaacus adapter.
+- **The adapter is thin.** Retries are the SDK's own (429s, 5xx and timeouts, honouring `Retry-After`; `max_retries` passed through, null for the SDK default), and long input is the API's `overflow_strategy`. The adapter declares the API's 8 texts per request and no split ceiling, so Womblex splits a document only above a ceiling a provider declares. *Rejected:* Womblex's own retry loops (a second back-off under the SDK's) and a 100K-token default split ceiling (it paid ~15% more on enrich for legislation to avoid a failure the API did not show).
+- **AI chunking belongs to chunking.** A chunk-time Enricher call is paid work that `chunking.chunking_model` asked for. It is logged per document and counted in the `*.chunks.parquet` footer (`womblex.ai_chunking_calls`), counted by `plan`, and never called a fallback.
+- **Graph refresh writes its own sidecar** (D-4.2 in [decisions-operations.md](decisions-operations.md)); see "Graph-edge refresh" above.

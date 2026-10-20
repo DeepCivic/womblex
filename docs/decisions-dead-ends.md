@@ -348,10 +348,10 @@ Approaches tried and abandoned, library-general limitations, and the deferred ba
      a cheap pre-filter, but byte-identity subsumes it (and also permits safe
      reuse when overlays are relabelled yet produce identical text). On any
      mismatch (or a missing sidecar),
-     **fall back to self-enrich** (`chunking_model` only) — i.e. promote
-     verification gate 1 from a one-time check to a per-document runtime guard,
-     mirroring the project's existing "missing overlay falls back to verbatim"
-     idiom. The fallback double-enriches that document only.
+     **the chunk stage makes the Enricher call itself** (`chunking_model` only, a
+     call that setting asked for) — i.e. promote verification gate 1 from a
+     one-time check to a per-document runtime guard. It pays for that document
+     only, and says so: logged per document and counted in the chunks footer.
   5. Ordering contract: with AI chunking on, run `enrich` before `chunk`.
      Repoint the existing `WomblexConfig` validator from "warns about
      double-enrich" to "warns only when reuse isn't wired (sidecar absent /
@@ -384,8 +384,8 @@ Approaches tried and abandoned, library-general limitations, and the deferred ba
   *Superseded:* a homegrown boundary-hints layer (enrichment spans as preferred
   splits and no-split zones fed to semchunk) — semchunk 4 absorbed the concern.
 
-- **Local enrichment fallback.** Without Isaacus there are no graph spans, so
-  PII has only the opt-in backstop and AI chunking falls back to token splitting.
+- **A local enrichment provider.** Without Isaacus there are no graph spans, so
+  PII has only the opt-in backstop and AI chunking is off (chunking is semchunk's token splitting).
   A config-selected local provider (spaCy / fine-tuned NER) populating
   `EnrichmentResult` would serve both offline, at lower quality. *Wanted
   (2026-10)*: a GLiNER-based provider is in development by the maintainer, so
@@ -408,8 +408,8 @@ Approaches tried and abandoned, library-general limitations, and the deferred ba
   reuse. Womblex keeps packing, splitting, the table pass, the sidecars, evidence
   and chunk mapping, so a provider changes who recognises entities and nothing
   downstream. The Isaacus-only features (AI-chunking reuse, `persist_document`)
-  stay as they are, with token splitting as the fallback for a provider that
-  returns no Document. *Rationale:* a pure Isaacus pipeline is the Isaacus SDK
+  stay as they are; for a provider that returns no Document, `chunking_model` is
+  set aside and chunking is semchunk's local token splitting. *Rationale:* a pure Isaacus pipeline is the Isaacus SDK
   used directly; the slot keeps Womblex's own pipeline from hard-wiring one
   provider. Embedding follows the same pattern, and the GLiNER provider is the
   first alternative once the slot exists.
