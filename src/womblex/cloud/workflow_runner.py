@@ -279,11 +279,13 @@ def prepare_workflow(
     resolve_preset: Callable[[str], Preset | None],
     present: Present | None,
     models_check: str | None = None,
+    shard_dir: Path | None = None,
 ) -> PreparedWorkflow:
     """The one pre-run path: `check_workflow`, then every step's context.
 
     Shared by `run_workflow_local` and `womblex validate`, so they refuse alike. *present*
-    is the disk state (`None`: unknown, so only the order among the steps is checked).
+    is the disk state (`None`: unknown, so only the order among the steps is checked), and
+    *shard_dir* the directory the steps run over, where known.
     Raises `WorkflowRefusedError`, naming every step whose preconditions failed.
     """
     config, stages = check_workflow(
@@ -306,6 +308,11 @@ def prepare_workflow(
             f"workflow {stored.id!r}: " + "; ".join(f"destination {d}: {m}" for d, m in problems),
             code=RefusalCode.DESTINATION_UNAVAILABLE,
         )
+    if stored.spec.destinations and shard_dir is not None and shard_dir.name != "documents":
+        raise WorkflowRefusedError(
+            f"workflow {stored.id!r} delivers a run, so it runs over a run's documents/ directory, not {shard_dir}",
+            code=RefusalCode.DESTINATION_UNAVAILABLE,
+        )
     return PreparedWorkflow(config, stages, contexts, optional_order_warnings(stages, config))
 
 
@@ -326,14 +333,9 @@ def run_workflow_local(
     """
     prepared = prepare_workflow(
         stored, resolve_preset=resolve_preset, models_check=models_check,
-        present=present_from_names(p.name for p in shard_dir.glob("*.parquet")),
+        present=present_from_names(p.name for p in shard_dir.glob("*.parquet")), shard_dir=shard_dir,
     )
     config, contexts = prepared.config, prepared.contexts
-    if stored.spec.destinations and shard_dir.name != "documents":
-        raise WorkflowRefusedError(
-            f"workflow {stored.id!r} delivers a run, so it runs over a run's documents/ directory, not {shard_dir}",
-            code=RefusalCode.DESTINATION_UNAVAILABLE,
-        )
     for warning in prepared.order_warnings:
         logger.warning("workflow %r: %s", stored.id, warning)
 
