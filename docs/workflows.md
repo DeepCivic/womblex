@@ -61,7 +61,7 @@ It replaces the bundle and the record.
 | `womblex validate FILE [--shards DIR] [--json]` | Every check a run makes before its first step, and nothing else. Exit 1 if it would be refused. |
 | `womblex plan FILE --shards DIR [--assume-price enrich=…]` | Which steps would run or skip, which are free (local) and which paid, and the exact tokens every paid call would send (`enrich`, `embed`, and AI chunking in `chunk`), in each provider's own tokens. Calls no paid API; a cost appears only for a price you supply. |
 | `womblex run-workflow FILE --shards DIR` | Run the steps over a local shard directory. Refused before the first step, never halted after it: a failed step is recorded and the later steps still run. |
-| `womblex dispatch-workflow FILE --run-id R --store URI [--firing T] [--dry-run]` | Queue the steps for the fleet; the run receives the whole workflow (its name, full spec, resolved config and digest), so nothing is stored. Refused before any queue row for anything the local runner refuses, a step the fleet does not dispatch (`layout`, `pii`, `quality`), an order the coordinator would change, or work no live worker serves under the workflow's config (`no_worker`). A workflow dispatched over a run another workflow worked runs its own stages. `--firing` dispatches the steps of a scheduled firing whose dispatch failed, over that firing's batches alone. |
+| `womblex dispatch-workflow FILE --run-id R --store URI [--firing T] [--dry-run]` | Queue the steps for the fleet; the run receives the whole workflow (its name, full spec, resolved config and digest), so nothing is stored. Refused before any queue row for anything the local runner refuses, a step the fleet does not dispatch (`layout`, `quality`), an order the coordinator would change, or work no live worker serves under the workflow's config (`no_worker`). A workflow dispatched over a run another workflow worked runs its own stages. `--firing` dispatches the steps of a scheduled firing whose dispatch failed, over that firing's batches alone. |
 | `womblex schedule-workflow FILE [--store URI]` | Store the copy the firings read and make the queue's schedules equal its triggers, in one action; a workflow with no triggers is unscheduled and its copy deleted. Refuses a workflow its firing would refuse (no input store, an unsafe input prefix, no documents, a failing dry-run dispatch). |
 | `womblex schedule-workflow FILE\|NAME --remove \| --status` | Unschedule the workflow and delete its stored copy, or list its schedules. Takes the name when the file is gone. |
 
@@ -69,8 +69,9 @@ It replaces the bundle and the record.
 step reads a required input that is missing, produced only by a later step, or
 rewritten by a later step. `dispatch-workflow` also needs pipeline order, since the
 coordinator runs stages in that order: `normalise`, `spellfix`, `enrich`, `chunk`,
-`graph-refresh`, `embed`, `money`, `link`. The fleet dispatches only these;
-`layout`, `pii` and `quality` run through `run-workflow` or `run-stage`.
+`graph-refresh`, `embed`, `money`, `link`, `pii`. The fleet dispatches only these;
+`layout` and `quality` run through `run-workflow` or `run-stage`. `pii` runs on the
+fleet only as a workflow's step: a run dispatched without a workflow never masks.
 
 ## A trigger firing
 

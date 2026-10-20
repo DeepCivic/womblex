@@ -572,6 +572,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - A firing with no new documents runs nothing and logs that.
 - A file whose content changed is a new document; the earlier version stays in the run. A file rewritten with the same bytes is not a new document.
 - A workflow has no owner; the runs it starts are admin-only, like CLI runs.
+- Fleet runs perform `pii` when a workflow includes it; runs without a workflow never do.
 - A workflow can name an object-store destination, which receives the Requirement 23 bundle; each destination chooses whether raw sources are included.
 - A workflow names where secrets are found, never the secrets. No secret is written to the file or the stored copy.
 - Every destination is checked before launch (its secrets resolve, its dependencies are installed); a failed check refuses the run.

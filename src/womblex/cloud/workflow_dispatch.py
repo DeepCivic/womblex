@@ -31,7 +31,7 @@ from womblex.cloud.workflow_runner import (
     workflow_overlay,
 )
 from womblex.cloud.workflow_store import StoredWorkflow, check_spec
-from womblex.pipeline_order import DOWNSTREAM_STAGES, in_pipeline_order
+from womblex.pipeline_order import WORKFLOW_FLEET_STAGES, in_pipeline_order
 from womblex.store.retention import is_safe_run_id
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -94,7 +94,7 @@ def dispatch_workflow(
         raise refuse(f"its config does not load: {e}", RefusalCode.CONFIG_INVALID) from e
 
     stages = tuple(s.stage for s in stored.spec.steps)
-    if bad := [s for s in stages if s not in DOWNSTREAM_STAGES]:
+    if bad := [s for s in stages if s not in WORKFLOW_FLEET_STAGES]:
         raise refuse(
             f"the fleet does not dispatch {', '.join(bad)} (run them with `run-stage`, or "
             "`run-workflow` locally)", RefusalCode.STAGE_NOT_DISPATCHABLE,
