@@ -3,7 +3,7 @@
 The one integration surface between Womblex (the producer) and its two
 downstream consumers, Numbatch and Echidnet. Womblex exports one finalised
 run plus its raw source documents to a destination as a single on-disk
-*bundle*; Numbatch reads a bundle for its data-team review panel; Echidnet
+*bundle* (by `womblex egress`, or as a workflow's delivery, below); Numbatch reads a bundle for its data-team review panel; Echidnet
 consumes a bundle's extracted corpus with no code change.
 
 The per-file contract version, sensitivity labels and join keys are in
@@ -142,6 +142,57 @@ womblex egress <run> --to <dest> [--run-id ID] [--bundle-prefix PREFIX]
 
 `finalize` consolidates a run's manifest *in place*; `egress` *exports* a run
 to a destination.
+
+## Delivery to a workflow's destinations
+
+A workflow file can name destinations ([workflows.md](workflows.md)); after its last
+step, failed or not, the run is delivered to each. `run-workflow` delivers a local
+run, a fleet run's coordinator delivers from the store, and `womblex deliver` delivers
+again. This section is what each destination is sent. Credentials are never in the
+workflow: each destination names the environment variables that hold them, and they
+are checked before the run starts.
+
+**Object store** (`kind: object_store`) — the bundle above, under `<uri>/<run_id>/`,
+exactly as `womblex egress` writes it, with or without `sources/` and
+`source_index.parquet` as `include_sources` says. Its `egress_manifest.json` also
+carries a `delivery` block: the workflow, the destination's name and `after_failed`,
+the steps that had failed when it was delivered (empty when none had). Raw sources
+are original documents, as above.
+
+**Postgres** (`kind: postgres`) — one row per embedded chunk in `table` (default
+`womblex_chunks`), created if absent:
+
+| Column | Holds |
+|---|---|
+| `run_id`, `source_hash`, `content_type`, `chunk_index` | The key; `source_hash` joins the bundle and the manifest |
+| `text` | The chunk's text in `text_layer` |
+| `text_layer` | `clean_text` (masked by the `pii` step; the default) or `chunks` (raw, only with `text_layer: raw`) |
+| `mask_status` | For masked text: `masked`, `no_entity` or `not_masked` (no candidate source covered it, so the text is verbatim) |
+| `model`, `embedding` | The embedding model and its vector (a pgvector `vector`) |
+| `delivered_at` | When this delivery wrote the row |
+
+A chunk the layer holds no text for is not sent from the other layer; it is left out
+and counted in the delivery record (`rows_skipped`). No sources and no other sidecar
+are sent.
+
+**Webhook** (`kind: webhook`) — the run's events, never its data: `extraction_settled`,
+`stage_finished`, `stage_failed`, `delivered`, `delivery_failed` and `run_finished`.
+Each is a JSON `POST` with `event`, `event_id`, `run_id`, `workflow`, `status` (the
+run's state as `/v1/runs` words it: `running`, then `done`, `failed` or `cancelled`), `at`, and the event's own `stage`, `destination`,
+`error`, `ran_after_failed` or `after_failed`. Headers: `X-Womblex-Event`,
+`X-Womblex-Event-Id` and `X-Womblex-Signature: sha256=<hex>`, the HMAC-SHA256 of the raw
+body under the key in `secret_env`. A receiver recomputes the signature before
+trusting a body and drops an `event_id` it has seen, since an event is resent under
+the same id.
+
+**Retries and records.** A delivery or event is tried three times with backoff; one
+that still fails is recorded and never stops the run. Each destination's record is
+`<run>/deliveries/<name>.json` (status, attempts, error, `after_failed`, counts, and a
+webhook's `events`), and the run record in `manifest.parquet` lists every one.
+Delivering again replaces: the bundle is rewritten, the rows upserted (the run's rows
+the delivery did not write are removed), and the record replaced. Nothing redelivers
+by itself; after a successful `retry-stage`, the command prints the `womblex deliver`
+line.
 
 ### Out of scope
 
