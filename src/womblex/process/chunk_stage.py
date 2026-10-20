@@ -28,8 +28,8 @@ at chunk time and is the only path that needs a configured deployment
 
 from __future__ import annotations
 
-import json
 import logging
+import math
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -319,8 +319,9 @@ def _load_narrative_overrides(
 
 @dataclass
 class AIChunkingPlan:
-    """What AI chunking would send at chunk time, counted offline (`womblex plan`): one Enricher
-    call per document no persisted Document's text matches, tokens by the provider's own counter."""
+    """What AI chunking would send at chunk time, counted offline (`womblex plan`): the Enricher
+    calls semchunk makes for each narrative no persisted Document is reused for and each table,
+    tokens by the enrichment provider's own counter."""
 
     documents: int = 0
     calls: int = 0
@@ -328,32 +329,62 @@ class AIChunkingPlan:
     tokens: int = 0
 
 
+def _effective_chunk_size(chunk_size: int, overlap: float | None) -> int:
+    """semchunk's chunk size once overlap is taken out (its `chunk`'s own arithmetic)."""
+    if overlap:
+        absolute = math.floor(chunk_size * overlap) if overlap < 1 else min(int(overlap), chunk_size - 1)
+        if absolute:
+            return min(absolute, chunk_size - absolute)
+    return chunk_size
+
+
 def plan_ai_chunking(shard_dir: Path, config: WomblexConfig) -> AIChunkingPlan:
     """Count the chunk-time Enricher calls `chunk_shards` would make under *config*; calls nothing.
 
-    The reuse test is the stage's: a persisted Document is reused only when its text is
-    byte-identical to the narrative. Raises `MissingOverlayError` as the stage does.
+    Mirrors the stage: the same inputs (`_build_inputs_for_batch`), the same reuse test (a
+    rehydrated Document from `_load_narrative_overrides` whose text is byte-identical to the
+    narrative) and semchunk's own rule — a text is enriched only when it holds more tokens than
+    the chunk size, in one call per million-character prechunk. Tables pass through the same
+    chunker, so a table over the chunk size is a call too. Raises `MissingOverlayError` as the
+    stage does.
     """
-    from womblex.analyse.enrich import make_enrichment_provider
-    from womblex.analyse.enrich_stage import _load_narratives
+    import semchunk
 
+    from womblex.analyse.enrich import make_enrichment_provider
+
+    chunking = config.chunking
     text_source = config.processing.text_source
     bases = _batch_bases(shard_dir)
     require_overlays(bases, text_source)
+    sizer = create_chunker(
+        tokenizer=resolve_tokenizer(chunking.tokenizer, chunking.tokenizer_options),
+        chunk_size=chunking.chunk_size, tokenizer_kwargs=chunking.tokenizer_kwargs,
+        memoize=chunking.memoize, cache_maxsize=chunking.cache_maxsize, max_token_chars=chunking.max_token_chars,
+    )
     counter = make_enrichment_provider(config.enrichment, None, None).limits.token_counter
     plan = AIChunkingPlan()
+
+    def enriched(text: str, limit: int) -> None:
+        if sizer.token_counter(text) <= limit:
+            return  # semchunk splits it by tokens alone
+        prechunks = semchunk.chunk(text, chunk_size=1_000_000, token_counter=len, memoize=False) \
+            if len(text) > 1_000_000 else [text]
+        plan.calls += len(prechunks)
+        plan.tokens += counter.count_batch([text])[0]
+
     for base in bases:
-        narratives, _ = _load_narratives(base, text_source)
-        persisted = {h: json.loads(doc).get("text") for h, (_, doc) in read_enrichment_docs(base).items() if doc}
-        for source_hash, text in narratives.items():
-            if not text.strip():
-                continue
+        inputs, _ = _build_inputs_for_batch(base, chunking.chunk_tables, text_source)
+        overrides = _load_narrative_overrides(base, text_source) or {}
+        for doc in inputs:
             plan.documents += 1
-            if persisted.get(source_hash) == text:
-                plan.reused += 1
-            else:
-                plan.calls += 1
-                plan.tokens += counter.count_batch([text])[0]
+            if doc.narrative.strip():
+                if getattr(overrides.get(doc.source_hash), "text", None) == doc.narrative:
+                    plan.reused += 1
+                else:
+                    enriched(doc.narrative, _effective_chunk_size(sizer.chunk_size, chunking.overlap))
+            for _page, _order, md in doc.tables:
+                if md.strip():
+                    enriched(md, sizer.chunk_size)
     return plan
 
 

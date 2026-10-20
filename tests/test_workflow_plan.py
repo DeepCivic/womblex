@@ -123,17 +123,66 @@ def test_local_steps_are_free_and_paid_ones_are_counted(shards: Path) -> None:  
     assert plan.steps[1].tokens is None and plan.steps[2].tokens is not None
 
 
-def test_ai_chunking_calls_are_counted_in_the_enrichers_own_tokens(shards: Path) -> None:  # noqa: F811
-    stored = _stored(["chunk"], config={"chunking": {"chunking_model": "kanon-2-enricher"},
-                                        "enrichment": {"enabled": True}})
-    (step,) = plan_workflow(stored, shards, resolve_preset=_resolve, prices={"chunk": 4.0}).steps
+def _ai_chunking(chunk_size: int) -> object:
+    return _stored(["chunk"], config={"chunking": {"chunking_model": "kanon-2-enricher", "chunk_size": chunk_size},
+                                      "enrichment": {"enabled": True}})
+
+
+@pytest.fixture
+def docx_shards(tmp_path: Path) -> Path:
+    """One batch holding a document with a narrative and tables (the register CSV has no narrative)."""
+    from tests._synthetic import BUDGET_DOCX
+    from womblex.batch import process_batch
+    from womblex.config import DatasetConfig, PathsConfig, WomblexConfig
+
+    out = tmp_path / "docx"
+    out.mkdir()
+    process_batch([BUDGET_DOCX], WomblexConfig(dataset=DatasetConfig(name="t"), paths=PathsConfig(
+        input_root=tmp_path, output_root=tmp_path, checkpoint_dir=tmp_path)), batch_num=1, shard_dir=out)
+    return out
+
+
+def _chunk_texts(shard_dir: Path) -> dict[str, tuple[str, list[str]]]:
+    """Each document's narrative and its non-blank texts (narrative, table markdowns), as the chunk stage builds them."""
+    from womblex.process.chunk_stage import _build_inputs_for_batch
+
+    return {doc.source_hash: (doc.narrative, [t for t in (doc.narrative, *(md for _, _, md in doc.tables)) if t.strip()])
+            for base in _batch_bases(shard_dir) for doc in _build_inputs_for_batch(base, True)[0]}
+
+
+def test_ai_chunking_counts_each_text_over_the_chunk_size_in_the_enrichers_own_tokens(docx_shards: Path) -> None:
+    """semchunk enriches a narrative or a table only when it exceeds the chunk size (Phase R, D12)."""
+    texts = [t for _, doc in _chunk_texts(docx_shards).values() for t in doc]
+    (step,) = plan_workflow(_ai_chunking(1), docx_shards, resolve_preset=_resolve, prices={"chunk": 4.0}).steps
     t = step.tokens
-    assert step.paid and t is not None and t.basis == "on_disk"
-    narrative, _ = _load_narratives(_batch_bases(shards)[0], "elements")
-    counter = TokenCounter(EnrichmentConfig().tokenizer)
-    assert t.requests == t.detail["documents"] == len([n for n in narrative.values() if n.strip()])
-    assert t.tokens == sum(counter.count_batch([n for n in narrative.values() if n.strip()]))
-    assert t.detail["reused_documents"] == 0 and t.assumed_cost == pytest.approx(t.tokens / 1e6 * 4.0)
+    assert step.paid and t is not None and t.basis == "on_disk" and texts
+    assert t.requests == len(texts) and t.detail["reused_documents"] == 0  # every text is over one token
+    assert t.tokens == sum(TokenCounter(EnrichmentConfig().tokenizer).count_batch(texts))
+    assert t.assumed_cost == pytest.approx(t.tokens / 1e6 * 4.0)
+    (step,) = plan_workflow(_ai_chunking(100_000), docx_shards, resolve_preset=_resolve).steps
+    assert step.tokens is not None and step.tokens.requests == step.tokens.tokens == 0  # all fit: token splitting
+
+
+@pytest.mark.parametrize("readable", [True, False])
+def test_ai_chunking_reuses_only_a_persisted_document_the_stage_would(
+    docx_shards: Path, monkeypatch: pytest.MonkeyPatch, readable: bool,
+) -> None:
+    """The stage's reuse test: a rehydrated Document byte-identical to the narrative is reused; one the
+    stage cannot rehydrate is enriched again, so it is counted."""
+    from womblex.process import chunk_stage
+    from womblex.store.enrichment_doc import write_enrichment_doc_shard
+
+    texts = _chunk_texts(docx_shards)
+    chosen = next(h for h, (narrative, _) in texts.items() if narrative.strip())
+    every = sum(len(doc) for _, doc in texts.values())
+    if readable:
+        monkeypatch.setattr(chunk_stage, "_load_narrative_overrides",
+                            lambda _b, _s: {chosen: type("Doc", (), {"text": texts[chosen][0]})()})
+    else:
+        write_enrichment_doc_shard([(chosen, "elements", "{not a document")], _batch_bases(docx_shards)[0])
+    t = plan_workflow(_ai_chunking(1), docx_shards, resolve_preset=_resolve).steps[0].tokens
+    assert t is not None and t.detail["reused_documents"] == int(readable)
+    assert t.requests == every - int(readable)
 
 
 def test_an_embedding_provider_with_no_token_counter_is_counted_by_texts(
