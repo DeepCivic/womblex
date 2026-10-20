@@ -372,7 +372,8 @@ def run_workflow_local(
     for o in result.deliveries:
         events.emit("delivered" if o.status == "delivered" else "delivery_failed", "running", o.destination,
                     destination=o.destination, error=o.error, after_failed=o.after_failed)
-    events.emit("run_finished", "failed" if result.exit_code else "done")
+    # The run's status as the board words it: its steps', not its deliveries' (those have their own events).
+    events.emit("run_finished", "failed" if any(s.status == "failed" for s in result.steps) else "done")
     if events.active:
         result.deliveries += _record_local(shard_dir, events.records())
     return result

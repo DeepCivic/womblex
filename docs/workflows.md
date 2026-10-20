@@ -55,8 +55,9 @@ A `webhook` destination is sent the run's events, not its results: `extraction_s
 `stage_finished` and `stage_failed` (per step), `delivered` and `delivery_failed` (per
 other destination) and `run_finished`; nothing per document or batch. Each is a JSON
 body with `event`, `event_id`, `run_id`, `workflow`, `status` (the API's `running`,
-`done` or `failed`) and the event's own fields (`stage`, `destination`, `error`),
-signed with HMAC-SHA256 under the key in `secret_env`: the
+`done` or `failed`; `run_finished` is `failed` only when a step failed, since a
+failed delivery has its own event) and the event's own fields (`stage`,
+`destination`, `error`), signed with HMAC-SHA256 under the key in `secret_env`: the
 `X-Womblex-Signature: sha256=<hex>` header is what a receiver recomputes over the raw
 body. An event is tried three times under the same `event_id`, so a receiver can drop
 a duplicate; one that never lands is listed in the webhook's record (`events`) and
