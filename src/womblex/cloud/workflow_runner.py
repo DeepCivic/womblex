@@ -381,8 +381,9 @@ def deliver_local(stored: StoredWorkflow, shard_dir: Path, failed: tuple[str, ..
         write_run_manifest(shard_dir)
     except Exception:  # the steps have run; nothing here may stop or unwind them
         logger.exception("workflow %s: delivery could not complete", stored.id)
-        return [DeliveryOutcome(d.name, d.kind, getattr(d, "uri", ""), stored.id, "failed", 0, list(failed),
-                                error="delivery could not complete; see the log") for d in stored.spec.destinations]
+        return [DeliveryOutcome(d.name, d.kind, str(getattr(d, "uri", None) or getattr(d, "table", "")), stored.id,
+                                "failed", 0, list(failed), error="delivery could not complete; see the log")
+                for d in stored.spec.destinations]
     return outcomes
 
 
