@@ -449,6 +449,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - A run belongs to the client that submitted it: another client's run is 404, an admin sees all runs, and runs dispatched from the CLI, the console or a workflow carry no owner and are visible to admins only. A run never has mixed ownership.
 - Document text defaults to the masked layer; raw layers (`chunks`, `elements`) require `read_raw`, decided by the layer's contract sensitivity.
 - Run file listings report each file's row count, `contract_version`, and `sensitivity`, so a caller can fetch Parquet directly under the data contract.
+- A run started by a workflow that names a webhook sends its events there (Requirement 27). Polling still works.
 - `ready` reports store and queue reachability and answers 503 when either is down; an unreachable queue, store, or ingest location on any other endpoint is 503, not 500.
 - The OpenAPI surface is pinned by a test so breaking changes are visible in review.
 
@@ -586,10 +587,6 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - There are no per-document or per-batch events.
 - The run record lists every delivery.
 
-**TO-DO:**
-
-- **The fleet sends no webhook events.** `dispatch-workflow` and `schedule-workflow` refuse a workflow with a webhook; the coordinator's events are the next merge.
-
 **Out of scope:** managing workflows through the API, pruning changed or deleted documents, resolving the source of a changed file's earlier version (its bytes are gone from the store, so `SourceResolver` reads it as `hash_mismatch`), workflow owners, backfill of missed firings, and databases other than Postgres (each needs its own requirement).
 
 ## 28. Fleet Runs — Honour the Dispatch, Report the Truth
@@ -629,6 +626,5 @@ Requirements not yet fully met. The detail lives in the **TO-DO** block under ea
 - **Requirement 9 (Redaction Handling):** no redaction `pipeline_point`, and the E2E `run` path writes no `*.redactions.parquet`.
 - **Requirement 13 (Money Annotation):** the money span row carries no merge extent or header-row coordinate.
 - **Requirements 17 and 21 (Corpus Inspector; Console Design System):** `DocumentGrid.svelte` is not virtualised and emits no `aria-rowcount`.
-- **Requirement 27 (Workflows):** the fleet sends no webhook events.
 
 ---

@@ -518,6 +518,34 @@ def test_a_fleet_run_with_a_failed_stage_still_delivers_and_names_it(fleet, monk
     assert marker["after_failed"] == ["normalise"]
 
 
+def test_a_fleet_run_sends_its_events_once_each_and_records_them(fleet, monkeypatch):
+    """Requirement 27 on the fleet: the coordinator sends each event as a recorded step, the
+    run's status in the API's words, and the webhook's record lists them."""
+    import json
+
+    import httpx
+
+    from tests.test_webhook import _HOOK, _Receiver
+
+    store_root, ingest, _ = fleet
+    got = _Receiver()
+    monkeypatch.setattr(httpx, "post", got)
+    monkeypatch.setenv(_HOOK["secret_env"], "s3cret")
+    _failing_units(monkeypatch, lambda stage, unit: stage == "normalise")
+    spec = {"preset": "recipe", "steps": [{"stage": "normalise"}], "destinations": [_HOOK]}
+    wf = {"id": "wf", "digest": "sha256:feed", "preset": "recipe", "spec": spec, "config": {}}
+    with RunBoard(None) as board:
+        board.enqueue("r1", [batch(ingest)])
+        board.enqueue_stages("r1", ["normalise"], "runs/r1/documents", workflow=wf, max_attempts=1)
+        work(fleet, idle_timeout=2)
+    bodies = [b for b, _, _ in got.calls]
+    assert [(b["event"], b["status"]) for b in bodies] == [
+        ("extraction_settled", "running"), ("stage_failed", "running"), ("run_finished", "failed")]
+    assert bodies[1]["stage"] == "normalise" and len({b["event_id"] for b in bodies}) == 3
+    saved = json.loads((store_root / "runs/r1/deliveries/hook.json").read_text())
+    assert [e["event"] for e in saved["events"]] == ["extraction_settled", "stage_failed", "run_finished"]
+
+
 class _Row:
     def __init__(self, wid, status, output, kind="batch", created_at=0):
         self.workflow_id, self.status, self.output = wid, status, output

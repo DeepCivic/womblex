@@ -106,9 +106,6 @@ def dispatch_workflow(
             "the coordinator runs stages in pipeline order, so reorder the steps",
             RefusalCode.ORDER_NOT_PIPELINE,
         )
-    if hooks := [d.name for d in stored.spec.destinations if d.kind == "webhook"]:  # never accepted and ignored
-        raise refuse(f"fleet runs do not send webhook events ({', '.join(hooks)}); run it with `run-workflow`",
-                     RefusalCode.DESTINATION_UNAVAILABLE)
     if problems := check_destinations(stored.spec.destinations):  # on this host; a firing checks on its worker
         raise refuse("; ".join(f"destination {d}: {m}" for d, m in problems), RefusalCode.DESTINATION_UNAVAILABLE)
     from womblex.utils.model_check import check_registered

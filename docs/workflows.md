@@ -57,8 +57,9 @@ signed with HMAC-SHA256 under the key in `secret_env`: the
 `X-Womblex-Signature: sha256=<hex>` header is what a receiver recomputes over the raw
 body. An event is tried three times under the same `event_id`, so a receiver can drop
 a duplicate; one that never lands is listed in the webhook's record (`events`) and
-never stops the run. Polling still works. The fleet does not send events yet, so
-`dispatch-workflow` and `schedule-workflow` refuse a workflow with a webhook.
+never stops the run. Polling still works. On the fleet the coordinator sends each
+event as a recorded step, so a recovered coordinator does not send one twice, and
+`run_finished` carries the run's status as `/v1/runs` reports it.
 
 Each destination is checked before the first step: its credentials' or signing key's
 environment variables are set and its URI's storage backend is installed; a failure refuses

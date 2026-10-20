@@ -97,13 +97,3 @@ def test_a_webhook_that_is_down_never_stops_the_run(run_root: Path, tmp_path: Pa
     (hook,) = result.deliveries
     assert (hook.status, hook.error) == ("failed", "3 of 3 event(s) not sent")
     assert result.exit_code == 1
-
-
-def test_the_fleet_refuses_a_webhook_it_would_not_send_to(tmp_path: Path, receiver):
-    from womblex.cloud.workflow_dispatch import dispatch_workflow
-    from womblex.cloud.workflow_runner import RefusalCode, WorkflowRefusedError
-
-    with pytest.raises(WorkflowRefusedError, match="webhook") as refused:
-        dispatch_workflow(_stored(["normalise"], destinations=[_HOOK]), resolve_preset=_resolve,
-                          run_id="r1", store_uri=None, dsn=None, dry_run=True)
-    assert refused.value.code is RefusalCode.DESTINATION_UNAVAILABLE
