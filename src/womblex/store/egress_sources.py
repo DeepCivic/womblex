@@ -145,9 +145,15 @@ def declared_root(manifest: pa.Table) -> str | Path:
         raise ValueError(
             f"the run declares {len(declared)} ingest roots; pass a source root explicitly"
         )
-    root = declared.pop()
+    return local_or_uri(declared.pop())
+
+
+def local_or_uri(root: str | Path) -> str | Path:
+    """*root* as a local path where it names one (a ``file://`` URI included), else the store URI."""
+    if isinstance(root, Path) or not root.startswith("file://"):
+        return root
     # `qualify_root` records a local root via `Path.as_uri()`, which percent-encodes.
-    return Path(unquote(root.removeprefix("file://"))) if root.startswith("file://") else root
+    return Path(unquote(root.removeprefix("file://")))
 
 
-__all__ = ["UPLOAD_FAILED", "LocalSources", "SourceOutcome", "StoreSources", "declared_root"]
+__all__ = ["UPLOAD_FAILED", "LocalSources", "SourceOutcome", "StoreSources", "declared_root", "local_or_uri"]
