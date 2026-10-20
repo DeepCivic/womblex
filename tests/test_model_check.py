@@ -520,7 +520,7 @@ class TestMarkdownEngines:
         assert check_models(self._cfg("md-empty"), "load", scopes=(SCOPE_EXTRACT,)).ok
 
 
-# --- models behind a service: one minimal request before any document -------
+# --- models behind a service: checked before any document ----------------------
 
 from types import SimpleNamespace
 
@@ -590,9 +590,9 @@ class TestIsaacus:
         # Plain chunking runs offline on the vendored tokeniser.
         assert isaacus_models(_config()) == []
 
-    def test_the_run_check_pings_every_model_and_records_it(self, fake_isaacus) -> None:
+    def test_smoke_sends_every_model_one_billed_request_and_records_it(self, fake_isaacus) -> None:
         made = fake_isaacus()
-        result = check_models(_config(**_PAID), "load", scopes=(SCOPE_ENRICH, SCOPE_EMBED))
+        result = check_models(_config(**_PAID), "smoke", scopes=(SCOPE_ENRICH, SCOPE_EMBED))
         assert result.ok
         kinds = sorted(c.calls[0][0] for c in made)
         assert kinds == ["embed", "enrich"]
@@ -608,7 +608,7 @@ class TestIsaacus:
     ) -> None:
         fake_isaacus(fail="401 invalid API key")
         cfg = _config(enrichment={"enabled": True}, spellfix={"enabled": True})
-        result = check_models(cfg, "load", scopes=(SCOPE_ENRICH,))
+        result = check_models(cfg, "smoke", scopes=(SCOPE_ENRICH,))
         (bad,) = result.failures
         assert "401 invalid API key" in bad.reason
         assert result.failures_for((SCOPE_ENRICH,)) and not result.failures_for((SCOPE_EXTRACT,))

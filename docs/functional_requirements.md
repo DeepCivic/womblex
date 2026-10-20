@@ -522,7 +522,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - The check has three levels, set by `processing.models_check` or `--models-check`: `off`; `load` (resolve and load the models, the default); `smoke` (also run one inference on a small built-in input).
 - `womblex run` checks the models of every enabled stage before batch one, before any output is written, so a run whose later stages cannot complete does not start.
 - A worker checks at startup and refuses jobs whose models fail the check, through the existing refused path. A job is refused only for the models it needs: a batch for the extraction models, a stage job for that stage's.
-- A model behind a service is checked with one minimal request at either level: each Isaacus model an enabled stage calls (enrich, embed, AI chunking), and an API-backed OCR engine (Bedrock, Ollama), so a run whose later paid stage cannot reach its service does not start.
+- A model behind a service is checked before any document, so a run whose later paid stage cannot reach its service does not start. Each Isaacus model an enabled stage calls (enrich, embed, AI chunking) is checked for connectivity at `load`, with no billed request: a deployment that serves it is configured and answers (the hosted API with a key set, taken as active; a SageMaker endpoint `InService`). At `smoke` it is also sent one minimal request, which is billed. An API-backed OCR engine is pinged at either level (Ollama free; Bedrock a one-token request, billed). A warning names every billed request before it is sent.
 - An API submission checks only that each named model is registered, because the API host may not carry the models.
 - Downstream stage preflight includes the model check, including the standalone `chunk`, `pii`, `spellfix` and `redact` commands, which check before writing anything.
 - The existing in-slot fallback (PaddleOCR v5 to the wheel's v4) stays, and the check reports which variant resolved.
@@ -592,7 +592,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 
 - Every stage of a fleet run runs under the config it was dispatched with; a worker's own config supplies only its store, paths, credentials and model locations.
 - Config submitted through the API, console or CLI governs how stages run, not only which run.
-- A worker serves a stage only once its model check passes for that stage: work is queued by the models the run's config names for it, and a worker checks every stage in its own config, enabled or not, and joins only the queues for the models it checked.
+- A worker serves a stage only once its model check passes for that stage: work is queued by the models the run's config names for it, and a worker checks the local models of every stage in its own config, enabled or not, and an Isaacus model only for a stage its config enables, and joins only the queues for the models it checked.
 - Once every failed stage has been retried successfully, the run shows `done`.
 - A scheduled firing whose dispatch failed and was later completed shows its real status, not `failed`.
 

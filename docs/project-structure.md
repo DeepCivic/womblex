@@ -198,7 +198,7 @@ womblex/
 │   └── utils/
 │       ├── metrics.py       # CER, WER, CER-s accuracy metrics (numpy-accelerated Levenshtein + spatial sort)
 │       ├── tabular_metrics.py # Tabular extraction accuracy (structural fidelity, data integrity)
-│       ├── model_check.py   # Pre-run model check: off/load/smoke per slot and scope, one minimal request per Isaacus model / service-backed model, remembered for the footer and run record
+│       ├── model_check.py   # Pre-run model check: off/load/smoke per slot and scope, Isaacus connectivity at load and one warned, billed request per model at smoke, a ping per service-backed OCR model, remembered for the footer and run record
 │       ├── model_registry.py # Named model registry per slot (OCR, layout, PII context, tokeniser, spellfix dictionary): built-in names + `womblex.models.<slot>` entry-point plugins; records which entry each slot actually built, with its distribution and version
 │       ├── models.py        # Local model path resolution (WOMBLEX_MODELS_DIR, _models/, models/ + HF snapshot layout) + load record with byte digests
 │       ├── checksum.py      # Streamed MD5 (register ingests) and SHA-256 (published run files) helpers

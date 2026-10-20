@@ -7,8 +7,10 @@ work it cannot do. An extraction queue is named for the ingest root it reads,
 so a worker wired to another root never sees that batch, and extraction and
 stage queues are named for the models their work needs under the run's config
 (`model_check.models_key`), so a worker joins only those whose models its own
-config names and its model check passed (Phase R, D8). It checks the models of
-every stage in its config, enabled or not, and records the queues it serves
+config names and its model check passed (Phase R, D8). It checks the local models
+of every stage in its config, enabled or not, and an Isaacus model only for a
+stage its config enables, so no disabled stage costs a request; a stage whose
+Isaacus model it did not check is not served. It records the queues it serves
 (`worker_registry`).
 
 A stopped worker's unfinished workflows are recovered by DBOS when an executor
@@ -26,7 +28,15 @@ from womblex.cloud import dbos_app
 from womblex.cloud.stage_contracts import STAGE_CONTRACTS
 from womblex.config import WomblexConfig
 from womblex.store.remote import RemoteStore
-from womblex.utils.model_check import SCOPE_EXTRACT, ModelCheckResult, check_models, models_key
+from womblex.utils.model_check import (
+    SCOPE_EXTRACT,
+    CheckLevel,
+    ModelCheckResult,
+    check_models,
+    enabled_scopes,
+    isaacus_models,
+    models_key,
+)
 
 #: Every scope a worker checks: extraction and each stage, whether its config enables it or not.
 WORKER_SCOPES = (SCOPE_EXTRACT, *STAGE_CONTRACTS)
@@ -51,7 +61,8 @@ def served_queues(
     the models *config* names for it, and the unkeyed one, which holds work
     enqueued before runs carried their config. Coordinators, and the firings of
     workflows whose input store is this worker's ingest root, are light and
-    always served.
+    always served. A stage whose Isaacus model went unchecked, because *config*
+    disables the stage, is not served.
     """
     queues = {dbos_app.DOWNSTREAM_QUEUE: 4, dbos_app.firing_queue(ingest_root): 1}
     if check.failures_for((SCOPE_EXTRACT,)):
@@ -59,10 +70,16 @@ def served_queues(
     else:
         for key in {"", models_key(config, SCOPE_EXTRACT) if config else ""}:
             queues[dbos_app.extract_queue(ingest_root, key)] = 1
+    unchecked = set() if config is None or check.level is CheckLevel.OFF else (
+        {s for u in isaacus_models(config, WORKER_SCOPES) for s in u.scopes} - enabled_scopes(config))
     for stage in STAGE_CONTRACTS:
         bad = check.failures_for((stage,))
         if bad:
             logger.error("not serving stage %s: model check failed: %s", stage, check.message(bad))
+            continue
+        if stage in unchecked:
+            logger.info("not serving stage %s: its Isaacus model is checked only when this worker's config "
+                        "enables the stage", stage)
             continue
         for key in {"", models_key(config, stage) if config else ""}:
             queues[dbos_app.stage_queue(stage, key)] = 1
@@ -119,7 +136,8 @@ def run_worker(
 
     # Before launch, so a model this worker lacks is known up front: the queues
     # that need it are simply not joined.
-    served = served_queues(check_models(config, scopes=WORKER_SCOPES), ingest_root, config)
+    served = served_queues(
+        check_models(config, scopes=WORKER_SCOPES, isaacus_scopes=enabled_scopes(config)), ingest_root, config)
     workflows.set_context(workflows.WorkerContext(config, store, ingest, ingest_root, dsn))
 
     DBOS(config={
