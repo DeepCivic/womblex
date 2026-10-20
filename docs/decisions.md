@@ -75,7 +75,10 @@ sustained ~0.7–1.0 M tok/min single-process with **zero 429s** (throughput is
 workload-shaped — decisions pack denser than bulky legislation).
 
 ### Long documents — client-side split + offset-merge; split docs not persisted
-A document past `split_ceiling` (default 100K tokens) is split on structural
+The Isaacus adapter declares no split ceiling: the API takes long input whole under
+`overflow_strategy`, and a single 377K-token request was observed to succeed with no 429.
+A provider that does declare a ceiling (`ProviderLimits.token_ceiling`), or an operator who
+sets `enrichment.split_ceiling`, gets the split below. A document past that ceiling is split on structural
 (blank-line) boundaries into sub-documents enriched separately, and the
 per-segment `EnrichmentResult`s are stitched back by `analyse/enrich_merge.py`:
 every span shifted by the segment's `start_char`, every entity/segment id
@@ -83,12 +86,10 @@ namespaced by segment index. This is the same offset stitch the enricher does
 internally for >16K inputs, applied one level up — needed only because a single
 very large *request* is the rate-limit risk. **Split docs are deliberately not
 persisted** for AI-chunking reuse (no single ILGS Document spans the full
-narrative), so those few long-tail docs self-enrich once at chunk time.
-*Measured tradeoff:* negligible for caselaw (~0.4% of docs >100K) but material
-for legislation (~4%, +~15% on enrich cost); the lever is to raise
-`split_ceiling` — a single 377K-token request was observed to succeed with no
-429, so the ceiling is far above the earlier ~150–200K assumption and the
-32K/100K defaults are conservative.
+narrative), so those few long-tail docs are enriched once more at chunk time.
+*Measured tradeoff when a ceiling of 100K was the default:* negligible for caselaw
+(~0.4% of docs >100K) but material for legislation (~4%, +~15% on enrich cost),
+which is why the default is now no ceiling.
 
 ### Graph-edge refresh — enrichment precedes AI chunking, so edges lag
 Semchunk-4 AI chunking reuses the persisted enrichment Document, so the order

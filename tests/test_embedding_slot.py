@@ -100,3 +100,19 @@ def test_an_unknown_embedder_is_refused_before_launch(tmp_path) -> None:
     config.embedding.enabled, config.embedding.model = True, "no-such-embedder"
     with pytest.raises(ValueError, match="unknown embedding model"):
         model_check.check_registered(config)
+
+
+def test_the_isaacus_embedding_adapter_makes_one_call_and_passes_max_retries_to_the_sdk():
+    from unittest.mock import MagicMock
+
+    from womblex.analyse.embed import MAX_TEXTS_PER_REQUEST, embed_texts, make_embedding_provider
+
+    client = MagicMock()
+    client.embeddings.create.side_effect = Exception("429 rate limit exceeded")
+    with pytest.raises(RuntimeError, match="Embedding failed"):
+        embed_texts(["a"], client)
+    assert client.embeddings.create.call_count == 1  # retries are the SDK's, not a loop here
+
+    provider = make_embedding_provider(EmbeddingConfig(max_retries=4), client)
+    client.with_options.assert_called_once_with(max_retries=4)
+    assert provider.limits.max_texts_per_request == MAX_TEXTS_PER_REQUEST

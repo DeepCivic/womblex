@@ -263,7 +263,7 @@ def plan_enrichment(
             max_items=limits.max_texts_per_request,
             token_budget=enrichment_config.token_budget,
         ):
-            if group.solo and group.total_tokens > limits.token_ceiling:
+            if group.solo and limits.token_ceiling is not None and group.total_tokens > limits.token_ceiling:
                 plan.split_documents += 1
                 plan.requests += len(split_on_boundaries(
                     group.items[0].text, counter.count_batch,
@@ -313,9 +313,9 @@ def _enrich_packed(
     for group in groups:
         keys = [it.key for it in group.items]
         try:
-            if group.solo and group.total_tokens > limits.token_ceiling:
+            if group.solo and limits.token_ceiling is not None and group.total_tokens > limits.token_ceiling:
                 src = group.items[0].key
-                results.append((src, _enrich_split_doc(group.items[0].text, provider)))
+                results.append((src, _enrich_split_doc(group.items[0].text, provider, limits.token_ceiling)))
             else:
                 pairs = provider.enrich([it.text for it in group.items])
                 for it, (enr, raw_doc) in zip(group.items, pairs):
@@ -333,12 +333,9 @@ def _enrich_packed(
     return results, doc_rows, errored
 
 
-def _enrich_split_doc(text: str, provider: EnrichmentProvider) -> EnrichmentResult:
+def _enrich_split_doc(text: str, provider: EnrichmentProvider, ceiling: int) -> EnrichmentResult:
     """Split an over-ceiling doc on boundaries, enrich each segment, offset-merge."""
-    limits = provider.limits
-    segments = split_on_boundaries(
-        text, limits.token_counter.count_batch, max_tokens=limits.token_ceiling,
-    )
+    segments = split_on_boundaries(text, provider.limits.token_counter.count_batch, max_tokens=ceiling)
     seg_results: list[tuple[TextSegment, EnrichmentResult]] = []
     for seg in segments:
         seg_results.append((seg, provider.enrich([seg.text])[0][0]))

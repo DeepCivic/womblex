@@ -396,9 +396,11 @@ class EnrichmentConfig(StrictModel):
             raise ValueError(f"overflow_strategy must be auto|chunk|drop_end|null, got {v!r}")
         return v
 
-    max_retries: int = Field(default=3, ge=0, description="Max retries for rate-limit errors")
-
-    retry_base_delay: float = Field(default=2.0, ge=0.0, description="Base delay for exponential backoff")
+    max_retries: int | None = Field(
+        default=None, ge=0,
+        description="The Isaacus SDK's own retry count (429, 5xx and timeouts, honouring "
+                    "Retry-After); null keeps the SDK default. Womblex adds no retry of its own.",
+    )
 
     batch_size: int = Field(default=10, ge=1, description="Documents per enrichment batch")
 
@@ -421,12 +423,12 @@ class EnrichmentConfig(StrictModel):
                     "Rate limits bind on tokens/request — start ~32K and probe at T0.",
     )
 
-    split_ceiling: int = Field(
-        default=100_000, ge=1,
-        description="A solo document above this token count is split client-side on "
+    split_ceiling: int | None = Field(
+        default=None, ge=1,
+        description="Split a solo document above this token count client-side on "
                     "structural (blank-line) boundaries into <= split_ceiling segments, "
-                    "enriched separately and offset-merged. ~150-200K tokens is the "
-                    "observed 429 failure zone; 100K leaves margin.",
+                    "enriched separately and offset-merged. Null (the default) splits "
+                    "nothing: the API takes long input whole under overflow_strategy.",
     )
 
     include_tables: bool = Field(
@@ -610,8 +612,9 @@ class EmbeddingConfig(StrictModel):
     dimensions: int | None = Field(
         default=None, description="Optional output dimensionality (model default if null).",
     )
-    max_retries: int = Field(default=3, ge=0)
-    retry_base_delay: float = Field(default=2.0, ge=0.0)
+    max_retries: int | None = Field(
+        default=None, ge=0, description="The Isaacus SDK's own retry count; null keeps the SDK default.",
+    )
 
 
 class WomblexConfig(StrictModel):

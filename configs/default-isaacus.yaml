@@ -151,7 +151,7 @@ enrichment:
   # against your rate limits and raise if you have headroom.
   max_texts_per_request: 8 # Isaacus per-request document ceiling.
   token_budget: 32768      # Pack requests up to this many combined tokens.
-  split_ceiling: 100000    # Split a solo doc above this client-side (429 margin).
+  # split_ceiling: 100000  # Opt in to splitting a solo doc above this client-side; unset, the API takes long input whole.
   # persist_document is auto-enabled here because chunking_model is set + enrich
   # is on; it lets the chunk stage reuse this stage's Document (no double enrich).
 

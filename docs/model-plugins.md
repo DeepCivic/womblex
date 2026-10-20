@@ -84,8 +84,8 @@ text, its offsets into the text sent, independent of which other texts share
 the request. Map labels onto the existing taxonomy inside the provider (a
 `Person` of `type="natural"` is what PII masks as `PERSON`). The limits it
 declares are what the stage packs and splits by: `max_texts_per_request`,
-`token_ceiling` (a longer text is split on blank lines and the results
-offset-merged), `token_counter` (`count_batch(texts) -> list[int]`),
+`token_ceiling` (`None` splits nothing; otherwise a longer text is split on blank
+lines and the results offset-merged), `token_counter` (`count_batch(texts) -> list[int]`),
 `needs_network`, and `returns_document`.
 
 An embedding provider has a `name`, a `limits` (`EmbeddingLimits`:

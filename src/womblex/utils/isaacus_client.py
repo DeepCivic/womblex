@@ -135,6 +135,17 @@ def is_model_served(model: str, endpoints: Iterable[SageMakerEndpoint]) -> bool:
     return any(e.models is None or model in e.models for e in endpoints)
 
 
+def with_retries(client: object, max_retries: int | None) -> object:
+    """*client* with the SDK's ``max_retries`` set to the corpus's value; untouched for ``None``.
+
+    The SDK retries 429s, 5xx responses and timeouts itself, honouring ``Retry-After``; this
+    only passes the count through. A ``None`` client (where only limits are read) is returned as is.
+    """
+    if client is None or max_retries is None:
+        return client
+    return client.with_options(max_retries=max_retries)  # type: ignore[attr-defined]
+
+
 def unserved_models(models: Iterable[str]) -> list[str]:
     """Of *models*, those no configured endpoint serves — empty on the hosted API."""
     endpoints = endpoints_from_env()
