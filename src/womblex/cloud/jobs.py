@@ -363,9 +363,13 @@ class RunBoard:
         return newly
 
     def seen_inputs(self, run_id: str) -> set[tuple[str, str]]:
-        """Every `(key, fingerprint)` a scheduled firing has queued for extraction in *run_id*."""
-        return {(k, fp) for s in self._list(run_id) if _attr(s, "kind") == dbos_app.KIND_BATCH
-                for k, fp in (_attr(s, "fingerprints") or {}).items()}
+        """Every `(key, fingerprint)` *run_id*'s firings have seen: queued for extraction, or found to
+        hold bytes the run already has (a firing's recorded `unchanged`)."""
+        rows = self._list(run_id, load_output=True)
+        queued = {(k, fp) for s in rows if _attr(s, "kind") == dbos_app.KIND_BATCH
+                  for k, fp in (_attr(s, "fingerprints") or {}).items()}
+        return queued | {(k, fp) for s in rows if _attr(s, "kind") == dbos_app.KIND_TRIGGER
+                         and isinstance(s.output, dict) for k, fp in (s.output.get("unchanged") or {}).items()}
 
     def firing_batches(self, run_id: str, firing: str) -> list[int]:
         """The batch numbers *firing* queued in *run_id*: a replayed firing reuses them."""

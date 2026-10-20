@@ -331,7 +331,8 @@ def _fire(run_id: str, context: dict[str, Any], firing: str) -> dict[str, Any]:
         )
     except WorkflowRefusedError as e:  # the board shows the message, so it carries the code
         raise WorkflowRefusedError(f"[{e.code.value}] {e}", e.issues, code=e.code, steps=e.steps) from e
-    return {"run_id": run_id, "firing": firing, "stages": list(sent.stages), "batches": sent.bases}
+    return {"run_id": run_id, "firing": firing, "stages": list(sent.stages), "batches": sent.bases,
+            "unchanged": sent.unchanged}  # read back by `RunBoard.seen_inputs`
 
 
 @DBOS.workflow(name=dbos_app.TRIGGER_WORKFLOW)

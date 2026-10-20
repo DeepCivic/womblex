@@ -428,3 +428,38 @@ def test_a_rewrite_of_the_same_bytes_is_not_queued_again(fleet, saved_preset, ca
     fire("3")
     with RunBoard(None) as board:
         assert board.firing_batches("nightly", "3") == [2]
+
+
+def test_a_file_found_unchanged_is_not_hashed_again(fleet, saved_preset, monkeypatch) -> None:  # noqa: F811
+    """A touched file with the same bytes is hashed once: the firing records its new fingerprint
+    (`unchanged`), so a later firing counts it seen (mistake 3: unattended work redoes nothing)."""
+    import os
+    from datetime import UTC, datetime
+
+    from womblex.store.remote import RemoteStore
+
+    _, ingest, _ = fleet
+    _inbox(fleet)
+    ensure_workflow_schema(None)
+    with WorkflowStore(None) as store:
+        store.save("nightly", _spec(["normalise"], [], "inbox", store=ingest))
+    hashed: list[str] = []
+    real = RemoteStore.sha256
+    monkeypatch.setattr(RemoteStore, "sha256", lambda self, key: hashed.append(key) or real(self, key))
+    client = dbos_app.open_client(None)
+
+    def fire(minute: int) -> None:  # a recorded firing, as a schedule starts it
+        client.enqueue({"workflow_name": dbos_app.SCHEDULED_WORKFLOW, "queue_name": dbos_app.DOWNSTREAM_QUEUE},
+                       datetime(2026, 10, 20, 1, minute, tzinfo=UTC), {"workflow_id": "nightly", "store": ingest})
+        work(fleet, idle_timeout=4)
+
+    people = Path(ingest) / "inbox" / "people.csv"
+    fire(0)
+    people.write_bytes(people.read_bytes())  # the same bytes, copied over again
+    stat = people.stat()
+    os.utime(people, (stat.st_atime + 60, stat.st_mtime + 60))
+    fire(1)
+    fire(2)
+    assert len(hashed) == 1  # the second firing hashed it; the third found its fingerprint seen
+    with RunBoard(None) as board:
+        assert board.next_batch_num("nightly") == 2  # one batch: the touched file was never queued again

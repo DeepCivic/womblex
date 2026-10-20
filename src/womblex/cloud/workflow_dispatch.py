@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from contextlib import nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 from womblex.cloud.workflow_order import StageOrderError, check_dispatch_order
@@ -50,6 +50,7 @@ class WorkflowDispatch:
     dry_run: bool
     firing: str | None = None
     bases: list[str] | None = None  # a firing's own batches; None is every batch of the run
+    unchanged: dict[str, str] = field(default_factory=dict)  # seen keys whose bytes it found unchanged -> fingerprint
 
 
 def dispatch_workflow(
@@ -199,7 +200,9 @@ def fire_workflow(
     A document is new when the run has not queued its key with its current fingerprint
     (`RemoteStore.fingerprints`) and, for a seen key whose fingerprint moved, its bytes differ from
     the run's recorded `source_hash` (`_changed_content`), so a changed file is a new document, the
-    earlier version stays, and a rewrite of the same bytes is not re-paid. A firing with nothing new queues and dispatches nothing. A replayed *firing* reuses
+    earlier version stays, and a rewrite of the same bytes is not re-paid. A seen key found unchanged
+    goes back with its fingerprint (`WorkflowDispatch.unchanged`, the firing's recorded output), so
+    the next firing counts it seen and does not hash it again. A firing with nothing new queues and dispatches nothing. A replayed *firing* reuses
     the batches it queued. The launch, so every check runs first (`check_firing`, then that this
     firing's batches were not cancelled) and a firing that cannot complete writes no row. A
     dispatch that fails after the batches are queued leaves them running: the run reads
@@ -213,6 +216,7 @@ def fire_workflow(
                         ingest=ingest, dsn=dsn)
     binding = stored.spec.input_binding
     shard_prefix = f"runs/{run_id}/documents"
+    unchanged: dict[str, str] = {}
     with RunBoard(dsn) as board:
         if cancelled := board.cancelled_batches(run_id, firing):  # a replayed firing: they would never run
             raise WorkflowRefusedError(f"firing {firing} of run {run_id!r} has cancelled batches "
@@ -221,11 +225,12 @@ def fire_workflow(
             prints = ingest.fingerprints(keys, under=normalise_prefix(binding.ingest_prefix))
             seen = board.seen_inputs(run_id)
             new = [k for k in keys if (k, prints[k]) not in seen]
-            new = _changed_content(stored.id, new, {k for k, _ in seen}, ingest, store, shard_prefix)
+            new, same = _changed_content(stored.id, new, {k for k, _ in seen}, ingest, store, shard_prefix)
+            unchanged = {k: prints[k] for k in same}  # recorded on the firing, so later ones do not hash them again
             if not new:
                 logger.info("workflow %s: no new documents under its input prefix; firing %s runs nothing",
                             stored.id, firing)
-                return WorkflowDispatch(run_id, stored.id, stored.digest, (), "", 0, False, firing, [])
+                return WorkflowDispatch(run_id, stored.id, stored.digest, (), "", 0, False, firing, [], unchanged)
             specs = batch_specs(new, shard_prefix=shard_prefix, ingest_root=binding.store or "",
                                 batch_size=binding.batch_size, max_attempts=3, start=board.next_batch_num(run_id))
             board.enqueue(run_id, specs, firing=firing, fingerprints=prints)
@@ -238,14 +243,14 @@ def fire_workflow(
         raise
     logger.info("workflow %s fired: run %s, firing %s, batches %s, stages %s", stored.id, run_id, firing,
                 ", ".join(sent.bases or ()), ", ".join(sent.stages))
-    return sent
+    return replace(sent, unchanged=unchanged)
 
 
 def _changed_content(
     workflow_id: str, new: list[str], seen_keys: set[str], ingest: RemoteStore, store: RemoteStore,
     shard_prefix: str,
-) -> list[str]:
-    """*new* without the seen keys whose bytes are unchanged, so a rewrite of the same bytes is not re-paid.
+) -> tuple[list[str], set[str]]:
+    """*new* without the seen keys whose bytes are unchanged, and those keys, so a rewrite of the same bytes is not re-paid.
 
     A seen key's fingerprint can move while its bytes stay (a re-copy, a multipart re-upload), so
     its bytes are hashed and compared with the `source_hash` the run's manifests record for it. A
@@ -259,7 +264,7 @@ def _changed_content(
 
     moved = [k for k in new if k in seen_keys]
     if not moved:
-        return new
+        return new, set()
     recorded: dict[str, set[str]] = {}
     with tempfile.TemporaryDirectory(prefix="womblex-seen-") as tmp:
         for key in store.list_files(shard_prefix, "*._manifest.parquet"):
@@ -270,7 +275,7 @@ def _changed_content(
     same = {k for k in moved if k in recorded and ingest.sha256(k) in recorded[k]}
     for key in sorted(same):
         logger.info("workflow %s: %s was rewritten with the same bytes; not queued again", workflow_id, key)
-    return [k for k in new if k not in same]
+    return [k for k in new if k not in same], same
 
 
 __all__ = ["WorkflowDispatch", "check_firing", "dispatch_workflow", "fire_workflow"]
