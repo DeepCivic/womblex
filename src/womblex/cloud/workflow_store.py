@@ -26,6 +26,7 @@ from pydantic import Field, ValidationError
 from womblex.cloud import dbos_app
 from womblex.cloud.stage_contracts import STAGE_NAMES
 from womblex.config.process import StrictModel
+from womblex.store.remote import validate_location_uri
 
 logger = logging.getLogger(__name__)
 
@@ -158,6 +159,11 @@ def _check_destinations(spec: StoredWorkflowSpec) -> None:
     for d in spec.destinations:
         if isinstance(d, ObjectStoreDestination) and "@" in urlsplit(d.uri).netloc:
             raise ValueError(f"destination {d.name!r}: a URI names no credentials; use `credentials`")
+        if isinstance(d, ObjectStoreDestination):
+            try:  # `s3:/bucket` would otherwise deliver to a local folder named `s3:`
+                validate_location_uri(d.uri)
+            except ValueError as e:
+                raise ValueError(f"destination {d.name!r}: {e}") from e
         if isinstance(d, PostgresDestination):
             if not _TABLE_NAME.match(d.table):
                 raise ValueError(f"destination {d.name!r}: table must be `name` or `schema.name`, got {d.table!r}")

@@ -28,7 +28,7 @@ its steps write.
 | `input_binding` | `store` (the input store a firing lists and extracts from; a scheduled workflow must name it, spelt exactly as the workers' `--ingest`, or `--store` where they have none, since firings are routed by that string), `ingest_prefix` (the documents under it a firing extracts) and `batch_size`. Extraction is not a step. |
 | `steps` | Downstream stages, each at most once, run in the order listed (`dispatch-workflow` needs pipeline order). |
 | `triggers` | Cron expressions scheduled by `schedule-workflow`. |
-| `destinations` | Where the run is delivered after its last step. `object_store`: `name`, `uri`, `include_sources` (default `true`) and optional `credentials` (`key_env` and `secret_env`, the environment variables holding an S3 key and secret, never the values). `postgres`: `name`, `dsn_env` (the environment variable holding the connection string), `table` (default `womblex_chunks`) and `text_layer` (`masked`, the default, or `raw`). |
+| `destinations` | Where the run is delivered after its last step. `object_store`: `name`, `uri` (a local path or a URI a store can open, checked when the file is read), `include_sources` (default `true`) and optional `credentials` (`key_env` and `secret_env`, the environment variables holding an S3 key and secret, never the values). `postgres`: `name`, `dsn_env` (the environment variable holding the connection string), `table` (default `womblex_chunks`) and `text_layer` (`masked`, the default, or `raw`). |
 
 ## Delivery
 
