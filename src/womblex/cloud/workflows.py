@@ -305,10 +305,15 @@ def scheduled_run_id(workflow_id: str, scheduled_time: datetime) -> str:
 def _fire(run_id: str, context: dict[str, Any]) -> dict[str, Any]:
     """Load the stored workflow and fire it (`workflow_dispatch.fire_workflow`)."""
     from womblex.cloud.workflow_dispatch import fire_workflow
-    from womblex.cloud.workflow_runner import WorkflowRefusedError, preset_resolver
+    from womblex.cloud.workflow_runner import RefusalCode, WorkflowRefusedError, preset_resolver
     from womblex.cloud.workflow_store import WorkflowStore
 
     ctx = _context()
+    if not context.get("store"):  # scheduled before workflows named their input store
+        raise WorkflowRefusedError(
+            f"[{RefusalCode.SPEC_INVALID.value}] workflow {context['workflow_id']!r} was scheduled before "
+            "workflows named their input store; add input_binding.store to its file and run "
+            "`womblex schedule-workflow` on it again", code=RefusalCode.SPEC_INVALID)
     if (context.get("store") or "").rstrip("/") != ctx.ingest_root.rstrip("/"):  # routing keeps this from happening
         raise RuntimeError(f"firing of {context['workflow_id']!r} reached a worker on {ctx.ingest_root}, "
                            f"not the workflow's input store {context.get('store')}")
@@ -341,7 +346,11 @@ def run_scheduled(scheduled_time: datetime, context: dict[str, Any]) -> dict[str
     attrs: dict[str, Any] = {"run_id": run_id, "kind": dbos_app.KIND_TRIGGER,
                              "workflow_id": context["workflow_id"]}
     with SetWorkflowID(dbos_app.trigger_id(run_id)), SetWorkflowAttributes(attrs):
-        DBOS.enqueue_workflow(dbos_app.firing_queue(context.get("store") or ""), fire_trigger, run_id, context)
+        # A schedule synced before workflows named a store has none: no worker serves an
+        # unkeyed firing queue, so it goes where every worker serves, to be refused visibly.
+        store = context.get("store")
+        queue = dbos_app.firing_queue(store) if store else dbos_app.DOWNSTREAM_QUEUE
+        DBOS.enqueue_workflow(queue, fire_trigger, run_id, context)
     return {"run_id": run_id, "firing": dbos_app.trigger_id(run_id)}
 
 

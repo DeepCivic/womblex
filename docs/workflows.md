@@ -25,7 +25,7 @@ its steps write.
 | `name` | The workflow's id: its schedules, its stored copy and its runs are named for it. |
 | `preset` | The base config, a built-in preset or one saved under `--presets-dir`. `dataset` and `paths` are never taken from the workflow. |
 | `config` | Overlay on the preset's config: mappings merge, anything else replaces, `null` drops a key to its default. |
-| `input_binding` | `store` (the input store a firing lists and extracts from; a scheduled workflow must name it), `ingest_prefix` (the documents under it a firing extracts) and `batch_size`. Extraction is not a step. |
+| `input_binding` | `store` (the input store a firing lists and extracts from; a scheduled workflow must name it, spelt exactly as the workers' `--ingest`, or `--store` where they have none, since firings are routed by that string), `ingest_prefix` (the documents under it a firing extracts) and `batch_size`. Extraction is not a step. |
 | `steps` | Downstream stages, each at most once, run in the order listed (`dispatch-workflow` needs pipeline order). |
 | `triggers` | Cron expressions scheduled by `schedule-workflow`. |
 
@@ -51,7 +51,7 @@ coordinator runs stages in that order: `normalise`, `spellfix`, `enrich`, `chunk
 
 At each cron time a worker on the workflow's input store starts a firing from the
 stored copy; a worker on another store never runs it, and credentials are the worker's own.
-The firing it runs the same checks as scheduling,
+The firing runs the same checks as scheduling, then
 queues the extraction batches for run `<name>-<UTC time>`, then dispatches the steps
 under the workflow's recipe. If the dispatch fails after the batches are queued, the
 batches run on and the run reads `orphaned` (`womblex jobs`, `/v1/runs`) until you

@@ -357,3 +357,18 @@ def test_a_scheduled_workflow_must_name_its_input_store(fleet, saved_preset, cap
     assert cmd_schedule_workflow(args) == 1
     assert "[spec_invalid]" in caplog.text and "input_binding.store" in caplog.text
     assert list_schedules(dbos_app.open_client(None), "nowhere") == []
+
+
+def test_a_schedule_synced_before_input_stores_is_refused_not_stranded(fleet, saved_preset) -> None:  # noqa: F811
+    """Its context names no store: the firing is refused on the board, not left on a queue no worker serves."""
+    from datetime import UTC, datetime
+
+    client = dbos_app.open_client(None)
+    client.enqueue({"workflow_name": dbos_app.SCHEDULED_WORKFLOW, "queue_name": dbos_app.DOWNSTREAM_QUEUE},
+                   datetime.now(UTC), {"workflow_id": "old", "trigger": 0})  # the context schedules held then
+    work(fleet, idle_timeout=3)
+    with RunBoard(None) as board:
+        (run,) = board.runs()
+        (row,) = board.list_jobs(run.run_id)
+    assert run.counts == {"failed": 1} and row.kind == "trigger"
+    assert "[spec_invalid]" in (row.error or "") and "schedule-workflow" in (row.error or "")
