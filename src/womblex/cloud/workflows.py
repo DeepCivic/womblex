@@ -489,12 +489,13 @@ def run_downstream(
             )
         try:
             results.append({**handle.get_result(), "ran_after_failed": list(failed)})
-            event("stage_finished", stage, stage=stage, ran_after_failed=list(failed))
         except Exception as e:  # a failed stage must not stop the ones after it
             results.append({"stage": stage, "error": _carried(e), "ran_after_failed": list(failed)})
             logger.warning("run %s: %s failed; later stages still run: %s", run_id, stage, results[-1]["error"])
             event("stage_failed", stage, stage=stage, error=results[-1]["error"], ran_after_failed=list(failed))
             failed.append(stage)
+        else:  # outside the try, so an event step that raised could never mark a finished stage failed
+            event("stage_finished", stage, stage=stage, ran_after_failed=list(failed))
     # Last, and whatever failed: the manifest covers every batch present (Requirement 2).
     unwritten = ""
     try:

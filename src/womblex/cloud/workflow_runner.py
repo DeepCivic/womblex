@@ -372,7 +372,8 @@ def run_workflow_local(
     for o in result.deliveries:
         events.emit("delivered" if o.status == "delivered" else "delivery_failed", "running", o.destination,
                     destination=o.destination, error=o.error, after_failed=o.after_failed)
-    events.emit("run_finished", "failed" if result.exit_code else "done")
+    # The run's status as the board words it: its steps', not its deliveries' (those have their own events).
+    events.emit("run_finished", "failed" if any(s.status == "failed" for s in result.steps) else "done")
     if events.active:
         result.deliveries += _record_local(shard_dir, events.records())
     return result
@@ -411,8 +412,9 @@ def deliver_local(stored: StoredWorkflow, shard_dir: Path, failed: tuple[str, ..
         _record_local(shard_dir, outcomes)
     except Exception:  # the steps have run; nothing here may stop or unwind them
         logger.exception("workflow %s: delivery could not complete", stored.id)
-        return [DeliveryOutcome(d.name, d.kind, getattr(d, "uri", ""), stored.id, "failed", 0, list(failed),
-                                error="delivery could not complete; see the log") for d in stored.spec.destinations]
+        return [DeliveryOutcome(d.name, d.kind, str(getattr(d, "uri", None) or getattr(d, "table", "")), stored.id,
+                                "failed", 0, list(failed), error="delivery could not complete; see the log")
+                for d in stored.spec.destinations]
     return outcomes
 
 

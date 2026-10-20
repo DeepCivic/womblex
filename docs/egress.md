@@ -160,7 +160,8 @@ the steps that had failed when it was delivered (empty when none had). Raw sourc
 are original documents, as above.
 
 **Postgres** (`kind: postgres`) — one row per embedded chunk in `table` (default
-`womblex_chunks`), created if absent:
+`womblex_chunks`), created if absent (with the `vector` extension, which pgvector lets
+only a superuser create, so for any other role it is created once beforehand):
 
 | Column | Holds |
 |---|---|

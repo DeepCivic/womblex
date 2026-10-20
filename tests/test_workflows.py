@@ -518,9 +518,11 @@ def test_a_fleet_run_with_a_failed_stage_still_delivers_and_names_it(fleet, monk
     assert marker["after_failed"] == ["normalise"]
 
 
-def test_a_fleet_run_sends_its_events_once_each_and_records_them(fleet, monkeypatch):
+@pytest.mark.parametrize("fails", [True, False])
+def test_a_fleet_run_sends_its_events_once_each_and_records_them(fleet, monkeypatch, fails):
     """Requirement 27 on the fleet: the coordinator sends each event as a recorded step, the
-    run's status in the API's words, and the webhook's record lists them."""
+    run's status in the API's words (the coordinator, still running, left out), and the
+    webhook's record lists them."""
     import json
 
     import httpx
@@ -531,7 +533,7 @@ def test_a_fleet_run_sends_its_events_once_each_and_records_them(fleet, monkeypa
     got = _Receiver()
     monkeypatch.setattr(httpx, "post", got)
     monkeypatch.setenv(_HOOK["secret_env"], "s3cret")
-    _failing_units(monkeypatch, lambda stage, unit: stage == "normalise")
+    _failing_units(monkeypatch, lambda stage, unit: fails and stage == "normalise")
     spec = {"preset": "recipe", "steps": [{"stage": "normalise"}], "destinations": [_HOOK]}
     wf = {"id": "wf", "digest": "sha256:feed", "preset": "recipe", "spec": spec, "config": {}}
     with RunBoard(None) as board:
@@ -539,11 +541,12 @@ def test_a_fleet_run_sends_its_events_once_each_and_records_them(fleet, monkeypa
         board.enqueue_stages("r1", ["normalise"], "runs/r1/documents", workflow=wf, max_attempts=1)
         work(fleet, idle_timeout=2)
     bodies = [b for b, _, _ in got.calls]
+    stage, status = ("stage_failed", "failed") if fails else ("stage_finished", "done")
     assert [(b["event"], b["status"]) for b in bodies] == [
-        ("extraction_settled", "running"), ("stage_failed", "running"), ("run_finished", "failed")]
+        ("extraction_settled", "running"), (stage, "running"), ("run_finished", status)]
     assert bodies[1]["stage"] == "normalise" and len({b["event_id"] for b in bodies}) == 3
     saved = json.loads((store_root / "runs/r1/deliveries/hook.json").read_text())
-    assert [e["event"] for e in saved["events"]] == ["extraction_settled", "stage_failed", "run_finished"]
+    assert [e["event"] for e in saved["events"]] == ["extraction_settled", stage, "run_finished"]
 
 
 class _Row:

@@ -97,3 +97,18 @@ def test_a_webhook_that_is_down_never_stops_the_run(run_root: Path, tmp_path: Pa
     (hook,) = result.deliveries
     assert (hook.status, hook.error) == ("failed", "3 of 3 event(s) not sent")
     assert result.exit_code == 1
+
+
+def test_a_failed_delivery_is_its_own_event_and_the_run_still_reads_done(
+    run_root: Path, tmp_path: Path, receiver, monkeypatch,  # noqa: F811
+):
+    def refused(*_a, **_k):
+        raise OSError("destination refused the write")
+
+    monkeypatch.setattr("womblex.store.egress.build_bundle", refused)
+    monkeypatch.setattr(delivery.time, "sleep", lambda _s: None)
+    result = run_workflow_local(_stored(["normalise"], destinations=[_to(tmp_path), _HOOK]),
+                                run_root / "documents", resolve_preset=_resolve)
+    assert result.exit_code == 1
+    assert [(b["event"], b["status"]) for b, _, _ in receiver.calls][-2:] == [
+        ("delivery_failed", "running"), ("run_finished", "done")]
