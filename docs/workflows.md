@@ -43,9 +43,16 @@ replaces the bundle and the record.
 
 Each destination is checked before the first step: its credentials' environment
 variables are set and its URI's storage backend is installed; a failure refuses
-the run with `destination_unavailable`. A workflow that delivers runs over a run's
-`documents/` directory. The fleet does not deliver yet, so `dispatch-workflow` and
-`schedule-workflow` refuse a workflow with destinations.
+the run with `destination_unavailable`. `dispatch-workflow` checks on the host it
+runs on, a scheduled firing on the worker that fires it; the workers that deliver
+need the same variables. A workflow that delivers runs over a run's `documents/`
+directory. On the fleet the coordinator delivers after it writes the run's manifest,
+and each firing delivers the whole run again.
+
+Nothing redelivers by itself. After a failed stage is retried successfully,
+`retry-stage` prints the command that delivers again:
+`womblex deliver FILE --run-id R --store URI` (or `--shards DIR` for a local run).
+It replaces the bundle and the record.
 
 ## Checking, running and dispatching
 

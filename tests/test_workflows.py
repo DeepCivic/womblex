@@ -459,7 +459,7 @@ def test_a_manifest_the_coordinator_cannot_write_is_named_not_hidden(fleet, monk
     def unwritable(*_a, **_k):
         raise OSError("store refused the upload")
 
-    monkeypatch.setattr(workflows, "finalize_run", unwritable)
+    monkeypatch.setattr(workflows, "finalize_from_board", unwritable)
     store_root, ingest, _ = fleet
     with RunBoard(None) as board:
         board.enqueue("r1", [batch(ingest)])
@@ -469,6 +469,32 @@ def test_a_manifest_the_coordinator_cannot_write_is_named_not_hidden(fleet, monk
     assert coordinator.status == "failed"
     assert "run manifest was not written" in (coordinator.error or "")
     assert (store_root / "runs/r1/documents/batch-0001.normalised_text.parquet").exists()
+
+
+def test_a_dispatched_workflow_is_delivered_after_its_stages_and_recorded(fleet):
+    """Requirement 27 on the fleet: the coordinator delivers the bundle, records it on the run, and
+    the run record lists it."""
+    import json
+
+    from womblex.store.run_manifest import read_run_record
+
+    store_root, ingest, tmp = fleet
+    dest = tmp / "handoff"
+    spec = {"preset": "recipe", "steps": [{"stage": "normalise"}],
+            "destinations": [{"kind": "object_store", "name": "archive", "uri": str(dest)}]}
+    wf = {"id": "wf", "digest": "sha256:feed", "preset": "recipe", "spec": spec, "config": {}}
+    with RunBoard(None) as board:
+        board.enqueue("r1", [batch(ingest)])
+        board.enqueue_stages("r1", ["normalise"], "runs/r1/documents", workflow=wf)
+        work(fleet, idle_timeout=2)
+        assert board.stats("r1") == {"done": 3}
+    bundle = dest / "r1"
+    assert list((bundle / "corpus").glob("*.normalised_text.parquet"))
+    assert json.loads((bundle / "egress_manifest.json").read_text())["sources_by_status"] == {"resolved": 1}
+    saved = json.loads((store_root / "runs/r1/deliveries/archive.json").read_text())
+    assert (saved["status"], saved["after_failed"]) == ("delivered", [])
+    record = read_run_record(store_root / "runs/r1/manifest.parquet")
+    assert [d["destination"] for d in record["deliveries"]] == ["archive"]
 
 
 class _Row:

@@ -351,6 +351,60 @@ def cmd_schedule_workflow(args: argparse.Namespace) -> int:
     return 0
 
 
+def _register_deliver(p: argparse.ArgumentParser) -> None:
+    p.add_argument("workflow", type=Path, help="Workflow file (YAML) naming the destinations")
+    where = p.add_mutually_exclusive_group(required=True)
+    where.add_argument("--shards", type=Path, help="A local run's documents/ directory")
+    where.add_argument("--run-id", help="A fleet run in --store")
+    p.add_argument("--store", default=None, help="Object-store URI the run is in (or $WOMBLEX_STORE_URI)")
+    p.add_argument("--output-prefix", default=None, help="Default: runs/<run-id>")
+    p.add_argument("--dsn", default=None,
+                   help="DBOS system database, for the run record's file checksums "
+                        "(or $WOMBLEX_DB_DSN / $DATABASE_URL). Default: the local SQLite file.")
+
+
+def cmd_deliver(args: argparse.Namespace) -> int:
+    """Deliver a finished run to its workflow's destinations again, replacing what was delivered.
+
+    Refused before anything is sent when the workflow names no destination or one fails its check.
+    Exit 1 if any delivery failed; each is recorded on the run either way.
+    """
+    from womblex.cloud.delivery import check_destinations, deliver, record_deliveries
+    from womblex.cloud.finalize import finalize_from_board
+    from womblex.cloud.workflow_runner import deliver_local
+    from womblex.store.remote import RemoteStore
+
+    stored = _load_workflow(args)
+    if stored is None:
+        return 1
+    if not stored.spec.destinations:
+        logger.error("workflow %s names no destinations", stored.id)
+        return 1
+    if problems := check_destinations(stored.spec.destinations):
+        for name, problem in problems:
+            logger.error("[destination_unavailable] destination %s: %s", name, problem)
+        return 1
+    if args.shards is not None:
+        if args.shards.name != "documents" or not args.shards.is_dir():
+            logger.error("--shards must be a run's documents/ directory: %s", args.shards)
+            return 1
+        outcomes = deliver_local(stored, args.shards)
+    else:
+        store_uri = args.store or os.environ.get("WOMBLEX_STORE_URI")
+        if not store_uri:
+            logger.error("No store URI (pass --store or set WOMBLEX_STORE_URI)")
+            return 1
+        prefix = (args.output_prefix or f"runs/{args.run_id}").strip("/")
+        run = RemoteStore.from_uri(store_uri).sub(prefix)
+        outcomes = deliver(stored, run, args.run_id)
+        record_deliveries(run, outcomes)
+        dsn = args.dsn or os.environ.get("WOMBLEX_DB_DSN") or os.environ.get("DATABASE_URL")
+        finalize_from_board(RemoteStore.from_uri(store_uri), args.run_id, prefix, dsn)
+    for o in outcomes:
+        logger.info("deliver %s: %s%s", o.destination, o.status, f" — {o.error}" if o.error else "")
+    return 1 if any(o.status != "delivered" for o in outcomes) else 0
+
+
 COMMANDS = [
     Command("run-workflow", "Run a workflow file's steps over a local shard directory",
             _register_run_workflow, cmd_run_workflow),
@@ -362,4 +416,6 @@ COMMANDS = [
             _register_plan, cmd_plan),
     Command("validate", "Check a workflow file would run, without running it",
             _register_validate, cmd_validate),
+    Command("deliver", "Deliver a finished run to its workflow file's destinations again",
+            _register_deliver, cmd_deliver),
 ]

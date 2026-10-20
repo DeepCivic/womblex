@@ -20,6 +20,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
+from womblex.cloud.delivery import check_destinations
 from womblex.cloud.workflow_order import StageOrderError, check_dispatch_order
 from womblex.cloud.workflow_runner import (
     RefusalCode,
@@ -105,9 +106,8 @@ def dispatch_workflow(
             "the coordinator runs stages in pipeline order, so reorder the steps",
             RefusalCode.ORDER_NOT_PIPELINE,
         )
-    if stored.spec.destinations:  # refused rather than dispatched and never delivered
-        raise refuse("fleet runs do not deliver to destinations; run it with `run-workflow`",
-                     RefusalCode.DESTINATION_UNAVAILABLE)
+    if problems := check_destinations(stored.spec.destinations):  # on this host; a firing checks on its worker
+        raise refuse("; ".join(f"destination {d}: {m}" for d, m in problems), RefusalCode.DESTINATION_UNAVAILABLE)
     from womblex.utils.model_check import check_registered
 
     try:

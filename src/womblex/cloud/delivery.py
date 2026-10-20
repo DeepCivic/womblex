@@ -16,13 +16,14 @@ id, with or without raw sources as the destination chooses.
 
 from __future__ import annotations
 
+import io
 import logging
 import os
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from womblex.store.delivery_record import delivery_key, dump_delivery
 from womblex.store.remote import RemoteStore
@@ -81,7 +82,7 @@ def _open(d: WorkflowDestination) -> RemoteStore:
 
 
 def deliver(
-    stored: StoredWorkflow, run_root: Path | str, run_id: str, *,
+    stored: StoredWorkflow, run_root: Path | str | RemoteStore, run_id: str, *,
     after_failed: tuple[str, ...] = (), attempts: int = DELIVERY_ATTEMPTS,
     backoff: float = DELIVERY_BACKOFF_SECONDS,
 ) -> list[DeliveryOutcome]:
@@ -119,12 +120,17 @@ def deliver(
     return outcomes
 
 
-def record_deliveries_local(run_root: Path, outcomes: list[DeliveryOutcome]) -> None:
-    """Write each outcome as its destination's delivery record under a local *run_root*."""
+def record_deliveries(run: RemoteStore, outcomes: list[DeliveryOutcome]) -> None:
+    """Write each outcome as its destination's delivery record in the *run*'s directory."""
     for o in outcomes:
-        path = run_root / delivery_key(o.destination)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(dump_delivery(asdict(o)), encoding="utf-8")
+        run.write_stream(io.BytesIO(dump_delivery(asdict(o)).encode()), delivery_key(o.destination))
+
+
+def dispatched_workflow(workflow: dict[str, Any]) -> StoredWorkflow:
+    """The workflow a fleet run was dispatched with, from the dict its coordinator carries."""
+    from womblex.cloud.workflow_store import StoredWorkflow, StoredWorkflowSpec
+
+    return StoredWorkflow(workflow["id"], StoredWorkflowSpec(**workflow["spec"]), workflow["digest"])
 
 
 
@@ -133,5 +139,6 @@ __all__ = [
     "DeliveryOutcome",
     "check_destinations",
     "deliver",
-    "record_deliveries_local",
+    "dispatched_workflow",
+    "record_deliveries",
 ]

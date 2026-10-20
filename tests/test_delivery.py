@@ -161,10 +161,41 @@ def test_a_workflow_with_no_destinations_keeps_its_digest():
     assert workflow_digest(spec) == "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
 
 
-def test_the_fleet_refuses_a_workflow_it_would_not_deliver(tmp_path: Path):
+def test_dispatch_checks_destinations_before_any_row(tmp_path: Path):
     from womblex.cloud.workflow_dispatch import dispatch_workflow
 
-    with pytest.raises(WorkflowRefusedError) as refused:
-        dispatch_workflow(_stored(["normalise"], destinations=[_to(tmp_path)]), resolve_preset=_resolve,
+    unset = _to(tmp_path, credentials={"key_env": "WOMBLEX_TEST_UNSET_KEY", "secret_env": "WOMBLEX_TEST_UNSET_SECRET"})
+    with pytest.raises(WorkflowRefusedError, match="WOMBLEX_TEST_UNSET_KEY") as refused:
+        dispatch_workflow(_stored(["normalise"], destinations=[unset]), resolve_preset=_resolve,
                           run_id="r1", store_uri=None, dsn=None, dry_run=True)
     assert refused.value.code is RefusalCode.DESTINATION_UNAVAILABLE
+
+
+def test_womblex_deliver_redelivers_and_refuses_what_it_cannot(run_root: Path, tmp_path: Path):
+    import argparse
+
+    import yaml
+
+    from womblex.cli.workflow import cmd_deliver
+
+    def deliver(destinations: list) -> int:
+        path = tmp_path / "wf.yaml"
+        path.write_text(yaml.safe_dump({"name": "wf", "preset": "saved-offline", "steps": [{"stage": "normalise"}],
+                                        "destinations": destinations}))
+        return cmd_deliver(argparse.Namespace(workflow=path, shards=run_root / "documents", run_id=None, store=None,
+                                              output_prefix=None, dsn=None))
+
+    assert deliver([_to(tmp_path, include_sources=False)]) == 0
+    assert (tmp_path / "out" / "archive" / "run-7" / "egress_manifest.json").is_file()
+    assert read_run_record(run_root / "manifest.parquet")["deliveries"][0]["status"] == "delivered"
+    assert deliver([]) == 1
+    assert deliver([{**_to(tmp_path), "uri": "nosuchscheme://x"}]) == 1
+
+
+def test_a_retry_names_the_workflow_to_redeliver():
+    from womblex.cloud.retry import _delivering
+
+    spec = {"steps": [{"stage": "chunk"}], "destinations": [{"kind": "object_store", "name": "a", "uri": "/x"}]}
+    assert _delivering({"workflow": {"id": "nightly", "spec": spec}}) == "nightly"
+    assert _delivering({"workflow": {"id": "nightly", "spec": {**spec, "destinations": []}}}) is None
+    assert _delivering({"config": {}}) is None

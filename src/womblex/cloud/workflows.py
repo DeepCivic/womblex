@@ -6,7 +6,8 @@ publishes the shards. A stage plans its units (one per batch base, or one for
 the whole run), then runs each as its own step, so a unit that finished is
 recorded and a re-run starts after it. The coordinator waits for the run's
 extraction to settle, runs the requested stages in pipeline order, then writes
-the run's ``manifest.parquet`` through the code `womblex finalize` runs.
+the run's ``manifest.parquet`` through the code `womblex finalize` runs and, for a
+workflow that names destinations, delivers the run to them (`cloud/delivery.py`).
 
 A launched run is never stopped part-way (`docs/decisions-operations.md`, "A run is an
 arrow"): a unit that fails does not stop the stage's other units, and a stage
@@ -36,7 +37,7 @@ from dbos import error as dbos_error
 
 from womblex.batch import process_batch
 from womblex.cloud import dbos_app
-from womblex.cloud.finalize import NoShardManifests, finalize_run, published_checksums
+from womblex.cloud.finalize import NoShardManifests, finalize_from_board
 from womblex.cloud.stage_contracts import PRODUCER_OF, STAGE_CONTRACTS
 from womblex.cloud.stage_runner import (
     InputContractError,
@@ -376,15 +377,25 @@ def _unsettled_batches(run_id: str) -> int:
 
 def _finalize(run_id: str, shard_prefix: str) -> str:
     """Write the run's ``manifest.parquet`` over every batch present, as `womblex finalize` does."""
-    from womblex.cloud.jobs import RunBoard
-
     ctx = _context()
-    output_prefix = _output_prefix(shard_prefix)
-    with RunBoard(ctx.dsn) as board:
-        checksums, undigested = published_checksums(board, run_id, output_prefix)
-    written = finalize_run(ctx.store, output_prefix, checksums=checksums, undigested=undigested)
+    written = finalize_from_board(ctx.store, run_id, _output_prefix(shard_prefix), ctx.dsn)
     logger.info("run %s: wrote %s from %d shard manifest(s)", run_id, written.manifest_key, written.shard_manifests)
     return written.manifest_key
+
+
+def _deliver(run_id: str, shard_prefix: str, workflow: dict[str, Any], failed: list[str]) -> list[str]:
+    """Deliver the run to its workflow's destinations, record each, and rewrite the manifest so the
+    run record lists them; returns each destination's status. Logs and records, never raises."""
+    from womblex.cloud.delivery import deliver, dispatched_workflow, record_deliveries
+
+    run = _context().store.sub(_output_prefix(shard_prefix))
+    outcomes = deliver(dispatched_workflow(workflow), run, run_id, after_failed=tuple(failed))
+    try:
+        record_deliveries(run, outcomes)
+        _finalize(run_id, shard_prefix)
+    except Exception:  # the deliveries happened; a record that could not be written is logged
+        logger.exception("run %s: delivery records could not be written", run_id)
+    return [f"{o.destination}: {o.status}" for o in outcomes]
 
 
 @DBOS.workflow(name=dbos_app.DOWNSTREAM_WORKFLOW)
@@ -402,9 +413,10 @@ def run_downstream(
     batch only. A failed stage does not stop the stages after it: each runs
     over what exists, recorded with the failures it follows (`ran_after_failed`
     on its row, as the local runner records), and the coordinator fails last
-    if any did, naming them. Its last step writes the run's ``manifest.parquet``
+    if any did, naming them. Then it writes the run's ``manifest.parquet``
     (`cloud/finalize.py`), after a failed stage too; a manifest it could not
-    write is named among the failures.
+    write is named among the failures. Last, a dispatched workflow's run is
+    delivered to its destinations; a failed delivery is recorded, not raised.
     """
     while DBOS.run_step({"name": "await-extraction"}, _unsettled_batches, run_id):
         DBOS.sleep(SETTLE_POLL_SECONDS)
@@ -453,6 +465,9 @@ def run_downstream(
             + (f"; ran after a failure: {'; '.join(after)}" if after else "")
             + (f"; {unwritten}" if unwritten else "")
         )
+    if workflow is not None and workflow.get("spec", {}).get("destinations"):
+        # Never fails the run: each destination's outcome is its own record (`cloud/delivery.py`).
+        DBOS.run_step({"name": "deliver"}, _deliver, run_id, shard_prefix, workflow, failed)
     if unwritten:
         raise RunIncomplete(f"run {run_id}: every stage finished, but {unwritten}")
     return results

@@ -232,6 +232,10 @@ class RemoteStore:
         fs, root = fsspec.core.url_to_fs(uri, **opts)
         return cls(fs=fs, root=root.rstrip("/"))
 
+    def sub(self, prefix: str) -> RemoteStore:
+        """The same store rooted at *prefix* under this one: a run's own directory, say."""
+        return RemoteStore(fs=self.fs, root=self._full(prefix))
+
     def _full(self, rel: str) -> str:
         rel = rel.strip("/")
         return f"{self.root}/{rel}" if rel else self.root

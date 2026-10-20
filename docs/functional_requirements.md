@@ -577,11 +577,8 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - Every destination is checked before launch (its secrets resolve, its dependencies are installed); a failed check refuses the run.
 - Results are delivered after the last step, even when a step failed, and a delivery after a failure names the failed steps.
 - A failed delivery is retried a set number of times, then recorded on the run. It never stops the run.
+- After a failed stage is retried successfully, the retry command prints how to redeliver. Redelivery replaces: files are rewritten.
 - The run record lists every delivery.
-
-**TO-DO:**
-
-- **The fleet does not deliver.** `dispatch-workflow` and `schedule-workflow` refuse a workflow with destinations; the coordinator's delivery, and `retry-stage`'s redelivery hint, are the next merge.
 
 **Out of scope:** managing workflows through the API, pruning changed or deleted documents, resolving the source of a changed file's earlier version (its bytes are gone from the store, so `SourceResolver` reads it as `hash_mismatch`), workflow owners, backfill of missed firings, and destination kinds other than an object store (each returns with the merge that delivers it).
 
@@ -622,6 +619,5 @@ Requirements not yet fully met. The detail lives in the **TO-DO** block under ea
 - **Requirement 9 (Redaction Handling):** no redaction `pipeline_point`, and the E2E `run` path writes no `*.redactions.parquet`.
 - **Requirement 13 (Money Annotation):** the money span row carries no merge extent or header-row coordinate.
 - **Requirements 17 and 21 (Corpus Inspector; Console Design System):** `DocumentGrid.svelte` is not virtualised and emits no `aria-rowcount`.
-- **Requirement 27 (Workflows):** the fleet does not deliver to a workflow's destinations.
 
 ---

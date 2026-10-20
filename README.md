@@ -109,6 +109,7 @@ womblex ui --output-root runs/          # http://127.0.0.1:8080
 | `retry-stage` | Retry a failed distributed stage from its first failed unit |
 | `run-workflow`, `validate`, `plan` | Run a workflow file's steps over a local shard directory; check it would run, without running it; count what its paid steps would send, calling nothing |
 | `dispatch-workflow`, `schedule-workflow` | Queue a workflow file's steps for the fleet; store its copy and schedule its cron triggers for workers to fire |
+| `deliver` | Deliver a finished run to its workflow file's destinations again, replacing what was delivered |
 | `validate-redactions` | Validate the redaction detector against a labels packet (`annotate-redactions` is a deprecated alias of `redact --shards --pdfs`) |
 | `ground-truth`, `score` | Build review baselines from a run, and score corrected ones |
 | `profile` | Print the inferred column schema of a tabular file |

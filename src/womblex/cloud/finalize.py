@@ -5,7 +5,8 @@ the coordinator, as its last step once the run's stages have finished. It
 stages in every ``*._manifest.parquet`` under ``<output_prefix>/documents``,
 reads every shard's footer in place for the run record, consolidates them with
 :func:`~womblex.store.run_manifest.write_run_manifest` and uploads
-``<output_prefix>/manifest.parquet``. Idempotent: a re-run over the same shards
+``<output_prefix>/manifest.parquet``, its run record listing the run's
+deliveries (``<output_prefix>/deliveries/``). Idempotent: a re-run over the same shards
 writes the same manifest, and one over more batches covers them too.
 """
 
@@ -17,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from womblex.store.delivery_record import DELIVERIES_DIRNAME, parse_deliveries
 from womblex.store.run_manifest import RUN_MANIFEST_FILENAME, write_run_manifest
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -77,13 +79,26 @@ def finalize_run(
     footers = [observed for observed in (store.read_parquet_footer(k) for k in shard_keys) if observed is not None]
     logger.info("Read %d/%d shard footer(s) for the run record", len(footers), len(shard_keys))
 
+    records = store.list_files(f"{output_prefix}/{DELIVERIES_DIRNAME}", "*.json")
+    deliveries = parse_deliveries([(k, store.read_text(k)) for k in records])
+
     target = f"{output_prefix}/{RUN_MANIFEST_FILENAME}"
     with tempfile.TemporaryDirectory(prefix="womblex-finalize-") as tmp:
         docs = Path(tmp) / "documents"
         store.download_to_dir(manifest_keys, docs)
-        local = write_run_manifest(docs, footers=footers, checksums=checksums, undigested=undigested)
+        local = write_run_manifest(docs, footers=footers, checksums=checksums, undigested=undigested,
+                                   deliveries=deliveries)
         store.upload_file(local, target)
     return FinalizeResult(target, len(manifest_keys), len(footers), len(shard_keys))
 
 
-__all__ = ["FinalizeResult", "NoShardManifests", "finalize_run", "published_checksums"]
+def finalize_from_board(store: RemoteStore, run_id: str, output_prefix: str, dsn: str | None) -> FinalizeResult:
+    """:func:`finalize_run` with the checksums the board at *dsn* holds for *run_id*."""
+    from womblex.cloud.jobs import RunBoard
+
+    with RunBoard(dsn) as board:
+        checksums, undigested = published_checksums(board, run_id, output_prefix.strip("/"))
+    return finalize_run(store, output_prefix, checksums=checksums, undigested=undigested)
+
+
+__all__ = ["FinalizeResult", "NoShardManifests", "finalize_from_board", "finalize_run", "published_checksums"]

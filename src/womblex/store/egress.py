@@ -82,7 +82,7 @@ class EgressResult:
 
 
 def build_bundle(
-    run_root: Path | str,
+    run_root: Path | str | RemoteStore,
     store: RemoteStore,
     *,
     run_id: str,
@@ -95,7 +95,8 @@ def build_bundle(
 
     *run_root* is a finished run's output directory (``documents/`` shard files
     plus ``manifest.parquet`` at its root): a local path, or an object-store URI
-    whose files are copied store to store with no local staging. Raises
+    or store rooted at the run, whose files are copied store to store with no
+    local staging. Raises
     ``FileNotFoundError`` if either is missing — an unfinalised run has no
     manifest to build a bundle from.
 
@@ -185,9 +186,11 @@ def build_bundle(
     )
 
 
-def _open_run(run_root: Path | str) -> RemoteStore:
+def _open_run(run_root: Path | str | RemoteStore) -> RemoteStore:
     """The run's files as a store: an object store's in place, a local directory through fsspec's
     local backend, so both are copied by one code path."""
+    if isinstance(run_root, RemoteStore):
+        return run_root
     if isinstance(run_root, str) and is_remote_uri(run_root):
         return RemoteStore.from_uri(run_root)
     return RemoteStore.from_uri(str(Path(run_root).expanduser().resolve()))
@@ -224,7 +227,7 @@ def _clean_stale_sources(store: RemoteStore, prefix: str, *, keep: set[str]) -> 
 
 
 def _sources(
-    run_root: Path | str, manifest: pa.Table, source_root: str | Path | None,
+    run_root: Path | str | RemoteStore, manifest: pa.Table, source_root: str | Path | None,
 ) -> LocalSources | StoreSources:
     """Where the run's raw sources are copied from: a local corpus (`SourceResolver`), or the
     object store it was ingested from, by `source_relpath`.

@@ -21,7 +21,7 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from womblex.cloud.delivery import DeliveryOutcome, check_destinations, deliver, record_deliveries_local
+from womblex.cloud.delivery import DeliveryOutcome, check_destinations, deliver, record_deliveries
 from womblex.cloud.stage_contracts import STAGE_CONTRACTS, RunContext
 from womblex.cloud.stage_runner import (
     StagePreconditionError,
@@ -360,23 +360,24 @@ def run_workflow_local(
                 error, status = f"{type(e).__name__}: {e}", "failed"
             result.steps.append(StepOutcome(step.stage, status, summary, error, earlier))
     if stored.spec.destinations:
-        result.deliveries = _deliver_local(stored, shard_dir, result)
+        result.deliveries = deliver_local(stored, shard_dir, tuple(s.stage for s in result.steps if s.status == "failed"))
     return result
 
 
-def _deliver_local(stored: StoredWorkflow, shard_dir: Path, result: WorkflowRunResult) -> list[DeliveryOutcome]:
-    """Deliver after the last step: the manifest first, so the bundle holds a current one, then
-    each destination, its record, and the manifest again, so the run record lists the deliveries."""
+def deliver_local(stored: StoredWorkflow, shard_dir: Path, failed: tuple[str, ...] = ()) -> list[DeliveryOutcome]:
+    """Deliver the local run whose ``documents/`` is *shard_dir*: the manifest first, so the bundle
+    holds a current one, then each destination, its record, and the manifest again, so the run
+    record lists the deliveries. *failed* names the failed steps it follows. Never raises."""
+    from womblex.store.remote import RemoteStore
     from womblex.store.run_manifest import write_run_manifest
     from womblex.store.run_stamp import stamp_from_footers
 
     run_root = shard_dir.parent
     stamp = stamp_from_footers(sorted(shard_dir.glob("*._manifest.parquet")), "egress")
-    failed = tuple(s.stage for s in result.steps if s.status == "failed")
     try:
         write_run_manifest(shard_dir)
         outcomes = deliver(stored, run_root, stamp.run_id if stamp else run_root.name, after_failed=failed)
-        record_deliveries_local(run_root, outcomes)
+        record_deliveries(RemoteStore.from_uri(str(run_root)), outcomes)
         write_run_manifest(shard_dir)
     except Exception:  # the steps have run; nothing here may stop or unwind them
         logger.exception("workflow %s: delivery could not complete", stored.id)
@@ -395,6 +396,7 @@ __all__ = [
     "config_from_overlay",
     "config_from_payload",
     "config_payload",
+    "deliver_local",
     "not_acted_on",
     "prepare_workflow",
     "preset_resolver",
