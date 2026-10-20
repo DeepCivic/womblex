@@ -30,7 +30,12 @@ from womblex.store.delivery_record import delivery_key, dump_delivery
 from womblex.store.remote import RemoteStore
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from womblex.cloud.workflow_store import ObjectStoreDestination, StoredWorkflow, WorkflowDestination
+    from womblex.cloud.workflow_store import (
+        ObjectStoreDestination,
+        PostgresDestination,
+        StoredWorkflow,
+        WorkflowDestination,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -45,10 +50,14 @@ def check_destinations(destinations: tuple[WorkflowDestination, ...]) -> list[tu
     every one can. Opens nothing remote and sends nothing."""
     import fsspec
 
-    from womblex.cloud.workflow_store import PostgresDestination
+    from womblex.cloud.workflow_store import PostgresDestination, WebhookDestination
 
     problems: list[tuple[str, str]] = []
     for d in destinations:
+        if isinstance(d, WebhookDestination):
+            if not os.environ.get(d.secret_env):
+                problems.append((d.name, f"signing key variable {d.secret_env} not set"))
+            continue
         if isinstance(d, PostgresDestination):
             if not os.environ.get(d.dsn_env):
                 problems.append((d.name, f"environment variable {d.dsn_env} not set"))
@@ -86,6 +95,7 @@ class DeliveryOutcome:
     sources_by_status: dict[str, int] = field(default_factory=dict)
     rows: int | None = None  # a Postgres destination's chunk rows, and those left out for want of text
     rows_skipped: int | None = None
+    events: list[dict[str, Any]] = field(default_factory=list)  # a webhook's events, each sent or failed
     delivered_at: str = ""
 
 
@@ -101,12 +111,15 @@ def deliver(
 ) -> list[DeliveryOutcome]:
     """Deliver the run at *run_root* to each of *stored*'s destinations; never raises.
 
-    *after_failed* names the workflow's failed steps; a delivery made after them says so.
+    *after_failed* names the workflow's failed steps; a delivery made after them says so. A webhook
+    is sent the run's events instead (`cloud/webhook.py`), so it is not delivered to here.
     """
-    from womblex.cloud.workflow_store import ObjectStoreDestination
+    from womblex.cloud.workflow_store import ObjectStoreDestination, WebhookDestination
 
     outcomes: list[DeliveryOutcome] = []
     for d in stored.spec.destinations:
+        if isinstance(d, WebhookDestination):
+            continue
         where = d.uri if isinstance(d, ObjectStoreDestination) else d.table
         outcome = DeliveryOutcome(d.name, d.kind, where, stored.id, "failed", 0, list(after_failed),
                                   d.include_sources if isinstance(d, ObjectStoreDestination) else False)
@@ -133,14 +146,15 @@ def deliver(
 
 
 def _deliver_one(
-    d: WorkflowDestination, run_root: Path | str | RemoteStore, run_id: str, marker: dict[str, Any],
+    d: ObjectStoreDestination | PostgresDestination, run_root: Path | str | RemoteStore, run_id: str,
+    marker: dict[str, Any],
     outcome: DeliveryOutcome,
 ) -> None:
     """One attempt at *d*, its counts written onto *outcome*; raises on failure."""
-    from womblex.cloud.workflow_store import PostgresDestination
+    from womblex.cloud.workflow_store import PostgresDestination as Postgres
     from womblex.store.egress import build_bundle, open_run
 
-    if isinstance(d, PostgresDestination):
+    if isinstance(d, Postgres):
         from womblex.cloud.destination_postgres import deliver_postgres
 
         written = deliver_postgres(d, open_run(run_root), run_id)

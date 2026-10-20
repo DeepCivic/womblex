@@ -163,6 +163,7 @@ womblex/
 │   │   ├── dbos_app.py         # DBOS wiring — system database URL, queue/workflow names and ids, client
 │   │   ├── jobs.py             # RunBoard — enqueue + read runs over DBOS workflows; run `owner` scoping; stage attempts and the fork
 │   │   ├── destination_postgres.py # A workflow's Postgres destination — one row per embedded chunk, masked by default, upserted
+│   │   ├── webhook.py          # A workflow's webhook destination — six run events, signed, resent under one id, recorded
 │   │   ├── delivery.py         # Deliver a finished run to its workflow's destinations — checked before launch, bounded retries, recorded on the run
 │   │   ├── finalize.py         # finalize_run() — a run's manifest.parquet in its store; `womblex finalize` and the coordinator's last step
 │   │   ├── retry.py            # retry_stage() — fork a failed stage from its first failed unit, refusing before the fork

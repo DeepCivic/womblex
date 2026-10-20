@@ -573,7 +573,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - A file whose content changed is a new document; the earlier version stays in the run. A file rewritten with the same bytes is not a new document.
 - A workflow has no owner; the runs it starts are admin-only, like CLI runs.
 - Fleet runs perform `pii` when a workflow includes it; runs without a workflow never do.
-- A workflow can name destinations: an object store and a Postgres database with embeddings.
+- A workflow can name destinations: an object store, a Postgres database with embeddings, and a webhook.
 - An object-store destination receives the Requirement 23 bundle; each destination chooses whether raw sources are included.
 - A Postgres destination gets one row per chunk with its embedding: masked text by default, raw only where the workflow asks, each row naming its layer.
 - A Postgres destination requires the `embed` step, and sending masked text requires `pii`; a workflow missing either is refused before launch.
@@ -582,7 +582,13 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - Results are delivered after the last step, even when a step failed, and a delivery after a failure names the failed steps.
 - A failed delivery is retried a set number of times, then recorded on the run. It never stops the run.
 - After a failed stage is retried successfully, the retry command prints how to redeliver. Redelivery replaces: files are rewritten and rows upserted.
+- A webhook receives six events: `extraction_settled`, `stage_finished`, `stage_failed`, `run_finished`, `delivered` and `delivery_failed`. Each carries an `event_id` (kept when the event is resent, so the receiver can drop a duplicate), the `run_id` and the run's status in the API's words, and is signed with a key held where the run executes.
+- There are no per-document or per-batch events.
 - The run record lists every delivery.
+
+**TO-DO:**
+
+- **The fleet sends no webhook events.** `dispatch-workflow` and `schedule-workflow` refuse a workflow with a webhook; the coordinator's events are the next merge.
 
 **Out of scope:** managing workflows through the API, pruning changed or deleted documents, resolving the source of a changed file's earlier version (its bytes are gone from the store, so `SourceResolver` reads it as `hash_mismatch`), workflow owners, backfill of missed firings, and databases other than Postgres (each needs its own requirement).
 
@@ -623,5 +629,6 @@ Requirements not yet fully met. The detail lives in the **TO-DO** block under ea
 - **Requirement 9 (Redaction Handling):** no redaction `pipeline_point`, and the E2E `run` path writes no `*.redactions.parquet`.
 - **Requirement 13 (Money Annotation):** the money span row carries no merge extent or header-row coordinate.
 - **Requirements 17 and 21 (Corpus Inspector; Console Design System):** `DocumentGrid.svelte` is not virtualised and emits no `aria-rowcount`.
+- **Requirement 27 (Workflows):** the fleet sends no webhook events.
 
 ---

@@ -28,7 +28,7 @@ its steps write.
 | `input_binding` | `store` (the input store a firing lists and extracts from; a scheduled workflow must name it, spelt exactly as the workers' `--ingest`, or `--store` where they have none, since firings are routed by that string), `ingest_prefix` (the documents under it a firing extracts) and `batch_size`. Extraction is not a step. |
 | `steps` | Downstream stages, each at most once, run in the order listed (`dispatch-workflow` needs pipeline order). |
 | `triggers` | Cron expressions scheduled by `schedule-workflow`. |
-| `destinations` | Where the run is delivered after its last step. `object_store`: `name`, `uri`, `include_sources` (default `true`) and optional `credentials` (`key_env` and `secret_env`, the environment variables holding an S3 key and secret, never the values). `postgres`: `name`, `dsn_env` (the environment variable holding the connection string), `table` (default `womblex_chunks`) and `text_layer` (`masked`, the default, or `raw`). |
+| `destinations` | Where the run is delivered after its last step. `object_store`: `name`, `uri`, `include_sources` (default `true`) and optional `credentials` (`key_env` and `secret_env`, the environment variables holding an S3 key and secret, never the values). `postgres`: `name`, `dsn_env` (the environment variable holding the connection string), `table` (default `womblex_chunks`) and `text_layer` (`masked`, the default, or `raw`). `webhook`: `name`, `url` and `secret_env` (the environment variable holding the signing key). |
 
 ## Delivery
 
@@ -48,8 +48,20 @@ never stops the run, and the exit code is non-zero. Every delivery is recorded a
 replaces the bundle, upserts the rows (and removes the run's rows it did not write) and
 replaces the record.
 
-Each destination is checked before the first step: its credentials' environment
-variables are set and its URI's storage backend is installed; a failure refuses
+A `webhook` destination is sent the run's events, not its results: `extraction_settled`,
+`stage_finished` and `stage_failed` (per step), `delivered` and `delivery_failed` (per
+other destination) and `run_finished`; nothing per document or batch. Each is a JSON
+body with `event`, `event_id`, `run_id`, `workflow`, `status` (the API's `running`,
+`done` or `failed`) and the event's own fields (`stage`, `destination`, `error`),
+signed with HMAC-SHA256 under the key in `secret_env`: the
+`X-Womblex-Signature: sha256=<hex>` header is what a receiver recomputes over the raw
+body. An event is tried three times under the same `event_id`, so a receiver can drop
+a duplicate; one that never lands is listed in the webhook's record (`events`) and
+never stops the run. Polling still works. The fleet does not send events yet, so
+`dispatch-workflow` and `schedule-workflow` refuse a workflow with a webhook.
+
+Each destination is checked before the first step: its credentials' or signing key's
+environment variables are set and its URI's storage backend is installed; a failure refuses
 the run with `destination_unavailable`. `dispatch-workflow` checks on the host it
 runs on, a scheduled firing on the worker that fires it; the workers that deliver
 need the same variables. A workflow that delivers runs over a run's `documents/`

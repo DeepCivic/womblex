@@ -15,6 +15,7 @@ After the last step, failed or not, the run is delivered to the workflow's desti
 from __future__ import annotations
 
 import logging
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
@@ -344,6 +345,11 @@ def run_workflow_local(
         )
     logger.info("workflow %s (%s): %s over %s", stored.id, stored.digest, " -> ".join(s.stage for s in stored.spec.steps), shard_dir)
 
+    from womblex.cloud.webhook import RunEvents
+
+    run_id = local_run_id(shard_dir)
+    events = RunEvents(stored, run_id, f"{run_id}:local-{uuid.uuid4().hex[:12]}")
+    events.emit("extraction_settled", "running")  # a local run's extraction is done before its steps
     with workflow_context(stored.digest, stored.id, stored.spec.model_dump(mode="json")):
         for step, ctx in zip(stored.spec.steps, contexts, strict=True):
             ctx.source_root, ctx.force = source_root, force
@@ -359,26 +365,50 @@ def run_workflow_local(
                 logger.exception("%s: failed", step.stage)
                 error, status = f"{type(e).__name__}: {e}", "failed"
             result.steps.append(StepOutcome(step.stage, status, summary, error, earlier))
+            events.emit("stage_failed" if status == "failed" else "stage_finished", "running", step.stage,
+                        stage=step.stage, error=error, ran_after_failed=list(earlier))
     if stored.spec.destinations:
         result.deliveries = deliver_local(stored, shard_dir, tuple(s.stage for s in result.steps if s.status == "failed"))
+    for o in result.deliveries:
+        events.emit("delivered" if o.status == "delivered" else "delivery_failed", "running", o.destination,
+                    destination=o.destination, error=o.error, after_failed=o.after_failed)
+    events.emit("run_finished", "failed" if result.exit_code else "done")
+    if events.active:
+        result.deliveries += _record_local(shard_dir, events.records())
     return result
+
+
+def local_run_id(shard_dir: Path) -> str:
+    """The run a local shard directory holds: its stamp's run id, else its run root's name."""
+    from womblex.store.run_stamp import stamp_from_footers
+
+    stamp = stamp_from_footers(sorted(shard_dir.glob("*._manifest.parquet")), "egress")
+    return stamp.run_id if stamp else shard_dir.parent.name
+
+
+def _record_local(shard_dir: Path, outcomes: list[DeliveryOutcome]) -> list[DeliveryOutcome]:
+    """Record *outcomes* on the local run and rewrite its manifest so the run record lists them."""
+    from womblex.store.remote import RemoteStore
+    from womblex.store.run_manifest import write_run_manifest
+
+    try:
+        record_deliveries(RemoteStore.from_uri(str(shard_dir.parent)), outcomes)
+        write_run_manifest(shard_dir)
+    except Exception:  # the run has finished; a record that could not be written is logged
+        logger.exception("delivery records could not be written under %s", shard_dir.parent)
+    return outcomes
 
 
 def deliver_local(stored: StoredWorkflow, shard_dir: Path, failed: tuple[str, ...] = ()) -> list[DeliveryOutcome]:
     """Deliver the local run whose ``documents/`` is *shard_dir*: the manifest first, so the bundle
     holds a current one, then each destination, its record, and the manifest again, so the run
     record lists the deliveries. *failed* names the failed steps it follows. Never raises."""
-    from womblex.store.remote import RemoteStore
     from womblex.store.run_manifest import write_run_manifest
-    from womblex.store.run_stamp import stamp_from_footers
 
-    run_root = shard_dir.parent
-    stamp = stamp_from_footers(sorted(shard_dir.glob("*._manifest.parquet")), "egress")
     try:
         write_run_manifest(shard_dir)
-        outcomes = deliver(stored, run_root, stamp.run_id if stamp else run_root.name, after_failed=failed)
-        record_deliveries(RemoteStore.from_uri(str(run_root)), outcomes)
-        write_run_manifest(shard_dir)
+        outcomes = deliver(stored, shard_dir.parent, local_run_id(shard_dir), after_failed=failed)
+        _record_local(shard_dir, outcomes)
     except Exception:  # the steps have run; nothing here may stop or unwind them
         logger.exception("workflow %s: delivery could not complete", stored.id)
         return [DeliveryOutcome(d.name, d.kind, getattr(d, "uri", ""), stored.id, "failed", 0, list(failed),
@@ -397,6 +427,7 @@ __all__ = [
     "config_from_payload",
     "config_payload",
     "deliver_local",
+    "local_run_id",
     "not_acted_on",
     "prepare_workflow",
     "preset_resolver",

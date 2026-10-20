@@ -100,8 +100,18 @@ class PostgresDestination(StrictModel):
     text_layer: Literal["masked", "raw"] = "masked"
 
 
+class WebhookDestination(StrictModel):
+    """Send the run's events to `url` (`cloud/webhook.py`), signed with the key in `secret_env`."""
+
+    kind: Literal["webhook"]
+    name: str
+    url: str
+    secret_env: str
+
+
 #: The destination kinds a workflow can name, each added in the merge that delivers to it.
-WorkflowDestination = Annotated[ObjectStoreDestination | PostgresDestination, Field(discriminator="kind")]
+WorkflowDestination = Annotated[
+    ObjectStoreDestination | PostgresDestination | WebhookDestination, Field(discriminator="kind")]
 
 _TABLE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$")
 
@@ -158,6 +168,10 @@ def _check_destinations(spec: StoredWorkflowSpec) -> None:
     for d in spec.destinations:
         if isinstance(d, ObjectStoreDestination) and "@" in urlsplit(d.uri).netloc:
             raise ValueError(f"destination {d.name!r}: a URI names no credentials; use `credentials`")
+        if isinstance(d, WebhookDestination):
+            url = urlsplit(d.url)
+            if url.scheme not in {"http", "https"} or not url.netloc or "@" in url.netloc:
+                raise ValueError(f"destination {d.name!r}: a webhook URL is http(s) and names no credentials")
         if isinstance(d, PostgresDestination):
             if not _TABLE_NAME.match(d.table):
                 raise ValueError(f"destination {d.name!r}: table must be `name` or `schema.name`, got {d.table!r}")
@@ -414,6 +428,7 @@ __all__ = [
     "StoreCredentials",
     "StoredWorkflow",
     "StoredWorkflowSpec",
+    "WebhookDestination",
     "WorkflowDestination",
     "WorkflowInputBinding",
     "WorkflowStep",
