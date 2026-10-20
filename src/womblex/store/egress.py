@@ -20,10 +20,12 @@ Resolution reuses :class:`~womblex.store.source_resolver.SourceResolver`, so
 this module's own: ``upload_failed``, for a source that resolved but whose
 copy to the destination raised — isolated per source so one bad upload does
 not abort the export (``source_index.parquet`` and ``egress_manifest.json``
-still get written). The run is read through a ``RemoteStore`` (fsspec's local
-backend) and every write goes through one, so a local directory and an
-object-store URI are one code path. Scoped to a local run, as
-``SourceResolver`` is (``store/egress_sources.py``).
+still get written). The run is read through a ``RemoteStore`` (a local
+directory through fsspec's local backend), so a local run and one held in an
+object store are copied by one code path, store to store, with no local
+staging. A run ingested from an object store has its sources fetched from that
+store by ``source_relpath`` and checked against ``source_hash``
+(``store/egress_sources.py``), with the same statuses.
 
 Re-exporting into a bundle folder that already has a ``sources/`` directory
 (a re-run over an updated corpus) removes any file under it that the new
@@ -54,9 +56,9 @@ from womblex.store.egress_output import (
     SOURCES_DIRNAME,
     write_source_index,
 )
-from womblex.store.egress_sources import UPLOAD_FAILED, LocalSources
+from womblex.store.egress_sources import UPLOAD_FAILED, LocalSources, StoreSources, declared_root
 from womblex.store.output import conform_shard
-from womblex.store.remote import RemoteStore
+from womblex.store.remote import RemoteStore, is_remote_uri
 from womblex.store.retention import is_safe_run_id
 from womblex.store.run_manifest import RUN_MANIFEST_FILENAME
 from womblex.store.run_stamp import stamp_from_metadata
@@ -80,7 +82,7 @@ class EgressResult:
 
 
 def build_bundle(
-    run_root: Path,
+    run_root: Path | str,
     store: RemoteStore,
     *,
     run_id: str,
@@ -88,15 +90,16 @@ def build_bundle(
     include_sources: bool = True,
     source_root: str | Path | None = None,
 ) -> EgressResult:
-    """Export the local run at *run_root* into a bundle under *store*.
+    """Export the run at *run_root* into a bundle under *store*.
 
     *run_root* is a finished run's output directory (``documents/`` shard files
-    plus ``manifest.parquet`` at its root), read through a ``RemoteStore``. Raises
+    plus ``manifest.parquet`` at its root): a local path, or an object-store URI
+    whose files are copied store to store with no local staging. Raises
     ``FileNotFoundError`` if either is missing — an unfinalised run has no
     manifest to build a bundle from.
 
     *bundle_prefix* defaults to *run_id*. *source_root* overrides where raw
-    sources resolve from (a moved corpus), as in :meth:`SourceResolver.for_run`.
+    sources resolve from (a moved corpus), a local path or a store URI.
     ``include_sources=False`` resolves nothing and writes neither ``sources/``
     nor ``source_index.parquet`` — the "corpus-only" export. Raises
     ``ValueError``, before any write, if *run_id* disagrees with the run's stamp
@@ -134,7 +137,7 @@ def build_bundle(
     with run.open(RUN_MANIFEST_FILENAME) as handle:
         manifest = conform_shard(pq.read_table(handle), "manifest", f"{run.root}/{RUN_MANIFEST_FILENAME}")
     rows = manifest.select(["source_hash", "doc_id", "filename", "ext"]).to_pylist()
-    sources = _sources(Path(run_root), manifest, source_root) if include_sources else None
+    sources = _sources(run_root, manifest, source_root) if include_sources else None
 
     for key in corpus_keys:
         with run.open(key) as handle:
@@ -178,9 +181,11 @@ def build_bundle(
     )
 
 
-def _open_run(run_root: Path) -> RemoteStore:
-    """The run's files as a store, through fsspec's local backend, so the corpus is copied the
-    way the bundle is written."""
+def _open_run(run_root: Path | str) -> RemoteStore:
+    """The run's files as a store: an object store's in place, a local directory through fsspec's
+    local backend, so both are copied by one code path."""
+    if isinstance(run_root, str) and is_remote_uri(run_root):
+        return RemoteStore.from_uri(run_root)
     return RemoteStore.from_uri(str(Path(run_root).expanduser().resolve()))
 
 
@@ -214,15 +219,28 @@ def _clean_stale_sources(store: RemoteStore, prefix: str, *, keep: set[str]) -> 
         logger.info("Removed %d stale source file(s) from a previous export", removed)
 
 
-def _sources(run_root: Path, manifest: pa.Table, source_root: str | Path | None) -> LocalSources:
-    """The run's sources. A run with no file-hashed row never reads a root (every row is
-    ``unsupported_basis``), so a records ingest with no ``ingest_root`` exports."""
-    methods = manifest.column("extraction_method").to_pylist()
-    if source_root is None and all(
-        hash_basis_for(str(m or "")) != HASH_BASIS_FILE_BYTES for m in methods
-    ):
-        return LocalSources(SourceResolver(manifest, run_root))
-    return LocalSources(SourceResolver.for_run(run_root, root=source_root))
+def _sources(
+    run_root: Path | str, manifest: pa.Table, source_root: str | Path | None,
+) -> LocalSources | StoreSources:
+    """Where the run's raw sources are copied from: a local corpus (`SourceResolver`), or the
+    object store it was ingested from, by `source_relpath`.
+
+    A run with no file-hashed row never reads a root (every row is ``unsupported_basis``), so a
+    records ingest with no ``ingest_root`` exports.
+    """
+    if source_root is None:
+        methods = manifest.column("extraction_method").to_pylist()
+        if all(hash_basis_for(str(m or "")) != HASH_BASIS_FILE_BYTES for m in methods):
+            return StoreSources(manifest, None)
+        source_root = declared_root(manifest)
+    if isinstance(source_root, str) and is_remote_uri(source_root):
+        ingest = RemoteStore.from_uri(source_root)
+        try:  # an unreadable store is refused here, before the first write, not found row by row
+            ingest.exists("")
+        except Exception as e:
+            raise ValueError(f"cannot read sources from {source_root}: {e}") from e
+        return StoreSources(manifest, ingest)
+    return LocalSources(SourceResolver(manifest, source_root))
 
 
 def _write_egress_manifest(

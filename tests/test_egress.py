@@ -218,11 +218,8 @@ def _corpus_with(tmp_path: Path, name: str, data: bytes) -> Path:
     return tmp_path / "corpus"
 
 
-@pytest.mark.parametrize("ingest_root", ["s3://bucket/corpus", ""])
-def test_a_run_with_no_local_root_is_refused_before_anything_is_written(
-    tmp_path: Path, ingest_root: str,
-):
-    run_root = _one_doc_run(tmp_path, "a.pdf", ingest_root=ingest_root)
+def test_a_run_that_declares_no_root_is_refused_before_anything_is_written(tmp_path: Path):
+    run_root = _one_doc_run(tmp_path, "a.pdf", ingest_root="")
 
     with pytest.raises(ValueError, match="root"):
         build_bundle(run_root, RemoteStore.from_uri(str(tmp_path / "dest")), run_id="run-A")
@@ -426,3 +423,108 @@ def test_a_failed_upload_does_not_delete_a_previously_copied_source(
     # The re-export's own upload failed, but the file from the first,
     # successful export must not be treated as stale and deleted.
     assert (dest / "run-A" / key_a).is_file()
+
+
+# --- runs and sources held in an object store ----------------------------------
+
+
+@pytest.fixture
+def fake_s3(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """`s3://` URIs opened over a local directory, so the store-to-store paths run offline."""
+    root = tmp_path / "s3"
+    real = RemoteStore.from_uri.__func__  # type: ignore[attr-defined]
+
+    def from_uri(cls, uri: str, **kw):
+        return real(cls, str(root / uri.removeprefix("s3://")) if uri.startswith("s3://") else uri, **kw)
+
+    monkeypatch.setattr(RemoteStore, "from_uri", classmethod(from_uri))
+    return root
+
+
+def _store_ingested_run(tmp_path: Path, fake_s3: Path, docs: dict[str, bytes], *,
+                        recorded: dict[str, str] | None = None) -> Path:
+    """A finished run whose documents were ingested from `s3://inbox`; *recorded* overrides a
+    document's recorded hash."""
+    inbox = fake_s3 / "inbox" / "2026"
+    inbox.mkdir(parents=True)
+    rows = []
+    for i, (name, data) in enumerate(docs.items()):
+        (inbox / name).write_bytes(data)
+        digest = (recorded or {}).get(name) or _source_hash(str(inbox / name))
+        rows.append(_manifest_row(digest, f"doc-{i}", name, Path(name).suffix, ingest_root="s3://inbox",
+                                  relpath=f"2026/{name}"))
+    return _write_run(tmp_path / "run", rows)
+
+
+def test_a_store_ingested_run_fetches_its_sources_by_relpath_checked_against_the_hash(
+    tmp_path: Path, fake_s3: Path,
+):
+    run_root = _store_ingested_run(tmp_path, fake_s3, {"a.pdf": b"%PDF-A", "b.pdf": b"%PDF-B"},
+                                   recorded={"b.pdf": "f" * 64})
+    dest = tmp_path / "dest"
+
+    result = build_bundle(run_root, RemoteStore.from_uri(str(dest)), run_id="run-A")
+
+    index = {r["doc_id"]: r for r in pq.read_table(str(dest / "run-A" / SOURCE_INDEX_FILENAME)).to_pylist()}
+    hash_a = _source_hash(str(fake_s3 / "inbox" / "2026" / "a.pdf"))
+    assert (index["doc-0"]["status"], index["doc-0"]["raw_key"]) == ("resolved", raw_key_for(hash_a, ".pdf"))
+    assert (dest / "run-A" / raw_key_for(hash_a, ".pdf")).read_bytes() == b"%PDF-A"
+    assert (index["doc-1"]["status"], index["doc-1"]["raw_key"]) == ("hash_mismatch", None)
+    assert sorted(p.name for p in (dest / "run-A" / SOURCES_DIRNAME).iterdir()) == [f"{hash_a}.pdf"]
+    assert result.sources_by_status == {"resolved": 1, "hash_mismatch": 1}
+
+
+def test_a_store_source_that_is_gone_is_not_found_and_the_export_completes(tmp_path: Path, fake_s3: Path):
+    run_root = _store_ingested_run(tmp_path, fake_s3, {"a.pdf": b"%PDF-A"})
+    (fake_s3 / "inbox" / "2026" / "a.pdf").unlink()
+
+    result = build_bundle(run_root, RemoteStore.from_uri(str(tmp_path / "dest")), run_id="run-A")
+
+    assert result.sources_by_status == {"not_found": 1}
+    assert (tmp_path / "dest" / "run-A" / EGRESS_MANIFEST_FILENAME).is_file()
+
+
+def test_a_failed_store_copy_is_upload_failed_and_leaves_no_partial(
+    tmp_path: Path, fake_s3: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    run_root = _store_ingested_run(tmp_path, fake_s3, {"a.pdf": b"%PDF-A"})
+    store = RemoteStore.from_uri(str(tmp_path / "dest"))
+    real = store.move
+
+    def refused(src: str, dst: str) -> str:
+        if SOURCES_DIRNAME in dst:
+            raise OSError("simulated copy failure")
+        return real(src, dst)
+
+    monkeypatch.setattr(store, "move", refused)
+    result = build_bundle(run_root, store, run_id="run-A")
+
+    assert result.sources_by_status == {"upload_failed": 1}
+    assert not list((tmp_path / "dest" / "run-A" / SOURCES_DIRNAME).glob("*"))
+
+
+def test_a_run_held_in_an_object_store_is_copied_store_to_store(tmp_path: Path, fake_s3: Path):
+    """No local run root: the corpus is read in place and the bundle written from it."""
+    local = _store_ingested_run(tmp_path, fake_s3, {"a.pdf": b"%PDF-A"})
+    (local / "documents" / "audit").mkdir()
+    (local / "documents" / "audit" / "notes.json").write_text("{}")
+    (fake_s3 / "runs").mkdir()
+    local.rename(fake_s3 / "runs" / "run-A")
+    dest = tmp_path / "dest"
+
+    result = build_bundle("s3://runs/run-A", RemoteStore.from_uri(str(dest)), run_id="run-A")
+
+    corpus = dest / "run-A" / CORPUS_DIRNAME
+    assert (corpus / "audit" / "notes.json").read_text() == "{}"
+    assert pq.read_table(str(corpus / "manifest.parquet")).num_rows == 1
+    assert (result.corpus_files, result.sources_by_status) == (4, {"resolved": 1})
+
+
+def test_a_run_in_a_store_with_the_wrong_run_id_is_refused_before_any_write(tmp_path: Path, fake_s3: Path):
+    local = _store_ingested_run(tmp_path, fake_s3, {"a.pdf": b"%PDF-A"})
+    (fake_s3 / "runs").mkdir()
+    local.rename(fake_s3 / "runs" / "run-A")
+
+    with pytest.raises(ValueError, match="does not match"):
+        build_bundle("s3://runs/run-A", RemoteStore.from_uri(str(tmp_path / "dest")), run_id="run-B")
+    assert not (tmp_path / "dest").exists()

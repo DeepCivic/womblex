@@ -580,9 +580,9 @@ def _warn_if_draining(args: argparse.Namespace, run_id: str) -> None:
 
 def _register_egress(p: argparse.ArgumentParser) -> None:
     p.add_argument(
-        "run", type=Path,
-        help="Finished local run root (holds `documents/` and `manifest.parquet`, "
-             "as `womblex run` or `womblex manifest` produces).",
+        "run",
+        help="Finished run root (holds `documents/` and `manifest.parquet`): a local "
+             "directory, or an object-store URI copied store to store.",
     )
     p.add_argument("--to", required=True, help="Destination RemoteStore URI (a local dir, s3://, …)")
     p.add_argument(
@@ -612,25 +612,30 @@ def _register_egress(p: argparse.ArgumentParser) -> None:
 
 
 def cmd_egress(args: argparse.Namespace) -> int:
-    """Export one finished local run into an egress bundle at any destination.
+    """Export one finished run into an egress bundle at any destination.
 
     The producer half of the Womblex/Numbatch/Echidnet bundle contract
     (`docs/egress.md`): writes `<bundle>/corpus/`, resolves and copies raw
     `<bundle>/sources/`, and writes `source_index.parquet` +
     `egress_manifest.json`, then stops — no retention, serving, versioning, or
-    auth. Sources resolve against a *local* run only; a distributed run is
-    staged locally first (e.g. `womblex finalize` then a sync-down).
+    auth. A run held in an object store is copied store to store, and sources
+    ingested from an object store are fetched from it by `source_relpath`.
     """
     from womblex.store.egress import build_bundle
-    from womblex.store.remote import RemoteStore
+    from womblex.store.remote import RemoteStore, is_remote_uri
 
-    run_root: Path = args.run
-    if not run_root.is_dir():
-        logger.error("run root is not a directory: %s", run_root)
-        return 1
-    # abspath, not resolve(): normalises `.`/`..` (whose `.name` is empty or
-    # `..`) without following a symlinked run root to another name.
-    run_id = args.run_id or Path(os.path.abspath(run_root)).name
+    run_root: Path | str
+    if is_remote_uri(str(args.run)):
+        run_root = str(args.run).rstrip("/")
+        run_id = args.run_id or run_root.rsplit("/", 1)[-1]
+    else:
+        run_root = Path(args.run)
+        if not run_root.is_dir():
+            logger.error("run root is not a directory: %s", run_root)
+            return 1
+        # abspath, not resolve(): normalises `.`/`..` (whose `.name` is empty or
+        # `..`) without following a symlinked run root to another name.
+        run_id = args.run_id or Path(os.path.abspath(run_root)).name
 
     try:
         store = RemoteStore.from_uri(args.to)
@@ -668,6 +673,6 @@ COMMANDS = [
             _register_enqueue_stages, cmd_enqueue_stages),
     Command("run-stage", "Run a downstream shard stage against object storage",
             _register_run_stage, cmd_run_stage),
-    Command("egress", "Export one finished local run into an egress bundle",
+    Command("egress", "Export one finished run into an egress bundle",
             _register_egress, cmd_egress),
 ]

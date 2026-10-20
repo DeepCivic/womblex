@@ -458,7 +458,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 **I want** one finished run exported with its raw source documents as a self-describing bundle,
 **so that** consumers can review and reuse the extracted corpus alongside its sources without calling back into Womblex.
 
-**Given** a finished local run root (holding `documents/` and `manifest.parquet`)
+**Given** a finished run root (holding `documents/` and `manifest.parquet`), local or in an object store
 **When** the operator runs `womblex egress <run> --to <dest>`
 **Then** a bundle is written under `<dest>/<bundle_prefix>/` holding the unchanged corpus, deduplicated raw sources, a source index, and a descriptor, and Womblex stops.
 
@@ -473,12 +473,9 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - A corpus-only export (`--no-sources` / `--corpus-only`) skips resolution and writes no `sources/` or `source_index.parquet`.
 - `--source-root` resolves sources from a moved corpus; `--run-id` defaults to the run root's directory name and must agree with the run's own stamp, if it has one.
 - Re-exporting into an existing bundle removes source files the fresh export neither wrote nor attempted, and leaves a source whose upload failed untouched.
+- A run held in an object store is copied store to store, with no local staging.
 - A run ingested from an object store resolves each source from that store by the manifest's `source_relpath`, checked against `source_hash`, with the same per-document statuses.
 - Womblex writes the bundle and nothing downstream of it: no retention, serving, or write-back of consumer corrections.
-
-**TO-DO:**
-
-- **Object-store runs are refused (re: "resolves each source from that store").** `build_bundle` needs a single `file://` ingest root, so a run ingested from an object store is refused before anything is written; stage it locally first.
 
 ## 24. Swappable Models Without a Schema Change
 
@@ -615,6 +612,5 @@ Requirements not yet fully met. The detail lives in the **TO-DO** block under ea
 - **Requirement 9 (Redaction Handling):** no redaction `pipeline_point`, and the E2E `run` path writes no `*.redactions.parquet`.
 - **Requirement 13 (Money Annotation):** the money span row carries no merge extent or header-row coordinate.
 - **Requirements 17 and 21 (Corpus Inspector; Console Design System):** `DocumentGrid.svelte` is not virtualised and emits no `aria-rowcount`.
-- **Requirement 23 (Egress Bundle):** a run ingested from an object store is refused rather than resolving its sources from that store.
 
 ---
