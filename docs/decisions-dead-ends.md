@@ -667,3 +667,17 @@ grid-first path scored by `tabular_metrics`. (4) *(deferred)* per-page modality
 (Option D) if measured to matter. The load-bearing invariant throughout: the
 element stream is the contract, so downstream stages are untouched by
 construction.
+
+## Mistakes to avoid when planning
+
+Made in Phase 2 of the trust-and-recipes plan (the ninth recurred in almost every merge of the plan). Check a new plan against this list before building.
+
+1. **A setting before anything uses it.** Workflow `destinations` were stored and did nothing. *Rule:* a setting lands in the merge that makes it act.
+2. **A file nobody reads.** Workflow conditions wrote a label sidecar nothing reads, derivable from the manifest anyway. *Rule:* every new output names its reader; anything derivable is derived on read.
+3. **Automation that pays twice.** Each scheduled firing re-extracts every document and re-pays enrichment. *Rule:* anything that runs unattended processes only unseen documents.
+4. **Tools taken from the operator.** A workflow could only be created in code. *Rule:* anything an operator sets up has a file and a command.
+5. **A justification never delivered.** Workflows went into a database because a file "cannot hold a schedule", and the schedule then repeated all work (mistake 3). *Rule:* a feature that justifies a decision must work in the same phase, or the decision reopens.
+6. **Halting a run after launch, then reverting.** Two changes stopped a run mid-flight over one document; both were reverted. *Rule:* every refusal happens before launch.
+7. **Secrets in stored settings.** A planned destination would have stored a database password in the workflow. *Rule:* settings name where a secret lives, never the secret.
+8. **Asking the owner what the design answers.** Reviews treated open items as settled and asked the owner to pick options. *Rule:* ask only when the answer changes what users get; otherwise the builder decides and cites where the design says so.
+9. **Isaacus's open-source parts treated as its paid models.** Requirements and docs ran semchunk, the Kanon-2 tokeniser and the Kanon-2 Enricher together. They described enrichment as if Isaacus were the only provider, put AI chunking inside enrichment, and called a paid chunk-time call a "fallback". *Rule:* semchunk (MIT, local), the Kanon-2 tokeniser (Apache-2.0, local) and the Kanon-2 Enricher and Embedder (paid, per call) are named separately in every sentence that touches them. Enrichment is written provider-neutral, with Isaacus as one adapter. AI chunking belongs to chunking. Every paid call names the setting that asked for it.
