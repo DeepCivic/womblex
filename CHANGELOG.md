@@ -9,7 +9,7 @@ Entries are terse by design; rationale lives in the PR/commit history.
 ## [Unreleased]
 
 ### Removed
-- **`run-workflow` no longer labels workflow conditions — trust plan, Phase R item R.1b (D3).** No `*.conditions.parquet` is written (`store/conditions_output.py` is deleted); conditions are still checked when a workflow is saved or loaded, and `run-workflow` and `dispatch-workflow` warn that they are not acted on.
+- **`run-workflow` no longer labels workflow conditions — trust plan, Phase R item R.1b (D3).** No `*.conditions.parquet` is written (`store/conditions_output.py` is deleted); conditions are still checked when a workflow is saved or loaded, and `run-workflow` and `dispatch-workflow` warn that they are not acted on. The `conditions` role is retired, so `CONTRACT_VERSION` is `3.0` (`docs/contract.md`).
 - **The fleet no longer labels workflow conditions — trust plan, Phase R item R.1a (D3).** `dispatch-workflow` stops carrying a workflow's conditions, the coordinator has no labelling step, `workflow_conditions.label_store` is deleted and `RunBoard.file_checksums` reads no coordinator output. The local runner still labels until R.1b removes conditions. Upgrading: let running coordinators finish before upgrading workers; DBOS derives the application version from the workflow source, so a coordinator the earlier code started is recovered only by a worker running that code.
 
 ### Added
