@@ -36,7 +36,7 @@ its steps write.
 | `womblex validate FILE [--shards DIR] [--json]` | Every check a run makes before its first step, and nothing else. Exit 1 if it would be refused. |
 | `womblex plan FILE --shards DIR [--assume-price enrich=…]` | Which steps would run or skip, and the exact tokens `enrich` and `embed` would send. Calls no paid API; a cost appears only for a price you supply. |
 | `womblex run-workflow FILE --shards DIR` | Run the steps over a local shard directory. Refused before the first step, never halted after it: a failed step is recorded and the later steps still run. |
-| `womblex dispatch-workflow FILE --run-id R --store URI [--dry-run]` | Queue the steps for the fleet; the run receives the workflow's recipe (its resolved config and digest), so nothing is stored. Refused before any queue row for anything the local runner refuses, a step the fleet does not dispatch (`layout`, `pii`, `quality`), an order the coordinator would change, or a run already worked under another workflow. |
+| `womblex dispatch-workflow FILE --run-id R --store URI [--firing T] [--dry-run]` | Queue the steps for the fleet; the run receives the workflow's recipe (its resolved config and digest), so nothing is stored. Refused before any queue row for anything the local runner refuses, a step the fleet does not dispatch (`layout`, `pii`, `quality`), or an order the coordinator would change. A workflow dispatched over a run another workflow worked runs its own stages. `--firing` dispatches the steps of a scheduled firing whose dispatch failed, over that firing's batches alone. |
 | `womblex schedule-workflow FILE [--store URI]` | Store the copy the firings read and make the queue's schedules equal its triggers, in one action; a workflow with no triggers is unscheduled and its copy deleted. Refuses a workflow its firing would refuse (no input store, an unsafe input prefix, no documents, a failing dry-run dispatch). |
 | `womblex schedule-workflow FILE\|NAME --remove \| --status` | Unschedule the workflow and delete its stored copy, or list its schedules. Takes the name when the file is gone. |
 
@@ -53,7 +53,8 @@ At each cron time a worker on the workflow's input store starts a firing from th
 stored copy; a worker on another store never runs it, and credentials are the worker's own.
 The firing runs the same checks as scheduling, then
 appends to the run named for the workflow: it queues extraction only for documents
-the run has not seen (a changed file is a new document; the earlier version stays),
+the run has not seen (a changed file is a new document; the earlier version stays, though
+its source can no longer be resolved or exported; a rewrite of the same bytes is not new),
 then dispatches the steps over those batches alone, under the workflow as it stands
 at that firing. A firing with nothing new runs nothing and says so. If the dispatch
 fails after the batches are queued, the batches run on and the run reads `orphaned`

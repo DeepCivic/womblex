@@ -185,3 +185,42 @@ def test_stages_offered_after_a_failure_are_in_pipeline_order():
                 for s in ("money", "embed", "chunk", "enrich", "spellfix")}
     attempts["normalise"] = [Row(status="ERROR", attributes={})]
     assert _ran_after(attempts, "normalise") == ("spellfix", "enrich", "chunk", "embed", "money")
+
+
+def _stage_rows(*specs: tuple[str, str, int]):
+    """Fake stage rows of run r1: (workflow id, DBOS status, created_at)."""
+    from tests.test_workflows import _Row
+
+    rows = []
+    for wid, status, created in specs:
+        row = _Row(wid, status, None, kind="stage", created_at=created)
+        row.attributes["stage"] = "normalise"
+        rows.append(row)
+    return rows
+
+
+@pytest.mark.parametrize(("specs", "chosen"), [
+    # the older firing failed and the newer finished: the failure is what a retry reaches
+    ([("r1:fire-1:stage:normalise", "ERROR", 1), ("r1:fire-2:stage:normalise", "SUCCESS", 2)],
+     ["r1:fire-1:stage:normalise"]),
+    # both failed: the newest first, the older once that one is retried successfully
+    ([("r1:fire-1:stage:normalise", "ERROR", 1), ("r1:fire-2:stage:normalise", "ERROR", 2)],
+     ["r1:fire-2:stage:normalise"]),
+    ([("r1:fire-1:stage:normalise", "ERROR", 1), ("r1:fire-2:stage:normalise", "ERROR", 2),
+      ("r1:fire-2:stage:normalise:retry:1", "SUCCESS", 3)],
+     ["r1:fire-1:stage:normalise"]),
+    # every firing finished: the newest
+    ([("r1:fire-1:stage:normalise", "SUCCESS", 1), ("r1:fire-2:stage:normalise", "SUCCESS", 2)],
+     ["r1:fire-2:stage:normalise"]),
+])
+def test_stage_attempts_reach_each_failed_firing_in_turn(specs, chosen) -> None:
+    from tests.test_workflows import _board
+
+    attempts = _board(_stage_rows(*specs)).stage_attempts("r1")
+    assert [a.workflow_id for a in attempts["normalise"]][:1] == chosen
+
+
+def test_a_firings_retry_is_named_under_its_own_firing() -> None:
+    base, number = dbos_app.stage_attempt("r1:fire-2:stage:normalise:retry:1")
+    assert (base, number) == ("r1:fire-2:stage:normalise", 1)
+    assert dbos_app.stage_retry_id(base, number + 1) == "r1:fire-2:stage:normalise:retry:2"
