@@ -307,7 +307,7 @@ Terms the requirements below use, as the code defines them.
 
 ### 25. Pre-Run Model Check
 
-**Paid:** The check sends one minimal request to each paid model an enabled stage uses (Kanon-2 Enricher, Kanon-2 Embedder, Mistral on Bedrock), at `load` and `smoke` alike, and each is billed. Ollama's check is free.
+**Paid:** At `load` the Kanon-2 Enricher and Kanon-2 Embedder are checked for connectivity only, with no billed request; at `smoke` each one an enabled stage uses is also sent one minimal request, which is billed. Mistral on Bedrock is pinged at either level, a one-token request, billed. A warning names each billed request before it is sent. Ollama's check is free.
 
 **As** an operator,
 **I want** configured models checked before any document is processed,
