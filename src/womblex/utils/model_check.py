@@ -10,9 +10,10 @@ does not.
 
 A model that lives behind a service has nothing to load short of calling it,
 so at ``load`` and ``smoke`` alike it gets one minimal request: each Isaacus
-model an enabled stage calls (enrich, embed, AI chunking) is sent one short
-sentence, and a registered model exposing ``ping()`` (the Bedrock and Ollama
-OCR readers) has it called. That is what stops a run that would fail at a
+model the checked scopes call (enrich, embed, AI chunking; every enabled
+stage's by default, every stage's on a worker) is sent one short sentence,
+and a registered model exposing ``ping()`` (the Bedrock and Ollama OCR
+readers) has it called. That is what stops a run that would fail at a
 paid later stage before its first document.
 """
 

@@ -678,6 +678,13 @@ class TestPing:
 
 
 class TestRoutingByModels:
+    def test_a_worker_checks_the_models_of_a_stage_its_config_disables(self) -> None:
+        from womblex.cloud.worker import WORKER_SCOPES
+
+        config = _config(chunking={"enabled": False, "tokenizer": "some-other/tokenizer"})
+        assert "some-other/tokenizer" not in {u.name for u in configured_models(config)}  # a run checks enabled stages
+        assert "some-other/tokenizer" in {u.name for u in configured_models(config, WORKER_SCOPES)}
+
     def test_work_is_queued_by_the_models_its_config_names_and_joined_by_a_worker_that_names_them(self) -> None:
         from womblex.cloud import dbos_app
         from womblex.cloud.worker import served_queues
