@@ -52,6 +52,7 @@ import pyarrow.parquet as pq
 from womblex.pipeline_order import stage_rank
 from womblex.store.build_info import image_info
 from womblex.store.contract import contract_footer
+from womblex.store.delivery_record import read_delivery_records
 from womblex.store.output import read_manifest
 from womblex.store.run_stamp import (
     read_footer_model_check,
@@ -85,8 +86,10 @@ RUN_MANIFEST_FILENAME = "manifest.parquet"
 #: was written by ``run-workflow``, not a record that predates the key.
 #: Version 7 adds each workflow's ``name`` and full ``spec`` (Phase R, D11), read from the
 #: ``womblex.workflow`` key its files carry; ``null`` for files written before that key.
+#: Version 8 adds ``deliveries`` — one record per workflow destination delivered to
+#: (`store/delivery_record.py`) — so an empty list means no delivery was made.
 RUN_RECORD_KEY = f"{NAMESPACE}.run_record"
-RUN_RECORD_VERSION = 7
+RUN_RECORD_VERSION = 8
 
 #: What one observed parquet contributes: its footer key-value metadata and its
 #: row count. A caller that reads files where they live supplies these rather
@@ -126,6 +129,7 @@ def _footer_from_columns(table: pa.Table) -> dict[bytes, bytes] | None:
 def _merged_footer(
     shard_dir: Path, table: pa.Table, footers: FooterList | None = None,
     checksums: dict[str, str] | None = None, undigested: list[str] | None = None,
+    deliveries: list[dict] | None = None,
 ) -> dict[bytes, bytes] | None:
     """Where the corpus came from, which run, and the record of what that run did.
 
@@ -145,6 +149,7 @@ def _merged_footer(
         RUN_RECORD_KEY.encode(): json.dumps(
             build_run_record(
                 shard_dir, table, footers=footers, checksums=checksums, undigested=undigested,
+                deliveries=deliveries,
             ),
             sort_keys=True,
         ).encode(),
@@ -484,6 +489,7 @@ def _partial(
 def build_run_record(
     shard_dir: Path, table: pa.Table, *, footers: FooterList | None = None,
     checksums: dict[str, str] | None = None, undigested: list[str] | None = None,
+    deliveries: list[dict] | None = None,
 ) -> dict:
     """Assemble the run record for *shard_dir*, whose rows are *table*.
 
@@ -501,6 +507,9 @@ def build_run_record(
     has no ``files`` key and names the gap in ``partial``. *undigested* names the
     jobs that may have published files without a digest (failed, unfinished, or
     recorded before checksums); ``partial`` names them too.
+
+    *deliveries* are the run's delivery records; without them they are read from
+    ``<run_root>/deliveries/`` beside *shard_dir* (`store/delivery_record.py`).
 
     Deterministic apart from ``generated_at``: every collection is sorted, the
     stages by pipeline position and the rest by name, so re-running over an
@@ -533,6 +542,7 @@ def build_run_record(
         "model_check": _observed_model_checks(footers),
         "services": _services(shard_dir),
         "image": image_info().as_record(),
+        "deliveries": deliveries if deliveries is not None else read_delivery_records(shard_dir.parent),
     }
     # Two different limits. A caller that supplied footers read them where the
     # files live, so the stages and models are complete and the staged-subset
@@ -592,6 +602,7 @@ def write_run_manifest(
     footers: FooterList | None = None,
     checksums: dict[str, str] | None = None,
     undigested: list[str] | None = None,
+    deliveries: list[dict] | None = None,
 ) -> Path:
     """Consolidate all ``*._manifest.parquet`` in ``shard_dir`` into one parquet.
 
@@ -599,11 +610,11 @@ def write_run_manifest(
     returns the path written. An empty shard directory still produces an
     empty-but-schema-correct file so downstream reads are safe.
 
-    *footers*, *checksums* and *undigested* are passed through to :func:`build_run_record` for
+    *footers*, *checksums*, *undigested* and *deliveries* are passed through to :func:`build_run_record` for
     a caller whose shards are not all in *shard_dir* — see that function.
     """
     table = read_manifest(shard_dir)
-    footer = _merged_footer(shard_dir, table, footers, checksums, undigested)
+    footer = _merged_footer(shard_dir, table, footers, checksums, undigested, deliveries)
     target = output_path or run_manifest_path_for(shard_dir)
     table = table.replace_schema_metadata({**(footer or {}), **contract_footer(target, role="manifest")})
     target.parent.mkdir(parents=True, exist_ok=True)

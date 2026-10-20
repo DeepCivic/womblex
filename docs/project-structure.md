@@ -146,6 +146,7 @@ womblex/
 │   │   ├── source_provenance.py  # Ingest root + source relpath, and their womblex.* Parquet footer keys
 │   │   ├── source_resolver.py    # SourceResolver — resolve a published row's source_hash back to its source file
 │   │   ├── egress_output.py      # source_index.parquet schema + IO for the egress bundle (self-contained)
+│   │   ├── delivery_record.py    # <run>/deliveries/<destination>.json — one record per workflow destination, listed by the run record
 │   │   ├── egress_sources.py     # A bundle's raw sources, one outcome per source_hash — a local corpus (SourceResolver) or the object store the run was ingested from, by source_relpath
 │   │   ├── egress.py             # build_bundle() — export one finished run (local or in a store) store to store with its resolved raw sources, to any RemoteStore destination (contract: docs/egress.md; CLI verb `womblex egress`)
 │   │   ├── build_info.py    # BuildInfo — package version + source commit, or unavailable with a reason

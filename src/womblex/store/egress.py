@@ -89,6 +89,7 @@ def build_bundle(
     bundle_prefix: str | None = None,
     include_sources: bool = True,
     source_root: str | Path | None = None,
+    delivery: dict | None = None,
 ) -> EgressResult:
     """Export the run at *run_root* into a bundle under *store*.
 
@@ -104,6 +105,9 @@ def build_bundle(
     nor ``source_index.parquet`` — the "corpus-only" export. Raises
     ``ValueError``, before any write, if *run_id* disagrees with the run's stamp
     or sources are wanted with no single root to resolve against.
+
+    *delivery* (a workflow destination's name, the workflow, and the failed steps it was
+    delivered after) is written into ``egress_manifest.json``, so a bundle says what it follows.
     """
     run = _open_run(run_root)
     if not run.exists(RUN_MANIFEST_FILENAME):
@@ -172,7 +176,7 @@ def build_bundle(
         )
 
     _write_egress_manifest(store, prefix, run_id=run_id, by_status=by_status,
-                            documents=len(rows), sources_copied=sources_copied)
+                            documents=len(rows), sources_copied=sources_copied, delivery=delivery)
 
     return EgressResult(
         run_id=run_id, bundle_prefix=prefix, documents=len(rows),
@@ -245,9 +249,9 @@ def _sources(
 
 def _write_egress_manifest(
     store: RemoteStore, prefix: str, *, run_id: str, by_status: dict[str, int],
-    documents: int, sources_copied: int,
+    documents: int, sources_copied: int, delivery: dict | None = None,
 ) -> None:
-    descriptor = {
+    descriptor: dict = {
         "run_id": run_id,
         "contract_version": CONTRACT_VERSION,
         "womblex_version": __version__,
@@ -256,6 +260,8 @@ def _write_egress_manifest(
         "sources_copied": sources_copied,
         "sources_by_status": by_status,
     }
+    if delivery is not None:
+        descriptor["delivery"] = delivery
     with tempfile.TemporaryDirectory(prefix="womblex-egress-") as tmp:
         local_path = Path(tmp) / EGRESS_MANIFEST_FILENAME
         local_path.write_text(json.dumps(descriptor, indent=2, sort_keys=True) + "\n")

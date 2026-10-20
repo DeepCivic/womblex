@@ -9,6 +9,7 @@ Entries are terse by design; rationale lives in the PR/commit history.
 ## [Unreleased]
 
 ### Changed
+- **The run record lists deliveries — trust plan, Phase 3 item 3.2c, first part.** Record version 8 adds `deliveries`, read from `<run>/deliveries/<destination>.json` (`store/delivery_record.py`); an empty list means no delivery was made. `build_bundle(delivery=…)` writes a `delivery` block (workflow, destination, the failed steps it follows) into `egress_manifest.json`. Nothing delivers yet; the next merge brings workflow destinations back.
 - **Egress reads its run through a store — trust plan, Phase 3 item 3.2b, first half.** `build_bundle` reads the run's files through a `RemoteStore` (fsspec's local backend) and copies the corpus by stream, and source copying is one outcome per `source_hash` (`store/egress_sources.py`). No behaviour change; the second half adds runs and sources held in an object store. Helpers beside it: `RemoteStore.open`, `run_stamp.stamp_from_metadata`, `output.conform_shard`.
 
 ### Added
