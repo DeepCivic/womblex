@@ -32,7 +32,7 @@ womblex/
 │   │   ├── profile.py      # profile subcommand
 │   │   ├── demo.py         # seed-demo subcommand (publish the vendored demo run)
 │   │   ├── verify.py       # verify-shards, verify-evidence, resolve-source subcommands
-│   │   └── workflow.py     # run-workflow / validate / plan / dispatch-workflow subcommands (a stored workflow over a local shard dir; its pre-run checks alone)
+│   │   └── workflow.py     # run-workflow / validate / plan / dispatch-workflow / schedule-workflow subcommands, each over a workflow file
 │   ├── config/             # Pydantic config models (__init__: YAML loader + WomblexConfig; process.py: process-stage models)
 │   ├── pipeline_order.py   # PIPELINE_ORDER — what runs when; enabled_downstream_stages(config)
 │   ├── batch.py            # process_batch() — shared per-batch pipeline body (extract → optional redaction detection; extraction only)
@@ -166,7 +166,7 @@ womblex/
 │   │   ├── worker.py           # run_worker() — launch DBOS, join the queues this process can serve
 │   │   ├── stage_contracts.py  # Declarative StageContract per downstream stage (inputs/outputs/scope)
 │   │   ├── stage_runner.py     # Execute a contract against an object store
-│   │   ├── workflow_store.py   # Stored workflow object (preset ref, input binding, steps, triggers) — schema, validation, its table
+│   │   ├── workflow_store.py   # Workflow spec (preset ref, input binding, steps, triggers) — schema, validation, and the table of copies scheduling stores
 │   │   ├── workflow_order.py   # Up-front step-order check — inputs on disk or produced earlier, stable refusal codes
 │   │   ├── workflow_file.py    # A workflow file — the master copy every workflow command reads (YAML, unknown keys refused)
 │   │   ├── workflow_schedules.py # Standing triggers — a workflow's cron triggers as DBOS schedules (sync/list/remove)
