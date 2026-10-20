@@ -262,6 +262,17 @@ def test_raw_key_extension_is_lowercased_like_the_manifest_ext(tmp_path: Path):
     assert (dest / "run-A" / row["raw_key"]).is_file()
 
 
+def test_a_source_root_given_as_a_file_uri_resolves_like_a_path(tmp_path: Path):
+    corpus_dir = _corpus_with(tmp_path, "a.pdf", b"%PDF moved")
+    source_hash = _source_hash(str(corpus_dir / "a.pdf"))
+    run_root = _one_doc_run(tmp_path, "a.pdf", ingest_root="file:///gone", source_hash=source_hash)
+
+    result = build_bundle(run_root, RemoteStore.from_uri(str(tmp_path / "dest")), run_id="run-A",
+                          source_root=qualify_root(corpus_dir))
+
+    assert result.sources_by_status == {"resolved": 1}
+
+
 def test_a_hash_mismatch_is_reported_and_not_copied(tmp_path: Path):
     corpus_dir = _corpus_with(tmp_path, "a.pdf", b"%PDF re-saved with different bytes")
     run_root = _one_doc_run(tmp_path, "a.pdf", ingest_root=qualify_root(corpus_dir))
