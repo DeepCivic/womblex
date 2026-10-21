@@ -51,3 +51,19 @@ def test_a_run_with_no_links_sidecar_reads_as_before(tmp_path):
     _d, base, _ = _setup_shard(tmp_path)
     assert read_matching_links(base) is None
     assert [m.chunk_index for m in load_entity_mentions(enrichment_entities_path_for(base))] == [-1, -1]
+
+
+def test_a_checkpointed_batch_is_linked_again_after_a_rechunk(tmp_path):
+    from womblex.store.checkpoint import CheckpointManager
+
+    d, base, src = _setup_shard(tmp_path)
+    ckpt = CheckpointManager(tmp_path / ".graph-refresh-checkpoint", "t_graph_refresh")
+    ckpt.load()
+    assert refresh_graph_edges(d, checkpoint_mgr=ckpt).batches_written == 1
+    assert refresh_graph_edges(d, checkpoint_mgr=ckpt).batches_written == 0  # resumed: links still match
+
+    write_chunks([_chunk_row(src, 0, 0, 50), _chunk_row(src, 1, 50, 200)], base)  # a rechunk
+    assert refresh_graph_edges(d, checkpoint_mgr=ckpt).batches_written == 1
+    assert read_matching_links(base) is not None
+    mentions = {m.entity_id: m.chunk_index for m in load_entity_mentions(enrichment_entities_path_for(base))}
+    assert mentions == {"loc:0": 0, "loc:1": 1}
