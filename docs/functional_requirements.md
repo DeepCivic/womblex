@@ -39,13 +39,15 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 
 **Acceptance criteria:**
 
-- Cloud workers and local runs use identical batch-processing logic and output identical shard layouts.
-- Work runs as DBOS workflows, so a batch is never double-processed, a unit that finished is not run again, and workers can scale dynamically.
+- Cloud workers and local runs run the same batch-processing code and, over the same input, write the same shard layout with the same `content_digest` for each document.
+- Work runs as DBOS workflows, so a batch is never double-processed, a unit that finished is not run again, and workers can be added or stopped while a run is in progress.
 - Distributed run shards can be synced locally and consumed unchanged by local per-stage commands.
-- A stage can execute in-place over object storage using the exact same contract as local file execution.
-- The pipeline natively resolves standard local and cloud storage URIs.
-- Object-storage stage writes are all-or-none per stage: every declared output must exist before any is published; a set left partial by a failed upload never reads as complete, so the next run redoes that base and overwrites it; and a stage that rewrites outputs in place commits atomically, so an interrupted publish leaves the previous outputs intact.
+- A stage can execute in place over object storage under the same contract as local execution.
+- A storage location may be a local path or a `file://`, `s3://` (S3 and MinIO), `s3a://`, `gs://`, `gcs://`, `az://` or `abfs://` URI.
+- Object-storage writes are all-or-none per unit: every declared output exists before any is published, and a unit left partial by a failed upload never reads as complete, so the next run redoes and overwrites it. A failed unit is recorded and the rest of the run continues. A stage that rewrites outputs in place commits atomically, so an interrupted publish leaves the previous outputs intact.
 - A distributed run writes `<run>/manifest.parquet` when its stages finish. `womblex finalize` still writes it on demand, with the same result.
+
+**Verification:** `womblex verify-shards <local run> --compare-to <fleet run>` over one input reports no difference.
 
 **TO-DO:**
 
