@@ -44,7 +44,7 @@ Terms the requirements use, as the code defines them.
 
 ## 2. Scale-Out and Environment-Agnostic Execution
 
-**Paid:** Launches workers that run every paid stage the run's config enables (Requirements 10, 12, 29, the `embed` stage, `mistral-ocr`). A SageMaker deployment of the paid models (Glossary) is billed by AWS while its endpoint runs, called or not.
+**Paid:** Launches workers that run every paid stage the run's config enables (Requirements 10, 12, 29, the `embed` stage, `mistral-ocr`). A SageMaker deployment of the Kanon-2 Enricher or Embedder is billed by AWS while its endpoint runs, called or not.
 
 **As** a user,
 **I want** to scale the pipeline to a cluster and move stages between local and cloud environments,
@@ -646,7 +646,7 @@ Terms the requirements use, as the code defines them.
 - After a failed stage is retried successfully, the retry command prints how to redeliver. Redelivery replaces: files are rewritten and rows upserted.
 - An object-store destination receives the Requirement 23 bundle; each destination chooses whether raw sources are included.
 - A Postgres destination gets one row per chunk with its embedding: masked text by default, raw only where the workflow asks, each row naming its layer.
-- A webhook receives six events: `extraction_settled`, `stage_finished`, `stage_failed`, `run_finished`, `delivered` and `delivery_failed`. Each carries an `event_id` (kept when the event is resent, so the receiver can drop a duplicate), the `run_id` and the run's status in the API's words, and is signed with a key held where the run executes.
+- A webhook receives six events: `extraction_settled`, `stage_finished`, `stage_failed`, `run_finished`, `delivered` and `delivery_failed`. Each carries an `event_id` (kept when the event is resent, so the receiver can drop a duplicate), the `run_id` and the run's status in the API's words, and is signed with a key held on the worker.
 - There are no per-document or per-batch events.
 - The run record lists every delivery.
 
