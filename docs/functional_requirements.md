@@ -6,6 +6,23 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 
 **Paid features are tagged.** A requirement whose behaviour can start a call billed by a third party carries a **Paid:** line under its heading, saying what is billed and which setting switches it on. A requirement without one engages nothing paid. The paid models are the Kanon-2 Enricher and Kanon-2 Embedder (Isaacus, on the hosted API or a SageMaker endpoint) and Mistral Pixtral Large on AWS Bedrock (`mistral-ocr`). Everything else runs locally and costs nothing per call, including semchunk (MIT), the Kanon-2 tokeniser (Apache-2.0), PaddleOCR, PP-DocLayout-M and a self-hosted Ollama. A merge that adds, removes or changes a paid call updates the line in the same merge.
 
+Acceptance criteria name outcomes a user can observe. How a criterion is tested goes on the requirement's **Verification:** line.
+
+## Glossary
+
+Terms the requirements use, as the code defines them.
+
+- **batch** — a numbered group of documents extracted together; it writes one `batch-NNNN` set of shard files.
+- **shard layout** — each batch's four extraction Parquet files (`elements`, `table_cells`, `form_fields`, `_manifest`) plus the sidecars later stages write beside them, with the schemas in `src/womblex/store/output.py`.
+- **unit** — what a stage runs as one step: one batch's shard files for a per-batch stage, or the whole run for a whole-run stage (`plan_units` / `run_unit` in `src/womblex/cloud/stage_runner.py`). A unit's outputs are published all or none.
+- **affected unit** — a unit of a later stage whose inputs came from a unit the failed stage did not finish.
+- **job** — one row on the queue (an extraction batch, a stage or a stage coordinator), as `womblex jobs`, the dashboard and the API list it (`src/womblex/cloud/jobs.py`).
+- **stage attempt** — one run of a stage over a run: its first dispatch, or a retry named `<run>:stage:<stage>:retry:<N>`. Counts take the latest attempt.
+- **staleness threshold** — `stale_after_seconds`, default 900: a `running` job with no update for longer than this is listed `stale`.
+- **extraction settled** — no extraction batch of the run is still pending or running; the coordinator waits for this before it runs the downstream stages.
+- **DBOS** — the durable workflow system: the queue, the workflow rows and the recovery of a stopped worker's work, kept in one system database (Postgres for a fleet, a local SQLite file otherwise; `src/womblex/cloud/dbos_app.py`).
+- **semchunk / Kanon-2** — semchunk is the local, MIT-licensed chunker and the Kanon-2 tokeniser runs locally; the Kanon-2 Enricher and Embedder are Isaacus's paid models.
+
 ## 1. Local Deployment Optimisation
 
 **As** a user,
