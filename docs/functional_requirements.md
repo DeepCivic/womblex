@@ -27,6 +27,8 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 
 ## 2. Scale-Out and Environment-Agnostic Execution
 
+**Paid:** Launches workers that run every paid stage the run's config enables (Requirements 10, 12, 29, the `embed` stage, `mistral-ocr`). A SageMaker deployment of the paid models (Glossary) is billed by AWS while its endpoint runs, called or not.
+
 **As** a user,
 **I want** to scale the pipeline to a cluster and move stages between local and cloud environments,
 **so that** I gain throughput without rewriting jobs or re-extracting documents.
@@ -295,6 +297,8 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 
 ## 14. Batch Processing, Resiliency, and Operational Controls
 
+**Paid:** A retry or resume reruns stages; each unit of a paid stage it redoes is billed again.
+
 **As** a user,
 **I want** reliable batching, checkpointing, and discrete execution controls (CLI/UI),
 **so that** I can manage large runs, recover from failures, and inspect outputs easily.
@@ -455,6 +459,8 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 
 ## 22. Service API — Submission and Retrieval
 
+**Paid:** A submitted run launches the paid stages its config enables, billed to the operator's accounts, not the caller's.
+
 **As** a developer integrating another system,
 **I want** an authenticated HTTP API to upload documents, submit runs, and read their results,
 **so that** my software can use Womblex as a backend service without shell access to the pipeline host.
@@ -576,6 +582,8 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - Benchmark reports (womblex-benchmark) name the models that produced them, suites can run against a named model, and `docs/accuracy/` stays labelled as the default group.
 
 ## 27. Workflows — Check, Run, Dispatch and Schedule
+
+**Paid:** `run-workflow`, `dispatch-workflow` and every scheduled firing launch the workflow's paid steps; each firing is billed for the documents it processes. `validate` and `plan` make no paid call.
 
 **As** an operator,
 **I want** to declare a named recipe of steps over a preset in a file and run it locally, on the fleet or on a schedule,
