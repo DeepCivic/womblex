@@ -46,6 +46,7 @@ from womblex.cloud.stage_runner import (
     prepare_stage_context,
     run_unit,
 )
+from womblex.cloud.unit_receipt import already_published
 from womblex.store.run_stamp import RunStamp, workflow_context
 from womblex.store.source_provenance import IngestProvenance
 from womblex.utils.log_format import log_context
@@ -167,9 +168,12 @@ def _logged[T](
 
 def _extract(
     run_id: str, batch_num: int, input_keys: list[str], shard_prefix: str, ingest_root: str,
-    config: dict[str, Any] | None = None,
+    config: dict[str, Any] | None = None, workflow: dict[str, Any] | None = None,
 ) -> dict[str, str]:
-    """Stage this batch's inputs, extract them under the run's config, publish the shards; return key -> SHA-256."""
+    """Stage this batch's inputs, extract them under the run's config, publish the shards; return key -> SHA-256.
+
+    A scheduled firing's *workflow* is named in the shards' footers, as a stage step names it in its sidecars.
+    """
     ctx = _context()
     run_config = _stage_config(None, config)
 
@@ -188,10 +192,12 @@ def _extract(
             if declared else None
         )
         stamp = RunStamp.declare(run_id, run_config, stage="extract") if run_id.strip() else None
-        outcome = process_batch(
-            files, run_config, batch_num=batch_num, shard_dir=shards_dir,
-            provenance=provenance, stamp=stamp,
-        )
+        with (workflow_context(workflow["digest"], workflow.get("id"), workflow.get("spec"))
+              if workflow else nullcontext()):
+            outcome = process_batch(
+                files, run_config, batch_num=batch_num, shard_dir=shards_dir,
+                provenance=provenance, stamp=stamp,
+            )
         # Glob off the shard path the batch reported, so the naming scheme lives
         # only in womblex.batch.
         published = ctx.store.upload_glob(shards_dir, f"{outcome.shard_path.stem}.*", shard_prefix)
@@ -208,10 +214,11 @@ def _extract(
 def extract_batch(
     run_id: str, batch_num: int, input_keys: list[str], shard_prefix: str,
     ingest_root: str, max_attempts: int, config: dict[str, Any] | None = None,
+    workflow: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     recorded = DBOS.run_step(
         _retry("extract", max_attempts), _extract,
-        run_id, batch_num, input_keys, shard_prefix, ingest_root, config,
+        run_id, batch_num, input_keys, shard_prefix, ingest_root, config, workflow,
     )
     return {"published": len(recorded), "checksums": _digests(recorded)}
 
@@ -261,11 +268,17 @@ def _unit(
     def body(_root: Path) -> dict[str, str]:
         # Built per unit: the client holds a connection, and a recovered
         # workflow resumes in a process that has none.
+        # A retry (`<stage id>:retry:N`, a fork or a later stage's re-run) runs every unit it holds.
+        wf_id = DBOS.workflow_id or ""
+        first = (dbos_app.stage_attempt(wf_id) or ("", 0))[1] == 0
+        if first and already_published(contract, config, ctx.store, shard_prefix, unit, by=wf_id):
+            logger.info("%s: %s already published under this config and these inputs; skipped", stage, label)
+            return {}  # a unit that runs publishes at least one key, so empty reads as skipped
         run_ctx = prepare_stage_context(contract, config)
         try:
             with (workflow_context(workflow["digest"], workflow.get("id"), workflow.get("spec"))
                   if workflow else nullcontext()):
-                return run_unit(contract, config, run_ctx, ctx.store, shard_prefix, unit, ctx.ingest)
+                return run_unit(contract, config, run_ctx, ctx.store, shard_prefix, unit, ctx.ingest, by=wf_id)
         except NotReady as nr:
             producer = PRODUCER_OF.get(nr.suffix, "the upstream stage")
             raise StageNotReady(
@@ -281,7 +294,7 @@ def run_stage(
     workflow: dict[str, Any] | None = None, bases: list[str] | None = None, config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     units = DBOS.run_step({"name": "plan"}, _plan, stage, shard_prefix, workflow, bases, config)
-    published = 0
+    published = skipped = 0
     checksums: dict[str, str] = {}
     failed: list[str] = []
     for unit in units:
@@ -296,12 +309,13 @@ def run_stage(
             logger.warning("%s: %s failed; the stage's other units still run: %s", stage, label, failed[-1])
             continue
         published += len(recorded)
+        skipped += not recorded
         checksums.update(_digests(recorded))
     if failed:
         raise StageIncomplete(
             f"{stage}: {len(failed)} of {len(units)} unit(s) failed; every unit ran — {'; '.join(failed)}"
         )
-    return {"stage": stage, "units": len(units), "published": published, "checksums": checksums}
+    return {"stage": stage, "units": len(units), "published": published, "skipped": skipped, "checksums": checksums}
 
 
 # --- scheduled firings ---------------------------------------------------------

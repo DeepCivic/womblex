@@ -151,7 +151,7 @@ womblex/
 │   │   ├── egress_sources.py     # A bundle's raw sources, one outcome per source_hash — a local corpus (SourceResolver) or the object store the run was ingested from, by source_relpath
 │   │   ├── egress.py             # build_bundle() — export one finished run (local or in a store) store to store with its resolved raw sources, to any RemoteStore destination (contract: docs/egress.md; CLI verb `womblex egress`)
 │   │   ├── build_info.py    # BuildInfo — package version + source commit, or unavailable with a reason
-│   │   ├── run_stamp.py     # RunStamp — run id / version / commit / config digest / stage / preset (config name) / loaded models / slot models (distribution + version), as womblex.* footer keys; workflow_context → womblex.workflow_digest on a workflow step's sidecars
+│   │   ├── run_stamp.py     # RunStamp — run id / version / commit / config digest / stage / preset (config name) / loaded models / slot models (distribution + version), as womblex.* footer keys; workflow_context → womblex.workflow_digest on a workflow step's sidecars and a scheduled firing's extraction files
 │   │   ├── content_digest.py # content_digest(elements): the manifest's determinism handle (kind / order / text / cells / fields / sheet cells / meta)
 │   │   ├── contract.py      # womblex.contract_version + womblex.sensitivity (raw / masked / none) footer keys, on every pipeline Parquet
 │   │   ├── run_manifest.py  # Consolidate per-batch manifests into a run-root manifest.parquet + the run record in its footer
@@ -176,6 +176,7 @@ womblex/
 │   │   ├── worker_registry.py  # womblex_workers — the queues each live worker serves
 │   │   ├── stage_contracts.py  # Declarative StageContract per downstream stage (inputs/outputs/scope)
 │   │   ├── stage_runner.py     # Execute a contract against an object store
+│   │   ├── unit_receipt.py     # A store-run unit's receipt; the fleet's skip rule for work already published
 │   │   ├── workflow_store.py   # Workflow object (preset ref, input binding, steps, triggers) — schema, validation, the scheduled copies' table
 │   │   ├── workflow_order.py   # Up-front step-order check — inputs on disk or produced earlier, stable refusal codes
 │   │   ├── workflow_file.py    # A workflow file — the master copy every workflow command reads (YAML, unknown keys refused)
