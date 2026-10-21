@@ -167,9 +167,12 @@ def _logged[T](
 
 def _extract(
     run_id: str, batch_num: int, input_keys: list[str], shard_prefix: str, ingest_root: str,
-    config: dict[str, Any] | None = None,
+    config: dict[str, Any] | None = None, workflow: dict[str, Any] | None = None,
 ) -> dict[str, str]:
-    """Stage this batch's inputs, extract them under the run's config, publish the shards; return key -> SHA-256."""
+    """Stage this batch's inputs, extract them under the run's config, publish the shards; return key -> SHA-256.
+
+    A scheduled firing's *workflow* is named in the shards' footers, as a stage step names it in its sidecars.
+    """
     ctx = _context()
     run_config = _stage_config(None, config)
 
@@ -188,10 +191,12 @@ def _extract(
             if declared else None
         )
         stamp = RunStamp.declare(run_id, run_config, stage="extract") if run_id.strip() else None
-        outcome = process_batch(
-            files, run_config, batch_num=batch_num, shard_dir=shards_dir,
-            provenance=provenance, stamp=stamp,
-        )
+        with (workflow_context(workflow["digest"], workflow.get("id"), workflow.get("spec"))
+              if workflow else nullcontext()):
+            outcome = process_batch(
+                files, run_config, batch_num=batch_num, shard_dir=shards_dir,
+                provenance=provenance, stamp=stamp,
+            )
         # Glob off the shard path the batch reported, so the naming scheme lives
         # only in womblex.batch.
         published = ctx.store.upload_glob(shards_dir, f"{outcome.shard_path.stem}.*", shard_prefix)
@@ -208,10 +213,11 @@ def _extract(
 def extract_batch(
     run_id: str, batch_num: int, input_keys: list[str], shard_prefix: str,
     ingest_root: str, max_attempts: int, config: dict[str, Any] | None = None,
+    workflow: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     recorded = DBOS.run_step(
         _retry("extract", max_attempts), _extract,
-        run_id, batch_num, input_keys, shard_prefix, ingest_root, config,
+        run_id, batch_num, input_keys, shard_prefix, ingest_root, config, workflow,
     )
     return {"published": len(recorded), "checksums": _digests(recorded)}
 

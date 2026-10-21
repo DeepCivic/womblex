@@ -337,13 +337,14 @@ class RunBoard:
     def enqueue(
         self, run_id: str, jobs: list[JobSpec], *, owner: str | None = None,
         firing: str | None = None, fingerprints: dict[str, str] | None = None,
-        config: dict[str, Any] | None = None,
+        config: dict[str, Any] | None = None, workflow: dict[str, Any] | None = None,
     ) -> int:
         """Enqueue *jobs* for *run_id*; idempotent per batch number.
 
         *config* (`workflow_runner.config_payload`) is the config the batches extract under, on
         any worker. A scheduled *firing* labels its batches, each with its keys' *fingerprints*, so a
-        later firing of the same run can tell which documents it has already seen.
+        later firing of the same run can tell which documents it has already seen. A firing's
+        *workflow* (``id``, ``digest``, ``spec``) is named in the footer of every file its batches write.
 
         Returns the number of batches that were not already on the board.
         Raises :class:`RunOwnedError` if *owner* is named and the run already
@@ -369,7 +370,7 @@ class RunBoard:
                 "attributes": attrs,
             }
             sends.append((options, (run_id, spec.batch_num, spec.input_keys, spec.shard_prefix,
-                                    spec.ingest_root, spec.max_attempts, config)))
+                                    spec.ingest_root, spec.max_attempts, config, workflow)))
         inserted = self._enqueue(sends)
         logger.info("Enqueued %d new job(s) for run %s (of %d submitted)",
                     inserted, run_id, len(jobs))

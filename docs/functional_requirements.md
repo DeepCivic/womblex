@@ -626,7 +626,7 @@ Terms the requirements use, as the code defines them.
 - `plan` counts the tokens and requests of every paid call, AI chunking included, with each provider's own token counter, and shows local steps as free. It calls no paid API.
 - Out-of-order steps are refused before launch with the code `step_order`, each issue naming `input_missing`, `input_out_of_order` or `input_stale`.
 - Once a step has run, a failed step does not stop later steps; each records the failure it follows, and the run exits non-zero.
-- Every sidecar a workflow step writes names the workflow that wrote it, and the run record holds the workflow's name and full spec. Extraction files name none: extraction is not a workflow step (see the data contract).
+- Every sidecar a workflow step writes names the workflow that wrote it, and so does every extraction file a scheduled firing writes; the run record holds the workflow's name and full spec. Extraction a workflow did not start (`womblex run`, `enqueue`) names none.
 - `dispatch-workflow` is refused before any row for anything the local runner refuses, a step the fleet cannot run, or an order the coordinator would change; workers run each stage under the workflow's config.
 - `schedule-workflow` saves the workflow and syncs its schedules in one action, so stored triggers and the queue's schedules always match. It runs every check a firing makes (`check_firing`, against `--store` and the workflow's input store), so a workflow its firing would refuse is not scheduled.
 - Each firing runs the saved copy against the workflow's input store (`input_binding.store`), on a worker that uses that store, and is refused before any row when the prefix holds no document.
