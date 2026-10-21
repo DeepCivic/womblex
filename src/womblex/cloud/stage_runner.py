@@ -325,16 +325,26 @@ def _cleanup_staged(store: RemoteStore, temp_keys: list[str]) -> None:
 def _run_unit(
     contract: StageContract, config: WomblexConfig, ctx: RunContext,
     store: RemoteStore, shard_prefix: str, stems: list[str], input_keys: list[str],
-    ingest: RemoteStore,
+    ingest: RemoteStore, by: str | None = None,
 ) -> dict[str, str]:
-    """Stage in, run the unchanged ``*_shards()``, publish. Returns key -> SHA-256 published."""
+    """Stage in, run the unchanged ``*_shards()``, publish. Returns key -> SHA-256 published.
+
+    A sidecar unit leaves a receipt of what it ran from and published (`unit_receipt`), naming the
+    stage workflow *by* that ran it.
+    """
+    from womblex.cloud.unit_receipt import input_fingerprints, write_receipt
+
     with tempfile.TemporaryDirectory(prefix="womblex-stage-") as tmp:
         documents = Path(tmp) / "documents"
+        prints = input_fingerprints(store, shard_prefix, input_keys)
         store.download_to_dir(input_keys, documents)
         if contract.needs_sources:
             ctx = replace(ctx, source_fetcher=_source_fetcher(ingest, Path(tmp) / "sources"))
         contract.run(documents, config, ctx)
-        return _publish(contract, config, store, shard_prefix, stems, documents)
+        published = _publish(contract, config, store, shard_prefix, stems, documents)
+        if contract.mutation is MutationMode.SIDECAR:
+            write_receipt(contract, config, store, shard_prefix, stems, prints, list(published), by)
+        return published
 
 
 class StageDiscoveryError(Exception):
@@ -371,7 +381,7 @@ def plan_units(
 
 def run_unit(
     contract: StageContract, config: WomblexConfig, ctx: RunContext, store: RemoteStore,
-    shard_prefix: str, unit: list[str], ingest: RemoteStore,
+    shard_prefix: str, unit: list[str], ingest: RemoteStore, by: str | None = None,
 ) -> dict[str, str]:
     """Run one unit and return the keys it published, each with its SHA-256.
 
@@ -380,7 +390,7 @@ def run_unit(
     """
     present = set(store.list_files(shard_prefix, "*.parquet"))
     input_keys = _resolve_inputs(contract, config, shard_prefix, unit, present)
-    return _run_unit(contract, config, ctx, store, shard_prefix, unit, input_keys, ingest)
+    return _run_unit(contract, config, ctx, store, shard_prefix, unit, input_keys, ingest, by)
 
 
 def _source_fetcher(ingest: RemoteStore, scratch: Path) -> Callable[[dict], Path]:
