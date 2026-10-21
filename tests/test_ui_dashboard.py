@@ -141,7 +141,7 @@ class TestDashboardApi:
         body = client.get("/api/dashboard").json()
         assert body["queue_error"] is None
         assert body["queue"] == {
-            "stats": {}, "total": 0, "jobs": [], "workers": [], "stale": [],
+            "stats": {}, "total": 0, "summary": None, "jobs": [], "workers": [], "stale": [],
             "throughput": {
                 "window_seconds": dashboard.DEFAULT_THROUGHPUT_WINDOW,
                 "completed": 0, "per_minute": 0.0, "last_completed_at": None,

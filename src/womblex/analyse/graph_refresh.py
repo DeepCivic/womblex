@@ -30,7 +30,7 @@ from womblex.process.chunk_stage import _batch_bases
 from womblex.store.checkpoint import CheckpointManager
 from womblex.store.enrichment_output import read_enrichment_entities
 from womblex.store.evidence import TABLE_LAYER
-from womblex.store.graph_links_output import write_graph_links
+from womblex.store.graph_links_output import read_matching_links, write_graph_links
 from womblex.store.output import chunks_path_for, read_chunks, read_manifest
 
 logger = logging.getLogger(__name__)
@@ -51,8 +51,9 @@ def refresh_graph_edges(
 
     Needs both ``*.enrichment_entities.parquet`` and ``*.chunks.parquet``
     siblings. Batches missing either are skipped (logged). When
-    ``checkpoint_mgr`` is provided, batches whose docs are all checkpointed
-    are skipped on resume.
+    ``checkpoint_mgr`` is provided, a batch whose docs are all checkpointed is
+    skipped on resume only while its links still match its chunks: after a
+    rechunk it is linked again.
     """
     if not shard_dir.is_dir():
         raise FileNotFoundError(f"shard directory not found: {shard_dir}")
@@ -67,8 +68,9 @@ def refresh_graph_edges(
     links_written = 0
 
     for base in bases:
-        if checkpoint_mgr is not None and _all_docs_checkpointed(base, checkpoint_mgr):
-            logger.info("refresh_graph_edges: skipping %s (all docs checkpointed)", base.stem)
+        if (checkpoint_mgr is not None and _all_docs_checkpointed(base, checkpoint_mgr)
+                and read_matching_links(base) is not None):
+            logger.info("refresh_graph_edges: skipping %s (all docs checkpointed, links match)", base.stem)
             continue
 
         entities_table = read_enrichment_entities(base)
