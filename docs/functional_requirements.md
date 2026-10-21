@@ -468,27 +468,28 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 
 **As** a developer integrating another system,
 **I want** an authenticated HTTP API to upload documents, submit runs, and read their results,
-**so that** my software can use Womblex as a backend service without shell access to the pipeline host.
+**so that** my software can use Womblex as a service without shell access to its host.
 
-**Given** `womblex serve` bound to a store, a job queue, and an ingest location, with a client registry
-**When** a caller presents a service token and uploads documents, submits a run, and polls it
-**Then** the run is queued under the caller's ownership and its status, files, and text are readable only by that caller (or an admin), gated by scope and file sensitivity.
+**Given** `womblex serve` bound to a store, a job queue and an ingest location, with a client registry
+**When** a caller presents a service token, uploads documents, submits a run and polls it
+**Then** the run is queued under the caller's ownership and runs under the submitted config, and its status, files and text are readable only by that caller (or an admin), gated by scope and file sensitivity.
 
 **Acceptance criteria:**
 
-- Every `/v1` endpoint except `health` and `ready` requires a bearer token whose SHA-256 is in the registry; a missing or unknown token is 401, and tokens are compared in constant time.
-- Scopes are `submit`, `read`, `read_raw`, and `admin` (which implies the rest); a request outside the caller's scopes is 403.
-- The service refuses to start with an empty registry unless explicitly run with `--insecure-no-auth`, and binds to loopback by default.
-- An upload is written to `<ingest>/<client_id>/<upload_id>/` keeping only bare file names; an unusable, repeated, or unsupported name is 400 with nothing written, an over-limit request is 413, and the response names the folder to submit as `input_prefix`.
-- A non-admin caller can submit runs only over its own `<client_id>/` tree (403 otherwise); the run id is minted server-side and unique across concurrent submissions.
-- A submitted `preset` or `config` is validated before any queue row is written (400 on failure) and governs every stage of the run, not only which stages run; a config enabling none is an extraction-only run.
-- A run belongs to the client that submitted it: another client's run is 404, an admin sees all runs, and runs dispatched from the CLI, the console or a workflow carry no owner and are visible to admins only. A run never has mixed ownership.
-- Document text defaults to the masked layer; raw layers (`chunks`, `elements`) require `read_raw`, decided by the layer's contract sensitivity.
-- Run file listings report each file's row count, `contract_version`, and `sensitivity`, so a caller can fetch Parquet directly under the data contract.
+- Every `/v1` endpoint except `health` and `ready` requires a bearer token whose SHA-256 is in the registry; a missing or unknown token is 401.
+- Scopes are `submit`, `read`, `read_raw` and `admin` (which implies the rest); a request outside the caller's scopes is 403.
+- The service refuses to start with an empty registry unless run with `--insecure-no-auth`, and binds to loopback by default.
+- An upload is written to `<ingest>/<client_id>/<upload_id>/`, bare file names only. An unusable, repeated or unsupported name is 400 with nothing written, an over-limit request is 413, and the response names the `input_prefix` to submit.
+- A non-admin caller submits runs only over its own `<client_id>/` tree (403 otherwise). The run id is minted server-side and unique under concurrent submissions.
+- A submitted `preset` or `config` is validated before any queue row (400 on failure) and governs every stage of the run, not only which stages run. A config enabling no downstream stage is an extraction-only run.
+- A run belongs to the client that submitted it: another client's run is 404, an admin sees all runs, and runs dispatched from the CLI, the console or a workflow carry no owner and are admin-only. A run never has mixed ownership.
+- Document text defaults to the masked layer; raw layers (`chunks`, `elements`) require `read_raw`, by the layer's contract sensitivity.
+- Run file listings report each file's row count, `contract_version` and `sensitivity`, so a caller can fetch Parquet directly under the data contract.
 - A run's status is the same sentence the CLI and dashboard show (`summary`), with its counts.
 - A run started by a workflow that names a webhook sends its events there (Requirement 27). Polling still works.
-- `ready` reports store and queue reachability and answers 503 when either is down; an unreachable queue, store, or ingest location on any other endpoint is 503, not 500.
-- The OpenAPI surface is pinned by a test so breaking changes are visible in review.
+- `ready` reports store and queue reachability and answers 503 when either is down; any other endpoint answers 503, not 500, when the queue, store or ingest location is unreachable.
+
+**Verification:** the token is checked against every registry entry with `hmac.compare_digest` and no early exit; a test fails on any change to the OpenAPI surface.
 
 ## 23. Egress Bundle — Export to Downstream Consumers
 
