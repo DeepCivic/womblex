@@ -99,9 +99,10 @@ Approaches tried and abandoned, library-general limitations, and the deferred ba
   (matched by text and box); and it injects a stray space between overlapping
   objects, which `_lines` drops when it lies off the row and the row carries on
   across it. A space on the row that the row carries on across is a word gap and
-  stays, including pdfium's generated ones, whose boxes are points. Not matched: oblique overprints and lines above (the row test uses
-  bounding boxes, crude at small angles), and characters pdfium reports
-  outside every text object's box.
+  stays, including pdfium's generated ones, whose boxes are points. Not
+  matched: oblique overprints and lines above (the row test uses bounding
+  boxes, crude at small angles), and characters pdfium reports outside every
+  text object's box.
 - **Handwriting is an OCR-engine ceiling.** The PaddleOCR ONNX backend cannot
   read handwriting; cross-cell handwritten forms and photographed/creased forms
   reach high CER. Out of scope without an HTR backend + dewarping.
