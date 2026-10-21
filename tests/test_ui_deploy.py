@@ -171,9 +171,9 @@ class TestSidecarImage:
         assert match.group(1) in scripts
 
     def test_final_stage_copies_the_builder_stages_declared_output(self) -> None:
-        """`svelte.config.js`'s adapter output dir must match what the Dockerfile COPYs out."""
-        svelte_config = (REPO_ROOT / "ui" / "svelte.config.js").read_text()
-        assert "pages: 'build'" in svelte_config
+        """The adapter output dir in `vite.config.ts` must match what the Dockerfile COPYs out."""
+        vite_config = (REPO_ROOT / "ui" / "vite.config.ts").read_text()
+        assert "pages: 'build'" in vite_config
         dockerfile = (REPO_ROOT / "Dockerfile.ui").read_text()
         assert "COPY --from=frontend-builder /app/ui/build /app/ui/build" in dockerfile
 
