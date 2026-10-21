@@ -39,15 +39,16 @@
 		return err instanceof Error ? err.message : String(err);
 	}
 
-	// The queue statuses map onto the shared pill vocabulary (`cancelled` takes
-	// `skipped`'s icon: withdrawn, not broken); anything the queue grows later
-	// falls back to `pending`'s neutral fill rather than crashing the lookup.
+	// The queue statuses map onto the shared pill vocabulary; anything the
+	// queue grows later falls back to `pending`'s neutral fill rather than
+	// crashing the lookup.
 	const STATUS_MAP: Record<string, Status> = {
 		pending: 'pending',
 		running: 'running',
 		done: 'done',
 		failed: 'failed',
-		cancelled: 'skipped'
+		skipped: 'skipped',
+		cancelled: 'cancelled'
 	};
 	function statusOf(name: string): Status {
 		return STATUS_MAP[name] ?? 'pending';
@@ -55,7 +56,7 @@
 
 	// Ordered so the tiles read left-to-right as a batch's lifecycle, with any
 	// unexpected status appended rather than dropped.
-	const STATUS_ORDER = ['pending', 'running', 'done', 'failed', 'cancelled'];
+	const STATUS_ORDER = ['pending', 'running', 'done', 'skipped', 'failed', 'cancelled'];
 	let statTiles = $derived.by((): { status: string; count: number }[] => {
 		const stats = data?.queue?.stats ?? {};
 		const known = STATUS_ORDER.filter((s) => s in stats).map((s) => ({

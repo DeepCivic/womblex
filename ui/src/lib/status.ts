@@ -6,9 +6,10 @@ import Clock from '@lucide/svelte/icons/clock';
 import Loader from '@lucide/svelte/icons/loader';
 import AlertTriangle from '@lucide/svelte/icons/alert-triangle';
 import SkipForward from '@lucide/svelte/icons/skip-forward';
+import Ban from '@lucide/svelte/icons/ban';
 import type { Component } from 'svelte';
 
-export type Status = 'pending' | 'running' | 'done' | 'failed' | 'warning' | 'skipped';
+export type Status = 'pending' | 'running' | 'done' | 'failed' | 'warning' | 'skipped' | 'cancelled';
 
 export const STATUS_ICON: Record<Status, Component<{ size?: number | string }>> = {
 	pending: Clock,
@@ -16,7 +17,8 @@ export const STATUS_ICON: Record<Status, Component<{ size?: number | string }>> 
 	done: CircleCheck,
 	failed: CircleX,
 	warning: AlertTriangle,
-	skipped: SkipForward
+	skipped: SkipForward,
+	cancelled: Ban
 };
 
 export const STATUS_BG: Record<Status, string> = {
@@ -25,9 +27,10 @@ export const STATUS_BG: Record<Status, string> = {
 	done: 'bg-status-done',
 	failed: 'bg-status-failed',
 	warning: 'bg-status-warning',
-	// Reuses the pending fill — legal because the icon, not the colour,
-	// carries the distinction (DESIGN.md).
-	skipped: 'bg-status-pending'
+	// `skipped` and `cancelled` reuse the pending fill — legal because the
+	// icon, not the colour, carries the distinction (DESIGN.md).
+	skipped: 'bg-status-pending',
+	cancelled: 'bg-status-pending'
 };
 
 // Text on each fill. Light fills take white and dark fills near-black
@@ -39,5 +42,6 @@ export const STATUS_FG: Record<Status, string> = {
 	done: 'text-status-foreground',
 	failed: 'text-status-foreground',
 	warning: 'text-status-foreground',
-	skipped: 'text-status-foreground'
+	skipped: 'text-status-foreground',
+	cancelled: 'text-status-foreground'
 };

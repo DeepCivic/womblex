@@ -101,7 +101,7 @@ _workflow: ContextVar[tuple[str, str | None] | None] = ContextVar("womblex_workf
 
 @contextmanager
 def workflow_context(digest: str, name: str | None = None, spec: Mapping[str, Any] | None = None) -> Iterator[None]:
-    """Mark every sidecar written inside the block as produced by the workflow *digest*, *name*d,
+    """Mark every file written inside the block as produced by the workflow *digest*, *name*d,
     with *spec*.
 
     Beside `config_digest`, which says how the stages were configured: this says which
@@ -414,16 +414,24 @@ def stamp_for_sidecar(base_path: Path, stage: str) -> RunStamp | None:
     return stamp_from_footers(others, stage)
 
 
+def workflow_footer() -> dict[bytes, bytes] | None:
+    """The workflow keys of the enclosing :func:`workflow_context`; ``None`` outside one."""
+    if (current := _workflow.get()) is None:
+        return None
+    digest, whole = current
+    meta = {WORKFLOW_DIGEST_KEY.encode(): digest.encode()}
+    if whole is not None:
+        meta[WORKFLOW_KEY.encode()] = whole.encode()
+    return meta
+
+
 def sidecar_footer(base_path: Path, stage: str) -> dict[bytes, bytes] | None:
     """:func:`stamp_for_sidecar` as footer metadata, for a writer to pass on."""
     stamp = stamp_for_sidecar(base_path, stage)
     meta = stamp.footer_metadata() if stamp is not None else None
-    if (current := _workflow.get()) is not None:
-        # A workflow is a fact about this write even where the run cannot be named.
-        digest, whole = current
-        meta = {**(meta or {}), WORKFLOW_DIGEST_KEY.encode(): digest.encode()}
-        if whole is not None:
-            meta[WORKFLOW_KEY.encode()] = whole.encode()
+    # A workflow is a fact about this write even where the run cannot be named.
+    if (workflow := workflow_footer()) is not None:
+        meta = {**(meta or {}), **workflow}
     return meta
 
 
@@ -450,4 +458,5 @@ __all__ = [
     "stamp_from_footers",
     "stamp_from_metadata",
     "workflow_context",
+    "workflow_footer",
 ]

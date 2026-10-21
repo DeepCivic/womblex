@@ -124,6 +124,8 @@ def test_run_detail_reports_derived_state(client):
     ({"done": 2}, "done"),
     ({"done": 2, "cancelled": 1}, "cancelled"),
     ({"pending": 1, "cancelled": 1}, "pending"),
+    ({"pending": 1, "skipped": 1}, "running"),
+    ({"done": 2, "skipped": 1}, "done"),
 ])
 def test_run_state(counts, state):
     assert run_state(counts) == state
