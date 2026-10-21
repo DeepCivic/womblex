@@ -614,7 +614,7 @@ Terms the requirements use, as the code defines them.
 
 **Given** a workflow file (name, preset, config overlay, input location, ordered steps, triggers and destinations)
 **When** the operator validates, plans, runs, dispatches or schedules it
-**Then** every refusal happens before the first step, each firing processes only new documents, every sidecar a workflow step writes names its workflow, and each destination receives the results.
+**Then** every refusal happens before the first step, each firing processes only new documents, every sidecar a workflow step writes and every extraction file a scheduled firing writes names its workflow, and each destination receives the results.
 
 **Acceptance criteria:**
 
