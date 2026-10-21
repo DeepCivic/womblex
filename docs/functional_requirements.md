@@ -307,15 +307,17 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 
 **Given** a configured run (local or distributed)
 **When** the operator uses the CLI or Web UI
-**Then** documents process in isolated, resumable batches, with independent stage controls and visual inspection capabilities.
+**Then** documents process in isolated, resumable batches, with independent stage controls and inspection.
 
 **Acceptance criteria:**
 
-- Processing occurs in configurable batches, appending results and writing checkpoints upon batch completion.
-- Resuming an interrupted run automatically reconciles checkpoints and skips already-completed documents.
-- Individual document errors are isolated, recorded in the manifest, and do not crash the wider batch.
-- CLI commands allow stages to be dispatched independently, with idempotent queueing ensuring dependent stages sequence properly.
-- `womblex retry-stage` retries a failed distributed stage by forking its workflow from the first failed unit, so the units that finished are not run again. A retry is a launch: it is refused, before anything is forked, for a stage that is unknown, still running, not failed, owned by another owner, or failing the checks a dispatch makes (its config and registered models, the inputs it needs in the store, a live worker that passes the model check for the stage). A stage that ran after a failure ran on partial output, so once the failed stage's latest attempt has succeeded it is retryable too, in the order the operator runs them, and its retry redoes only its affected units, so finished work is not paid for again.
+- Processing occurs in configurable batches, appending results and writing a checkpoint as each batch completes.
+- Resuming an interrupted run reconciles checkpoints and skips completed documents.
+- A document error is isolated, recorded in the manifest, and does not stop its batch.
+- Stages can be dispatched independently from the CLI; idempotent queueing keeps dependent stages in order.
+- `womblex retry-stage` forks a failed distributed stage from its first failed unit, so finished units are not rerun.
+- A retry is a launch, refused before the fork with one of these codes: `not_found` (no such run or stage, or the run is another owner's), `still_running`, `not_failed`, `earlier_failed` (an earlier stage's latest attempt failed), `already_retried`, `config_invalid` (the config does not load with registered models), `step_order` (an input the stage needs is missing from the store or out of order) or `no_worker` (no live worker passes the model check for the stage).
+- A stage that ran after a failure ran on partial output, so it is retryable once the failed stage's latest attempt has succeeded, earliest stage first. Its retry redoes only its affected units, so finished work is not paid for again.
 - Logs can be emitted as JSON lines (`womblex --log-format json` or `WOMBLEX_LOG_FORMAT=json`) with no added dependency; worker and batch records carry `run_id`, `job_id`, `stage`, and `source_hash` where known, and the default text format is unchanged.
 
 ## 15. Web Console Shell, Navigation, and Deployment Modes
