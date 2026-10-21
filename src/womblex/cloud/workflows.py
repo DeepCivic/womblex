@@ -46,6 +46,7 @@ from womblex.cloud.stage_runner import (
     prepare_stage_context,
     run_unit,
 )
+from womblex.cloud.unit_receipt import already_published
 from womblex.store.run_stamp import RunStamp, workflow_context
 from womblex.store.source_provenance import IngestProvenance
 from womblex.utils.log_format import log_context
@@ -267,6 +268,11 @@ def _unit(
     def body(_root: Path) -> dict[str, str]:
         # Built per unit: the client holds a connection, and a recovered
         # workflow resumes in a process that has none.
+        # A retry (`<stage id>:retry:N`, a fork or a later stage's re-run) runs every unit it holds.
+        first = (dbos_app.stage_attempt(DBOS.workflow_id or "") or ("", 0))[1] == 0
+        if first and already_published(contract, config, ctx.store, shard_prefix, unit):
+            logger.info("%s: %s already published under this config and these inputs; skipped", stage, label)
+            return {}  # a unit that runs publishes at least one key, so empty reads as skipped
         run_ctx = prepare_stage_context(contract, config)
         try:
             with (workflow_context(workflow["digest"], workflow.get("id"), workflow.get("spec"))
@@ -287,7 +293,7 @@ def run_stage(
     workflow: dict[str, Any] | None = None, bases: list[str] | None = None, config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     units = DBOS.run_step({"name": "plan"}, _plan, stage, shard_prefix, workflow, bases, config)
-    published = 0
+    published = skipped = 0
     checksums: dict[str, str] = {}
     failed: list[str] = []
     for unit in units:
@@ -302,12 +308,13 @@ def run_stage(
             logger.warning("%s: %s failed; the stage's other units still run: %s", stage, label, failed[-1])
             continue
         published += len(recorded)
+        skipped += not recorded
         checksums.update(_digests(recorded))
     if failed:
         raise StageIncomplete(
             f"{stage}: {len(failed)} of {len(units)} unit(s) failed; every unit ran — {'; '.join(failed)}"
         )
-    return {"stage": stage, "units": len(units), "published": published, "checksums": checksums}
+    return {"stage": stage, "units": len(units), "published": published, "skipped": skipped, "checksums": checksums}
 
 
 # --- scheduled firings ---------------------------------------------------------

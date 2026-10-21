@@ -176,6 +176,7 @@ womblex/
 │   │   ├── worker_registry.py  # womblex_workers — the queues each live worker serves
 │   │   ├── stage_contracts.py  # Declarative StageContract per downstream stage (inputs/outputs/scope)
 │   │   ├── stage_runner.py     # Execute a contract against an object store
+│   │   ├── unit_receipt.py     # A store-run unit's receipt; the fleet's skip rule for work already published
 │   │   ├── workflow_store.py   # Workflow object (preset ref, input binding, steps, triggers) — schema, validation, the scheduled copies' table
 │   │   ├── workflow_order.py   # Up-front step-order check — inputs on disk or produced earlier, stable refusal codes
 │   │   ├── workflow_file.py    # A workflow file — the master copy every workflow command reads (YAML, unknown keys refused)

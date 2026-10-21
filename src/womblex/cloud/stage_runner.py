@@ -327,14 +327,23 @@ def _run_unit(
     store: RemoteStore, shard_prefix: str, stems: list[str], input_keys: list[str],
     ingest: RemoteStore,
 ) -> dict[str, str]:
-    """Stage in, run the unchanged ``*_shards()``, publish. Returns key -> SHA-256 published."""
+    """Stage in, run the unchanged ``*_shards()``, publish. Returns key -> SHA-256 published.
+
+    A sidecar unit leaves a receipt of what it ran from and published (`unit_receipt`).
+    """
+    from womblex.cloud.unit_receipt import input_fingerprints, write_receipt
+
     with tempfile.TemporaryDirectory(prefix="womblex-stage-") as tmp:
         documents = Path(tmp) / "documents"
+        prints = input_fingerprints(store, shard_prefix, input_keys)
         store.download_to_dir(input_keys, documents)
         if contract.needs_sources:
             ctx = replace(ctx, source_fetcher=_source_fetcher(ingest, Path(tmp) / "sources"))
         contract.run(documents, config, ctx)
-        return _publish(contract, config, store, shard_prefix, stems, documents)
+        published = _publish(contract, config, store, shard_prefix, stems, documents)
+        if contract.mutation is MutationMode.SIDECAR:
+            write_receipt(contract, config, store, shard_prefix, stems, prints, list(published))
+        return published
 
 
 class StageDiscoveryError(Exception):

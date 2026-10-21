@@ -58,6 +58,7 @@ Terms the requirements use, as the code defines them.
 
 - Cloud workers and local runs run the same batch-processing code and, over the same input, write the same shard layout with the same `content_digest` for each document.
 - Work runs as DBOS workflows, so a batch is never double-processed, a unit that finished is not run again, and workers can be added or stopped while a run is in progress.
+- A stage dispatched again under new stage ids (a changed workflow, a later firing) skips a unit whose outputs were published by the same Womblex version under the same stage config from unchanged inputs, so identical work is neither redone nor re-paid. Any difference runs the unit, and a retry runs every unit it holds.
 - Distributed run shards can be synced locally and consumed unchanged by local per-stage commands.
 - A stage can execute in place over object storage under the same contract as local execution.
 - A storage location may be a local path or a `file://`, `s3://` (S3 and MinIO), `s3a://`, `gs://`, `gcs://`, `az://` or `abfs://` URI.
