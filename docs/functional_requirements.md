@@ -499,22 +499,22 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 
 **Given** a finished run root (holding `documents/` and `manifest.parquet`), local or in an object store
 **When** the operator runs `womblex egress <run> --to <dest>`
-**Then** a bundle is written under `<dest>/<bundle_prefix>/` holding the unchanged corpus, deduplicated raw sources, a source index, and a descriptor, and Womblex stops.
+**Then** a bundle is written under `<dest>/<bundle_prefix>/` holding the unchanged corpus, deduplicated raw sources, a source index and a descriptor, and Womblex stops.
 
 **Acceptance criteria:**
 
-- The destination may be any `RemoteStore` URI (local directory, S3, MinIO, GCS) through one code path.
-- `corpus/` mirrors the run's shard directory recursively, including every downstream sidecar, plus the consolidated `manifest.parquet`, unchanged.
+- The destination may be any storage location Requirement 2 lists (a `RemoteStore` URI), through one code path.
+- `corpus/` mirrors the run's shard directory, every downstream sidecar included, plus the consolidated `manifest.parquet`, unchanged.
 - Raw sources are written to `sources/<source_hash><ext>`, deduplicated by hash; two documents sharing a hash point at one file.
-- `source_index.parquet` has one row per document with `source_hash`, `doc_id`, `filename`, `ext`, `raw_key`, and a status of `resolved`, `hash_mismatch`, `not_found`, `unsupported_basis`, or `upload_failed`; `raw_key` is null wherever no file was produced.
-- Source resolution is non-fatal per document: a missing, mismatched, records-ingested, or failed-upload source is reported in the index and in `egress_manifest.json`, never aborting the export.
+- `source_index.parquet` has one row per document (`source_hash`, `doc_id`, `filename`, `ext`, `raw_key`, and a status of `resolved`, `hash_mismatch`, `not_found`, `unsupported_basis` or `upload_failed`); `raw_key` is null wherever no file was produced.
+- Source resolution never aborts the export: a source whose status is `not_found`, `hash_mismatch`, `unsupported_basis` (a records-ingested document) or `upload_failed` is reported in the index and in `egress_manifest.json`.
 - `egress_manifest.json` carries the contract version and a per-document resolution report.
 - A corpus-only export (`--no-sources` / `--corpus-only`) skips resolution and writes no `sources/` or `source_index.parquet`.
-- `--source-root` resolves sources from a moved corpus; `--run-id` defaults to the run root's directory name and must agree with the run's own stamp, if it has one.
-- Re-exporting into an existing bundle removes source files the fresh export neither wrote nor attempted, and leaves a source whose upload failed untouched.
+- `--source-root` resolves sources for a moved corpus; `--run-id` defaults to the run root's name and must agree with the run's stamp, if any.
+- Re-exporting removes source files the fresh export neither wrote nor attempted, and leaves a failed-upload source untouched.
 - A run held in an object store is copied store to store, with no local staging.
-- A run ingested from an object store resolves each source from that store by the manifest's `source_relpath`, checked against `source_hash`, with the same per-document statuses.
-- Womblex writes the bundle and nothing downstream of it: no retention, serving, or write-back of consumer corrections.
+- A run ingested from an object store resolves each source from that store by `source_relpath`, checked against `source_hash`, with the same statuses.
+- Womblex writes the bundle and nothing downstream of it: no retention, serving, or write-back of consumer corrections. Delivery to a workflow's destinations is Requirement 27.
 
 ## 24. Swappable Models Without a Schema Change
 
