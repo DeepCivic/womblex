@@ -5,8 +5,10 @@ The fleet's skip rule. A unit that runs on a store leaves a receipt at
 ran under (a sidecar's `config_digest` is the run's, inherited from extraction), and the
 fingerprint of every input it read and output it published. A unit is skipped only when its
 receipt matches all of these as they are now, so a changed config, a rewritten input (an upstream
-retry, a rechunk), a rewritten output or a new build runs it again, and an output with no receipt
-(written before receipts, or by `--shards`) is never skipped. The receipt sits beside the run's
+retry, a rechunk), a rewritten output or a new version runs it again, and an output with no receipt
+(written before receipts, or by `--shards`) is never skipped. A receipt names the stage workflow that
+wrote it, and a unit is never skipped against its own workflow's receipt: a step recovered after
+publishing runs again, as before receipts, so its checksums are recorded. The receipt sits beside the run's
 `logs/`, outside `documents/`, so the sidecars stay byte-identical to a local run's.
 """
 
@@ -45,12 +47,17 @@ def _receipt(config: WomblexConfig, inputs: dict[str, str], outputs: dict[str, s
 
 def write_receipt(
     contract: StageContract, config: WomblexConfig, store: RemoteStore, shard_prefix: str,
-    unit: list[str], inputs: dict[str, str], published: list[str],
+    unit: list[str], inputs: dict[str, str], published: list[str], by: str | None = None,
 ) -> None:
-    """Record what *unit* ran from (*inputs*, fingerprinted before it ran) and published."""
-    body = _receipt(config, inputs, _fingerprints(store, shard_prefix, published))
-    store.write_stream(io.BytesIO(json.dumps(body, sort_keys=True).encode()),
-                       receipt_key(shard_prefix, contract.name, unit))
+    """Record what *unit* ran from (*inputs*, fingerprinted before it ran) and published, written *by*
+    a stage workflow. Never raises: the outputs are published, and a unit with no receipt only runs again."""
+    key = receipt_key(shard_prefix, contract.name, unit)
+    try:
+        body = {**_receipt(config, inputs, _fingerprints(store, shard_prefix, published)), "by": by}
+        store.write_stream(io.BytesIO(json.dumps(body, sort_keys=True).encode()), key)
+    except Exception as exc:  # bookkeeping: the unit's outputs stand
+        logger.warning("%s: no receipt written for %s (%s); the unit will run again if dispatched again",
+                       contract.name, key, exc)
 
 
 def input_fingerprints(store: RemoteStore, shard_prefix: str, keys: list[str]) -> dict[str, str]:
@@ -60,8 +67,10 @@ def input_fingerprints(store: RemoteStore, shard_prefix: str, keys: list[str]) -
 
 def already_published(
     contract: StageContract, config: WomblexConfig, store: RemoteStore, shard_prefix: str, unit: list[str],
+    by: str | None = None,
 ) -> bool:
-    """True when *unit*'s receipt matches this version, config, its inputs and its outputs."""
+    """True when *unit*'s receipt matches this version, config, its inputs and its outputs, and was
+    written by a stage workflow other than *by*."""
     from womblex.cloud.stage_runner import InputContractError, NotReady, _key, _outputs_present, _resolve_inputs
 
     if contract.mutation is not MutationMode.SIDECAR or not contract.skip_if_output_present:
@@ -74,6 +83,11 @@ def already_published(
         inputs = _resolve_inputs(contract, config, shard_prefix, unit, present)
         recorded = json.loads(store.read_text(key))
     except (NotReady, InputContractError, ValueError):
+        return False
+    if not isinstance(recorded, dict):
+        return False
+    writer = recorded.pop("by", None)
+    if writer is not None and writer == by:  # its own receipt: a step recovered after publishing runs again
         return False
     outputs = [_key(shard_prefix, stem, suffix) for stem in unit for suffix in contract.outputs(config)]
     current = _receipt(config, _fingerprints(store, shard_prefix, inputs), _fingerprints(store, shard_prefix, outputs))

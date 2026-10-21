@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -14,7 +16,7 @@ from tests.test_workflows import batch, fleet, work  # noqa: F401
 from womblex.cloud import dbos_app
 from womblex.cloud.jobs import RunBoard
 from womblex.cloud.stage_contracts import STAGE_CONTRACTS
-from womblex.cloud.unit_receipt import already_published
+from womblex.cloud.unit_receipt import already_published, write_receipt
 from womblex.cloud.workflow_runner import config_payload
 from womblex.store.remote import RemoteStore
 
@@ -38,6 +40,13 @@ def test_a_redispatch_skips_published_units_and_a_change_runs_them(fleet) -> Non
         work(fleet, idle_timeout=2)
         assert _stage_result(board, None)["skipped"] == 0
         written = sidecar.stat().st_mtime_ns
+        # The workflow that wrote the receipt never skips against it: a step recovered after
+        # publishing runs again and records its checksums.
+        store = RemoteStore.from_uri(str(store_dir))
+        writer = dbos_app.stage_id("r1", "normalise", dbos_app.stage_scope(None, None))
+        normalise = STAGE_CONTRACTS["normalise"]
+        assert not already_published(normalise, config, store, _PREFIX, ["batch-0001"], by=writer)
+        assert already_published(normalise, config, store, _PREFIX, ["batch-0001"], by="another")
 
         # Same config, same inputs, new stage ids: nothing runs again.
         board.enqueue_stages("r1", ["normalise"], _PREFIX, config=config_payload(config),
@@ -82,3 +91,13 @@ def test_never_skipped_without_receipt_or_for_an_in_place_stage(fleet) -> None: 
     normalise_shards(local, config.normalise)
     assert (local / "batch-0001.normalised_text.parquet").exists()
     assert not already_published(STAGE_CONTRACTS["normalise"], config, store, _PREFIX, ["batch-0001"])
+
+
+def test_a_receipt_that_cannot_be_written_warns_and_does_not_fail_the_unit(tmp_path, caplog) -> None:
+    store = MagicMock()
+    store.fingerprints.return_value = {}
+    store.write_stream.side_effect = OSError("store unavailable")
+    with caplog.at_level(logging.WARNING, logger="womblex.cloud.unit_receipt"):
+        write_receipt(STAGE_CONTRACTS["normalise"], _minimal_config(tmp_path), store, _PREFIX,
+                      ["batch-0001"], {}, [f"{_PREFIX}/batch-0001.normalised_text.parquet"], "wf")
+    assert "no receipt written" in caplog.text

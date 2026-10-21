@@ -269,15 +269,16 @@ def _unit(
         # Built per unit: the client holds a connection, and a recovered
         # workflow resumes in a process that has none.
         # A retry (`<stage id>:retry:N`, a fork or a later stage's re-run) runs every unit it holds.
-        first = (dbos_app.stage_attempt(DBOS.workflow_id or "") or ("", 0))[1] == 0
-        if first and already_published(contract, config, ctx.store, shard_prefix, unit):
+        wf_id = DBOS.workflow_id or ""
+        first = (dbos_app.stage_attempt(wf_id) or ("", 0))[1] == 0
+        if first and already_published(contract, config, ctx.store, shard_prefix, unit, by=wf_id):
             logger.info("%s: %s already published under this config and these inputs; skipped", stage, label)
             return {}  # a unit that runs publishes at least one key, so empty reads as skipped
         run_ctx = prepare_stage_context(contract, config)
         try:
             with (workflow_context(workflow["digest"], workflow.get("id"), workflow.get("spec"))
                   if workflow else nullcontext()):
-                return run_unit(contract, config, run_ctx, ctx.store, shard_prefix, unit, ctx.ingest)
+                return run_unit(contract, config, run_ctx, ctx.store, shard_prefix, unit, ctx.ingest, by=wf_id)
         except NotReady as nr:
             producer = PRODUCER_OF.get(nr.suffix, "the upstream stage")
             raise StageNotReady(
