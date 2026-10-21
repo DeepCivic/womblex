@@ -301,7 +301,7 @@ def _try_parse(value: str, formats: tuple[str, ...], *, allow_iso: bool) -> bool
             # Parsing is the *test* here — the datetime is discarded, so its
             # tz-awareness is irrelevant. Requiring %z would narrow which
             # formats are recognised, which is the opposite of the intent.
-            datetime.strptime(value, fmt)  # noqa: DTZ007
+            datetime.strptime(value, fmt)
             return True
         except ValueError:
             continue
