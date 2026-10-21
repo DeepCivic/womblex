@@ -117,7 +117,7 @@ slot, name, and the distribution and version that supplied it
 (`read_footer_slot_models`); `womblex.model_check` records the pre-run model
 check's result (`read_footer_model_check`); `womblex.workflow_digest` names the
 workflow whose step wrote a sidecar (locally through `run-workflow`, or on a worker for a stage dispatched with the workflow) and `womblex.workflow` holds that workflow's name and full spec as JSON (`read_footer_stamp`),
-absent from extraction files and from sidecars written outside a workflow; `womblex.ai_chunking_calls` on a chunks file counts the Kanon-2 Enricher calls AI chunking made for that batch, and is absent when `chunking.chunking_model` was not set. Each is written only when it has a
+and the same two keys are on every file a scheduled firing's extraction batches write (the four extraction files and the layout sidecar beside them); they are absent from other extraction files and from sidecars written outside a workflow; `womblex.ai_chunking_calls` on a chunks file counts the Kanon-2 Enricher calls AI chunking made for that batch, and is absent when `chunking.chunking_model` was not set. Each is written only when it has a
 value — a process that loaded, built or checked nothing writes no key — and
 all are additive metadata, so a reader that ignores them reads the file
 unchanged. No column is added for any.

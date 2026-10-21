@@ -43,10 +43,11 @@ _STATUS = {
 
 def run_state(counts: dict[str, int]) -> str:
     """Collapse a status rollup into one state; any failed job fails the run, and a finished run
-    with a cancelled job is cancelled. The API's words, which webhook events use too."""
+    with a cancelled job is cancelled. A skipped stage counts as finished. The API's words, which
+    webhook events use too."""
     if counts.get("failed"):
         return "failed"
-    if counts.get("running") or (counts.get("pending") and counts.get("done")):
+    if counts.get("running") or (counts.get("pending") and (counts.get("done") or counts.get("skipped"))):
         return "running"
     if counts.get("pending"):
         return "pending"
@@ -182,7 +183,7 @@ def _rollup(rows: list[WorkflowStatus]) -> list[tuple[WorkflowStatus, str]]:
                   for s in latest if _attr(s, "kind") == dbos_app.KIND_DOWNSTREAM}
     out: list[tuple[WorkflowStatus, str]] = []
     for s in latest:
-        status, kind, run = _board_status(s), _attr(s, "kind"), _attr(s, "run_id", "")
+        status, kind, run = _shown_status(s), _attr(s, "kind"), _attr(s, "run_id", "")
         if status == "failed" and kind == dbos_app.KIND_DOWNSTREAM:
             scope = dbos_app.stage_scope(_attr(s, "firing"), _attr(s, "workflow_digest"))
             stages = _attr(s, "stages") or []
@@ -225,6 +226,18 @@ def _board_status(status: WorkflowStatus) -> str:
     return _STATUS.get(status.status, "failed")
 
 
+def _shown_status(status: WorkflowStatus) -> str:
+    """The status a row is shown and counted with: a stage that succeeded with every unit
+    skipped (`cloud/unit_receipt.py`) reads `skipped`. Retries and checksums read `_board_status`,
+    where it is `done`. Needs the row's output; a row listed without it reads `done`."""
+    board = _board_status(status)
+    out = status.output if isinstance(status.output, dict) else {}
+    if board == "done" and _attr(status, "kind") == dbos_app.KIND_STAGE and out.get("units") \
+            and out.get("skipped") == out["units"]:
+        return "skipped"
+    return board
+
+
 def queue_models(config: dict[str, Any] | None, scope: str) -> str:
     """The models key (`model_check.models_key`) a run's *config* payload routes *scope*'s work by."""
     if config is None:  # a run that carries no config: the unkeyed queue, served as before
@@ -241,7 +254,7 @@ def _job_row(s: WorkflowStatus) -> JobRow:
         id=s.workflow_id,
         run_id=_attr(s, "run_id", ""),
         batch_num=int(_attr(s, "batch_num", 0)),
-        status=_board_status(s),
+        status=_shown_status(s),
         attempts=0 if _board_status(s) == "pending" else 1,
         max_attempts=int(_attr(s, "max_attempts", 3)),
         locked_by=s.executor_id if running else None,
@@ -337,13 +350,14 @@ class RunBoard:
     def enqueue(
         self, run_id: str, jobs: list[JobSpec], *, owner: str | None = None,
         firing: str | None = None, fingerprints: dict[str, str] | None = None,
-        config: dict[str, Any] | None = None,
+        config: dict[str, Any] | None = None, workflow: dict[str, Any] | None = None,
     ) -> int:
         """Enqueue *jobs* for *run_id*; idempotent per batch number.
 
         *config* (`workflow_runner.config_payload`) is the config the batches extract under, on
         any worker. A scheduled *firing* labels its batches, each with its keys' *fingerprints*, so a
-        later firing of the same run can tell which documents it has already seen.
+        later firing of the same run can tell which documents it has already seen. A firing's
+        *workflow* (``id``, ``digest``, ``spec``) is named in the footer of every file its batches write.
 
         Returns the number of batches that were not already on the board.
         Raises :class:`RunOwnedError` if *owner* is named and the run already
@@ -369,7 +383,7 @@ class RunBoard:
                 "attributes": attrs,
             }
             sends.append((options, (run_id, spec.batch_num, spec.input_keys, spec.shard_prefix,
-                                    spec.ingest_root, spec.max_attempts, config)))
+                                    spec.ingest_root, spec.max_attempts, config, workflow)))
         inserted = self._enqueue(sends)
         logger.info("Enqueued %d new job(s) for run %s (of %d submitted)",
                     inserted, run_id, len(jobs))
@@ -531,7 +545,7 @@ class RunBoard:
 
     def stats(self, run_id: str | None = None, *, owner: str | None = None) -> dict[str, int]:
         """Count jobs by status (optionally for one run, one owner), each by its latest attempt (`_rollup`)."""
-        return dict(Counter(status for _, status in _rollup(self._rows(run_id, owner))))
+        return dict(Counter(status for _, status in _rollup(self._rows(run_id, owner, load_output=True))))
 
     def runs(
         self, owner: str | None = None, *, run_id: str | None = None, limit: int = 100,
@@ -542,7 +556,7 @@ class RunBoard:
         including CLI- and console-submitted ones that have no owner.
         """
         grouped: dict[str, list[tuple[WorkflowStatus, str]]] = {}
-        for s, status in _rollup(self._rows(run_id, owner)):
+        for s, status in _rollup(self._rows(run_id, owner, load_output=True)):
             grouped.setdefault(_attr(s, "run_id", ""), []).append((s, status))
         summaries = [
             RunSummary(
