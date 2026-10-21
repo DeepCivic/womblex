@@ -46,6 +46,11 @@ def test_a_redispatch_skips_published_units_and_a_change_runs_them(fleet) -> Non
         assert _stage_result(board, "again") | {"checksums": {}} == {
             "stage": "normalise", "units": 1, "published": 0, "skipped": 1, "checksums": {}}
         assert sidecar.stat().st_mtime_ns == written
+        shown = {r.id: r.status for r in board.list_jobs("r1") if r.kind == "stage"}
+        assert shown == {dbos_app.stage_id("r1", "normalise"): "done",
+                         dbos_app.stage_id("r1", "normalise", "fire-again"): "skipped"}
+        assert board.stats("r1").get("skipped") == 1
+        assert "normalise: 1 done, 1 skipped" in board.runs(run_id="r1")[0].sentence
 
         # The stage's own config changed: the unit runs.
         changed = config.model_copy(update={"normalise": config.normalise.model_copy(
@@ -62,7 +67,7 @@ def test_a_redispatch_skips_published_units_and_a_change_runs_them(fleet) -> Non
                              firing="touched", bases=["batch-0001"])
         work(fleet, idle_timeout=2)
         assert _stage_result(board, "touched")["skipped"] == 0
-        assert all(r.status == "done" for r in board.list_jobs("r1") if r.kind == "stage")
+        assert all(r.status in ("done", "skipped") for r in board.list_jobs("r1") if r.kind == "stage")
 
 
 def test_never_skipped_without_receipt_or_for_an_in_place_stage(fleet) -> None:  # noqa: F811

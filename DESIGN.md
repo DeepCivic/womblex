@@ -177,10 +177,10 @@ set, the console needs `Tabs`, `Tooltip`, `DropdownMenu`, `Command`, `Progress`,
 **`StatusPill`** — the single most repeated element. Icon + text label + status
 fill, per the rule above. Statuses map 1:1 onto the values the system actually
 writes: `pending` / `running` / `done` / `failed` mapped from the DBOS workflow status,
-plus `stale` (a `running` workflow with no update past the threshold) and `skipped`;
-the queue's `cancelled` takes the `skipped` pill. `skipped`
-reuses the pending fill with a distinct icon — which is legal precisely because
-the icon, not the colour, is doing the work.
+plus `stale` (a `running` workflow with no update past the threshold), `skipped`
+(a stage whose every unit was already published) and `cancelled`. `skipped` and
+`cancelled` reuse the pending fill, each with its own icon — which is legal
+precisely because the icon, not the colour, is doing the work.
 
 **`StageNode`** — one operation in the Pipeline Composer. Shows the stage name,
 its enabled/disabled toggle, and its declared inputs and outputs. Nodes are
