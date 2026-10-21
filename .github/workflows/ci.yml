@@ -26,28 +26,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - name: Set up uv and Python ${{ matrix.python-version }}
+        uses: astral-sh/setup-uv@v10
         with:
+          version: "0.11.7"
           python-version: ${{ matrix.python-version }}
-          cache: pip
+          enable-cache: true
 
-      - name: Install package and dev extras
-        # The isaacus SDK is a core dependency now (no [isaacus] extra to ask
-        # for), so it's always installed and the enrich/graph/query/embed
-        # suites' `importorskip("isaacus")` never skips wholesale. The tests
-        # that need a live endpoint still skip on the missing ISAACUS_API_KEY.
-        # [api] brings python-multipart: `create_api_app` registers the
-        # multipart `POST /v1/uploads` route, so every API test needs it.
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev,cloud,ui,api]"
+      - name: The lock matches pyproject.toml
+        # A pyproject.toml edit that was not re-locked fails here, before
+        # anything installs.
+        run: uv lock --check
+
+      - name: Install from the lock
+        # The locked set, not a fresh resolve of pyproject.toml's ranges: a new
+        # upstream release reaches CI only through a lock change on a PR
+        # (docs/security-upgrade-plan.md, M0). The isaacus SDK is core, so the
+        # enrich/graph/query/embed suites' `importorskip("isaacus")` never skips
+        # wholesale; tests that need a live endpoint still skip on the missing
+        # ISAACUS_API_KEY. [api] brings python-multipart: `create_api_app`
+        # registers the multipart `POST /v1/uploads` route.
+        run: uv sync --frozen --extra dev --extra ui --extra api
 
       - name: Lint (ruff)
-        run: ruff check src/ tests/
+        run: uv run --no-sync ruff check src/ tests/
 
       - name: Type-check (mypy)
-        run: mypy src/
+        run: uv run --no-sync mypy src/
 
       - name: Tests
         # Every file input is the synthetic set in fixtures/synthetic/. The
@@ -56,7 +61,7 @@ jobs:
         # (Isaacus, Bedrock) skip without credentials, which CI does not have.
         env:
           WOMBLEX_DB_DSN: postgresql://postgres:womblex@localhost:5432/womblex
-        run: python -m pytest tests/ -v -m "not benchmark"
+        run: uv run --no-sync python -m pytest tests/ -v -m "not benchmark"
 
   frontend:
     name: Console frontend (ui/)
