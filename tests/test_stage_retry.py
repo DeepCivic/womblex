@@ -26,11 +26,11 @@ class Fault:
         self.broken, self.calls = True, []
         real = workflows.run_unit
 
-        def run_unit(contract, config, ctx, store, prefix, u, ingest):
+        def run_unit(contract, config, ctx, store, prefix, u, ingest, by=None):
             self.calls.append((contract.name, u))
             if self.broken and contract.name == stage and u == unit:
                 raise RuntimeError(f"{stage} broke on {u[0]}")
-            return real(contract, config, ctx, store, prefix, u, ingest)
+            return real(contract, config, ctx, store, prefix, u, ingest, by)
 
         monkeypatch.setattr(workflows, "run_unit", run_unit)
 

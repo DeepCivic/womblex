@@ -25,6 +25,13 @@ def test_the_sentence_names_each_stages_exact_counts():
     )
 
 
+def test_a_skipped_stage_reads_skipped_after_done():
+    stages = {"extract": {"done": 2}, "embed": {"skipped": 1}, "chunk": {"pending": 1, "skipped": 1, "done": 1}}
+    assert run_sentence("r", "running", stages) == (
+        "Run r is running (extract: 2 done; embed: 1 skipped; chunk: 1 done, 1 skipped, 1 pending)."
+    )
+
+
 def test_a_run_with_no_work_and_an_orphaned_firing():
     assert run_sentence("run-a", "pending", {}) == "Run run-a is pending."
     assert run_sentence("run-a", "running", {"extract": {"running": 1}}, orphaned=True).endswith(

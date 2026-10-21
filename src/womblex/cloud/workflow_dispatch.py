@@ -250,7 +250,9 @@ def fire_workflow(
             specs = batch_specs(new, shard_prefix=shard_prefix, ingest_root=binding.store or "",
                                 batch_size=binding.batch_size, max_attempts=3, start=board.next_batch_num(run_id))
             recipe = config_from_overlay(stored.spec.preset, workflow_overlay(stored, resolve_preset))
-            board.enqueue(run_id, specs, firing=firing, fingerprints=prints, config=config_payload(recipe))
+            named = {"id": stored.id, "digest": stored.digest, "spec": stored.spec.model_dump(mode="json")}
+            board.enqueue(run_id, specs, firing=firing, fingerprints=prints, config=config_payload(recipe),
+                          workflow=named)
     try:
         sent = dispatch_workflow(stored, firing=firing, **_firing_kwargs(stored, run_id, resolve_preset, store, dsn))
     except Exception:
