@@ -51,6 +51,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 
 **TO-DO:**
 
+- **`verify-shards --compare-to` does not compare `content_digest`.** It prints each run's aggregate counts (`store/shard_audit.py`, `format_audit_diff`) side by side and flags nothing, so a document whose `content_digest` differs between a local and a fleet run goes unreported. Compare the manifests' `content_digest` per `source_hash` and report each difference.
 - **Azure storage URIs aren't credential-wired.** `storage_options_from_env` (`store/remote.py`) wires only `s3://`; `az://`/`abfs://` fall through to adlfs unauthed and untested. Add an `az`/`abfs` branch reading `AZURE_STORAGE_*`, plus coverage.
 - **No Azure ML connection in the enrichment paths.** `utils/isaacus_client.py` handles the hosted API and AWS SageMaker (`ISAACUS_SAGEMAKER_ENDPOINTS`) but has no Azure ML equivalent. Add an Azure ML connection option so those paths can reach an Azure ML endpoint (`AZUREML_ENDPOINTS`, client factory, `unserved_models` pre-flight).
 
@@ -316,7 +317,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - A document error is isolated, recorded in the manifest, and does not stop its batch.
 - Stages can be dispatched independently from the CLI; idempotent queueing keeps dependent stages in order.
 - `womblex retry-stage` forks a failed distributed stage from its first failed unit, so finished units are not rerun.
-- A retry is a launch, refused before the fork with one of these codes: `not_found` (no such run or stage, or the run is another owner's), `still_running`, `not_failed`, `earlier_failed` (an earlier stage's latest attempt failed), `already_retried`, `config_invalid` (the config does not load with registered models), `step_order` (an input the stage needs is missing from the store or out of order) or `no_worker` (no live worker passes the model check for the stage).
+- A retry is a launch, refused before the fork with one of these codes: `not_found` (no such run or stage), `still_running`, `not_failed`, `earlier_failed` (a stage it ran after has not succeeded since), `already_retried`, `config_invalid` (the config does not load with registered models), `step_order` (an input the stage needs is missing from the store or out of order) or `no_worker` (no live worker passes the model check for the stage). A run another owner holds is refused before the fork too.
 - A stage that ran after a failure ran on partial output, so it is retryable once the failed stage's latest attempt has succeeded, earliest stage first. Its retry redoes only its affected units, so finished work is not paid for again.
 - Logs can be emitted as JSON lines (`womblex --log-format json` or `WOMBLEX_LOG_FORMAT=json`) with no added dependency; worker and batch records carry `run_id`, `job_id`, `stage`, and `source_hash` where known, and the default text format is unchanged.
 
@@ -353,7 +354,6 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 
 - Queue and stage state come from what the pipeline already writes (the job queue and per-stage checkpoints); with no queue, the dashboard falls back to checkpoints.
 - A run's status is one sentence built from exact per-stage counts of done, pending and failed work, shown beside the counts. The CLI (`womblex jobs --run-id`), the API and the dashboard show the same sentence.
-- The sentence uses the API's status words (`pending` / `running` / `done` / `failed` / `cancelled`), plus a warning when a scheduled firing could not dispatch its stages.
 - The sentence uses the API's status words (`pending` / `running` / `done` / `failed` / `cancelled`), plus a warning when a scheduled firing could not dispatch its stages.
 - Job status is rendered with the exact values the system writes (`pending` / `running` / `done` / `failed` / `cancelled`), plus `stale` for a `running` job with no update past `stale_after_seconds` (default 900), and `skipped`.
 - A retried stage counts once: counts take its latest stage attempt, and the superseded attempt stays listed `failed`, its `retried_by` field holding the next attempt's id.
@@ -687,7 +687,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 Requirements not yet fully met. The detail lives in the **TO-DO** block under each requirement; this list is the index. When a gap is closed (or the criterion is deliberately narrowed), its TO-DO block and its entry here are removed in the same PR.
 
 
-- **Requirement 2 (Scale-Out):** Azure storage URIs (`az://` / `abfs://`) are not credential-wired, and the enrichment paths have no Azure ML connection.
+- **Requirement 2 (Scale-Out):** `verify-shards --compare-to` does not compare `content_digest`; Azure storage URIs (`az://` / `abfs://`) are not credential-wired, and the enrichment paths have no Azure ML connection.
 - **Requirement 3 (Ingest-First Data Flow):** up-front composition check covers workflows (local and `dispatch-workflow`) and dispatch, not a lone `run-stage --store` (per-base `NotReady`).
 - **Requirement 6 (Native Office and Spreadsheet Extraction):** multi-row headers are emitted for DOCX only; spreadsheets and the legacy table view collapse to row 0, no per-cell header-row coordinate exists, and cell formulas are never captured.
 - **Requirement 7 (Standalone Reference Register Ingestion):** G-NAF and geospatial writes are not guarded against partial output.
