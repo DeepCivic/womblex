@@ -13,7 +13,7 @@
 
 # uv exports the lock at build time; it is mounted, never installed. A stage
 # of its own so the pin is a FROM line that dependency updates can read.
-FROM ghcr.io/astral-sh/uv:0.11.7 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.4 AS uv
 
 FROM node:25-slim AS frontend-builder
 WORKDIR /app/ui
