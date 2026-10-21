@@ -1,5 +1,5 @@
-import tailwindcss from '@tailwindcss/vite';
 import adapter from '@sveltejs/adapter-static';
+import tailwindcss from '@tailwindcss/vite';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 import { defineConfig } from 'vite';
@@ -9,9 +9,6 @@ export default defineConfig({
 		tailwindcss(),
 		sveltekit({
 			preprocess: vitePreprocess(),
-			// Kit 3 dropped the built-in `$lib` alias; keep it rather than
-			// rewriting every import to `#lib`.
-			alias: { $lib: 'src/lib' },
 			// Static SPA build: the sidecar has no Node runtime (Dockerfile.ui),
 			// so the whole app is prerendered/fallback-served as plain files and
 			// FastAPI mounts `build/` (womblex/ui/app.py resolves it relative to

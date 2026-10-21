@@ -1,4 +1,4 @@
-import { listRuns, type RunSummary } from '$lib/api';
+import { listRuns, type RunSummary } from '#lib/api/index.ts';
 
 const SELECTED_RUN_KEY = 'womblex-console:selected-run';
 

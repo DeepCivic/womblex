@@ -2,7 +2,7 @@
 	// The Corpus Inspector's verify-shards action: an
 	// on-demand call to the existing `audit_shard_directory` — not a poll,
 	// since a full audit reads every shard in the run.
-	import { getAudit, type ShardAudit } from '$lib/api';
+	import { getAudit, type ShardAudit } from '#lib/api/index.ts';
 
 	let { runId }: { runId: string } = $props();
 	let loading = $state(false);

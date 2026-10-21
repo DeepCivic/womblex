@@ -10,7 +10,7 @@
 	// screen groups them onto their chunk (entities by `chunk_index`, money by
 	// range containment) and lists them beside the text rather than inventing a
 	// mapping the pipeline never wrote — the console surfaces what exists.
-	import type { Chunk, PiiSpan, EntityMention, MoneySpan, ChunkQuality } from '$lib/api';
+	import type { Chunk, PiiSpan, EntityMention, MoneySpan, ChunkQuality } from '#lib/api/index.ts';
 
 	let {
 		chunk,

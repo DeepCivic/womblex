@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { preferences, persistPreferences, type Density } from '$lib/stores/preferences.svelte';
+	import { preferences, persistPreferences, type Density } from '#lib/stores/preferences.svelte.ts';
 
 	const LEVELS: { value: Density; label: string }[] = [
 		{ value: 'comfortable', label: 'Comfortable' },

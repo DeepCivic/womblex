@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { NAV_ITEMS } from '$lib/nav';
+	import { NAV_ITEMS } from '#lib/nav.ts';
 
 	let { expanded = $bindable(true) }: { expanded?: boolean } = $props();
 </script>

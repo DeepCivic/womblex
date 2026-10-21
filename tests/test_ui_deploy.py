@@ -171,7 +171,7 @@ class TestSidecarImage:
         assert match.group(1) in scripts
 
     def test_final_stage_copies_the_builder_stages_declared_output(self) -> None:
-        """The adapter output dir in `vite.config.ts` must match what the Dockerfile COPYs out."""
+        """`vite.config.ts`'s adapter output dir must match what the Dockerfile COPYs out."""
         vite_config = (REPO_ROOT / "ui" / "vite.config.ts").read_text()
         assert "pages: 'build'" in vite_config
         dockerfile = (REPO_ROOT / "Dockerfile.ui").read_text()

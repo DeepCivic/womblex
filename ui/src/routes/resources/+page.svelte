@@ -14,8 +14,8 @@
 		type ReachabilityResult,
 		type QueueTestResult,
 		type IngestPreflight
-	} from '$lib/api';
-	import StatusPill from '$lib/components/StatusPill.svelte';
+	} from '#lib/api/index.ts';
+	import StatusPill from '#lib/components/StatusPill.svelte';
 
 	let cards: ResourcesCards | null = $state(null);
 	let loading = $state(true);

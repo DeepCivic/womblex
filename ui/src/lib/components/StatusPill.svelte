@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { STATUS_ICON, STATUS_BG, STATUS_FG, type Status } from '$lib/status';
+	import { STATUS_ICON, STATUS_BG, STATUS_FG, type Status } from '#lib/status.ts';
 
 	let { status, label }: { status: Status; label?: string } = $props();
 	let Icon = $derived(STATUS_ICON[status]);

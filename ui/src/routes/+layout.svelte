@@ -1,10 +1,10 @@
 <script lang="ts">
 	import '../app.css';
 	import { onMount } from 'svelte';
-	import TopBar from '$lib/components/TopBar.svelte';
-	import SideNav from '$lib/components/SideNav.svelte';
-	import { preferences } from '$lib/stores/preferences.svelte';
-	import { runSelection } from '$lib/stores/run.svelte';
+	import TopBar from '#lib/components/TopBar.svelte';
+	import SideNav from '#lib/components/SideNav.svelte';
+	import { preferences } from '#lib/stores/preferences.svelte.ts';
+	import { runSelection } from '#lib/stores/run.svelte.ts';
 
 	let { children } = $props();
 	let navExpanded = $state(true);

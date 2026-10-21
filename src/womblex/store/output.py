@@ -64,7 +64,7 @@ import pyarrow.parquet as pq
 from womblex.ingest.extract import ExtractionResult
 from womblex.store.content_digest import content_digest
 from womblex.store.contract import contract_footer
-from womblex.store.run_stamp import RunStamp, sidecar_footer
+from womblex.store.run_stamp import RunStamp, sidecar_footer, workflow_footer
 from womblex.store.source_provenance import IngestProvenance
 
 logger = logging.getLogger(__name__)
@@ -278,7 +278,8 @@ def write_results(
     configuration digest and stage — in the same footer, so a shard copied out
     of its run directory still says which run it belongs to. Supplied by the
     caller for the same reason ``provenance`` is: only the caller knows the run
-    id. Omitted, no run keys are written.
+    id. Omitted, no run keys are written. Inside a ``workflow_context`` (a
+    scheduled firing's batches) the workflow keys are written too.
     """
     paths = _shard_paths(output_path)
     if provenance is not None:
@@ -372,6 +373,7 @@ def write_results(
     footer = _merge_footers(
         provenance.footer_metadata(relpaths) if provenance is not None else None,
         stamp.footer_metadata() if stamp is not None else None,
+        workflow_footer(),
     )
     outcome = next((res.layout for _, _, res in results if res.layout is not None), None)
     elements_footer = (

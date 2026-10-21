@@ -20,7 +20,7 @@
 		EnqueueRefused,
 		type ConfigObject,
 		type StageDispatchResult
-	} from '$lib/api';
+	} from '#lib/api/index.ts';
 
 	let {
 		config,

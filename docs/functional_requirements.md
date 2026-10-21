@@ -44,7 +44,7 @@ Terms the requirements use, as the code defines them.
 
 ## 2. Scale-Out and Environment-Agnostic Execution
 
-**Paid:** Launches workers that run every paid stage the run's config enables (Requirements 10, 12, 29, the `embed` stage, `mistral-ocr`). A SageMaker deployment of the paid models (Glossary) is billed by AWS while its endpoint runs, called or not.
+**Paid:** Launches workers that run every paid stage the run's config enables (Requirements 10, 12, 29, the `embed` stage, `mistral-ocr`). A SageMaker deployment of the Kanon-2 Enricher or Embedder is billed by AWS while its endpoint runs, called or not.
 
 **As** a user,
 **I want** to scale the pipeline to a cluster and move stages between local and cloud environments,
@@ -58,6 +58,7 @@ Terms the requirements use, as the code defines them.
 
 - Cloud workers and local runs run the same batch-processing code and, over the same input, write the same shard layout with the same `content_digest` for each document.
 - Work runs as DBOS workflows, so a batch is never double-processed, a unit that finished is not run again, and workers can be added or stopped while a run is in progress.
+- A stage dispatched again under new stage ids (a changed workflow, a later firing) skips a unit whose outputs were published by the same Womblex version under the same stage config from unchanged inputs, so identical work is neither redone nor re-paid. Any difference runs the unit, and a retry runs every unit it holds.
 - Distributed run shards can be synced locally and consumed unchanged by local per-stage commands.
 - A stage can execute in place over object storage under the same contract as local execution.
 - A storage location may be a local path or a `file://`, `s3://` (S3 and MinIO), `s3a://`, `gs://`, `gcs://`, `az://` or `abfs://` URI.
@@ -372,7 +373,7 @@ Terms the requirements use, as the code defines them.
 - Queue and stage state come from what the pipeline already writes (the job queue and per-stage checkpoints); with no queue, the dashboard falls back to checkpoints.
 - A run's status is one sentence built from exact per-stage counts of done, pending and failed work, shown beside the counts. The CLI (`womblex jobs --run-id`), the API and the dashboard show the same sentence.
 - The sentence uses the API's status words (`pending` / `running` / `done` / `failed` / `cancelled`), plus a warning when a scheduled firing could not dispatch its stages.
-- Job status is rendered with the exact values the system writes (`pending` / `running` / `done` / `failed` / `cancelled`), plus `stale` for a `running` job with no update past `stale_after_seconds` (default 900), and `skipped`.
+- Job status is rendered with the exact values the system writes (`pending` / `running` / `done` / `failed` / `cancelled`), plus `stale` for a `running` job with no update past `stale_after_seconds` (default 900), and `skipped` for a stage whose every unit was already published for the same work (Requirement 2). A run with a skipped stage reads finished.
 - A retried stage counts once: counts take its latest stage attempt, and the superseded attempt stays listed `failed`, its `retried_by` field holding the next attempt's id.
 - The run record's lineage event (`womblex manifest --lineage` with `--dsn`) reports the run's real outcome (`COMPLETE`, `FAIL` or `ABORT`), not always complete; without a queue to ask, its status is `unknown`.
 - The dashboard only *names* a stalled job; DBOS recovers it when its executor restarts, and the dashboard never requeues, cancels, or claims work itself.
@@ -614,7 +615,7 @@ Terms the requirements use, as the code defines them.
 
 **Given** a workflow file (name, preset, config overlay, input location, ordered steps, triggers and destinations)
 **When** the operator validates, plans, runs, dispatches or schedules it
-**Then** every refusal happens before the first step, each firing processes only new documents, every sidecar a workflow step writes names its workflow, and each destination receives the results.
+**Then** every refusal happens before the first step, each firing processes only new documents, every sidecar a workflow step writes and every extraction file a scheduled firing writes names its workflow, and each destination receives the results.
 
 **Acceptance criteria:**
 
@@ -626,7 +627,7 @@ Terms the requirements use, as the code defines them.
 - `plan` counts the tokens and requests of every paid call, AI chunking included, with each provider's own token counter, and shows local steps as free. It calls no paid API.
 - Out-of-order steps are refused before launch with the code `step_order`, each issue naming `input_missing`, `input_out_of_order` or `input_stale`.
 - Once a step has run, a failed step does not stop later steps; each records the failure it follows, and the run exits non-zero.
-- Every sidecar a workflow step writes names the workflow that wrote it, and the run record holds the workflow's name and full spec. Extraction files name none: extraction is not a workflow step (see the data contract).
+- Every sidecar a workflow step writes names the workflow that wrote it, and so does every extraction file a scheduled firing writes; the run record holds the workflow's name and full spec. Extraction a workflow did not start (`womblex run`, `enqueue`) names none.
 - `dispatch-workflow` is refused before any row for anything the local runner refuses, a step the fleet cannot run, or an order the coordinator would change; workers run each stage under the workflow's config.
 - `schedule-workflow` saves the workflow and syncs its schedules in one action, so stored triggers and the queue's schedules always match. It runs every check a firing makes (`check_firing`, against `--store` and the workflow's input store), so a workflow its firing would refuse is not scheduled.
 - Each firing runs the saved copy against the workflow's input store (`input_binding.store`), on a worker that uses that store, and is refused before any row when the prefix holds no document.
@@ -645,7 +646,7 @@ Terms the requirements use, as the code defines them.
 - After a failed stage is retried successfully, the retry command prints how to redeliver. Redelivery replaces: files are rewritten and rows upserted.
 - An object-store destination receives the Requirement 23 bundle; each destination chooses whether raw sources are included.
 - A Postgres destination gets one row per chunk with its embedding: masked text by default, raw only where the workflow asks, each row naming its layer.
-- A webhook receives six events: `extraction_settled`, `stage_finished`, `stage_failed`, `run_finished`, `delivered` and `delivery_failed`. Each carries an `event_id` (kept when the event is resent, so the receiver can drop a duplicate), the `run_id` and the run's status in the API's words, and is signed with a key held where the run executes.
+- A webhook receives six events: `extraction_settled`, `stage_finished`, `stage_failed`, `run_finished`, `delivered` and `delivery_failed`. Each carries an `event_id` (kept when the event is resent, so the receiver can drop a duplicate), the `run_id` and the run's status in the API's words, and is signed with a key held on the worker.
 - There are no per-document or per-batch events.
 - The run record lists every delivery.
 

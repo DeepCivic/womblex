@@ -141,10 +141,10 @@ def _failing_units(monkeypatch, fails) -> None:
     """Make `run_unit` raise for every unit *fails* picks out; the others run as normal."""
     real = workflows.run_unit
 
-    def run_unit(contract, config, ctx, store, prefix, unit, ingest):
+    def run_unit(contract, config, ctx, store, prefix, unit, ingest, by=None):
         if fails(contract.name, unit):
             raise RuntimeError(f"{contract.name} broke on {unit[0]}")
-        return real(contract, config, ctx, store, prefix, unit, ingest)
+        return real(contract, config, ctx, store, prefix, unit, ingest, by)
 
     monkeypatch.setattr(workflows, "run_unit", run_unit)
 

@@ -31,12 +31,12 @@
 		type Preset,
 		type StageGraph as StageGraphData,
 		type ValidationResult
-	} from '$lib/api';
-	import { runSelection } from '$lib/stores/run.svelte';
-	import StageGraph from '$lib/components/StageGraph.svelte';
-	import SchemaForm, { defaultsFor } from '$lib/components/SchemaForm.svelte';
-	import StatusPill from '$lib/components/StatusPill.svelte';
-	import StageDispatch from '$lib/components/StageDispatch.svelte';
+	} from '#lib/api/index.ts';
+	import { runSelection } from '#lib/stores/run.svelte.ts';
+	import StageGraph from '#lib/components/StageGraph.svelte';
+	import SchemaForm, { defaultsFor } from '#lib/components/SchemaForm.svelte';
+	import StatusPill from '#lib/components/StatusPill.svelte';
+	import StageDispatch from '#lib/components/StageDispatch.svelte';
 
 	// `$state<T | null>` rather than an annotation on the `let`: TypeScript
 	// narrows the latter to `null` from its initialiser, which makes every
