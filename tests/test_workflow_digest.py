@@ -64,3 +64,28 @@ def test_no_digest_outside_a_workflow_and_the_context_resets(tmp_path: Path) -> 
         assert sidecar_footer(base, "chunk") == {b"womblex.workflow_digest": b"sha256:abc"}
         raise RuntimeError
     assert sidecar_footer(base, "chunk") is None
+
+
+def test_a_batch_extracted_inside_a_workflow_names_it_and_its_sidecars_do_not_inherit(tmp_path: Path) -> None:
+    cfg = WomblexConfig(
+        dataset=DatasetConfig(name="t"),
+        paths=PathsConfig(input_root=tmp_path, output_root=tmp_path, checkpoint_dir=tmp_path),
+    )
+    stamp = RunStamp.declare("run-1", cfg, stage="extract")
+    inside, outside = tmp_path / "fired", tmp_path / "plain"
+    inside.mkdir()
+    outside.mkdir()
+    with workflow_context("sha256:abc", "nightly", {"steps": []}):  # a scheduled firing's batch
+        process_batch([REGISTER_CSV], cfg, batch_num=1, shard_dir=inside, stamp=stamp)
+    process_batch([REGISTER_CSV], cfg, batch_num=1, shard_dir=outside, stamp=stamp)
+
+    roles = ("elements", "table_cells", "form_fields", "_manifest")
+    for role in roles:
+        footer = read_footer_stamp(pq.read_metadata(str(inside / f"batch-0001.{role}.parquet")).metadata)
+        assert footer["workflow_digest"] == "sha256:abc" and footer["run_id"] == "run-1"
+        assert footer["workflow"] == '{"name": "nightly", "spec": {"steps": []}}'
+        assert _digest(outside / f"batch-0001.{role}.parquet") is None
+    # A stage run later, outside the workflow, inherits the run and not the workflow.
+    later = sidecar_footer(inside / "batch-0001.parquet", "chunk")
+    assert later is not None and b"womblex.run_id" in later
+    assert b"womblex.workflow_digest" not in later and b"womblex.workflow" not in later
