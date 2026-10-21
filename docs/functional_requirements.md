@@ -39,16 +39,19 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 
 **Acceptance criteria:**
 
-- Cloud workers and local runs use identical batch-processing logic and output identical shard layouts.
-- Work runs as DBOS workflows, so a batch is never double-processed, a unit that finished is not run again, and workers can scale dynamically.
+- Cloud workers and local runs run the same batch-processing code and, over the same input, write the same shard layout with the same `content_digest` for each document.
+- Work runs as DBOS workflows, so a batch is never double-processed, a unit that finished is not run again, and workers can be added or stopped while a run is in progress.
 - Distributed run shards can be synced locally and consumed unchanged by local per-stage commands.
-- A stage can execute in-place over object storage using the exact same contract as local file execution.
-- The pipeline natively resolves standard local and cloud storage URIs.
-- Object-storage stage writes are all-or-none per stage: every declared output must exist before any is published; a set left partial by a failed upload never reads as complete, so the next run redoes that base and overwrites it; and a stage that rewrites outputs in place commits atomically, so an interrupted publish leaves the previous outputs intact.
+- A stage can execute in place over object storage under the same contract as local execution.
+- A storage location may be a local path or a `file://`, `s3://` (S3 and MinIO), `s3a://`, `gs://`, `gcs://`, `az://` or `abfs://` URI.
+- Object-storage writes are all-or-none per unit: every declared output exists before any is published, and a unit left partial by a failed upload never reads as complete, so the next run redoes and overwrites it. A failed unit is recorded and the rest of the run continues. A stage that rewrites outputs in place commits atomically, so an interrupted publish leaves the previous outputs intact.
 - A distributed run writes `<run>/manifest.parquet` when its stages finish. `womblex finalize` still writes it on demand, with the same result.
+
+**Verification:** `womblex verify-shards <local run> --compare-to <fleet run>` over one input reports no difference.
 
 **TO-DO:**
 
+- **`verify-shards --compare-to` does not compare `content_digest`.** It prints each run's aggregate counts (`store/shard_audit.py`, `format_audit_diff`) side by side and flags nothing, so a document whose `content_digest` differs between a local and a fleet run goes unreported. Compare the manifests' `content_digest` per `source_hash` and report each difference.
 - **Azure storage URIs aren't credential-wired.** `storage_options_from_env` (`store/remote.py`) wires only `s3://`; `az://`/`abfs://` fall through to adlfs unauthed and untested. Add an `az`/`abfs` branch reading `AZURE_STORAGE_*`, plus coverage.
 - **No Azure ML connection in the enrichment paths.** `utils/isaacus_client.py` handles the hosted API and AWS SageMaker (`ISAACUS_SAGEMAKER_ENDPOINTS`) but has no Azure ML equivalent. Add an Azure ML connection option so those paths can reach an Azure ML endpoint (`AZUREML_ENDPOINTS`, client factory, `unserved_models` pre-flight).
 
@@ -305,15 +308,17 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 
 **Given** a configured run (local or distributed)
 **When** the operator uses the CLI or Web UI
-**Then** documents process in isolated, resumable batches, with independent stage controls and visual inspection capabilities.
+**Then** documents process in isolated, resumable batches, with independent stage controls and inspection.
 
 **Acceptance criteria:**
 
-- Processing occurs in configurable batches, appending results and writing checkpoints upon batch completion.
-- Resuming an interrupted run automatically reconciles checkpoints and skips already-completed documents.
-- Individual document errors are isolated, recorded in the manifest, and do not crash the wider batch.
-- CLI commands allow stages to be dispatched independently, with idempotent queueing ensuring dependent stages sequence properly.
-- `womblex retry-stage` retries a failed distributed stage by forking its workflow from the first failed unit, so the units that finished are not run again. A retry is a launch: it is refused, before anything is forked, for a stage that is unknown, still running, not failed, owned by another owner, or failing the checks a dispatch makes (its config and registered models, the inputs it needs in the store, a live worker that passes the model check for the stage). A stage that ran after a failure ran on partial output, so once the failed stage's latest attempt has succeeded it is retryable too, in the order the operator runs them, and its retry redoes only its affected units, so finished work is not paid for again.
+- Processing occurs in configurable batches, appending results and writing a checkpoint as each batch completes.
+- Resuming an interrupted run reconciles checkpoints and skips completed documents.
+- A document error is isolated, recorded in the manifest, and does not stop its batch.
+- Stages can be dispatched independently from the CLI; idempotent queueing keeps dependent stages in order.
+- `womblex retry-stage` forks a failed distributed stage from its first failed unit, so finished units are not rerun.
+- A retry is a launch, refused before the fork with one of these codes: `not_found` (no such run or stage), `still_running`, `not_failed`, `earlier_failed` (a stage it ran after has not succeeded since), `already_retried`, `config_invalid` (the config does not load with registered models), `step_order` (an input the stage needs is missing from the store or out of order) or `no_worker` (no live worker passes the model check for the stage). A run another owner holds is refused before the fork too.
+- A stage that ran after a failure ran on partial output, so it is retryable once the failed stage's latest attempt has succeeded, earliest stage first. Its retry redoes only its affected units, so finished work is not paid for again.
 - Logs can be emitted as JSON lines (`womblex --log-format json` or `WOMBLEX_LOG_FORMAT=json`) with no added dependency; worker and batch records carry `run_id`, `job_id`, `stage`, and `source_hash` where known, and the default text format is unchanged.
 
 ## 15. Web Console Shell, Navigation, and Deployment Modes
@@ -339,19 +344,19 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 
 **As** an administrator,
 **I want** a run-scoped dashboard of queue state and per-stage progress,
-**so that** I can monitor throughput and spot stalled jobs while operating or debugging a run, without touching the queue.
+**so that** I can monitor throughput and spot stalled jobs without touching the queue.
 
-**Given** a selected run, with an optional job queue and the run's own per-stage checkpoints
+**Given** a selected run, with an optional job queue and the run's per-stage checkpoints
 **When** the operator opens the Dashboard
-**Then** it shows the run's status sentence, queue counts and per-stage completion, polling while the tab is visible and pausing while it is hidden.
+**Then** it shows the run's status sentence, queue counts and per-stage completion, polling while the tab is visible.
 
 **Acceptance criteria:**
 
-- Queue and stage state are read from sources the pipeline already writes (the job queue and per-stage checkpoints); with no queue configured, the dashboard falls back to checkpoints.
+- Queue and stage state come from what the pipeline already writes (the job queue and per-stage checkpoints); with no queue, the dashboard falls back to checkpoints.
 - A run's status is one sentence built from exact per-stage counts of done, pending and failed work, shown beside the counts. The CLI (`womblex jobs --run-id`), the API and the dashboard show the same sentence.
 - The sentence uses the API's status words (`pending` / `running` / `done` / `failed` / `cancelled`), plus a warning when a scheduled firing could not dispatch its stages.
-- Job status is rendered with the exact values the system writes (`pending` / `running` / `done` / `failed` / `cancelled`), plus `stale` for a running workflow with no update past the staleness threshold, and `skipped`.
-- A retried stage counts once: the run's counts take its latest attempt, and the attempt a retry superseded stays listed `failed` with `retried_by` naming the next.
+- Job status is rendered with the exact values the system writes (`pending` / `running` / `done` / `failed` / `cancelled`), plus `stale` for a `running` job with no update past `stale_after_seconds` (default 900), and `skipped`.
+- A retried stage counts once: counts take its latest stage attempt, and the superseded attempt stays listed `failed`, its `retried_by` field holding the next attempt's id.
 - The run record's lineage event (`womblex manifest --lineage` with `--dsn`) reports the run's real outcome (`COMPLETE`, `FAIL` or `ABORT`), not always complete; without a queue to ask, its status is `unknown`.
 - The dashboard only *names* a stalled job; DBOS recovers it when its executor restarts, and the dashboard never requeues, cancels, or claims work itself.
 - Polling is paused while the browser tab is hidden so a backgrounded console stops hitting the queue.
@@ -463,27 +468,28 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 
 **As** a developer integrating another system,
 **I want** an authenticated HTTP API to upload documents, submit runs, and read their results,
-**so that** my software can use Womblex as a backend service without shell access to the pipeline host.
+**so that** my software can use Womblex as a service without shell access to its host.
 
-**Given** `womblex serve` bound to a store, a job queue, and an ingest location, with a client registry
-**When** a caller presents a service token and uploads documents, submits a run, and polls it
-**Then** the run is queued under the caller's ownership and its status, files, and text are readable only by that caller (or an admin), gated by scope and file sensitivity.
+**Given** `womblex serve` bound to a store, a job queue and an ingest location, with a client registry
+**When** a caller presents a service token, uploads documents, submits a run and polls it
+**Then** the run is queued under the caller's ownership and runs under the submitted config, and its status, files and text are readable only by that caller (or an admin), gated by scope and file sensitivity.
 
 **Acceptance criteria:**
 
-- Every `/v1` endpoint except `health` and `ready` requires a bearer token whose SHA-256 is in the registry; a missing or unknown token is 401, and tokens are compared in constant time.
-- Scopes are `submit`, `read`, `read_raw`, and `admin` (which implies the rest); a request outside the caller's scopes is 403.
-- The service refuses to start with an empty registry unless explicitly run with `--insecure-no-auth`, and binds to loopback by default.
-- An upload is written to `<ingest>/<client_id>/<upload_id>/` keeping only bare file names; an unusable, repeated, or unsupported name is 400 with nothing written, an over-limit request is 413, and the response names the folder to submit as `input_prefix`.
-- A non-admin caller can submit runs only over its own `<client_id>/` tree (403 otherwise); the run id is minted server-side and unique across concurrent submissions.
-- A submitted `preset` or `config` is validated before any queue row is written (400 on failure) and governs every stage of the run, not only which stages run; a config enabling none is an extraction-only run.
-- A run belongs to the client that submitted it: another client's run is 404, an admin sees all runs, and runs dispatched from the CLI, the console or a workflow carry no owner and are visible to admins only. A run never has mixed ownership.
-- Document text defaults to the masked layer; raw layers (`chunks`, `elements`) require `read_raw`, decided by the layer's contract sensitivity.
-- Run file listings report each file's row count, `contract_version`, and `sensitivity`, so a caller can fetch Parquet directly under the data contract.
+- Every `/v1` endpoint except `health` and `ready` requires a bearer token whose SHA-256 is in the registry; a missing or unknown token is 401.
+- Scopes are `submit`, `read`, `read_raw` and `admin` (which implies the rest); a request outside the caller's scopes is 403.
+- The service refuses to start with an empty registry unless run with `--insecure-no-auth`, and binds to loopback by default.
+- An upload is written to `<ingest>/<client_id>/<upload_id>/`, bare file names only. An unusable, repeated or unsupported name is 400 with nothing written, an over-limit request is 413, and the response names the `input_prefix` to submit.
+- A non-admin caller submits runs only over its own `<client_id>/` tree (403 otherwise). The run id is minted server-side and unique under concurrent submissions.
+- A submitted `preset` or `config` is validated before any queue row (400 on failure) and governs every stage of the run, not only which stages run. A config enabling no downstream stage is an extraction-only run.
+- A run belongs to the client that submitted it: another client's run is 404, an admin sees all runs, and runs dispatched from the CLI, the console or a workflow carry no owner and are admin-only. A run never has mixed ownership.
+- Document text defaults to the masked layer; raw layers (`chunks`, `elements`) require `read_raw`, by the layer's contract sensitivity.
+- Run file listings report each file's row count, `contract_version` and `sensitivity`, so a caller can fetch Parquet directly under the data contract.
 - A run's status is the same sentence the CLI and dashboard show (`summary`), with its counts.
 - A run started by a workflow that names a webhook sends its events there (Requirement 27). Polling still works.
-- `ready` reports store and queue reachability and answers 503 when either is down; an unreachable queue, store, or ingest location on any other endpoint is 503, not 500.
-- The OpenAPI surface is pinned by a test so breaking changes are visible in review.
+- `ready` reports store and queue reachability and answers 503 when either is down; any other endpoint answers 503, not 500, when the queue, store or ingest location is unreachable.
+
+**Verification:** the token is checked against every registry entry with `hmac.compare_digest` and no early exit; a test fails on any change to the OpenAPI surface.
 
 ## 23. Egress Bundle — Export to Downstream Consumers
 
@@ -493,22 +499,22 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 
 **Given** a finished run root (holding `documents/` and `manifest.parquet`), local or in an object store
 **When** the operator runs `womblex egress <run> --to <dest>`
-**Then** a bundle is written under `<dest>/<bundle_prefix>/` holding the unchanged corpus, deduplicated raw sources, a source index, and a descriptor, and Womblex stops.
+**Then** a bundle is written under `<dest>/<bundle_prefix>/` holding the unchanged corpus, deduplicated raw sources, a source index and a descriptor, and Womblex stops.
 
 **Acceptance criteria:**
 
-- The destination may be any `RemoteStore` URI (local directory, S3, MinIO, GCS) through one code path.
-- `corpus/` mirrors the run's shard directory recursively, including every downstream sidecar, plus the consolidated `manifest.parquet`, unchanged.
+- The destination may be any storage location Requirement 2 lists (a `RemoteStore` URI), through one code path.
+- `corpus/` mirrors the run's shard directory, every downstream sidecar included, plus the consolidated `manifest.parquet`, unchanged.
 - Raw sources are written to `sources/<source_hash><ext>`, deduplicated by hash; two documents sharing a hash point at one file.
-- `source_index.parquet` has one row per document with `source_hash`, `doc_id`, `filename`, `ext`, `raw_key`, and a status of `resolved`, `hash_mismatch`, `not_found`, `unsupported_basis`, or `upload_failed`; `raw_key` is null wherever no file was produced.
-- Source resolution is non-fatal per document: a missing, mismatched, records-ingested, or failed-upload source is reported in the index and in `egress_manifest.json`, never aborting the export.
+- `source_index.parquet` has one row per document (`source_hash`, `doc_id`, `filename`, `ext`, `raw_key`, and a status of `resolved`, `hash_mismatch`, `not_found`, `unsupported_basis` or `upload_failed`); `raw_key` is null wherever no file was produced.
+- Source resolution never aborts the export: a source whose status is `not_found`, `hash_mismatch`, `unsupported_basis` (a records-ingested document) or `upload_failed` is reported in the index and in `egress_manifest.json`.
 - `egress_manifest.json` carries the contract version and a per-document resolution report.
 - A corpus-only export (`--no-sources` / `--corpus-only`) skips resolution and writes no `sources/` or `source_index.parquet`.
-- `--source-root` resolves sources from a moved corpus; `--run-id` defaults to the run root's directory name and must agree with the run's own stamp, if it has one.
-- Re-exporting into an existing bundle removes source files the fresh export neither wrote nor attempted, and leaves a source whose upload failed untouched.
+- `--source-root` resolves sources for a moved corpus; `--run-id` defaults to the run root's name and must agree with the run's stamp, if any.
+- Re-exporting removes source files the fresh export neither wrote nor attempted, and leaves a failed-upload source untouched.
 - A run held in an object store is copied store to store, with no local staging.
-- A run ingested from an object store resolves each source from that store by the manifest's `source_relpath`, checked against `source_hash`, with the same per-document statuses.
-- Womblex writes the bundle and nothing downstream of it: no retention, serving, or write-back of consumer corrections.
+- A run ingested from an object store resolves each source from that store by `source_relpath`, checked against `source_hash`, with the same statuses.
+- Womblex writes the bundle and nothing downstream of it: no retention, serving, or write-back of consumer corrections. Delivery to a workflow's destinations is Requirement 27.
 
 ## 24. Swappable Models Without a Schema Change
 
@@ -581,31 +587,32 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - A model the pre-run check builds only to confirm it loads is not recorded as used — a run whose check built the model but whose stages never actually called it shows no entry for it; only a run's own build of it does.
 - Benchmark reports (womblex-benchmark) name the models that produced them, suites can run against a named model, and `docs/accuracy/` stays labelled as the default group.
 
-## 27. Workflows — Check, Run, Dispatch and Schedule
+## 27. Workflows — Check, Run, Dispatch, Schedule and Deliver
 
 **Paid:** `run-workflow`, `dispatch-workflow` and every scheduled firing launch the workflow's paid steps; each firing is billed for the documents it processes. `validate` and `plan` make no paid call.
 
 **As** an operator,
-**I want** to declare a named recipe of steps over a preset in a file and run it locally, on the fleet or on a schedule,
-**so that** a run's sequence is declared once, checked before it spends anything, and recorded in what it writes.
+**I want** to declare a recipe of stages once and run it locally, on the fleet or on a schedule,
+**so that** every run follows the same steps, refusals happen before any spend, scheduled firings pay only for new documents, and results reach downstream systems.
 
-**Given** a workflow file (a name, a preset reference, input binding, ordered steps, triggers and destinations)
+**Given** a workflow file (name, preset, config overlay, input location, ordered steps, triggers and destinations)
 **When** the operator validates, plans, runs, dispatches or schedules it
-**Then** everything that can refuse does so before the first step, and the files each step writes name the workflow.
+**Then** every refusal happens before the first step, each firing processes only new documents, every sidecar a workflow step writes names its workflow, and each destination receives the results.
 
 **Acceptance criteria:**
 
 - A workflow is a plain-text file; creating or editing one needs no code.
 - Every command validates the file first (steps, cron and timezone, config overlay) and rejects unknown keys.
 - The workflow digest ignores formatting and comments.
-- Its own `config` is laid over its preset's key by key, and the whole is validated as a full config.
-- `validate` runs exactly the checks `run-workflow` runs before its first step, and writes nothing.
+- Its `config` is laid over its preset's key by key and validated as a full config.
+- `validate` runs every check `run-workflow` runs before its first step, and writes nothing.
 - `plan` counts the tokens and requests of every paid call, AI chunking included, with each provider's own token counter, and shows local steps as free. It calls no paid API.
-- Step order is checked before launch: a step whose input is missing, produced later, or rewritten later is refused with a stable code.
-- Once a step has run, a failed step does not stop the steps after it; each later step records the failure it follows, and the exit code is non-zero.
+- Out-of-order steps are refused before launch with the code `step_order`, each issue naming `input_missing`, `input_out_of_order` or `input_stale`.
+- Once a step has run, a failed step does not stop later steps; each records the failure it follows, and the run exits non-zero.
 - Every sidecar a workflow step writes names the workflow that wrote it, and the run record holds the workflow's name and full spec. Extraction files name none: extraction is not a workflow step (see the data contract).
-- `dispatch-workflow` queues the steps for the fleet, refused before any row for anything the local runner refuses and for a step the fleet cannot run, or an order the coordinator would change; workers run each stage under the workflow's config.
-- `schedule-workflow` saves the workflow and syncs its schedules in one action, so stored triggers and the queue's schedules always match; each firing reads the saved copy on a worker that uses the workflow's input store (`input_binding.store`), refused before any row when the prefix holds no document. `schedule-workflow` runs the same checks first (`check_firing`, against `--store` and the workflow's input store), so a workflow its firing would refuse is not scheduled.
+- `dispatch-workflow` is refused before any row for anything the local runner refuses, a step the fleet cannot run, or an order the coordinator would change; workers run each stage under the workflow's config.
+- `schedule-workflow` saves the workflow and syncs its schedules in one action, so stored triggers and the queue's schedules always match. It runs every check a firing makes (`check_firing`, against `--store` and the workflow's input store), so a workflow its firing would refuse is not scheduled.
+- Each firing runs the saved copy against the workflow's input store (`input_binding.store`), on a worker that uses that store, and is refused before any row when the prefix holds no document.
 - A scheduled workflow appends to one run: each firing processes only documents the run has not seen, and never reprocesses or re-pays for one it has.
 - After an edit and reschedule, the new version applies to new documents only; earlier documents keep their results.
 - A firing with no new documents runs nothing and logs that.
@@ -613,19 +620,19 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - A workflow has no owner; the runs it starts are admin-only, like CLI runs.
 - Fleet runs perform `pii` when a workflow includes it; runs without a workflow never do.
 - A workflow can name destinations: an object store, a Postgres database with embeddings, and a webhook.
-- An object-store destination receives the Requirement 23 bundle; each destination chooses whether raw sources are included.
-- A Postgres destination gets one row per chunk with its embedding: masked text by default, raw only where the workflow asks, each row naming its layer.
-- A Postgres destination requires the `embed` step, and sending masked text requires `pii`; a workflow missing either is refused before launch.
 - A workflow names where secrets are found, never the secrets. No secret is written to the file or the stored copy.
 - Every destination is checked before launch (its secrets resolve, its dependencies are installed); a failed check refuses the run.
+- A Postgres destination requires the `embed` step, and sending masked text requires `pii`; a workflow missing either is refused before launch.
 - Results are delivered after the last step, even when a step failed, and a delivery after a failure names the failed steps.
 - A failed delivery is retried a set number of times, then recorded on the run. It never stops the run.
 - After a failed stage is retried successfully, the retry command prints how to redeliver. Redelivery replaces: files are rewritten and rows upserted.
+- An object-store destination receives the Requirement 23 bundle; each destination chooses whether raw sources are included.
+- A Postgres destination gets one row per chunk with its embedding: masked text by default, raw only where the workflow asks, each row naming its layer.
 - A webhook receives six events: `extraction_settled`, `stage_finished`, `stage_failed`, `run_finished`, `delivered` and `delivery_failed`. Each carries an `event_id` (kept when the event is resent, so the receiver can drop a duplicate), the `run_id` and the run's status in the API's words, and is signed with a key held where the run executes.
 - There are no per-document or per-batch events.
 - The run record lists every delivery.
 
-**Out of scope:** managing workflows through the API, pruning changed or deleted documents, resolving the source of a changed file's earlier version (its bytes are gone from the store, so `SourceResolver` reads it as `hash_mismatch`), workflow owners, backfill of missed firings, and databases other than Postgres (each needs its own requirement).
+**Out of scope:** managing workflows through the API, pruning changed or deleted documents, resolving the source of a changed file's earlier version (its bytes are gone from the store, so `SourceResolver` reads it as `hash_mismatch`), workflow owners, backfill of missed firings, per-step destinations, databases other than Postgres (each needs its own requirement), registering webhooks through the API, and write-back from consumers.
 
 ## 28. Fleet Runs — Honour the Dispatch, Report the Truth
 
@@ -680,7 +687,7 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 Requirements not yet fully met. The detail lives in the **TO-DO** block under each requirement; this list is the index. When a gap is closed (or the criterion is deliberately narrowed), its TO-DO block and its entry here are removed in the same PR.
 
 
-- **Requirement 2 (Scale-Out):** Azure storage URIs (`az://` / `abfs://`) are not credential-wired, and the enrichment paths have no Azure ML connection.
+- **Requirement 2 (Scale-Out):** `verify-shards --compare-to` does not compare `content_digest`; Azure storage URIs (`az://` / `abfs://`) are not credential-wired, and the enrichment paths have no Azure ML connection.
 - **Requirement 3 (Ingest-First Data Flow):** up-front composition check covers workflows (local and `dispatch-workflow`) and dispatch, not a lone `run-stage --store` (per-base `NotReady`).
 - **Requirement 6 (Native Office and Spreadsheet Extraction):** multi-row headers are emitted for DOCX only; spreadsheets and the legacy table view collapse to row 0, no per-cell header-row coordinate exists, and cell formulas are never captured.
 - **Requirement 7 (Standalone Reference Register Ingestion):** G-NAF and geospatial writes are not guarded against partial output.
