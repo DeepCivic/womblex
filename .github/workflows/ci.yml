@@ -27,7 +27,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up uv and Python ${{ matrix.python-version }}
-        uses: astral-sh/setup-uv@v10
+        # setup-uv publishes no floating major tag from v8 on (`@v10` does not
+        # resolve), so the release is named in full.
+        uses: astral-sh/setup-uv@v10.3.0
         with:
           version: "0.11.7"
           python-version: ${{ matrix.python-version }}
