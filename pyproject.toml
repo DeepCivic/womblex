@@ -140,7 +140,7 @@ dev = [
     # a tree that had been green), so an unpinned ruff turns CI red on an
     # upstream release rather than on a change of ours. Raise the ceiling as a
     # deliberate commit that also clears whatever the new rules flag.
-    "ruff>=0.16,<0.17",
+    "ruff>=0.16,<0.18",
     "mypy",
     # Starlette's TestClient transport, for the [ui] route tests. Test-only:
     # the console itself never makes an HTTP request, so this stays out of [ui].
