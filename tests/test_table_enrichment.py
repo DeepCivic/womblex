@@ -74,9 +74,12 @@ def test_graph_refresh_leaves_table_mentions_alone(tmp_path):
 
     refresh_graph_edges(tmp_path)
 
-    rows = read_enrichment_entities(base).to_pylist()
-    assert [r["chunk_index"] for r in rows if r["text_layer"] == "table_markdown"] == [-1]
-    assert [r["chunk_index"] for r in rows if r["text_layer"] == "elements"] == [0]
+    # The links are refresh's own sidecar; the reader takes them over the enrich file's -1.
+    from womblex.analyse.query import load_entity_mentions
+
+    mentions = load_entity_mentions(enrichment_entities_path_for(base))
+    assert [m.chunk_index for m in mentions if m.text_layer == "table_markdown"] == [-1]
+    assert [m.chunk_index for m in mentions if m.text_layer == "elements"] == [0]
 
 
 def test_a_batch_enriched_without_tables_is_re_enriched_on_resume(tmp_path):
