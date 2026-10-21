@@ -95,6 +95,36 @@ jobs:
         working-directory: ui
         run: npm run build
 
+  audit:
+    name: Dependency advisories
+    runs-on: ubuntu-latest
+    # Known advisories in the locked Python set and the console's npm lock, so a
+    # new one shows on the PR that would ship it (docs/security-upgrade-plan.md,
+    # M1). Reported, not yet gating: the advisories open today are cleared by
+    # the plan's upgrade merges (M2 to M5), and this line goes when they land.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10
+        with:
+          version: "0.11.7"
+          python-version: "3.12"
+
+      - name: Python (pip-audit over the lock)
+        # Every extra, dev included, read from the hashed export with no
+        # resolve. pip-audit runs pinned through uvx, so it is not a project
+        # dependency.
+        run: |
+          uv export --frozen --all-extras --no-emit-project -o "$RUNNER_TEMP/requirements.txt"
+          uvx pip-audit@2.10.1 --disable-pip -r "$RUNNER_TEMP/requirements.txt"
+
+      - name: Console (npm audit, high and above)
+        if: ${{ !cancelled() }}
+        working-directory: ui
+        run: npm audit --audit-level=high
+
   images:
     name: Container image (${{ matrix.name }})
     runs-on: ubuntu-latest
