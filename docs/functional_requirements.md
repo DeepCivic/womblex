@@ -343,19 +343,20 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 
 **As** an administrator,
 **I want** a run-scoped dashboard of queue state and per-stage progress,
-**so that** I can monitor throughput and spot stalled jobs while operating or debugging a run, without touching the queue.
+**so that** I can monitor throughput and spot stalled jobs without touching the queue.
 
-**Given** a selected run, with an optional job queue and the run's own per-stage checkpoints
+**Given** a selected run, with an optional job queue and the run's per-stage checkpoints
 **When** the operator opens the Dashboard
-**Then** it shows the run's status sentence, queue counts and per-stage completion, polling while the tab is visible and pausing while it is hidden.
+**Then** it shows the run's status sentence, queue counts and per-stage completion, polling while the tab is visible.
 
 **Acceptance criteria:**
 
-- Queue and stage state are read from sources the pipeline already writes (the job queue and per-stage checkpoints); with no queue configured, the dashboard falls back to checkpoints.
+- Queue and stage state come from what the pipeline already writes (the job queue and per-stage checkpoints); with no queue, the dashboard falls back to checkpoints.
 - A run's status is one sentence built from exact per-stage counts of done, pending and failed work, shown beside the counts. The CLI (`womblex jobs --run-id`), the API and the dashboard show the same sentence.
 - The sentence uses the API's status words (`pending` / `running` / `done` / `failed` / `cancelled`), plus a warning when a scheduled firing could not dispatch its stages.
-- Job status is rendered with the exact values the system writes (`pending` / `running` / `done` / `failed` / `cancelled`), plus `stale` for a running workflow with no update past the staleness threshold, and `skipped`.
-- A retried stage counts once: the run's counts take its latest attempt, and the attempt a retry superseded stays listed `failed` with `retried_by` naming the next.
+- The sentence uses the API's status words (`pending` / `running` / `done` / `failed` / `cancelled`), plus a warning when a scheduled firing could not dispatch its stages.
+- Job status is rendered with the exact values the system writes (`pending` / `running` / `done` / `failed` / `cancelled`), plus `stale` for a `running` job with no update past `stale_after_seconds` (default 900), and `skipped`.
+- A retried stage counts once: counts take its latest stage attempt, and the superseded attempt stays listed `failed`, its `retried_by` field holding the next attempt's id.
 - The run record's lineage event (`womblex manifest --lineage` with `--dsn`) reports the run's real outcome (`COMPLETE`, `FAIL` or `ABORT`), not always complete; without a queue to ask, its status is `unknown`.
 - The dashboard only *names* a stalled job; DBOS recovers it when its executor restarts, and the dashboard never requeues, cancels, or claims work itself.
 - Polling is paused while the browser tab is hidden so a backgrounded console stops hitting the queue.
