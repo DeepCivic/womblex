@@ -10,6 +10,11 @@
 # compose service runs on the same image as the workers. The other extras are
 # `[ui]` (the console, its own image) and `[dev]` (test/lint); override at
 # build time, e.g. --build-arg EXTRAS="api,dev".
+
+# uv exports the lock at build time; it is mounted, never installed. A stage
+# of its own so the pin is a FROM line that dependency updates can read.
+FROM ghcr.io/astral-sh/uv:0.11.7 AS uv
+
 FROM python:3.12-slim AS base
 
 ENV PYTHONUNBUFFERED=1 \
@@ -27,18 +32,26 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY . /app
 
+# Dependencies install from `uv.lock`, hash-checked, rather than from a fresh
+# resolve of pyproject.toml's ranges, so the image ships exactly the set CI
+# tested and the dependency alerts name (docs/security-upgrade-plan.md, M0).
+# Only the two files the export reads are copied first, so this layer stays
+# cached until the lock changes. uv is mounted for the export, not installed.
 # `.` installs the core deps (S3 + queue included); a worker needs nothing
 # more. `[api]` is fastapi + uvicorn + python-multipart, for `womblex serve`.
+# EXTRAS is comma-separated, e.g. "api,dev", or empty for the core alone.
 ARG EXTRAS="api"
-# Upgrade pip first: the stock pip on python:3.12-slim is old enough that its
-# resolver stalls/fails on the boto stack (s3fs -> aiobotocore pins a narrow
-# botocore range that must co-resolve with boto3's own botocore pin). The
-# newer resolver finds the compatible set. Baked in here rather than patched
-# on the instance so every build is reproducible from the tag.
-RUN pip install --upgrade pip \
-    && if [ -n "${EXTRAS}" ]; then pip install ".[${EXTRAS}]"; else pip install "."; fi
+COPY pyproject.toml uv.lock /app/
+RUN --mount=from=uv,source=/uv,target=/usr/local/bin/uv \
+    extras="" \
+    && for e in $(echo "${EXTRAS}" | tr ',' ' '); do extras="${extras} --extra ${e}"; done \
+    && uv export --frozen --no-dev ${extras} --no-emit-project -o /tmp/requirements.txt \
+    && pip install --require-hashes -r /tmp/requirements.txt \
+    && rm /tmp/requirements.txt
+
+COPY . /app
+RUN pip install --no-deps .
 
 # The source commit, supplied rather than discovered: `.dockerignore` excludes
 # `.git`, and a build context is a copy of a work tree rather than one, so a

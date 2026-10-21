@@ -203,11 +203,13 @@ Approaches tried and abandoned, library-general limitations, and the deferred ba
   - **Prerequisite — shipped.** `config.py` (920 lines) was split
     mechanically into the `config/` package (#132).
 
-- **Trust baseline and recipes.** *In progress 2026-10; the trust baseline,
-  stored workflows, the enrichment and embedding model slots and the
-  OpenLineage export shipped.* Scope and the dependency assessment are recorded
-  in decisions-operations.md ("Trust and recipes") and above ("Dependencies assessed"). Outstanding work:
-  [plan-trust-and-recipes.md](plan-trust-and-recipes.md).
+- **Trust baseline and recipes.** *Shipped 2026-10: the trust baseline,
+  stored workflows and their repairs, delivery to workflow destinations, the
+  enrichment and embedding model slots, the OpenLineage export and the
+  one-sentence run status.* Scope and the dependency assessment are recorded
+  in decisions-operations.md ("Trust and recipes") and above ("Dependencies
+  assessed"); the requirements it met are in functional_requirements.md, and
+  the gaps it left are in that document's Outstanding list.
 - **Permissive dependencies — Apache-2.0 compatibility.** *Shipped 2026-10
   (layout swap #130, layout stage L3, pdfium default F1, PyMuPDF removed F2).*
   The previous layout model's dependency and PyMuPDF were not licence-compatible
@@ -673,6 +675,8 @@ construction.
 ## Mistakes to avoid when planning
 
 Made in Phase 2 of the trust-and-recipes plan (the ninth recurred in almost every merge of the plan). Check a new plan against this list before building.
+
+A plan lists only outstanding work and is deleted with its last item; finished work lives in the CHANGELOG and the docs. Each work item names the requirements it delivers, and a requirement moves into the requirements document when an item meets it. A change that reverses a decision deletes the old decision from the decision docs rather than keeping it as a rejected alternative; this list is the record of what went wrong.
 
 1. **A setting before anything uses it.** Workflow `destinations` were stored and did nothing. *Rule:* a setting lands in the merge that makes it act.
 2. **A file nobody reads.** Workflow conditions wrote a label sidecar nothing reads, derivable from the manifest anyway. *Rule:* every new output names its reader; anything derivable is derived on read.

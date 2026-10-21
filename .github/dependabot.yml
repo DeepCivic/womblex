@@ -1,0 +1,38 @@
+# Weekly dependency updates, so upgrades arrive small and each is tested by the
+# lock-based CI on its own PR rather than surfacing on `main`
+# (docs/security-upgrade-plan.md, M1). Minor and patch updates are grouped into
+# one PR per ecosystem; a major update gets a PR of its own.
+version: 2
+updates:
+  - package-ecosystem: uv
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      python-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: "/ui"
+    schedule:
+      interval: weekly
+    groups:
+      ui-minor-patch:
+        update-types: [minor, patch]
+
+  # Both Dockerfiles: the Python, Node and uv base images.
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      images-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      actions-minor-patch:
+        update-types: [minor, patch]

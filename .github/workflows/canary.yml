@@ -1,0 +1,43 @@
+name: Canary
+
+# Early warning of upstream breakage: the test suite against the newest
+# releases pyproject.toml's ranges allow, without moving the lock
+# (docs/security-upgrade-plan.md, M1). The breaks on record (DBOS dropping its
+# vendored croniter, OpenCV 5's HoughLinesP layout) are the kind it catches.
+# It never gates a merge: it runs on a schedule, not on pull requests, and a
+# red run means the next lock upgrade needs work first.
+on:
+  schedule:
+    - cron: "0 18 * * 0" # Monday 04:00 AEST
+  workflow_dispatch:
+
+jobs:
+  upgraded:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv and Python 3.12
+        uses: astral-sh/setup-uv@v10.3.0
+        with:
+          version: "0.11.7"
+          python-version: "3.12"
+
+      - name: Upgrade the lock in place (not committed)
+        run: |
+          uv lock --upgrade
+          git diff --stat uv.lock
+
+      - name: Install the upgraded set
+        run: uv sync --frozen --extra dev --extra ui --extra api
+
+      - name: Lint (ruff)
+        run: uv run --no-sync ruff check src/ tests/
+
+      - name: Type-check (mypy)
+        run: uv run --no-sync mypy src/
+
+      - name: Tests
+        # No Postgres service: its test variants skip, and the SQLite ones
+        # cover the job queue.
+        run: uv run --no-sync python -m pytest tests/ -v -m "not benchmark"
