@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { runSelection } from '$lib/stores/run.svelte';
+	import { runSelection } from '#lib/stores/run.svelte.ts';
 
 	function onChange(event: Event): void {
 		runSelection.select((event.target as HTMLSelectElement).value || null);

@@ -1,9 +1,9 @@
 <script lang="ts">
-	import { runSelection } from '$lib/stores/run.svelte';
-	import { getManifest, getStagePresence, type ManifestDocument } from '$lib/api';
-	import DocumentGrid from '$lib/components/DocumentGrid.svelte';
-	import CheckpointSwitcher from '$lib/components/CheckpointSwitcher.svelte';
-	import AuditPanel from '$lib/components/AuditPanel.svelte';
+	import { runSelection } from '#lib/stores/run.svelte.ts';
+	import { getManifest, getStagePresence, type ManifestDocument } from '#lib/api/index.ts';
+	import DocumentGrid from '#lib/components/DocumentGrid.svelte';
+	import CheckpointSwitcher from '#lib/components/CheckpointSwitcher.svelte';
+	import AuditPanel from '#lib/components/AuditPanel.svelte';
 
 	let documents: ManifestDocument[] = $state([]);
 	let loading = $state(false);

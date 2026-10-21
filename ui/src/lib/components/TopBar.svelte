@@ -1,7 +1,7 @@
 <script lang="ts">
-	import RunSelector from '$lib/components/RunSelector.svelte';
-	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
-	import DensityToggle from '$lib/components/DensityToggle.svelte';
+	import RunSelector from '#lib/components/RunSelector.svelte';
+	import ThemeToggle from '#lib/components/ThemeToggle.svelte';
+	import DensityToggle from '#lib/components/DensityToggle.svelte';
 </script>
 
 <header

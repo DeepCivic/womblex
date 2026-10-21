@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { preferences, persistPreferences } from '$lib/stores/preferences.svelte';
+	import { preferences, persistPreferences } from '#lib/stores/preferences.svelte.ts';
 	import Sun from '@lucide/svelte/icons/sun';
 	import Moon from '@lucide/svelte/icons/moon';
 

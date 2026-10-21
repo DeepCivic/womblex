@@ -9,7 +9,7 @@
 	// predicate into parquet; see readers.py `_remote_chunk_detail`). The
 	// document list therefore comes from the manifest, exactly as the Corpus
 	// Inspector's grid does.
-	import { runSelection } from '$lib/stores/run.svelte';
+	import { runSelection } from '#lib/stores/run.svelte.ts';
 	import {
 		getManifest,
 		getChunkDetail,
@@ -17,8 +17,8 @@
 		type ChunkDetail,
 		type MoneySpan,
 		type ChunkQuality
-	} from '$lib/api';
-	import ChunkCard from '$lib/components/ChunkCard.svelte';
+	} from '#lib/api/index.ts';
+	import ChunkCard from '#lib/components/ChunkCard.svelte';
 
 	let documents: ManifestDocument[] = $state([]);
 	let documentsLoading = $state(false);

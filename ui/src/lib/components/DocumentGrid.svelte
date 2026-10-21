@@ -3,8 +3,8 @@
 	// `DocumentGrid`): real <table> semantics, sticky header, failed rows
 	// marked by their StatusPill alone (never a tinted row).
 	import StatusPill from './StatusPill.svelte';
-	import type { Status } from '$lib/status';
-	import type { ManifestDocument } from '$lib/api';
+	import type { Status } from '#lib/status.ts';
+	import type { ManifestDocument } from '#lib/api/index.ts';
 
 	let {
 		documents,

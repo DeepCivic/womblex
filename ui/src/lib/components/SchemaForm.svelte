@@ -3,7 +3,7 @@
 	// Recursive: a `$ref` property renders as a collapsible subsection, so the
 	// whole of `WomblexConfig` is reachable without a hand-typed mirror of
 	// `config.py` — the field list is whatever `/api/composer/schema` serves.
-	import type { ConfigObject, JsonSchema } from '$lib/api';
+	import type { ConfigObject, JsonSchema } from '#lib/api/index.ts';
 
 	export type FieldKind = 'boolean' | 'number' | 'string' | 'strings' | 'mapping' | 'model';
 

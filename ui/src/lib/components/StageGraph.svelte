@@ -6,7 +6,7 @@
 	// Nodes are HTML cards (so the enabled toggle is a real checkbox) laid out
 	// at fixed pixel positions, with an SVG behind them for the edges. Both
 	// read the same constants, so edge geometry needs no DOM measurement.
-	import type { ConfigObject, StageGraph } from '$lib/api';
+	import type { ConfigObject, StageGraph } from '#lib/api/index.ts';
 
 	let {
 		graph,

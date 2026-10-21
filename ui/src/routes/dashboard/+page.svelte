@@ -18,10 +18,10 @@
 		type DashboardData,
 		type JobRow,
 		type RunLog
-	} from '$lib/api';
-	import { runSelection } from '$lib/stores/run.svelte';
-	import StatusPill from '$lib/components/StatusPill.svelte';
-	import type { Status } from '$lib/status';
+	} from '#lib/api/index.ts';
+	import { runSelection } from '#lib/stores/run.svelte.ts';
+	import StatusPill from '#lib/components/StatusPill.svelte';
+	import type { Status } from '#lib/status.ts';
 
 	// Poll cadence. Fast enough that a draining queue looks live, slow enough
 	// that a routable-but-dead queue (each poll waits out `QUEUE_CONNECT_TIMEOUT`
