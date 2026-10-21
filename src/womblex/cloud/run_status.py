@@ -1,7 +1,8 @@
 """A run's status as one sentence, built from exact per-stage counts.
 
 The words are the API's (`jobs.run_state`: ``pending`` / ``running`` / ``done`` /
-``failed`` / ``cancelled``). The CLI, the API and the console all print what
+``failed`` / ``cancelled``); a stage's counts add ``skipped`` for a stage whose every unit was
+already published. The CLI, the API and the console all print what
 `run_sentence` returns, so the three never describe a run differently.
 """
 
@@ -12,7 +13,7 @@ from collections.abc import Iterable
 from womblex.pipeline_order import sort_by_pipeline
 
 #: Counts are listed in this order; a status with no jobs is left out.
-_ORDER = ("done", "running", "pending", "failed", "cancelled")
+_ORDER = ("done", "skipped", "running", "pending", "failed", "cancelled")
 
 #: The name extraction batches count under, beside the downstream stages.
 EXTRACT = "extract"

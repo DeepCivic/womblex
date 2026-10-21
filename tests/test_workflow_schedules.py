@@ -174,8 +174,10 @@ def test_a_firing_extracts_the_prefix_and_runs_the_workflow_unowned_and_stamped(
     assert kinds == ["batch", "downstream", "stage", "trigger"]  # one firing ran, the other attached
     assert all("owner" not in (s.attributes or {}) for s in rows)  # no row the firing made has an owner
     out = Path(str(store_dir)) / f"runs/{runs[0].run_id}/documents"
-    meta = pq.read_metadata(str(out / "batch-0001.normalised_text.parquet")).metadata
-    assert meta[b"womblex.workflow_digest"] == stored.digest.encode()
+    for name in ("batch-0001.normalised_text.parquet", "batch-0001.elements.parquet"):  # the firing extracted it
+        meta = pq.read_metadata(str(out / name)).metadata
+        assert meta[b"womblex.workflow_digest"] == stored.digest.encode()
+        assert b'"name": "nightly"' in meta[b"womblex.workflow"]
 
 
 def test_a_firing_that_cannot_complete_queues_nothing(fleet, saved_preset) -> None:  # noqa: F811
