@@ -70,6 +70,7 @@ def _EMPTY_QUEUE_SECTION(window_seconds: float) -> dict:
     return {
         "stats": {},
         "total": 0,
+        "summary": None,
         "jobs": [],
         "workers": [],
         "stale": [],
@@ -160,6 +161,7 @@ def queue_section(
         with RunBoard(settings.db_dsn, connect_timeout=QUEUE_CONNECT_TIMEOUT) as board:
             try:
                 stats = board.stats(run_id)
+                found = board.runs(run_id=run_id, limit=1) if run_id else []
                 jobs = board.list_jobs(run_id, limit=job_limit)
                 workers = board.workers(run_id)
                 stale = board.stale_jobs(stale_after, run_id)
@@ -174,6 +176,8 @@ def queue_section(
     return {
         "stats": stats,
         "total": sum(stats.values()),
+        # The run's status sentence, the one `womblex jobs` and `/v1/runs/{id}` print.
+        "summary": found[0].sentence if found else None,
         "jobs": [asdict(j) for j in jobs],
         "workers": [asdict(w) for w in workers],
         # Whole rows, not ids: `jobs` is capped by `job_limit` ordered on

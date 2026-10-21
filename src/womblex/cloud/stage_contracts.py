@@ -48,6 +48,7 @@ from womblex.store.enrichment_output import (
     GRAPH_EDGES_SUFFIX,
 )
 from womblex.store.entity_links_output import ENTITY_LINKS_SUFFIX
+from womblex.store.graph_links_output import GRAPH_LINKS_SUFFIX
 from womblex.store.layout_output import LAYOUT_REGIONS_SUFFIX
 from womblex.store.money_output import MONEY_COLUMNS_SUFFIX, MONEY_SPANS_SUFFIX
 from womblex.store.normalise_output import NORMALISED_TEXT_SUFFIX
@@ -165,6 +166,9 @@ class StageContract:
     # The stage re-reads the source documents, not just the shards: the runner
     # hands it a fetcher for the ingest store (`RunContext.source_fetcher`).
     needs_sources: bool = False
+    # Whether published outputs let the runner skip a base. False for a stage whose inputs can
+    # change under outputs it already wrote (graph-refresh after a rechunk).
+    skip_if_output_present: bool = True
 
     def requires_isaacus_api(self, config: WomblexConfig) -> bool:
         """Whether *config* makes this stage call the Isaacus API at runtime."""
@@ -204,7 +208,7 @@ def _chunk_conditional(config: WomblexConfig) -> tuple[ConditionalInput, ...]:
     inputs = _overlay_input(config.processing.text_source)
     if ai_chunking_model(config):
         # Ordering requirement, not a hard dependency: without the sidecar the
-        # chunker self-enriches (double cost, same output). Warn, don't fail.
+        # chunker calls the Enricher itself (double cost, same output). Warn, don't fail.
         inputs += (
             ConditionalInput(
                 ENRICHMENT_DOC_SUFFIX,
@@ -538,15 +542,14 @@ STAGE_CONTRACTS: dict[str, StageContract] = {
     "graph-refresh": StageContract(
         name="graph-refresh",
         scope=StageScope.PER_BATCH,
-        mutation=MutationMode.IN_PLACE,
-        required_inputs=(
-            ENRICHMENT_ENTITIES_SUFFIX, GRAPH_EDGES_SUFFIX, CHUNKS_SUFFIX, MANIFEST_SUFFIX,
-        ),
+        mutation=MutationMode.SIDECAR,
+        required_inputs=(ENRICHMENT_ENTITIES_SUFFIX, CHUNKS_SUFFIX, MANIFEST_SUFFIX),
         conditional_inputs=_no_conditional,
-        # A subset of the inputs: the stage rewrites both sidecars in place.
-        outputs=lambda _c: (ENRICHMENT_ENTITIES_SUFFIX, GRAPH_EDGES_SUFFIX),
+        outputs=lambda _c: (GRAPH_LINKS_SUFFIX,),
         run=_run_graph_refresh,
         checkpoint_dirname=".graph-refresh-checkpoint",
+        # A rechunk leaves a links file that no longer matches its chunks.
+        skip_if_output_present=False,
     ),
     "quality": StageContract(
         name="quality",

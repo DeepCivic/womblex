@@ -75,7 +75,10 @@ sustained ~0.7–1.0 M tok/min single-process with **zero 429s** (throughput is
 workload-shaped — decisions pack denser than bulky legislation).
 
 ### Long documents — client-side split + offset-merge; split docs not persisted
-A document past `split_ceiling` (default 100K tokens) is split on structural
+The Isaacus adapter declares no split ceiling: the API takes long input whole under
+`overflow_strategy`, and a single 377K-token request was observed to succeed with no 429.
+A provider that does declare a ceiling (`ProviderLimits.token_ceiling`), or an operator who
+sets `enrichment.split_ceiling`, gets the split below. A document past that ceiling is split on structural
 (blank-line) boundaries into sub-documents enriched separately, and the
 per-segment `EnrichmentResult`s are stitched back by `analyse/enrich_merge.py`:
 every span shifted by the segment's `start_char`, every entity/segment id
@@ -83,12 +86,10 @@ namespaced by segment index. This is the same offset stitch the enricher does
 internally for >16K inputs, applied one level up — needed only because a single
 very large *request* is the rate-limit risk. **Split docs are deliberately not
 persisted** for AI-chunking reuse (no single ILGS Document spans the full
-narrative), so those few long-tail docs self-enrich once at chunk time.
-*Measured tradeoff:* negligible for caselaw (~0.4% of docs >100K) but material
-for legislation (~4%, +~15% on enrich cost); the lever is to raise
-`split_ceiling` — a single 377K-token request was observed to succeed with no
-429, so the ceiling is far above the earlier ~150–200K assumption and the
-32K/100K defaults are conservative.
+narrative), so those few long-tail docs are enriched once more at chunk time.
+*Measured tradeoff when a ceiling of 100K was the default:* negligible for caselaw
+(~0.4% of docs >100K) but material for legislation (~4%, +~15% on enrich cost),
+which is why the default is now no ceiling.
 
 ### Graph-edge refresh — enrichment precedes AI chunking, so edges lag
 Semchunk-4 AI chunking reuses the persisted enrichment Document, so the order
@@ -97,9 +98,13 @@ time cannot contain mention→chunk edges (no chunks exist yet), and
 `enrichment_entities.chunk_index` is `-1`. `analyse/graph_refresh.py` closes the
 gap **offline** after chunking: entity mention spans and chunk offsets share the
 same narrative coordinate space, so overlap is deterministic and API-free. It
-rewrites `chunk_index` and replaces the `mentioned_in` edges while preserving
-hierarchy/citation/cross-reference edges; idempotent by construction. Only
-entity mentions are relinked — segment/cross-reference chunk edges need the full
+writes the result to its own `*.graph_links.parquet`, stamped with the digest of
+the chunks it linked against, and rewrites neither enrich file (D-4.2 in
+[decisions-operations.md](decisions-operations.md)); idempotent by construction.
+A reader (`analyse/query.py`) takes the links while the digest matches the chunks
+beside them and otherwise reads enrich's files, so a rechunk costs nothing but a
+refresh and a run refreshed by an older build reads as before. Only entity
+mentions are linked — segment/cross-reference chunk edges need the full
 `EnrichmentResult` and are out of scope.
 
 ### Reference registers — dedicated ingests; document formats — generic
@@ -573,3 +578,12 @@ be re-derivable, and the first pass's were not.
   concurrency over pdfium (a thread pool inside one worker, say), the fix is
   one process-wide `threading.Lock` around every pdfium call, not per-object
   isolation — the restriction is process-wide, not per-document.
+
+### Isaacus's parts are named separately, and the adapter is thin
+2026-10, decided 19 October for Phase 4 of the trust plan.
+
+- **Three things, named apart.** semchunk is open source (MIT) and local. The Kanon-2 tokeniser is open source (Apache-2.0, per its Hugging Face card) and local. The Kanon-2 Enricher and Embedder are paid models, billed per call. Docs and code had run the three together, so enrichment read as if Isaacus were the only provider and a paid chunk-time call was called a "fallback". Every sentence that touches them names which it means, and every paid call names the setting that asked for it ([functional_requirements.md](functional_requirements.md) tags each such requirement with a **Paid:** line).
+- **Enrichment is two requirements.** Requirement 12 is what Womblex does for any provider (packing to the provider's declared limits, the sidecars, the mention-to-chunk links). Requirement 29 is the Isaacus adapter.
+- **The adapter is thin.** Retries are the SDK's own (429s, 5xx and timeouts, honouring `Retry-After`; `max_retries` passed through, null for the SDK default), and long input is the API's `overflow_strategy`. The adapter declares the API's 8 texts per request and no split ceiling, so Womblex splits a document only above a ceiling a provider declares. *Rejected:* Womblex's own retry loops (a second back-off under the SDK's) and a 100K-token default split ceiling (it paid ~15% more on enrich for legislation to avoid a failure the API did not show).
+- **AI chunking belongs to chunking.** A chunk-time Enricher call is paid work that `chunking.chunking_model` asked for. It is logged per document and counted in the `*.chunks.parquet` footer (`womblex.ai_chunking_calls`), counted by `plan`, and never called a fallback.
+- **Graph refresh writes its own sidecar** (D-4.2 in [decisions-operations.md](decisions-operations.md)); see "Graph-edge refresh" above.

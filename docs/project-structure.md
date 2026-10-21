@@ -18,7 +18,8 @@ womblex/
 │   │   ├── __main__.py     # `python -m womblex.cli` → main()
 │   │   ├── _shared.py      # Command NamedTuple, setup_logging, select_supported / discover_files, normalise_prefix, check_stage_models
 │   │   ├── pipeline.py     # run, extract, chunk, manifest subcommands
-│   │   ├── cloud.py        # enqueue / enqueue-stages / worker / jobs / finalize / run-stage / egress subcommands
+│   │   ├── cloud.py        # enqueue / enqueue-stages / worker / finalize / run-stage / egress subcommands
+│   │   ├── jobs.py         # jobs subcommand (queue status)
 │   │   ├── retry.py        # retry-stage subcommand
 │   │   ├── serve.py        # serve subcommand (the `/v1` service API)
 │   │   ├── api_token.py    # api-token subcommand
@@ -120,7 +121,7 @@ womblex/
 │   │   ├── enrich.py        # Isaacus enrichment wrappers (kanon-2-enricher)
 │   │   ├── enrich_stage.py  # enrich_shards() — drives `womblex enrich --shards`; writes *.enrichment_entities.parquet
 │   │   ├── enrich_merge.py  # Stitch per-segment results of a split long document back into one
-│   │   ├── graph_refresh.py # refresh_graph_edges() — offline mention→chunk edge rebuild after AI chunking
+│   │   ├── graph_refresh.py # refresh_graph_edges() — offline mention→chunk links (*.graph_links.parquet) after chunking
 │   │   ├── embed.py         # Thin wrapper over Isaacus embeddings.create (kanon-2-embedder)
 │   │   ├── embed_stage.py   # embed_shards() — drives `womblex embed --shards`; writes *.embeddings.parquet
 │   │   ├── graph.py         # build_document_graph() — entity graph construction from enrichment results
@@ -137,6 +138,7 @@ womblex/
 │   │   ├── spellfix_output.py    # *.spellfix_text.parquet + *.spellfix_corrections.parquet schemas + IO
 │   │   ├── quality_output.py     # *.chunk_quality.parquet schema + IO
 │   │   ├── embed_output.py  # *.embeddings.parquet schema + IO
+│   │   ├── graph_links_output.py # *.graph_links.parquet schema + IO, chunks digest, matching-links read
 │   │   ├── entity_links_output.py # *.entity_links.parquet schema + IO (mention grain; doc grain derived on read)
 │   │   ├── layout_output.py # *.layout_regions.parquet schema + IO, LayoutFingerprint and its footer keys
 │   │   ├── money_output.py  # *.money_spans.parquet (decimal128 values) + *.money_columns.parquet schemas + IO
@@ -165,6 +167,7 @@ womblex/
 │   │   ├── destination_postgres.py # A workflow's Postgres destination — one row per embedded chunk, masked by default, upserted
 │   │   ├── webhook.py          # A workflow's webhook destination — six run events, signed, resent under one id, recorded
 │   │   ├── delivery.py         # Deliver a finished run to its workflow's destinations — checked before launch, bounded retries, recorded on the run
+│   │   ├── run_status.py       # run_sentence() — a run's status as one sentence from exact per-stage counts
 │   │   ├── finalize.py         # finalize_run() — a run's manifest.parquet in its store; `womblex finalize` and the coordinator's last step
 │   │   ├── retry.py            # retry_stage() — fork a failed stage from its first failed unit, refusing before the fork
 │   │   ├── workflows.py        # extract_batch / run_stage / run_downstream workflows; a dispatched workflow's stage runs under its overlay and digest

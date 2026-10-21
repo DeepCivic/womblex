@@ -145,11 +145,12 @@ def _skippable(
     contract: StageContract, config: WomblexConfig, shard_prefix: str,
     unit: list[str], present: set[str], force: bool,
 ) -> bool:
-    # Skip is only sound for sidecar producers: graph-refresh's outputs are a
-    # subset of its inputs, so output-exists can never fire.
+    # Skip is only sound for sidecar producers whose inputs cannot change under their outputs;
+    # layout's outputs are a subset of its inputs, so output-exists can never fire.
     return (
         not force
         and contract.mutation is MutationMode.SIDECAR
+        and contract.skip_if_output_present
         and _outputs_present(contract, config, shard_prefix, unit, present)
     )
 
@@ -250,7 +251,7 @@ def _publish(
     leaves only an incomplete *new* set, which the skip rule refuses to treat as
     complete — the next run redoes the base and overwrites.
 
-    An IN_PLACE stage (only ``graph-refresh``) rewrites keys that already hold
+    An IN_PLACE stage (only ``layout``) rewrites keys that already hold
     good bytes and is never skipped, so a straight overwrite is destructive: a
     crash between the two uploads could leave one sidecar rewritten against the
     other's stale bytes, or a half-written object, with no clean copy to fall
@@ -307,8 +308,8 @@ def _publish_atomic(
         raise
 
     # All uploads landed — commit. A failure here can leave a partial set on the
-    # live keys, but graph-refresh is never skipped and recomputes both sidecars
-    # from the same offsets, so the next run overwrites cleanly.
+    # live keys, but layout is never skipped and recomputes its sidecar, so the
+    # next run overwrites cleanly.
     for temp_key, live_key in staged:
         store.move(temp_key, live_key)
 

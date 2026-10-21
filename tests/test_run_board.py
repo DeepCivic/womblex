@@ -100,6 +100,15 @@ def test_runs_rolls_up_status_per_run(board):
     assert board.runs(owner="bob", run_id="run-a") == []
 
 
+def test_a_run_summary_reads_as_a_sentence_from_its_per_stage_counts(board):
+    board.enqueue("run-a", [spec(1), spec(2)])
+    board.enqueue_stages("run-a", ["enrich", "chunk"], "runs/x/documents")
+    (summary,) = board.runs(run_id="run-a")
+    # The coordinator is bookkeeping; stage rows appear as the coordinator dispatches them.
+    assert summary.stages == {"extract": {"pending": 2}}
+    assert summary.sentence == "Run run-a is pending (extract: 2 pending)."
+
+
 def test_list_jobs_reads_the_row_the_dashboard_shows(board):
     board.enqueue("run-a", [spec(1), spec(2)])
     rows = board.list_jobs("run-a")

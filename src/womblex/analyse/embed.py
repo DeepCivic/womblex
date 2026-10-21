@@ -1,8 +1,8 @@
 """Isaacus embeddings API wrapper (kanon-2-embedder).
 
 Thin adapter over ``client.embeddings.create``. Batches into the API's
-128-text-per-request limit, handles 429 rate-limit retries with
-exponential backoff, and returns vectors in input order. The embedding
+128-text-per-request limit and returns vectors in input order; retries are the
+SDK's own (``max_retries`` on the client). The embedding
 *task* matters: documents being indexed use ``retrieval/document``;
 search queries use ``retrieval/query`` (see CLAUDE.md "Isaacus task
 types matter").
@@ -18,7 +18,6 @@ and its `isaacus` trait answers the pre-launch gates before anything is built.
 from __future__ import annotations
 
 import logging
-import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
@@ -33,8 +32,6 @@ logger = logging.getLogger(__name__)
 DEFAULT_MODEL = "kanon-2-embedder"
 DEFAULT_TASK = "retrieval/document"
 MAX_TEXTS_PER_REQUEST = 128
-DEFAULT_MAX_RETRIES = 3
-DEFAULT_RETRY_BASE_DELAY = 2.0
 
 
 def embed_texts(
@@ -44,22 +41,17 @@ def embed_texts(
     model: str = DEFAULT_MODEL,
     task: str | None = DEFAULT_TASK,
     dimensions: int | None = None,
-    max_retries: int = DEFAULT_MAX_RETRIES,
-    retry_base_delay: float = DEFAULT_RETRY_BASE_DELAY,
 ) -> list[list[float]]:
     """Embed ``texts`` via the Isaacus embedding API, preserving order.
 
     Splits into ``MAX_TEXTS_PER_REQUEST`` chunks. Each text must contain a
     non-whitespace character (the caller filters empties). Raises
-    ``RuntimeError`` if a request fails after all retries.
+    ``RuntimeError`` if a request fails.
     """
     out: list[list[float] | None] = [None] * len(texts)
     for start in range(0, len(texts), MAX_TEXTS_PER_REQUEST):
         batch = texts[start : start + MAX_TEXTS_PER_REQUEST]
-        resp = _embed_batch(
-            batch, client, model=model, task=task, dimensions=dimensions,
-            max_retries=max_retries, retry_base_delay=retry_base_delay,
-        )
+        resp = _embed_batch(batch, client, model=model, task=task, dimensions=dimensions)
         for emb in resp.embeddings:  # type: ignore[attr-defined]
             out[start + emb.index] = emb.embedding
     if any(v is None for v in out):
@@ -68,35 +60,18 @@ def embed_texts(
 
 
 def _embed_batch(
-    texts: list[str], client: object, *, model: str, task: str | None,
-    dimensions: int | None, max_retries: int, retry_base_delay: float,
+    texts: list[str], client: object, *, model: str, task: str | None, dimensions: int | None,
 ) -> object:
     kwargs: dict = {"model": model, "texts": texts}
     if task is not None:
         kwargs["task"] = task
     if dimensions is not None:
         kwargs["dimensions"] = dimensions
-
-    last_error: Exception | None = None
-    for attempt in range(max_retries + 1):
-        try:
-            return client.embeddings.create(**kwargs)  # type: ignore[attr-defined]
-        except Exception as e:
-            last_error = e
-            error_str = str(e)
-            if "429" in error_str or "rate" in error_str.lower():
-                delay = retry_base_delay * (2 ** attempt)
-                logger.warning(
-                    "Rate limited on embeddings (attempt %d/%d), retrying in %.1fs",
-                    attempt + 1, max_retries + 1, delay,
-                )
-                time.sleep(delay)
-                continue
-            logger.error("Embedding failed: %s", e)
-            raise RuntimeError(f"Embedding failed: {e}") from e
-    raise RuntimeError(
-        f"Embedding failed after {max_retries + 1} attempts: {last_error}"
-    ) from last_error
+    try:
+        return client.embeddings.create(**kwargs)  # type: ignore[attr-defined]
+    except Exception as e:
+        logger.error("Embedding failed: %s", e)
+        raise RuntimeError(f"Embedding failed: {e}") from e
 
 
 # ---------------------------------------------------------------------------
@@ -142,13 +117,13 @@ class IsaacusEmbedding:
             model=self.config.model,
             task=self.config.task,
             dimensions=self.config.dimensions,
-            max_retries=self.config.max_retries,
-            retry_base_delay=self.config.retry_base_delay,
         )
 
 
 def _make_isaacus(*, config: EmbeddingConfig, client: object = None, **_: object) -> IsaacusEmbedding:
-    return IsaacusEmbedding(client, config)
+    from womblex.utils.isaacus_client import with_retries
+
+    return IsaacusEmbedding(with_retries(client, config.max_retries), config)
 
 
 register(SLOT_EMBEDDING, DEFAULT_MODEL, _make_isaacus, traits={"isaacus": True})

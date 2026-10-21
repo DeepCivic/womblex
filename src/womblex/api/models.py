@@ -18,7 +18,8 @@ class Ready(BaseModel):
 
 class RunStatus(BaseModel):
     """One run's queue rollup. ``state`` is derived from ``counts``; ``orphaned`` marks extraction
-    a failed firing queued with no stages dispatched."""
+    a failed firing queued with no stages dispatched. ``summary`` is the status sentence the CLI and
+    console show, built from the exact per-stage counts."""
 
     run_id: str
     state: Literal["pending", "running", "done", "failed", "cancelled"]
@@ -27,6 +28,7 @@ class RunStatus(BaseModel):
     created_at: str | None = None
     updated_at: str | None = None
     orphaned: bool = False
+    summary: str
 
 
 class RunList(BaseModel):

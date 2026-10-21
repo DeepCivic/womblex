@@ -348,10 +348,10 @@ Approaches tried and abandoned, library-general limitations, and the deferred ba
      a cheap pre-filter, but byte-identity subsumes it (and also permits safe
      reuse when overlays are relabelled yet produce identical text). On any
      mismatch (or a missing sidecar),
-     **fall back to self-enrich** (`chunking_model` only) — i.e. promote
-     verification gate 1 from a one-time check to a per-document runtime guard,
-     mirroring the project's existing "missing overlay falls back to verbatim"
-     idiom. The fallback double-enriches that document only.
+     **the chunk stage makes the Enricher call itself** (`chunking_model` only, a
+     call that setting asked for) — i.e. promote verification gate 1 from a
+     one-time check to a per-document runtime guard. It pays for that document
+     only, and says so: logged per document and counted in the chunks footer.
   5. Ordering contract: with AI chunking on, run `enrich` before `chunk`.
      Repoint the existing `WomblexConfig` validator from "warns about
      double-enrich" to "warns only when reuse isn't wired (sidecar absent /
@@ -384,8 +384,8 @@ Approaches tried and abandoned, library-general limitations, and the deferred ba
   *Superseded:* a homegrown boundary-hints layer (enrichment spans as preferred
   splits and no-split zones fed to semchunk) — semchunk 4 absorbed the concern.
 
-- **Local enrichment fallback.** Without Isaacus there are no graph spans, so
-  PII has only the opt-in backstop and AI chunking falls back to token splitting.
+- **A local enrichment provider.** Without Isaacus there are no graph spans, so
+  PII has only the opt-in backstop and AI chunking is off (chunking is semchunk's token splitting).
   A config-selected local provider (spaCy / fine-tuned NER) populating
   `EnrichmentResult` would serve both offline, at lower quality. *Wanted
   (2026-10)*: a GLiNER-based provider is in development by the maintainer, so
@@ -408,8 +408,8 @@ Approaches tried and abandoned, library-general limitations, and the deferred ba
   reuse. Womblex keeps packing, splitting, the table pass, the sidecars, evidence
   and chunk mapping, so a provider changes who recognises entities and nothing
   downstream. The Isaacus-only features (AI-chunking reuse, `persist_document`)
-  stay as they are, with token splitting as the fallback for a provider that
-  returns no Document. *Rationale:* a pure Isaacus pipeline is the Isaacus SDK
+  stay as they are; for a provider that returns no Document, `chunking_model` is
+  set aside and chunking is semchunk's local token splitting. *Rationale:* a pure Isaacus pipeline is the Isaacus SDK
   used directly; the slot keeps Womblex's own pipeline from hard-wiring one
   provider. Embedding follows the same pattern, and the GLiNER provider is the
   first alternative once the slot exists.
@@ -667,3 +667,17 @@ grid-first path scored by `tabular_metrics`. (4) *(deferred)* per-page modality
 (Option D) if measured to matter. The load-bearing invariant throughout: the
 element stream is the contract, so downstream stages are untouched by
 construction.
+
+## Mistakes to avoid when planning
+
+Made in Phase 2 of the trust-and-recipes plan (the ninth recurred in almost every merge of the plan). Check a new plan against this list before building.
+
+1. **A setting before anything uses it.** Workflow `destinations` were stored and did nothing. *Rule:* a setting lands in the merge that makes it act.
+2. **A file nobody reads.** Workflow conditions wrote a label sidecar nothing reads, derivable from the manifest anyway. *Rule:* every new output names its reader; anything derivable is derived on read.
+3. **Automation that pays twice.** Each scheduled firing re-extracts every document and re-pays enrichment. *Rule:* anything that runs unattended processes only unseen documents.
+4. **Tools taken from the operator.** A workflow could only be created in code. *Rule:* anything an operator sets up has a file and a command.
+5. **A justification never delivered.** Workflows went into a database because a file "cannot hold a schedule", and the schedule then repeated all work (mistake 3). *Rule:* a feature that justifies a decision must work in the same phase, or the decision reopens.
+6. **Halting a run after launch, then reverting.** Two changes stopped a run mid-flight over one document; both were reverted. *Rule:* every refusal happens before launch.
+7. **Secrets in stored settings.** A planned destination would have stored a database password in the workflow. *Rule:* settings name where a secret lives, never the secret.
+8. **Asking the owner what the design answers.** Reviews treated open items as settled and asked the owner to pick options. *Rule:* ask only when the answer changes what users get; otherwise the builder decides and cites where the design says so.
+9. **Isaacus's open-source parts treated as its paid models.** Requirements and docs ran semchunk, the Kanon-2 tokeniser and the Kanon-2 Enricher together. They described enrichment as if Isaacus were the only provider, put AI chunking inside enrichment, and called a paid chunk-time call a "fallback". *Rule:* semchunk (MIT, local), the Kanon-2 tokeniser (Apache-2.0, local) and the Kanon-2 Enricher and Embedder (paid, per call) are named separately in every sentence that touches them. Enrichment is written provider-neutral, with Isaacus as one adapter. AI chunking belongs to chunking. Every paid call names the setting that asked for it.

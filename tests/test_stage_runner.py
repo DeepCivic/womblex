@@ -83,9 +83,20 @@ def test_inputs_and_outputs_disjoint_except_in_place_mutators():
             assert outs <= ins, f"{name} is IN_PLACE but its outputs are not a subset of inputs"
 
 
-def test_graph_refresh_and_layout_are_the_in_place_mutators():
+def test_layout_is_the_only_in_place_mutator():
     in_place = {n for n, c in STAGE_CONTRACTS.items() if c.mutation is MutationMode.IN_PLACE}
-    assert in_place == {"graph-refresh", "layout"}
+    assert in_place == {"layout"}
+
+
+def test_graph_refresh_writes_only_its_links_and_is_not_skipped_on_them():
+    """A rechunk leaves a links file that no longer matches, so its existence cannot skip the base."""
+    from womblex.cloud.stage_runner import _skippable
+    from womblex.store.graph_links_output import GRAPH_LINKS_SUFFIX
+
+    contract, cfg = STAGE_CONTRACTS["graph-refresh"], _config()
+    assert contract.outputs(cfg) == (GRAPH_LINKS_SUFFIX,)
+    present = {f"runs/r/documents/batch-0001{GRAPH_LINKS_SUFFIX}"}
+    assert not _skippable(contract, cfg, "runs/r/documents", ["batch-0001"], present, False)
 
 
 def test_quality_is_the_only_whole_run_stage():
@@ -337,7 +348,7 @@ def test_missing_soft_conditional_input_is_tolerated(tmp_path):
 
 
 def test_in_place_mutator_is_never_skipped(tmp_path):
-    """graph-refresh's outputs are a subset of its inputs — output-exists can't fire."""
+    """An in-place stage's outputs are a subset of its inputs — output-exists can't fire."""
     store = RemoteStore.from_uri(str(tmp_path / "store"))
     prefix = "runs/r/documents"
     _seed(store, tmp_path, prefix, [
@@ -361,7 +372,7 @@ def test_in_place_commit_leaves_live_keys_untouched_on_upload_failure(tmp_path, 
     """The destructive window is closed: a crash mid-upload must not truncate or
     partially rewrite the live sidecars an IN_PLACE stage overwrites.
 
-    graph-refresh rewrites two sidecars that already hold good bytes and is
+    an in-place stage rewrites sidecars that already hold good bytes and is
     never skipped, so a straight overwrite that failed between the two writes
     could leave one rewritten against the other's stale bytes. The atomic commit
     uploads to `.staging` first and only moves onto the live keys once every

@@ -256,8 +256,8 @@ def cmd_graph_refresh(args: argparse.Namespace) -> int:
     logger.info("graph-refresh --shards: dir=%s", shard_dir)
     result = refresh_graph_edges(shard_dir, checkpoint_mgr=ckpt)
     logger.info(
-        "Done: %d batches written, %d docs refreshed, %d mention edges",
-        result.batches_written, result.docs_refreshed, result.edges_added,
+        "Done: %d batches written, %d docs refreshed, %d mention links",
+        result.batches_written, result.docs_refreshed, result.links_written,
     )
     return 0
 
@@ -266,7 +266,7 @@ COMMANDS = [
     Command("enrich", "Enrich a shard directory via Kanon-2 (per-stage)", _register_enrich, cmd_enrich),
     Command("link", "Match enrichment candidates to a reference register", _register_link, cmd_link),
     Command(
-        "graph-refresh", "Rebuild mention→chunk graph edges after chunking (offline)",
+        "graph-refresh", "Link mentions to chunks after chunking (offline)",
         _register_graph_refresh, cmd_graph_refresh,
     ),
 ]

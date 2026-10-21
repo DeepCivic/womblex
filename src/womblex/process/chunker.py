@@ -50,8 +50,9 @@ mapping ``source_hash`` → a pre-enriched ``Document`` persisted by the
 enrich stage (``*.enrichment_doc.parquet``). An override is used only when
 its ``.text`` is byte-identical to the doc's reassembled narrative — the
 coordinate-space guard from ``docs/decisions-dead-ends.md``; on mismatch (or no
-sidecar) the doc falls back to passing the string and letting semchunk
-self-enrich. The composable default (``chunking_model=None``) keeps the
+sidecar) the string is passed and semchunk makes the Enricher call itself, because
+``chunking_model`` asked for AI chunking (a paid call, logged per document and counted
+in the chunks footer by the chunk stage). The composable default (``chunking_model=None``) keeps the
 offline token split, so non-Kanon callers are unaffected.
 """
 
@@ -361,8 +362,8 @@ def chunk_batch(
     override is used **only** when its ``.text`` is byte-identical to that
     doc's reassembled ``narrative`` (the coordinate-space guard from
     ``docs/decisions-dead-ends.md``); on any mismatch the plain narrative string is
-    chunked instead, so a stale or differently-cleaned Document silently
-    falls back to self-enrich rather than desyncing offsets. Tables always
+    chunked instead, so a stale or differently-cleaned Document is never used
+    against the wrong text; semchunk makes the Enricher call for it instead. Tables always
     chunk in token mode.
 
     Returns ``{source_hash: list[TextChunk]}`` with ``chunk_index``
@@ -475,8 +476,8 @@ def _resolve_narrative_input(doc: ChunkInput, overrides: dict[str, object]) -> o
 
     The byte-identity guard: an override is honoured only when its ``.text``
     equals ``doc.narrative`` exactly (same coordinate space). Otherwise the
-    plain narrative string is returned and semchunk self-enriches (if a
-    ``chunking_model`` is set) — the per-doc fallback in ``docs/decisions-dead-ends.md``.
+    plain narrative string is returned and semchunk makes the Enricher call itself (if a
+    ``chunking_model`` is set), as ``docs/decisions-dead-ends.md`` records.
     """
     override = overrides.get(doc.source_hash)
     if override is None:
@@ -486,7 +487,7 @@ def _resolve_narrative_input(doc: ChunkInput, overrides: dict[str, object]) -> o
         return override
     logger.warning(
         "chunk reuse guard: persisted Document.text for %s does not match the "
-        "reassembled narrative (len %s vs %s); falling back to self-enrich.",
+        "reassembled narrative (len %s vs %s); not reused, so AI chunking calls the Enricher.",
         doc.source_hash,
         None if override_text is None else len(override_text),
         len(doc.narrative),

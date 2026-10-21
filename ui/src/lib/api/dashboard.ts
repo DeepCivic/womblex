@@ -32,6 +32,8 @@ export interface JobRow {
 export interface QueueSection {
 	stats: Record<string, number>;
 	total: number;
+	// The run's status sentence (null without a selected run); the CLI and API print the same one.
+	summary: string | null;
 	jobs: JobRow[];
 	workers: QueueWorker[];
 	stale: JobRow[];

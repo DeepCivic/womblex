@@ -244,42 +244,31 @@ class TestEnrichDocument:
         assert len(results) == 1
         assert isinstance(results[0], EnrichmentResult)
 
-    def test_enrich_retry_on_rate_limit(self) -> None:
-        client = MagicMock()
-        # First call raises 429, second succeeds
-        doc = _make_mock_document()
-        response = SimpleNamespace(
-            results=[SimpleNamespace(index=0, document=doc)],
-            usage=SimpleNamespace(input_tokens=42),
-        )
-        client.enrichments.create.side_effect = [
-            Exception("429 rate limit exceeded"),
-            response,
-        ]
-
-        result = enrich_document(
-            "Test text",
-            client,
-            retry_base_delay=0.01,  # fast retries for test
-        )
-        assert isinstance(result, EnrichmentResult)
-        assert client.enrichments.create.call_count == 2
-
-    def test_enrich_non_retryable_error(self) -> None:
-        client = MagicMock()
-        client.enrichments.create.side_effect = Exception("Internal server error")
-
-        with pytest.raises(RuntimeError, match="Enrichment failed"):
-            enrich_document("Test text", client)
-
-    def test_enrich_exhausted_retries(self) -> None:
+    def test_a_failed_request_is_one_call_and_the_sdk_does_the_retrying(self) -> None:
         client = MagicMock()
         client.enrichments.create.side_effect = Exception("429 rate limit exceeded")
 
-        with pytest.raises(RuntimeError, match="after 4 attempts"):
-            enrich_document(
-                "Test text",
-                client,
-                max_retries=3,
-                retry_base_delay=0.01,
-            )
+        with pytest.raises(RuntimeError, match="Enrichment failed"):
+            enrich_document("Test text", client)
+        assert client.enrichments.create.call_count == 1  # no Womblex retry loop
+
+    def test_max_retries_is_passed_to_the_sdk_client(self) -> None:
+        from womblex.analyse.enrich import isaacus_provider
+        from womblex.config import EnrichmentConfig
+
+        client = MagicMock()
+        provider = isaacus_provider(EnrichmentConfig(max_retries=5), client, token_counter=MagicMock())
+        client.with_options.assert_called_once_with(max_retries=5)
+        assert provider.client is client.with_options.return_value
+
+        unset = MagicMock()
+        assert isaacus_provider(EnrichmentConfig(), unset, token_counter=MagicMock()).client is unset  # SDK default
+
+    def test_the_isaacus_adapter_declares_the_apis_limits_and_no_split_ceiling(self) -> None:
+        from womblex.analyse.enrich import isaacus_provider
+        from womblex.config import EnrichmentConfig
+
+        limits = isaacus_provider(EnrichmentConfig(), None, token_counter=MagicMock()).limits
+        assert (limits.max_texts_per_request, limits.token_ceiling) == (8, None)
+        assert isaacus_provider(EnrichmentConfig(split_ceiling=5000), None, token_counter=MagicMock()
+                                ).limits.token_ceiling == 5000

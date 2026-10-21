@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import time
 from pathlib import Path
 
@@ -540,6 +541,24 @@ def _register_manifest(p: argparse.ArgumentParser) -> None:
         "--lineage", type=Path, default=None,
         help="Also write the run record as an OpenLineage RunEvent (JSON) to this path.",
     )
+    p.add_argument(
+        "--dsn", default=None,
+        help="DBOS system database URL (or $WOMBLEX_DB_DSN / $DATABASE_URL): with --lineage, the "
+             "event reports the run's real outcome from the job queue instead of `unknown`.",
+    )
+
+
+def _run_state(args: argparse.Namespace, record: dict) -> str | None:
+    """The run's outcome from the job queue, or ``None`` with no DSN or no run on the board."""
+    dsn = getattr(args, "dsn", None) or os.environ.get("WOMBLEX_DB_DSN") or os.environ.get("DATABASE_URL")
+    if not dsn:
+        return None
+    from womblex.cloud.jobs import RunBoard, run_state
+
+    run_id = (record.get("run") or {}).get("run_id")
+    with RunBoard(dsn) as board:
+        counts = board.stats(run_id) if run_id else {}
+    return run_state(counts) if counts else None
 
 
 def cmd_manifest(args: argparse.Namespace) -> int:
@@ -561,8 +580,9 @@ def cmd_manifest(args: argparse.Namespace) -> int:
         from womblex.store.lineage import LineageError, run_event
         from womblex.store.run_manifest import read_run_record
 
+        record = read_run_record(manifest) or {}
         try:
-            event = run_event(read_run_record(manifest) or {})
+            event = run_event(record, state=_run_state(args, record))
         except LineageError as e:
             logger.error("--lineage: %s", e)
             return 1

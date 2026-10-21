@@ -34,8 +34,9 @@ the single source). An unknown role reads as `raw`.
 | `normalised_text`, `spellfix_text`, `spellfix_corrections` | `(source_hash, elem_order)` | raw |
 | `chunks` | `(source_hash, chunk_index)`; table chunks anchor on `elem_order` | raw |
 | `embeddings`, `chunk_quality` | `(source_hash, chunk_index)` | none |
-| `enrichment_entities` | `(source_hash, entity_id)`; carries `chunk_index` to `chunks` (narrative mentions only; table mentions are `-1`). `text_layer` names the text `mention_start` / `mention_end` index: the narrative under its element-text layer, or `table_markdown` with the table named by `elem_order` or `sheet` (1.4; null on older files, read as narrative). `mention_text` is the text of that mention, which can differ from the entity's `name` (1.5; null on older files) | raw |
-| `graph_edges` | `source_hash` + `source_id` / `target_id` to `enrichment_entities.entity_id` | raw |
+| `enrichment_entities` | `(source_hash, entity_id)`; carries `chunk_index` to `chunks` (narrative mentions only; table mentions are `-1`) as enrich left it, `-1` where chunks did not yet exist: `graph-refresh` no longer rewrites it, so read the link through `graph_links` (`analyse/query.py` does). `text_layer` names the text `mention_start` / `mention_end` index: the narrative under its element-text layer, or `table_markdown` with the table named by `elem_order` or `sheet` (1.4; null on older files, read as narrative). `mention_text` is the text of that mention, which can differ from the entity's `name` (1.5; null on older files) | raw |
+| `graph_edges` | `source_hash` + `source_id` / `target_id` to `enrichment_entities.entity_id`; its `mentioned_in` edges are enrich's, present only where chunks existed when it ran; `graph-refresh` leaves the file as it is, and a reader derives those edges from `graph_links` while the links match | raw |
+| `graph_links` | `(source_hash, entity_id, mention_start, mention_end)` to `enrichment_entities`; `chunk_index` is the first overlapping narrative chunk (`-1` for none) and `chunk_indices` all of them. The footer key `womblex.chunks_digest` is the digest of the chunks it was computed against: a reader uses the links only while the `chunks` beside them hash to it. Written by `graph-refresh`; absent from earlier runs, which read as before | raw |
 | `enrichment_doc` | `source_hash` (one row per document) | raw |
 | `enrichment_meta` | `source_hash`; `table_count` is tables sent to the enricher on their own, null where none were (1.4) | none |
 | `entity_links` | `source_hash` plus the evidence reference; its `entity_id` is the reference-register id and `mention_text` the enricher's text for the mention (null where the provider gave none) | raw |
@@ -116,7 +117,7 @@ slot, name, and the distribution and version that supplied it
 (`read_footer_slot_models`); `womblex.model_check` records the pre-run model
 check's result (`read_footer_model_check`); `womblex.workflow_digest` names the
 workflow whose step wrote a sidecar (locally through `run-workflow`, or on a worker for a stage dispatched with the workflow) and `womblex.workflow` holds that workflow's name and full spec as JSON (`read_footer_stamp`),
-absent from extraction files and from sidecars written outside a workflow. Each is written only when it has a
+absent from extraction files and from sidecars written outside a workflow; `womblex.ai_chunking_calls` on a chunks file counts the Kanon-2 Enricher calls AI chunking made for that batch, and is absent when `chunking.chunking_model` was not set. Each is written only when it has a
 value — a process that loaded, built or checked nothing writes no key — and
 all are additive metadata, so a reader that ignores them reads the file
 unchanged. No column is added for any.
@@ -124,7 +125,9 @@ unchanged. No column is added for any.
 The run record in `manifest.parquet`'s footer can be exported as an OpenLineage
 2-0-2 `RunEvent` (`womblex manifest --shards DIR --lineage OUT`). It carries the
 record's own facts, with the run id, file keys and digests, models and services
-in `womblex_*` facets, and no document text.
+in `womblex_*` facets, and no document text. With `--dsn` the event type follows the
+run's outcome on the job queue (`COMPLETE`, `FAIL` or `ABORT`); without it the event is
+`COMPLETE` and its `status` facet is `unknown`.
 
 ## Safe to hand onward
 

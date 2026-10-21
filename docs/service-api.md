@@ -72,7 +72,7 @@ that submitted them.
 | POST | `/v1/uploads` | submit | Multipart `files` to `<ingest>/<client_id>/<upload_id>/`; returns that folder as `input_prefix` |
 | POST | `/v1/runs` | submit | Enqueue extraction plus the downstream stages the config enables; returns `run_id`, `document_count`, `batch_count` and `stages` |
 | GET | `/v1/runs` | read | The caller's runs with a status rollup, latest activity first, at most 1000 (`RUN_LIMIT`) |
-| GET | `/v1/runs/{id}` | read | One run's state and per-status counts |
+| GET | `/v1/runs/{id}` | read | One run's state, per-status counts and status sentence (`summary`) |
 | GET | `/v1/runs/{id}/manifest` | read | The consolidated run manifest |
 | GET | `/v1/runs/{id}/files` | read | Object keys, row counts and footer `contract_version` / `sensitivity` |
 | GET | `/v1/runs/{id}/documents/{hash}/text` | read / read_raw | One document's text in document order, by `layer` |
@@ -112,7 +112,9 @@ pins its operation and model surface so breaking changes show in review.
 `failed` if any job failed; `running` while jobs run or some are pending
 beside some done; `pending` while all are pending; `cancelled` when a job
 was cancelled; otherwise `done`. `orphaned` is true for a run whose firing
-queued extraction and failed before its stages were dispatched.
+queued extraction and failed before its stages were dispatched. `summary` is the
+sentence `womblex jobs --run-id` and the console show, built from the exact
+per-stage counts, e.g. `Run r1 is running (extract: 4 done; chunk: 1 done, 2 pending).`
 
 ### Document text layers
 

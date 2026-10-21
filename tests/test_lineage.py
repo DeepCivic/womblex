@@ -87,6 +87,21 @@ def test_a_run_record_maps_to_a_conforming_run_event(tmp_path, extraction) -> No
     assert event["inputs"][0]["facets"]["womblex_corpus"]["documents"] == 1
 
 
+@pytest.mark.parametrize(("state", "event_type"), [("done", "COMPLETE"), ("failed", "FAIL"), ("cancelled", "ABORT")])
+def test_the_event_type_follows_the_runs_outcome(tmp_path, extraction, state, event_type) -> None:  # noqa: F811
+    record = read_run_record(write_run_manifest(_extracted(tmp_path, extraction)))
+    event = run_event(record, state=state)
+    assert _conforms(event, _event_schema()) == []
+    assert event["eventType"] == event_type and event["run"]["facets"]["womblex_run"]["status"] == state
+
+
+def test_an_unfinished_run_has_no_outcome_and_no_state_is_unknown(tmp_path, extraction) -> None:  # noqa: F811
+    record = read_run_record(write_run_manifest(_extracted(tmp_path, extraction)))
+    with pytest.raises(LineageError):
+        run_event(record, state="running")
+    assert run_event(record)["run"]["facets"]["womblex_run"]["status"] == "unknown"
+
+
 def test_published_files_become_output_datasets(tmp_path, extraction) -> None:  # noqa: F811
     shards = _extracted(tmp_path, extraction)
     table = pq.read_table(str(write_run_manifest(shards)))

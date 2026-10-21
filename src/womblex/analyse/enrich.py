@@ -20,7 +20,6 @@ than a paid call of its own.
 from __future__ import annotations
 
 import logging
-import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
@@ -49,31 +48,6 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "kanon-2-enricher"
-DEFAULT_MAX_RETRIES = 3
-DEFAULT_RETRY_BASE_DELAY = 2.0
-
-
-def _retry_after_seconds(exc: object) -> float | None:
-    """Extract a ``Retry-After`` delay (seconds) from an SDK exception, if any.
-
-    The Isaacus SDK's ``RateLimitError`` carries the HTTP ``response``; its
-    ``Retry-After`` header (delta-seconds) is the server's own backoff advice.
-    Returns ``None`` when unavailable so the caller falls back to exponential.
-    """
-    response = getattr(exc, "response", None)
-    headers = getattr(response, "headers", None)
-    if headers is None:
-        return None
-    try:
-        raw = headers.get("retry-after")
-    except Exception:
-        return None
-    if not raw:
-        return None
-    try:
-        return max(0.0, float(raw))
-    except (TypeError, ValueError):
-        return None
 
 
 # ---------------------------------------------------------------------------
@@ -303,8 +277,6 @@ def enrich_document(
     *,
     model: str = DEFAULT_MODEL,
     overflow_strategy: str = "auto",
-    max_retries: int = DEFAULT_MAX_RETRIES,
-    retry_base_delay: float = DEFAULT_RETRY_BASE_DELAY,
 ) -> EnrichmentResult:
     """Enrich a single document via the Isaacus enrichment API.
 
@@ -312,19 +284,15 @@ def enrich_document(
         text: Full extracted document text.
         client: An ``isaacus.Isaacus`` client instance.
         model: Enrichment model identifier.
-        max_retries: Maximum retry attempts for rate-limit (429) errors.
-        retry_base_delay: Base delay in seconds for exponential backoff.
 
     Returns:
         EnrichmentResult containing segments, entities, and relationships.
 
     Raises:
-        RuntimeError: If enrichment fails after all retries.
+        RuntimeError: If the request fails (after the SDK's own retries).
     """
     return enrich_documents([text], client, model=model,
-                            overflow_strategy=overflow_strategy,
-                            max_retries=max_retries,
-                            retry_base_delay=retry_base_delay)[0]
+                            overflow_strategy=overflow_strategy)[0]
 
 
 def enrich_document_raw(
@@ -333,8 +301,6 @@ def enrich_document_raw(
     *,
     model: str = DEFAULT_MODEL,
     overflow_strategy: str = "auto",
-    max_retries: int = DEFAULT_MAX_RETRIES,
-    retry_base_delay: float = DEFAULT_RETRY_BASE_DELAY,
 ) -> tuple[EnrichmentResult, object]:
     """Like :func:`enrich_document` but also return the *raw* SDK Document.
 
@@ -345,9 +311,7 @@ def enrich_document_raw(
     stage can persist it for chunk-stage reuse.
     """
     return enrich_documents_raw([text], client, model=model,
-                                overflow_strategy=overflow_strategy,
-                                max_retries=max_retries,
-                                retry_base_delay=retry_base_delay)[0]
+                                overflow_strategy=overflow_strategy)[0]
 
 
 def enrich_documents(
@@ -356,8 +320,6 @@ def enrich_documents(
     *,
     model: str = DEFAULT_MODEL,
     overflow_strategy: str = "auto",
-    max_retries: int = DEFAULT_MAX_RETRIES,
-    retry_base_delay: float = DEFAULT_RETRY_BASE_DELAY,
 ) -> list[EnrichmentResult]:
     """Enrich one or more documents via the Isaacus enrichment API.
 
@@ -370,19 +332,16 @@ def enrich_documents(
         overflow_strategy: How Kanon-2 handles input beyond its context window
             ("auto"/"chunk"/"drop_end"/"null"). "auto" chunks + stitches into one
             prediction; returned span offsets still index the full source text.
-        max_retries: Maximum retry attempts for rate-limit errors.
-        retry_base_delay: Base delay in seconds for exponential backoff.
 
     Returns:
         List of EnrichmentResult objects, one per input text.
 
     Raises:
-        RuntimeError: If enrichment fails after all retries.
+        RuntimeError: If the request fails (after the SDK's own retries).
     """
     return [
         result for result, _raw in enrich_documents_raw(
             texts, client, model=model, overflow_strategy=overflow_strategy,
-            max_retries=max_retries, retry_base_delay=retry_base_delay,
         )
     ]
 
@@ -393,64 +352,30 @@ def enrich_documents_raw(
     *,
     model: str = DEFAULT_MODEL,
     overflow_strategy: str = "auto",
-    max_retries: int = DEFAULT_MAX_RETRIES,
-    retry_base_delay: float = DEFAULT_RETRY_BASE_DELAY,
 ) -> list[tuple[EnrichmentResult, object]]:
     """Enrich documents, returning ``(EnrichmentResult, raw SDK Document)`` pairs.
 
-    The single source of the retry/backoff logic; :func:`enrich_documents`
-    and :func:`enrich_document` are thin views that drop the raw Document.
-    Handles 429 rate-limit errors with exponential backoff.
+    One request, no retry loop of Womblex's own: the SDK retries 429s, 5xx responses and
+    timeouts itself, honouring ``Retry-After`` (its ``max_retries``, set on the client).
 
     Raises:
-        RuntimeError: If enrichment fails after all retries.
+        RuntimeError: If the request fails.
     """
-    last_error: Exception | None = None
-
-    for attempt in range(max_retries + 1):
-        try:
-            response = client.enrichments.create(  # type: ignore[attr-defined]
-                model=model,
-                texts=texts,
-                overflow_strategy=overflow_strategy,
-            )
-            # Convert SDK response to our models, keeping the raw Document.
-            results: list[tuple[EnrichmentResult, object]] = []
-            for r in response.results:
-                results.append((_convert_document(r.document), r.document))
-
-            logger.info(
-                "Enriched %d document(s), usage: %d input tokens",
-                len(results),
-                response.usage.input_tokens,
-            )
-            return results
-
-        except Exception as e:
-            last_error = e
-            error_str = str(e)
-
-            # Retry on rate limits (429), honouring a Retry-After header when the
-            # server sends one (adaptive throttle: back off exactly as told, else
-            # exponential). Whole ~150-200K-token requests trigger these.
-            if "429" in error_str or "rate" in error_str.lower():
-                retry_after = _retry_after_seconds(e)
-                delay = retry_after if retry_after is not None else retry_base_delay * (2 ** attempt)
-                logger.warning(
-                    "Rate limited on enrichment (attempt %d/%d), retrying in %.1fs%s",
-                    attempt + 1, max_retries + 1, delay,
-                    " (Retry-After)" if retry_after is not None else "",
-                )
-                time.sleep(delay)
-                continue
-
-            # Non-retryable error
-            logger.error("Enrichment failed: %s", e)
-            raise RuntimeError(f"Enrichment failed: {e}") from e
-
-    raise RuntimeError(
-        f"Enrichment failed after {max_retries + 1} attempts: {last_error}"
-    ) from last_error
+    try:
+        response = client.enrichments.create(  # type: ignore[attr-defined]
+            model=model,
+            texts=texts,
+            overflow_strategy=overflow_strategy,
+        )
+    except Exception as e:
+        logger.error("Enrichment failed: %s", e)
+        raise RuntimeError(f"Enrichment failed: {e}") from e
+    # Convert SDK response to our models, keeping the raw Document.
+    results = [(_convert_document(r.document), r.document) for r in response.results]
+    logger.info(
+        "Enriched %d document(s), usage: %d input tokens", len(results), response.usage.input_tokens,
+    )
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -463,8 +388,8 @@ class ProviderLimits:
     """What a provider declares, so the stage packs and splits requests by it."""
 
     max_texts_per_request: int
-    token_ceiling: int
-    """A text over this many tokens is split on boundaries and offset-merged."""
+    token_ceiling: int | None
+    """A text over this many tokens is split on boundaries and offset-merged; `None` splits nothing."""
     token_counter: TokenCounter
     needs_network: bool
     returns_document: bool
@@ -482,7 +407,11 @@ class EnrichmentProvider(Protocol):
 
 @dataclass
 class IsaacusEnrichment:
-    """Kanon-2 enrichment through the Isaacus SDK; its limits come from `EnrichmentConfig`."""
+    """Kanon-2 enrichment through the Isaacus SDK.
+
+    The API accepts 8 texts a request and long input whole (`overflow_strategy`), so the
+    limits are `max_texts_per_request` and no split ceiling unless `split_ceiling` sets one.
+    """
 
     client: object
     config: EnrichmentConfig
@@ -494,8 +423,6 @@ class IsaacusEnrichment:
             texts, self.client,
             model=self.config.model,
             overflow_strategy=self.config.overflow_strategy,
-            max_retries=self.config.max_retries,
-            retry_base_delay=self.config.retry_base_delay,
         ))
 
 
@@ -503,9 +430,10 @@ def isaacus_provider(
     config: EnrichmentConfig, client: object, token_counter: TokenCounter | None = None,
 ) -> IsaacusEnrichment:
     """The Isaacus provider; *client* may be `None` where only the limits are read (`plan`)."""
+    from womblex.utils.isaacus_client import with_retries
     from womblex.utils.token_packer import TokenCounter
 
-    return IsaacusEnrichment(client, config, ProviderLimits(
+    return IsaacusEnrichment(with_retries(client, config.max_retries), config, ProviderLimits(
         max_texts_per_request=config.max_texts_per_request,
         token_ceiling=config.split_ceiling,
         token_counter=token_counter or TokenCounter(config.tokenizer),
