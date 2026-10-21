@@ -263,9 +263,11 @@ def _lines(chars: list[Char]) -> list[_Line]:
     runs: list[_Line] = []
     pending: Char | None = None  # a space that did not abut: a word gap, or pdfium's stray separator
     for char in chars:
-        if runs and _same_line(runs[-1], char) and (pending is None or not _on_row(runs[-1], pending)):
+        if runs and _same_line(runs[-1], char):
+            if pending is not None and _on_row(runs[-1], pending):
+                runs[-1].chars.append(pending)  # the row carried on across a space on it: a word gap
             runs[-1].chars.append(char)
-            pending = None  # the row carried on across a space lying off it: pdfium's stray one
+            pending = None  # one lying off the row is pdfium's stray separator
             continue
         if pending is not None:
             runs.append(_Line([pending]))

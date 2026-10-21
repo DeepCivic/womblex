@@ -38,6 +38,14 @@ class TestSegment:
         chars = _chars("Label", 72, 100, bold=True) + _chars("body text", 72, 100 + LINE)
         assert [len(b) for b in _text.segment(chars)] == [2]
 
+    def test_a_generated_space_between_words_on_a_row_is_kept(self) -> None:
+        # pdfium generates a space where the PDF has none, boxed as a point inside
+        # the previous glyph; the gap is too narrow for `_join` to infer one.
+        left = _chars("sourcing", 72, 100)
+        space = _text.Char(" ", Rect(111, 104, 111, 104), 10, "Helv", False)
+        chars = [*left, space, *_chars("strategy", 112 + 1.9, 100)]
+        assert _text.plain_text(chars) == "sourcing strategy\n"
+
     def test_a_row_across_a_gutter_stays_in_one_block(self) -> None:
         chars = _chars("left", 72, 100) + _chars("right", 340, 100)
         assert [[line.text for line in b] for b in _text.segment(chars)] == [["left", "right"]]
