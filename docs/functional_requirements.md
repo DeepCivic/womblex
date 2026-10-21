@@ -587,31 +587,32 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - A model the pre-run check builds only to confirm it loads is not recorded as used — a run whose check built the model but whose stages never actually called it shows no entry for it; only a run's own build of it does.
 - Benchmark reports (womblex-benchmark) name the models that produced them, suites can run against a named model, and `docs/accuracy/` stays labelled as the default group.
 
-## 27. Workflows — Check, Run, Dispatch and Schedule
+## 27. Workflows — Check, Run, Dispatch, Schedule and Deliver
 
 **Paid:** `run-workflow`, `dispatch-workflow` and every scheduled firing launch the workflow's paid steps; each firing is billed for the documents it processes. `validate` and `plan` make no paid call.
 
 **As** an operator,
-**I want** to declare a named recipe of steps over a preset in a file and run it locally, on the fleet or on a schedule,
-**so that** a run's sequence is declared once, checked before it spends anything, and recorded in what it writes.
+**I want** to declare a recipe of stages once and run it locally, on the fleet or on a schedule,
+**so that** every run follows the same steps, refusals happen before any spend, scheduled firings pay only for new documents, and results reach downstream systems.
 
-**Given** a workflow file (a name, a preset reference, input binding, ordered steps, triggers and destinations)
+**Given** a workflow file (name, preset, config overlay, input location, ordered steps, triggers and destinations)
 **When** the operator validates, plans, runs, dispatches or schedules it
-**Then** everything that can refuse does so before the first step, and the files each step writes name the workflow.
+**Then** every refusal happens before the first step, each firing processes only new documents, every sidecar a workflow step writes names its workflow, and each destination receives the results.
 
 **Acceptance criteria:**
 
 - A workflow is a plain-text file; creating or editing one needs no code.
 - Every command validates the file first (steps, cron and timezone, config overlay) and rejects unknown keys.
 - The workflow digest ignores formatting and comments.
-- Its own `config` is laid over its preset's key by key, and the whole is validated as a full config.
-- `validate` runs exactly the checks `run-workflow` runs before its first step, and writes nothing.
+- Its `config` is laid over its preset's key by key and validated as a full config.
+- `validate` runs every check `run-workflow` runs before its first step, and writes nothing.
 - `plan` counts the tokens and requests of every paid call, AI chunking included, with each provider's own token counter, and shows local steps as free. It calls no paid API.
-- Step order is checked before launch: a step whose input is missing, produced later, or rewritten later is refused with a stable code.
-- Once a step has run, a failed step does not stop the steps after it; each later step records the failure it follows, and the exit code is non-zero.
+- Out-of-order steps are refused before launch with the code `step_order`, each issue naming `input_missing`, `input_out_of_order` or `input_stale`.
+- Once a step has run, a failed step does not stop later steps; each records the failure it follows, and the run exits non-zero.
 - Every sidecar a workflow step writes names the workflow that wrote it, and the run record holds the workflow's name and full spec. Extraction files name none: extraction is not a workflow step (see the data contract).
-- `dispatch-workflow` queues the steps for the fleet, refused before any row for anything the local runner refuses and for a step the fleet cannot run, or an order the coordinator would change; workers run each stage under the workflow's config.
-- `schedule-workflow` saves the workflow and syncs its schedules in one action, so stored triggers and the queue's schedules always match; each firing reads the saved copy on a worker that uses the workflow's input store (`input_binding.store`), refused before any row when the prefix holds no document. `schedule-workflow` runs the same checks first (`check_firing`, against `--store` and the workflow's input store), so a workflow its firing would refuse is not scheduled.
+- `dispatch-workflow` is refused before any row for anything the local runner refuses, a step the fleet cannot run, or an order the coordinator would change; workers run each stage under the workflow's config.
+- `schedule-workflow` saves the workflow and syncs its schedules in one action, so stored triggers and the queue's schedules always match. It runs every check a firing makes (`check_firing`, against `--store` and the workflow's input store), so a workflow its firing would refuse is not scheduled.
+- Each firing runs the saved copy against the workflow's input store (`input_binding.store`), on a worker that uses that store, and is refused before any row when the prefix holds no document.
 - A scheduled workflow appends to one run: each firing processes only documents the run has not seen, and never reprocesses or re-pays for one it has.
 - After an edit and reschedule, the new version applies to new documents only; earlier documents keep their results.
 - A firing with no new documents runs nothing and logs that.
@@ -619,19 +620,19 @@ cover *how* the system is built, why decisions were made, or measured accuracy.
 - A workflow has no owner; the runs it starts are admin-only, like CLI runs.
 - Fleet runs perform `pii` when a workflow includes it; runs without a workflow never do.
 - A workflow can name destinations: an object store, a Postgres database with embeddings, and a webhook.
-- An object-store destination receives the Requirement 23 bundle; each destination chooses whether raw sources are included.
-- A Postgres destination gets one row per chunk with its embedding: masked text by default, raw only where the workflow asks, each row naming its layer.
-- A Postgres destination requires the `embed` step, and sending masked text requires `pii`; a workflow missing either is refused before launch.
 - A workflow names where secrets are found, never the secrets. No secret is written to the file or the stored copy.
 - Every destination is checked before launch (its secrets resolve, its dependencies are installed); a failed check refuses the run.
+- A Postgres destination requires the `embed` step, and sending masked text requires `pii`; a workflow missing either is refused before launch.
 - Results are delivered after the last step, even when a step failed, and a delivery after a failure names the failed steps.
 - A failed delivery is retried a set number of times, then recorded on the run. It never stops the run.
 - After a failed stage is retried successfully, the retry command prints how to redeliver. Redelivery replaces: files are rewritten and rows upserted.
+- An object-store destination receives the Requirement 23 bundle; each destination chooses whether raw sources are included.
+- A Postgres destination gets one row per chunk with its embedding: masked text by default, raw only where the workflow asks, each row naming its layer.
 - A webhook receives six events: `extraction_settled`, `stage_finished`, `stage_failed`, `run_finished`, `delivered` and `delivery_failed`. Each carries an `event_id` (kept when the event is resent, so the receiver can drop a duplicate), the `run_id` and the run's status in the API's words, and is signed with a key held where the run executes.
 - There are no per-document or per-batch events.
 - The run record lists every delivery.
 
-**Out of scope:** managing workflows through the API, pruning changed or deleted documents, resolving the source of a changed file's earlier version (its bytes are gone from the store, so `SourceResolver` reads it as `hash_mismatch`), workflow owners, backfill of missed firings, and databases other than Postgres (each needs its own requirement).
+**Out of scope:** managing workflows through the API, pruning changed or deleted documents, resolving the source of a changed file's earlier version (its bytes are gone from the store, so `SourceResolver` reads it as `hash_mismatch`), workflow owners, backfill of missed firings, per-step destinations, databases other than Postgres (each needs its own requirement), registering webhooks through the API, and write-back from consumers.
 
 ## 28. Fleet Runs — Honour the Dispatch, Report the Truth
 
