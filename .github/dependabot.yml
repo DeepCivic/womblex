@@ -11,6 +11,13 @@ updates:
     groups:
       python-minor-patch:
         update-types: [minor, patch]
+    # boto3 pins botocore to its own version, and s3fs reaches botocore through
+    # aiobotocore, which caps it a few releases behind. A boto3 bump past that
+    # cap cannot resolve, so these move by hand when aiobotocore allows:
+    # `uv lock --upgrade-package boto3 --upgrade-package botocore`.
+    ignore:
+      - dependency-name: boto3
+      - dependency-name: botocore
 
   # The Dockerfile: the Python and uv base images.
   - package-ecosystem: docker
