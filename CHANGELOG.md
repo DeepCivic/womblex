@@ -8,7 +8,11 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 ## [Unreleased]
 
+### Removed
+- **The console leaves Womblex for [womblex-console](https://github.com/DeepCivic/womblex-console).** `womblex ui`, `src/womblex/ui/`, the `ui/` SPA, `Dockerfile.ui`, the `ui` compose service and the console's CI and publish jobs are gone; the repository was seeded from this history. Requirements 15 to 21 and `DESIGN.md` went with it. The console depends on a pinned Womblex and Womblex no longer imports or tests it. The `[ui]` extra is still declared and removed in its own dependency change.
+
 ### Changed
+- **What the library used from the console moved into it.** Presets are `womblex.presets` (with `read_saved_presets` / `get_any_preset`); `DeploymentSettings` and `deployment_paths` are `cloud/deployment.py`, fastapi-free; the `/v1/ready` probes are `cloud/reachability.py`; the remote manifest read behind `/v1/runs/{id}/manifest` is `store/remote_manifest.py`; `CHECKPOINT_DIRNAMES` sits beside `STAGE_CONTRACTS`.
 - **Requirement 2 names the paid models; Requirement 27 says where the webhook key is held.** Requirement 2's Paid line reads "a SageMaker deployment of the Kanon-2 Enricher or Embedder" in place of a glossary reference, and Requirement 27's webhook bullet says the signing key is held on the worker. The trust-plan notes appended to `docs/security-upgrade-plan.md` are removed. Docs only.
 - **Console lock: the high and moderate npm advisories — security upgrade plan, M5.** `ui/package-lock.json` only, from `npm audit fix` without `--force`: vite 8.3.5, devalue 5.9.4, brace-expansion 5.0.12, source-map-js 1.2.2, postcss-selector-parser 7.1.7, with rolldown, postcss, picomatch, nanoid and a `@sveltejs/kit` patch (2.70.3) carried along. `npm audit --audit-level=high` is clean; three low advisories remain behind the `@sveltejs/kit` 3 major, which the plan keeps out.
 - **A stage whose every unit was already published reads `skipped`.** `womblex jobs`, `/v1/runs` counts, the run sentence and the console show a stage that succeeded with every unit skipped as `skipped` (`jobs._shown_status`, from the stage's recorded result); a run with one reads finished, and retries still see the stage as succeeded. The console gives `cancelled` a pill of its own instead of `skipped`'s.

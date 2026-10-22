@@ -25,13 +25,11 @@
 #     docker compose up --scale worker=4 worker
 #     # once drained, consolidate the run manifest:
 #     docker compose run --rm womblex finalize --run-id <run_id>
-#     # optional console over the same bucket, at :8080:
-#     docker compose up -d ui
 #     # optional /v1 service API at :8081 (needs a client registry file):
 #     WOMBLEX_API_CLIENTS_FILE=./clients.yaml docker compose --profile api up -d api
 #
 #   CLOUD — set the three connection vars (+ S3 creds) to external services and
-#   DO NOT start the bundled backends. `init`/`worker`/`ui` do not wait on
+#   DO NOT start the bundled backends. `init`/`worker` do not wait on
 #   postgres/minio (their deps are `required: false`), so an absent bundled
 #   backend is not a missing dependency — it points at the external one instead:
 #
@@ -53,26 +51,19 @@
 #     docker compose up --scale worker=4 worker
 #   See the README "Cloud deployment" section for the full walk-through.
 #
-#   # Just want to see the console with a sample corpus (no workers)?
-#   # Bring up the infra, seed the vendored demo run into the bucket, then the
-#   # console. Postgres is included so the Dashboard/Execution panels see a
-#   # reachable queue (an empty one) rather than "queue unreachable".
-#   # Same COMPOSE_FILE export as the LOCAL path above — without it these
-#   # pull a published image rather than building your tree:
-#   export COMPOSE_FILE=docker-compose.yml:docker-compose.local.override.yml
+#   # Want a sample corpus in the bucket (no workers)? Bring up the infra, then
+#   # seed the vendored demo run. Same COMPOSE_FILE export as the LOCAL path.
 #   docker compose --profile local up -d postgres minio createbuckets init
 #   docker compose --profile seed up seed-demo
-#   docker compose up -d ui           # run-synthetic-demo now shows at :8080
 #
 # Inputs and outputs share the s3://womblex bucket, on disjoint prefixes:
 # source documents live under inbox/, shards land at runs/<run_id>/documents/.
 #
-# Two images, one stack: the pipeline/worker/api services run the image built
-# from the plain `Dockerfile`; the `ui` console runs the one from `Dockerfile.ui`
-# (adds a Node stage for the SPA).
+# One image: the pipeline/worker/api services run the image built from the
+# plain `Dockerfile`.
 #
 # PUBLISHED OR BUILT — decided by which files you pass, not by editing one.
-# This file NAMES both images and builds neither; the local override carries
+# This file NAMES the image and builds none; the local override carries
 # the `build:` blocks. (Compose builds whenever a `build:` key is present, so
 # an `image:` beside one is not a switch — the blocks had to move.)
 #
@@ -80,17 +71,17 @@
 #   docker compose -f docker-compose.yml \
 #                  -f docker-compose.local.override.yml up  # built from the tree
 #
-# The references below are `${WOMBLEX_*_IMAGE:-<latest tag>}`, so the digest a
+# The references below are `${WOMBLEX_PIPELINE_IMAGE:-<latest tag>}`, so the digest a
 # release recorded in deploy/images.env overrides the tag with no file edit.
 # Every service's decision is enumerated in docs/deployment-images.md.
 #
 # OLDER COMPOSE (< 2.20.0, no `required: false`): the cloud path relies on
-# `required: false` to let `init`/`worker`/`ui` come up without the bundled
+# `required: false` to let `init`/`worker` come up without the bundled
 # `postgres`/`minio`. On an engine that rejects that key, make this one
 # mechanical edit for a cloud deployment and commit it to your fork:
 #   1. delete the `postgres`, `minio` and `createbuckets` services, AND
 #   2. delete every `depends_on:` block that names them (in `init`, `worker`,
-#      `womblex`, `seed-demo`, `ui`, `api`).
+#      `womblex`, `seed-demo`, `api`).
 # Nothing else changes — the env vars still point every service at the
 # external Postgres + S3. (The local stack is unaffected; it needs 2.20.0
 # only if you keep the `required: false` keys, which are harmless there.)
@@ -130,8 +121,7 @@ x-cloud-env: &cloud-env
   # handed in: a digest is content-addressed after the push, so it cannot be
   # baked into the image it names, and a container cannot read its own labels.
   # Same value the services are pinned to, so the record names what compose
-  # actually ran. A tag here records no digest rather than a false one; the
-  # `ui` service overrides it with the console image below.
+  # actually ran. A tag here records no digest rather than a false one.
   WOMBLEX_IMAGE_REF: ${WOMBLEX_PIPELINE_IMAGE:-ghcr.io/deepcivic/womblex:latest}
 
 services:
@@ -241,8 +231,7 @@ services:
               "--poll-interval", "5"]
 
   # One-shot, opt-in: publish the vendored sample corpus (run-synthetic-demo)
-  # into the bucket so a fresh console shows a browsable run instead of
-  # "Sample corpus not present". Behind a profile so a real deployment does
+  # into the bucket so a fresh store holds a browsable run. Behind a profile so a real deployment does
   # not seed a sample into its own store unasked; run it explicitly with
   # `docker compose --profile seed up seed-demo`.
   seed-demo:
@@ -254,50 +243,6 @@ services:
     environment: *cloud-env
     command: ["seed-demo"]   # resolves WOMBLEX_STORE_URI -> s3://womblex
     profiles: ["seed"]
-
-  # Optional console (`womblex ui`), at :8080. An interactive operator
-  # surface, not a passive viewer: it reads the same s3://womblex bucket the
-  # workers publish to (the shared cloud-env anchor supplies WOMBLEX_STORE_URI,
-  # the run source the CLI resolves when neither --output-root nor --store is
-  # passed) AND acts on the deployment — the Pipeline Composer dispatches runs
-  # into the queue, and it files presets into the store.
-  #
-  # Depends on postgres AND minio being *healthy*, not just createbuckets: the
-  # console advertises WOMBLEX_DB_DSN (the queue the Dashboard and Execution
-  # panels read) and WOMBLEX_STORE_URI, so bringing it up before either is
-  # ready is what produced the reported "queue unreachable" / intermittent
-  # Composer 500s + failed-to-fetch — every screen's first reads raced the
-  # backends' startup. Gating on health makes the console come up only once
-  # both are answering. The gates are `required: false`: in cloud mode the
-  # bundled backends are absent, and the console reads the external DSN/S3 the
-  # same env vars name — a reachable-but-schemaless external queue reads as an
-  # empty queue, not a fault (v0.5.6), so it comes up cleanly there too.
-  ui:
-    image: ${WOMBLEX_CONSOLE_IMAGE:-ghcr.io/deepcivic/womblex-console:latest}
-    depends_on:
-      postgres:
-        condition: service_healthy
-        required: false
-      minio:
-        condition: service_healthy
-        required: false
-      createbuckets:
-        condition: service_completed_successfully
-        required: false
-    environment:
-      <<: *cloud-env
-      # The console runs the other image, so it names that one rather than
-      # inheriting the pipeline's reference from the anchor.
-      WOMBLEX_IMAGE_REF: ${WOMBLEX_CONSOLE_IMAGE:-ghcr.io/deepcivic/womblex-console:latest}
-    ports:
-      - "8080:8080"
-    # The console reads artefacts and writes nothing to its own image: run
-    # requests land in the store, presets on the store's own
-    # prefix. The one exception is a tmpfs for /tmp, where a store-backed
-    # read stages the parquet it is about to open.
-    read_only: true
-    tmpfs:
-      - /tmp
 
   # Opt-in: the `/v1` service API (`womblex serve`), at :8081. Integrations
   # submit and read work here; the console above is the admin utility. Runs on

@@ -82,14 +82,7 @@ CLAUDE.md rules that apply:
 - Two advisories stay open with no fix published: torch PYSEC-2026-139 and transformers PYSEC-2026-4174. Check whether the vulnerable code path is reachable (e.g. pickle `torch.load` versus safetensors) and record the outcome in the PR body.
 
 ### M5 – UI high and moderate fixes
-- In `ui/`, run `npm audit fix` without `--force`. It covers:
-  - vite 8.2.x → ≥8.2.3
-  - devalue
-  - brace-expansion
-  - source-map-js
-  - postcss-selector-parser
-- The existing `frontend` job (lint, svelte-check, build) gates it.
-- `@sveltejs/kit` 3 and `adapter-static` 4 are low-severity majors and stay out.
+The `ui/` frontend and its npm audit left with the console (womblex-console). Nothing here remains to do.
 
 ### M6 – Other vulnerability surfaces (newly in scope)
 | Surface | Current state | Proposed |

@@ -481,3 +481,12 @@ Womblex serves other software two ways: a versioned on-disk contract
   config and models, not file bytes. Drift is detectable, not prevented.
 - **Consumers poll.** Callbacks, cancellation and per-client quotas were left
   out of v1.
+
+### The console is its own repository, aligned and not coupled
+
+2026-10. The admin console (`womblex ui`: a SvelteKit SPA over a FastAPI backend) exists for local deployment experimentation, adds little for most users, and may be deprecated. It moved to [womblex-console](https://github.com/DeepCivic/womblex-console), which was seeded from this history.
+
+- **Dependency runs one way.** The console depends on a pinned Womblex release; Womblex never imports, tests or documents it. When Womblex changes, the console moves its pin and its imports; Womblex carries no obligation to keep it working. Deprecating the console is archiving that repository, and nothing here changes.
+- **What the library used from the console moved into the library.** Presets are `womblex.presets`; the fastapi-free deployment settings and `deployment_paths` are `cloud/deployment.py`; the store and queue probes behind `/v1/ready` are `cloud/reachability.py`; the remote manifest read behind `/v1/runs/{id}/manifest` is `store/remote_manifest.py`; `CHECKPOINT_DIRNAMES` sits beside `STAGE_CONTRACTS`. The console's readers, composer, dashboard and resources code went with it.
+- **Left behind, unchanged.** `seed-demo` and the vendored demo run stay: they publish a sample run into any store. `WOMBLEX_UI_OUTPUT_ROOT` and `WOMBLEX_UI_PRESETS_DIR` keep their names, since `seed-demo` and `run-workflow` read them; a dispatched config's `dataset.name` is still `console`, so config digests of dispatched runs do not move.
+- **Requirements 15 to 21** moved to the console's `docs/requirements.md`; numbers 22 onward are unchanged.

@@ -1,16 +1,16 @@
 """FastAPI app factory for the `/v1` service API (`docs/service-api.md`).
 
-Separate from the console: it binds one shared store and queue for its
+It binds one shared store and queue for its
 lifetime, authenticates every `/v1` route with a service token
 (:mod:`womblex.api.auth`), and scopes runs to the caller that submitted them —
 a run another client owns is a 404, and ``admin`` sees all. A run is known by
-the queue, so the CLI- and console-submitted runs (no owner) are admin-only.
+the queue, so a CLI-submitted run (no owner) is admin-only.
 
 Uploads (``POST /v1/uploads``) store documents under the caller's own
 ``<client_id>/<upload_id>/`` folder of the ingest location, which is the
 ``input_prefix`` a submission then names.
 
-Submission writes queue rows only, through the console's dispatch
+Submission writes queue rows only, through the shared dispatch
 (:mod:`womblex.cloud.dispatch`): the run id is minted here, a non-admin
 caller's ``input_prefix`` must sit under its own client id, and the config is
 validated before any row is written. The config governs every stage of the run: the

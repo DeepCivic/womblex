@@ -11,11 +11,9 @@
 #       run --rm womblex enqueue --config configs/example.yaml --create-schema
 #   docker compose -f docker-compose.yml -f docker-compose.local.override.yml \
 #       up --scale worker=4 worker
-#   # console over the same bucket at :8080 (seed a demo run first if you like):
+#   # seed a demo run into the bucket if you like:
 #   docker compose -f docker-compose.yml -f docker-compose.local.override.yml \
 #       --profile seed up seed-demo
-#   docker compose -f docker-compose.yml -f docker-compose.local.override.yml \
-#       --profile local up -d ui
 #
 # WHY THIS FILE EXISTS
 # --------------------
@@ -33,7 +31,7 @@
 # cloud, this override is never passed there.
 #
 # IT ALSO CARRIES THE BUILDS. The base file names published images and builds
-# nothing, so this file holds the `build:` blocks for all six services — which
+# nothing, so this file holds the `build:` blocks for all five services — which
 # makes passing it the one declared switch between running the published
 # artefact and building from the working tree. Compose builds whenever a
 # `build:` key is present, so the two could not have lived in one file.
@@ -120,23 +118,6 @@ services:
       context: .
       dockerfile: Dockerfile
     depends_on:
-      createbuckets:
-        condition: service_completed_successfully
-        required: true
-    environment:
-      <<: *local-env
-
-  ui:
-    build:
-      context: .
-      dockerfile: Dockerfile.ui
-    depends_on:
-      postgres:
-        condition: service_healthy
-        required: true
-      minio:
-        condition: service_healthy
-        required: true
       createbuckets:
         condition: service_completed_successfully
         required: true

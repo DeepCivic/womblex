@@ -1,6 +1,6 @@
 name: Publish images
 
-# Publishes both images to GHCR and records the digest each one got.
+# Publishes the image to GHCR and records its digest.
 #
 # Separate from `release.yml` rather than a job inside it, for two reasons: that
 # workflow publishes the wheel to PyPI under Trusted Publishing, and a manual
@@ -29,8 +29,6 @@ jobs:
       # and none to leak. Nothing is baked into an image either — the only
       # build arguments are the commit and the stamp guard.
       packages: write
-    # One runner per image, for the reason the CI build job gives: each carries
-    # the whole vision/ML stack on top of a 100 MB models/ directory.
     strategy:
       fail-fast: false
       matrix:
@@ -38,9 +36,6 @@ jobs:
           - name: pipeline
             dockerfile: Dockerfile
             repository: womblex
-          - name: console
-            dockerfile: Dockerfile.ui
-            repository: womblex-console
     steps:
       - uses: actions/checkout@v4
 
@@ -163,7 +158,6 @@ jobs:
       - name: Write deploy/images.env
         run: |
           pipeline=$(cat digests/digest-pipeline/pipeline)
-          console=$(cat digests/digest-console/console)
           cat > deploy/images.env <<EOF
           # Written by .github/workflows/publish-images.yml when a release is cut.
           # Edit the workflow, not this file — a release overwrites it.
@@ -177,7 +171,6 @@ jobs:
           WOMBLEX_IMAGE_RELEASE=${GITHUB_REF_NAME}
           WOMBLEX_IMAGE_COMMIT=${GITHUB_SHA}
           WOMBLEX_PIPELINE_IMAGE=${pipeline}
-          WOMBLEX_CONSOLE_IMAGE=${console}
           EOF
           cat deploy/images.env
 
@@ -196,7 +189,7 @@ jobs:
           git add deploy/images.env
           git commit -m "Record the images published for ${GITHUB_REF_NAME}
 
-          Written by the publish-images workflow. Both references are digests,
+          Written by the publish-images workflow. The reference is a digest,
           so a deployment pins the artefact rather than a moving tag."
           # Remote and branch named explicitly rather than relying on upstream
           # tracking, which the checkout action does not guarantee to configure

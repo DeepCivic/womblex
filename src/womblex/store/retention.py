@@ -52,8 +52,7 @@ logger = logging.getLogger(__name__)
 #: writing one of its own.
 #:
 #: Ordered by `sort_by_pipeline`, not by how it is spelled here: every reader
-#: of this dict presents its keys as the run's stage list (the console's
-#: lifecycle-checkpoint switcher renders them directly), and hand-keeping a
+#: of this dict presents its keys as the run's stage list, and hand-keeping a
 #: literal in order is exactly what drifted — this ran `chunk` before
 #: `enrich`, backwards from the sequence the README prescribes.
 STAGE_SUFFIXES: dict[str, str] = sort_by_pipeline({
@@ -131,7 +130,7 @@ def most_recent_run(output_root: Path) -> Path | None:
 
 @dataclass(frozen=True)
 class RunDescription:
-    """Summary of one run directory, for a run selector (console or CLI).
+    """Summary of one run directory, for a run selector.
 
     ``document_count`` is ``None`` when there is no manifest to count yet —
     an empty or not-yet-extracted run — which is distinct from a run that

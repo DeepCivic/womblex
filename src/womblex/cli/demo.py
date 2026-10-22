@@ -1,18 +1,11 @@
 """Demo-corpus CLI subcommand: ``womblex seed-demo``.
 
-Publishes the vendored sample run into a console's run store so a fresh
-deployment shows a browsable corpus instead of "no runs" / "Sample corpus not
-present". Targets the same run source ``womblex ui`` resolves — a local
-``--output-root`` or a ``--store`` URI (``s3://…``) — so seeding and serving
-agree on where runs live.
+Publishes the vendored sample run into a run store so a fresh deployment
+holds a browsable corpus instead of "no runs". The target is a local
+``--output-root`` or a ``--store`` URI (``s3://…``).
 
-    # local console
     womblex seed-demo --output-root output/
-    womblex ui        --output-root output/
-
-    # store-backed (cloud) console
     womblex seed-demo --store s3://redline
-    womblex ui        --store s3://redline
 """
 from __future__ import annotations
 
@@ -56,8 +49,7 @@ def cmd_seed_demo(args: argparse.Namespace) -> int:
     )
     from womblex.store.remote import RemoteStore
 
-    # Resolve the target the same way `womblex ui` does: explicit flag, then
-    # the shared env vars, exactly one of the two.
+    # Explicit flag, then the shared env vars, exactly one of the two.
     output_root = args.output_root
     if output_root is None and "WOMBLEX_UI_OUTPUT_ROOT" in os.environ:
         output_root = Path(os.environ["WOMBLEX_UI_OUTPUT_ROOT"])
@@ -84,8 +76,8 @@ def cmd_seed_demo(args: argparse.Namespace) -> int:
     run_id = args.run_id or DEMO_RUN_ID
     # One code path for local and remote: RemoteStore.from_uri returns a local
     # LocalFileSystem for a bare path and an S3FileSystem for s3://. The layout
-    # differs by mode, though: a store-backed console reads runs/<run_id>/, a
-    # local --output-root console reads <output_root>/<run_id>/ directly.
+    # differs by mode, though: a store holds runs/<run_id>/, a
+    # local --output-root holds <output_root>/<run_id>/ directly.
     if store_uri:
         target, prefix = store_uri, "runs"
     else:
@@ -99,7 +91,7 @@ def cmd_seed_demo(args: argparse.Namespace) -> int:
 
     logger.info(
         "Seeded demo corpus: %d file(s) -> %s (run_id=%s). "
-        "Point the console at the same target to browse it.",
+        "Read it from the same target.",
         count, target, run_id,
     )
     return 0
@@ -108,7 +100,7 @@ def cmd_seed_demo(args: argparse.Namespace) -> int:
 COMMANDS = [
     Command(
         "seed-demo",
-        "Publish the vendored sample corpus into a console's run store",
+        "Publish the vendored sample corpus into a run store",
         _register_seed_demo, cmd_seed_demo,
     ),
 ]

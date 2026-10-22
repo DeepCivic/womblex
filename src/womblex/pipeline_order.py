@@ -10,8 +10,7 @@ alone will happily put chunk first.
 So the order has to be written down. It was — three times, in three places,
 disagreeing: `STAGE_CONTRACTS`'s dict order, `store.retention.STAGE_SUFFIXES`
 (commented "in pipeline order") and the README's command sequence. The first
-two both ran chunk before enrich, and the console rendered its lifecycle
-checkpoints in that order. This module is the README's sequence — the correct
+two both ran chunk before enrich, and every reader of them inherited that order. This module is the README's sequence — the correct
 one — as the single declaration the others now derive from.
 
 `sort_by_pipeline` rather than an exported list of pairs, because every

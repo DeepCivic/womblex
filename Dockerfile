@@ -7,8 +7,8 @@
 # enrichment/embeddings and the Bedrock VLM OCR engine are core too — just a
 # key / `ISAACUS_SAGEMAKER_ENDPOINTS` / an OCR engine choice at runtime. The
 # image installs `[api]` (the `womblex serve` service API), so the `api`
-# compose service runs on the same image as the workers. The other extras are
-# `[ui]` (the console, its own image) and `[dev]` (test/lint); override at
+# compose service runs on the same image as the workers. The other extra is
+# `[dev]` (test/lint); override at
 # build time, e.g. --build-arg EXTRAS="api,dev".
 
 # uv exports the lock at build time; it is mounted, never installed. A stage

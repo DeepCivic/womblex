@@ -9,8 +9,6 @@ Womblex serves other software in two modes:
 - **Callable service.** A consumer submits work to `womblex serve` and reads
   results back over the authenticated `/v1` HTTP API described here.
 
-The operator console (`womblex ui`) is an admin and debugging utility, not an
-integration surface. It has no authentication and binds to loopback.
 
 ## Deployment
 
@@ -58,7 +56,7 @@ that submitted them.
 
 - A run owned by another client answers 404, as an unknown run does.
 - `admin` sees every run. An admin's submitted run carries no owner.
-- Runs dispatched from the CLI, the console or a workflow carry no owner, so through the API
+- Runs dispatched from the CLI or a workflow carry no owner, so through the API
   they are visible to `admin` only.
 - A run never has mixed ownership: the queue refuses an enqueue that names a
   different owner (`RunOwnedError`).
@@ -113,7 +111,7 @@ pins its operation and model surface so breaking changes show in review.
 beside some done; `pending` while all are pending; `cancelled` when a job
 was cancelled; otherwise `done`. `orphaned` is true for a run whose firing
 queued extraction and failed before its stages were dispatched. `summary` is the
-sentence `womblex jobs --run-id` and the console show, built from the exact
+sentence `womblex jobs --run-id` shows, built from the exact
 per-stage counts, e.g. `Run r1 is running (extract: 4 done; chunk: 1 done, 2 pending).`
 
 ### Document text layers

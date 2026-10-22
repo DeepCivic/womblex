@@ -200,19 +200,3 @@ def test_older_files_read_at_the_level_their_old_columns_supported(tmp_path):
     for row in (narrative, cell, span, link):
         assert set(EVIDENCE_COLUMNS) <= set(row) and "start_char" not in row
         assert "start" not in row and "mention_start" not in row and "parent_elem_order" not in row
-
-
-def test_the_inspector_gets_a_span_position_only_for_a_span_level_receipt():
-    from womblex.ui.readers import _chunk_relative_pii
-
-    detail = {
-        "chunks": [{"chunk_index": 3, "start_char": 100}],
-        "pii_spans": [
-            {"chunk_index": 3, "anchor_level": "span", "char_start": 104, "char_end": 112},
-            {"chunk_index": 3, "anchor_level": "document", "char_start": None, "char_end": None},
-        ],
-    }
-
-    _chunk_relative_pii(detail)
-
-    assert [(s["start"], s["end"]) for s in detail["pii_spans"]] == [(4, 12), (-1, -1)]

@@ -4,7 +4,7 @@ One document's text out of the run's shards, by layer. A layer's sensitivity is
 the one its file role carries (:mod:`womblex.store.contract`), so the gate is
 the contract's own: a ``masked`` or ``none`` layer needs ``read``, anything
 else ``read_raw``. Rows are read in place with the ``source_hash`` predicate
-pushed into the Parquet reader, as the console's chunk inspector does.
+pushed into the Parquet reader.
 """
 from __future__ import annotations
 

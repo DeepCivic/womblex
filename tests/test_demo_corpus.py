@@ -39,7 +39,7 @@ class TestDemoCorpusVendored:
         """The demo is vendored where the seeder expects it, with a manifest."""
         assert demo_corpus.demo_is_present(), (
             f"demo run missing at {demo_corpus.demo_run_dir()} — the sample corpus "
-            "that seeds the console is not vendored"
+            "that seeds a run store is not vendored"
         )
         # The consolidated manifest is the file a run reader prefers.
         assert (demo_corpus.demo_run_dir() / "manifest.parquet").is_file()

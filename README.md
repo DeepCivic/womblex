@@ -47,7 +47,6 @@ on 3.13).
 ```bash
 pip install womblex          # the whole pipeline, CPU-only
 pip install womblex[api]     # + the /v1 service API (womblex serve)
-pip install womblex[ui]      # + the admin console (womblex ui)
 pip install womblex[pgvector] # + a workflow's Postgres destination (pgvector)
 ```
 
@@ -85,11 +84,10 @@ commented inside it. With AI chunking on, run `enrich` before `chunk`, so
 chunking reuses the enrichment instead of paying for it twice. Dataset-specific
 settings belong in config, never in code.
 
-To browse a sample run in the console:
+To publish a sample run into a run root:
 
 ```bash
 womblex seed-demo --output-root runs/   # publishes run-synthetic-demo
-womblex ui --output-root runs/          # http://127.0.0.1:8080
 ```
 
 ### Commands
@@ -115,7 +113,7 @@ womblex ui --output-root runs/          # http://127.0.0.1:8080
 | `ground-truth`, `score` | Build review baselines from a run, and score corrected ones |
 | `profile` | Print the inferred column schema of a tabular file |
 | `api-token`, `serve` | Mint service tokens; run the service API |
-| `ui`, `seed-demo` | Run the admin console; publish the demo run for it |
+| `seed-demo` | Publish the demo run into a run root or store |
 
 ## Integrating with Womblex
 
@@ -151,9 +149,6 @@ are in [docs/contract.md](docs/contract.md), the schemas in
 [docs/egress.md](docs/egress.md). In Python, `womblex.__all__` is the stable
 surface.
 
-The console (`womblex ui`) is an admin and debugging view over a run's files. It
-has no authentication, binds to loopback, and is not an integration surface.
-
 ## Documentation
 
 | Document | Covers |
@@ -172,7 +167,6 @@ has no authentication, binds to loopback, and is not an integration surface.
 | [deployment-images.md](docs/deployment-images.md) | Docker Compose services and their images |
 | [decisions.md](docs/decisions.md) | Why things are the way they are, and dead ends not to retry |
 | [steering.md](docs/steering.md), [CHANGELOG.md](CHANGELOG.md) | What's next, and what has shipped |
-| [DESIGN.md](DESIGN.md) | The console's design system |
 
 ## Project status
 
@@ -183,13 +177,13 @@ Womblex is **alpha** and pre-1.0.
   a reader shim), and the Python names in `womblex.__all__`, which change only
   after one minor release of deprecation warnings. See [docs/contract.md](docs/contract.md).
 - **Moving:** everything outside `__all__`, the CLI options, the stored-workflow
-  commands, and the console.
+  commands.
 
 ## Contributing
 
 ```bash
 git clone https://github.com/DeepCivic/womblex.git && cd womblex
-uv sync --extra dev --extra ui --extra api
+uv sync --extra dev --extra api
 
 uv run ruff check src/ tests/
 uv run mypy src/

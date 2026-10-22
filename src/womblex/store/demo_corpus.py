@@ -1,17 +1,14 @@
-"""Publish the vendored demo run into a console's run store.
+"""Publish the vendored demo run into a run store.
 
-A fresh console — local or store-backed — points at an empty run source and
-shows "no runs" until a real pipeline has landed one. That is a poor first
-impression for an operator evaluating the console, and the cause of the
-cloud-deployment "Sample corpus not present": the store (`s3://redline`) was
-simply empty.
+A fresh run source (a local `output_root` or an `s3://` bucket) is empty until
+a real pipeline has landed a run in it. This module gives it a sample one.
 
 `output/console-demo/run-synthetic-demo/` is a complete, pre-built pipeline run
 of the reference DEFAULT-Isaacus shape (extract → normalise → enrich → chunk →
 build_graph → embed → money, checkpoints included; not `link`, which needs a
 corpus reference register) over the PDF and DOCX documents in
 `fixtures/synthetic/documents/`, vendored into the repo/image. This
-module copies it into whatever store the console reads — a local `output_root`
+module copies it into the store — a local `output_root`
 or an `s3://` bucket — under `runs/<run_id>/`, so a fresh deployment has a
 browsable sample corpus with one command (`womblex seed-demo`). It is
 store-layout knowledge, so it lives beside the other `store/` publishers rather
@@ -61,7 +58,7 @@ def demo_run_dir() -> Path:
 def demo_is_present() -> bool:
     """True when the vendored demo run is where :func:`demo_run_dir` expects it.
 
-    Checks for the consolidated ``manifest.parquet`` — the one file the console's
+    Checks for the consolidated ``manifest.parquet`` — the one file a
     run reader prefers — so a partial/empty directory does not read as present.
     """
     return (demo_run_dir() / "manifest.parquet").is_file()
@@ -73,15 +70,14 @@ def publish_demo_run(
     """Copy the vendored demo run into *store* under ``<prefix>/<run_id>/``.
 
     Uploads every file in the run directory — the ``documents/`` shards, the
-    consolidated ``manifest.parquet``, and the per-stage checkpoint dot-dirs
-    (the dashboard reads those) — preserving the layout relative to the run
+    consolidated ``manifest.parquet``, and the per-stage checkpoint dot-dirs — preserving the layout relative to the run
     root. Returns the number of files published.
 
     *prefix* is the store-relative dir the run sits under, and it differs by
-    console mode: a store-backed console reads ``runs/<run_id>/`` (pass the
-    default ``"runs"``), while a local ``--output-root`` console reads
-    ``<output_root>/<run_id>/`` directly (pass ``""``). Getting this wrong is a
-    silent "no runs" — the console simply looks in the other place.
+    mode: a store holds ``runs/<run_id>/`` (pass the default ``"runs"``),
+    while a local ``--output-root`` holds ``<output_root>/<run_id>/`` directly
+    (pass ``""``). Getting this wrong is a silent "no runs" — a reader simply
+    looks in the other place.
 
     Idempotent: re-publishing overwrites the same keys. Raises
     ``FileNotFoundError`` when the demo is not vendored where

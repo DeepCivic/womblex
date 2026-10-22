@@ -73,7 +73,7 @@ class NestedCorpusError(ValueError):
     level down would be ingested by some entry points and passed over by others,
     so every entry point refuses them instead — see ``select_supported``.
 
-    Subclasses ``ValueError`` so the console's enqueue route reports it as bad
+    Subclasses ``ValueError`` so a route that dispatches can report it as bad
     input rather than a 500.
     """
 
@@ -107,8 +107,8 @@ def select_supported(relpaths: Iterable[str], *, location: str) -> list[str]:
     Subdirectories holding no supported document are ignored, so a corpus
     alongside ``.git`` or a notes directory still runs.
 
-    The one enumeration rule, shared by the local CLI, the cloud enqueue and the
-    console, so the three cannot drift apart again.
+    The one enumeration rule, shared by the local CLI and the cloud enqueue, so
+    they cannot drift apart again.
     """
     top: list[str] = []
     nested: dict[str, int] = {}
