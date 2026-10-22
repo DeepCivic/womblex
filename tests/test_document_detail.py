@@ -50,6 +50,7 @@ class TestDetail:
     def test_an_absent_run_is_none_and_an_absent_document_empty(self, tmp_path: Path, remote: bool) -> None:
         settings, _ = _demo(tmp_path, remote)
         assert document_detail(settings, "run-absent", "h") is None
+        assert document_detail(settings, "..", "h") is None
         assert document_detail(settings, DEMO, "no-such-hash") == {
             "chunks": [], "entities": [], "pii_spans": [], "money_spans": [], "quality": []}
 

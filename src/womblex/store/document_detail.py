@@ -21,6 +21,7 @@ from womblex.store.money_output import MONEY_SPANS_SCHEMA, MONEY_SPANS_SUFFIX, m
 from womblex.store.output import CHUNKS_SCHEMA, CHUNKS_SUFFIX
 from womblex.store.pii_output import PII_SPANS_SCHEMA, PII_SPANS_SUFFIX
 from womblex.store.quality_output import CHUNK_QUALITY_SCHEMA, CHUNK_QUALITY_SUFFIX
+from womblex.store.retention import is_safe_run_id
 from womblex.store.run_reads import RUNS_PREFIX, hash_column, store_with_run
 
 if TYPE_CHECKING:
@@ -41,9 +42,11 @@ DETAIL_SIDECARS: tuple[tuple[str, str, pa.Schema], ...] = (
 def document_detail(settings: DeploymentSettings, run_id: str, source_hash: str) -> dict[str, Any] | None:
     """``{"chunks", "entities", "pii_spans", "money_spans", "quality"}`` for one document.
 
-    ``None`` when the run does not exist; empty lists when a stage has not run
-    or the document is not in the run.
+    ``None`` when the run does not exist or *run_id* is unsafe (`is_safe_run_id`);
+    empty lists when a stage has not run or the document is not in the run.
     """
+    if not is_safe_run_id(run_id):
+        return None
     filesystem: object | None = None
     if settings.is_remote:
         store = store_with_run(settings, run_id)
