@@ -9,7 +9,6 @@ Womblex serves other software in two modes:
 - **Callable service.** A consumer submits work to `womblex serve` and reads
   results back over the authenticated `/v1` HTTP API described here.
 
-
 ## Deployment
 
 `womblex serve` needs the `[api]` extra (fastapi, uvicorn, python-multipart)
