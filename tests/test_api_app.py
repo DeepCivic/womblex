@@ -409,6 +409,7 @@ def test_openapi_surface_is_pinned(client):
             "POST /v1/presets": "201 PresetOut",
             "GET /v1/presets/{name}": "200 PresetOut",
             "DELETE /v1/presets/{name}": "200 PresetDeleted",
+            "GET /v1/ingest": "200 IngestPreview",
         },
         "models": {
             "DocumentText": ["layer", "rows", "run_id", "sensitivity", "source_hash"],
@@ -427,6 +428,8 @@ def test_openapi_surface_is_pinned(client):
             "ConfigValidation": ["errors", "valid"],
             "StageGraph": ["edges", "nodes"],
             "PresetDeleted": ["deleted"],
+            "IngestPreview": ["document_count", "error", "input_prefix", "kind", "reachable", "sample", "subdirectories", "uri"],
+            "IngestSubdirectory": ["document_count", "input_prefix", "name"],
             "PresetList": ["presets"],
             "PresetOut": ["config", "description", "formats", "name", "source"],
             "PresetSave": ["config", "description", "formats", "name"],

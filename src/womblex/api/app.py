@@ -34,6 +34,7 @@ from womblex.api.auth import Caller, ClientRegistry, caller_dependency, require_
 from womblex.api.models import (
     DocumentText,
     Health,
+    IngestPreview,
     Ready,
     RunFile,
     RunFiles,
@@ -51,6 +52,7 @@ from womblex.cli._shared import SUPPORTED_EXTENSIONS, select_supported
 from womblex.cloud import dispatch
 from womblex.cloud.deployment import DeploymentSettings
 from womblex.cloud.dispatch import QUEUE_CONNECT_TIMEOUT
+from womblex.cloud.ingest_preview import ingest_preflight
 from womblex.cloud.jobs import RunBoard, RunSummary, run_state
 from womblex.cloud.reachability import queue_reachable, store_reachable
 from womblex.cloud.worker_registry import NoLiveWorker
@@ -237,6 +239,11 @@ def create_api_app(
             run_id=run.run_id, document_count=run.document_count,
             batch_count=run.batch_count, stages=list(stages),
         )
+
+    @app.get("/v1/ingest", response_model=IngestPreview, tags=["uploads"])
+    def preview_ingest(input_prefix: str = "", caller: Caller = Depends(can_submit)) -> IngestPreview:  # noqa: B008
+        """What a submission naming *input_prefix* would run, before it is submitted."""
+        return IngestPreview(**ingest_preflight(settings, input_prefix=confine_prefix(caller, input_prefix)))
 
     @app.post("/v1/uploads", response_model=UploadAccepted, status_code=201, tags=["uploads"])
     def upload(files: list[UploadFile], caller: Caller = Depends(can_submit)) -> UploadAccepted:  # noqa: B008

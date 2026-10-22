@@ -141,3 +141,22 @@ class PresetSave(BaseModel):
 
 class PresetDeleted(BaseModel):
     deleted: str
+
+
+class IngestSubdirectory(BaseModel):
+    name: str
+    input_prefix: str
+    document_count: int
+
+
+class IngestPreview(BaseModel):
+    """What ``POST /v1/runs`` would pick up under ``input_prefix``; ``error`` says why it would not."""
+
+    uri: str | None
+    input_prefix: str
+    kind: Literal["local", "remote"] | None
+    reachable: bool
+    document_count: int
+    sample: list[str]
+    subdirectories: list[IngestSubdirectory]
+    error: str | None

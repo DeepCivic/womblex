@@ -67,6 +67,7 @@ that submitted them.
 |---|---|---|---|
 | GET | `/v1/health` | none | Liveness |
 | GET | `/v1/ready` | none | Store and queue reachability; 503 when either fails |
+| GET | `/v1/ingest?input_prefix=` | submit | What a submission naming the prefix would run: document count and a sample, or a nested layout's refusal with each subdirectory's prefix and count; confined to the caller's tree like a submission |
 | POST | `/v1/uploads` | submit | Multipart `files` to `<ingest>/<client_id>/<upload_id>/`; returns that folder as `input_prefix` |
 | POST | `/v1/runs` | submit | Enqueue extraction plus the downstream stages the config enables; returns `run_id`, `document_count`, `batch_count` and `stages` |
 | GET | `/v1/runs` | read | The caller's runs with a status rollup, latest activity first, at most 1000 (`RUN_LIMIT`) |

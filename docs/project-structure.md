@@ -173,6 +173,7 @@ womblex/
 │   │   ├── retry.py            # retry_stage() — fork a failed stage from its first failed unit, refusing before the fork
 │   │   ├── workflows.py        # extract_batch / run_stage / run_downstream workflows; a dispatched workflow's stage runs under its overlay and digest
 │   │   ├── dispatch.py         # enqueue_extraction / enqueue_downstream_stages (owner=), downstream_stages gate + guard — shared by the service API and any other dispatcher
+│   │   ├── ingest_preview.py   # ingest_preflight() — what a run over a prefix would pick up, before enqueue
 │   │   ├── deployment.py       # DeploymentSettings (run source, queue, ingest, presets dir) + deployment_paths — fastapi-free
 │   │   ├── reachability.py     # store_reachable / queue_reachable — the `/v1/ready` probes
 │   │   ├── worker.py           # run_worker() — launch DBOS, join the queues this process can serve (keyed by the models it checked)
