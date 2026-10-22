@@ -37,7 +37,7 @@ jobs:
             dockerfile: Dockerfile
             repository: womblex
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Reclaim runner disk
         run: |
@@ -127,7 +127,7 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: digest-${{ matrix.name }}
           path: digest/
@@ -142,7 +142,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # The tag is what was built, but the file has to land somewhere a
           # later checkout reads, and a tag is immutable — so the commit goes

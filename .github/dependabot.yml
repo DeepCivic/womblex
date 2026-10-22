@@ -2,6 +2,10 @@
 # lock-based CI on its own PR rather than surfacing on `main`
 # (docs/security-upgrade-plan.md, M1). Minor and patch updates are grouped into
 # one PR per ecosystem; a major update gets a PR of its own.
+#
+# An update that cannot land green (it does not resolve, or it pulls in a
+# version with a known advisory) is ignored below, with the reason and what has
+# to change upstream. When that changes, bump it by hand and drop the ignore.
 version: 2
 updates:
   - package-ecosystem: uv
@@ -11,6 +15,17 @@ updates:
     groups:
       python-minor-patch:
         update-types: [minor, patch]
+    # boto3 pins botocore to its own version, and s3fs reaches botocore through
+    # aiobotocore, which caps it a few releases behind. A boto3 bump past that
+    # cap cannot resolve, so these move by hand when aiobotocore allows:
+    # `uv lock --upgrade-package boto3 --upgrade-package botocore`.
+    ignore:
+      - dependency-name: boto3
+      - dependency-name: botocore
+      # 2.2.364 pins cryptography <49, which forces it back to 48.0.1 and its
+      # advisories (PYSEC-2026-3552/3553/3554), so pip-audit fails. Lift once a
+      # release allows cryptography >=50.
+      - dependency-name: presidio-anonymizer
 
   # The Dockerfile: the Python and uv base images.
   - package-ecosystem: docker
