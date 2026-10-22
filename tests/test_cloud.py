@@ -93,7 +93,7 @@ def test_storage_options_omits_credentials_when_none_are_set(monkeypatch):
 
 
 def test_storage_options_explicit_credentials_win_over_env(monkeypatch):
-    """An operator-saved (Resources Console) credential override beats the env
+    """An explicit credential override beats the env
     keys the Dockerfile baked in — so a rotated key is used moving forward
     without a container rebuild (issue 3).
     """
@@ -171,7 +171,7 @@ def test_assert_disjoint_locations_honours_a_custom_output_prefix():
 
 def test_validate_location_uri_rejects_the_typos_operators_actually_make():
     """A hand-typed location that fsspec would silently read as a *relative
-    local path* is the failure the Resources Console has to catch on save."""
+    local path* is refused rather than accepted."""
     validate_location_uri("s3://womblex/inbox")
     validate_location_uri("/data/inbox")
     validate_location_uri("gs://bucket/inbox")
