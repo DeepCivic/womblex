@@ -1,9 +1,9 @@
 """A run's batch logs: the per-document failure lines a worker or `womblex run` publishes to ``logs/``.
 
 `utils/run_log.capture_batch_log` writes ``batch-NNNN.log`` beside a run's
-shards. A name is checked against that pattern before any path join, so a
-caller cannot reach outside the run's ``logs/`` prefix. ``None`` means the run
-does not exist; an empty list, a run written before logs were published.
+shards. A name is checked against that pattern, and a run id against
+`is_safe_run_id`, before any path join, so a caller cannot reach outside the
+run's ``logs/`` prefix. ``None`` means the run does not exist; an empty list, a run written before logs were published.
 """
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from womblex.store.retention import is_safe_run_id
 from womblex.store.run_reads import RUNS_PREFIX, store_with_run
 
 if TYPE_CHECKING:
@@ -31,6 +32,8 @@ def is_safe_log_name(name: str) -> bool:
 
 def list_run_logs(settings: DeploymentSettings, run_id: str) -> list[dict[str, Any]] | None:
     """``name``, ``size`` and ``modified`` (UTC, or ``None`` where a store omits it) per log, newest first."""
+    if not is_safe_run_id(run_id):
+        return None
     if settings.is_remote:
         store = store_with_run(settings, run_id)
         if store is None:
@@ -55,7 +58,7 @@ def list_run_logs(settings: DeploymentSettings, run_id: str) -> list[dict[str, A
 
 def read_run_log(settings: DeploymentSettings, run_id: str, name: str) -> str | None:
     """One log's text; ``None`` when the run or the log is absent, or *name* is not a log's name."""
-    if not is_safe_log_name(name):
+    if not is_safe_log_name(name) or not is_safe_run_id(run_id):
         return None
     if settings.is_remote:
         store = store_with_run(settings, run_id)

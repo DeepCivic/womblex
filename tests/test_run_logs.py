@@ -40,6 +40,8 @@ class TestLibrary:
         (root / "run-old" / "documents").mkdir(parents=True)
         assert list_run_logs(settings, "run-old") == []
         assert list_run_logs(settings, "run-none") is None
+        assert list_run_logs(settings, "..") is None
+        assert read_run_log(settings, "..", "batch-0001.log") is None
         assert read_run_log(settings, "run-old", "batch-0001.log") is None
         for bad in ("batch-1.log", "batch-0001.log.bak", "../../etc/passwd"):
             assert read_run_log(settings, "run-old", bad) is None
