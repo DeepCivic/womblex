@@ -47,8 +47,7 @@ def storage_options_from_env(uri: str, *, credentials: tuple[str, str] | None = 
     credentials); these kwargs are s3fs-shaped and would misconfigure them.
 
     *credentials*, when given as ``(key, secret)``, is an explicit override
-    that wins over the environment — the path an operator-saved credential
-    (Resources Console) takes so a rotated key is used *moving forward*
+    that wins over the environment, so a rotated key is used *moving forward*
     without a container rebuild, even though the Dockerfile baked an older one
     into the env. When ``None``, the store's credentials are read from the
     **store-specific** ``WOMBLEX_S3_ACCESS_KEY_ID`` /
