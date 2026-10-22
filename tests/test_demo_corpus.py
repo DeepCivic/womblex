@@ -1,12 +1,10 @@
 """Tests for the demo-corpus seeder (`womblex seed-demo`).
 
-The seeder exists to fix "Sample corpus not present": a fresh console — local
-or store-backed — reads an empty run source and shows nothing until a real run
-lands. `seed-demo` publishes the vendored `output/console-demo/run-synthetic-demo`
-into that run source so the console has a browsable sample. These tests prove
-the two console modes each *see* the seeded run through the same `ui.readers`
-the frontend calls, and that the per-mode layout (local vs `runs/` prefix) is
-right — getting that wrong is a silent "no runs".
+`seed-demo` publishes the vendored `output/console-demo/run-synthetic-demo`
+into a run source, so a fresh local root or store holds a browsable sample.
+These tests prove the run lands where each mode reads it and that the
+per-mode layout (local vs `runs/` prefix) is right — getting that wrong is a
+silent "no runs".
 """
 from __future__ import annotations
 
@@ -19,8 +17,8 @@ pytest.importorskip("fsspec")
 from womblex.cli import ALL_COMMANDS
 from womblex.cli.demo import cmd_seed_demo
 from womblex.store import demo_corpus
-from womblex.ui import readers
-from womblex.ui.deps import UISettings
+from womblex.store.remote_manifest import open_store, remote_manifest_rows
+from womblex.store.retention import describe_run, list_runs
 
 #: The synthetic PDF and DOCX documents the demo run was built from.
 DEMO_DOCUMENTS = 7
@@ -43,7 +41,7 @@ class TestDemoCorpusVendored:
             f"demo run missing at {demo_corpus.demo_run_dir()} — the sample corpus "
             "that seeds the console is not vendored"
         )
-        # The consolidated manifest is the file the console's run reader prefers.
+        # The consolidated manifest is the file a run reader prefers.
         assert (demo_corpus.demo_run_dir() / "manifest.parquet").is_file()
 
     def test_demo_dir_honours_the_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -56,44 +54,38 @@ class TestSeedDemoCommand:
     def test_registered_in_the_cli(self) -> None:
         assert any(c.name == "seed-demo" for c in ALL_COMMANDS)
 
-    def test_seeds_a_local_output_root_the_console_then_reads(self, tmp_path: Path) -> None:
-        """Local mode: the run lands at <output_root>/<run_id>/ and the console sees it."""
+    def test_seeds_a_local_output_root_that_is_then_readable(self, tmp_path: Path) -> None:
+        """Local mode: the run lands at <output_root>/<run_id>/ and is listed."""
         assert cmd_seed_demo(_Args(output_root=tmp_path)) == 0
         # Layout: no `runs/` prefix in local mode.
         assert (tmp_path / demo_corpus.DEMO_RUN_ID / "manifest.parquet").is_file()
 
-        settings = UISettings(output_root=tmp_path, store_uri=None)
-        runs = readers.list_run_summaries(settings)
+        runs = [describe_run(p) for p in list_runs(tmp_path)]
         assert [r.run_id for r in runs] == [demo_corpus.DEMO_RUN_ID]
         assert runs[0].document_count == DEMO_DOCUMENTS
         # A full pipeline run: the stages the checkpoints/sidecars evidence.
         assert "extract" in runs[0].stages and "money" in runs[0].stages
 
-        rows = readers.get_manifest_rows(settings, demo_corpus.DEMO_RUN_ID)
-        assert rows is not None and len(rows) == DEMO_DOCUMENTS
-
     def test_seeded_run_carries_the_default_isaacus_shape(self, tmp_path: Path) -> None:
-        """The sample corpus is a completed DEFAULT-Isaacus run, so the console's
-        sample and the composer preset agree. Embed is part of it — the demo run
-        that omitted it would have disagreed with the (now embed-enabled) preset.
+        """The sample corpus is a completed DEFAULT-Isaacus run, so the sample
+        and the preset agree. Embed is part of it — the demo run that omitted it
+        would have disagreed with the (now embed-enabled) preset.
         """
         assert cmd_seed_demo(_Args(output_root=tmp_path)) == 0
-        settings = UISettings(output_root=tmp_path, store_uri=None)
-        stages = set(readers.list_run_summaries(settings)[0].stages)
+        stages = set(describe_run(next(iter(list_runs(tmp_path)))).stages)
         # The stages the DEFAULT-Isaacus shape names, evidenced by their sidecars.
         assert {"extract", "normalise", "chunk", "enrich", "embed", "money"} <= stages
 
-    def test_seeds_a_store_the_console_then_reads(self, tmp_path: Path) -> None:
+    def test_seeds_a_store_that_is_then_readable(self, tmp_path: Path) -> None:
         """Store mode: the run lands under runs/<run_id>/ (RemoteStore's local backend)."""
         store_root = tmp_path / "store"
         assert cmd_seed_demo(_Args(store=str(store_root))) == 0
-        # Layout: the `runs/` prefix a store-backed console reads.
+        # Layout: the `runs/` prefix a store is read under.
         assert (store_root / "runs" / demo_corpus.DEMO_RUN_ID / "manifest.parquet").is_file()
 
-        settings = UISettings(output_root=None, store_uri=str(store_root))
-        runs = readers.list_run_summaries(settings)
-        assert [r.run_id for r in runs] == [demo_corpus.DEMO_RUN_ID]
-        assert runs[0].document_count == DEMO_DOCUMENTS
+        assert open_store(str(store_root)).list_dirs("runs") == [demo_corpus.DEMO_RUN_ID]
+        rows = remote_manifest_rows(str(store_root), demo_corpus.DEMO_RUN_ID)
+        assert rows is not None and len(rows) == DEMO_DOCUMENTS
 
     def test_refuses_two_targets(self, tmp_path: Path) -> None:
         assert cmd_seed_demo(_Args(output_root=tmp_path, store="s3://x")) == 1
@@ -106,7 +98,7 @@ class TestSeedDemoCommand:
     def test_resolves_target_from_env(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """`seed-demo` reads the same env vars `womblex ui` does."""
+        """`seed-demo` falls back to the environment when no target is passed."""
         monkeypatch.delenv("WOMBLEX_STORE_URI", raising=False)
         monkeypatch.setenv("WOMBLEX_UI_OUTPUT_ROOT", str(tmp_path))
         assert cmd_seed_demo(_Args()) == 0

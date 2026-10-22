@@ -14,58 +14,22 @@ from pathlib import Path
 
 from fastapi import Request
 
-from womblex.store.remote import assert_disjoint_locations
+from womblex.cloud.deployment import DeploymentSettings
 
 
 @dataclass(frozen=True)
-class UISettings:
-    """Where the console reads run state from. Exactly one of the two is set.
-
-    ``db_dsn`` is the optional job queue the dashboard reads. It is
-    orthogonal to the run source rather than paired with it: a queue is
-    present whenever one is configured (env or argument) and absent
-    otherwise, and a deployment with no queue falls back to the per-stage
-    checkpoints inside the run itself.
+class UISettings(DeploymentSettings):
+    """The deployment settings plus what only the console asks of them.
 
     ``presets_dir`` is where the Pipeline Composer *saves* operator-authored
-    presets (docs/functional_requirements.md, Requirement 19) — one JSON file per preset. It applies
-    to *local* mode only, it is local-mode only: remote mode has no
-    equivalent field because it always writes presets under the store's own
-    ``presets/`` prefix, a sibling of ``runs/`` in the same
-    bucket — so a store-backed console needs no writable mount to save presets.
-    In local mode, ``None`` disables saving: the built-in presets still serve,
-    but ``POST /api/composer/presets`` refuses with 409.
-
-    ``ingest_uri`` names where source documents arrive from, distinct from
-    ``store_uri``/``output_root``. ``None`` means the Execution Controls
-    cannot dispatch; everything read-only still serves. When both are set they
-    must be disjoint of the output store's effective ``runs/`` prefix,
-    enforced here at construction.
+    presets in local mode; ``None`` disables saving, but the built-in presets
+    still serve and ``POST /api/composer/presets`` refuses with 409. Remote mode
+    always saves under the store's own ``presets/`` prefix.
     """
-
-    output_root: Path | None
-    store_uri: str | None
-    db_dsn: str | None = None
-    presets_dir: Path | None = None
-    ingest_uri: str | None = None
-
-    def __post_init__(self) -> None:
-        if bool(self.output_root) == bool(self.store_uri):
-            raise ValueError("UISettings needs exactly one of output_root or store_uri")
-        if self.ingest_uri and self.store_uri:
-            assert_disjoint_locations(self.ingest_uri, self.store_uri)
-
-    @property
-    def is_remote(self) -> bool:
-        return self.store_uri is not None
 
     @property
     def presets_writable(self) -> bool:
-        """Whether this deployment can save presets at all.
-
-        Remote mode always can (it writes to the store's ``presets/`` prefix); local mode can only when a writable ``presets_dir`` was
-        configured. The composer's save/delete routes 409 when this is false.
-        """
+        """Whether this deployment can save presets at all."""
         return self.is_remote or self.presets_dir is not None
 
 

@@ -47,16 +47,17 @@ from womblex.api.models import (
 )
 from womblex.cli._shared import SUPPORTED_EXTENSIONS, select_supported
 from womblex.cloud import dispatch
+from womblex.cloud.deployment import DeploymentSettings
 from womblex.cloud.dispatch import QUEUE_CONNECT_TIMEOUT
 from womblex.cloud.jobs import RunBoard, RunSummary, run_state
+from womblex.cloud.reachability import queue_reachable, store_reachable
 from womblex.cloud.worker_registry import NoLiveWorker
 from womblex.cloud.workflow_order import StageOrderError
+from womblex.presets import get_any_preset
 from womblex.store.contract import read_footer_contract
 from womblex.store.remote import RemoteStore
+from womblex.store.remote_manifest import StoreUnreachable, remote_manifest_rows
 from womblex.store.retention import generate_run_id
-from womblex.ui import readers as ui_readers
-from womblex.ui import resources
-from womblex.ui.deps import UISettings
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +140,7 @@ def create_api_app(
     ``serve`` command, not this factory, refuses an empty registry. Without
     *ingest_uri* the reads serve and submission and uploads answer 503.
     """
-    settings = UISettings(
+    settings = DeploymentSettings(
         output_root=None, store_uri=store_uri, db_dsn=db_dsn, ingest_uri=ingest_uri,
     )
     app = FastAPI(title="Womblex API", version="1")
@@ -169,8 +170,8 @@ def create_api_app(
 
     @app.get("/v1/ready", response_model=Ready, tags=["ops"])
     def ready(response: Response) -> Ready:
-        store_ok = bool(resources.test_store(settings)["reachable"])
-        queue_ok = bool(resources.test_queue(settings)["reachable"])
+        store_ok, _ = store_reachable(store_uri)
+        queue_ok, _ = queue_reachable(db_dsn)
         ok = store_ok and queue_ok
         if not ok:
             response.status_code = 503
@@ -186,7 +187,7 @@ def create_api_app(
         prefix = confine_prefix(caller, body.input_prefix)
         config = body.config
         if body.preset is not None:
-            preset = ui_readers.get_any_preset(settings, body.preset)
+            preset = get_any_preset(settings, body.preset)
             if preset is None:
                 raise HTTPException(status_code=400, detail=f"unknown preset: {body.preset}")
             config = preset.config
@@ -266,8 +267,8 @@ def create_api_app(
         with queue() as q:
             find_run(q, caller, run_id)
         try:
-            rows = ui_readers.get_manifest_rows(settings, run_id)
-        except ui_readers.StoreUnreachable as e:
+            rows = remote_manifest_rows(store_uri, run_id)
+        except StoreUnreachable as e:
             raise HTTPException(status_code=503, detail=f"run store unreachable: {e}") from e
         return RunManifest(run_id=run_id, documents=rows or [])
 

@@ -24,7 +24,7 @@ from womblex.cloud.workflow_store import StoredWorkflow
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from womblex.config import WomblexConfig
-    from womblex.ui.presets import Preset
+    from womblex.presets import Preset
 
 #: Free, local, deterministic steps whose output a count may need, per counted stage.
 _FEEDS: dict[str, tuple[str, ...]] = {

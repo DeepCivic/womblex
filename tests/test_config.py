@@ -450,7 +450,7 @@ class TestStrictConfig:
     def test_saved_preset_with_stray_key_is_logged_by_name(self, caplog) -> None:
         import json
 
-        from womblex.ui.presets import parse_saved_preset
+        from womblex.presets import parse_saved_preset
 
         body = json.dumps({"config": {"chunking": {"nope": 1}}})
         with caplog.at_level("WARNING"):

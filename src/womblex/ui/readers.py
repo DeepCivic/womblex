@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING, cast
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from womblex import presets as presets_mod
+from womblex.presets import Preset
 from womblex.store.enrichment_output import (
     ENRICHMENT_ENTITIES_SUFFIX,
     ENTITY_SCHEMA,
@@ -37,9 +39,7 @@ from womblex.store.quality_output import CHUNK_QUALITY_SCHEMA, CHUNK_QUALITY_SUF
 from womblex.store.retention import STAGE_SUFFIXES, RunDescription, describe_run, list_runs
 from womblex.store.run_manifest import RUN_MANIFEST_FILENAME
 from womblex.store.shard_audit import ARCHIVE_SUFFIX, audit_shard_directory
-from womblex.ui import presets as presets_mod
 from womblex.ui.deps import UISettings
-from womblex.ui.presets import Preset
 
 if TYPE_CHECKING:
     from womblex.store.remote import RemoteStore

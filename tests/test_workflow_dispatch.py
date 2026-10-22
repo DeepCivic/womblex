@@ -129,7 +129,7 @@ def test_cli_exit_codes_and_one_line_per_refusal(fleet, caplog, monkeypatch):  #
 
     from tests.test_workflow_runner import _PRESET, write_workflow
     from womblex.cli.workflow import cmd_dispatch_workflow
-    from womblex.ui.presets import build_preset_record, preset_filename, serialise_preset_record
+    from womblex.presets import build_preset_record, preset_filename, serialise_preset_record
 
     store, _, tmp = fleet
     write_workflow(tmp, "good", ["normalise"], config=_NORMALISED)

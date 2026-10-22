@@ -215,7 +215,7 @@ def _check_config_overlay(spec: StoredWorkflowSpec) -> None:
     An unknown name may be an operator-saved preset (unreadable without a store), so it passes here;
     the runner resolves it and re-validates the full combination.
     """
-    from womblex.ui.presets import _validate_overlay, get_preset
+    from womblex.presets import _validate_overlay, get_preset
 
     builtin = get_preset(spec.preset)
     _validate_overlay(combine_config(builtin.config if builtin else {}, spec.config))

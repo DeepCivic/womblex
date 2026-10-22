@@ -43,7 +43,7 @@ from womblex.store.run_stamp import workflow_context
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from womblex.config import WomblexConfig
-    from womblex.ui.presets import Preset
+    from womblex.presets import Preset
 
 logger = logging.getLogger(__name__)
 
@@ -172,11 +172,8 @@ def config_from_payload(payload: dict[str, Any], paths: dict[str, Any]) -> Wombl
 
 
 def preset_resolver(presets_dir: Path | None) -> Callable[[str], Preset | None]:
-    """Resolve a preset name: an operator-saved one in *presets_dir* shadows a built-in.
-
-    Imports `ui.presets`, not `ui.readers` (which needs fastapi, an extra).
-    """
-    from womblex.ui import presets as pm
+    """Resolve a preset name: an operator-saved one in *presets_dir* shadows a built-in."""
+    from womblex import presets as pm
 
     def resolve(name: str) -> Preset | None:
         path = presets_dir / pm.preset_filename(name) if presets_dir and pm.is_safe_preset_name(name) else None

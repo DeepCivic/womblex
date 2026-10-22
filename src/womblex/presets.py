@@ -1,18 +1,15 @@
-"""Named pre-configured pipelines the Pipeline Composer offers as starting points.
+"""Named pre-configured pipelines a workflow or a dispatched run starts from.
 
 A *preset* is a partial :class:`~womblex.config.WomblexConfig` — the stage
-toggles and stage settings for a common end-to-end shape — that the composer
-form loads so an operator does not hand-assemble it section by section. It is
-deliberately *partial*: ``dataset`` and ``paths`` name a real run and have no
-sensible default (they are the one thing the operator must still supply), so a
-preset never carries them. Merging a preset into the form's current config
+toggles and stage settings for a common end-to-end shape. It is deliberately
+*partial*: ``dataset`` and ``paths`` name a real run and have no sensible
+default, so a preset never carries them. Merging a preset into a config
 therefore only ever flips stage `enabled` flags and their settings, leaving the
 run's identity and filesystem paths untouched.
 
-Presets are just data here for the same reason the DAG is: the composer's
-validation and YAML download go through the same ``WomblexConfig(**raw)``
-construction ``load_config`` uses, so a preset that would not load is a test
-failure, not a runtime surprise (``tests/test_ui_composer.py`` builds each one).
+Presets are just data, so a preset that would not load is a test failure, not a
+runtime surprise: every one is validated through the same
+``WomblexConfig(**raw)`` construction ``load_config`` uses.
 
 `DEFAULT-Isaacus` is the reference Isaacus pipeline:
 ``extract → normalise → enrich → chunk → build_graph → embed →
@@ -25,7 +22,7 @@ among ``SUPPORTED_EXTENSIONS`` — which is what makes AI chunking and enrichmen
 meaningful (spreadsheets are structured, not narrative). The vendored demo run
 (``run-synthetic-demo``, ``womblex seed-demo``) is a completed run of this
 shape over the synthetic fixture documents, bar ``link`` (it needs a corpus
-reference register), so the console's sample corpus and the preset stay in step.
+reference register).
 
 The runnable, CLI-first source of truth for that shape is
 ``configs/default-isaacus.yaml`` — a complete config plus the per-stage command
@@ -41,16 +38,19 @@ import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from womblex.config import DatasetConfig, PathsConfig, WomblexConfig
+
+if TYPE_CHECKING:
+    from womblex.cloud.deployment import DeploymentSettings
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
 class Preset:
-    """A named partial config the composer loads into its form.
+    """A named partial config a run or workflow starts from.
 
     ``config`` is the partial ``WomblexConfig`` overlay (no ``dataset`` /
     ``paths``); ``formats`` is the file extensions the pipeline is intended for.
@@ -80,7 +80,7 @@ class Preset:
 #: Mirrors ``configs/default-isaacus.yaml`` (the runnable, CLI-first source of
 #: truth) and the vendored demo run (``run-synthetic-demo``, a completed run of
 #: this shape bar ``link``) — edit all three together. Settings beyond the bare
-#: `enabled` flags are carried so the composer form seeds sensible values, not
+#: `enabled` flags are carried so a preset seeds sensible values, not
 #: just toggles:
 #:
 #: - `processing.text_source = normalised` selects the cleaned text layer as
@@ -95,7 +95,7 @@ class Preset:
 #:   are dense with proper nouns, statute short titles and agency acronyms that
 #:   are legitimately out-of-dictionary — so it is a per-corpus call to make
 #:   after measuring, not a reference default. The stage and its config are
-#:   unchanged; the composer still offers them.
+#:   unchanged.
 #: - `chunking.chunking_model = kanon-2-enricher` selects semchunk-4 AI
 #:   chunking (boundaries follow the enricher's structure). With `enrich` also
 #:   on, `WomblexConfig` auto-enables `enrichment.persist_document` so `chunk`
@@ -155,7 +155,7 @@ PRESETS: dict[str, Preset] = {p.name: p for p in (_DEFAULT_ISAACUS,)}
 
 
 def list_presets() -> list[dict[str, Any]]:
-    """Every built-in preset, in registration order — the composer's preset dropdown."""
+    """Every built-in preset, in registration order."""
     return [p.as_dict() for p in PRESETS.values()]
 
 
@@ -165,21 +165,18 @@ def get_preset(name: str) -> Preset | None:
 
 
 # ---------------------------------------------------------------------------
-# Operator-saved presets (docs/functional_requirements.md, Requirement 19)
+# Operator-saved presets
 # ---------------------------------------------------------------------------
 #
-# Besides the built-ins above (code), an operator can *save* a composed config
+# Besides the built-ins above (code), an operator can *save* a config
 # as a named starting point of their own. Each lands as one JSON file — one file
-# per record, so two saves can't lose each other. *Where* that file sits is ``womblex.ui.readers``' call, not this
-# module's: locally under a writable ``presets_dir``, remotely under the store's
-# own ``presets/`` prefix (a sibling of ``runs/``), so a
-# store-backed console needs no writable mount. This module owns only the
-# *format* — the filename, the record bytes, and parsing one file back into a
-# :class:`Preset`.
+# per record, so two saves can't lose each other. Locally the files sit under a
+# ``presets_dir``, remotely under the store's own ``presets/`` prefix (a sibling
+# of ``runs/``). This module owns the *format* — the filename, the record bytes,
+# and parsing one file back into a :class:`Preset` — and reading them back.
 
 #: The store prefix operator-saved presets live under in remote mode — a
-#: sibling of ``runs/`` in the same bucket, so the container
-#: stays ``read_only`` (docs/functional_requirements.md, Requirement 19).
+#: sibling of ``runs/`` in the same bucket.
 PRESETS_DIRNAME = "presets"
 
 _PRESET_SUFFIX = ".preset.json"
@@ -220,8 +217,8 @@ def _validate_overlay(config: dict[str, Any]) -> dict[str, Any]:
 
 # ---------------------------------------------------------------------------
 # Format: filename, record bytes, and parsing one file back into a Preset.
-# `readers.py` owns *where* these files sit (local dir vs. store prefix); this
-# module owns *what* one is, the same split as the rest of the console.
+# `read_saved_presets` below owns *where* these files sit (local dir vs. store
+# prefix); this section owns *what* one is.
 # ---------------------------------------------------------------------------
 
 
@@ -301,6 +298,49 @@ def merge_saved(saved: dict[str, Preset]) -> list[dict[str, Any]]:
 def resolve_one(saved: dict[str, Preset], name: str) -> Preset | None:
     """One preset by name — a *saved* one shadowing a built-in — or ``None``."""
     return saved.get(name) or PRESETS.get(name)
+
+
+def read_saved_presets(settings: DeploymentSettings) -> dict[str, Preset]:
+    """Every operator-saved preset, keyed by name — the store prefix or the local dir.
+
+    A file that will not parse or whose overlay will not load is skipped (not
+    fatal): one corrupt preset must not blank the list.
+    """
+    saved: dict[str, Preset] = {}
+    if settings.is_remote:
+        from womblex.store.remote_manifest import open_store
+
+        store = open_store(str(settings.store_uri))
+        for key in store.list_files(PRESETS_DIRNAME, "*"):
+            name = preset_name_from_filename(key.rsplit("/", 1)[-1])
+            if name is None:
+                continue
+            preset = parse_saved_preset(name, store.read_text(key))
+            if preset is not None:
+                saved[name] = preset
+        return saved
+    presets_dir = settings.presets_dir
+    if presets_dir is None or not presets_dir.is_dir():
+        return saved
+    for path in sorted(presets_dir.glob("*")):
+        name = preset_name_from_filename(path.name)
+        if name is None:
+            continue
+        try:
+            body = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        preset = parse_saved_preset(name, body)
+        if preset is not None:
+            saved[name] = preset
+    return saved
+
+
+def get_any_preset(settings: DeploymentSettings, name: str) -> Preset | None:
+    """One preset by name (a saved one shadowing a built-in), or ``None``."""
+    if not is_safe_preset_name(name):
+        return PRESETS.get(name)
+    return resolve_one(read_saved_presets(settings), name)
 
 
 def _validate_presets() -> None:

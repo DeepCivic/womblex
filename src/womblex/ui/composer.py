@@ -21,6 +21,7 @@ from typing import Any
 import yaml
 from pydantic import ValidationError
 
+from womblex.cloud.deployment import deployment_paths
 from womblex.cloud.stage_contracts import (
     DISCOVERY_SUFFIXES,
     PRODUCER_OF,
@@ -28,7 +29,6 @@ from womblex.cloud.stage_contracts import (
     STAGE_NAMES,
 )
 from womblex.config import DatasetConfig, PathsConfig, WomblexConfig
-from womblex.store.remote import is_remote_uri
 from womblex.ui.deps import UISettings
 
 #: Extraction is not itself a `StageContract` — it runs inside
@@ -154,48 +154,6 @@ def get_config_schema() -> dict[str, Any]:
     if isinstance(required, list) and "paths" in required:
         required.remove("paths")
     return schema
-
-
-#: `pathlib.Path` mangles an object-store URI (`Path("s3://foo")` collapses
-#: to `s3:/foo`), so an object-store field is filled with this placeholder
-#: instead and named in a YAML header comment (`render_yaml`) rather than
-#: written where it would lie.
-_PATHS_PLACEHOLDER = "."
-
-
-def deployment_paths(settings: UISettings) -> tuple[dict[str, str], list[str]]:
-    """This deployment's `paths` section, plus env vars to note instead of a
-    mangled object-store URI. A local folder is written verbatim.
-
-    Public because `ui.execute` builds the same `WomblexConfig` from the same
-    posted form state when it dispatches downstream stages — the stage list it
-    derives has to come from the config *as the CLI would load it*, which means
-    the same paths injection.
-    """
-    env_vars: list[str] = []
-
-    if settings.ingest_uri and is_remote_uri(settings.ingest_uri):
-        input_root = _PATHS_PLACEHOLDER
-        env_vars.append("$WOMBLEX_INGEST_URI")
-    elif settings.ingest_uri:
-        input_root = settings.ingest_uri
-    else:
-        input_root = str(settings.output_root) if settings.output_root else _PATHS_PLACEHOLDER
-
-    if settings.store_uri and is_remote_uri(settings.store_uri):
-        output_root = _PATHS_PLACEHOLDER
-        env_vars.append("$WOMBLEX_STORE_URI")
-    elif settings.store_uri:
-        output_root = settings.store_uri
-    else:
-        output_root = str(settings.output_root) if settings.output_root else _PATHS_PLACEHOLDER
-
-    paths = {
-        "input_root": input_root,
-        "output_root": output_root,
-        "checkpoint_dir": _PATHS_PLACEHOLDER,
-    }
-    return paths, env_vars
 
 
 def validate_config(raw: dict[str, Any], settings: UISettings) -> dict[str, Any]:
