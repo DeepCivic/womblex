@@ -158,6 +158,7 @@ womblex/
 │   │   ├── run_reads.py     # Runs as the store or output root holds them: listing, stage presence, shard audit
 │   │   ├── document_detail.py # One document's chunks with its entities, PII spans, money and quality rows
 │   │   ├── run_logs.py      # A run's batch logs: list and read, names checked before any join
+│   │   ├── stage_progress.py # Each stage's checkpoint progress for one run, read from the run itself
 │   │   ├── lineage.py       # The run record as an OpenLineage 2-0-2 RunEvent (`manifest --lineage`)
 │   │   ├── register_manifest.py  # Manifest for standalone register ingests (G-NAF/ABN/geospatial)
 │   │   ├── demo_corpus.py   # Publish the vendored demo run into a run store (`womblex seed-demo`)
@@ -178,6 +179,7 @@ womblex/
 │   │   ├── dispatch.py         # enqueue_extraction / enqueue_downstream_stages (owner=), downstream_stages gate + guard — shared by the service API and any other dispatcher
 │   │   ├── ingest_preview.py   # ingest_preflight() — what a run over a prefix would pick up, before enqueue
 │   │   ├── deployment.py       # DeploymentSettings (run source, queue, ingest, presets dir) + deployment_paths — fastapi-free
+│   │   ├── queue_snapshot.py   # queue_snapshot() — stats, jobs, workers, stale jobs, throughput in one read
 │   │   ├── reachability.py     # store_reachable / queue_reachable — the `/v1/ready` probes
 │   │   ├── worker.py           # run_worker() — launch DBOS, join the queues this process can serve (keyed by the models it checked)
 │   │   ├── worker_registry.py  # womblex_workers — the queues each live worker serves
@@ -196,7 +198,8 @@ womblex/
 │   ├── api/                    # Service API (`womblex serve`)
 │   │   ├── app.py              # create_api_app() — `/v1` health/ready, run submit, list/detail, manifest, files, document text, metrics; owner-scoped
 │   │   ├── routes_config.py    # /v1/stages and /v1/config/schema, validate, yaml
-│   │   ├── routes_runs.py      # /v1/store/runs (admin), per-run stage presence, shard audit, document detail, logs
+│   │   ├── routes_queue.py     # /v1/queue — the queue in one read, owner-scoped
+│   │   ├── routes_runs.py      # /v1/store/runs (admin), per-run stage presence, shard audit, document detail, logs, progress
 │   │   ├── routes_presets.py   # /v1/presets list, fetch (read), save, delete (admin)
 │   │   ├── readers.py          # Document text rows by layer (masked / chunks / elements), read in place with a source_hash filter
 │   │   ├── auth.py             # Service-token auth: client registry (WOMBLEX_API_CLIENTS), Caller + scopes, FastAPI dependencies

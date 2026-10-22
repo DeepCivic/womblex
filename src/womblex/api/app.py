@@ -48,6 +48,7 @@ from womblex.api.models import (
 )
 from womblex.api.routes_config import config_router
 from womblex.api.routes_presets import presets_router
+from womblex.api.routes_queue import queue_router
 from womblex.api.routes_runs import runs_router
 from womblex.cli._shared import SUPPORTED_EXTENSIONS, select_supported
 from womblex.cloud import dispatch
@@ -156,6 +157,7 @@ def create_api_app(
     can_read_raw = require_scope(get_caller, "read_raw")
     app.include_router(config_router(settings, can_read))
     app.include_router(presets_router(settings, can_read, can_admin))
+    app.include_router(queue_router(db_dsn, can_read))
 
     @contextmanager
     def queue() -> Iterator[RunBoard]:

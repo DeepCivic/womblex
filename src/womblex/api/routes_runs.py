@@ -1,11 +1,12 @@
-"""`/v1/store/runs` and the per-run reads over a run's files: stage presence, the shard audit, a document's chunk detail and the batch logs.
+"""`/v1/store/runs` and the per-run reads over a run's files: stage presence, the shard audit, a document's chunk detail, the batch logs and stage progress.
 
 The store is read directly, so these answer for a run the queue never saw
 (one `womblex run` wrote, or one seeded). Listing the store is ``admin``: it
 names every run, whoever submitted it. A per-run read needs ``read`` and the
 run's ownership, through *authorise*; a document's detail carries raw chunk
 text and PII, so it needs ``read_raw``. The bodies are :mod:`womblex.store.run_reads`,
-:mod:`womblex.store.document_detail` and :mod:`womblex.store.run_logs`.
+:mod:`womblex.store.document_detail`, :mod:`womblex.store.run_logs` and
+:mod:`womblex.store.stage_progress`.
 """
 from __future__ import annotations
 
@@ -17,12 +18,21 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
 
 from womblex.api.auth import Caller
-from womblex.api.models import DocumentDetail, RunLog, RunLogs, StagePresence, StoredRun, StoredRunList
+from womblex.api.models import (
+    DocumentDetail,
+    RunLog,
+    RunLogs,
+    StagePresence,
+    StageProgress,
+    StoredRun,
+    StoredRunList,
+)
 from womblex.cloud.deployment import DeploymentSettings
 from womblex.store import run_logs, run_reads
 from womblex.store.document_detail import document_detail
 from womblex.store.remote_manifest import StoreUnreachable
 from womblex.store.retention import STAGE_SUFFIXES
+from womblex.store.stage_progress import stage_progress
 
 
 def unreachable(e: StoreUnreachable) -> HTTPException:
@@ -118,5 +128,17 @@ def runs_router(
             raise HTTPException(status_code=404, detail={"message": f"log not found: {name}", "available": available})
         headers = {"Content-Disposition": f'attachment; filename="{name}"'} if download else None
         return PlainTextResponse(text, headers=headers)
+
+    @router.get("/v1/runs/{run_id}/progress", response_model=StageProgress)
+    def get_progress(run_id: str, caller: Caller = Depends(can_read)) -> StageProgress:  # noqa: B008
+        """Each stage's checkpoint, read from the run itself, so it answers without a queue too."""
+        authorise(caller, run_id)
+        try:
+            stages = stage_progress(settings, run_id)
+        except StoreUnreachable as e:
+            raise unreachable(e) from e
+        if stages is None:
+            raise not_found(run_id)
+        return StageProgress(run_id=run_id, stages=stages)
 
     return router

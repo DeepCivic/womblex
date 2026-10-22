@@ -30,6 +30,12 @@ def store_reachable(store_uri: str) -> tuple[bool, str | None]:
     return True, None
 
 
+def is_missing_schema(exc: Exception) -> bool:
+    """Whether *exc* says the DBOS system tables do not exist yet (Postgres or SQLite wording)."""
+    text = str(exc).lower()
+    return "workflow_status" in text and ("exist" in text or "no such table" in text)
+
+
 def queue_reachable(db_dsn: str | None) -> tuple[bool, str | None]:
     """Whether the job queue at *db_dsn* answers.
 
@@ -46,8 +52,7 @@ def queue_reachable(db_dsn: str | None) -> tuple[bool, str | None]:
             try:
                 board.stats()
             except Exception as e:
-                text = str(e).lower()
-                if "workflow_status" in text and ("exist" in text or "no such table" in text):
+                if is_missing_schema(e):
                     return True, None
                 raise
     except Exception as e:

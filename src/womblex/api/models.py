@@ -207,3 +207,24 @@ class RunLogs(BaseModel):
 
     run_id: str
     logs: list[RunLog]
+
+
+class StageProgress(BaseModel):
+    """Each stage's checkpoint for the run, in pipeline order; a stage that has not run is absent."""
+
+    run_id: str
+    stages: list[dict[str, Any]]
+
+
+class QueueSnapshot(BaseModel):
+    """The queue in one read, scoped to the caller's runs (and to ``run_id`` when given)."""
+
+    run_id: str | None
+    stale_after_seconds: float
+    stats: dict[str, int]
+    total: int
+    summary: str | None
+    jobs: list[dict[str, Any]]
+    workers: list[dict[str, Any]]
+    stale: list[dict[str, Any]]
+    throughput: dict[str, Any]
