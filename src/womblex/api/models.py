@@ -100,3 +100,17 @@ class UploadAccepted(BaseModel):
     input_prefix: str
     files: list[str]
     bytes: int
+
+
+class StageGraph(BaseModel):
+    """The pipeline's nodes (one per stage, plus ``extract``) and its required-input edges."""
+
+    nodes: list[dict[str, Any]]
+    edges: list[dict[str, Any]]
+
+
+class ConfigValidation(BaseModel):
+    """Whether a posted config builds a `WomblexConfig`, with Pydantic's own errors."""
+
+    valid: bool
+    errors: list[dict[str, Any]]

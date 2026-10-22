@@ -75,8 +75,12 @@ that submitted them.
 | GET | `/v1/runs/{id}/files` | read | Object keys, row counts and footer `contract_version` / `sensitivity` |
 | GET | `/v1/runs/{id}/documents/{hash}/text` | read / read_raw | One document's text in document order, by `layer` |
 | GET | `/v1/runs/{id}/metrics` | read | Queue stats, workers and throughput as JSON |
+| GET | `/v1/stages` | read | The pipeline graph: a node per stage (and `extract`), an edge per required input |
+| GET | `/v1/config/schema` | read | `WomblexConfig`'s JSON Schema, without the deployment's `paths` |
+| POST | `/v1/config/validate` | read | `{valid, errors}` for a posted config under this deployment's `paths` |
+| POST | `/v1/config/yaml` | read | The posted config as YAML `womblex run --config` reads; 422 with the errors when invalid |
 
-Both POST routes answer 201. Pydantic models generate the OpenAPI spec; a test
+`POST /v1/runs` and `POST /v1/uploads` answer 201. Pydantic models generate the OpenAPI spec; a test
 pins its operation and model surface so breaking changes show in review.
 
 ### Uploads

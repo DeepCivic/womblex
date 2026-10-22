@@ -34,6 +34,7 @@ womblex/
 │   │   └── workflow.py     # run-workflow / validate / plan / dispatch-workflow / schedule-workflow subcommands, each over a workflow file
 │   ├── config/             # Pydantic config models (__init__: YAML loader + WomblexConfig; process.py: process-stage models)
 │   ├── pipeline_order.py   # PIPELINE_ORDER — what runs when; enabled_downstream_stages(config)
+│   ├── config_tools.py     # A composed config: JSON Schema without paths, validation and YAML under a deployment's paths
 │   ├── presets.py          # Named partial configs (built-in DEFAULT-Isaacus + operator-saved) and `read_saved_presets` / `get_any_preset`
 │   ├── batch.py            # process_batch() — shared per-batch pipeline body (extract → optional redaction detection; extraction only)
 │   ├── operations/         # Independent operations, one module each: extract, redact, chunk, pii, enrich — callers compose directly
@@ -177,6 +178,7 @@ womblex/
 │   │   ├── worker.py           # run_worker() — launch DBOS, join the queues this process can serve (keyed by the models it checked)
 │   │   ├── worker_registry.py  # womblex_workers — the queues each live worker serves
 │   │   ├── stage_contracts.py  # Declarative StageContract per downstream stage (inputs/outputs/scope)
+│   │   ├── stage_graph.py      # stage_graph() — the contracts as nodes and required-input edges
 │   │   ├── stage_runner.py     # Execute a contract against an object store
 │   │   ├── unit_receipt.py     # A store-run unit's receipt; the fleet's skip rule for work already published
 │   │   ├── workflow_store.py   # Workflow object (preset ref, input binding, steps, triggers) — schema, validation, the scheduled copies' table
@@ -189,6 +191,7 @@ womblex/
 │   │   └── workflow_runner.py  # Local multi-stage runner — a workflow's steps through the stage functions; refuse before work, record after
 │   ├── api/                    # Service API (`womblex serve`)
 │   │   ├── app.py              # create_api_app() — `/v1` health/ready, run submit, list/detail, manifest, files, document text, metrics; owner-scoped
+│   │   ├── routes_config.py    # /v1/stages and /v1/config/schema, validate, yaml
 │   │   ├── readers.py          # Document text rows by layer (masked / chunks / elements), read in place with a source_hash filter
 │   │   ├── auth.py             # Service-token auth: client registry (WOMBLEX_API_CLIENTS), Caller + scopes, FastAPI dependencies
 │   │   └── models.py           # Pydantic response models — the OpenAPI surface

@@ -401,6 +401,10 @@ def test_openapi_surface_is_pinned(client):
             "GET /v1/runs/{run_id}/manifest": "200 RunManifest",
             "GET /v1/runs/{run_id}/metrics": "200 RunMetrics",
             "POST /v1/uploads": "201 UploadAccepted",
+            "GET /v1/stages": "200 StageGraph",
+            "GET /v1/config/schema": "200 ",
+            "POST /v1/config/validate": "200 ConfigValidation",
+            "POST /v1/config/yaml": "200 ",
         },
         "models": {
             "DocumentText": ["layer", "rows", "run_id", "sensitivity", "source_hash"],
@@ -416,5 +420,7 @@ def test_openapi_surface_is_pinned(client):
             "RunSubmitted": ["batch_count", "document_count", "run_id", "stages"],
             "UploadAccepted": ["bytes", "files", "input_prefix", "upload_id"],
             "Body_upload_v1_uploads_post": ["files"],
+            "ConfigValidation": ["errors", "valid"],
+            "StageGraph": ["edges", "nodes"],
         },
     }
