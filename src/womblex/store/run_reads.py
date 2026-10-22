@@ -4,8 +4,9 @@ Every reader takes a `DeploymentSettings` and answers for either run source:
 a local ``output_root`` (``<root>/<run_id>/``) or a store (``runs/<run_id>/``).
 A store read stages only the small files it needs into a temp dir and hands
 them to the local reader, so the parquet logic has one code path. A per-run
-reader returns ``None`` when the run does not exist; an unreachable store is
-`StoreUnreachable`.
+reader returns ``None`` when the run does not exist, and for a run id that is
+not a single safe path component (`is_safe_run_id`), so ``..`` never reaches the
+parent of ``output_root``; an unreachable store is `StoreUnreachable`.
 """
 from __future__ import annotations
 
@@ -19,7 +20,7 @@ import pyarrow.parquet as pq
 from womblex.store.enrichment_output import LEGACY_HASH_COLUMN
 from womblex.store.output import _SHARD_SUFFIX
 from womblex.store.remote_manifest import open_store, remote_manifest_table
-from womblex.store.retention import STAGE_SUFFIXES, RunDescription, describe_run, list_runs
+from womblex.store.retention import STAGE_SUFFIXES, RunDescription, describe_run, is_safe_run_id, list_runs
 from womblex.store.shard_audit import ARCHIVE_SUFFIX, audit_shard_directory
 
 if TYPE_CHECKING:
@@ -59,6 +60,8 @@ def stage_presence(settings: DeploymentSettings, run_id: str, stage: str) -> lis
     Reads only the hash column. ``KeyError`` for a stage with no sidecar of its own.
     """
     suffix = STAGE_SUFFIXES[stage]
+    if not is_safe_run_id(run_id):
+        return None
     if settings.is_remote:
         store = store_with_run(settings, run_id)
         if store is None:
@@ -83,6 +86,8 @@ def shard_audit(settings: DeploymentSettings, run_id: str) -> dict | None:
     nothing else, and the embedding and enrichment sidecars are the run's
     largest files.
     """
+    if not is_safe_run_id(run_id):
+        return None
     if settings.is_remote:
         store = store_with_run(settings, run_id)
         if store is None:

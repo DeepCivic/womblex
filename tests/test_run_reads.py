@@ -49,6 +49,11 @@ class TestReads:
         assert audit is not None and audit["manifest_row_count"] == 7 and audit["shard_count"] >= 1
         assert run_reads.shard_audit(source, "run-absent") is None
 
+    @pytest.mark.parametrize("run_id", ["..", "../x", f"{DEMO}/..", ""])
+    def test_an_unsafe_run_id_names_no_run(self, source: DeploymentSettings, run_id: str) -> None:
+        assert run_reads.stage_presence(source, run_id, "chunk") is None
+        assert run_reads.shard_audit(source, run_id) is None
+
 
 class TestRoutes:
     @pytest.fixture
