@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import pytest
-
-from womblex.cloud.stage_contracts import STAGE_CONTRACTS
+from womblex.cloud.stage_contracts import CHECKPOINT_DIRNAMES, STAGE_CONTRACTS
 from womblex.pipeline_order import (
     DOWNSTREAM_STAGES,
     PIPELINE_ORDER,
@@ -17,11 +15,6 @@ from womblex.store.retention import STAGE_SUFFIXES
 
 
 def _checkpoint_dirnames() -> dict[str, str]:
-    """`ui.dashboard` pulls in FastAPI (the `[ui]` extra), so it is imported
-    inside the tests that need it rather than at module scope."""
-    pytest.importorskip("fastapi")
-    from womblex.ui.dashboard import CHECKPOINT_DIRNAMES
-
     return CHECKPOINT_DIRNAMES
 
 

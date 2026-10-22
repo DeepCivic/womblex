@@ -82,7 +82,7 @@ def test_price_appears_only_when_assumed(shards: Path) -> None:  # noqa: F811
 
 def test_cli_json_prices_and_exit_codes(shards: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:  # noqa: F811
     from womblex.cli.workflow import cmd_plan
-    from womblex.ui.presets import build_preset_record, preset_filename, serialise_preset_record
+    from womblex.presets import build_preset_record, preset_filename, serialise_preset_record
 
     write_workflow(tmp_path, "w", ["chunk", "embed"])
     record, _ = build_preset_record(name=_PRESET.name, description="", formats=(), config=_PRESET.config)

@@ -69,14 +69,14 @@ class TestSelectSupported:
         assert "/corpus" in msg
         assert "agency-a/ (1 document)" in msg
 
-    def test_error_is_a_value_error_for_the_console_route(self):
-        # ui/execute raises ValueError for bad input, which the route maps to
-        # 400; the refusal travels the same way without a route change.
+    def test_error_is_a_value_error_for_a_dispatching_route(self):
+        # A route that dispatches maps ValueError to 400; the refusal travels
+        # the same way without a route change.
         assert issubclass(NestedCorpusError, ValueError)
 
 
 class TestNormalisePrefix:
-    """One key scope per location, for the CLI enqueue and the console alike.
+    """One key scope per location, for the CLI enqueue and every other dispatcher alike.
 
     A spelling that survives normalisation is published provenance: the keys
     under the prefix are what the queue carries and what is recorded as each

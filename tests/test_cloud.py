@@ -93,7 +93,7 @@ def test_storage_options_omits_credentials_when_none_are_set(monkeypatch):
 
 
 def test_storage_options_explicit_credentials_win_over_env(monkeypatch):
-    """An operator-saved (Resources Console) credential override beats the env
+    """An explicit credential override beats the env
     keys the Dockerfile baked in — so a rotated key is used moving forward
     without a container rebuild (issue 3).
     """
@@ -171,7 +171,7 @@ def test_assert_disjoint_locations_honours_a_custom_output_prefix():
 
 def test_validate_location_uri_rejects_the_typos_operators_actually_make():
     """A hand-typed location that fsspec would silently read as a *relative
-    local path* is the failure the Resources Console has to catch on save."""
+    local path* is refused rather than accepted."""
     validate_location_uri("s3://womblex/inbox")
     validate_location_uri("/data/inbox")
     validate_location_uri("gs://bucket/inbox")
@@ -261,7 +261,7 @@ def test_remote_store_move_replaces_the_destination(tmp_path):
 
 
 def test_remote_store_read_text_and_delete(tmp_path):
-    """The small in-place read/delete the console's saved presets use (docs/functional_requirements.md, Requirement 19)."""
+    """The small in-place read/delete a saved preset needs."""
     store = RemoteStore.from_uri(str(tmp_path / "store"))
     src = tmp_path / "one.preset.json"
     src.write_text('{"name": "one"}', encoding="utf-8")
@@ -658,7 +658,7 @@ def test_enqueue_is_refused_before_any_row_when_no_live_worker_serves_the_run(tm
     assert _CapturingQueue.keys is None and "no live worker serves extraction" in caplog.text
 
 def test_the_worker_side_dispatch_helpers_import_without_fastapi():
-    """fastapi is the `ui`/`api` extra; a base-install worker must still import these."""
+    """fastapi is the `api` extra; a base-install worker must still import these."""
     import subprocess
     import sys
 
@@ -670,7 +670,7 @@ def test_the_worker_side_dispatch_helpers_import_without_fastapi():
 def test_owned_prefix_confines_an_owner_to_its_own_tree():
     from womblex.cloud.dispatch import PrefixNotOwned, owned_prefix
 
-    assert owned_prefix(None, "anyone/x") == "anyone/x"  # admin, CLI and console
+    assert owned_prefix(None, "anyone/x") == "anyone/x"  # admin and CLI
     assert owned_prefix("acme", "acme//in/") == "acme/in"
     assert owned_prefix("acme", "acme") == "acme"
     for other in ("other/x", "acme-two/x", ""):

@@ -25,8 +25,8 @@ UNLISTED = {
     "store/retention.py", "store/shard_audit.py", "utils/availability.py", "utils/checksum.py",
     "utils/money_metrics.py", "utils/run_log.py",
 }
-#: Covered elsewhere: package markers, and the CLI and console (the README command table).
-EXEMPT_PREFIXES = ("cli/", "ui/")
+#: Covered elsewhere: package markers, and the CLI (the README command table).
+EXEMPT_PREFIXES = ("cli/",)
 
 
 def _readme_commands() -> tuple[set[str], str]:

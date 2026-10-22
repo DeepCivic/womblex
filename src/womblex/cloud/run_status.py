@@ -2,8 +2,8 @@
 
 The words are the API's (`jobs.run_state`: ``pending`` / ``running`` / ``done`` /
 ``failed`` / ``cancelled``); a stage's counts add ``skipped`` for a stage whose every unit was
-already published. The CLI, the API and the console all print what
-`run_sentence` returns, so the three never describe a run differently.
+already published. The CLI and the API both print what
+`run_sentence` returns, so the two never describe a run differently.
 """
 
 from __future__ import annotations

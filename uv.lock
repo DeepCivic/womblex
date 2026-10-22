@@ -2182,17 +2182,12 @@ dev = [
 pgvector = [
     { name = "pgvector" },
 ]
-ui = [
-    { name = "fastapi" },
-    { name = "uvicorn" },
-]
 
 [package.metadata]
 requires-dist = [
     { name = "boto3", specifier = ">=1.34" },
     { name = "dbos", specifier = ">=3.2.0" },
     { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.115" },
-    { name = "fastapi", marker = "extra == 'ui'", specifier = ">=0.115" },
     { name = "fsspec", specifier = ">=2024.0" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
@@ -2228,10 +2223,9 @@ requires-dist = [
     { name = "spylls", specifier = ">=0.1.7" },
     { name = "tqdm" },
     { name = "uvicorn", marker = "extra == 'api'", specifier = ">=0.30" },
-    { name = "uvicorn", marker = "extra == 'ui'", specifier = ">=0.30" },
-    { name = "womblex", extras = ["cloud", "ui", "api", "pgvector", "dev"], marker = "extra == 'all'" },
+    { name = "womblex", extras = ["cloud", "api", "pgvector", "dev"], marker = "extra == 'all'" },
 ]
-provides-extras = ["local", "cloud", "ui", "api", "pgvector", "dev", "all"]
+provides-extras = ["local", "cloud", "api", "pgvector", "dev", "all"]
 
 [[package]]
 name = "wrapt"

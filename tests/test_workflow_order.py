@@ -103,7 +103,7 @@ def test_store_dispatch_refuses_and_codes_are_data(tmp_path: Path) -> None:
     with pytest.raises(StageOrderError) as e:
         check_dispatch_order(["chunk", "normalise"], cfg, store, "runs/r1/documents")
     assert e.value.issues[0].as_dict()["code"] == "input_stale"
-    assert isinstance(e.value, ValueError)  # the console and API map it to 400
+    assert isinstance(e.value, ValueError)  # the API maps it to 400
 
 
 def test_rerunning_a_misordered_workflow_over_a_stale_overlay_is_refused(tmp_path: Path) -> None:

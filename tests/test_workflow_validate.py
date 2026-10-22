@@ -69,7 +69,7 @@ def test_cli_json_and_exit_codes(shards: Path, tmp_path: Path, capsys: pytest.Ca
     write_workflow(tmp_path, "good", ["normalise"])
     write_workflow(tmp_path, "misordered", ["chunk", "normalise"], config=_NORMALISED)
     write_workflow(tmp_path, "unknown-key", ["normalise"], webhook="https://example.invalid")
-    from womblex.ui.presets import build_preset_record, preset_filename, serialise_preset_record
+    from womblex.presets import build_preset_record, preset_filename, serialise_preset_record
 
     record, _ = build_preset_record(name=_PRESET.name, description="", formats=(), config=_PRESET.config)
     (tmp_path / preset_filename(_PRESET.name)).write_text(serialise_preset_record(record))

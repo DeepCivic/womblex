@@ -1,16 +1,16 @@
 """FastAPI app factory for the `/v1` service API (`docs/service-api.md`).
 
-Separate from the console: it binds one shared store and queue for its
+It binds one shared store and queue for its
 lifetime, authenticates every `/v1` route with a service token
 (:mod:`womblex.api.auth`), and scopes runs to the caller that submitted them —
 a run another client owns is a 404, and ``admin`` sees all. A run is known by
-the queue, so the CLI- and console-submitted runs (no owner) are admin-only.
+the queue, so a CLI-submitted run (no owner) is admin-only.
 
 Uploads (``POST /v1/uploads``) store documents under the caller's own
 ``<client_id>/<upload_id>/`` folder of the ingest location, which is the
 ``input_prefix`` a submission then names.
 
-Submission writes queue rows only, through the console's dispatch
+Submission writes queue rows only, through the shared dispatch
 (:mod:`womblex.cloud.dispatch`): the run id is minted here, a non-admin
 caller's ``input_prefix`` must sit under its own client id, and the config is
 validated before any row is written. The config governs every stage of the run: the
@@ -34,6 +34,7 @@ from womblex.api.auth import Caller, ClientRegistry, caller_dependency, require_
 from womblex.api.models import (
     DocumentText,
     Health,
+    IngestPreview,
     Ready,
     RunFile,
     RunFiles,
@@ -45,18 +46,25 @@ from womblex.api.models import (
     RunSubmitted,
     UploadAccepted,
 )
+from womblex.api.routes_config import config_router
+from womblex.api.routes_presets import presets_router
+from womblex.api.routes_queue import queue_router
+from womblex.api.routes_resources import resources_router
+from womblex.api.routes_runs import runs_router
 from womblex.cli._shared import SUPPORTED_EXTENSIONS, select_supported
 from womblex.cloud import dispatch
+from womblex.cloud.deployment import DeploymentSettings
 from womblex.cloud.dispatch import QUEUE_CONNECT_TIMEOUT
+from womblex.cloud.ingest_preview import ingest_preflight
 from womblex.cloud.jobs import RunBoard, RunSummary, run_state
+from womblex.cloud.reachability import queue_reachable, store_reachable
 from womblex.cloud.worker_registry import NoLiveWorker
 from womblex.cloud.workflow_order import StageOrderError
+from womblex.presets import get_any_preset
 from womblex.store.contract import read_footer_contract
 from womblex.store.remote import RemoteStore
+from womblex.store.remote_manifest import StoreUnreachable, remote_manifest_rows
 from womblex.store.retention import generate_run_id
-from womblex.ui import readers as ui_readers
-from womblex.ui import resources
-from womblex.ui.deps import UISettings
 
 logger = logging.getLogger(__name__)
 
@@ -139,13 +147,19 @@ def create_api_app(
     ``serve`` command, not this factory, refuses an empty registry. Without
     *ingest_uri* the reads serve and submission and uploads answer 503.
     """
-    settings = UISettings(
+    settings = DeploymentSettings(
         output_root=None, store_uri=store_uri, db_dsn=db_dsn, ingest_uri=ingest_uri,
     )
     app = FastAPI(title="Womblex API", version="1")
     get_caller = caller_dependency(registry)
     can_read = require_scope(get_caller, "read")
     can_submit = require_scope(get_caller, "submit")
+    can_admin = require_scope(get_caller, "admin")
+    can_read_raw = require_scope(get_caller, "read_raw")
+    app.include_router(config_router(settings, can_read))
+    app.include_router(presets_router(settings, can_read, can_admin))
+    app.include_router(queue_router(db_dsn, can_read))
+    app.include_router(resources_router(settings, can_admin))
 
     @contextmanager
     def queue() -> Iterator[RunBoard]:
@@ -163,14 +177,23 @@ def create_api_app(
             return found[0]
         raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
 
+    def authorise_run(caller: Caller, run_id: str) -> None:
+        """An admin reads any run the store holds; another caller only one the queue says it owns."""
+        if caller.owner is None:
+            return
+        with queue() as q:
+            find_run(q, caller, run_id)
+
+    app.include_router(runs_router(settings, can_read, can_admin, can_read_raw, authorise_run))
+
     @app.get("/v1/health", response_model=Health, tags=["ops"])
     def health() -> Health:
         return Health()
 
     @app.get("/v1/ready", response_model=Ready, tags=["ops"])
     def ready(response: Response) -> Ready:
-        store_ok = bool(resources.test_store(settings)["reachable"])
-        queue_ok = bool(resources.test_queue(settings)["reachable"])
+        store_ok, _ = store_reachable(store_uri)
+        queue_ok, _ = queue_reachable(db_dsn)
         ok = store_ok and queue_ok
         if not ok:
             response.status_code = 503
@@ -186,7 +209,7 @@ def create_api_app(
         prefix = confine_prefix(caller, body.input_prefix)
         config = body.config
         if body.preset is not None:
-            preset = ui_readers.get_any_preset(settings, body.preset)
+            preset = get_any_preset(settings, body.preset)
             if preset is None:
                 raise HTTPException(status_code=400, detail=f"unknown preset: {body.preset}")
             config = preset.config
@@ -232,6 +255,11 @@ def create_api_app(
             batch_count=run.batch_count, stages=list(stages),
         )
 
+    @app.get("/v1/ingest", response_model=IngestPreview, tags=["uploads"])
+    def preview_ingest(input_prefix: str = "", caller: Caller = Depends(can_submit)) -> IngestPreview:  # noqa: B008
+        """What a submission naming *input_prefix* would run, before it is submitted."""
+        return IngestPreview(**ingest_preflight(settings, input_prefix=confine_prefix(caller, input_prefix)))
+
     @app.post("/v1/uploads", response_model=UploadAccepted, status_code=201, tags=["uploads"])
     def upload(files: list[UploadFile], caller: Caller = Depends(can_submit)) -> UploadAccepted:  # noqa: B008
         if not ingest_uri:
@@ -266,8 +294,8 @@ def create_api_app(
         with queue() as q:
             find_run(q, caller, run_id)
         try:
-            rows = ui_readers.get_manifest_rows(settings, run_id)
-        except ui_readers.StoreUnreachable as e:
+            rows = remote_manifest_rows(store_uri, run_id)
+        except StoreUnreachable as e:
             raise HTTPException(status_code=503, detail=f"run store unreachable: {e}") from e
         return RunManifest(run_id=run_id, documents=rows or [])
 

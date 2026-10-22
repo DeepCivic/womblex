@@ -48,7 +48,7 @@ jobs:
         # wholesale; tests that need a live endpoint still skip on the missing
         # ISAACUS_API_KEY. [api] brings python-multipart: `create_api_app`
         # registers the multipart `POST /v1/uploads` route.
-        run: uv sync --frozen --extra dev --extra ui --extra api
+        run: uv sync --frozen --extra dev --extra api
 
       - name: Lint (ruff)
         run: uv run --no-sync ruff check src/ tests/
@@ -65,43 +65,11 @@ jobs:
           WOMBLEX_DB_DSN: postgresql://postgres:womblex@localhost:5432/womblex
         run: uv run --no-sync python -m pytest tests/ -v -m "not benchmark"
 
-  frontend:
-    name: Console frontend (ui/)
-    runs-on: ubuntu-latest
-    # Separate from `test`'s Python matrix — a broken SvelteKit build must
-    # fail its own job, not hide inside (or block on) a pipeline test run it
-    # has nothing to do with.
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: ui/package-lock.json
-
-      - name: Install
-        working-directory: ui
-        run: npm ci
-
-      - name: Lint (eslint)
-        working-directory: ui
-        run: npm run lint
-
-      - name: Type-check (svelte-check)
-        working-directory: ui
-        run: npm run check
-
-      - name: Build (vite)
-        working-directory: ui
-        run: npm run build
-
   audit:
     name: Dependency advisories
     runs-on: ubuntu-latest
-    # Known advisories in the locked Python set and the console's npm lock, so a
-    # new one shows on the PR that would ship it (docs/security-upgrade-plan.md,
+    # Known advisories in the locked Python set, so a new one shows on the PR
+    # that would ship it (docs/security-upgrade-plan.md,
     # M1). Reported, not yet gating: the advisories open today are cleared by
     # the plan's upgrade merges (M2 to M5), and this line goes when they land.
     continue-on-error: true
@@ -122,25 +90,17 @@ jobs:
           uv export --frozen --all-extras --no-emit-project -o "$RUNNER_TEMP/requirements.txt"
           uvx pip-audit@2.10.1 --disable-pip -r "$RUNNER_TEMP/requirements.txt"
 
-      - name: Console (npm audit, high and above)
-        if: ${{ !cancelled() }}
-        working-directory: ui
-        run: npm audit --audit-level=high
-
   images:
     name: Container image (${{ matrix.name }})
     runs-on: ubuntu-latest
-    # One runner per image rather than two builds in one job: each carries the
-    # whole vision/ML stack on top of a 100 MB models/ directory, and a single
-    # runner's disk does not comfortably hold both.
+    # The image carries the whole vision/ML stack on top of a 100 MB models/
+    # directory.
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: pipeline
             dockerfile: Dockerfile
-          - name: console
-            dockerfile: Dockerfile.ui
     steps:
       - uses: actions/checkout@v4
 
@@ -210,21 +170,3 @@ jobs:
           docker run --rm womblex-pipeline:ci --help
           docker run --rm --entrypoint python womblex-pipeline:ci -c \
             'import womblex.ingest.extract, womblex.ingest.heuristics_cv2, womblex.cloud.worker'
-
-      - name: The console serves
-        if: matrix.name == 'console'
-        # A run source is required (the console reads exactly one), so point it
-        # at the vendored demo corpus the image already carries — which also
-        # makes this more than a liveness check: the run listing proves the
-        # image can read a real run's artefacts, not just answer a health stub.
-        run: |
-          docker run -d --name console -p 8080:8080 \
-            -e WOMBLEX_UI_OUTPUT_ROOT=/app/output/console-demo womblex-console:ci
-          for _ in $(seq 1 30); do
-            if curl -fsS http://localhost:8080/api/health; then served=1; break; fi
-            sleep 2
-          done
-          docker logs console
-          test "${served:-0}" = "1"
-          curl -fsS http://localhost:8080/api/runs | grep -q run-synthetic-demo
-

@@ -36,7 +36,7 @@ CLAUDE.md rules that apply:
 - `uv.lock` doesn't count toward the 500-line cap.
 
 ### M0 – Install from the lock everywhere (no version changes)
-- **CI `test` job**: replace the pip install with `astral-sh/setup-uv`, then `uv sync --frozen --extra dev --extra ui --extra api`, then run ruff, mypy and pytest via `uv run`. This matches the commands CLAUDE.md already documents. Add `uv lock --check` as the first step so a `pyproject.toml` edit without a re-lock fails.
+- **CI `test` job**: replace the pip install with `astral-sh/setup-uv`, then `uv sync --frozen --extra dev --extra api`, then run ruff, mypy and pytest via `uv run`. This matches the commands CLAUDE.md already documents. Add `uv lock --check` as the first step so a `pyproject.toml` edit without a re-lock fails.
 - **Both Dockerfiles**: copy `uv.lock`, then install the exported lock, for example:
   - `uv export --frozen --no-dev --extra <EXTRAS> --no-emit-project -o /tmp/req.txt`
   - `pip install --require-hashes -r /tmp/req.txt`
@@ -82,14 +82,7 @@ CLAUDE.md rules that apply:
 - Two advisories stay open with no fix published: torch PYSEC-2026-139 and transformers PYSEC-2026-4174. Check whether the vulnerable code path is reachable (e.g. pickle `torch.load` versus safetensors) and record the outcome in the PR body.
 
 ### M5 – UI high and moderate fixes
-- In `ui/`, run `npm audit fix` without `--force`. It covers:
-  - vite 8.2.x → ≥8.2.3
-  - devalue
-  - brace-expansion
-  - source-map-js
-  - postcss-selector-parser
-- The existing `frontend` job (lint, svelte-check, build) gates it.
-- `@sveltejs/kit` 3 and `adapter-static` 4 are low-severity majors and stay out.
+The `ui/` frontend and its npm audit left with the console (womblex-console). Nothing here remains to do.
 
 ### M6 – Other vulnerability surfaces (newly in scope)
 | Surface | Current state | Proposed |
@@ -102,7 +95,7 @@ CLAUDE.md rules that apply:
 
 ## Verification (every merge)
 - `uv lock --check`
-- `uv sync --frozen --extra dev --extra ui --extra api`
+- `uv sync --frozen --extra dev --extra api`
 - `uv run ruff check src/ tests/`
 - `uv run mypy src/`
 - `uv run python -m pytest tests/ -v -m "not benchmark"`

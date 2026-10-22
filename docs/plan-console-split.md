@@ -1,11 +1,11 @@
 # Console split — plan
 
-*Status: not started (2026-10). This document is deleted when the console's last trace leaves Womblex.*
+*Status: steps 1 and 2 done (2026-10); the `[ui]` extra is removed; every console-held capability is back in Womblex as a library call and a `/v1` route (`decisions-operations.md`, "Every capability a surface needs is a Womblex call"); step 3 waits on the first Womblex release carrying them. This document is deleted when step 3 lands.*
 
 ## Context
 The console (`womblex ui`) is two parts: the SvelteKit SPA in `ui/`, and the FastAPI backend in `src/womblex/ui/`, which reads run state and dispatches to the queue. It exists for local deployment experimentation, adds little for most users, and may be deprecated. It moves to its own repository, `womblex-console`.
 
-The two projects stay **aligned, not coupled**. The console repository does almost all of the work. Womblex does only what it needs to stop shipping the console, and it gains no surface, test or doc that exists for the console's sake.
+The two projects stay **aligned, not coupled**. The console repository does almost all of the work. Womblex does what it needs to stop shipping the console and keeps every capability the console held, as a library call and a `/v1` route any interface can use; it gains no surface, test or doc that exists for the console alone.
 
 ## Principles
 - Dependency runs one way. The console depends on a pinned Womblex release. Womblex never imports, tests or documents the console.
@@ -34,7 +34,7 @@ Then deletion:
 Merges stay under the 500-line cap: the moves first, suite green; the pure-deletion merges exceed it and say so in their PR bodies for human approval. The phase closes with a docs stocktake: the README command table, the CLAUDE.md module table, `docs/architecture.md`, `docs/project-structure.md`, `docs/deployment-images.md`, a decision entry in `docs/decisions-operations.md`, Requirement 19 in `docs/functional_requirements.md`, and `CHANGELOG.md`.
 
 ## Step 3: the console takes the new Womblex release (console repository)
-Bump the pin and repoint imports at the moved modules (`womblex.presets`, the deployment settings). Its CI checks it against the published release.
+Bump the pin and replace the console's own readers, composer, dashboard and resources code with the Womblex calls that now hold them (the `/v1` routes, or the library functions behind them), so the console renders and holds no Womblex logic. Its CI checks it against the published release.
 
 ## Verification
 - Womblex: `uv run ruff check src/ tests/`, `uv run mypy src/`, `uv run python -m pytest tests/ -m "not benchmark"`; `grep -rn "womblex.ui\|womblex ui" src tests` finds nothing; `uv lock --check` passes; `test_doc_currency.py` is green.

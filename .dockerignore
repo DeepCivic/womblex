@@ -14,7 +14,7 @@ pytest.log
 deploy/
 output/
 # ...but keep the vendored demo corpus: `womblex seed-demo` publishes it into a
-# fresh console's store, and both Dockerfiles rely on `COPY . /app` carrying it
+# fresh store, and the Dockerfile relies on `COPY . /app` carrying it
 # to /app/output/console-demo (see store/demo_corpus.py).
 !output/console-demo/
 .venv/
@@ -34,7 +34,3 @@ docs/accuracy/
 # keeping a work tree's out of the context is what stops a stale commit riding
 # in and being believed.
 src/womblex/_build_stamp.py
-# Built by Dockerfile.ui's frontend-builder stage, not the base build context.
-ui/node_modules/
-ui/build/
-ui/.svelte-kit/

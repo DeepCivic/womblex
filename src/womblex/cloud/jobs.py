@@ -9,7 +9,7 @@ and a re-enqueue resumes a run rather than duplicating it.
 
 Ownership travels as the ``owner`` workflow attribute. DBOS's own statuses are
 mapped back to the board's vocabulary (``pending`` / ``running`` / ``done`` /
-``failed`` / ``cancelled``), which the API and console speak.
+``failed`` / ``cancelled``), which the API speaks.
 """
 
 from __future__ import annotations
@@ -321,7 +321,7 @@ class RunBoard:
     def _claim_run_owner(self, run_id: str, owner: str | None) -> str | None:
         """Resolve the owner new rows of *run_id* carry; refuse a different owner.
 
-        An unscoped caller (``owner=None``: the CLI, the console) is not
+        An unscoped caller (``owner=None``: the CLI) is not
         checked and inherits the run's existing owner. Two submitters racing to
         create the same run can both pass this check; the first row written
         names the owner and the second attaches to its deterministic ids.
@@ -553,7 +553,7 @@ class RunBoard:
         """Runs with their jobs rolled up by status, latest activity first.
 
         *owner* narrows to one caller's runs; ``None`` lists every run,
-        including CLI- and console-submitted ones that have no owner.
+        including CLI-submitted ones that have no owner.
         """
         grouped: dict[str, list[tuple[WorkflowStatus, str]]] = {}
         for s, status in _rollup(self._rows(run_id, owner, load_output=True)):

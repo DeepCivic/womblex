@@ -405,17 +405,17 @@ class TestRegistrationOnly:
 class TestSubmission:
     def test_an_unknown_model_is_rejected_before_any_row_is_written(self, tmp_path: Path) -> None:
         from womblex.cloud import dispatch
-        from womblex.ui.deps import UISettings
+        from womblex.cloud.deployment import DeploymentSettings
 
-        settings = UISettings(output_root=tmp_path, store_uri=None)
+        settings = DeploymentSettings(output_root=tmp_path, store_uri=None)
         with pytest.raises(ValueError, match="nope.*known"):
             dispatch.downstream_stages(settings, {"chunking": {"tokenizer": "nope"}})
 
     def test_registered_models_pass_without_being_loaded(self, tmp_path: Path) -> None:
         from womblex.cloud import dispatch
-        from womblex.ui.deps import UISettings
+        from womblex.cloud.deployment import DeploymentSettings
 
-        settings = UISettings(output_root=tmp_path, store_uri=None)
+        settings = DeploymentSettings(output_root=tmp_path, store_uri=None)
         assert isinstance(dispatch.downstream_stages(settings, {}), tuple)
 
 

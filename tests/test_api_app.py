@@ -132,9 +132,7 @@ def test_run_state(counts, state):
 
 
 def test_manifest_serves_the_run_documents_table(client, monkeypatch):
-    monkeypatch.setattr(
-        api_app.ui_readers, "get_manifest_rows", lambda settings, run_id: [{"source_hash": "h"}],
-    )
+    monkeypatch.setattr(api_app, "remote_manifest_rows", lambda uri, run_id: [{"source_hash": "h"}])
     body = client.get("/v1/runs/run-a/manifest", headers=auth("ta")).json()
     assert body == {"run_id": "run-a", "documents": [{"source_hash": "h"}]}
 
@@ -403,6 +401,25 @@ def test_openapi_surface_is_pinned(client):
             "GET /v1/runs/{run_id}/manifest": "200 RunManifest",
             "GET /v1/runs/{run_id}/metrics": "200 RunMetrics",
             "POST /v1/uploads": "201 UploadAccepted",
+            "GET /v1/stages": "200 StageGraph",
+            "GET /v1/config/schema": "200 ",
+            "POST /v1/config/validate": "200 ConfigValidation",
+            "POST /v1/config/yaml": "200 ",
+            "GET /v1/presets": "200 PresetList",
+            "POST /v1/presets": "201 PresetOut",
+            "GET /v1/presets/{name}": "200 PresetOut",
+            "DELETE /v1/presets/{name}": "200 PresetDeleted",
+            "GET /v1/ingest": "200 IngestPreview",
+            "GET /v1/store/runs": "200 StoredRunList",
+            "GET /v1/runs/{run_id}/stages/{stage}": "200 StagePresence",
+            "GET /v1/runs/{run_id}/audit": "200 ",
+            "GET /v1/runs/{run_id}/documents/{source_hash}/detail": "200 DocumentDetail",
+            "GET /v1/runs/{run_id}/logs": "200 RunLogs",
+            "GET /v1/runs/{run_id}/logs/{name}": "200 ",
+            "GET /v1/runs/{run_id}/progress": "200 StageProgress",
+            "GET /v1/queue": "200 QueueSnapshot",
+            "GET /v1/resources": "200 Resources",
+            "POST /v1/resources/test/{target}": "200 Reachability",
         },
         "models": {
             "DocumentText": ["layer", "rows", "run_id", "sensitivity", "source_hash"],
@@ -418,5 +435,23 @@ def test_openapi_surface_is_pinned(client):
             "RunSubmitted": ["batch_count", "document_count", "run_id", "stages"],
             "UploadAccepted": ["bytes", "files", "input_prefix", "upload_id"],
             "Body_upload_v1_uploads_post": ["files"],
+            "ConfigValidation": ["errors", "valid"],
+            "StageGraph": ["edges", "nodes"],
+            "PresetDeleted": ["deleted"],
+            "IngestPreview": ["document_count", "error", "input_prefix", "kind", "reachable", "sample", "subdirectories", "uri"],
+            "IngestSubdirectory": ["document_count", "input_prefix", "name"],
+            "StagePresence": ["run_id", "source_hashes", "stage"],
+            "RunLog": ["modified", "name", "size"],
+            "StageProgress": ["run_id", "stages"],
+            "Reachability": ["error", "reachable", "target"],
+            "Resources": ["ingest", "isaacus", "queue", "store"],
+            "QueueSnapshot": ["jobs", "run_id", "stale", "stale_after_seconds", "stats", "summary", "throughput", "total", "workers"],
+            "RunLogs": ["logs", "run_id"],
+            "DocumentDetail": ["chunks", "entities", "money_spans", "pii_spans", "quality", "run_id", "source_hash"],
+            "StoredRun": ["created_at", "document_count", "run_id", "stages", "updated_at"],
+            "StoredRunList": ["runs"],
+            "PresetList": ["presets"],
+            "PresetOut": ["config", "description", "formats", "name", "source"],
+            "PresetSave": ["config", "description", "formats", "name"],
         },
     }

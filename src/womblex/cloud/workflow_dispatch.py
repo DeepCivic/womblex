@@ -35,8 +35,8 @@ from womblex.pipeline_order import WORKFLOW_FLEET_STAGES, in_pipeline_order
 from womblex.store.retention import is_safe_run_id
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from womblex.presets import Preset
     from womblex.store.remote import RemoteStore
-    from womblex.ui.presets import Preset
 
 logger = logging.getLogger(__name__)
 

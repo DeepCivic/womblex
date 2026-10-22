@@ -9,9 +9,6 @@ Womblex serves other software in two modes:
 - **Callable service.** A consumer submits work to `womblex serve` and reads
   results back over the authenticated `/v1` HTTP API described here.
 
-The operator console (`womblex ui`) is an admin and debugging utility, not an
-integration surface. It has no authentication and binds to loopback.
-
 ## Deployment
 
 `womblex serve` needs the `[api]` extra (fastapi, uvicorn, python-multipart)
@@ -58,8 +55,10 @@ that submitted them.
 
 - A run owned by another client answers 404, as an unknown run does.
 - `admin` sees every run. An admin's submitted run carries no owner.
-- Runs dispatched from the CLI, the console or a workflow carry no owner, so through the API
+- Runs dispatched from the CLI or a workflow carry no owner, so through the API
   they are visible to `admin` only.
+- The routes that read a run's shards from the store (`/stages`, `/audit`, `/detail`, `/logs`, `/progress`) also
+  answer an `admin` for a run only the store holds: one `womblex run` wrote, or one seeded.
 - A run never has mixed ownership: the queue refuses an enqueue that names a
   different owner (`RunOwnedError`).
 
@@ -69,6 +68,7 @@ that submitted them.
 |---|---|---|---|
 | GET | `/v1/health` | none | Liveness |
 | GET | `/v1/ready` | none | Store and queue reachability; 503 when either fails |
+| GET | `/v1/ingest?input_prefix=` | submit | What a submission naming the prefix would run: document count and a sample, or a nested layout's refusal with each subdirectory's prefix and count; confined to the caller's tree like a submission |
 | POST | `/v1/uploads` | submit | Multipart `files` to `<ingest>/<client_id>/<upload_id>/`; returns that folder as `input_prefix` |
 | POST | `/v1/runs` | submit | Enqueue extraction plus the downstream stages the config enables; returns `run_id`, `document_count`, `batch_count` and `stages` |
 | GET | `/v1/runs` | read | The caller's runs with a status rollup, latest activity first, at most 1000 (`RUN_LIMIT`) |
@@ -77,8 +77,26 @@ that submitted them.
 | GET | `/v1/runs/{id}/files` | read | Object keys, row counts and footer `contract_version` / `sensitivity` |
 | GET | `/v1/runs/{id}/documents/{hash}/text` | read / read_raw | One document's text in document order, by `layer` |
 | GET | `/v1/runs/{id}/metrics` | read | Queue stats, workers and throughput as JSON |
+| GET | `/v1/store/runs` | admin | Every run the store holds, with document counts and the stages present, whether or not the queue knows it |
+| GET | `/v1/runs/{id}/stages/{stage}` | read | The documents with a row in that stage's sidecar; 400 for a stage with none of its own |
+| GET | `/v1/runs/{id}/documents/{hash}/detail` | read_raw | The document's chunks with its entities, PII spans (with offsets in their chunk), narrative money and quality rows |
+| GET | `/v1/runs/{id}/logs` | read | The run's batch logs (name, size, modified), newest first; empty for a run older than published logs |
+| GET | `/v1/runs/{id}/logs/{name}` | read | One log as `text/plain` (`?download=true` as a file); a name that is not a log's and an absent log give one 404 listing the logs there are |
+| GET | `/v1/runs/{id}/progress` | read | Each stage's checkpoint, read from the run itself, in pipeline order |
+| GET | `/v1/queue` | read | The caller's runs on the queue in one read: counts, jobs (`job_limit`), workers, jobs stale past `stale_after`, throughput over `window_seconds`; `run_id` narrows it |
+| GET | `/v1/runs/{id}/audit` | read | `verify-shards`' structural audit of the run's extraction shards |
+| GET | `/v1/resources` | admin | The store, ingest location, queue and Isaacus deployment, credentials masked; no network call |
+| POST | `/v1/resources/test/{store,ingest,queue}` | admin | A live check of one: `{target, reachable, error}` |
+| GET | `/v1/stages` | read | The pipeline graph: a node per stage (and `extract`), an edge per required input |
+| GET | `/v1/config/schema` | read | `WomblexConfig`'s JSON Schema, without the deployment's `paths` |
+| POST | `/v1/config/validate` | read | `{valid, errors}` for a posted config under this deployment's `paths` |
+| GET | `/v1/presets` | read | Built-in presets, then saved ones (a saved name shadows a built-in) |
+| GET | `/v1/presets/{name}` | read | One preset; 404 when none |
+| POST | `/v1/presets` | admin | Save or replace a preset under the store's `presets/`; 400 for an unsafe name or a config that would not load |
+| DELETE | `/v1/presets/{name}` | admin | Delete a saved preset; 404 when none, and for a built-in |
+| POST | `/v1/config/yaml` | read | The posted config as YAML `womblex run --config` reads; 422 with the errors when invalid |
 
-Both POST routes answer 201. Pydantic models generate the OpenAPI spec; a test
+`POST /v1/runs`, `POST /v1/uploads` and `POST /v1/presets` answer 201. Pydantic models generate the OpenAPI spec; a test
 pins its operation and model surface so breaking changes show in review.
 
 ### Uploads
@@ -113,7 +131,7 @@ pins its operation and model surface so breaking changes show in review.
 beside some done; `pending` while all are pending; `cancelled` when a job
 was cancelled; otherwise `done`. `orphaned` is true for a run whose firing
 queued extraction and failed before its stages were dispatched. `summary` is the
-sentence `womblex jobs --run-id` and the console show, built from the exact
+sentence `womblex jobs --run-id` shows, built from the exact
 per-stage counts, e.g. `Run r1 is running (extract: 4 done; chunk: 1 done, 2 pending).`
 
 ### Document text layers

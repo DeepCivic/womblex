@@ -31,7 +31,7 @@ from womblex.store.remote import validate_location_uri
 logger = logging.getLogger(__name__)
 
 #: A workflow id becomes a primary key and, later, a DBOS schedule name: constrained like
-#: a preset name or run id (`ui.presets.is_safe_preset_name`, `store.retention.is_safe_run_id`).
+#: a preset name or run id (`presets.is_safe_preset_name`, `store.retention.is_safe_run_id`).
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
@@ -215,7 +215,7 @@ def _check_config_overlay(spec: StoredWorkflowSpec) -> None:
     An unknown name may be an operator-saved preset (unreadable without a store), so it passes here;
     the runner resolves it and re-validates the full combination.
     """
-    from womblex.ui.presets import _validate_overlay, get_preset
+    from womblex.presets import _validate_overlay, get_preset
 
     builtin = get_preset(spec.preset)
     _validate_overlay(combine_config(builtin.config if builtin else {}, spec.config))

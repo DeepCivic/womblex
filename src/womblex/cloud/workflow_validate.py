@@ -21,7 +21,7 @@ from womblex.cloud.workflow_runner import (
 from womblex.cloud.workflow_store import StoredWorkflow
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from womblex.ui.presets import Preset
+    from womblex.presets import Preset
 
 
 @dataclass(frozen=True)

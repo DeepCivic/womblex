@@ -1,11 +1,9 @@
-"""Queue dispatch shared by the console and the service API (`docs/service-api.md`).
+"""Queue dispatch for the service API and any other dispatcher (`docs/service-api.md`).
 
 The two write actions that put work on the queue — plan an extraction run
 (:func:`enqueue_extraction`) and dispatch a run's downstream stages
 (:func:`enqueue_downstream_stages`) — plus the guard that refuses either when
-a deployment lacks the store, ingest location or DSN they need. Extracted from
-``womblex.ui.execute`` unchanged so a second caller reuses the same rules;
-``ui.execute`` re-exports every name here.
+a deployment lacks the store, ingest location or DSN they need.
 
 Dispatch is always the queue. Nothing here shells out or runs a batch
 in-process: it writes queue rows, and the workers a platform brings up do the
@@ -21,12 +19,12 @@ from typing import TYPE_CHECKING, cast
 
 from womblex.cli._shared import normalise_prefix, select_supported
 from womblex.cloud.dbos_app import ensure_schema
+from womblex.cloud.deployment import DeploymentSettings, deployment_paths
 from womblex.store.retention import generate_run_id, is_safe_run_id
 
-if TYPE_CHECKING:  # pragma: no cover - typing only; ui.deps imports fastapi, an extra a worker lacks
+if TYPE_CHECKING:  # pragma: no cover - typing only
     from womblex.cloud.jobs import JobSpec
     from womblex.store.remote import RemoteStore
-    from womblex.ui.deps import UISettings
 
 #: Seconds to wait for the queue connection before reporting it unreachable. A
 #: polled dashboard or a request thread would otherwise sit on a routable-but-dead
@@ -36,10 +34,10 @@ QUEUE_CONNECT_TIMEOUT = 5.0
 logger = logging.getLogger(__name__)
 
 class ExecutionDisabled(Exception):
-    """A write action was attempted on a console that cannot execute.
+    """A write action was attempted on a deployment that cannot execute.
 
     Carries a machine-readable ``reason`` the route maps to a 409 (store,
-    ingest or queue not configured), so the frontend can tell which piece is
+    ingest or queue not configured), so a caller can tell which piece is
     unwired without parsing a message.
     """
 
@@ -51,18 +49,18 @@ class ExecutionDisabled(Exception):
 
 @dataclass(frozen=True)
 class ExecutionCapability:
-    """Whether this console can dispatch work, and if not, precisely why.
+    """Whether this deployment can dispatch work, and if not, precisely why.
 
     All three must hold: an output location a ``RemoteStore`` can publish
     shards to, an ingest location to enqueue documents from, and a job queue
     to dispatch through (see the module docstring). ``can_execute`` is their
-    conjunction; the individual flags are surfaced so the screen can name the
+    conjunction; the individual flags are surfaced so a caller can name the
     missing piece rather than a bare "disabled".
 
     It reports no stage list. It used to carry ``STAGE_NAMES``, which read as
-    "the stages this console dispatches" while nothing here could dispatch
-    one — and no caller ever read it. The pipeline's shape is the composer's
-    ``get_stage_graph()``, which serves it from the contracts.
+    "the stages this deployment dispatches" while nothing here could dispatch
+    one — and no caller ever read it. The pipeline's shape is
+    ``STAGE_CONTRACTS``.
     """
 
     has_store: bool
@@ -86,13 +84,12 @@ class ExecutionCapability:
         }
 
 
-def execution_status(settings: UISettings) -> ExecutionCapability:
-    """What the console is allowed and able to dispatch — a cheap, network-free read.
+def execution_status(settings: DeploymentSettings) -> ExecutionCapability:
+    """What this deployment is allowed and able to dispatch — a cheap, network-free read.
 
-    The screen loads this to decide whether to show the run/dispatch controls
-    at all, and which explanation to show when it cannot. No store or queue
-    connection is made here; reachability is the Resources Console's separate
-    ``test`` actions.
+    A caller uses this to decide whether to offer dispatch at all, and which
+    explanation to give when it cannot. No store or queue connection is made
+    here.
     """
     return ExecutionCapability(
         has_store=settings.is_remote,
@@ -103,8 +100,8 @@ def execution_status(settings: UISettings) -> ExecutionCapability:
     )
 
 
-def _guard(settings: UISettings, *, needs_ingest: bool = True) -> ExecutionCapability:
-    """Refuse any write action the console is not configured to perform.
+def _guard(settings: DeploymentSettings, *, needs_ingest: bool = True) -> ExecutionCapability:
+    """Refuse any write action the deployment is not configured to perform.
 
     Ordered so the operator sees the most actionable failure first: a missing
     store, ingest location or queue is a wiring gap (409), checked in that
@@ -137,7 +134,7 @@ def _guard(settings: UISettings, *, needs_ingest: bool = True) -> ExecutionCapab
     return cap
 
 
-def run_config(settings: UISettings, config: dict | None) -> dict:
+def run_config(settings: DeploymentSettings, config: dict | None) -> dict:
     """The config a run dispatched from *config* carries to every worker (Phase R, D7).
 
     Built through the same construction `downstream_stages` validates with, so the workers run
@@ -146,14 +143,13 @@ def run_config(settings: UISettings, config: dict | None) -> dict:
     """
     from womblex.cloud.workflow_runner import config_payload
     from womblex.config import WomblexConfig
-    from womblex.ui.composer import deployment_paths
 
     paths, _ = deployment_paths(settings)
     return config_payload(WomblexConfig(**{"dataset": {"name": "console"}, **(config or {}), "paths": paths}))
 
 
 def check_served(
-    settings: UISettings, config: dict | None, stages: tuple[str, ...] = (), *, extraction: bool = False,
+    settings: DeploymentSettings, config: dict | None, stages: tuple[str, ...] = (), *, extraction: bool = False,
 ) -> None:
     """Refuse (`worker_registry.NoLiveWorker`, a ``ValueError``) a run under *config* whose
     extraction or *stages* no live worker serves. Writes nothing, so a submit refuses before any row."""
@@ -165,7 +161,7 @@ def check_served(
     require_served(settings.db_dsn, needed_queues(validated, stages, settings.ingest_uri if extraction else None))
 
 
-def _supported_under(settings: UISettings, prefix: str) -> tuple[str, list[str]]:
+def _supported_under(settings: DeploymentSettings, prefix: str) -> tuple[str, list[str]]:
     """The location *prefix* names, and the store keys a run there would ingest.
 
     One listing for both write and preview, so the count the composer shows is
@@ -248,7 +244,7 @@ class EnqueueResult:
 
 
 def enqueue_extraction(
-    settings: UISettings,
+    settings: DeploymentSettings,
     *,
     input_prefix: str | None = None,
     run_id: str | None = None,
@@ -268,11 +264,10 @@ def enqueue_extraction(
     :func:`ingest_preflight` previews, so a prefix the operator saw a count for
     enqueues that count.
 
-    *owner* is the service caller the run belongs to (``None`` for the CLI
-    and console); see `RunBoard.enqueue`. *config* is what the batches extract under on
+    *owner* is the service caller the run belongs to (``None`` for the CLI); see `RunBoard.enqueue`. *config* is what the batches extract under on
     every worker (`run_config`; omitted, the default config).
 
-    Raises :class:`ExecutionDisabled` when the console cannot dispatch (the
+    Raises :class:`ExecutionDisabled` when the deployment cannot dispatch (a
     route maps it to 409) and ``ValueError`` on bad input (→ 400) — an unsafe
     run id or prefix, a nested layout, or no documents under the prefix.
     """
@@ -302,7 +297,7 @@ def enqueue_extraction(
         newly = board.enqueue(resolved_run_id, specs, owner=owner, config=payload)
 
     logger.info(
-        "console enqueue: run_id=%s, %d doc(s) -> %d batch(es), %d newly enqueued",
+        "enqueue: run_id=%s, %d doc(s) -> %d batch(es), %d newly enqueued",
         resolved_run_id, len(keys), len(specs), newly,
     )
     return EnqueueResult(
@@ -314,7 +309,7 @@ def enqueue_extraction(
     )
 
 
-def downstream_stages(settings: UISettings, config: dict) -> tuple[str, ...]:
+def downstream_stages(settings: DeploymentSettings, config: dict) -> tuple[str, ...]:
     """The downstream stages *config* enables, in `PIPELINE_ORDER` — the shared gate.
 
     Validates *config* before anything is written, so a caller that enqueues
@@ -326,7 +321,6 @@ def downstream_stages(settings: UISettings, config: dict) -> tuple[str, ...]:
     """
     from womblex.config import WomblexConfig
     from womblex.pipeline_order import enabled_downstream_stages
-    from womblex.ui.composer import deployment_paths
     from womblex.utils.model_check import check_registered
 
     # Built through the same `WomblexConfig(**{**raw, "paths": …})` construction
@@ -375,7 +369,7 @@ class StageDispatchResult:
 
 
 def check_stage_order(
-    settings: UISettings, config: dict, stages: tuple[str, ...], run_id: str,
+    settings: DeploymentSettings, config: dict, stages: tuple[str, ...], run_id: str,
 ) -> None:
     """Refuse a stage list whose strict inputs no earlier stage or stored copy supplies.
 
@@ -385,7 +379,6 @@ def check_stage_order(
     from womblex.cloud.workflow_order import check_dispatch_order
     from womblex.config import WomblexConfig
     from womblex.store.remote import RemoteStore
-    from womblex.ui.composer import deployment_paths
 
     paths, _ = deployment_paths(settings)
     validated = WomblexConfig(**{"dataset": {"name": "console"}, **config, "paths": paths})
@@ -394,7 +387,7 @@ def check_stage_order(
 
 
 def enqueue_downstream_stages(
-    settings: UISettings,
+    settings: DeploymentSettings,
     *,
     run_id: str,
     config: dict,
@@ -402,12 +395,12 @@ def enqueue_downstream_stages(
     owner: str | None = None,
     order_checked: bool = False,
 ) -> StageDispatchResult:
-    """Dispatch *run_id*'s downstream stages — the console's second write action.
+    """Dispatch *run_id*'s downstream stages — the second write action.
 
-    Exactly what ``womblex enqueue-stages --run-id … --config …`` does, reached
-    from the screen that composed the config: the stages *config* enables
+    Exactly what ``womblex enqueue-stages --run-id … --config …`` does: the stages *config* enables
     (:func:`~womblex.pipeline_order.enabled_downstream_stages`), written as
-    queue rows for the workers to claim, each run under *config* (`run_config`). The console still only writes rows —
+    queue rows for the workers to claim, each run under *config* (`run_config`).
+    This only writes rows —
     execution stays on the fleet, with its retry and crash recovery, and no
     request here can become a command because there is no command.
 
@@ -422,10 +415,10 @@ def enqueue_downstream_stages(
     (*order_checked*, the API's submit, which checks before writing any row).
 
     ``pii`` and ``quality`` are never dispatched — that bound lives in
-    ``DOWNSTREAM_STAGES``, not here, so the console cannot widen it. Both stay
+    ``DOWNSTREAM_STAGES``, not here, so no caller can widen it. Both stay
     reachable through ``womblex run-stage``.
 
-    Raises :class:`ExecutionDisabled` when the console cannot dispatch (→
+    Raises :class:`ExecutionDisabled` when the deployment cannot dispatch (→
     409), ``pydantic.ValidationError`` on a config that would not load (→
     400) and ``ValueError`` on an unsafe run id or a config that enables no
     stage at all (→ 400).
@@ -455,7 +448,7 @@ def enqueue_downstream_stages(
         )
 
     logger.info(
-        "console stage dispatch: run_id=%s, stages %s, %d newly enqueued",
+        "stage dispatch: run_id=%s, stages %s, %d newly enqueued",
         run_id, " -> ".join(stages), newly,
     )
     return StageDispatchResult(

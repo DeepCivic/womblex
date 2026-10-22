@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING
 
 from womblex.analyse.embed import calls_isaacus as embedding_calls_isaacus
 from womblex.analyse.enrich import ai_chunking_model, calls_isaacus, effective_chunking, returns_document
+from womblex.pipeline_order import sort_by_pipeline
 
 # `_SUFFIX` / `_SHARD_SUFFIX` are imported rather than re-spelled so a schema
 # change in `store/` or `process/text_overlay.py` reaches the runner
@@ -578,8 +579,20 @@ PRODUCER_OF: dict[str, str] = {
 
 STAGE_NAMES: tuple[str, ...] = tuple(STAGE_CONTRACTS)
 
+#: Stage name -> the dot-directory its checkpoint lands in, taken from the
+#: contracts rather than re-typed so a renamed directory cannot drift. Stages
+#: with no checkpoint of their own (``quality``, whose scope is the whole run)
+#: are absent by construction. In pipeline order: `STAGE_CONTRACTS`'s own dict
+#: order is an inventory, not a sequence (it lists `chunk` before `enrich`).
+CHECKPOINT_DIRNAMES: dict[str, str] = sort_by_pipeline({
+    name: contract.checkpoint_dirname
+    for name, contract in STAGE_CONTRACTS.items()
+    if contract.checkpoint_dirname is not None
+})
+
 
 __all__ = [
+    "CHECKPOINT_DIRNAMES",
     "DISCOVERY_SUFFIXES",
     "PRODUCER_OF",
     "STAGE_CONTRACTS",

@@ -124,7 +124,7 @@ also replaces the role for the SageMaker signer, and calls fail with 403.
 Setting the real AWS keys instead makes s3fs fail against MinIO. Give the
 object store its own credentials on `WOMBLEX_S3_ACCESS_KEY_ID` /
 `WOMBLEX_S3_SECRET_ACCESS_KEY` and leave `AWS_ACCESS_KEY_ID` unset. These keys
-are read at process start-up by the CLI, workers and console alike, so
+are read at process start-up by the CLI and workers alike, so
 rotating one is an environment change and a redeploy.
 
 ## Related

@@ -18,9 +18,8 @@
 # reuses the enrich Document rather than paying for a second enrichment pass.
 # Run enrich BEFORE chunk (see the command sequence).
 #
-# This file is the source of truth for the "DEFAULT-Isaacus" preset the console's
-# Pipeline Composer offers (src/womblex/ui/presets.py mirrors the stage toggles
-# and settings here) and the vendored demo run (output/console-demo, a completed
+# This file is the source of truth for the "DEFAULT-Isaacus" preset
+# (src/womblex/presets.py mirrors the stage toggles and settings here) and the vendored demo run (output/console-demo, a completed
 # run of this shape, bar link). Edit all three together.
 #
 # ─────────────────────────────────────────────────────────────────────────────

@@ -32,15 +32,15 @@ fails a test rather than quietly joining the stack:
 | | Count |
 |---|---|
 | Compose files | 2 |
-| Services in `docker-compose.yml` | 9 |
-| Services in `docker-compose.local.override.yml` | 6 |
+| Services in `docker-compose.yml` | 8 |
+| Services in `docker-compose.local.override.yml` | 5 |
 | Of the base file: build from source | 0 |
 | Of the base file: reference a third-party image | 3 |
-| Of the base file: reference an image of this project | 6 |
-| Of the override: build from source | 6 |
+| Of the base file: reference an image of this project | 5 |
+| Of the override: build from source | 5 |
 
-The override introduces no service of its own — all six of its entries adjust
-the same six services the base file already declares, and now carry the
+The override introduces no service of its own — all five of its entries adjust
+the same five services the base file already declares, and now carry the
 `build:` blocks that used to sit in the base file.
 
 ## The enumeration
@@ -51,7 +51,7 @@ the same six services the base file already declares, and now carry the
 that does neither and inherits the base file's verdict.
 
 **Published and built are separated by which files you pass, not by editing
-one.** The base file names a published image for all six services; the local
+one.** The base file names a published image for all five services; the local
 override carries their `build:` blocks. Compose builds whenever a `build:` key
 is present, so the two cannot coexist in one file — which is why the blocks
 moved rather than being paired with an `image:` key:
@@ -63,7 +63,7 @@ docker compose -f docker-compose.yml \
 ```
 
 The second is the command a developer already types, so local work is
-unchanged. Each published reference is `${WOMBLEX_*_IMAGE:-<latest tag>}`, so
+unchanged. Each published reference is `${WOMBLEX_PIPELINE_IMAGE:-<latest tag>}`, so
 the digest a release recorded overrides the tag without any file being edited.
 
 Being reached only through a profile is not an exemption — `womblex`,
@@ -76,7 +76,6 @@ enumerated like any other.
 | `womblex` | base | published | `${WOMBLEX_PIPELINE_IMAGE:-ghcr.io/deepcivic/womblex:latest}` | `cli` | Published — pipeline image |
 | `worker` | base | published | `${WOMBLEX_PIPELINE_IMAGE:-ghcr.io/deepcivic/womblex:latest}` | — | Published — pipeline image |
 | `seed-demo` | base | published | `${WOMBLEX_PIPELINE_IMAGE:-ghcr.io/deepcivic/womblex:latest}` | `seed` | Published — pipeline image |
-| `ui` | base | published | `${WOMBLEX_CONSOLE_IMAGE:-ghcr.io/deepcivic/womblex-console:latest}` | — | Published — console image |
 | `api` | base | published | `${WOMBLEX_PIPELINE_IMAGE:-ghcr.io/deepcivic/womblex:latest}` | `api` | Published — pipeline image |
 | `postgres` | base | image | `postgres:16` | `local` | Third party — tag pinned to a major series, moving within it |
 | `minio` | base | image | `minio/minio` | `local` | Third party — tag unpinned |
@@ -85,19 +84,16 @@ enumerated like any other.
 | `womblex` | override | build | `Dockerfile` | — | Built locally — the development path |
 | `worker` | override | build | `Dockerfile` | — | Built locally — the development path |
 | `seed-demo` | override | build | `Dockerfile` | — | Built locally — the development path |
-| `ui` | override | build | `Dockerfile.ui` | — | Built locally — the development path |
 | `api` | override | build | `Dockerfile` | — | Built locally — the development path |
 
-## Why the six collapse to two images
+## Why the five collapse to one image
 
-All six build-from-source services carry the same verdict, and that is not six
-decisions that happened to agree. Five of them — `init`, `womblex`, `worker`,
+All five build-from-source services carry the same verdict, and that is not five
+decisions that happened to agree. They — `init`, `womblex`, `worker`,
 `seed-demo` and `api` — build the identical `Dockerfile`, differing only in the command
 they run and their mounts (`./configs` for two, the client registry for `api`). Nothing that distinguishes
 them is part of the image, so they are one artefact with five entry points;
-building them separately would produce five copies of the same bytes. The console is the
-second image because `Dockerfile.ui` carries a Node build stage the pipeline has
-no reason to hold.
+building them separately would produce five copies of the same bytes.
 
 The demo seeder is the one that could reasonably have gone the other way: it
 exists to publish a sample corpus and a deployment that never seeds does not
@@ -129,8 +125,8 @@ whoever pulled first and broken for whoever pulls now.
 
 ## How an image identifies itself
 
-Both `Dockerfile` and `Dockerfile.ui` take a `SOURCE_COMMIT` build argument and
-write it into the installed package as `_build_stamp.py`, which
+The `Dockerfile` takes a `SOURCE_COMMIT` build argument and
+writes it into the installed package as `_build_stamp.py`, which
 `store/build_info.py` reads for the run stamp's commit. With `REQUIRE_STAMP=1`
 (the publish path) a build given no commit fails; a local build supplies none
 and reports `unavailable` with a reason. The same commit is set as the OCI
@@ -138,7 +134,7 @@ and reports `unavailable` with a reason. The same commit is set as the OCI
 
 The image reference cannot be baked into the image it names, so it is handed in
 as `WOMBLEX_IMAGE_REF`. The base file's `cloud-env` anchor sets it to the
-pipeline image reference, and `ui` overrides it with the console image; the
+pipeline image reference; the
 local override empties it, since a locally built service is not running the
 published image. `store/build_info.py` treats a process as containerised only
 when `/.dockerenv` (Docker) or `/run/.containerenv` (Podman) exists, and

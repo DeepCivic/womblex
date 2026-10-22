@@ -12,15 +12,7 @@ updates:
       python-minor-patch:
         update-types: [minor, patch]
 
-  - package-ecosystem: npm
-    directory: "/ui"
-    schedule:
-      interval: weekly
-    groups:
-      ui-minor-patch:
-        update-types: [minor, patch]
-
-  # Both Dockerfiles: the Python, Node and uv base images.
+  # The Dockerfile: the Python and uv base images.
   - package-ecosystem: docker
     directory: "/"
     schedule:

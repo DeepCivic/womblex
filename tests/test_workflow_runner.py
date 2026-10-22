@@ -27,8 +27,8 @@ from womblex.cloud.workflow_store import (
     workflow_digest,
 )
 from womblex.config import DatasetConfig, PathsConfig, WomblexConfig
+from womblex.presets import Preset, build_preset_record, preset_filename, serialise_preset_record
 from womblex.process.text_overlay import MissingOverlayError
-from womblex.ui.presets import Preset, build_preset_record, preset_filename, serialise_preset_record
 
 _PRESET = Preset(
     name="saved-offline", description="", formats=(), source="saved",
@@ -194,7 +194,7 @@ def test_cli_exit_codes(shards: Path, tmp_path: Path, monkeypatch: pytest.Monkey
     assert cmd_run_workflow(args("good")) == 1
     record, _ = build_preset_record(name=_PRESET.name, description="", formats=(), config=_PRESET.config)
     (tmp_path / preset_filename(_PRESET.name)).write_text(serialise_preset_record(record))
-    for mod in ("fastapi", "womblex.ui.deps", "womblex.ui.readers"):  # base install: no [ui] extra
+    for mod in ("fastapi",):  # base install: no [api] extra
         monkeypatch.setitem(sys.modules, mod, None)
     assert cmd_run_workflow(args("good", presets_dir=tmp_path)) == 0
     assert list(shards.glob("*.normalised_text.parquet"))

@@ -11,7 +11,6 @@ womblex/
 ├── docs/              # Architecture docs, ADRs, accuracy reports, the deployment-image audit, the consumer contract (contract.md), the service API (service-api.md), the egress bundle (egress.md), workflow files (workflows.md), the design decisions by concern (decisions.md for the library, decisions-operations.md for operating it, decisions-dead-ends.md for dead-ends, limitations and the backlog)
 ├── fixtures/synthetic/  # Generated test fixtures (generate.py + its committed output; see its README)
 ├── models/            # Locally pre-downloaded models, resolved by utils/models.py (see models.md)
-├── ui/                # Console SPA frontend (SvelteKit), built into the console image by Dockerfile.ui
 ├── src/womblex/
 │   ├── cli/                # CLI subpackage — per-topic modules
 │   │   ├── __init__.py     # main() + ALL_COMMANDS aggregation + dispatch
@@ -23,7 +22,6 @@ womblex/
 │   │   ├── retry.py        # retry-stage subcommand
 │   │   ├── serve.py        # serve subcommand (the `/v1` service API)
 │   │   ├── api_token.py    # api-token subcommand
-│   │   ├── ui.py           # ui subcommand (admin and debugging console)
 │   │   ├── redact.py       # redact, annotate-redactions, validate-redactions subcommands
 │   │   ├── link.py         # enrich, link, graph-refresh subcommands
 │   │   ├── embed.py, normalise.py, spellfix.py, quality.py, money.py, pii.py  # one subcommand each
@@ -36,6 +34,8 @@ womblex/
 │   │   └── workflow.py     # run-workflow / validate / plan / dispatch-workflow / schedule-workflow subcommands, each over a workflow file
 │   ├── config/             # Pydantic config models (__init__: YAML loader + WomblexConfig; process.py: process-stage models)
 │   ├── pipeline_order.py   # PIPELINE_ORDER — what runs when; enabled_downstream_stages(config)
+│   ├── config_tools.py     # A composed config: JSON Schema without paths, validation and YAML under a deployment's paths
+│   ├── presets.py          # Named partial configs (built-in DEFAULT-Isaacus + operator-saved): read, list, save, delete
 │   ├── batch.py            # process_batch() — shared per-batch pipeline body (extract → optional redaction detection; extraction only)
 │   ├── operations/         # Independent operations, one module each: extract, redact, chunk, pii, enrich — callers compose directly
 │   │   ├── models.py       # DocumentResult / BatchResult dataclasses + PreconditionError
@@ -155,10 +155,15 @@ womblex/
 │   │   ├── content_digest.py # content_digest(elements): the manifest's determinism handle (kind / order / text / cells / fields / sheet cells / meta)
 │   │   ├── contract.py      # womblex.contract_version + womblex.sensitivity (raw / masked / none) footer keys, on every pipeline Parquet
 │   │   ├── run_manifest.py  # Consolidate per-batch manifests into a run-root manifest.parquet + the run record in its footer
+│   │   ├── run_reads.py     # Runs as the store or output root holds them: listing, stage presence, shard audit
+│   │   ├── document_detail.py # One document's chunks with its entities, PII spans, money and quality rows
+│   │   ├── run_logs.py      # A run's batch logs: list and read, names checked before any join
+│   │   ├── stage_progress.py # Each stage's checkpoint progress for one run, read from the run itself
 │   │   ├── lineage.py       # The run record as an OpenLineage 2-0-2 RunEvent (`manifest --lineage`)
 │   │   ├── register_manifest.py  # Manifest for standalone register ingests (G-NAF/ABN/geospatial)
-│   │   ├── demo_corpus.py   # Publish the vendored demo run into a console's run store (`womblex seed-demo`)
+│   │   ├── demo_corpus.py   # Publish the vendored demo run into a run store (`womblex seed-demo`)
 │   │   ├── remote.py        # fsspec stage-in/stage-out object-storage adapter for distributed runs
+│   │   ├── remote_manifest.py # A stored run's document table read from an object store; `StoreUnreachable`, `open_store`
 │   │   ├── retention.py     # run_id-based retention policy + describe_run() (doc count, stages, timestamps) + is_safe_run_id (run-root join containment)
 │   │   └── checkpoint.py    # Per-stage CheckpointManager — JSON checkpoints for resumable batch runs
 │   ├── cloud/                  # Distributed run support — `womblex enqueue` / `enqueue-stages` / `worker` / `jobs` / `finalize` / `run-stage` / `egress`
@@ -171,10 +176,16 @@ womblex/
 │   │   ├── finalize.py         # finalize_run() — a run's manifest.parquet in its store; `womblex finalize` and the coordinator's last step
 │   │   ├── retry.py            # retry_stage() — fork a failed stage from its first failed unit, refusing before the fork
 │   │   ├── workflows.py        # extract_batch / run_stage / run_downstream workflows; a dispatched workflow's stage runs under its overlay and digest
-│   │   ├── dispatch.py         # enqueue_extraction / enqueue_downstream_stages (owner=), downstream_stages gate + guard — shared by the console and the service API
+│   │   ├── dispatch.py         # enqueue_extraction / enqueue_downstream_stages (owner=), downstream_stages gate + guard — shared by the service API and any other dispatcher
+│   │   ├── ingest_preview.py   # ingest_preflight() — what a run over a prefix would pick up, before enqueue
+│   │   ├── deployment.py       # DeploymentSettings (run source, queue, ingest, presets dir) + deployment_paths — fastapi-free
+│   │   ├── queue_snapshot.py   # queue_snapshot() — stats, jobs, workers, stale jobs, throughput in one read
+│   │   ├── resources.py        # deployment_resources() — store, ingest, queue, Isaacus, masked; check_store / check_ingest
+│   │   ├── reachability.py     # store_reachable / queue_reachable — the `/v1/ready` probes
 │   │   ├── worker.py           # run_worker() — launch DBOS, join the queues this process can serve (keyed by the models it checked)
 │   │   ├── worker_registry.py  # womblex_workers — the queues each live worker serves
 │   │   ├── stage_contracts.py  # Declarative StageContract per downstream stage (inputs/outputs/scope)
+│   │   ├── stage_graph.py      # stage_graph() — the contracts as nodes and required-input edges
 │   │   ├── stage_runner.py     # Execute a contract against an object store
 │   │   ├── unit_receipt.py     # A store-run unit's receipt; the fleet's skip rule for work already published
 │   │   ├── workflow_store.py   # Workflow object (preset ref, input binding, steps, triggers) — schema, validation, the scheduled copies' table
@@ -187,24 +198,14 @@ womblex/
 │   │   └── workflow_runner.py  # Local multi-stage runner — a workflow's steps through the stage functions; refuse before work, record after
 │   ├── api/                    # Service API (`womblex serve`)
 │   │   ├── app.py              # create_api_app() — `/v1` health/ready, run submit, list/detail, manifest, files, document text, metrics; owner-scoped
+│   │   ├── routes_config.py    # /v1/stages and /v1/config/schema, validate, yaml
+│   │   ├── routes_queue.py     # /v1/queue — the queue in one read, owner-scoped
+│   │   ├── routes_resources.py # /v1/resources and its live checks (admin)
+│   │   ├── routes_runs.py      # /v1/store/runs (admin), per-run stage presence, shard audit, document detail, logs, progress
+│   │   ├── routes_presets.py   # /v1/presets list, fetch (read), save, delete (admin)
 │   │   ├── readers.py          # Document text rows by layer (masked / chunks / elements), read in place with a source_hash filter
 │   │   ├── auth.py             # Service-token auth: client registry (WOMBLEX_API_CLIENTS), Caller + scopes, FastAPI dependencies
 │   │   └── models.py           # Pydantic response models — the OpenAPI surface
-│   ├── ui/                     # Admin and debugging console (`womblex ui`) — FastAPI over pipeline artefacts; reads runs, never writes to one; no auth, loopback by default. Integrations use api/
-│   │   ├── app.py              # create_app() — binds one run source for the app's lifetime
-│   │   ├── deps.py             # UISettings — local output_root vs store-backed (+ optional queue/presets dirs), resolved from args/env
-│   │   ├── readers.py          # Thin pyarrow readers + preset writers, local and store-backed, over the same store/ modules
-│   │   ├── dashboard.py        # Queue + per-stage checkpoint views for GET /api/dashboard
-│   │   ├── composer.py         # Stage-graph, config JSON Schema, validate + YAML render for the Pipeline Composer
-│   │   ├── presets.py          # Named pipeline presets — built-in (DEFAULT-Isaacus) + operator-saved (format: filename/bytes/parse)
-│   │   ├── execute.py          # Execution capability + ingest preflight + enqueue-into-queue (the one writable-to-a-run surface)
-│   │   ├── resources.py        # Store / queue / Isaacus connection cards + live test actions
-│   │   └── routes/
-│   │       ├── runs.py         # /api/runs — manifest, stage-presence, audit, chunk detail
-│   │       ├── dashboard.py    # GET /api/dashboard — queue state + per-stage progress
-│   │       ├── composer.py     # /api/composer — graph, schema, validate, yaml, GET/POST/DELETE presets (presets/ sibling)
-│   │       ├── resources.py    # /api/resources — connection cards + test/store, test/queue
-│   │       └── execute.py      # /api/execute — status + prefix-scoped ingest preflight + enqueue an extraction run into the queue
 │   └── utils/
 │       ├── metrics.py       # CER, WER, CER-s accuracy metrics (numpy-accelerated Levenshtein + spatial sort)
 │       ├── tabular_metrics.py # Tabular extraction accuracy (structural fidelity, data integrity)
@@ -220,7 +221,6 @@ womblex/
 │       └── availability.py  # isaacus_available() gates API stages (enrich/embed, AI chunking); tokenizer_available() gates offline token chunking on the vendored tokeniser
 ├── tests/
 ├── Dockerfile         # Pipeline/worker image (CLI, worker, per-stage commands)
-├── Dockerfile.ui      # Console image (adds a Node stage for the SPA)
 ├── deploy/images.env  # The published image digests a release pinned (written by publish-images.yml)
 ├── docker-compose.yml # Local + cloud stack; per-service image decisions in docs/deployment-images.md
 └── docker-compose.local.override.yml  # Pins the bundled-local stack's connection surface
