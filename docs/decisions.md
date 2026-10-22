@@ -563,9 +563,9 @@ be re-derivable, and the first pass's were not.
   rarely overlap in practice) but was never a safety guarantee. There is no
   internal lock to rely on; a caller who skips the mutex "would crash or
   corrupt the process," in the library's own words. This turns out not to
-  bind today regardless, and the check is one grep: neither server imports
-  fitz at all (`api/` for `womblex serve`, `ui/` for `womblex ui` — both only
-  enqueue and read parquet), which is the thing protecting them: their route
+  bind today regardless, and the check is one grep: the server does not import
+  fitz at all (`api/` for `womblex serve` only enqueues and reads
+  parquet), which is the thing protecting it: its route
   handlers are sync `def`, so uvicorn runs them in a thread pool, and a
   single fitz/pdfium call added to a route would be concurrent by default.
   Beyond that, no module under `src/` constructs a thread,

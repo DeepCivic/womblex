@@ -57,6 +57,24 @@ class TestRemoteManifest:
         (tmp_path / "runs" / "run-a").mkdir(parents=True)
         assert remote_manifest_rows(str(tmp_path), "run-b") is None
 
+    @pytest.mark.parametrize("consolidated", [True, False])
+    def test_rows_come_from_the_run_manifest_or_its_shard_manifests(
+        self, tmp_path: Path, consolidated: bool,
+    ) -> None:
+        """Before `womblex finalize` there is no `manifest.parquet`; the shard manifests answer."""
+        pytest.importorskip("fsspec")
+        import shutil
+
+        from womblex.store.demo_corpus import demo_run_dir
+
+        run = tmp_path / "runs" / "run-a"
+        shutil.copytree(demo_run_dir(), run)
+        expected = {r["source_hash"] for r in remote_manifest_rows(str(tmp_path), "run-a") or []}
+        if not consolidated:
+            (run / "manifest.parquet").unlink()
+        rows = remote_manifest_rows(str(tmp_path), "run-a") or []
+        assert expected and {r["source_hash"] for r in rows} == expected
+
 
 class TestReachability:
     def test_an_empty_local_store_answers(self, tmp_path: Path) -> None:
@@ -74,5 +92,26 @@ class TestReachability:
     def test_no_dsn_is_not_a_queue(self) -> None:
         assert queue_reachable(None) == (False, "no queue configured")
 
-    def test_a_fresh_database_without_the_schema_is_an_empty_queue(self, tmp_path: Path) -> None:
-        assert queue_reachable(f"sqlite:///{tmp_path / 'fresh.sqlite'}")[0] is True
+    def test_a_fresh_database_answers(self, tmp_path: Path) -> None:
+        assert queue_reachable(f"sqlite:///{tmp_path / 'fresh.sqlite'}") == (True, None)
+
+    @pytest.mark.parametrize(("message", "reachable"), [
+        ('relation "dbos.workflow_status" does not exist', True),  # Postgres, no schema yet
+        ("no such table: workflow_status", True),  # SQLite, no schema yet
+        ("permission denied for table workflow_status", False),
+    ])
+    def test_only_a_missing_schema_reads_as_an_empty_queue(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, message: str, reachable: bool,
+    ) -> None:
+        from womblex.cloud.jobs import RunBoard
+
+        def _raise(_self: object, *_a: object, **_kw: object) -> dict:
+            raise RuntimeError(message)
+
+        monkeypatch.setattr(RunBoard, "stats", _raise)
+        ok, error = queue_reachable(f"sqlite:///{tmp_path / 'q.sqlite'}")
+        assert ok is reachable and (error is None) is reachable
+
+    def test_a_queue_that_cannot_be_reached_reports_why(self) -> None:
+        ok, error = queue_reachable("postgresql://nobody@127.0.0.1:1/none")
+        assert ok is False and error
