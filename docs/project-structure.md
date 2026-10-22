@@ -180,6 +180,7 @@ womblex/
 │   │   ├── ingest_preview.py   # ingest_preflight() — what a run over a prefix would pick up, before enqueue
 │   │   ├── deployment.py       # DeploymentSettings (run source, queue, ingest, presets dir) + deployment_paths — fastapi-free
 │   │   ├── queue_snapshot.py   # queue_snapshot() — stats, jobs, workers, stale jobs, throughput in one read
+│   │   ├── resources.py        # deployment_resources() — store, ingest, queue, Isaacus, masked; check_store / check_ingest
 │   │   ├── reachability.py     # store_reachable / queue_reachable — the `/v1/ready` probes
 │   │   ├── worker.py           # run_worker() — launch DBOS, join the queues this process can serve (keyed by the models it checked)
 │   │   ├── worker_registry.py  # womblex_workers — the queues each live worker serves
@@ -199,6 +200,7 @@ womblex/
 │   │   ├── app.py              # create_api_app() — `/v1` health/ready, run submit, list/detail, manifest, files, document text, metrics; owner-scoped
 │   │   ├── routes_config.py    # /v1/stages and /v1/config/schema, validate, yaml
 │   │   ├── routes_queue.py     # /v1/queue — the queue in one read, owner-scoped
+│   │   ├── routes_resources.py # /v1/resources and its live checks (admin)
 │   │   ├── routes_runs.py      # /v1/store/runs (admin), per-run stage presence, shard audit, document detail, logs, progress
 │   │   ├── routes_presets.py   # /v1/presets list, fetch (read), save, delete (admin)
 │   │   ├── readers.py          # Document text rows by layer (masked / chunks / elements), read in place with a source_hash filter

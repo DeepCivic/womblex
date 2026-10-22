@@ -418,6 +418,8 @@ def test_openapi_surface_is_pinned(client):
             "GET /v1/runs/{run_id}/logs/{name}": "200 ",
             "GET /v1/runs/{run_id}/progress": "200 StageProgress",
             "GET /v1/queue": "200 QueueSnapshot",
+            "GET /v1/resources": "200 Resources",
+            "POST /v1/resources/test/{target}": "200 Reachability",
         },
         "models": {
             "DocumentText": ["layer", "rows", "run_id", "sensitivity", "source_hash"],
@@ -441,6 +443,8 @@ def test_openapi_surface_is_pinned(client):
             "StagePresence": ["run_id", "source_hashes", "stage"],
             "RunLog": ["modified", "name", "size"],
             "StageProgress": ["run_id", "stages"],
+            "Reachability": ["error", "reachable", "target"],
+            "Resources": ["ingest", "isaacus", "queue", "store"],
             "QueueSnapshot": ["jobs", "run_id", "stale", "stale_after_seconds", "stats", "summary", "throughput", "total", "workers"],
             "RunLogs": ["logs", "run_id"],
             "DocumentDetail": ["chunks", "entities", "money_spans", "pii_spans", "quality", "run_id", "source_hash"],

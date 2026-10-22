@@ -228,3 +228,18 @@ class QueueSnapshot(BaseModel):
     workers: list[dict[str, Any]]
     stale: list[dict[str, Any]]
     throughput: dict[str, Any]
+
+
+class Resources(BaseModel):
+    """What the deployment is wired to, credentials masked."""
+
+    store: dict[str, Any]
+    ingest: dict[str, Any]
+    queue: dict[str, Any]
+    isaacus: dict[str, Any]
+
+
+class Reachability(BaseModel):
+    target: Literal["store", "ingest", "queue"]
+    reachable: bool
+    error: str | None

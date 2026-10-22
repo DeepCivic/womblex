@@ -86,6 +86,8 @@ that submitted them.
 | GET | `/v1/runs/{id}/progress` | read | Each stage's checkpoint, read from the run itself, in pipeline order |
 | GET | `/v1/queue` | read | The caller's runs on the queue in one read: counts, jobs (`job_limit`), workers, jobs stale past `stale_after`, throughput over `window_seconds`; `run_id` narrows it |
 | GET | `/v1/runs/{id}/audit` | read | `verify-shards`' structural audit of the run's extraction shards |
+| GET | `/v1/resources` | admin | The store, ingest location, queue and Isaacus deployment, credentials masked; no network call |
+| POST | `/v1/resources/test/{store,ingest,queue}` | admin | A live check of one: `{target, reachable, error}` |
 | GET | `/v1/stages` | read | The pipeline graph: a node per stage (and `extract`), an edge per required input |
 | GET | `/v1/config/schema` | read | `WomblexConfig`'s JSON Schema, without the deployment's `paths` |
 | POST | `/v1/config/validate` | read | `{valid, errors}` for a posted config under this deployment's `paths` |
