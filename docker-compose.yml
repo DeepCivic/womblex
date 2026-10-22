@@ -245,7 +245,7 @@ services:
     profiles: ["seed"]
 
   # Opt-in: the `/v1` service API (`womblex serve`), at :8081. Integrations
-  # submit and read work here; the console above is the admin utility. Runs on
+  # submit and read work here. Runs on
   # the pipeline image (it installs the `[api]` extra) and reads the same
   # store, queue and ingest location the workers use. The client registry is
   # mounted read-only from WOMBLEX_API_CLIENTS_FILE; serve refuses to start
