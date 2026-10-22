@@ -48,6 +48,7 @@ from womblex.api.models import (
 )
 from womblex.api.routes_config import config_router
 from womblex.api.routes_presets import presets_router
+from womblex.api.routes_runs import runs_router
 from womblex.cli._shared import SUPPORTED_EXTENSIONS, select_supported
 from womblex.cloud import dispatch
 from womblex.cloud.deployment import DeploymentSettings
@@ -170,6 +171,15 @@ def create_api_app(
         if found:
             return found[0]
         raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
+
+    def authorise_run(caller: Caller, run_id: str) -> None:
+        """An admin reads any run the store holds; another caller only one the queue says it owns."""
+        if caller.owner is None:
+            return
+        with queue() as q:
+            find_run(q, caller, run_id)
+
+    app.include_router(runs_router(settings, can_read, can_admin, authorise_run))
 
     @app.get("/v1/health", response_model=Health, tags=["ops"])
     def health() -> Health:

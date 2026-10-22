@@ -58,6 +58,8 @@ that submitted them.
 - `admin` sees every run. An admin's submitted run carries no owner.
 - Runs dispatched from the CLI or a workflow carry no owner, so through the API
   they are visible to `admin` only.
+- The routes that read a run's shards from the store (`/stages`, `/audit`) also
+  answer an `admin` for a run only the store holds: one `womblex run` wrote, or one seeded.
 - A run never has mixed ownership: the queue refuses an enqueue that names a
   different owner (`RunOwnedError`).
 
@@ -76,6 +78,9 @@ that submitted them.
 | GET | `/v1/runs/{id}/files` | read | Object keys, row counts and footer `contract_version` / `sensitivity` |
 | GET | `/v1/runs/{id}/documents/{hash}/text` | read / read_raw | One document's text in document order, by `layer` |
 | GET | `/v1/runs/{id}/metrics` | read | Queue stats, workers and throughput as JSON |
+| GET | `/v1/store/runs` | admin | Every run the store holds, with document counts and the stages present, whether or not the queue knows it |
+| GET | `/v1/runs/{id}/stages/{stage}` | read | The documents with a row in that stage's sidecar; 400 for a stage with none of its own |
+| GET | `/v1/runs/{id}/audit` | read | `verify-shards`' structural audit of the run's extraction shards |
 | GET | `/v1/stages` | read | The pipeline graph: a node per stage (and `extract`), an edge per required input |
 | GET | `/v1/config/schema` | read | `WomblexConfig`'s JSON Schema, without the deployment's `paths` |
 | POST | `/v1/config/validate` | read | `{valid, errors}` for a posted config under this deployment's `paths` |

@@ -160,3 +160,25 @@ class IngestPreview(BaseModel):
     sample: list[str]
     subdirectories: list[IngestSubdirectory]
     error: str | None
+
+
+class StoredRun(BaseModel):
+    """A run the store holds; ``document_count`` is null before any manifest landed."""
+
+    run_id: str
+    document_count: int | None
+    stages: list[str]
+    created_at: str | None
+    updated_at: str | None
+
+
+class StoredRunList(BaseModel):
+    runs: list[StoredRun]
+
+
+class StagePresence(BaseModel):
+    """The documents with a row in the stage's sidecar."""
+
+    run_id: str
+    stage: str
+    source_hashes: list[str]
