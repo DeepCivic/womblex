@@ -97,24 +97,10 @@ local = []
 # pair, and so existing `pip install womblex[cloud]` invocations keep resolving.
 cloud = []
 
-# Console sidecar - pip install womblex[ui]
-# `womblex ui` serves an API over the artefacts the pipeline writes and lets an
-# operator act on the deployment (the Pipeline Composer dispatches runs into
-# the queue; presets are filed into the store). fastapi + uvicorn and
-# nothing else: the console adds no pipeline logic, so it stays as CPU-light as
-# the worker it sits beside. Reading a *distributed* run's object storage needs
-# fsspec + s3fs, which are now core — so a bare `womblex[ui]` console reads an
-# `s3://` store out of the box, no `[cloud]` required.
-ui = [
-    "fastapi>=0.115",
-    "uvicorn>=0.30",
-]
-
 # Service API - pip install womblex[api]
-# `womblex serve`, the `/v1` API integrations use. fastapi + uvicorn, as for
-# the console, plus python-multipart for `POST /v1/uploads` (FastAPI's form
-# parsing). Kept apart from [ui] so the console does not carry an upload
-# parser it never uses. The pipeline image installs it, so the `api` compose
+# `womblex serve`, the `/v1` API integrations use. fastapi + uvicorn, plus
+# python-multipart for `POST /v1/uploads` (FastAPI's form parsing). The pipeline
+# image installs it, so the `api` compose
 # service runs on the same image as the workers.
 api = [
     "fastapi>=0.115",
@@ -142,15 +128,14 @@ dev = [
     # deliberate commit that also clears whatever the new rules flag.
     "ruff>=0.16,<0.18",
     "mypy",
-    # Starlette's TestClient transport, for the [ui] route tests. Test-only:
-    # the console itself never makes an HTTP request, so this stays out of [ui].
+    # Starlette's TestClient transport, for the [api] route tests. Test-only.
     "httpx>=0.27",
     # Builds the test PDFs (tests/_pdf_builders.py).
     "reportlab>=4.0",
 ]
 
 # Full install - pip install womblex[all]
-all = ["womblex[cloud,ui,api,pgvector,dev]"]  # [local] is empty; isaacus + Bedrock OCR + AWS SDK are core
+all = ["womblex[cloud,api,pgvector,dev]"]  # [local] is empty; isaacus + Bedrock OCR + AWS SDK are core
 
 [project.urls]
 Homepage = "https://github.com/DeepCivic/womblex"

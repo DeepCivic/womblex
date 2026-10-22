@@ -1,6 +1,6 @@
 # Console split — plan
 
-*Status: steps 1 and 2 done (2026-10); step 3 waits on the first Womblex release without the console, which is also the point the `[ui]` extra goes (it needs human approval as its own dependency merge). This document is deleted when step 3 lands.*
+*Status: steps 1 and 2 done (2026-10); the `[ui]` extra is removed; step 3 waits on the first Womblex release without the console. This document is deleted when step 3 lands.*
 
 ## Context
 The console (`womblex ui`) is two parts: the SvelteKit SPA in `ui/`, and the FastAPI backend in `src/womblex/ui/`, which reads run state and dispatches to the queue. It exists for local deployment experimentation, adds little for most users, and may be deprecated. It moves to its own repository, `womblex-console`.

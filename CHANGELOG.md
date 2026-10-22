@@ -9,7 +9,7 @@ Entries are terse by design; rationale lives in the PR/commit history.
 ## [Unreleased]
 
 ### Removed
-- **The console leaves Womblex for [womblex-console](https://github.com/DeepCivic/womblex-console).** `womblex ui`, `src/womblex/ui/`, the `ui/` SPA, `Dockerfile.ui`, the `ui` compose service and the console's CI and publish jobs are gone; the repository was seeded from this history. Requirements 15 to 21 and `DESIGN.md` went with it. The console depends on a pinned Womblex and Womblex no longer imports or tests it. The `[ui]` extra is still declared and removed in its own dependency change.
+- **The console leaves Womblex for [womblex-console](https://github.com/DeepCivic/womblex-console).** `womblex ui`, `src/womblex/ui/`, the `ui/` SPA, `Dockerfile.ui`, the `ui` compose service and the console's CI and publish jobs are gone; the repository was seeded from this history. Requirements 15 to 21 and `DESIGN.md` went with it. The console depends on a pinned Womblex and Womblex no longer imports or tests it. The `[ui]` extra is removed in a dependency change of its own; its fastapi and uvicorn are in `[api]`.
 
 ### Changed
 - **What the library used from the console moved into it.** Presets are `womblex.presets` (with `read_saved_presets` / `get_any_preset`); `DeploymentSettings` and `deployment_paths` are `cloud/deployment.py`, fastapi-free; the `/v1/ready` probes are `cloud/reachability.py`; the remote manifest read behind `/v1/runs/{id}/manifest` is `store/remote_manifest.py`; `CHECKPOINT_DIRNAMES` sits beside `STAGE_CONTRACTS`.
