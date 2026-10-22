@@ -1,9 +1,11 @@
-"""`/v1/store/runs` and the per-run reads over a run's shards: stage presence and the shard audit.
+"""`/v1/store/runs` and the per-run reads over a run's shards: stage presence, the shard audit and a document's chunk detail.
 
 The store is read directly, so these answer for a run the queue never saw
 (one `womblex run` wrote, or one seeded). Listing the store is ``admin``: it
 names every run, whoever submitted it. A per-run read needs ``read`` and the
-run's ownership, through *authorise*. The bodies are :mod:`womblex.store.run_reads`.
+run's ownership, through *authorise*; a document's detail carries raw chunk
+text and PII, so it needs ``read_raw``. The bodies are :mod:`womblex.store.run_reads`
+and :mod:`womblex.store.document_detail`.
 """
 from __future__ import annotations
 
@@ -14,9 +16,10 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 
 from womblex.api.auth import Caller
-from womblex.api.models import StagePresence, StoredRun, StoredRunList
+from womblex.api.models import DocumentDetail, StagePresence, StoredRun, StoredRunList
 from womblex.cloud.deployment import DeploymentSettings
 from womblex.store import run_reads
+from womblex.store.document_detail import document_detail
 from womblex.store.remote_manifest import StoreUnreachable
 from womblex.store.retention import STAGE_SUFFIXES
 
@@ -33,6 +36,7 @@ def runs_router(
     settings: DeploymentSettings,
     can_read: Callable[..., Caller],
     can_admin: Callable[..., Caller],
+    can_read_raw: Callable[..., Caller],
     authorise: Callable[[Caller, str], None],
 ) -> APIRouter:
     router = APIRouter(tags=["runs"])
@@ -70,5 +74,17 @@ def runs_router(
         if audit is None:
             raise not_found(run_id)
         return audit
+
+    @router.get("/v1/runs/{run_id}/documents/{source_hash}/detail", response_model=DocumentDetail)
+    def get_document_detail(run_id: str, source_hash: str, caller: Caller = Depends(can_read_raw)) -> DocumentDetail:  # noqa: B008
+        """The document's chunks, entities, PII spans, narrative money and quality rows."""
+        authorise(caller, run_id)
+        try:
+            detail = document_detail(settings, run_id, source_hash)
+        except StoreUnreachable as e:
+            raise unreachable(e) from e
+        if detail is None:
+            raise not_found(run_id)
+        return DocumentDetail(run_id=run_id, source_hash=source_hash, **detail)
 
     return router

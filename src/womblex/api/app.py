@@ -153,6 +153,7 @@ def create_api_app(
     can_read = require_scope(get_caller, "read")
     can_submit = require_scope(get_caller, "submit")
     can_admin = require_scope(get_caller, "admin")
+    can_read_raw = require_scope(get_caller, "read_raw")
     app.include_router(config_router(settings, can_read))
     app.include_router(presets_router(settings, can_read, can_admin))
 
@@ -179,7 +180,7 @@ def create_api_app(
         with queue() as q:
             find_run(q, caller, run_id)
 
-    app.include_router(runs_router(settings, can_read, can_admin, authorise_run))
+    app.include_router(runs_router(settings, can_read, can_admin, can_read_raw, authorise_run))
 
     @app.get("/v1/health", response_model=Health, tags=["ops"])
     def health() -> Health:

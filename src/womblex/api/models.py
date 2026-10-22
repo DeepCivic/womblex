@@ -182,3 +182,15 @@ class StagePresence(BaseModel):
     run_id: str
     stage: str
     source_hashes: list[str]
+
+
+class DocumentDetail(BaseModel):
+    """One document's chunks and the rows each stage annotated on them (raw text: ``read_raw``)."""
+
+    run_id: str
+    source_hash: str
+    chunks: list[dict[str, Any]]
+    entities: list[dict[str, Any]]
+    pii_spans: list[dict[str, Any]]
+    money_spans: list[dict[str, Any]]
+    quality: list[dict[str, Any]]

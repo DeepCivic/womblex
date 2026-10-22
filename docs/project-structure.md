@@ -156,6 +156,7 @@ womblex/
 │   │   ├── contract.py      # womblex.contract_version + womblex.sensitivity (raw / masked / none) footer keys, on every pipeline Parquet
 │   │   ├── run_manifest.py  # Consolidate per-batch manifests into a run-root manifest.parquet + the run record in its footer
 │   │   ├── run_reads.py     # Runs as the store or output root holds them: listing, stage presence, shard audit
+│   │   ├── document_detail.py # One document's chunks with its entities, PII spans, money and quality rows
 │   │   ├── lineage.py       # The run record as an OpenLineage 2-0-2 RunEvent (`manifest --lineage`)
 │   │   ├── register_manifest.py  # Manifest for standalone register ingests (G-NAF/ABN/geospatial)
 │   │   ├── demo_corpus.py   # Publish the vendored demo run into a run store (`womblex seed-demo`)
@@ -194,7 +195,7 @@ womblex/
 │   ├── api/                    # Service API (`womblex serve`)
 │   │   ├── app.py              # create_api_app() — `/v1` health/ready, run submit, list/detail, manifest, files, document text, metrics; owner-scoped
 │   │   ├── routes_config.py    # /v1/stages and /v1/config/schema, validate, yaml
-│   │   ├── routes_runs.py      # /v1/store/runs (admin), per-run stage presence and shard audit
+│   │   ├── routes_runs.py      # /v1/store/runs (admin), per-run stage presence, shard audit, document detail
 │   │   ├── routes_presets.py   # /v1/presets list, fetch (read), save, delete (admin)
 │   │   ├── readers.py          # Document text rows by layer (masked / chunks / elements), read in place with a source_hash filter
 │   │   ├── auth.py             # Service-token auth: client registry (WOMBLEX_API_CLIENTS), Caller + scopes, FastAPI dependencies
