@@ -38,7 +38,7 @@ import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from womblex.config import DatasetConfig, PathsConfig, WomblexConfig
 
@@ -173,7 +173,8 @@ def get_preset(name: str) -> Preset | None:
 # per record, so two saves can't lose each other. Locally the files sit under a
 # ``presets_dir``, remotely under the store's own ``presets/`` prefix (a sibling
 # of ``runs/``). This module owns the *format* — the filename, the record bytes,
-# and parsing one file back into a :class:`Preset` — and reading them back.
+# and parsing one file back into a :class:`Preset` — and reading, saving and
+# deleting them.
 
 #: The store prefix operator-saved presets live under in remote mode — a
 #: sibling of ``runs/`` in the same bucket.
@@ -334,6 +335,64 @@ def read_saved_presets(settings: DeploymentSettings) -> dict[str, Preset]:
         if preset is not None:
             saved[name] = preset
     return saved
+
+
+def list_all_presets(settings: DeploymentSettings) -> list[dict[str, Any]]:
+    """Built-in presets, then saved ones (a saved name shadows a built-in)."""
+    return merge_saved(read_saved_presets(settings))
+
+
+class PresetsNotWritable(Exception):
+    """This deployment has nowhere to save presets: local, with no ``presets_dir``."""
+
+
+def save_preset(
+    settings: DeploymentSettings, *, name: str, description: str, formats: tuple[str, ...], config: dict[str, Any],
+) -> Preset:
+    """Validate and save one preset under the store's ``presets/`` prefix or the local ``presets_dir``.
+
+    Replaces a saved preset of the same name. Raises `PresetsNotWritable`, ``ValueError``
+    on an unsafe name and ``pydantic.ValidationError`` on an overlay that would not load.
+    """
+    if not settings.presets_writable:
+        raise PresetsNotWritable("no presets_dir is configured, so presets cannot be saved")
+    record, overlay = build_preset_record(name=name, description=description, formats=formats, config=config)
+    body = serialise_preset_record(record).encode("utf-8")
+    filename = preset_filename(name)
+    if settings.is_remote:
+        import io
+
+        from womblex.store.remote_manifest import open_store
+
+        open_store(str(settings.store_uri)).write_stream(io.BytesIO(body), f"{PRESETS_DIRNAME}/{filename}")
+    else:
+        presets_dir = cast(Path, settings.presets_dir)
+        presets_dir.mkdir(parents=True, exist_ok=True)
+        (presets_dir / filename).write_bytes(body)
+    return Preset(name=name, description=description, formats=formats, config=overlay, source="saved")
+
+
+def delete_saved_preset(settings: DeploymentSettings, name: str) -> bool:
+    """Delete a saved preset; ``False`` when no saved one has that name (a built-in is code, never removed)."""
+    if not settings.presets_writable:
+        raise PresetsNotWritable("no presets_dir is configured, so there are no saved presets")
+    if not is_safe_preset_name(name):
+        return False
+    filename = preset_filename(name)
+    if settings.is_remote:
+        from womblex.store.remote_manifest import open_store
+
+        store = open_store(str(settings.store_uri))
+        key = f"{PRESETS_DIRNAME}/{filename}"
+        if not store.exists(key):
+            return False
+        store.delete(key)
+        return True
+    path = cast(Path, settings.presets_dir) / filename
+    if not path.is_file():
+        return False
+    path.unlink()
+    return True
 
 
 def get_any_preset(settings: DeploymentSettings, name: str) -> Preset | None:

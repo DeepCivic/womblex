@@ -78,9 +78,13 @@ that submitted them.
 | GET | `/v1/stages` | read | The pipeline graph: a node per stage (and `extract`), an edge per required input |
 | GET | `/v1/config/schema` | read | `WomblexConfig`'s JSON Schema, without the deployment's `paths` |
 | POST | `/v1/config/validate` | read | `{valid, errors}` for a posted config under this deployment's `paths` |
+| GET | `/v1/presets` | read | Built-in presets, then saved ones (a saved name shadows a built-in) |
+| GET | `/v1/presets/{name}` | read | One preset; 404 when none |
+| POST | `/v1/presets` | admin | Save or replace a preset under the store's `presets/`; 400 for an unsafe name or a config that would not load |
+| DELETE | `/v1/presets/{name}` | admin | Delete a saved preset; 404 when none, and for a built-in |
 | POST | `/v1/config/yaml` | read | The posted config as YAML `womblex run --config` reads; 422 with the errors when invalid |
 
-`POST /v1/runs` and `POST /v1/uploads` answer 201. Pydantic models generate the OpenAPI spec; a test
+`POST /v1/runs`, `POST /v1/uploads` and `POST /v1/presets` answer 201. Pydantic models generate the OpenAPI spec; a test
 pins its operation and model surface so breaking changes show in review.
 
 ### Uploads

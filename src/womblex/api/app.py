@@ -46,6 +46,7 @@ from womblex.api.models import (
     UploadAccepted,
 )
 from womblex.api.routes_config import config_router
+from womblex.api.routes_presets import presets_router
 from womblex.cli._shared import SUPPORTED_EXTENSIONS, select_supported
 from womblex.cloud import dispatch
 from womblex.cloud.deployment import DeploymentSettings
@@ -148,7 +149,9 @@ def create_api_app(
     get_caller = caller_dependency(registry)
     can_read = require_scope(get_caller, "read")
     can_submit = require_scope(get_caller, "submit")
+    can_admin = require_scope(get_caller, "admin")
     app.include_router(config_router(settings, can_read))
+    app.include_router(presets_router(settings, can_read, can_admin))
 
     @contextmanager
     def queue() -> Iterator[RunBoard]:

@@ -35,7 +35,7 @@ womblex/
 │   ├── config/             # Pydantic config models (__init__: YAML loader + WomblexConfig; process.py: process-stage models)
 │   ├── pipeline_order.py   # PIPELINE_ORDER — what runs when; enabled_downstream_stages(config)
 │   ├── config_tools.py     # A composed config: JSON Schema without paths, validation and YAML under a deployment's paths
-│   ├── presets.py          # Named partial configs (built-in DEFAULT-Isaacus + operator-saved) and `read_saved_presets` / `get_any_preset`
+│   ├── presets.py          # Named partial configs (built-in DEFAULT-Isaacus + operator-saved): read, list, save, delete
 │   ├── batch.py            # process_batch() — shared per-batch pipeline body (extract → optional redaction detection; extraction only)
 │   ├── operations/         # Independent operations, one module each: extract, redact, chunk, pii, enrich — callers compose directly
 │   │   ├── models.py       # DocumentResult / BatchResult dataclasses + PreconditionError
@@ -192,6 +192,7 @@ womblex/
 │   ├── api/                    # Service API (`womblex serve`)
 │   │   ├── app.py              # create_api_app() — `/v1` health/ready, run submit, list/detail, manifest, files, document text, metrics; owner-scoped
 │   │   ├── routes_config.py    # /v1/stages and /v1/config/schema, validate, yaml
+│   │   ├── routes_presets.py   # /v1/presets list, fetch (read), save, delete (admin)
 │   │   ├── readers.py          # Document text rows by layer (masked / chunks / elements), read in place with a source_hash filter
 │   │   ├── auth.py             # Service-token auth: client registry (WOMBLEX_API_CLIENTS), Caller + scopes, FastAPI dependencies
 │   │   └── models.py           # Pydantic response models — the OpenAPI surface

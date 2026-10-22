@@ -114,3 +114,30 @@ class ConfigValidation(BaseModel):
 
     valid: bool
     errors: list[dict[str, Any]]
+
+
+class PresetOut(BaseModel):
+    """A named partial config; ``source`` is ``builtin`` (code, never deleted) or ``saved``."""
+
+    name: str
+    description: str
+    formats: list[str]
+    config: dict[str, Any]
+    source: Literal["builtin", "saved"]
+
+
+class PresetList(BaseModel):
+    presets: list[PresetOut]
+
+
+class PresetSave(BaseModel):
+    """A preset to save; ``dataset`` and ``paths`` in ``config`` are dropped (a preset is an overlay)."""
+
+    name: str = Field(min_length=1)
+    description: str = ""
+    formats: list[str] = Field(default_factory=list)
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class PresetDeleted(BaseModel):
+    deleted: str

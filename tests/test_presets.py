@@ -112,3 +112,90 @@ class TestSavedPresets:
     def test_an_unsafe_name_is_refused(self) -> None:
         with pytest.raises(ValueError):
             presets.build_preset_record(name="../x", description="", formats=(), config={})
+
+
+@pytest.fixture(params=["local", "store"])
+def writable(request: pytest.FixtureRequest, tmp_path: Path) -> DeploymentSettings:
+    if request.param == "store":
+        pytest.importorskip("fsspec")
+        return DeploymentSettings(output_root=None, store_uri=str(tmp_path / "store"))
+    return DeploymentSettings(output_root=tmp_path, store_uri=None, presets_dir=tmp_path / "presets")
+
+
+class TestSaveAndDelete:
+    def test_save_then_list_fetch_and_delete(self, writable: DeploymentSettings) -> None:
+        saved = presets.save_preset(writable, name="Mine", description="d", formats=(".pdf",),
+                                    config={**_MINIMAL, "money": {"enabled": True}})
+        assert saved.source == "saved" and "dataset" not in saved.config
+        names = [p["name"] for p in presets.list_all_presets(writable)]
+        assert names == ["DEFAULT-Isaacus", "Mine"]
+        fetched = presets.get_any_preset(writable, "Mine")
+        assert fetched is not None and fetched.config == {"money": {"enabled": True}}
+        assert presets.delete_saved_preset(writable, "Mine") is True
+        assert presets.delete_saved_preset(writable, "Mine") is False
+        assert presets.get_any_preset(writable, "Mine") is None
+
+    def test_a_store_save_lands_under_its_presets_prefix(self, tmp_path: Path) -> None:
+        pytest.importorskip("fsspec")
+        settings = DeploymentSettings(output_root=None, store_uri=str(tmp_path / "store"))
+        presets.save_preset(settings, name="R", description="", formats=(), config={})
+        assert (tmp_path / "store" / presets.PRESETS_DIRNAME / "R.preset.json").is_file()
+
+    def test_a_built_in_or_unsafe_name_is_never_deleted(self, writable: DeploymentSettings) -> None:
+        assert presets.delete_saved_preset(writable, "DEFAULT-Isaacus") is False
+        assert presets.delete_saved_preset(writable, "../x") is False
+        assert presets.get_preset("DEFAULT-Isaacus") is not None
+
+    def test_a_bad_save_writes_nothing(self, writable: DeploymentSettings) -> None:
+        with pytest.raises(ValueError):
+            presets.save_preset(writable, name="../x", description="", formats=(), config={})
+        with pytest.raises(Exception, match="chnk_size"):
+            presets.save_preset(writable, name="Bad", description="", formats=(),
+                                config={"chunking": {"chnk_size": 1}})
+        assert presets.read_saved_presets(writable) == {}
+
+    def test_local_without_a_presets_dir_cannot_save_or_delete(self, tmp_path: Path) -> None:
+        settings = DeploymentSettings(output_root=tmp_path, store_uri=None)
+        assert settings.presets_writable is False
+        with pytest.raises(presets.PresetsNotWritable):
+            presets.save_preset(settings, name="X", description="", formats=(), config={})
+        with pytest.raises(presets.PresetsNotWritable):
+            presets.delete_saved_preset(settings, "X")
+
+
+class TestRoutes:
+    @pytest.fixture
+    def api(self, tmp_path: Path):  # type: ignore[no-untyped-def]
+        pytest.importorskip("fastapi")
+        from fastapi.testclient import TestClient
+
+        from womblex.api.app import create_api_app
+        from womblex.api.auth import hash_token, parse_registry
+
+        registry = parse_registry({"clients": [
+            {"client_id": "r", "token_sha256": hash_token("r"), "scopes": ["read", "submit"]},
+            {"client_id": "ops", "token_sha256": hash_token("a"), "scopes": ["admin"]},
+        ]})
+        return TestClient(create_api_app(store_uri=str(tmp_path / "store"), db_dsn="postgresql://x/y",
+                                         registry=registry))
+
+    def test_reads_need_read_and_writes_need_admin(self, api) -> None:  # type: ignore[no-untyped-def]
+        read, admin = {"Authorization": "Bearer r"}, {"Authorization": "Bearer a"}
+        body = {"name": "Mine", "config": {"money": {"enabled": True}}}
+        assert api.get("/v1/presets").status_code == 401
+        assert api.post("/v1/presets", headers=read, json=body).status_code == 403
+        assert api.delete("/v1/presets/Mine", headers=read).status_code == 403
+        made = api.post("/v1/presets", headers=admin, json=body)
+        assert made.status_code == 201 and made.json()["source"] == "saved"
+        listed = api.get("/v1/presets", headers=read).json()["presets"]
+        assert [p["name"] for p in listed] == ["DEFAULT-Isaacus", "Mine"]
+        assert api.get("/v1/presets/Mine", headers=read).json()["config"] == {"money": {"enabled": True}}
+        assert api.delete("/v1/presets/Mine", headers=admin).json() == {"deleted": "Mine"}
+        assert api.get("/v1/presets/Mine", headers=read).status_code == 404
+
+    def test_refusals_map_to_their_status(self, api) -> None:  # type: ignore[no-untyped-def]
+        admin = {"Authorization": "Bearer a"}
+        assert api.post("/v1/presets", headers=admin, json={"name": "../x"}).status_code == 400
+        bad = api.post("/v1/presets", headers=admin, json={"name": "B", "config": {"chunking": {"chnk_size": 1}}})
+        assert bad.status_code == 400 and bad.json()["detail"][0]["loc"] == ["chunking", "chnk_size"]
+        assert api.delete("/v1/presets/DEFAULT-Isaacus", headers=admin).status_code == 404

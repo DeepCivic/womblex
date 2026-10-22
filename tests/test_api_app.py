@@ -405,6 +405,10 @@ def test_openapi_surface_is_pinned(client):
             "GET /v1/config/schema": "200 ",
             "POST /v1/config/validate": "200 ConfigValidation",
             "POST /v1/config/yaml": "200 ",
+            "GET /v1/presets": "200 PresetList",
+            "POST /v1/presets": "201 PresetOut",
+            "GET /v1/presets/{name}": "200 PresetOut",
+            "DELETE /v1/presets/{name}": "200 PresetDeleted",
         },
         "models": {
             "DocumentText": ["layer", "rows", "run_id", "sensitivity", "source_hash"],
@@ -422,5 +426,9 @@ def test_openapi_surface_is_pinned(client):
             "Body_upload_v1_uploads_post": ["files"],
             "ConfigValidation": ["errors", "valid"],
             "StageGraph": ["edges", "nodes"],
+            "PresetDeleted": ["deleted"],
+            "PresetList": ["presets"],
+            "PresetOut": ["config", "description", "formats", "name", "source"],
+            "PresetSave": ["config", "description", "formats", "name"],
         },
     }

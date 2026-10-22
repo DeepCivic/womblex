@@ -49,6 +49,11 @@ class DeploymentSettings:
     def is_remote(self) -> bool:
         return self.store_uri is not None
 
+    @property
+    def presets_writable(self) -> bool:
+        """Whether presets can be saved: always on a store, locally only with a ``presets_dir``."""
+        return self.is_remote or self.presets_dir is not None
+
 
 def deployment_paths(settings: DeploymentSettings) -> tuple[dict[str, str], list[str]]:
     """This deployment's `paths` section, plus env vars to note instead of a
