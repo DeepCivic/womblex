@@ -72,7 +72,7 @@ Stage order is a dependency DAG over the inputs above, not one fixed sequence. `
 extract → normalise → spellfix → enrich → chunk → graph-refresh → embed → money → link → pii → quality
 ```
 
-Its two non-obvious edges are config-derived, so the contracts alone cannot express them: normalise and spellfix precede enrich and chunk because `processing.text_source` makes both reassemble from their overlays, and enrich precedes chunk so AI chunking reuses the persisted Document. `DOWNSTREAM_STAGES` is the subset a dispatcher (`enqueue-stages`, the console) may queue automatically — every stage except `extract` (the batch queue itself), `pii` (irreversible masking, always a deliberate act) and `quality` (run-scoped). Both remain reachable through `run-stage`.
+Its two non-obvious edges are config-derived, so the contracts alone cannot express them: normalise and spellfix precede enrich and chunk because `processing.text_source` makes both reassemble from their overlays, and enrich precedes chunk so AI chunking reuses the persisted Document. `DOWNSTREAM_STAGES` is the subset a dispatcher (`enqueue-stages`, `POST /v1/runs`) may queue automatically — every stage except `extract` (the batch queue itself), `pii` (irreversible masking, always a deliberate act) and `quality` (run-scoped). Both remain reachable through `run-stage`.
 
 | After | Valid immediate next stages |
 |---|---|
