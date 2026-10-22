@@ -414,6 +414,8 @@ def test_openapi_surface_is_pinned(client):
             "GET /v1/runs/{run_id}/stages/{stage}": "200 StagePresence",
             "GET /v1/runs/{run_id}/audit": "200 ",
             "GET /v1/runs/{run_id}/documents/{source_hash}/detail": "200 DocumentDetail",
+            "GET /v1/runs/{run_id}/logs": "200 RunLogs",
+            "GET /v1/runs/{run_id}/logs/{name}": "200 ",
         },
         "models": {
             "DocumentText": ["layer", "rows", "run_id", "sensitivity", "source_hash"],
@@ -435,6 +437,8 @@ def test_openapi_surface_is_pinned(client):
             "IngestPreview": ["document_count", "error", "input_prefix", "kind", "reachable", "sample", "subdirectories", "uri"],
             "IngestSubdirectory": ["document_count", "input_prefix", "name"],
             "StagePresence": ["run_id", "source_hashes", "stage"],
+            "RunLog": ["modified", "name", "size"],
+            "RunLogs": ["logs", "run_id"],
             "DocumentDetail": ["chunks", "entities", "money_spans", "pii_spans", "quality", "run_id", "source_hash"],
             "StoredRun": ["created_at", "document_count", "run_id", "stages", "updated_at"],
             "StoredRunList": ["runs"],

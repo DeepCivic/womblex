@@ -194,3 +194,16 @@ class DocumentDetail(BaseModel):
     pii_spans: list[dict[str, Any]]
     money_spans: list[dict[str, Any]]
     quality: list[dict[str, Any]]
+
+
+class RunLog(BaseModel):
+    name: str
+    size: int
+    modified: str | None
+
+
+class RunLogs(BaseModel):
+    """The run's batch logs, newest first; empty for a run written before logs were published."""
+
+    run_id: str
+    logs: list[RunLog]

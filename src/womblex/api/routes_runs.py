@@ -1,11 +1,11 @@
-"""`/v1/store/runs` and the per-run reads over a run's shards: stage presence, the shard audit and a document's chunk detail.
+"""`/v1/store/runs` and the per-run reads over a run's files: stage presence, the shard audit, a document's chunk detail and the batch logs.
 
 The store is read directly, so these answer for a run the queue never saw
 (one `womblex run` wrote, or one seeded). Listing the store is ``admin``: it
 names every run, whoever submitted it. A per-run read needs ``read`` and the
 run's ownership, through *authorise*; a document's detail carries raw chunk
-text and PII, so it needs ``read_raw``. The bodies are :mod:`womblex.store.run_reads`
-and :mod:`womblex.store.document_detail`.
+text and PII, so it needs ``read_raw``. The bodies are :mod:`womblex.store.run_reads`,
+:mod:`womblex.store.document_detail` and :mod:`womblex.store.run_logs`.
 """
 from __future__ import annotations
 
@@ -14,11 +14,12 @@ from dataclasses import asdict
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import PlainTextResponse
 
 from womblex.api.auth import Caller
-from womblex.api.models import DocumentDetail, StagePresence, StoredRun, StoredRunList
+from womblex.api.models import DocumentDetail, RunLog, RunLogs, StagePresence, StoredRun, StoredRunList
 from womblex.cloud.deployment import DeploymentSettings
-from womblex.store import run_reads
+from womblex.store import run_logs, run_reads
 from womblex.store.document_detail import document_detail
 from womblex.store.remote_manifest import StoreUnreachable
 from womblex.store.retention import STAGE_SUFFIXES
@@ -86,5 +87,36 @@ def runs_router(
         if detail is None:
             raise not_found(run_id)
         return DocumentDetail(run_id=run_id, source_hash=source_hash, **detail)
+
+    @router.get("/v1/runs/{run_id}/logs", response_model=RunLogs)
+    def list_logs(run_id: str, caller: Caller = Depends(can_read)) -> RunLogs:  # noqa: B008
+        authorise(caller, run_id)
+        try:
+            logs = run_logs.list_run_logs(settings, run_id)
+        except StoreUnreachable as e:
+            raise unreachable(e) from e
+        if logs is None:
+            raise not_found(run_id)
+        return RunLogs(run_id=run_id, logs=[RunLog(**entry) for entry in logs])
+
+    @router.get("/v1/runs/{run_id}/logs/{name}", response_class=PlainTextResponse)
+    def read_log(run_id: str, name: str, download: bool = False, caller: Caller = Depends(can_read)) -> PlainTextResponse:  # noqa: B008
+        """One log as text (``?download=true`` names it as a file).
+
+        A name that is not a log's and an absent log give the same 404 with the
+        logs there are, so the route cannot probe outside the run's ``logs/``.
+        """
+        authorise(caller, run_id)
+        try:
+            text = run_logs.read_run_log(settings, run_id, name)
+            available = None if text is not None else run_logs.list_run_logs(settings, run_id)
+        except StoreUnreachable as e:
+            raise unreachable(e) from e
+        if text is None:
+            if available is None:
+                raise not_found(run_id)
+            raise HTTPException(status_code=404, detail={"message": f"log not found: {name}", "available": available})
+        headers = {"Content-Disposition": f'attachment; filename="{name}"'} if download else None
+        return PlainTextResponse(text, headers=headers)
 
     return router

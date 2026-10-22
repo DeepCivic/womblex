@@ -58,7 +58,7 @@ that submitted them.
 - `admin` sees every run. An admin's submitted run carries no owner.
 - Runs dispatched from the CLI or a workflow carry no owner, so through the API
   they are visible to `admin` only.
-- The routes that read a run's shards from the store (`/stages`, `/audit`, `/detail`) also
+- The routes that read a run's shards from the store (`/stages`, `/audit`, `/detail`, `/logs`) also
   answer an `admin` for a run only the store holds: one `womblex run` wrote, or one seeded.
 - A run never has mixed ownership: the queue refuses an enqueue that names a
   different owner (`RunOwnedError`).
@@ -81,6 +81,8 @@ that submitted them.
 | GET | `/v1/store/runs` | admin | Every run the store holds, with document counts and the stages present, whether or not the queue knows it |
 | GET | `/v1/runs/{id}/stages/{stage}` | read | The documents with a row in that stage's sidecar; 400 for a stage with none of its own |
 | GET | `/v1/runs/{id}/documents/{hash}/detail` | read_raw | The document's chunks with its entities, PII spans (with offsets in their chunk), narrative money and quality rows |
+| GET | `/v1/runs/{id}/logs` | read | The run's batch logs (name, size, modified), newest first; empty for a run older than published logs |
+| GET | `/v1/runs/{id}/logs/{name}` | read | One log as `text/plain` (`?download=true` as a file); a name that is not a log's and an absent log give one 404 listing the logs there are |
 | GET | `/v1/runs/{id}/audit` | read | `verify-shards`' structural audit of the run's extraction shards |
 | GET | `/v1/stages` | read | The pipeline graph: a node per stage (and `extract`), an edge per required input |
 | GET | `/v1/config/schema` | read | `WomblexConfig`'s JSON Schema, without the deployment's `paths` |

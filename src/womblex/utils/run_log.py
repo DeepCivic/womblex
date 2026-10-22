@@ -5,7 +5,7 @@ The per-document failure lines that explain a run — ``operations/extract.py``'
 already exist, but they go to stderr, so they die in ``docker logs`` on whichever
 worker claimed the batch and never reach whoever reads the run. :func:`capture_batch_log`
 tees them into one file per batch, which the worker (and ``womblex run``) then
-publishes next to the shards.
+publishes next to the shards, where `store/run_logs.py` reads them back.
 
 Additive by construction: it *attaches* a ``FileHandler`` to the ``womblex``
 logger for the batch's duration and detaches it after, leaving the existing
