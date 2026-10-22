@@ -24,7 +24,7 @@ jobs:
       matrix:
         python-version: ["3.12"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up uv and Python ${{ matrix.python-version }}
         # setup-uv publishes no floating major tag from v8 on (`@v10` does not
@@ -74,7 +74,7 @@ jobs:
     # the plan's upgrade merges (M2 to M5), and this line goes when they land.
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v10.3.0
@@ -102,7 +102,7 @@ jobs:
           - name: pipeline
             dockerfile: Dockerfile
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Reclaim runner disk
         # The preinstalled toolchains are what the build would otherwise run
