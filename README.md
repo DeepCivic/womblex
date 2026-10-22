@@ -123,7 +123,10 @@ Other software integrates in one of two ways.
 store, a job queue and an ingest location. A client uploads documents, submits a
 run, polls it and reads results back; runs are owner-scoped, so a client sees
 only its own. Workers do the processing; the API only writes queue rows and
-reads output.
+reads output. Everything an operator interface needs is a call here too
+(composing and validating a config, presets, ingest previews, a run's stage
+presence, chunk detail, logs and progress, the queue, the deployment's
+resources), so a user interface is a renderer over the API.
 
 ```bash
 womblex api-token --client my-app --scope submit --scope read   # token shown once, plus its registry entry

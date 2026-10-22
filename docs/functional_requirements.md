@@ -16,7 +16,7 @@ Terms the requirements use, as the code defines them.
 - **shard layout** — each batch's four extraction Parquet files (`elements`, `table_cells`, `form_fields`, `_manifest`) plus the sidecars later stages write beside them, with the schemas in `src/womblex/store/output.py`.
 - **unit** — what a stage runs as one step: one batch's shard files for a per-batch stage, or the whole run for a whole-run stage (`plan_units` / `run_unit` in `src/womblex/cloud/stage_runner.py`). A unit's outputs are published all or none.
 - **affected unit** — a unit of a later stage whose inputs came from a unit the failed stage did not finish.
-- **job** — one row on the queue (an extraction batch, a stage or a stage coordinator), as `womblex jobs`, the dashboard and the API list it (`src/womblex/cloud/jobs.py`).
+- **job** — one row on the queue (an extraction batch, a stage or a stage coordinator), as `womblex jobs` and the API list it (`src/womblex/cloud/jobs.py`).
 - **stage attempt** — one run of a stage over a run: its first dispatch, or a retry named `<run>:stage:<stage>:retry:<N>`. Counts take the latest attempt.
 - **staleness threshold** — `stale_after_seconds`, default 900: a `running` job with no update for longer than this is listed `stale`.
 - **extraction settled** — no extraction batch of the run is still pending or running; the coordinator waits for this before it runs the downstream stages.
@@ -366,8 +366,10 @@ These requirements described the admin console (`womblex ui`). The console now l
 - A run belongs to the client that submitted it: another client's run is 404, an admin sees all runs, and runs dispatched from the CLI or a workflow carry no owner and are admin-only. A run never has mixed ownership.
 - Document text defaults to the masked layer; raw layers (`chunks`, `elements`) require `read_raw`, by the layer's contract sensitivity.
 - Run file listings report each file's row count, `contract_version` and `sensitivity`, so a caller can fetch Parquet directly under the data contract.
-- A run's status is the same sentence the CLI and dashboard show (`summary`), with its counts.
+- A run's status is the same sentence the CLI shows (`summary`), with its counts.
 - A run started by a workflow that names a webhook sends its events there (Requirement 27). Polling still works.
+- Everything an operator surface needs is a `/v1` call, so a user interface is a renderer over the API and holds no Womblex logic: the pipeline graph, a config's JSON Schema, validation and YAML (`read`); presets listed and fetched (`read`), saved and deleted (`admin`); an ingest prefix previewed before submission (`submit`, the caller's tree); every run the store holds (`admin`); per run, the documents each stage wrote, the shard audit, the batch logs and each stage's checkpoint progress (`read`) and a document's chunks with their annotations (`read_raw`); the queue in one read (`read`, the caller's runs); and what the deployment is wired to, credentials masked, with a live check of each piece (`admin`).
+- A per-run read over the store answers an `admin` for a run only the store holds; any other caller reads only the runs it owns.
 - `ready` reports store and queue reachability and answers 503 when either is down; any other endpoint answers 503, not 500, when the queue, store or ingest location is unreachable.
 
 **Verification:** the token is checked against every registry entry with `hmac.compare_digest` and no early exit; a test fails on any change to the OpenAPI surface.
