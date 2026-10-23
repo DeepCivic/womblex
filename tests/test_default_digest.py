@@ -36,9 +36,9 @@ _PINNED = {
     "spreadsheets/echidna-population-statistics.xlsx":
         "e8dcda866921d1b7144db7e5e5d7bcc7f84e06eef172af4c87195c75785cd4a1",
     "documents/quokka-care-decision-notice_redacted.pdf":
-        "6f12a4d14f1db5ada59421ab5aae895625afcee240e415901d983504bfb97e46",
+        "208ece89afd781bc4f11f4d6f146cd43c4b40527ef18faea6b56dac3443fda50",
     "documents/koala-habitat-audit.pdf":
-        "be8091e48559f7c91fedef45c83809780297c6c12299db61d74d465da593bc9b",
+        "2ee1b87e67415a50981f49123816ecba2eefd1b8741336c8b29231fce3d6a06d",
     "documents/numbat-scanned-survey-page.pdf":
         "8b3c633cd73cfd3024cc7e6294b7d3abf2f19f5df027e38b6d03fe2be1012473",
 }
