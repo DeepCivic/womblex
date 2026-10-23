@@ -300,6 +300,31 @@ def test_paddleocr_reader_names_the_model_set_it_loaded() -> None:
     assert reader.model_variant in {"paddleocr-v5", "rapidocr-bundled-v4"}
 
 
+def test_paddleocr_reader_passes_use_cls_to_the_engine() -> None:
+    import numpy as np
+
+    from womblex.ingest.paddle_ocr import PaddleOCRReader
+
+    seen: list[dict] = []
+
+    class _Engine:
+        def __call__(self, img, **kwargs):
+            seen.append(kwargs)
+            return None, None
+
+    for reader in (PaddleOCRReader(), PaddleOCRReader(use_cls=False)):
+        reader._engine = _Engine()  # type: ignore[assignment]
+        reader.readtext(np.zeros((10, 10), dtype=np.uint8))
+    assert seen == [{"use_cls": True}, {"use_cls": False}]
+
+
+def test_paddleocr_use_cls_is_an_engine_option() -> None:
+    from womblex.ingest.paddle_ocr import get_ocr_reader
+
+    assert get_ocr_reader("paddleocr").use_cls is True
+    assert get_ocr_reader("paddleocr", use_cls=False).use_cls is False
+
+
 # --- slot-model provenance (O3) --------------------------------------------
 
 from womblex import __version__ as _WOMBLEX_VERSION

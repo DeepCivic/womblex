@@ -339,6 +339,17 @@ def _classify_native_block(
     return "paragraph"
 
 
+def _ends_joined(text: str) -> bool:
+    """A line ending that takes the next line with no space between.
+
+    A line carries no trailing space (the text engine strips a line's edge
+    spaces), so lines in a block are joined with one. The exceptions are text
+    already ending in whitespace and a line-end hyphen after a letter, which
+    stays joined to its continuation as MuPDF kept it.
+    """
+    return text[-1].isspace() or (text.endswith("-") and len(text) > 1 and text[-2].isalpha())
+
+
 def _build_text_blocks(page: Page) -> list[TextBlock]:
     """Extract text blocks with positional data and type classification."""
     blocks: list[TextBlock] = []
@@ -354,8 +365,11 @@ def _build_text_blocks(page: Page) -> list[TextBlock]:
         max_font_size = 0.0
         any_bold = False
         for line in block.lines:
+            line_text = "".join(span.text for span in line.spans)
+            if block_text and line_text and not _ends_joined(block_text):
+                block_text += " "
+            block_text += line_text
             for span in line.spans:
-                block_text += span.text
                 max_font_size = max(max_font_size, span.size)
                 any_bold = any_bold or span.bold
 

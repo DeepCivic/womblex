@@ -32,11 +32,13 @@ PARITY = {
     FOI_INDEX_PDF: [[2, 2, 7, 5, 1] + [11] * 36, _FOI_PAGE, _FOI_PAGE, _FOI_PAGE],
 }
 
-#: Element kinds and counts over the whole extraction.
+#: Element kinds and counts over the whole extraction. The FOI index differs from
+#: MuPDF's 12 headings: MuPDF glued a block's lines, and its four bold column-header
+#: rows, spaced, run past the 80-character bold-heading limit.
 KINDS = {
     AUDIT_PDF: {"header": 6, "paragraph": 24, "footer": 6, "page_break": 5, "table": 1, "heading": 1},
     SPACING_PDF: {"header": 6, "heading": 6, "page_break": 5, "paragraph": 12},
-    FOI_INDEX_PDF: {"heading": 12, "paragraph": 144, "footer": 2, "page_break": 3, "table": 1},
+    FOI_INDEX_PDF: {"heading": 8, "paragraph": 148, "footer": 2, "page_break": 3, "table": 1},
 }
 
 

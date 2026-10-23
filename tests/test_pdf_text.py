@@ -205,3 +205,28 @@ class TestPage:
     def test_empty_page(self, tmp_path) -> None:
         with PdfBuilder(tmp_path / "e.pdf").page().open() as doc:
             assert doc[0].plain_text() == "" and doc[0].words() == [] and doc[0].text_dict() == []
+
+
+class TestTextBlocks:
+    """A block's lines become one element text, separated as the page reads."""
+
+    def _texts(self, builder: PdfBuilder) -> list[str]:
+        from womblex.ingest.extract import _build_text_blocks
+
+        with open_document(builder.save()) as doc:
+            return [b.text for b in _build_text_blocks(doc[0])]
+
+    def test_lines_are_joined_with_a_space(self, tmp_path) -> None:
+        builder = PdfBuilder(tmp_path / "l.pdf").page()
+        builder.text(72, 100, "is not subject to the").text(72, 113, "Directions in this instrument.")
+        assert self._texts(builder) == ["is not subject to the Directions in this instrument."]
+
+    def test_a_list_label_is_spaced_from_its_item(self, tmp_path) -> None:
+        builder = PdfBuilder(tmp_path / "d.pdf").page()
+        builder.text(72, 100, "(2)").text(108, 100, "Each delegation is subject to the directions.")
+        assert self._texts(builder) == ["(2) Each delegation is subject to the directions."]
+
+    def test_a_line_end_hyphen_stays_joined(self, tmp_path) -> None:
+        builder = PdfBuilder(tmp_path / "h.pdf").page()
+        builder.text(72, 100, "the Auditor-").text(72, 113, "General reported")
+        assert self._texts(builder) == ["the Auditor-General reported"]

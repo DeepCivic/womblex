@@ -95,6 +95,8 @@ class OCRConfig(StrictModel):
 
     ``engine_options`` forwards engine-specific kwargs:
 
+    - PaddleOCR: ``use_cls`` (default ``True``, as RapidOCR), RapidOCR's
+      per-line 180-degree text classifier.
     - Mistral OCR: ``model`` (default ``mistral.pixtral-large-2502-v1:0``,
       or ``MISTRAL_OCR_MODEL_ID`` env), ``region`` (default from
       ``AWS_REGION`` / ``AWS_DEFAULT_REGION`` env or ``us-east-1``). AWS
