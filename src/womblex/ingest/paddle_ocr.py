@@ -144,9 +144,11 @@ class PaddleOCRReader:
         "dict": "ppocrv5_dict.txt",
     }
 
-    def __init__(self, lang: str = "en", use_int8: bool = True) -> None:
+    def __init__(self, lang: str = "en", use_int8: bool = True, use_cls: bool = True) -> None:
         self.lang = lang
         self.use_int8 = use_int8
+        # RapidOCR's per-line 180-degree classifier; on by default, as upstream.
+        self.use_cls = use_cls
         self._engine: RapidOCR | None = None
         # Which model set loaded, once it has; read by the pre-run model check.
         self.model_variant: str | None = None
@@ -221,7 +223,7 @@ class PaddleOCRReader:
         self._ensure_loaded()
         assert self._engine is not None
 
-        result, _elapse = self._engine(img)
+        result, _elapse = self._engine(img, use_cls=self.use_cls)
         if not result:
             return []
 
@@ -257,7 +259,9 @@ _paddle_readers: dict[str, PaddleOCRReader] = {}
 _layout_analyzers: dict[str, LayoutAnalyzer] = {}
 
 
-def get_paddle_reader(lang: str = "eng", use_int8: bool = True) -> PaddleOCRReader:
+def get_paddle_reader(
+    lang: str = "eng", use_int8: bool = True, use_cls: bool = True,
+) -> PaddleOCRReader:
     """Return a cached PaddleOCR reader for the given Tesseract-style lang code.
 
     Bypasses the cache while recording is suppressed (the pre-run model
@@ -269,15 +273,15 @@ def get_paddle_reader(lang: str = "eng", use_int8: bool = True) -> PaddleOCRRead
     """
     mapped = _LANG_MAP.get(lang, lang)
     if recording_suppressed():
-        return PaddleOCRReader(lang=mapped, use_int8=use_int8)
-    key = f"{mapped}_{use_int8}"
+        return PaddleOCRReader(lang=mapped, use_int8=use_int8, use_cls=use_cls)
+    key = f"{mapped}_{use_int8}_{use_cls}"
     if key not in _paddle_readers:
-        _paddle_readers[key] = PaddleOCRReader(lang=mapped, use_int8=use_int8)
+        _paddle_readers[key] = PaddleOCRReader(lang=mapped, use_int8=use_int8, use_cls=use_cls)
     return _paddle_readers[key]
 
 
-def _make_paddle(lang: str = "eng", **_: object) -> PaddleOCRReader:
-    return get_paddle_reader(lang=lang)
+def _make_paddle(lang: str = "eng", use_cls: bool = True, **_: object) -> PaddleOCRReader:
+    return get_paddle_reader(lang=lang, use_cls=use_cls)
 
 
 def _make_mistral(
