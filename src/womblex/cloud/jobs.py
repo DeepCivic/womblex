@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any, Self, TypeGuard
 import sqlalchemy.exc
 
 from womblex.cloud import dbos_app
+from womblex.cloud.run_owner import owned_rows, run_owners
 from womblex.cloud.run_status import run_sentence, stage_counts
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -315,8 +316,17 @@ class RunBoard:
             if not schema_missing(e):
                 raise
             return []
-        # Filtered here, not by DBOS: filtering on attributes is Postgres-only.
-        return rows if owner is None else [s for s in rows if _attr(s, "owner") == owner]
+        if owner is None:
+            return rows
+        # Filtered here, not by DBOS: filtering on attributes is Postgres-only. A run is the
+        # owner its first row names (`cloud/run_owner.py`), so a filtered listing reads all rows.
+        filtered = status or any(k in kwargs for k in ("limit", "completed_after"))
+        whole = self._list(run_id) if filtered else rows
+        return owned_rows(rows, run_owners(whole), owner)
+
+    def check_owner(self, run_id: str, owner: str | None) -> None:
+        """Raise :class:`RunOwnedError` where :meth:`enqueue` for *owner* would; write nothing."""
+        self._claim_run_owner(run_id, owner)
 
     def _claim_run_owner(self, run_id: str, owner: str | None) -> str | None:
         """Resolve the owner new rows of *run_id* carry; refuse a different owner.
