@@ -205,7 +205,7 @@ The only identity change is that the run id stops being the workflow name.
 **Clean-up after each spike:**
 - delete the spike branch and any prototype code
 - record the outcome in `docs/decisions.md`, or in `docs/decisions-dead-ends.md` if it is rejected
-- open the build requirement text if it goes ahead
+- if it goes ahead, add the build to Phase F
 - confirm no spike columns, fixtures or tests reached `main`
 - check `git log origin/main` for the spike commits
 
