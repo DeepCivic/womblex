@@ -75,6 +75,9 @@ class RefusalCode(str, Enum):
     NO_WORKER = "no_worker"
     """No live worker serves a step's (or a firing's extraction's) work under the workflow's config."""
 
+    RUN_OWNED = "run_owned"
+    """The run a firing appends to is owned by another owner than the stored workflow's."""
+
     BATCHES_CANCELLED = "batches_cancelled"
     """A replayed firing's own batches were cancelled; re-queueing would attach to them and never run."""
 
