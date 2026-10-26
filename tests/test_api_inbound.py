@@ -141,3 +141,28 @@ def test_delivery_received_lands_on_the_named_seq_and_an_unknown_seq_is_refused(
     assert (unknown.status_code, unknown.json()["code"]) == (409, "unknown_delivery")
     with RunBoard(None) as board:
         assert board.runs() == []  # the run's status is never touched
+
+
+def test_the_events_listing_is_owner_scoped_and_shows_each_outcome(hooks, fleet) -> None:  # noqa: F811
+    from womblex.api.auth import hash_token, parse_registry
+
+    send(hooks, {"event": "documents_added", "event_id": "e1"})
+    send(hooks, {"event": "run_requested", "event_id": "e2"}, workflow="lonely", key="k2")
+    registry = parse_registry({"clients": [
+        {"client_id": "alice", "token_sha256": hash_token("ta"), "scopes": ["read"]},
+        {"client_id": "bob", "token_sha256": hash_token("tb"), "scopes": ["read"]},
+        {"client_id": "ops", "token_sha256": hash_token("to"), "scopes": ["admin"]},
+    ]})
+    client = TestClient(create_api_app(store_uri=str(fleet[0]), db_dsn="", registry=registry, ingest_uri=fleet[1]))
+
+    def listing(token: str, workflow: str):
+        return client.get(f"/v1/workflows/{workflow}/inbound-events", headers={"Authorization": f"Bearer {token}"})
+
+    mine = listing("ta", "feed").json()["events"]
+    assert [(e["event_id"], e["event"], e["outcome"]["status"], e["outcome"]["http_status"]) for e in mine] == [
+        ("e1", "documents_added", "accepted", 202)]
+    assert listing("tb", "feed").status_code == 404  # another owner's workflow
+    assert listing("ta", "nope").status_code == 404
+    refused = listing("to", "lonely").json()["events"]  # admin sees every workflow's
+    assert [(e["event_id"], e["outcome"]["code"]) for e in refused] == [("e2", "no_worker")]
+    assert client.get("/v1/workflows/feed/inbound-events").status_code == 401

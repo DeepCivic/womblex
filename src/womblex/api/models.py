@@ -107,6 +107,21 @@ class CollectionRerun(BaseModel):
     newly_dispatched: int
 
 
+class InboundEventOut(BaseModel):
+    """One inbound event: the sender's id, and the outcome it was given (null while it is being handled)."""
+
+    event_id: str
+    hook: str
+    event: str
+    received_at: str
+    outcome: dict[str, Any] | None
+
+
+class InboundEventList(BaseModel):
+    workflow: str
+    events: list[InboundEventOut]
+
+
 class RunFile(BaseModel):
     """One object under the run. Contract keys are null for a non-Parquet or pre-contract file."""
 

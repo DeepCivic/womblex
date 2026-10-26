@@ -425,6 +425,7 @@ def test_openapi_surface_is_pinned(client):
             "POST /v1/collections/{name}/add": "202 CollectionAdded",
             "POST /v1/collections/{name}/rerun": "202 CollectionRerun",
             "POST /v1/hooks/{workflow}/{hook}": "202 ",
+            "GET /v1/workflows/{workflow}/inbound-events": "200 InboundEventList",
         },
         "models": {
             "DocumentText": ["layer", "rows", "run_id", "sensitivity", "source_hash"],
@@ -464,5 +465,7 @@ def test_openapi_surface_is_pinned(client):
             "CollectionAction": ["workflow"],
             "CollectionAdded": ["firing", "name", "workflow"],
             "CollectionRerun": ["name", "newly_dispatched", "stages", "workflow"],
+            "InboundEventList": ["events", "workflow"],
+            "InboundEventOut": ["event", "event_id", "hook", "outcome", "received_at"],
         },
     }

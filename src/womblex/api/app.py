@@ -162,7 +162,7 @@ def create_api_app(
     app.include_router(presets_router(settings, can_read, can_admin))
     app.include_router(queue_router(db_dsn, can_read))
     app.include_router(collections_router(settings, can_read, can_submit))
-    app.include_router(inbound_router(settings))
+    app.include_router(inbound_router(settings, can_read))
     app.include_router(resources_router(settings, can_admin))
 
     @contextmanager

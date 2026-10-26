@@ -1,6 +1,6 @@
 # SMS uplift — plan
 
-*Status: proposed (2026-10); a piece is removed from this plan when it is built. Phases A (collections) and B (inbound webhooks) are the priority and stand alone; C to G may follow later. This document is deleted when its last phase lands.*
+*Status: Phases A (collections) and B (inbound webhooks) are built (Requirements 34 and 35); C to G are proposed and may follow later. A piece is removed from this plan when it is built, and this document is deleted when its last phase lands.*
 
 ## Context
 
@@ -8,7 +8,7 @@ SMS-validate reads Womblex output and assigns kinds itself. Womblex's job is to 
 general-purpose atoms, and to give other systems enough capability to manage data
 around it. Womblex does not become a warehouse. No SMS-named stage goes in Womblex.
 
-**Priority:** collections (Requirement 34) and inbound webhooks (Requirement 35) come first.
+**Priority:** collections (Requirement 34) and inbound webhooks (Requirement 35) came first and are built.
 Everything after them can be delayed without leaving the tree half-built.
 
 **Requirement numbers:** Requirements 30 to 35 are working labels for this plan only.
@@ -55,25 +55,15 @@ existing machinery as-is:
 
 The only identity change is that the run id stops being the workflow name. That change is built (Requirement 34): a workflow's `collection` names its run, and the schedule context carries the run id.
 
-**A2. Add to a collection on demand.** Built (Requirement 34), except that the stored copy is also kept for inbound hooks once B1 adds them.
-
-**A2a. Workflow owner.** Built (Requirement 34): the store holds an owner and firings run under it. Nothing yet stores a workflow under a non-admin owner (the CLI stores none, and A4 does not create workflows); A4 must settle how an owned workflow comes to exist.
-
-**A4. API.** Built (Requirement 34).
-
-**A5. Document versions.** Built (Requirement 34). D1's unreadable rows will chain like any other version; their batch-qualified hash keeps each occurrence distinct.
-
-**A6. Redelivery trace.** Built (Requirement 34). `delivery_received` (B2) appends its acknowledgement to the record its `seq` names: `<destination>.json` when that is the latest, else `<destination>.<seq>.json`.
+Items A1 to A6, including A2a, are built (Requirement 34). One question is open: the plan
+says a workflow's owner is the API caller that stored it, but the CLI stores none and the API
+routes do not create workflows, so nothing yet stores a workflow under a non-admin owner and
+only an admin sees collections until that is settled (`docs/decisions-operations.md`, "Acting on
+a collection through the API").
 
 ## Phase B — Inbound webhooks (Requirement 35)
 
-**B1. Spec and storage.** Built (Requirement 35). `WOMBLEX_INSECURE_INBOUND` is read by `workflow_store.insecure_inbound()`, and the route (B2) reads it from there.
-
-**B2. Route.** Built (Requirement 35). The listing (B3) reads `InboundEvents.list`, whose ids are `<workflow>:<hook>:<event_id>`.
-
-**B3. Listing and docs.**
-- `GET /v1/workflows/{id}/inbound-events`, owner-scoped like A4.
-- `delivery_received` reopens Requirement 27's "write-back from consumers" exclusion. Record that in `docs/decisions-operations.md`.
+Items B1 to B3 are built (Requirement 35).
 
 ## Phase C — Progress events and timestamps
 
@@ -163,22 +153,6 @@ A docs-only merge per CLAUDE.md "Stocktake":
 
 - `uv run ruff check src/ tests/` && `uv run mypy src/` && `uv run python -m pytest tests/ -v -m "not benchmark"`
 - `git diff --stat $(git merge-base HEAD origin/main)..HEAD` ≤500 lines; `wc -l` on every touched file.
-- **A:** a `fleet`-fixture test (SQLite + Postgres):
-  - two firings of one workflow into collection `c1` give one run `c1`
-  - changing a synthetic file gives two linked versions, the later one `is_current` (built: `tests/test_document_versions.py`)
-  - an unreadable file in two firings gives two distinct `source_hash`es in one chain
-  - a schedule synced before the `collection` field (no `run_id` in its context) still fires into the run named for the workflow
-  - changing the workflow's `name` while keeping `collection: c1` fires into run `c1`. The old name's stored copy and schedules stay until `remove-workflow` removes them
-  - `rerun-collection` after adding a step runs only that step among the sidecar stages (built, `tests/test_workflow_schedules.py`)
-  - the API lists `c1` for its owner and admin, and 404s for another owner
-  - `remove-workflow c1` removes the copy and schedules and leaves the run
-- **B:** `TestClient` tests:
-  - a signed `documents_added` adds one file
-  - a resend adds nothing
-  - a bad signature, a wrong hook and no live worker are each refused with their code and no queue row
-  - a bad signature or wrong hook writes no event row; a no-live-worker refusal writes one, and its resend returns the same refusal
-  - two hooks sharing a `secret_env` are refused at validation, and only warned with `WOMBLEX_INSECURE_INBOUND=1`
-  - an unsigned event is accepted only with `WOMBLEX_INSECURE_INBOUND=1`
-  - `delivery_received` appears on the named `seq` record with the run status unchanged; an unknown `seq` is refused
+- **A and B:** built; each requirement's **Verification** line (34 and 35 in `functional_requirements.md`) names its tests. One check waits on D1: an unreadable file in two firings gives two distinct `source_hash`es in one chain.
 - **C:** the `test_webhook.py` receiver sees `stage_started` and `batch_progress` with counts summing to the total. The `events` filter drops them.
 - **D:** a fixture with an unreadable file, an unsupported file and a redacted PDF gives an error manifest row (`extraction_method` `unreadable`, which `SourceResolver` declines as `unsupported_basis`), an `omitted.parquet` row and region rows with page and bbox.
