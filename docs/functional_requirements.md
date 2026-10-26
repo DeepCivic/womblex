@@ -585,7 +585,7 @@ These requirements described the admin console (`womblex ui`). The console now l
 - The workflow's digest does not cover the collection, so naming or changing it leaves the digest of an otherwise unchanged workflow as it was.
 - The source-provenance collection recorded in a firing's extraction files is the collection, else the workflow's name; extraction from a run no workflow started still records the preset name. Files written earlier keep what they were written with.
 
-**Verification:** `tests/test_workflow_store.py` (the digest and an unsafe collection) and `tests/test_workflow_schedules.py` (a renamed workflow firing into its collection, with the provenance footer).
+**Verification:** `tests/test_workflow_store.py` (the digest and an unsafe collection) and `tests/test_workflow_schedules.py` (a renamed workflow firing into its collection, with the provenance footer; a schedule synced without `run_id` firing into the run named for its workflow).
 
 **Out of scope:** adding to a collection on demand, owners, the API and document versions, each a later piece of the same requirement.
 
