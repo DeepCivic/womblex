@@ -15,8 +15,9 @@ with the commands that use it in its comments.
 
 Every command checks the file first and refuses what could never run: an unknown
 key, an unknown stage, a stage listed twice, a bad cron expression or timezone,
-or a config that does not validate. A workflow has no owner; the runs it starts
-are admin-only, like CLI runs. Its digest (`sha256:…`) is over the parsed spec,
+or a config that does not validate. A stored workflow's owner is the API caller
+that stored it (none, admin, from the CLI); the runs it starts are theirs, and a CLI-stored
+workflow's are admin-only, like CLI runs. Its digest (`sha256:…`) is over the parsed spec,
 so formatting and comments do not change it, and is stamped on every sidecar
 its steps write.
 

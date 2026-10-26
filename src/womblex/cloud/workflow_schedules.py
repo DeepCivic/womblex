@@ -87,8 +87,10 @@ def remove_schedules(client: DBOSClient, workflow_id: str) -> int:
     return len(names)
 
 
-def schedule_workflow(client: DBOSClient, wf_store: WorkflowStore, stored: StoredWorkflow) -> list[str]:
-    """Store *stored* as the copy its firings read and make its schedules equal its triggers.
+def schedule_workflow(
+    client: DBOSClient, wf_store: WorkflowStore, stored: StoredWorkflow, *, owner: str | None = None,
+) -> list[str]:
+    """Store *stored* as the copy its firings read, owned by *owner* (`None`: admin), and make its schedules equal its triggers.
 
     A workflow with no triggers is unscheduled, and its copy deleted unless it names a collection.
     If the sync fails, the previous copy is put back (or the new one deleted), so a firing never
@@ -96,12 +98,12 @@ def schedule_workflow(client: DBOSClient, wf_store: WorkflowStore, stored: Store
     """
     previous = wf_store.get(stored.id)
     if keeps_copy(stored.spec):
-        wf_store.save(stored.id, stored.spec)
+        wf_store.save(stored.id, stored.spec, owner=owner)
     try:
         names = sync_schedules(client, stored)
     except Exception:
         if previous is not None:
-            wf_store.save(previous.id, previous.spec)
+            wf_store.save(previous.id, previous.spec, owner=previous.owner)
         elif keeps_copy(stored.spec):
             wf_store.delete(stored.id)
         raise

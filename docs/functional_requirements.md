@@ -500,7 +500,7 @@ These requirements described the admin console (`womblex ui`). The console now l
 - After an edit and reschedule, the new version applies to new documents only; earlier documents keep their results.
 - A firing with no new documents runs nothing and logs that.
 - A file whose content changed is a new document; the earlier version stays in the run. A file rewritten with the same bytes is not a new document.
-- A workflow has no owner; the runs it starts are admin-only, like CLI runs.
+- A stored workflow has an owner, the API caller that stored it (none for the CLI); the runs it starts belong to that owner, and a run already owned by another owner is refused. A workflow with no owner starts admin-only runs, like CLI runs.
 - Fleet runs perform `pii` when a workflow includes it; runs without a workflow never do.
 - A workflow can name destinations: an object store, a Postgres database with embeddings, and a webhook.
 - A workflow names where secrets are found, never the secrets. No secret is written to the file or the stored copy.
@@ -515,7 +515,7 @@ These requirements described the admin console (`womblex ui`). The console now l
 - There are no per-document or per-batch events.
 - The run record lists every delivery.
 
-**Out of scope:** managing workflows through the API, pruning changed or deleted documents, resolving the source of a changed file's earlier version (its bytes are gone from the store, so `SourceResolver` reads it as `hash_mismatch`), workflow owners, backfill of missed firings, per-step destinations, databases other than Postgres (each needs its own requirement), registering webhooks through the API, and write-back from consumers.
+**Out of scope:** managing workflows through the API, pruning changed or deleted documents, resolving the source of a changed file's earlier version (its bytes are gone from the store, so `SourceResolver` reads it as `hash_mismatch`), backfill of missed firings, per-step destinations, databases other than Postgres (each needs its own requirement), registering webhooks through the API, and write-back from consumers.
 
 ## 28. Fleet Runs — Honour the Dispatch, Report the Truth
 
@@ -588,9 +588,10 @@ These requirements described the admin console (`womblex ui`). The console now l
 **Verification:** `tests/test_workflow_store.py` (the digest and an unsafe collection) and `tests/test_workflow_schedules.py` (a renamed workflow firing into its collection, with the provenance footer; on-demand adds, the kept copy and `remove-workflow`).
 
 - `add-to-collection` fires the stored workflow once, now, on the queue of its input store, as a schedule's firing: it makes the same checks before any row (a workflow not stored, or one the firing would refuse, queues nothing), adds only the documents the collection has not seen, and a repeat within the same second attaches rather than firing twice.
+- A stored workflow's owner is the API caller that stored it (none from the CLI). Its firings run under that owner, so the collection's run is owned like an API run, and a firing for a run another owner holds is refused.
 - A workflow with a collection and no triggers keeps its stored copy. `schedule-workflow --remove` unschedules and keeps the copy; `remove-workflow` removes the schedules and the copy by name, even when the file is gone, and leaves the collection's run and shards.
 
-**Out of scope:** owners, the API and document versions, each a later piece of the same requirement.
+**Out of scope:** the API and document versions, each a later piece of the same requirement.
 
 ## Outstanding
 

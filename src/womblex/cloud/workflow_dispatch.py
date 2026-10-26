@@ -146,6 +146,7 @@ def dispatch_workflow(
             run_id, list(stages), shard_prefix, max_attempts=max_attempts,
             workflow={"id": stored.id, "digest": stored.digest, "preset": stored.spec.preset,
                       "config": overlay, "spec": stored.spec.model_dump(mode="json")}, firing=firing, bases=bases,
+            owner=stored.owner,
         )
     if left := [f for f in not_acted_on(stored) if f not in acted_on]:
         logger.warning("workflow %s: %s stored but not acted on by dispatch", stored.id, ", ".join(left))
@@ -252,7 +253,7 @@ def fire_workflow(
             recipe = config_from_overlay(stored.spec.preset, workflow_overlay(stored, resolve_preset))
             named = {"id": stored.id, "digest": stored.digest, "spec": stored.spec.model_dump(mode="json")}
             board.enqueue(run_id, specs, firing=firing, fingerprints=prints, config=config_payload(recipe),
-                          workflow=named)
+                          workflow=named, owner=stored.owner)
     try:
         sent = dispatch_workflow(stored, firing=firing, **_firing_kwargs(stored, run_id, resolve_preset, store, dsn))
     except Exception:

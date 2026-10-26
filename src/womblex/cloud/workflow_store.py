@@ -273,6 +273,7 @@ class StoredWorkflow:
     digest: str
     created_at: str = ""
     updated_at: str = ""
+    owner: str | None = None  # the API caller that stored it; `None` is admin (the CLI)
 
     @property
     def run_id(self) -> str:
@@ -294,6 +295,7 @@ def _ddl() -> Any:
         sa.Column("digest", sa.Text, nullable=False),
         sa.Column("created_at", sa.Text, nullable=False),
         sa.Column("updated_at", sa.Text, nullable=False),
+        sa.Column("owner", sa.Text, nullable=True),
     ), metadata
 
 
@@ -305,6 +307,9 @@ def ensure_workflow_schema(dsn: str | None) -> None:
     engine = sa.create_engine(dbos_app.system_database_url(dsn))
     try:
         metadata.create_all(engine, tables=[table])
+        if "owner" not in {c["name"] for c in sa.inspect(engine).get_columns(_TABLE)}:  # a table made before owners
+            with engine.begin() as conn:
+                conn.execute(sa.text(f"ALTER TABLE {_TABLE} ADD COLUMN owner TEXT"))
     finally:
         engine.dispose()
 
@@ -346,6 +351,7 @@ def _row_to_stored(row: Any) -> StoredWorkflow:
         digest=digest,
         created_at=row.created_at,
         updated_at=row.updated_at,
+        owner=row.owner,
     )
 
 
@@ -380,8 +386,8 @@ class WorkflowStore:
 
         return conn.execute(sa.select(self._table).where(self._table.c.id == workflow_id)).first()
 
-    def save(self, workflow_id: str, spec: StoredWorkflowSpec) -> StoredWorkflow:
-        """Create or replace *workflow_id*'s definition.
+    def save(self, workflow_id: str, spec: StoredWorkflowSpec, *, owner: str | None = None) -> StoredWorkflow:
+        """Create or replace *workflow_id*'s definition, stored by *owner* (`None`: admin).
 
         Raises `ValueError` if *workflow_id* is unsafe or the spec fails `check_spec`
         (`pydantic.ValidationError` for a bad config overlay).
@@ -392,15 +398,15 @@ class WorkflowStore:
             raise ValueError(f"unsafe workflow id: {workflow_id!r}")
         check_spec(spec)
         try:
-            self._write(workflow_id, spec)
+            self._write(workflow_id, spec, owner)
         except sqlalchemy.exc.IntegrityError:
             # A concurrent save created the row first; the retry replaces it.
-            self._write(workflow_id, spec)
+            self._write(workflow_id, spec, owner)
         stored = self.get(workflow_id)
         assert stored is not None  # just written and committed
         return stored
 
-    def _write(self, workflow_id: str, spec: StoredWorkflowSpec) -> None:
+    def _write(self, workflow_id: str, spec: StoredWorkflowSpec, owner: str | None) -> None:
         import sqlalchemy as sa
 
         now = datetime.now(UTC).isoformat()
@@ -412,6 +418,7 @@ class WorkflowStore:
                 "digest": workflow_digest(spec),
                 "created_at": created_at,
                 "updated_at": now,
+                "owner": owner,
             }
             if existing is not None:
                 conn.execute(

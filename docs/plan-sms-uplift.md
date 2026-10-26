@@ -57,10 +57,7 @@ The only identity change is that the run id stops being the workflow name. That 
 
 **A2. Add to a collection on demand.** Built (Requirement 34), except that the stored copy is also kept for inbound hooks once B1 adds them.
 
-**A2a. Workflow owner.**
-- Add `owner` to the stored copy (`WorkflowStore`, the `womblex_workflows` table), set from the caller that stored it: the API caller's `client_id`, or `None` (admin) from the CLI. It is not part of the spec file or of `workflow_digest`.
-- `fire_workflow` enqueues with the workflow's owner, so a collection's run is owned like any API run, and `RunBoard.enqueue` refuses a collection whose run is already owned by another owner (`RunOwnedError`).
-- This reopens the "a workflow has no owner" call (CLAUDE.md, `cloud/workflow_store.py`) and the "workflow owners" exclusion in Requirement 27's out-of-scope list. Record it in `docs/decisions-operations.md`.
+**A2a. Workflow owner.** Built (Requirement 34): the store holds an owner and firings run under it. Nothing yet stores a workflow under a non-admin owner (the CLI stores none, and A4 does not create workflows); A4 must settle how an owned workflow comes to exist.
 
 **A3. Workflow changes and rerunning a collection.**
 - A dispatch outside a firing (`dispatch_workflow`, where `bases=None` means every batch) applies the current steps to the whole collection. Unit receipts (`cloud/unit_receipt.py`) skip sidecar units whose version, stage config and inputs are unchanged, on a stage's first attempt. So adding `pii` reruns only `pii`, and a changed setting reruns the stages whose config or inputs it changes.

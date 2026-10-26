@@ -563,3 +563,41 @@ def test_add_to_collection_queues_nothing_for_a_workflow_that_is_not_stored_or_h
     assert "no_documents" in caplog.text
     with RunBoard(None) as board:
         assert board.runs() == []
+
+
+def test_a_firing_runs_under_the_workflows_owner_and_refuses_a_run_another_owner_holds(
+    fleet, saved_preset,  # noqa: F811
+) -> None:
+    from tests.test_cloud import _minimal_config
+    from womblex.cloud import workflows
+    from womblex.cloud.jobs import RunOwnedError
+    from womblex.store.remote import RemoteStore
+
+    store_dir, ingest, tmp = fleet
+    _inbox(fleet)
+    ensure_workflow_schema(None)
+    spec = validate_workflow_spec({
+        "preset": _PRESET.name, "steps": [{"stage": "normalise"}], "triggers": [], "collection": "c1",
+        "input_binding": {"store": ingest, "ingest_prefix": "inbox"},
+    })
+    with WorkflowStore(None) as store:
+        store.save("feed", spec, owner="alice")
+        store.save("rival", spec, owner="bob")
+
+    def fire(name: str, firing: str) -> None:
+        workflows.set_context(workflows.WorkerContext(
+            _minimal_config(tmp), RemoteStore.from_uri(str(store_dir)), RemoteStore.from_uri(ingest), ingest, None))
+        try:
+            workflows._fire("c1", {"workflow_id": name, "run_id": "c1", "store": ingest}, firing)
+        finally:
+            workflows.set_context(None)
+
+    fire("feed", "1")
+    with RunBoard(None) as board:
+        assert [r.run_id for r in board.runs(owner="alice")] == ["c1"]
+        assert board.runs(owner="bob") == []
+    (Path(ingest) / "inbox" / "more.csv").write_text("name,role\nBob,Clerk\n")  # new, so the firing would queue it
+    with pytest.raises(RunOwnedError):
+        fire("rival", "2")
+    with RunBoard(None) as board:
+        assert board.firing_batches("c1", "2") == []  # nothing was queued

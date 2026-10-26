@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from pydantic import ValidationError
 
@@ -175,3 +177,30 @@ def test_save_losing_an_insert_race_replaces_the_winner(store, monkeypatch) -> N
     monkeypatch.setattr(store, "_get_row", lambda conn, wid: next(calls, real_get_row(conn, wid)))
     spec = validate_workflow_spec({**_MINIMAL, "steps": [{"stage": "chunk"}]})
     assert store.save("wf-1", spec).digest == workflow_digest(spec)
+
+
+def test_a_workflow_is_stored_with_its_owner_and_a_resave_replaces_it(store) -> None:
+    spec = validate_workflow_spec(_MINIMAL)
+    assert store.save("wf", spec).owner is None
+    assert store.save("wf", spec, owner="alice").owner == "alice"
+    assert store.get("wf").owner == "alice" and [w.owner for w in store.list()] == ["alice"]
+    assert store.save("wf", spec).owner is None  # stored again by the CLI
+
+
+def test_a_table_made_before_owners_gains_the_column_and_reads_unowned(tmp_path) -> None:
+    import sqlalchemy as sa
+
+    dsn = f"sqlite:///{tmp_path}/old.db"
+    engine = sa.create_engine(dsn)
+    with engine.begin() as conn:
+        conn.execute(sa.text(
+            "CREATE TABLE womblex_workflows (id TEXT PRIMARY KEY, spec_json TEXT NOT NULL, digest TEXT NOT NULL, "
+            "created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"))
+        conn.execute(sa.text(
+            "INSERT INTO womblex_workflows VALUES ('old', :spec, 'sha256:x', 't', 't')"),
+            {"spec": json.dumps(validate_workflow_spec(_MINIMAL).model_dump(mode="json"))})
+    engine.dispose()
+    ensure_workflow_schema(dsn)
+    with WorkflowStore(dsn) as s:
+        assert s.get("old").owner is None
+        assert s.save("old", validate_workflow_spec(_MINIMAL), owner="bob").owner == "bob"
