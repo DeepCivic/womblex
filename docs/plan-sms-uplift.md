@@ -11,6 +11,9 @@ around it. Womblex does not become a warehouse. No SMS-named stage goes in Wombl
 **Priority:** collections (Requirement 34) and inbound webhooks (Requirement 35) come first.
 Everything after them can be delayed without leaving the tree half-built.
 
+**Requirement numbers:** Requirements 30 to 35 are draft numbers. `docs/functional_requirements.md`
+stops at Requirement 29; none of their text is in the repository yet. Phase G writes it.
+
 **In scope:**
 - collections
 - inbound webhooks
@@ -52,23 +55,38 @@ The only identity change is that the run id stops being the workflow name.
 
 **A1. `collection` field on the workflow spec.**
 - Add an optional safe-name field to `StoredWorkflowSpec` (`cloud/workflow_store.py`).
-- Drop it from `workflow_digest` and from `config_digest`, the same way an empty `destinations` list is dropped today.
+- Drop it from `workflow_digest`, the same way an empty `destinations` list is dropped today. `config_digest` (`store/run_stamp.py`) hashes the validated `WomblexConfig`, not the spec, and the collection never enters the config, so it needs no exclusion there.
 - `run_scheduled` / `_fire` (`cloud/workflows.py`) use `spec.collection or stored.id` as the run id.
-- `_extract` declares `IngestProvenance` with the collection, not `run_config.dataset.name`. `dataset.name` stays the preset name and keeps feeding `womblex.preset`.
+- `_extract` declares `IngestProvenance` with `spec.collection or stored.id`, not `run_config.dataset.name`. `dataset.name` stays the preset name and keeps feeding `womblex.preset`.
+  - This changes the provenance collection footer for every existing workflow, including those with no `collection`: it was the preset name and becomes the workflow id. Older shards keep the footer they were written with.
 - `workflow_runner.config_from_overlay` is unchanged.
-- Record the digest exception in `docs/decisions-operations.md` beside "A workflow is a file".
+- Record in `docs/decisions-operations.md`, beside "A workflow is a file", the three calls A1 reopens:
+  - the digest exception
+  - run identity: the run id is the collection, not the workflow name
+  - the provenance collection is the collection (else the workflow id), not `dataset.name`
 
 **A2. Add to a collection on demand.**
-- New CLI `womblex add-to-collection FILE --store --dsn`. It enqueues `fire_trigger` on `dbos_app.firing_queue(store)` with firing label `manual-<UTC>`, the same path a schedule takes. That gives it the same checks (`check_firing`), deduplication and replay safety.
+- New CLI `womblex add-to-collection FILE --store --dsn`. It enqueues `fire_trigger` on `dbos_app.firing_queue(ingest_root)` (the workflow's input store, so only a worker on that ingest root picks it up) with firing label `manual-<UTC>`, the same path a schedule takes. That gives it the same checks (`check_firing`), deduplication and replay safety.
 - `WorkflowStore` currently keeps only workflows that have triggers (`workflow_schedules.schedule_workflow` deletes the rest). Widen this: store the copy when the workflow has triggers, a collection or inbound hooks. That way the API and inbound events can find it by name.
+- Lifecycle of the stored copy:
+  - `schedule-workflow FILE` stores or replaces the copy and syncs its schedules. A workflow with no triggers is unscheduled, but its copy is deleted only if it also has no collection and no inbound hooks.
+  - `schedule-workflow --remove` only unschedules; it no longer deletes the copy.
+  - New CLI `womblex remove-workflow NAME` removes the schedules and the stored copy. Like `--remove`, it works by name, so a deleted or invalid file can still be removed. The collection's run and its shards are untouched.
+
+**A2a. Workflow owner.**
+- Add `owner` to the stored copy (`WorkflowStore`, the `womblex_workflows` table), set from the caller that stored it: the API caller's `client_id`, or `None` (admin) from the CLI. It is not part of the spec file or of `workflow_digest`.
+- `fire_workflow` enqueues with the workflow's owner, so a collection's run is owned like any API run, and `RunBoard.enqueue` refuses a collection whose run is already owned by another owner (`RunOwnedError`).
+- This reopens the "a workflow has no owner" call (CLAUDE.md, `cloud/workflow_store.py`). Record it in `docs/decisions-operations.md`.
 
 **A3. Workflow changes and rerunning a collection.**
-- A dispatch outside a firing (`dispatch_workflow`, where `bases=None` means every batch) applies the current steps to the whole collection. Unit receipts (`cloud/unit_receipt.py`) skip units whose version, stage config and inputs are unchanged. So adding `pii` reruns only `pii`, and a changed setting reruns only the stages it touches.
+- A dispatch outside a firing (`dispatch_workflow`, where `bases=None` means every batch) applies the current steps to the whole collection. Unit receipts (`cloud/unit_receipt.py`) skip sidecar units whose version, stage config and inputs are unchanged, on a stage's first attempt. So adding `pii` reruns only `pii`, and a changed setting reruns the stages whose config or inputs it changes.
+- Receipts never skip an in-place stage, `graph-refresh`, or an output with no receipt. Those rerun over the whole collection on every rerun. Record this as a limit in the requirement.
 - Expose this as `womblex rerun-collection FILE`, a thin wrapper over `dispatch-workflow` without `--firing`.
 - Re-extraction is out: batch ids are deterministic and attach rather than rerun. Record this as a limit in the requirement.
 
 **A4. API.**
 - New `api/routes_collections.py`:
+  - Owner-scoped like `/v1/runs`: a caller sees and acts on its own collections (A2a), another owner's is 404, admin sees all.
   - `GET /v1/collections`: from `WorkflowStore` plus the store's runs.
   - `GET /v1/collections/{name}`: documents, current-version counts, workflows that wrote to it (read from the run record's `workflows`).
   - `POST /v1/collections/{name}/add` and `POST /v1/collections/{name}/rerun` (submit scope).
@@ -82,39 +100,50 @@ The only identity change is that the run id stops being the workflow name.
   - `is_current`
 
   Versions are grouped by `source_relpath` and ordered by batch number, never by time.
+- Limits, recorded in the requirement beside "re-extraction is out":
+  - a moved or renamed file starts a new chain
+  - identical bytes at two paths form two chains
+- Unreadable rows (D1) chain like any other version; their batch-qualified hash keeps each occurrence distinct.
 - Per-batch manifests are never rewritten.
 - Additive columns, so contract 3.0 → 3.1, with a backfill entry in `store/output.py` `_BACKFILL`.
 
 **A6. Redelivery trace.**
 - `store/delivery_record.py` keeps the earlier records as `<destination>.<seq>.json`.
 - Each record carries `seq`, `replaces` and `replaced_by`, plus whether `content_digest` changed per document.
+- A redelivery writes a new `seq`; earlier records are never rewritten, except that `delivery_received` (B2) appends acknowledgements to the record it names.
 - Run record version 8 → 9.
 
 ## Phase B — Inbound webhooks (Requirement 35)
 
 **B1. Spec and storage.**
 - Add `inbound: [{name, secret_env, events}]` to the workflow spec, validated like `WebhookDestination`.
-- New `cloud/inbound_store.py` creates the `womblex_inbound_events` table (`event_id` PK, `workflow_id`, `hook`, `event`, `received_at`, `outcome_json`). It follows the `womblex_workflows` / `worker_registry` DDL pattern: insert first, and an `IntegrityError` means the event is a duplicate.
+- Each hook needs its own secret: validation refuses two hooks (in this workflow or another stored one) naming the same `secret_env`. The signature stays body-only, matching outbound `webhook.sign`, so a sender uses a standard HMAC.
+- Development switch: `WOMBLEX_INSECURE_INBOUND=1` turns the inbound checks off for a proof of concept:
+  - validation warns, rather than refuses, a shared or unset `secret_env`
+  - the route skips signature verification and logs a warning on every event it accepts unsigned
+  - it is read only from the environment, never from the spec, so a stored workflow cannot turn it on
+- New `cloud/inbound_store.py` creates the `womblex_inbound_events` table (`event_id` PK, `workflow_id`, `hook`, `event`, `received_at`, `outcome_json`). It follows the `womblex_workflows` / `worker_registry` DDL pattern: insert first, and an `IntegrityError` means the event was seen before.
 
 **B2. Route.** New `api/routes_inbound.py` serves `POST /v1/hooks/{workflow}/{hook}`.
 - Authentication is HMAC only, not the bearer token:
   - read the raw body with `await request.body()`
   - verify with `webhook.sign` + `hmac.compare_digest` against `X-Womblex-Signature`
-  - `--insecure-no-auth` still checks the signature
-- Every check runs before any row is written:
+  - `--insecure-no-auth` still checks the signature; only `WOMBLEX_INSECURE_INBOUND` (B1) skips it
+- Checks, in order:
   1. signature
   2. workflow is stored
-  3. hook declares the event
-  4. `event_id` not seen before
-  5. `check_firing` / `require_served`
+  3. hook declares the event — a refusal at 1 to 3 writes nothing, so unauthenticated or malformed requests never fill the table
+  4. insert the `event_id` row. A conflict means the event was seen before: the route returns the stored `outcome_json`, whether that was an acceptance or a refusal, and does nothing else.
+  5. `check_firing` / `require_served`, before any queue row. The outcome, accepted or refused with its code, is written to `outcome_json`. A sender that wants to retry a refused event sends a new `event_id`.
+- The firing runs under the workflow's owner (A2a).
 - Actions:
   - `documents_added` and `run_requested`: enqueue `fire_trigger` with firing `event-<sha8(event_id)>`, so the DBOS id is idempotent too.
   - `rerun_requested`: the A3 dispatch.
-  - `delivery_received`: append to that destination's delivery record. The run's status is never touched.
-- Refusals return `{code, message}` using the `RefusalCode` values plus `bad_signature`, `unknown_hook`, `event_not_declared` and `duplicate`.
+  - `delivery_received`: the event names the destination and the `seq` (A6) it acknowledges, and is appended to that record. A `seq` with no record is refused (`unknown_delivery`). The run's status is never touched.
+- Refusals return `{code, message}` using the `RefusalCode` values plus `bad_signature`, `unknown_hook`, `event_not_declared` and `unknown_delivery`. A resend returns the first outcome, not a separate `duplicate` code.
 
 **B3. Listing and docs.**
-- `GET /v1/workflows/{id}/inbound-events`.
+- `GET /v1/workflows/{id}/inbound-events`, owner-scoped like A4.
 - `delivery_received` reopens Requirement 27's "write-back from consumers" exclusion. Record that in `docs/decisions-operations.md`.
 
 ## Phase C — Progress events and timestamps
@@ -124,7 +153,6 @@ The only identity change is that the run id stops being the workflow name.
 - `WebhookDestination` gets an optional `events:` filter, so a consumer can subscribe to coarse events only.
 - Reopen the "no per-batch events" rule in the `cloud/webhook.py` docstring and the decisions doc.
 - Emitters go in a new `cloud/run_events.py`, because `cloud/workflows.py` is at 540 lines. Each emit is a DBOS step with an idempotent id. `run_stage` emits per unit, and the coordinator emits `stage_started`.
-- Bug fix: `run_finished` is currently sent only when the workflow has destinations.
 
 **C2. Write time.**
 - `sidecar_footer` / `contract_footer` add a `womblex.written_at` footer key. It is never a column, so `content_digest` and the rows don't change.
@@ -132,7 +160,11 @@ The only identity change is that the run id stops being the workflow name.
   - `docs/decisions-operations.md` (two places)
   - `cloud/unit_receipt.py`
   - the `batch.process_batch` docstring
-- None of the existing byte-identity tests compare Parquet files that both get rewritten. Confirm with a full run.
+- The footer is part of the file's bytes, so every rewrite changes a file's ETag / checksum even when its rows don't. Each check that compares file bytes, and how it copes:
+  - `RemoteStore.fingerprints` and receipt output fingerprints (`cloud/unit_receipt.py`): a receipt compares the published output with the fingerprint it recorded when it wrote that output, so a file that was not rewritten still matches. A rerun writes a new receipt. No change.
+  - `published_checksums` (`cloud/finalize.py`) and the run record's checksums: they record what was published, so they change on every rewrite, and that is correct. The docs must stop calling them stable across reruns.
+  - Local-vs-fleet and rerun comparisons in the tests that assert byte identity (`tests/test_records.py`, `tests/test_enrich_stage.py`, `tests/test_enrichment_output.py`, `tests/test_source_provenance.py`, `tests/test_ground_truth.py`, `tests/test_workflow_plan.py`): compare rows plus the footer minus `womblex.written_at`. Add a shared test helper for that comparison rather than editing each assertion.
+  - Determinism stays `content_digest`, which never covers footers.
 
 ## Phase D — Withheld, omitted and failed documents
 
@@ -140,7 +172,7 @@ The only identity change is that the run id stops being the workflow name.
 
 **D1. Failed documents get manifest rows.**
 - `operations/persist.py` and `cli/pipeline.py` pass errored results through, so the existing `status: error` branch is finally reached.
-- A source that can't be read is recorded as failed. Its `source_hash` is SHA-256 over `unreadable:` + `source_relpath`, with hash basis `unreadable`, so join keys never collide and are never empty. This replaces the empty string `_source_hash` returns today.
+- A source that can't be read is recorded as failed. Its `source_hash` is SHA-256 over `unreadable:` + `source_relpath` + `:` + the batch number, with hash basis `unreadable`, so join keys are never empty and an unreadable file in two firings of one collection gets two distinct hashes (A5). This replaces the empty string `_source_hash` returns today.
 
 **D2. Omitted files.**
 - `select_supported` and `dispatch.supported_keys` return the files they dropped.
@@ -199,13 +231,18 @@ A docs-only merge per CLAUDE.md "Stocktake":
 - **A:** a `fleet`-fixture test (SQLite + Postgres):
   - two firings of one workflow into collection `c1` give one run `c1`
   - changing a synthetic file gives two linked versions, the later one `is_current`
+  - an unreadable file in two firings gives two distinct `source_hash`es in one chain
   - renaming the workflow file keeps the collection
-  - `rerun-collection` after adding `pii` runs only `pii`
-  - the API lists `c1`
+  - `rerun-collection` after adding `pii` runs only `pii` among the sidecar stages, and reruns an in-place stage in the workflow
+  - the API lists `c1` for its owner and admin, and 404s for another owner
+  - `remove-workflow c1` removes the copy and schedules and leaves the run
 - **B:** `TestClient` tests:
   - a signed `documents_added` adds one file
   - a resend adds nothing
   - a bad signature, a wrong hook and no live worker are each refused with their code and no queue row
-  - `delivery_received` appears on the delivery record with the run status unchanged
+  - a bad signature or wrong hook writes no event row; a no-live-worker refusal writes one, and its resend returns the same refusal
+  - two hooks sharing a `secret_env` are refused at validation, and only warned with `WOMBLEX_INSECURE_INBOUND=1`
+  - an unsigned event is accepted only with `WOMBLEX_INSECURE_INBOUND=1`
+  - `delivery_received` appears on the named `seq` record with the run status unchanged; an unknown `seq` is refused
 - **C:** the `test_webhook.py` receiver sees `stage_started` and `batch_progress` with counts summing to the total. The `events` filter drops them.
 - **D:** a fixture with an unreadable file, an unsupported file and a redacted PDF gives an error manifest row, an `omitted.parquet` row and region rows with page and bbox.
