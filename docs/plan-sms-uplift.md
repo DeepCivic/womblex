@@ -53,25 +53,10 @@ existing machinery as-is:
 - `next_batch_num` numbers new batches after the run's last
 - finalize consolidates the run manifest
 
-The only identity change is that the run id stops being the workflow name.
-
-**A1. `collection` field on the workflow spec.**
-- Add an optional safe-name field to `StoredWorkflowSpec` (`cloud/workflow_store.py`).
-- Drop it from `workflow_digest`, the same way an empty `destinations` list is dropped today. `config_digest` (`store/run_stamp.py`) hashes the validated `WomblexConfig`, not the spec, and the collection never enters the config, so it needs no exclusion there.
-- The run id becomes `spec.collection or stored.id`, and it travels in the schedule context:
-  - `sync_schedules` (`cloud/workflow_schedules.py`) writes it into each schedule's context as `run_id`, beside `workflow_id`, `store` and `trigger`.
-  - `run_scheduled` (`cloud/workflows.py`) takes `context["run_id"]` in place of `context["workflow_id"]`. A context with no `run_id` (a schedule synced before this change) falls back to `workflow_id`, which was its run id.
-  - Why the context rather than reading the stored copy at fire time: `run_scheduled` builds the idempotent trigger id `<run>:trigger:<UTC time>` from the run id before anything is enqueued. A store read there would have to be a DBOS step, and a recovery after the copy changed could compute another run id and fire twice. The context is fixed per schedule, and `schedule_workflow` saves the copy and syncs its schedules in one action ("A workflow is a file; scheduling stores a copy"), so the context never disagrees with `spec.collection`.
-- `_extract` declares `IngestProvenance` with `spec.collection or stored.id`, not `run_config.dataset.name`. `dataset.name` stays the preset name and keeps feeding `womblex.preset`.
-  - This changes the provenance collection footer for every existing workflow, including those with no `collection`: it was the preset name and becomes the workflow id. Older shards keep the footer they were written with.
-- `workflow_runner.config_from_overlay` is unchanged.
-- Record in `docs/decisions-operations.md`, beside "A workflow is a file", the three calls A1 reopens:
-  - the digest exception
-  - run identity: the run id is the collection, not the workflow name
-  - the provenance collection is the collection (else the workflow id), not `dataset.name`
+The only identity change is that the run id stops being the workflow name. That change is built (Requirement 34): a workflow's `collection` names its run, and the schedule context carries the run id.
 
 **A2. Add to a collection on demand.**
-- New CLI `womblex add-to-collection FILE --store --dsn`. It enqueues `fire_trigger` on `dbos_app.firing_queue(ingest_root)` (the workflow's input store, so only a worker on that ingest root picks it up) with firing label `manual-<UTC>`, the same path a schedule takes. That gives it the same checks (`check_firing`), deduplication and replay safety. It takes the run id from the stored copy (`spec.collection or stored.id`) and passes it in the context the same way a schedule does (A1).
+- New CLI `womblex add-to-collection FILE --store --dsn`. It enqueues `fire_trigger` on `dbos_app.firing_queue(ingest_root)` (the workflow's input store, so only a worker on that ingest root picks it up) with firing label `manual-<UTC>`, the same path a schedule takes. That gives it the same checks (`check_firing`), deduplication and replay safety. It takes the run id from the stored copy (`spec.collection or stored.id`) and passes it in the context the same way a schedule does (Requirement 34).
 - `WorkflowStore` currently keeps only workflows that have triggers (`workflow_schedules.schedule_workflow` deletes the rest). Widen this: store the copy when the workflow has triggers, a collection or inbound hooks. That way the API and inbound events can find it by name.
 - Lifecycle of the stored copy:
   - `schedule-workflow FILE` stores or replaces the copy and syncs its schedules. A workflow with no triggers is unscheduled, but its copy is deleted only if it also has no collection and no inbound hooks.
@@ -244,7 +229,7 @@ A docs-only merge per CLAUDE.md "Stocktake":
   - two firings of one workflow into collection `c1` give one run `c1`
   - changing a synthetic file gives two linked versions, the later one `is_current`
   - an unreadable file in two firings gives two distinct `source_hash`es in one chain
-  - a schedule synced before A1 (no `run_id` in its context) still fires into the run named for the workflow
+  - a schedule synced before the `collection` field (no `run_id` in its context) still fires into the run named for the workflow
   - changing the workflow's `name` while keeping `collection: c1` fires into run `c1`. The old name's stored copy and schedules stay until `remove-workflow` removes them
   - `rerun-collection` after adding `pii` runs only `pii` among the sidecar stages, and reruns an in-place stage in the workflow
   - the API lists `c1` for its owner and admin, and 404s for another owner

@@ -284,7 +284,7 @@ def _check_firing(args: argparse.Namespace, stored, dsn: str | None) -> bool:  #
         return False
     try:
         check_firing(
-            stored, run_id=stored.id,
+            stored, run_id=stored.run_id,
             resolve_preset=_preset_resolver(args),  # type: ignore[arg-type]
             store=RemoteStore.from_uri(store_uri), dsn=dsn,
         )

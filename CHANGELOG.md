@@ -8,6 +8,9 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 ## [Unreleased]
 
+### Added
+- **A workflow may name a `collection`.** Its scheduled firings append to the run named for the collection instead of the workflow (Requirement 34; `StoredWorkflow.run_id`). The schedule context carries `run_id`, and one without it still fires into the run named for the workflow. The collection is outside `workflow_digest`, and a firing's extraction files record it (else the workflow's name) as the provenance collection, where they recorded the preset name.
+
 ### Removed
 - **The console leaves Womblex for [womblex-console](https://github.com/DeepCivic/womblex-console).** `womblex ui`, `src/womblex/ui/`, the `ui/` SPA, `Dockerfile.ui`, the `ui` compose service and the console's CI and publish jobs are gone; the repository was seeded from this history. Requirements 15 to 21 and `DESIGN.md` went with it. The console depends on a pinned Womblex and Womblex no longer imports or tests it. The `[ui]` extra is removed in a dependency change of its own; its fastapi and uvicorn are in `[api]`.
 

@@ -166,6 +166,13 @@ def _logged[T](
 # --- extraction --------------------------------------------------------------
 
 
+def _provenance_collection(run_config: WomblexConfig, workflow: dict[str, Any] | None) -> str:
+    """The collection a workflow's documents belong to (its `collection`, else its id); the preset name otherwise."""
+    if workflow and workflow.get("id"):
+        return str((workflow.get("spec") or {}).get("collection") or workflow["id"])
+    return run_config.dataset.name
+
+
 def _extract(
     run_id: str, batch_num: int, input_keys: list[str], shard_prefix: str, ingest_root: str,
     config: dict[str, Any] | None = None, workflow: dict[str, Any] | None = None,
@@ -186,7 +193,7 @@ def _extract(
         declared = ingest_root or ctx.ingest_root
         provenance = (
             IngestProvenance.declare(
-                declared, run_config.dataset.name,
+                declared, _provenance_collection(run_config, workflow),
                 relpaths=dict(zip(files, input_keys, strict=True)),
             )
             if declared else None
@@ -366,8 +373,10 @@ def fire_trigger(run_id: str, context: dict[str, Any], firing: str) -> dict[str,
 def run_scheduled(scheduled_time: datetime, context: dict[str, Any]) -> dict[str, str]:
     """Start the firing as `<run>:trigger:<firing>`, so a firing that fails is on the board under its
     run, not only as DBOS's unattributed `sched-…` row. A workflow's firings append to one run,
-    named for the workflow. A workflow has no owner, so the run is admin-only, like a CLI run."""
-    run_id, firing = context["workflow_id"], firing_label(scheduled_time)
+    named for the workflow's collection, else for the workflow (a schedule synced before the
+    context carried `run_id` falls back to the workflow, which was its run id). A workflow has
+    no owner, so the run is admin-only, like a CLI run."""
+    run_id, firing = context.get("run_id") or context["workflow_id"], firing_label(scheduled_time)
     attrs: dict[str, Any] = {"run_id": run_id, "kind": dbos_app.KIND_TRIGGER,
                              "workflow_id": context["workflow_id"], "firing": firing}
     with SetWorkflowID(dbos_app.trigger_id(run_id, firing)), SetWorkflowAttributes(attrs):

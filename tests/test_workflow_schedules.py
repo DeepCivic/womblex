@@ -180,6 +180,31 @@ def test_a_firing_extracts_the_prefix_and_runs_the_workflow_unowned_and_stamped(
         assert b'"name": "nightly"' in meta[b"womblex.workflow"]
 
 
+def test_a_collection_names_the_run_whatever_the_workflow_is_called(fleet, saved_preset) -> None:  # noqa: F811
+    from womblex.store.source_provenance import COLLECTION_ID_KEY
+
+    store_dir, _, _ = fleet
+    _inbox(fleet)
+    ensure_workflow_schema(None)
+    spec = validate_workflow_spec({
+        "preset": _PRESET.name, "steps": [{"stage": "normalise"}], "triggers": [_TRIGGER],
+        "input_binding": {"store": fleet[1], "ingest_prefix": "inbox"}, "collection": "c1",
+    })
+    with WorkflowStore(None) as store:
+        stored = store.save("renamed", spec)
+    client = dbos_app.open_client(None)
+    sync_schedules(client, stored)
+    (sched,) = list_schedules(client, "renamed")
+    assert sched["context"]["run_id"] == "c1" and sched["context"]["workflow_id"] == "renamed"
+    _fire_all_at_once(client, stored)
+    work(fleet, idle_timeout=4)
+    with RunBoard(None) as board:
+        (run,) = board.runs()
+    assert run.run_id == "c1"
+    meta = pq.read_metadata(str(Path(str(store_dir)) / "runs/c1/documents/batch-0001.elements.parquet")).metadata
+    assert meta[COLLECTION_ID_KEY.encode()] == b"c1"  # the collection, not the preset name
+
+
 def test_a_firing_that_cannot_complete_queues_nothing(fleet, saved_preset) -> None:  # noqa: F811
     """The firing body, outside DBOS: `quality` is never dispatched, so it raises before any row."""
     from tests.test_cloud import _minimal_config

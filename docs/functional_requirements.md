@@ -565,6 +565,30 @@ These requirements described the admin console (`womblex ui`). The console now l
 
 **Out of scope:** AI chunking (Requirement 10) and the Isaacus embedder (`embed`).
 
+## 34. Collections — A Long-Lived Run Named for What It Holds
+
+**Paid:** A firing that adds a collection's documents launches the workflow's paid steps, billed for the documents it adds (Requirement 27).
+
+**As** an operator,
+**I want** a workflow's documents kept in a run named for a collection, not for the workflow,
+**so that** a collection keeps its identity when the workflow that feeds it is renamed or replaced.
+
+**Given** a workflow file with a `collection`
+**When** the operator schedules it and it fires
+**Then** every firing appends to the one run named for the collection.
+
+**Acceptance criteria:**
+
+- A workflow may name a `collection`: one safe token, as a workflow name is. Without one, the run is named for the workflow, as before.
+- A scheduled firing appends to the run named for the collection. Renaming the workflow while keeping the collection fires into the same run.
+- A schedule synced before the `collection` field existed still fires into the run named for its workflow.
+- The workflow's digest does not cover the collection, so naming or changing it leaves the digest of an otherwise unchanged workflow as it was.
+- The source-provenance collection recorded in a firing's extraction files is the collection, else the workflow's name; extraction from a run no workflow started still records the preset name. Files written earlier keep what they were written with.
+
+**Verification:** `tests/test_workflow_store.py` (the digest and an unsafe collection) and `tests/test_workflow_schedules.py` (a renamed workflow firing into its collection, with the provenance footer).
+
+**Out of scope:** adding to a collection on demand, owners, the API and document versions, each a later piece of the same requirement.
+
 ## Outstanding
 
 Requirements not yet fully met. The detail lives in the **TO-DO** block under each requirement; this list is the index. When a gap is closed (or the criterion is deliberately narrowed), its TO-DO block and its entry here are removed in the same PR.

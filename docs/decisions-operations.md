@@ -88,6 +88,13 @@ engines".
 - *Rejected:* **extending the preset** with steps. One schema and no new storage, but it mixes how a stage behaves with what runs, and leaves nothing for a standing trigger to act on.
 - *Rejected:* **a workflow kept only in the database.** A schedule needs a copy its firings can read, but the operator edits and reviews a file; keeping both, with the file the master, gives each its job.
 
+### A collection is the run id; three calls it reopens (Requirement 34, A1)
+2026-10. A workflow's `collection` names its run (`StoredWorkflow.run_id` is `spec.collection or id`), so a collection keeps its documents when the workflow is renamed. A collection is a long-lived run, so firing, batch numbering and consolidation are as they were.
+
+- **The digest ignores it.** `workflow_digest` drops `collection` from the payload, always, not only when unset the way an empty `destinations` list is. The digest names the recipe the files were written under; where the documents are kept is not part of it, and a coordinator's id is scoped by the digest, so a collection edit alone must not make a new coordinator. The spec still carries the collection into `womblex.workflow` on the files a step writes.
+- **Run identity is the collection.** The run id was the workflow name. `sync_schedules` writes `run_id` into each schedule's context and `run_scheduled` reads it, falling back to `workflow_id` for a schedule synced before the field. The id comes from the context rather than the stored copy because `run_scheduled` builds the idempotent `<run>:trigger:<UTC time>` id before anything is enqueued: a store read there would have to be a DBOS step, and a recovery after the copy changed could compute another run id and fire twice. `schedule_workflow` stores the copy and syncs the schedules in one action, so the context never disagrees with `spec.collection`.
+- **The provenance collection is the collection.** A firing's extraction batches declare the source-provenance collection as `spec.collection or workflow id`, not the preset name (`dataset.name`, which still feeds `womblex.preset`). That changes the footer for every workflow, collection or not; earlier shards keep theirs. Extraction no workflow started still records the preset name.
+
 ### A workflow runs locally: validate on save and load, refuse before work, record after
 Phase 2 merge 2 (`cloud/workflow_runner.py`). Three calls the merge-1 review left open.
 

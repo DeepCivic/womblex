@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from womblex.cloud.workflow_store import (
+    StoredWorkflow,
     WorkflowStore,
     ensure_workflow_schema,
     is_safe_workflow_id,
@@ -99,6 +100,20 @@ def test_digest_stable_then_changes_with_spec() -> None:
     assert workflow_digest(spec_a) == workflow_digest(spec_b)
     assert workflow_digest(spec_a).startswith("sha256:")
     assert workflow_digest(spec_a) != workflow_digest(spec_c)
+
+
+def test_collection_names_the_run_and_stays_out_of_the_digest() -> None:
+    plain = validate_workflow_spec(_MINIMAL)
+    kept = validate_workflow_spec({**_MINIMAL, "collection": "c1"})
+    assert workflow_digest(kept) == workflow_digest(plain)  # where documents are kept is not what runs on them
+    assert StoredWorkflow("wf", kept, "").run_id == "c1"
+    assert StoredWorkflow("wf", plain, "").run_id == "wf"
+
+
+@pytest.mark.parametrize("collection", ["", "a/b", "..", "has space"])
+def test_an_unsafe_collection_is_refused(collection: str) -> None:
+    with pytest.raises(ValueError, match="collection"):
+        validate_workflow_spec({**_MINIMAL, "collection": collection})
 
 
 # --- storage ------------------------------------------------------------------

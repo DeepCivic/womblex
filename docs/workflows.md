@@ -22,11 +22,12 @@ its steps write.
 
 | Field | Meaning |
 |---|---|
-| `name` | The workflow's id: its schedules, its stored copy and its runs are named for it. |
+| `name` | The workflow's id: its schedules, its stored copy and its runs are named for it (a `collection` names the run instead). |
 | `preset` | The base config, a built-in preset or one saved under `--presets-dir`. `dataset` and `paths` are never taken from the workflow. |
 | `config` | Overlay on the preset's config: mappings merge, anything else replaces, `null` drops a key to its default. |
 | `input_binding` | `store` (the input store a firing lists and extracts from; a scheduled workflow must name it, spelt exactly as the workers' `--ingest`, or `--store` where they have none, since firings are routed by that string), `ingest_prefix` (the documents under it a firing extracts) and `batch_size`. Extraction is not a step. |
 | `steps` | Downstream stages, each at most once, run in the order listed (`dispatch-workflow` needs pipeline order). |
+| `collection` | Optional. The run the workflow's firings append to, in place of the workflow's name: one safe token. Not part of the digest. |
 | `triggers` | Cron expressions scheduled by `schedule-workflow`. |
 | `destinations` | Where the run is delivered after its last step. `object_store`: `name`, `uri` (a local path or a URI a store can open, checked when the file is read), `include_sources` (default `true`) and optional `credentials` (`key_env` and `secret_env`, the environment variables holding an S3 key and secret, never the values). `postgres`: `name`, `dsn_env` (the environment variable holding the connection string), `table` (default `womblex_chunks`) and `text_layer` (`masked`, the default, or `raw`). `webhook`: `name`, `url` and `secret_env` (the environment variable holding the signing key). |
 

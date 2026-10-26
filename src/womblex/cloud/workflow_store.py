@@ -126,6 +126,7 @@ class StoredWorkflowSpec(StrictModel):
     steps: tuple[WorkflowStep, ...]
     triggers: tuple[WorkflowTrigger, ...] = ()
     destinations: tuple[WorkflowDestination, ...] = ()
+    collection: str | None = None
 
 
 def _check_steps(spec: StoredWorkflowSpec) -> None:
@@ -188,6 +189,13 @@ def _check_destinations(spec: StoredWorkflowSpec) -> None:
                                  "(or `text_layer: raw` to send the chunk text)")
 
 
+def _check_collection(spec: StoredWorkflowSpec) -> None:
+    from womblex.store.retention import is_safe_run_id
+
+    if spec.collection is not None and not (is_safe_workflow_id(spec.collection) and is_safe_run_id(spec.collection)):
+        raise ValueError(f"collection must be one safe token, got {spec.collection!r}")
+
+
 def combine_config(preset_config: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
     """A preset's config with a workflow's own `config` laid over it, merged key by key.
 
@@ -231,6 +239,7 @@ def check_spec(spec: StoredWorkflowSpec) -> None:
     _check_steps(spec)
     _check_triggers(spec)
     _check_destinations(spec)
+    _check_collection(spec)
     _check_config_overlay(spec)
 
 
@@ -250,6 +259,7 @@ def workflow_digest(spec: StoredWorkflowSpec) -> str:
     payload = spec.model_dump(mode="json")
     if not payload["destinations"]:  # a workflow that names none keeps the digest it had before they existed
         del payload["destinations"]
+    del payload["collection"]  # where documents are kept, not what runs on them: the digest is the recipe's
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
 
@@ -263,6 +273,11 @@ class StoredWorkflow:
     digest: str
     created_at: str = ""
     updated_at: str = ""
+
+    @property
+    def run_id(self) -> str:
+        """The run a firing appends to: the collection, else the workflow's own id."""
+        return self.spec.collection or self.id
 
 
 _TABLE = "womblex_workflows"
