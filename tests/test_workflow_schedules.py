@@ -599,6 +599,7 @@ def test_a_firing_runs_under_the_workflows_owner_and_refuses_a_run_another_owner
     from tests.test_cloud import _minimal_config
     from womblex.cloud import workflows
     from womblex.cloud.jobs import RunOwnedError
+    from womblex.cloud.workflow_runner import RefusalCode, WorkflowRefusedError
     from womblex.store.remote import RemoteStore
 
     store_dir, ingest, tmp = fleet
@@ -625,10 +626,38 @@ def test_a_firing_runs_under_the_workflows_owner_and_refuses_a_run_another_owner
         assert [r.run_id for r in board.runs(owner="alice")] == ["c1"]
         assert board.runs(owner="bob") == []
     (Path(ingest) / "inbox" / "more.csv").write_text("name,role\nBob,Clerk\n")  # new, so the firing would queue it
-    with pytest.raises(RunOwnedError):
+    with pytest.raises(WorkflowRefusedError) as refused:  # check_firing refuses before any row
         fire("rival", "2")
+    assert refused.value.code is RefusalCode.RUN_OWNED
     with RunBoard(None) as board:
         assert board.firing_batches("c1", "2") == []  # nothing was queued
+        with pytest.raises(RunOwnedError):  # and the board refuses the write itself
+            board.enqueue("c1", [], owner="bob")
+
+
+def test_a_refused_firings_own_row_does_not_give_its_owner_the_run(fleet, saved_preset) -> None:  # noqa: F811
+    from datetime import UTC, datetime, timedelta
+
+    from womblex.cloud.workflow_schedules import add_to_collection
+
+    _inbox(fleet)
+    ensure_workflow_schema(None)
+    spec = validate_workflow_spec({
+        "preset": _PRESET.name, "steps": [{"stage": "normalise"}], "collection": "c1",
+        "input_binding": {"store": fleet[1], "ingest_prefix": "inbox"},
+    })
+    with WorkflowStore(None) as store:
+        alice, bob = store.save("feed", spec, owner="alice"), store.save("rival", spec, owner="bob")
+    client = dbos_app.open_client(None)
+    add_to_collection(client, alice)
+    work(fleet, idle_timeout=4)
+    add_to_collection(client, bob, now=datetime.now(UTC) + timedelta(seconds=5))  # a schedule's firing: no CLI check
+    work(fleet, idle_timeout=4)
+    with RunBoard(None) as board:
+        rows = board._list("c1")
+        assert any((s.attributes or {}).get("owner") == "bob" for s in rows)  # the refused firing's own row
+        assert board.runs(owner="bob") == []  # still not bob's run
+        assert [r.run_id for r in board.runs(owner="alice")] == ["c1"]
 
 
 def test_a_scheduled_firing_of_an_owned_workflow_opens_a_run_its_owner_sees(fleet, saved_preset) -> None:  # noqa: F811
