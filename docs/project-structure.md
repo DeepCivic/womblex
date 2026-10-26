@@ -193,6 +193,7 @@ womblex/
 │   │   ├── workflow_order.py   # Up-front step-order check — inputs on disk or produced earlier, stable refusal codes
 │   │   ├── workflow_file.py    # A workflow file — the master copy every workflow command reads (YAML, unknown keys refused)
 │   │   ├── collections.py      # Collections for the API — stored workflows that feed one, add and rerun through them
+│   │   ├── inbound.py          # An inbound webhook event — authenticate, record once, act
 │   │   ├── inbound_store.py    # womblex_inbound_events — insert-first dedupe of inbound webhook events
 │   │   ├── workflow_schedules.py # Standing triggers — a workflow's cron triggers as DBOS schedules (sync/list/remove)
 │   │   ├── workflow_dispatch.py # `dispatch-workflow` — a workflow file to the fleet; refuse before any row
@@ -203,6 +204,7 @@ womblex/
 │   │   ├── app.py              # create_api_app() — `/v1` health/ready, run submit, list/detail, manifest, files, document text, metrics; owner-scoped
 │   │   ├── routes_config.py    # /v1/stages and /v1/config/schema, validate, yaml
 │   │   ├── routes_queue.py     # /v1/queue — the queue in one read, owner-scoped
+│   │   ├── routes_inbound.py   # POST /v1/hooks/{workflow}/{hook} — inbound webhooks, HMAC-authenticated
 │   │   ├── routes_collections.py # /v1/collections — list, detail, add and rerun through a stored workflow, owner-scoped
 │   │   ├── routes_resources.py # /v1/resources and its live checks (admin)
 │   │   ├── routes_runs.py      # /v1/store/runs (admin), per-run stage presence, shard audit, document detail, logs, progress

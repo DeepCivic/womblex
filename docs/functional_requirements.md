@@ -624,9 +624,15 @@ These requirements described the admin console (`womblex ui`). The console now l
 - A workflow with inbound hooks keeps its stored copy without triggers or a collection, and the table that records the events it receives (`womblex_inbound_events`: the event id, workflow, hook, event, time and outcome) is created by `schedule-workflow`.
 - Hooks are part of the workflow's digest; a workflow with none keeps the digest it had.
 
-**Verification:** `tests/test_workflow_store.py` (validation, the digest, shared keys), `tests/test_inbound_store.py` and `tests/test_workflow_schedules.py` (the kept copy, the key check, the cross-workflow refusal).
+**Verification:** `tests/test_workflow_store.py` (validation, the digest, shared keys), `tests/test_inbound_store.py`, `tests/test_workflow_schedules.py` (the kept copy, the key check, the cross-workflow refusal) and `tests/test_api_inbound.py` (signed, repeated, refused and acknowledged events).
 
-**Out of scope:** receiving the events (a later piece of this requirement), and the console.
+- `POST /v1/hooks/{workflow}/{hook}` authenticates by the hook's key only: an HMAC-SHA256 over the raw body in `X-Womblex-Signature`, the recipe an outbound webhook uses. A service token is not asked for, and `--insecure-no-auth` does not skip it; only `WOMBLEX_INSECURE_INBOUND=1` does, logging a warning for every event it accepts unsigned.
+- An event is a JSON body with an `event` and an `event_id`. A workflow or hook that is not stored (404 `unknown_hook`), a signature that does not match (401 `bad_signature`), a body that is not an event (400 `bad_event`) and an event the hook does not declare (403 `event_not_declared`) are refused and write nothing, so an unauthenticated or malformed request never fills the event table.
+- An event id is recorded once per hook. A resend of a seen id returns the first outcome, acceptance or refusal, and does nothing else; a sender who wants a refused event retried sends a new id.
+- `documents_added` and `run_requested` fire the workflow into its collection under the workflow's owner, once per event id; `rerun_requested` dispatches its steps over the collection (`rerun-collection`). Both make the checks a scheduled firing makes before any queue row; a refusal (409) carries the workflow refusal's code and is stored as the event's outcome.
+- `delivery_received` names a `destination` and the `seq` of the delivery it acknowledges, and is appended to that delivery record. A `seq` with no record is refused (409 `unknown_delivery`). The run's status is never touched.
+
+**Out of scope:** listing the events, and the console.
 
 ## Outstanding
 

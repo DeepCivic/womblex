@@ -126,14 +126,16 @@ def schedule_workflow(
     return names
 
 
-def add_to_collection(client: DBOSClient, stored: StoredWorkflow, *, now: datetime | None = None) -> str:
+def add_to_collection(
+    client: DBOSClient, stored: StoredWorkflow, *, now: datetime | None = None, firing: str | None = None,
+) -> str:
     """Enqueue one firing of *stored* now, on its input store's firing queue; return its board id.
 
     The path a schedule takes (`workflows.fire_trigger`, which makes the same checks), labelled
-    `manual-<UTC time>` so a repeat within the second attaches rather than firing twice. The
+    `manual-<UTC time>` (or *firing*, for an event that names its own) so a repeat attaches rather than firing twice. The
     caller has checked the firing (`workflow_dispatch.check_firing`) before this writes a row.
     """
-    firing = f"manual-{(now or datetime.now(UTC)):%Y%m%dT%H%M%SZ}"
+    firing = firing or f"manual-{(now or datetime.now(UTC)):%Y%m%dT%H%M%SZ}"
     run_id, context = stored.run_id, firing_context(stored)
     workflow_id = dbos_app.trigger_id(run_id, firing)
     client.enqueue(

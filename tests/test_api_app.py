@@ -424,6 +424,7 @@ def test_openapi_surface_is_pinned(client):
             "GET /v1/collections/{name}": "200 CollectionDetail",
             "POST /v1/collections/{name}/add": "202 CollectionAdded",
             "POST /v1/collections/{name}/rerun": "202 CollectionRerun",
+            "POST /v1/hooks/{workflow}/{hook}": "202 ",
         },
         "models": {
             "DocumentText": ["layer", "rows", "run_id", "sensitivity", "source_hash"],

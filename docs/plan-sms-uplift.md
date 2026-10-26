@@ -69,23 +69,7 @@ The only identity change is that the run id stops being the workflow name. That 
 
 **B1. Spec and storage.** Built (Requirement 35). `WOMBLEX_INSECURE_INBOUND` is read by `workflow_store.insecure_inbound()`, and the route (B2) reads it from there.
 
-**B2. Route.** New `api/routes_inbound.py` serves `POST /v1/hooks/{workflow}/{hook}`.
-- Authentication is HMAC only, not the bearer token:
-  - read the raw body with `await request.body()`
-  - verify with `webhook.sign` + `hmac.compare_digest` against `X-Womblex-Signature`
-  - `--insecure-no-auth` still checks the signature; only `WOMBLEX_INSECURE_INBOUND` (B1) skips it
-- Checks, in order:
-  1. signature
-  2. workflow is stored
-  3. hook declares the event — a refusal at 1 to 3 writes nothing, so unauthenticated or malformed requests never fill the table
-  4. insert the `event_id` row. A conflict means the event was seen before: the route returns the stored `outcome_json`, whether that was an acceptance or a refusal, and does nothing else.
-  5. `check_firing` / `require_served`, before any queue row. The outcome, accepted or refused with its code, is written to `outcome_json`. A sender that wants to retry a refused event sends a new `event_id`.
-- The firing runs under the workflow's owner (A2a).
-- Actions:
-  - `documents_added` and `run_requested`: enqueue `fire_trigger` with firing `event-<sha8(event_id)>`, so the DBOS id is idempotent too.
-  - `rerun_requested`: the `rerun-collection` dispatch (Requirement 34).
-  - `delivery_received`: the event names the destination and the `seq` (A6) it acknowledges, and is appended to that record. A `seq` with no record is refused (`unknown_delivery`). The run's status is never touched.
-- Refusals return `{code, message}` using the `RefusalCode` values plus `bad_signature`, `unknown_hook`, `event_not_declared` and `unknown_delivery`. A resend returns the first outcome, not a separate `duplicate` code.
+**B2. Route.** Built (Requirement 35). The listing (B3) reads `InboundEvents.list`, whose ids are `<workflow>:<hook>:<event_id>`.
 
 **B3. Listing and docs.**
 - `GET /v1/workflows/{id}/inbound-events`, owner-scoped like A4.

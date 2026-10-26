@@ -98,6 +98,7 @@ that submitted them.
 | GET | `/v1/collections/{name}` | read | One collection: its workflows, its document count and the workflows its run's files record; 404 for another owner's |
 | POST | `/v1/collections/{name}/add` | submit | Fire the stored workflow now (`womblex add-to-collection`); 202 with the firing's board id. Body `{workflow}` names it when several feed the collection (409 otherwise); 409 `{code, message}` for a firing that would be refused, before any row |
 | POST | `/v1/collections/{name}/rerun` | submit | Dispatch the stored workflow's steps over the collection (`womblex rerun-collection`); 202 with the stages and the units newly dispatched; refused as `add` is |
+| POST | `/v1/hooks/{workflow}/{hook}` | the hook's HMAC | An inbound event (Requirement 35): a signed JSON body with `event` and `event_id`; 202 `{status: accepted, …}`, or `{status: refused, code, message}` with 401 `bad_signature`, 404 `unknown_hook`, 400 `bad_event`, 403 `event_not_declared`, or 409 for a workflow refusal, `unknown_delivery` or `in_progress`. A resend returns the first outcome |
 | POST | `/v1/config/yaml` | read | The posted config as YAML `womblex run --config` reads; 422 with the errors when invalid |
 
 `POST /v1/runs`, `POST /v1/uploads` and `POST /v1/presets` answer 201; the collection actions answer 202. Pydantic models generate the OpenAPI spec; a test

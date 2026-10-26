@@ -25,6 +25,8 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 - **A workflow may declare `inbound` hooks.** `name`, `secret_env` and `events`, validated like a webhook destination; each hook needs its own key across stored workflows (`WOMBLEX_INSECURE_INBOUND=1` downgrades the check to a warning), `schedule-workflow` checks the key is set and creates `womblex_inbound_events` (`cloud/inbound_store.py`), and a workflow with hooks keeps its stored copy. Nothing receives events yet.
 
+- **Inbound webhooks.** `POST /v1/hooks/{workflow}/{hook}` takes a signed event for a stored workflow's hook: `documents_added` / `run_requested` fire it into its collection, `rerun_requested` dispatches its steps over the collection, `delivery_received` is appended to the delivery record it names. Authenticated by the hook's HMAC (`WOMBLEX_INSECURE_INBOUND=1` skips it), recorded once per event id, and refused before any row for what a firing would refuse.
+
 ### Removed
 - **The console leaves Womblex for [womblex-console](https://github.com/DeepCivic/womblex-console).** `womblex ui`, `src/womblex/ui/`, the `ui/` SPA, `Dockerfile.ui`, the `ui` compose service and the console's CI and publish jobs are gone; the repository was seeded from this history. Requirements 15 to 21 and `DESIGN.md` went with it. The console depends on a pinned Womblex and Womblex no longer imports or tests it. The `[ui]` extra is removed in a dependency change of its own; its fastapi and uvicorn are in `[api]`.
 

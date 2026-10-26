@@ -94,6 +94,7 @@ def collection_documents(store_uri: str, name: str) -> tuple[int, int | None, li
 
 def add_documents(
     settings: DeploymentSettings, stored: StoredWorkflow, resolve_preset: Callable[[str], Preset | None],
+    *, firing: str | None = None,
 ) -> str:
     """Check the firing, then enqueue it now; return the board id of the firing.
 
@@ -104,7 +105,7 @@ def add_documents(
     store_uri = settings.store_uri or ""
     check_firing(stored, run_id=stored.run_id, resolve_preset=resolve_preset,
                  store=RemoteStore.from_uri(store_uri), dsn=settings.db_dsn)
-    return add_to_collection(dbos_app.open_client(settings.db_dsn), stored)
+    return add_to_collection(dbos_app.open_client(settings.db_dsn), stored, firing=firing)
 
 
 def rerun_documents(

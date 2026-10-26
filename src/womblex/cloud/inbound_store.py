@@ -107,6 +107,14 @@ class InboundEvents:
             conn.execute(sa.update(self._table).where(self._table.c.event_id == event_id)
                          .values(outcome_json=json.dumps(outcome, sort_keys=True)))
 
+    def forget(self, event_id: str) -> None:
+        """Drop *event_id* before any outcome was stored, so a failed handling can be resent under its id."""
+        import sqlalchemy as sa
+
+        with self._engine.begin() as conn:
+            conn.execute(sa.delete(self._table).where(sa.and_(
+                self._table.c.event_id == event_id, self._table.c.outcome_json.is_(None))))
+
     def get(self, event_id: str) -> InboundEvent | None:
         import sqlalchemy as sa
 

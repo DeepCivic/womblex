@@ -34,3 +34,12 @@ def test_events_list_newest_first_per_workflow(events) -> None:
     assert [e.event_id for e in events.list("wf")] == ["e2", "e1", "e0"]
     assert [e.event_id for e in events.list("wf", limit=1)] == ["e2"]
     assert events.get("missing") is None
+
+
+def test_a_failed_handling_can_be_forgotten_but_a_settled_event_cannot(events) -> None:
+    events.begin("e1", "wf", "crm", "run_requested")
+    events.forget("e1")
+    assert events.get("e1") is None and events.begin("e1", "wf", "crm", "run_requested") is None
+    events.settle("e1", {"http_status": 202, "body": {}})
+    events.forget("e1")
+    assert events.get("e1") is not None
