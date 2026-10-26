@@ -205,6 +205,29 @@ def test_a_collection_names_the_run_whatever_the_workflow_is_called(fleet, saved
     assert meta[COLLECTION_ID_KEY.encode()] == b"c1"  # the collection, not the preset name
 
 
+def test_a_schedule_synced_before_run_id_fires_into_the_run_named_for_the_workflow(
+    fleet, saved_preset,  # noqa: F811
+) -> None:
+    from datetime import UTC, datetime
+
+    _inbox(fleet)
+    ensure_workflow_schema(None)
+    spec = validate_workflow_spec({
+        "preset": _PRESET.name, "steps": [{"stage": "normalise"}], "triggers": [_TRIGGER],
+        "input_binding": {"store": fleet[1], "ingest_prefix": "inbox"}, "collection": "c1",
+    })
+    with WorkflowStore(None) as store:
+        stored = store.save("legacy", spec)
+    client = dbos_app.open_client(None)
+    sync_schedules(client, stored)
+    (sched,) = list_schedules(client, "legacy")
+    old = {k: v for k, v in sched["context"].items() if k != "run_id"}  # the context as synced before the field
+    client.enqueue({"workflow_name": sched["workflow_name"], "queue_name": sched["queue_name"]}, datetime.now(UTC), old)
+    work(fleet, idle_timeout=4)
+    with RunBoard(None) as board:
+        assert [r.run_id for r in board.runs()] == ["legacy"]
+
+
 def test_a_firing_that_cannot_complete_queues_nothing(fleet, saved_preset) -> None:  # noqa: F811
     """The firing body, outside DBOS: `quality` is never dispatched, so it raises before any row."""
     from tests.test_cloud import _minimal_config
@@ -510,9 +533,14 @@ def test_a_collection_keeps_its_copy_without_triggers_and_remove_workflow_delete
 
     path = _collection_file(fleet)
     args = argparse.Namespace(workflow=path, dsn=None, remove=False, status=False, **_where(fleet))
+    assert cmd_schedule_workflow(argparse.Namespace(**{**vars(args), "owner": "a/b"})) == 1  # not a client_id
+    assert cmd_schedule_workflow(argparse.Namespace(**{**vars(args), "owner": "alice"})) == 0
+    with WorkflowStore(None) as store:
+        assert store.get("feed").owner == "alice"  # stored on the client's behalf
     assert cmd_schedule_workflow(args) == 0
     with WorkflowStore(None) as store:
         assert store.get("feed").run_id == "c1"  # no triggers, but a collection to add to
+        assert store.get("feed").owner is None  # stored again without --owner: admin's
     assert cmd_schedule_workflow(argparse.Namespace(**{**vars(args), "remove": True})) == 0
     with WorkflowStore(None) as store:
         assert store.get("feed") is not None  # --remove only unschedules
