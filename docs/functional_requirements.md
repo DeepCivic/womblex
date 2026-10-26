@@ -508,7 +508,7 @@ These requirements described the admin console (`womblex ui`). The console now l
 - A Postgres destination requires the `embed` step, and sending masked text requires `pii`; a workflow missing either is refused before launch.
 - Results are delivered after the last step, even when a step failed, and a delivery after a failure names the failed steps.
 - A failed delivery is retried a set number of times, then recorded on the run. It never stops the run.
-- After a failed stage is retried successfully, the retry command prints how to redeliver. Redelivery replaces: files are rewritten and rows upserted.
+- After a failed stage is retried successfully, the retry command prints how to redeliver. Redelivery replaces: files are rewritten and rows upserted; the delivery record is kept as a trace (Requirement 34).
 - An object-store destination receives the Requirement 23 bundle; each destination chooses whether raw sources are included.
 - A Postgres destination gets one row per chunk with its embedding: masked text by default, raw only where the workflow asks, each row naming its layer.
 - A webhook receives six events: `extraction_settled`, `stage_finished`, `stage_failed`, `run_finished`, `delivered` and `delivery_failed`. Each carries an `event_id` (kept when the event is resent, so the receiver can drop a duplicate), the `run_id` and the run's status in the API's words, and is signed with a key held on the worker.
@@ -597,6 +597,7 @@ These requirements described the admin console (`womblex ui`). The console now l
 - The service API lists a caller's collections and shows one with its workflows, document count and the workflows its files record; another owner's collection is 404 and an admin sees all. Adding to and rerunning a collection (`submit` scope) act through the stored workflow, make the checks of `add-to-collection` and `rerun-collection`, and refuse before any row with the workflow refusal's code (409). A collection fed by several workflows needs one named.
 - Every outbound webhook event carries the workflow's `collection` (null when it names none).
 
+- A redelivery to a destination writes a new delivery record with the next `seq` and the `seq` it `replaces`, and keeps the earlier record as it was. A record names the documents whose `content_digest` changed since the delivery it replaces, and the run record (version 9) lists every delivery with the one that replaced it.
 - The run manifest marks each document's version: `replaces` and `replaced_by` name the earlier and later version of the same `source_relpath` (by `source_hash`), and `is_current` is true for the latest. Versions follow batch order, never time. Per-batch manifests are not rewritten; they carry the columns null, as do shards written before them. The collection's detail reports how many documents are current.
 - Limits: a moved or renamed file starts a new chain, and identical bytes at two paths form two chains.
 

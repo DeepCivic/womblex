@@ -63,11 +63,7 @@ The only identity change is that the run id stops being the workflow name. That 
 
 **A5. Document versions.** Built (Requirement 34). D1's unreadable rows will chain like any other version; their batch-qualified hash keeps each occurrence distinct.
 
-**A6. Redelivery trace.**
-- `store/delivery_record.py` keeps the earlier records as `<destination>.<seq>.json`.
-- Each record carries `seq`, `replaces` and `replaced_by`, plus whether `content_digest` changed per document.
-- A redelivery writes a new `seq`; earlier records are never rewritten, except that `delivery_received` (B2) appends acknowledgements to the record it names.
-- Run record version 8 → 9.
+**A6. Redelivery trace.** Built (Requirement 34). `delivery_received` (B2) appends its acknowledgement to the record its `seq` names: `<destination>.json` when that is the latest, else `<destination>.<seq>.json`.
 
 ## Phase B — Inbound webhooks (Requirement 35)
 

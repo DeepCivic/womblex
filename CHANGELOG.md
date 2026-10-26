@@ -21,6 +21,8 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 - **Document versions on the run manifest (contract 3.1).** `manifest.parquet` gains `replaces`, `replaced_by` and `is_current`, chained per `source_relpath` in batch order (`store/document_versions.py`); per-batch manifests carry them null and older shards back-fill null. `GET /v1/collections/{name}` reports `current_documents`.
 
+- **A redelivery leaves a trace; run record 9.** `<destination>.json` stays the latest delivery record and a redelivery keeps the one it replaces as `<destination>.<seq>.json`. Each record carries `seq`, `replaces`, the manifest's per-document digests and the documents whose digest moved; the run record lists every delivery with `replaced_by` and a `documents_changed` count.
+
 ### Removed
 - **The console leaves Womblex for [womblex-console](https://github.com/DeepCivic/womblex-console).** `womblex ui`, `src/womblex/ui/`, the `ui/` SPA, `Dockerfile.ui`, the `ui` compose service and the console's CI and publish jobs are gone; the repository was seeded from this history. Requirements 15 to 21 and `DESIGN.md` went with it. The console depends on a pinned Womblex and Womblex no longer imports or tests it. The `[ui]` extra is removed in a dependency change of its own; its fastapi and uvicorn are in `[api]`.
 

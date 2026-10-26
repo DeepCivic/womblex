@@ -90,7 +90,7 @@ RUN_MANIFEST_FILENAME = "manifest.parquet"
 #: Version 8 adds ``deliveries`` — one record per workflow destination delivered to
 #: (`store/delivery_record.py`) — so an empty list means no delivery was made.
 RUN_RECORD_KEY = f"{NAMESPACE}.run_record"
-RUN_RECORD_VERSION = 8
+RUN_RECORD_VERSION = 9
 
 #: What one observed parquet contributes: its footer key-value metadata and its
 #: row count. A caller that reads files where they live supplies these rather
