@@ -76,11 +76,11 @@ def collections_router(
     def get_collection(name: str, caller: Caller = Depends(can_read)) -> CollectionDetail:  # noqa: B008
         workflows = feeding(caller, name)
         try:
-            documents, written_by = coll.collection_documents(settings.store_uri or "", name)
+            documents, current, written_by = coll.collection_documents(settings.store_uri or "", name)
         except StoreUnreachable as e:
             raise HTTPException(status_code=503, detail=f"run store unreachable: {e}") from e
         return CollectionDetail(name=name, workflows=sorted(w.id for w in workflows),
-                                documents=documents, written_by=written_by)
+                                documents=documents, current_documents=current, written_by=written_by)
 
     @router.post("/v1/collections/{name}/add", response_model=CollectionAdded, status_code=202)
     def add_to_collection(

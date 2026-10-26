@@ -154,6 +154,7 @@ womblex/
 │   │   ├── run_stamp.py     # RunStamp — run id / version / commit / config digest / stage / preset (config name) / loaded models / slot models (distribution + version), as womblex.* footer keys; workflow_context → womblex.workflow_digest on a workflow step's sidecars and a scheduled firing's extraction files
 │   │   ├── content_digest.py # content_digest(elements): the manifest's determinism handle (kind / order / text / cells / fields / sheet cells / meta)
 │   │   ├── contract.py      # womblex.contract_version + womblex.sensitivity (raw / masked / none) footer keys, on every pipeline Parquet
+│   │   ├── document_versions.py # replaces / replaced_by / is_current on the run manifest — versions chained per source_relpath
 │   │   ├── run_manifest.py  # Consolidate per-batch manifests into a run-root manifest.parquet + the run record in its footer
 │   │   ├── run_reads.py     # Runs as the store or output root holds them: listing, stage presence, shard audit
 │   │   ├── document_detail.py # One document's chunks with its entities, PII spans, money and quality rows

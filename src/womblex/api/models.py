@@ -84,6 +84,7 @@ class CollectionDetail(BaseModel):
     name: str
     workflows: list[str]
     documents: int
+    current_documents: int | None = None
     written_by: list[dict[str, Any]]
 
 

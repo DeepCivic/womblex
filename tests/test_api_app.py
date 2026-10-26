@@ -459,7 +459,7 @@ def test_openapi_surface_is_pinned(client):
             "PresetSave": ["config", "description", "formats", "name"],
             "CollectionList": ["collections"],
             "CollectionSummary": ["name", "workflows"],
-            "CollectionDetail": ["documents", "name", "workflows", "written_by"],
+            "CollectionDetail": ["current_documents", "documents", "name", "workflows", "written_by"],
             "CollectionAction": ["workflow"],
             "CollectionAdded": ["firing", "name", "workflow"],
             "CollectionRerun": ["name", "newly_dispatched", "stages", "workflow"],

@@ -7,7 +7,7 @@ column-level schemas are in [extraction.md](extraction.md).
 
 ## Contract version
 
-`womblex.contract_version` (currently `3.0`, `store/contract.CONTRACT_VERSION`)
+`womblex.contract_version` (currently `3.1`, `store/contract.CONTRACT_VERSION`)
 is in the footer of every pipeline Parquet and in `egress_manifest.json`. It is
 versioned apart from the package: a release that changes no schema leaves it
 alone.
@@ -92,6 +92,11 @@ span's position in its chunk is `char_start - chunk.start_char` for a `span` row
 The 3.0 bump retired the `conditions` role (Phase R, D3): no `*.conditions.parquet` is
 written, and `manifest.parquet` holds every column a condition labelled. A file of that
 role a 2.x run wrote keeps `womblex.sensitivity: none` in its own footer.
+
+The 3.1 bump added `replaces`, `replaced_by` and `is_current` to the manifest. The run-root
+`manifest.parquet` fills them when it is consolidated (`store/document_versions.py`): versions are
+chained per `source_relpath` in batch order, never by time. A per-batch manifest is never
+rewritten, so it carries them null, as does a shard written before the columns.
 
 ## Determinism
 

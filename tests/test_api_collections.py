@@ -73,6 +73,8 @@ def test_add_fires_the_stored_workflow_into_the_collection(api, fleet) -> None: 
     work(fleet, idle_timeout=4)
     detail = api.get("/v1/collections/c1", headers=auth("ta")).json()
     assert detail["workflows"] == ["feed"]
+    assert (detail["documents"], detail["current_documents"]) == (1, 1)
+    assert [w["name"] for w in detail["written_by"]] == ["feed"]
     with RunBoard(None) as board:
         assert [r.run_id for r in board.runs(owner="alice")] == ["c1"]  # owned by the workflow's owner
 

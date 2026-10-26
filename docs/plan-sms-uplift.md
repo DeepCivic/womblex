@@ -59,21 +59,9 @@ The only identity change is that the run id stops being the workflow name. That 
 
 **A2a. Workflow owner.** Built (Requirement 34): the store holds an owner and firings run under it. Nothing yet stores a workflow under a non-admin owner (the CLI stores none, and A4 does not create workflows); A4 must settle how an owned workflow comes to exist.
 
-**A4. API.** Built (Requirement 34), except `current_documents` on `GET /v1/collections/{name}`, which A5 adds with `is_current`.
+**A4. API.** Built (Requirement 34).
 
-**A5. Document versions (the Requirement 31 need, document level).**
-- New `store/document_versions.py`. At consolidation (`cloud/finalize.py`, `store/run_manifest.write_run_manifest`) it adds three columns to the run-root `manifest.parquet`:
-  - `replaces`: the earlier version's `source_hash`
-  - `replaced_by`
-  - `is_current`
-
-  Versions are grouped by `source_relpath` and ordered by batch number, never by time.
-- Limits, recorded in the requirement beside "re-extraction is out":
-  - a moved or renamed file starts a new chain
-  - identical bytes at two paths form two chains
-- Unreadable rows (D1) chain like any other version; their batch-qualified hash keeps each occurrence distinct.
-- Per-batch manifests are never rewritten.
-- Additive columns, so contract 3.0 → 3.1, with a backfill entry in `store/output.py` `_BACKFILL`.
+**A5. Document versions.** Built (Requirement 34). D1's unreadable rows will chain like any other version; their batch-qualified hash keeps each occurrence distinct.
 
 **A6. Redelivery trace.**
 - `store/delivery_record.py` keeps the earlier records as `<destination>.<seq>.json`.
@@ -204,7 +192,7 @@ A docs-only merge per CLAUDE.md "Stocktake":
 - `git diff --stat $(git merge-base HEAD origin/main)..HEAD` ≤500 lines; `wc -l` on every touched file.
 - **A:** a `fleet`-fixture test (SQLite + Postgres):
   - two firings of one workflow into collection `c1` give one run `c1`
-  - changing a synthetic file gives two linked versions, the later one `is_current`
+  - changing a synthetic file gives two linked versions, the later one `is_current` (built: `tests/test_document_versions.py`)
   - an unreadable file in two firings gives two distinct `source_hash`es in one chain
   - a schedule synced before the `collection` field (no `run_id` in its context) still fires into the run named for the workflow
   - changing the workflow's `name` while keeping `collection: c1` fires into run `c1`. The old name's stored copy and schedules stay until `remove-workflow` removes them

@@ -20,7 +20,7 @@ from womblex.cloud.jobs import schema_missing
 from womblex.cloud.workflow_dispatch import WorkflowDispatch, check_firing, dispatch_workflow
 from womblex.cloud.workflow_schedules import add_to_collection
 from womblex.cloud.workflow_store import StoredWorkflow, WorkflowStore
-from womblex.store.remote_manifest import open_store
+from womblex.store.remote_manifest import open_store, remote_manifest_table
 from womblex.store.run_manifest import RUN_RECORD_KEY
 
 if TYPE_CHECKING:
@@ -67,22 +67,28 @@ def pick_workflow(candidates: list[StoredWorkflow], name: str | None) -> StoredW
     return candidates[0] if candidates else None
 
 
-def collection_documents(store_uri: str, name: str) -> tuple[int, list[dict[str, Any]]]:
-    """The collection's document count and the workflows its files record, from the run manifest's footer.
+def collection_documents(store_uri: str, name: str) -> tuple[int, int | None, list[dict[str, Any]]]:
+    """The collection's document count, how many are the current version, and the workflows its files record.
 
-    `(0, [])` before the run has a consolidated manifest. Raises `StoreUnreachable`.
+    The count of current documents is `None` until the run has a consolidated manifest that
+    marks versions (`store/document_versions.py`). Raises `StoreUnreachable`.
     """
-    footer = open_store(store_uri).read_parquet_footer(f"runs/{name}/manifest.parquet")
+    store = open_store(store_uri)
+    table = remote_manifest_table(store, f"runs/{name}")
+    current: int | None = None
+    if "is_current" in table.schema.names and table.column("is_current").null_count == 0:
+        current = sum(1 for v in table.column("is_current").to_pylist() if v)
+    footer = store.read_parquet_footer(f"runs/{name}/manifest.parquet")
     if footer is None:
-        return 0, []
-    meta, rows = footer
+        return table.num_rows, current, []
+    meta, _ = footer
     raw = (meta or {}).get(RUN_RECORD_KEY.encode())
     try:
         record = json.loads(raw.decode()) if raw else {}
     except (json.JSONDecodeError, UnicodeDecodeError):
         record = {}
     written = record.get("workflows", []) if isinstance(record, dict) else []
-    return rows, [{"name": w.get("name"), "digest": w.get("digest"), "stages": w.get("stages", [])}
+    return table.num_rows, current, [{"name": w.get("name"), "digest": w.get("digest"), "stages": w.get("stages", [])}
                   for w in written if isinstance(w, dict)]
 
 

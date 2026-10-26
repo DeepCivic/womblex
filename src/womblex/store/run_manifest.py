@@ -53,6 +53,7 @@ from womblex.pipeline_order import stage_rank
 from womblex.store.build_info import image_info
 from womblex.store.contract import contract_footer
 from womblex.store.delivery_record import read_delivery_records
+from womblex.store.document_versions import add_versions
 from womblex.store.output import read_manifest
 from womblex.store.run_stamp import (
     read_footer_model_check,
@@ -613,7 +614,7 @@ def write_run_manifest(
     *footers*, *checksums*, *undigested* and *deliveries* are passed through to :func:`build_run_record` for
     a caller whose shards are not all in *shard_dir* — see that function.
     """
-    table = read_manifest(shard_dir)
+    table = add_versions(read_manifest(shard_dir))
     footer = _merged_footer(shard_dir, table, footers, checksums, undigested, deliveries)
     target = output_path or run_manifest_path_for(shard_dir)
     table = table.replace_schema_metadata({**(footer or {}), **contract_footer(target, role="manifest")})

@@ -143,6 +143,9 @@ MANIFEST_SCHEMA = pa.schema([
     ("extracted_at_iso", pa.string()),
     ("parser_version", pa.string()),
     ("content_digest", pa.string()),
+    ("replaces", pa.string()),
+    ("replaced_by", pa.string()),
+    ("is_current", pa.bool_()),
 ])
 
 # Manifest columns added after parser 2.0. Older shards back-fill on read
@@ -155,7 +158,7 @@ _MANIFEST_BACKFILL: tuple[str, ...] = ("ingest_root", "source_relpath")
 
 # `content_digest` back-fills as null, not "": a shard written before it has no
 # digest to compare, which is unknown rather than an empty document's digest.
-_MANIFEST_NULL_BACKFILL: tuple[str, ...] = ("content_digest",)
+_MANIFEST_NULL_BACKFILL: tuple[str, ...] = ("content_digest", "replaces", "replaced_by", "is_current")
 
 # `table_cells.bbox` (contract 1.3) back-fills as null: a cell written before it
 # has no recorded geometry.

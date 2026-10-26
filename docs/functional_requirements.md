@@ -597,6 +597,9 @@ These requirements described the admin console (`womblex ui`). The console now l
 - The service API lists a caller's collections and shows one with its workflows, document count and the workflows its files record; another owner's collection is 404 and an admin sees all. Adding to and rerunning a collection (`submit` scope) act through the stored workflow, make the checks of `add-to-collection` and `rerun-collection`, and refuse before any row with the workflow refusal's code (409). A collection fed by several workflows needs one named.
 - Every outbound webhook event carries the workflow's `collection` (null when it names none).
 
+- The run manifest marks each document's version: `replaces` and `replaced_by` name the earlier and later version of the same `source_relpath` (by `source_hash`), and `is_current` is true for the latest. Versions follow batch order, never time. Per-batch manifests are not rewritten; they carry the columns null, as do shards written before them. The collection's detail reports how many documents are current.
+- Limits: a moved or renamed file starts a new chain, and identical bytes at two paths form two chains.
+
 **Out of scope:** creating, editing or removing a workflow through the API (so a non-admin owner is, for now, whoever the deployment stored the workflow for), document versions and document versions, each a later piece of the same requirement.
 
 ## Outstanding
