@@ -58,7 +58,10 @@ The only identity change is that the run id stops being the workflow name.
 **A1. `collection` field on the workflow spec.**
 - Add an optional safe-name field to `StoredWorkflowSpec` (`cloud/workflow_store.py`).
 - Drop it from `workflow_digest`, the same way an empty `destinations` list is dropped today. `config_digest` (`store/run_stamp.py`) hashes the validated `WomblexConfig`, not the spec, and the collection never enters the config, so it needs no exclusion there.
-- `run_scheduled` / `_fire` (`cloud/workflows.py`) use `spec.collection or stored.id` as the run id.
+- The run id becomes `spec.collection or stored.id`, and it travels in the schedule context:
+  - `sync_schedules` (`cloud/workflow_schedules.py`) writes it into each schedule's context as `run_id`, beside `workflow_id`, `store` and `trigger`.
+  - `run_scheduled` (`cloud/workflows.py`) takes `context["run_id"]` in place of `context["workflow_id"]`. A context with no `run_id` (a schedule synced before this change) falls back to `workflow_id`, which was its run id.
+  - Why the context rather than reading the stored copy at fire time: `run_scheduled` builds the idempotent trigger id `<run>:trigger:<UTC time>` from the run id before anything is enqueued. A store read there would have to be a DBOS step, and a recovery after the copy changed could compute another run id and fire twice. The context is fixed per schedule, and `schedule_workflow` saves the copy and syncs its schedules in one action ("A workflow is a file; scheduling stores a copy"), so the context never disagrees with `spec.collection`.
 - `_extract` declares `IngestProvenance` with `spec.collection or stored.id`, not `run_config.dataset.name`. `dataset.name` stays the preset name and keeps feeding `womblex.preset`.
   - This changes the provenance collection footer for every existing workflow, including those with no `collection`: it was the preset name and becomes the workflow id. Older shards keep the footer they were written with.
 - `workflow_runner.config_from_overlay` is unchanged.
@@ -68,7 +71,7 @@ The only identity change is that the run id stops being the workflow name.
   - the provenance collection is the collection (else the workflow id), not `dataset.name`
 
 **A2. Add to a collection on demand.**
-- New CLI `womblex add-to-collection FILE --store --dsn`. It enqueues `fire_trigger` on `dbos_app.firing_queue(ingest_root)` (the workflow's input store, so only a worker on that ingest root picks it up) with firing label `manual-<UTC>`, the same path a schedule takes. That gives it the same checks (`check_firing`), deduplication and replay safety.
+- New CLI `womblex add-to-collection FILE --store --dsn`. It enqueues `fire_trigger` on `dbos_app.firing_queue(ingest_root)` (the workflow's input store, so only a worker on that ingest root picks it up) with firing label `manual-<UTC>`, the same path a schedule takes. That gives it the same checks (`check_firing`), deduplication and replay safety. It takes the run id from the stored copy (`spec.collection or stored.id`) and passes it in the context the same way a schedule does (A1).
 - `WorkflowStore` currently keeps only workflows that have triggers (`workflow_schedules.schedule_workflow` deletes the rest). Widen this: store the copy when the workflow has triggers, a collection or inbound hooks. That way the API and inbound events can find it by name.
 - Lifecycle of the stored copy:
   - `schedule-workflow FILE` stores or replaces the copy and syncs its schedules. A workflow with no triggers is unscheduled, but its copy is deleted only if it also has no collection and no inbound hooks.
@@ -78,7 +81,7 @@ The only identity change is that the run id stops being the workflow name.
 **A2a. Workflow owner.**
 - Add `owner` to the stored copy (`WorkflowStore`, the `womblex_workflows` table), set from the caller that stored it: the API caller's `client_id`, or `None` (admin) from the CLI. It is not part of the spec file or of `workflow_digest`.
 - `fire_workflow` enqueues with the workflow's owner, so a collection's run is owned like any API run, and `RunBoard.enqueue` refuses a collection whose run is already owned by another owner (`RunOwnedError`).
-- This reopens the "a workflow has no owner" call (CLAUDE.md, `cloud/workflow_store.py`). Record it in `docs/decisions-operations.md`.
+- This reopens the "a workflow has no owner" call (CLAUDE.md, `cloud/workflow_store.py`) and the "workflow owners" exclusion in Requirement 27's out-of-scope list. Record it in `docs/decisions-operations.md`.
 
 **A3. Workflow changes and rerunning a collection.**
 - A dispatch outside a firing (`dispatch_workflow`, where `bases=None` means every batch) applies the current steps to the whole collection. Unit receipts (`cloud/unit_receipt.py`) skip sidecar units whose version, stage config and inputs are unchanged, on a stage's first attempt. So adding `pii` reruns only `pii`, and a changed setting reruns the stages whose config or inputs it changes.
@@ -92,6 +95,7 @@ The only identity change is that the run id stops being the workflow name.
   - `GET /v1/collections`: from `WorkflowStore` plus the store's runs.
   - `GET /v1/collections/{name}`: documents, current-version counts, workflows that wrote to it (read from the run record's `workflows`).
   - `POST /v1/collections/{name}/add` and `POST /v1/collections/{name}/rerun` (submit scope).
+  - These two routes reopen the "managing workflows through the API" exclusion in Requirement 27's out-of-scope list. They act on a stored workflow but neither creates, edits nor removes one. Record the narrowed exclusion in `docs/decisions-operations.md`.
 - Add a `collection` field to every outbound webhook `event_body` (`cloud/webhook.py`).
 - Update `test_openapi_surface_is_pinned`.
 
@@ -160,12 +164,13 @@ The only identity change is that the run id stops being the workflow name.
 - `sidecar_footer` / `contract_footer` add a `womblex.written_at` footer key. It is never a column, so `content_digest` and the rows don't change.
 - Reword the byte-identical claims ("identical aside from the write time"):
   - `docs/decisions-operations.md` (two places)
+  - `docs/composable-design.md` (money output before or after `enrich`)
   - `cloud/unit_receipt.py`
   - the `batch.process_batch` docstring
 - The footer is part of the file's bytes, so every rewrite changes a file's ETag / checksum even when its rows don't. Each check that compares file bytes, and how it copes:
   - `RemoteStore.fingerprints` and receipt output fingerprints (`cloud/unit_receipt.py`): a receipt compares the published output with the fingerprint it recorded when it wrote that output, so a file that was not rewritten still matches. A rerun writes a new receipt. No change.
   - `published_checksums` (`cloud/finalize.py`) and the run record's checksums: they record what was published, so they change on every rewrite, and that is correct. The docs must stop calling them stable across reruns.
-  - Local-vs-fleet and rerun comparisons in the tests that assert byte identity (`tests/test_records.py`, `tests/test_enrich_stage.py`, `tests/test_enrichment_output.py`, `tests/test_source_provenance.py`, `tests/test_ground_truth.py`, `tests/test_workflow_plan.py`): compare rows plus the footer minus `womblex.written_at`. Add a shared test helper for that comparison rather than editing each assertion.
+  - Local-vs-fleet and rerun comparisons in the tests that assert byte identity (`tests/test_records.py`, `tests/test_stage_runner.py` (the local-vs-remote parity check), `tests/test_enrich_stage.py`, `tests/test_enrichment_output.py`, `tests/test_source_provenance.py`, `tests/test_ground_truth.py`, `tests/test_workflow_plan.py`): compare rows plus the footer minus `womblex.written_at`. Add a shared test helper for that comparison rather than editing each assertion.
   - Determinism stays `content_digest`, which never covers footers.
 
 ## Phase D — Withheld, omitted and failed documents
@@ -174,7 +179,12 @@ The only identity change is that the run id stops being the workflow name.
 
 **D1. Failed documents get manifest rows.**
 - `operations/persist.py` and `cli/pipeline.py` pass errored results through, so the existing `status: error` branch is finally reached.
-- A source that can't be read is recorded as failed. Its `source_hash` is SHA-256 over `unreadable:` + `source_relpath` + `:` + the batch number, with hash basis `unreadable`, so join keys are never empty and an unreadable file in two firings of one collection gets two distinct hashes (A5). This replaces the empty string `_source_hash` returns today.
+- A source that can't be read is recorded as failed. Its `source_hash` is SHA-256 over `unreadable:` + `source_relpath` + `:` + the batch number, so join keys are never empty and an unreadable file in two firings of one collection gets two distinct hashes (A5). This replaces the empty string `_source_hash` returns today.
+- The row's `extraction_method` is `unreadable`. A row that failed after its bytes were read keeps its file-bytes hash and its method, so `status: error` alone does not mark this case.
+- Hash basis (`store/source_resolver.py`):
+  - add `HASH_BASIS_UNREADABLE`. `hash_basis_for` maps `extraction_method == "unreadable"` to it, the way `_RECORD_METHODS` maps to `record_id+text`; today it would read as `file_bytes`
+  - `SourceResolver` declines the row as `unsupported_basis`, with a reason naming its `source_relpath`. It never resolves one: `resolved` always means the bytes matched `source_hash` ("Path first, then hash", `docs/decisions-operations.md`), and this hash is not over bytes
+  - egress already reports `unsupported_basis` with no entry under `sources/` (`docs/egress.md`). Add the unreadable case beside the records-ingest one there.
 
 **D2. Omitted files.**
 - `select_supported` and `dispatch.supported_keys` return the files they dropped.
@@ -234,7 +244,8 @@ A docs-only merge per CLAUDE.md "Stocktake":
   - two firings of one workflow into collection `c1` give one run `c1`
   - changing a synthetic file gives two linked versions, the later one `is_current`
   - an unreadable file in two firings gives two distinct `source_hash`es in one chain
-  - renaming the workflow file keeps the collection
+  - a schedule synced before A1 (no `run_id` in its context) still fires into the run named for the workflow
+  - changing the workflow's `name` while keeping `collection: c1` fires into run `c1`. The old name's stored copy and schedules stay until `remove-workflow` removes them
   - `rerun-collection` after adding `pii` runs only `pii` among the sidecar stages, and reruns an in-place stage in the workflow
   - the API lists `c1` for its owner and admin, and 404s for another owner
   - `remove-workflow c1` removes the copy and schedules and leaves the run
@@ -247,4 +258,4 @@ A docs-only merge per CLAUDE.md "Stocktake":
   - an unsigned event is accepted only with `WOMBLEX_INSECURE_INBOUND=1`
   - `delivery_received` appears on the named `seq` record with the run status unchanged; an unknown `seq` is refused
 - **C:** the `test_webhook.py` receiver sees `stage_started` and `batch_progress` with counts summing to the total. The `events` filter drops them.
-- **D:** a fixture with an unreadable file, an unsupported file and a redacted PDF gives an error manifest row, an `omitted.parquet` row and region rows with page and bbox.
+- **D:** a fixture with an unreadable file, an unsupported file and a redacted PDF gives an error manifest row (`extraction_method` `unreadable`, which `SourceResolver` declines as `unsupported_basis`), an `omitted.parquet` row and region rows with page and bbox.
