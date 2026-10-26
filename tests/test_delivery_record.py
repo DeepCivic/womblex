@@ -97,3 +97,20 @@ def test_a_record_written_before_sequences_is_the_first_delivery_and_a_missing_m
     latest = json.loads((run_root / "deliveries" / "archive.json").read_text())
     assert (latest["seq"], latest["replaces"], latest["document_digests"], latest["changed_documents"]) == (
         2, 1, None, None)
+
+
+def test_recording_the_same_delivery_again_is_not_a_redelivery(tmp_path: Path):
+    from dataclasses import replace
+
+    from womblex.cloud.delivery import record_deliveries
+
+    run_root, _ = _build_run(tmp_path)
+    write_run_manifest(run_root / "documents")
+    run = RemoteStore.from_uri(str(run_root))
+    sent = replace(_outcome(), delivered_at="2026-10-26T00:00:00+00:00")
+    hook = replace(_outcome(), destination="hook", kind="webhook", events=[{"event_id": "e1", "status": "sent"}],
+                   delivered_at="2026-10-26T00:00:00+00:00")
+    record_deliveries(run, [sent, hook])
+    record_deliveries(run, [sent, replace(hook, delivered_at="2026-10-26T00:00:09+00:00")])  # a recovered step
+    assert sorted(p.name for p in (run_root / "deliveries").iterdir()) == ["archive.json", "hook.json"]
+    assert [d["seq"] for d in read_delivery_records(run_root)] == [1, 1]
