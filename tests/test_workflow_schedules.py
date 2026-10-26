@@ -150,7 +150,7 @@ def test_remove_and_status_work_after_the_workflow_file_is_deleted(
     assert cmd_schedule_workflow(argparse.Namespace(**{**vars(by_name), "remove": True})) == 0
     assert list_schedules(dbos_app.open_client(None), "gone") == []
     with WorkflowStore(None) as store:
-        assert store.get("gone") is None
+        assert store.get("gone") is not None  # --remove unschedules; `remove-workflow` deletes the copy
 
 
 def test_a_firing_extracts_the_prefix_and_runs_the_workflow_unowned_and_stamped(
@@ -492,3 +492,74 @@ def test_a_file_found_unchanged_is_not_hashed_again(fleet, saved_preset, monkeyp
     assert len(hashed) == 1  # the second firing hashed it; the third found its fingerprint seen
     with RunBoard(None) as board:
         assert board.next_batch_num("nightly") == 2  # one batch: the touched file was never queued again
+
+
+def _collection_file(fleet, name: str = "feed") -> str:  # noqa: F811
+    from tests.test_workflow_runner import write_workflow
+
+    return str(write_workflow(fleet[2], name, ["normalise"], collection="c1",
+                              input_binding={"store": fleet[1], "ingest_prefix": "inbox"}))
+
+
+def test_a_collection_keeps_its_copy_without_triggers_and_remove_workflow_deletes_it(
+    fleet, saved_preset, capsys,  # noqa: F811
+) -> None:
+    import argparse
+
+    from womblex.cli.workflow import cmd_remove_workflow, cmd_schedule_workflow
+
+    path = _collection_file(fleet)
+    args = argparse.Namespace(workflow=path, dsn=None, remove=False, status=False, **_where(fleet))
+    assert cmd_schedule_workflow(args) == 0
+    with WorkflowStore(None) as store:
+        assert store.get("feed").run_id == "c1"  # no triggers, but a collection to add to
+    assert cmd_schedule_workflow(argparse.Namespace(**{**vars(args), "remove": True})) == 0
+    with WorkflowStore(None) as store:
+        assert store.get("feed") is not None  # --remove only unschedules
+    capsys.readouterr()
+    assert cmd_remove_workflow(argparse.Namespace(workflow="feed", dsn=None)) == 0
+    with WorkflowStore(None) as store:
+        assert store.get("feed") is None
+
+
+def test_add_to_collection_fires_the_stored_copy_into_the_collection_and_leaves_the_run_on_removal(
+    fleet, saved_preset, capsys,  # noqa: F811
+) -> None:
+    import argparse
+
+    from womblex.cli.workflow import cmd_add_to_collection, cmd_remove_workflow, cmd_schedule_workflow
+
+    _inbox(fleet)
+    path = _collection_file(fleet)
+    assert cmd_schedule_workflow(argparse.Namespace(
+        workflow=path, dsn=None, remove=False, status=False, **_where(fleet))) == 0
+    capsys.readouterr()
+    assert cmd_add_to_collection(argparse.Namespace(workflow=path, dsn=None, **_where(fleet))) == 0
+    (row_id,) = capsys.readouterr().out.split()
+    assert row_id.startswith("c1:trigger:manual-")
+    work(fleet, idle_timeout=4)
+    with RunBoard(None) as board:
+        assert [r.run_id for r in board.runs()] == ["c1"]
+        assert board.next_batch_num("c1") == 2  # one batch extracted
+    assert cmd_remove_workflow(argparse.Namespace(workflow="feed", dsn=None)) == 0
+    with RunBoard(None) as board:
+        assert [r.run_id for r in board.runs()] == ["c1"]  # the run and its shards stay
+
+
+def test_add_to_collection_queues_nothing_for_a_workflow_that_is_not_stored_or_has_no_documents(
+    fleet, saved_preset, caplog,  # noqa: F811
+) -> None:
+    import argparse
+
+    from womblex.cli.workflow import cmd_add_to_collection, cmd_schedule_workflow
+
+    path = _collection_file(fleet)  # nothing under inbox/
+    where = _where(fleet)
+    assert cmd_add_to_collection(argparse.Namespace(workflow=path, dsn=None, **where)) == 1
+    assert "is not stored" in caplog.text
+    assert cmd_schedule_workflow(argparse.Namespace(
+        workflow=path, dsn=None, remove=False, status=False, **where)) == 0
+    assert cmd_add_to_collection(argparse.Namespace(workflow=path, dsn=None, **where)) == 1
+    assert "no_documents" in caplog.text
+    with RunBoard(None) as board:
+        assert board.runs() == []

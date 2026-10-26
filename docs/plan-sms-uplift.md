@@ -1,6 +1,6 @@
 # SMS uplift — plan
 
-*Status: proposed (2026-10); nothing built. Phases A (collections) and B (inbound webhooks) are the priority and stand alone; C to G may follow later. This document is deleted when its last phase lands.*
+*Status: proposed (2026-10); a piece is removed from this plan when it is built. Phases A (collections) and B (inbound webhooks) are the priority and stand alone; C to G may follow later. This document is deleted when its last phase lands.*
 
 ## Context
 
@@ -55,13 +55,7 @@ existing machinery as-is:
 
 The only identity change is that the run id stops being the workflow name. That change is built (Requirement 34): a workflow's `collection` names its run, and the schedule context carries the run id.
 
-**A2. Add to a collection on demand.**
-- New CLI `womblex add-to-collection FILE --store --dsn`. It enqueues `fire_trigger` on `dbos_app.firing_queue(ingest_root)` (the workflow's input store, so only a worker on that ingest root picks it up) with firing label `manual-<UTC>`, the same path a schedule takes. That gives it the same checks (`check_firing`), deduplication and replay safety. It takes the run id from the stored copy (`spec.collection or stored.id`) and passes it in the context the same way a schedule does (Requirement 34).
-- `WorkflowStore` currently keeps only workflows that have triggers (`workflow_schedules.schedule_workflow` deletes the rest). Widen this: store the copy when the workflow has triggers, a collection or inbound hooks. That way the API and inbound events can find it by name.
-- Lifecycle of the stored copy:
-  - `schedule-workflow FILE` stores or replaces the copy and syncs its schedules. A workflow with no triggers is unscheduled, but its copy is deleted only if it also has no collection and no inbound hooks.
-  - `schedule-workflow --remove` only unschedules; it no longer deletes the copy.
-  - New CLI `womblex remove-workflow NAME` removes the schedules and the stored copy. Like `--remove`, it works by name, so a deleted or invalid file can still be removed. The collection's run and its shards are untouched.
+**A2. Add to a collection on demand.** Built (Requirement 34), except that the stored copy is also kept for inbound hooks once B1 adds them.
 
 **A2a. Workflow owner.**
 - Add `owner` to the stored copy (`WorkflowStore`, the `womblex_workflows` table), set from the caller that stored it: the API caller's `client_id`, or `None` (admin) from the CLI. It is not part of the spec file or of `workflow_digest`.

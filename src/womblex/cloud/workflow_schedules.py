@@ -8,17 +8,20 @@ workflow's last trigger unschedules it. The firing itself is `workflows.run_sche
 
 `schedule_workflow` is the one place a workflow is stored (Phase R, D10): it saves the
 copy the firings read and syncs its schedules in one action, so the two never disagree.
+The copy is kept while the workflow has triggers or a collection (something that fires it
+or that other systems find it by); `add_to_collection` fires it once, on demand, as a schedule would.
 """
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import sqlalchemy.exc
 
 from womblex.cloud import dbos_app
 from womblex.cloud.jobs import schema_missing
-from womblex.cloud.workflow_store import StoredWorkflow, WorkflowStore
+from womblex.cloud.workflow_store import StoredWorkflow, StoredWorkflowSpec, WorkflowStore
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from dbos import DBOSClient
@@ -29,6 +32,16 @@ def schedule_prefix(workflow_id: str) -> str:
     return f"womblex-wf:{workflow_id}:"
 
 
+def firing_context(stored: StoredWorkflow) -> dict[str, Any]:
+    """What a firing is told of its workflow: the same for a schedule's and an on-demand one."""
+    return {"workflow_id": stored.id, "run_id": stored.run_id, "store": stored.spec.input_binding.store}
+
+
+def keeps_copy(spec: StoredWorkflowSpec) -> bool:
+    """Whether *spec* needs its copy stored: it has triggers to fire it or a collection to add to."""
+    return bool(spec.triggers or spec.collection)
+
+
 def schedule_inputs(stored: StoredWorkflow) -> list[dict[str, Any]]:
     return [
         {
@@ -37,8 +50,7 @@ def schedule_inputs(stored: StoredWorkflow) -> list[dict[str, Any]]:
             "schedule": t.cron,
             "cron_timezone": t.timezone,
             "queue_name": dbos_app.firing_queue(stored.spec.input_binding.store or ""),
-            "context": {"workflow_id": stored.id, "run_id": stored.run_id,
-                        "store": stored.spec.input_binding.store, "trigger": i},
+            "context": {**firing_context(stored), "trigger": i},
             "automatic_backfill": False,
         }
         for i, t in enumerate(stored.spec.triggers)
@@ -78,34 +90,58 @@ def remove_schedules(client: DBOSClient, workflow_id: str) -> int:
 def schedule_workflow(client: DBOSClient, wf_store: WorkflowStore, stored: StoredWorkflow) -> list[str]:
     """Store *stored* as the copy its firings read and make its schedules equal its triggers.
 
-    A workflow with no triggers is unscheduled and its copy deleted. If the sync fails, the
-    previous copy is put back (or the new one deleted), so a firing never reads a copy its
-    schedules do not match; the error propagates.
+    A workflow with no triggers is unscheduled, and its copy deleted unless it names a collection.
+    If the sync fails, the previous copy is put back (or the new one deleted), so a firing never
+    reads a copy its schedules do not match; the error propagates.
     """
     previous = wf_store.get(stored.id)
-    if stored.spec.triggers:
+    if keeps_copy(stored.spec):
         wf_store.save(stored.id, stored.spec)
     try:
         names = sync_schedules(client, stored)
     except Exception:
         if previous is not None:
             wf_store.save(previous.id, previous.spec)
-        elif stored.spec.triggers:
+        elif keeps_copy(stored.spec):
             wf_store.delete(stored.id)
         raise
-    if not stored.spec.triggers:
+    if not keeps_copy(stored.spec):
         wf_store.delete(stored.id)
     return names
 
 
+def add_to_collection(client: DBOSClient, stored: StoredWorkflow, *, now: datetime | None = None) -> str:
+    """Enqueue one firing of *stored* now, on its input store's firing queue; return its board id.
+
+    The path a schedule takes (`workflows.fire_trigger`, which makes the same checks), labelled
+    `manual-<UTC time>` so a repeat within the second attaches rather than firing twice. The
+    caller has checked the firing (`workflow_dispatch.check_firing`) before this writes a row.
+    """
+    firing = f"manual-{(now or datetime.now(UTC)):%Y%m%dT%H%M%SZ}"
+    run_id = stored.run_id
+    workflow_id = dbos_app.trigger_id(run_id, firing)
+    client.enqueue(
+        {"workflow_name": dbos_app.TRIGGER_WORKFLOW,
+         "queue_name": dbos_app.firing_queue(stored.spec.input_binding.store or ""),
+         "workflow_id": workflow_id,
+         "attributes": {"run_id": run_id, "kind": dbos_app.KIND_TRIGGER,
+                        "workflow_id": stored.id, "firing": firing}},
+        run_id, firing_context(stored), firing,
+    )
+    return workflow_id
+
+
 def unschedule_workflow(client: DBOSClient, wf_store: WorkflowStore, workflow_id: str) -> int:
-    """Remove *workflow_id*'s schedules and its stored copy; return how many schedules went."""
+    """Remove *workflow_id*'s schedules and its stored copy; return how many schedules went.
+
+    A collection's run and its shards are untouched.
+    """
     removed = remove_schedules(client, workflow_id)
     wf_store.delete(workflow_id)
     return removed
 
 
 __all__ = [
-    "list_schedules", "remove_schedules", "schedule_inputs", "schedule_prefix", "schedule_workflow",
+    "add_to_collection", "firing_context", "keeps_copy", "list_schedules", "remove_schedules", "schedule_inputs", "schedule_prefix", "schedule_workflow",
     "sync_schedules", "unschedule_workflow",
 ]
