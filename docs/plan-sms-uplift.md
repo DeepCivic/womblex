@@ -11,8 +11,10 @@ around it. Womblex does not become a warehouse. No SMS-named stage goes in Wombl
 **Priority:** collections (Requirement 34) and inbound webhooks (Requirement 35) come first.
 Everything after them can be delayed without leaving the tree half-built.
 
-**Requirement numbers:** Requirements 30 to 35 are draft numbers. `docs/functional_requirements.md`
-stops at Requirement 29; none of their text is in the repository yet. Phase G writes it.
+**Requirement numbers:** Requirements 30 to 35 are working labels for this plan only.
+`docs/functional_requirements.md` stops at Requirement 29. As each piece is delivered, its
+requirement is written there as built, in that file's conventions and numbering. The piece is then
+removed from this plan in the same merge.
 
 **In scope:**
 - collections
@@ -41,7 +43,7 @@ stops at Requirement 29; none of their text is in the repository yet. Phase G wr
   - `store/shard_audit.py`: 709
 - A new module lands in the CLAUDE.md table, `docs/architecture.md` and `docs/project-structure.md`
   in the same merge (`tests/test_doc_currency.py`).
-- A merge that satisfies a requirement updates `docs/functional_requirements.md`.
+- A merge that delivers a piece of this plan writes its requirement as built into `docs/functional_requirements.md` and removes that piece from this plan.
 
 ## Phase A — Collections (Requirement 34)
 
@@ -222,7 +224,7 @@ A docs-only merge per CLAUDE.md "Stocktake":
 - README command table (new CLI commands)
 - Outstanding index
 - CHANGELOG
-- `functional_requirements.md` Requirements 30, 31, 34 and 35 written in that file's conventions
+- `functional_requirements.md` holds every delivered piece's requirement, and this plan is deleted
 
 ## Verification (each merge)
 
