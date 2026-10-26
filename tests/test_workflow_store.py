@@ -200,6 +200,8 @@ def test_a_table_made_before_owners_gains_the_column_and_reads_unowned(tmp_path)
             "INSERT INTO womblex_workflows VALUES ('old', :spec, 'sha256:x', 't', 't')"),
             {"spec": json.dumps(validate_workflow_spec(_MINIMAL).model_dump(mode="json"))})
     engine.dispose()
+    with WorkflowStore(dsn) as s:  # a reader (a worker's firing) before any writer migrated the table
+        assert s.get("old").owner is None and [w.owner for w in s.list()] == [None]
     ensure_workflow_schema(dsn)
     with WorkflowStore(dsn) as s:
         assert s.get("old").owner is None
