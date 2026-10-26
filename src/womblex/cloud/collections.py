@@ -26,6 +26,7 @@ from womblex.store.run_manifest import RUN_RECORD_KEY
 if TYPE_CHECKING:
     from womblex.cloud.deployment import DeploymentSettings
     from womblex.presets import Preset
+    from womblex.store.remote import RemoteStore
 
 
 class AmbiguousWorkflow(Exception):
@@ -67,14 +68,11 @@ def pick_workflow(candidates: list[StoredWorkflow], name: str | None) -> StoredW
     return candidates[0] if candidates else None
 
 
-def collection_documents(store_uri: str, name: str) -> tuple[int, list[dict[str, Any]]]:
-    """The collection's document count and the workflows its files record, from the run manifest's footer.
-
-    `(0, [])` before the run has a consolidated manifest. Raises `StoreUnreachable`.
-    """
-    footer = open_store(store_uri).read_parquet_footer(f"runs/{name}/manifest.parquet")
+def _recorded_workflows(store: RemoteStore, name: str) -> tuple[int, list[dict[str, Any]]] | None:
+    """The run manifest's row count and its run record's `workflows`; `None` before it is consolidated."""
+    footer = store.read_parquet_footer(f"runs/{name}/manifest.parquet")
     if footer is None:
-        return 0, []
+        return None
     meta, rows = footer
     raw = (meta or {}).get(RUN_RECORD_KEY.encode())
     try:
@@ -82,8 +80,37 @@ def collection_documents(store_uri: str, name: str) -> tuple[int, list[dict[str,
     except (json.JSONDecodeError, UnicodeDecodeError):
         record = {}
     written = record.get("workflows", []) if isinstance(record, dict) else []
-    return rows, [{"name": w.get("name"), "digest": w.get("digest"), "stages": w.get("stages", [])}
-                  for w in written if isinstance(w, dict)]
+    return rows, [w for w in written if isinstance(w, dict)]
+
+
+def store_collections(store_uri: str | None) -> set[str]:
+    """The store's runs whose run record names a workflow that kept it as its `collection`.
+
+    What the store holds, whatever is stored now: a collection whose workflows were removed
+    (`remove-workflow`) is still here. Its run has no owner to read, so only admin lists it.
+    A local deployment (no store) has none. Raises `StoreUnreachable`.
+    """
+    if not store_uri:
+        return set()
+    store = open_store(store_uri)
+    found = set()
+    for run in store.list_dirs("runs"):
+        recorded = _recorded_workflows(store, run)
+        if recorded and any((w.get("spec") or {}).get("collection") == run for w in recorded[1]):
+            found.add(run)
+    return found
+
+
+def collection_documents(store_uri: str, name: str) -> tuple[int, list[dict[str, Any]]]:
+    """The collection's document count and the workflows its files record, from the run manifest's footer.
+
+    `(0, [])` before the run has a consolidated manifest. Raises `StoreUnreachable`.
+    """
+    recorded = _recorded_workflows(open_store(store_uri), name)
+    if recorded is None:
+        return 0, []
+    rows, written = recorded
+    return rows, [{"name": w.get("name"), "digest": w.get("digest"), "stages": w.get("stages", [])} for w in written]
 
 
 def add_documents(
@@ -111,5 +138,5 @@ def rerun_documents(
 
 __all__ = [
     "AmbiguousWorkflow", "add_documents", "collection_documents", "pick_workflow", "rerun_documents",
-    "stored_collections",
+    "store_collections", "stored_collections",
 ]

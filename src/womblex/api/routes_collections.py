@@ -1,8 +1,9 @@
 """`/v1/collections`: the collections a caller's stored workflows feed, and adding to or rerunning one.
 
 Owner-scoped like `/v1/runs`: a caller sees and acts on collections its own stored workflows feed
-(Requirement 34); another owner's is 404, and ``admin`` sees all. Reading is ``read``; adding and
-rerunning are ``submit``. Both act on a stored workflow and neither creates, edits nor removes one.
+(Requirement 34); another owner's is 404, and ``admin`` sees all, with the store's collection runs
+no stored workflow feeds any more (listed with no workflows; adding or rerunning one is 404).
+Reading is ``read``; adding and rerunning are ``submit``. Both act on a stored workflow and neither creates, edits nor removes one.
 A collection fed by several workflows needs the workflow named (409 otherwise). A refusal is 409
 with the workflow refusal's stable code, before any queue row. The bodies are
 :mod:`womblex.cloud.collections`.
@@ -38,10 +39,18 @@ def collections_router(
     router = APIRouter(tags=["collections"])
 
     def visible(caller: Caller) -> dict[str, list[StoredWorkflow]]:
+        """Collections fed by the caller's stored workflows; for admin also the store's runs no stored workflow feeds."""
         try:
-            return coll.stored_collections(settings.db_dsn, caller.owner)
+            found = coll.stored_collections(settings.db_dsn, caller.owner)
         except (sqlalchemy.exc.SQLAlchemyError, OSError) as e:
             raise HTTPException(status_code=503, detail="job queue unreachable") from e
+        if caller.owner is None:
+            try:
+                for name in coll.store_collections(settings.store_uri):
+                    found.setdefault(name, [])
+            except StoreUnreachable as e:
+                raise HTTPException(status_code=503, detail=f"run store unreachable: {e}") from e
+        return found
 
     def feeding(caller: Caller, name: str) -> list[StoredWorkflow]:
         if (found := visible(caller).get(name)) is None:

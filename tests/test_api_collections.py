@@ -104,3 +104,17 @@ def test_a_collection_fed_by_several_workflows_needs_one_named(api, fleet) -> No
     assert both.status_code == 409 and both.json()["detail"]["workflows"] == ["feed", "feed-2"]
     assert api.post("/v1/collections/c1/add", headers=auth("ta"), json={"workflow": "nope"}).status_code == 404
     assert api.post("/v1/collections/c1/add", headers=auth("ta"), json={"workflow": "feed-2"}).status_code == 202
+
+
+def test_a_collection_whose_workflows_were_removed_stays_listed_for_admin(api, fleet) -> None:  # noqa: F811
+    assert api.post("/v1/collections/c1/add", headers=auth("ta")).status_code == 202
+    work(fleet, idle_timeout=4)  # the coordinator consolidates the run manifest
+    with WorkflowStore(None) as store:
+        store.delete("feed")  # `remove-workflow`: the run and its shards stay
+    listed = api.get("/v1/collections", headers=auth("to")).json()["collections"]
+    assert {"name": "c1", "workflows": []} in listed
+    assert api.get("/v1/collections", headers=auth("ta")).json()["collections"] == []  # the run has no owner to read
+    detail = api.get("/v1/collections/c1", headers=auth("to")).json()
+    assert detail["workflows"] == [] and detail["documents"] == 1
+    assert api.get("/v1/collections/c1", headers=auth("ta")).status_code == 404
+    assert api.post("/v1/collections/c1/add", headers=auth("to")).status_code == 404  # nothing to fire it through
