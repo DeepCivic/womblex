@@ -585,7 +585,7 @@ These requirements described the admin console (`womblex ui`). The console now l
 - The workflow's digest does not cover the collection, so naming or changing it leaves the digest of an otherwise unchanged workflow as it was.
 - The source-provenance collection recorded in a firing's extraction files is the collection, else the workflow's name; extraction from a run no workflow started still records the preset name. Files written earlier keep what they were written with.
 
-**Verification:** `tests/test_workflow_store.py` (the digest and an unsafe collection) and `tests/test_workflow_schedules.py` (a renamed workflow firing into its collection, with the provenance footer; on-demand adds, the kept copy and `remove-workflow`).
+**Verification:** `tests/test_workflow_store.py` (the digest and an unsafe collection) and `tests/test_workflow_schedules.py` (a renamed workflow firing into its collection, with the provenance footer; a schedule synced without `run_id` firing into the run named for its workflow; on-demand adds, the kept copy and `remove-workflow`).
 
 - `add-to-collection` fires the stored workflow once, now, on the queue of its input store, as a schedule's firing: it makes the same checks before any row (a workflow not stored, or one the firing would refuse, queues nothing), adds only the documents the collection has not seen, and a repeat within the same second attaches rather than firing twice.
 - A stored workflow's owner is the API caller that stored it (none from the CLI). Its firings run under that owner, so the collection's run is owned like an API run, and a firing for a run another owner holds is refused.
