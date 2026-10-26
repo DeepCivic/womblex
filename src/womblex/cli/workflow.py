@@ -54,13 +54,22 @@ def _register_plan(p: argparse.ArgumentParser) -> None:
 def _register_dispatch(p: argparse.ArgumentParser) -> None:
     p.add_argument("workflow", type=Path, help="Workflow file (YAML) to dispatch")
     p.add_argument("--run-id", required=True, help="Run whose extraction the stages follow")
+    p.add_argument("--firing", default=None,
+                   help="A scheduled firing whose stages failed to dispatch: run the steps over its batches only")
+    _dispatch_options(p)
+
+
+def _register_rerun(p: argparse.ArgumentParser) -> None:
+    p.add_argument("workflow", type=Path, help="Workflow file (YAML) whose steps to run over its whole collection")
+    _dispatch_options(p)
+
+
+def _dispatch_options(p: argparse.ArgumentParser) -> None:
     p.add_argument("--store", default=None,
                    help="Object-store URI the run's shards are in (or $WOMBLEX_STORE_URI)")
     p.add_argument("--output-prefix", default=None, help="Default: runs/<run-id>")
     p.add_argument("--max-attempts", type=int, default=3)
     p.add_argument("--dry-run", action="store_true", help="Run every check, write no queue row")
-    p.add_argument("--firing", default=None,
-                   help="A scheduled firing whose stages failed to dispatch: run the steps over its batches only")
     p.add_argument("--dsn", default=None,
                    help="DBOS system database holding the queue "
                         "(or $WOMBLEX_DB_DSN / $DATABASE_URL). Default: the local SQLite file.")
@@ -272,6 +281,19 @@ def cmd_dispatch_workflow(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_rerun_collection(args: argparse.Namespace) -> int:
+    """Run a workflow file's current steps over its whole collection: `dispatch-workflow` outside a firing.
+
+    The run is the workflow's collection (else its name). A unit whose version, stage config and
+    inputs are unchanged since it was published is skipped; an in-place stage, `graph-refresh` and
+    an output with no receipt run again over every batch.
+    """
+    if (stored := _load_workflow(args)) is None:
+        return 1
+    args.run_id = stored.run_id
+    return cmd_dispatch_workflow(args)
+
+
 def _check_firing(args: argparse.Namespace, stored, dsn: str | None) -> bool:  # type: ignore[no-untyped-def]
     """Run the checks a firing would make, so a workflow it would refuse is not scheduled."""
     from womblex.cloud.workflow_dispatch import check_firing
@@ -479,6 +501,8 @@ COMMANDS = [
             _register_run_workflow, cmd_run_workflow),
     Command("dispatch-workflow", "Queue a workflow file's steps for the fleet (object-store run)",
             _register_dispatch, cmd_dispatch_workflow),
+    Command("rerun-collection", "Run a workflow file's steps over its whole collection (receipts skip unchanged units)",
+            _register_rerun, cmd_rerun_collection),
     Command("schedule-workflow", "Store a workflow file's copy and schedule its cron triggers (workers fire them)",
             _register_schedule, cmd_schedule_workflow),
     Command("add-to-collection", "Fire a stored workflow once now, adding its input prefix's new documents to its collection",

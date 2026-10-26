@@ -59,12 +59,6 @@ The only identity change is that the run id stops being the workflow name. That 
 
 **A2a. Workflow owner.** Built (Requirement 34): the store holds an owner and firings run under it. Nothing yet stores a workflow under a non-admin owner (the CLI stores none, and A4 does not create workflows); A4 must settle how an owned workflow comes to exist.
 
-**A3. Workflow changes and rerunning a collection.**
-- A dispatch outside a firing (`dispatch_workflow`, where `bases=None` means every batch) applies the current steps to the whole collection. Unit receipts (`cloud/unit_receipt.py`) skip sidecar units whose version, stage config and inputs are unchanged, on a stage's first attempt. So adding `pii` reruns only `pii`, and a changed setting reruns the stages whose config or inputs it changes.
-- Receipts never skip an in-place stage, `graph-refresh`, or an output with no receipt. Those rerun over the whole collection on every rerun. Record this as a limit in the requirement.
-- Expose this as `womblex rerun-collection FILE`, a thin wrapper over `dispatch-workflow` without `--firing`.
-- Re-extraction is out: batch ids are deterministic and attach rather than rerun. Record this as a limit in the requirement.
-
 **A4. API.**
 - New `api/routes_collections.py`:
   - Owner-scoped like `/v1/runs`: a caller sees and acts on its own collections (A2a), another owner's is 404, admin sees all.
@@ -120,7 +114,7 @@ The only identity change is that the run id stops being the workflow name. That 
 - The firing runs under the workflow's owner (A2a).
 - Actions:
   - `documents_added` and `run_requested`: enqueue `fire_trigger` with firing `event-<sha8(event_id)>`, so the DBOS id is idempotent too.
-  - `rerun_requested`: the A3 dispatch.
+  - `rerun_requested`: the `rerun-collection` dispatch (Requirement 34).
   - `delivery_received`: the event names the destination and the `seq` (A6) it acknowledges, and is appended to that record. A `seq` with no record is refused (`unknown_delivery`). The run's status is never touched.
 - Refusals return `{code, message}` using the `RefusalCode` values plus `bad_signature`, `unknown_hook`, `event_not_declared` and `unknown_delivery`. A resend returns the first outcome, not a separate `duplicate` code.
 
@@ -222,7 +216,7 @@ A docs-only merge per CLAUDE.md "Stocktake":
   - an unreadable file in two firings gives two distinct `source_hash`es in one chain
   - a schedule synced before the `collection` field (no `run_id` in its context) still fires into the run named for the workflow
   - changing the workflow's `name` while keeping `collection: c1` fires into run `c1`. The old name's stored copy and schedules stay until `remove-workflow` removes them
-  - `rerun-collection` after adding `pii` runs only `pii` among the sidecar stages, and reruns an in-place stage in the workflow
+  - `rerun-collection` after adding a step runs only that step among the sidecar stages (built, `tests/test_workflow_schedules.py`)
   - the API lists `c1` for its owner and admin, and 404s for another owner
   - `remove-workflow c1` removes the copy and schedules and leaves the run
 - **B:** `TestClient` tests:

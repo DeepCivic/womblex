@@ -108,6 +108,7 @@ womblex seed-demo --output-root runs/   # publishes run-synthetic-demo
 | `retry-stage` | Retry a failed distributed stage from its first failed unit |
 | `run-workflow`, `validate`, `plan` | Run a workflow file's steps over a local shard directory; check it would run, without running it; count what its paid steps would send, calling nothing |
 | `dispatch-workflow`, `schedule-workflow` | Queue a workflow file's steps for the fleet; store its copy and schedule its cron triggers for workers to fire |
+| `rerun-collection` | Run a workflow file's steps over its whole collection; unchanged published units are skipped |
 | `add-to-collection`, `remove-workflow` | Fire a stored workflow once now, adding its input prefix's new documents to its collection; remove a workflow's schedules and stored copy (its run and shards stay) |
 | `deliver` | Deliver a finished run to its workflow file's destinations again, replacing what was delivered |
 | `validate-redactions` | Validate the redaction detector against a labels packet (`annotate-redactions` is a deprecated alias of `redact --shards --pdfs`) |

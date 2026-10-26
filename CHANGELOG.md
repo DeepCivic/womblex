@@ -15,6 +15,8 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 - **A stored workflow has an owner.** `womblex_workflows` gains an `owner` column (added to an existing table by `ensure_workflow_schema`), set from the caller that stores the copy; firings enqueue under it, and a run owned by another owner refuses the firing. Reverses "a workflow has no owner".
 
+- **Rerun a collection.** `womblex rerun-collection FILE` dispatches the workflow's current steps over its whole collection (`dispatch-workflow` without `--firing`, run id from the collection); unit receipts skip unchanged units. Re-extraction stays out.
+
 ### Removed
 - **The console leaves Womblex for [womblex-console](https://github.com/DeepCivic/womblex-console).** `womblex ui`, `src/womblex/ui/`, the `ui/` SPA, `Dockerfile.ui`, the `ui` compose service and the console's CI and publish jobs are gone; the repository was seeded from this history. Requirements 15 to 21 and `DESIGN.md` went with it. The console depends on a pinned Womblex and Womblex no longer imports or tests it. The `[ui]` extra is removed in a dependency change of its own; its fastapi and uvicorn are in `[api]`.
 

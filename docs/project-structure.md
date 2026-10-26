@@ -31,7 +31,7 @@ womblex/
 │   │   ├── profile.py      # profile subcommand
 │   │   ├── demo.py         # seed-demo subcommand (publish the vendored demo run)
 │   │   ├── verify.py       # verify-shards, verify-evidence, resolve-source subcommands
-│   │   └── workflow.py     # run-workflow / validate / plan / dispatch-workflow / schedule-workflow / add-to-collection / remove-workflow subcommands, each over a workflow file
+│   │   └── workflow.py     # run-workflow / validate / plan / dispatch-workflow / schedule-workflow / add-to-collection / rerun-collection / remove-workflow subcommands, each over a workflow file
 │   ├── config/             # Pydantic config models (__init__: YAML loader + WomblexConfig; process.py: process-stage models)
 │   ├── pipeline_order.py   # PIPELINE_ORDER — what runs when; enabled_downstream_stages(config)
 │   ├── config_tools.py     # A composed config: JSON Schema without paths, validation and YAML under a deployment's paths
