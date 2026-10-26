@@ -533,9 +533,14 @@ def test_a_collection_keeps_its_copy_without_triggers_and_remove_workflow_delete
 
     path = _collection_file(fleet)
     args = argparse.Namespace(workflow=path, dsn=None, remove=False, status=False, **_where(fleet))
+    assert cmd_schedule_workflow(argparse.Namespace(**{**vars(args), "owner": "a/b"})) == 1  # not a client_id
+    assert cmd_schedule_workflow(argparse.Namespace(**{**vars(args), "owner": "alice"})) == 0
+    with WorkflowStore(None) as store:
+        assert store.get("feed").owner == "alice"  # stored on the client's behalf
     assert cmd_schedule_workflow(args) == 0
     with WorkflowStore(None) as store:
         assert store.get("feed").run_id == "c1"  # no triggers, but a collection to add to
+        assert store.get("feed").owner is None  # stored again without --owner: admin's
     assert cmd_schedule_workflow(argparse.Namespace(**{**vars(args), "remove": True})) == 0
     with WorkflowStore(None) as store:
         assert store.get("feed") is not None  # --remove only unschedules

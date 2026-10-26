@@ -78,6 +78,9 @@ def _register_schedule(p: argparse.ArgumentParser) -> None:
                         "workflow's own input store (input_binding.store).")
     p.add_argument("--presets-dir", type=Path, default=None,
                    help="Directory of operator-saved presets (or $WOMBLEX_UI_PRESETS_DIR).")
+    p.add_argument("--owner", default=None,
+                   help="Store the copy on behalf of this API client_id, so its firings run under that owner and "
+                        "the client sees the collection. Default: none (admin); storing again without it clears it.")
     mode = p.add_mutually_exclusive_group()
     mode.add_argument("--remove", action="store_true",
                       help="Unschedule every trigger of the workflow; its stored copy stays (`remove-workflow` deletes it)")
@@ -314,8 +317,8 @@ def _workflow_name(arg: str) -> str | None:
 def cmd_schedule_workflow(args: argparse.Namespace) -> int:
     """Store a workflow's copy and make the board's schedules equal its triggers (workers fire them)."""
     from womblex.cloud import dbos_app
-    from womblex.cloud.workflow_schedules import list_schedules, remove_schedules, schedule_workflow
-    from womblex.cloud.workflow_store import WorkflowStore, ensure_workflow_schema
+    from womblex.cloud.workflow_schedules import keeps_copy, list_schedules, remove_schedules, schedule_workflow
+    from womblex.cloud.workflow_store import WorkflowStore, ensure_workflow_schema, is_safe_workflow_id
 
     dsn = args.dsn or os.environ.get("WOMBLEX_DB_DSN") or os.environ.get("DATABASE_URL")
     # --status and --remove take a name too: a workflow's file may be gone while its schedules stay.
@@ -327,6 +330,9 @@ def cmd_schedule_workflow(args: argparse.Namespace) -> int:
         return 1
     else:
         name = stored.id
+    if (owner := getattr(args, "owner", None)) is not None and not is_safe_workflow_id(owner):
+        logger.error("--owner must be one safe token (an API client_id), got %r", owner)
+        return 1
     if stored is not None and stored.spec.triggers and not _check_firing(args, stored, dsn):
         return 1
     if args.status and not dsn and not dbos_app.local_database_path().exists():
@@ -345,9 +351,10 @@ def cmd_schedule_workflow(args: argparse.Namespace) -> int:
             print(f"unscheduled {remove_schedules(client, name)} trigger(s) of {name}")
             return 0
         assert stored is not None  # neither --status nor --remove
-        names = schedule_workflow(client, wf_store, stored)
+        names = schedule_workflow(client, wf_store, stored, owner=getattr(args, "owner", None))
+    kept = "its copy is stored" if keeps_copy(stored.spec) else "nothing stored"
     print(f"{stored.id} ({stored.digest}): {len(names)} trigger(s) scheduled"
-          + (f" ({', '.join(names)}); its copy is stored for the firings" if names else "; nothing stored"))
+          + (f" ({', '.join(names)}); its copy is stored for the firings" if names else f"; {kept}"))
     return 0
 
 

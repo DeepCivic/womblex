@@ -588,7 +588,7 @@ These requirements described the admin console (`womblex ui`). The console now l
 **Verification:** `tests/test_workflow_store.py` (the digest and an unsafe collection) and `tests/test_workflow_schedules.py` (a renamed workflow firing into its collection, with the provenance footer; a schedule synced without `run_id` firing into the run named for its workflow; on-demand adds, the kept copy and `remove-workflow`).
 
 - `add-to-collection` fires the stored workflow once, now, on the queue of its input store, as a schedule's firing: it makes the same checks before any row (a workflow not stored, or one the firing would refuse, queues nothing), adds only the documents the collection has not seen, and a repeat within the same second attaches rather than firing twice.
-- A stored workflow's owner is the API caller that stored it (none from the CLI). Its firings run under that owner, so the collection's run is owned like an API run, and a firing for a run another owner holds is refused.
+- A stored workflow's owner is the client it was stored for (`schedule-workflow --owner <client_id>`; none, admin, otherwise), and a copy stored before owners reads as unowned. Its firings run under that owner, so the collection's run is owned like an API run, and a firing for a run another owner holds is refused.
 - A workflow with a collection and no triggers keeps its stored copy. `schedule-workflow --remove` unschedules and keeps the copy; `remove-workflow` removes the schedules and the copy by name, even when the file is gone, and leaves the collection's run and shards.
 
 **Out of scope:** the API and document versions, each a later piece of the same requirement.

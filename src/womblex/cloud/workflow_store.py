@@ -362,6 +362,7 @@ class WorkflowStore:
         import sqlalchemy as sa
 
         self._table, _ = _ddl()
+        self._has_owner: bool | None = None
         url = dbos_app.system_database_url(dsn)
         if connect_timeout is not None and not url.startswith("sqlite"):
             self._engine = sa.create_engine(
@@ -381,10 +382,18 @@ class WorkflowStore:
     def __exit__(self, *exc: object) -> None:
         self.close()
 
-    def _get_row(self, conn: Any, workflow_id: str) -> Any:
+    def _select(self, conn: Any) -> Any:
+        """Every column, with `owner` read as null from a table made before owners: readers do not migrate."""
         import sqlalchemy as sa
 
-        return conn.execute(sa.select(self._table).where(self._table.c.id == workflow_id)).first()
+        if self._has_owner is None and sa.inspect(conn).has_table(_TABLE):
+            self._has_owner = "owner" in {c["name"] for c in sa.inspect(conn).get_columns(_TABLE)}
+        if self._has_owner is False:
+            return sa.select(*[c for c in self._table.c if c.name != "owner"], sa.null().label("owner"))
+        return sa.select(self._table)
+
+    def _get_row(self, conn: Any, workflow_id: str) -> Any:
+        return conn.execute(self._select(conn).where(self._table.c.id == workflow_id)).first()
 
     def save(self, workflow_id: str, spec: StoredWorkflowSpec, *, owner: str | None = None) -> StoredWorkflow:
         """Create or replace *workflow_id*'s definition, stored by *owner* (`None`: admin).
@@ -435,11 +444,8 @@ class WorkflowStore:
 
     def list(self) -> list[StoredWorkflow]:
         """Every workflow, oldest first."""
-        import sqlalchemy as sa
-
-        stmt = sa.select(self._table).order_by(self._table.c.created_at)
         with self._engine.connect() as conn:
-            rows = conn.execute(stmt).fetchall()
+            rows = conn.execute(self._select(conn).order_by(self._table.c.created_at)).fetchall()
         return [_row_to_stored(r) for r in rows]
 
     def delete(self, workflow_id: str) -> None:
