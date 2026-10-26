@@ -316,6 +316,18 @@ def _check_firing(args: argparse.Namespace, stored, dsn: str | None) -> bool:  #
     return True
 
 
+def _check_inbound(stored) -> bool:  # type: ignore[no-untyped-def]
+    """Each hook's key is set here (as a webhook destination's is), or only warned under the insecure switch."""
+    from womblex.cloud.workflow_store import inbound_problems, insecure_inbound
+
+    for problem in inbound_problems(stored.spec):
+        if not insecure_inbound():
+            logger.error("not scheduled: %s", problem)
+            return False
+        logger.warning("%s (allowed by WOMBLEX_INSECURE_INBOUND)", problem)
+    return True
+
+
 def _workflow_name(arg: str) -> str | None:
     """The workflow *arg* names: its file's `name`, else *arg* itself as a name (`None` if neither)."""
     from womblex.cloud.workflow_file import WorkflowFileError, workflow_file_name
@@ -336,6 +348,7 @@ def _workflow_name(arg: str) -> str | None:
 def cmd_schedule_workflow(args: argparse.Namespace) -> int:
     """Store a workflow's copy and make the board's schedules equal its triggers (workers fire them)."""
     from womblex.cloud import dbos_app
+    from womblex.cloud.inbound_store import ensure_inbound_schema
     from womblex.cloud.workflow_schedules import list_schedules, remove_schedules, schedule_workflow
     from womblex.cloud.workflow_store import WorkflowStore, ensure_workflow_schema
 
@@ -350,6 +363,8 @@ def cmd_schedule_workflow(args: argparse.Namespace) -> int:
     else:
         name = stored.id
     if stored is not None and stored.spec.triggers and not _check_firing(args, stored, dsn):
+        return 1
+    if stored is not None and stored.spec.inbound and not _check_inbound(stored):
         return 1
     if args.status and not dsn and not dbos_app.local_database_path().exists():
         return 0  # nothing scheduled, and --status creates no database to say so
@@ -367,7 +382,13 @@ def cmd_schedule_workflow(args: argparse.Namespace) -> int:
             print(f"unscheduled {remove_schedules(client, name)} trigger(s) of {name}")
             return 0
         assert stored is not None  # neither --status nor --remove
-        names = schedule_workflow(client, wf_store, stored)
+        if stored.spec.inbound:
+            ensure_inbound_schema(dsn)
+        try:
+            names = schedule_workflow(client, wf_store, stored)
+        except ValueError as e:  # a hook secret another stored workflow names; nothing was stored
+            logger.error("not stored: %s", e)
+            return 1
     print(f"{stored.id} ({stored.digest}): {len(names)} trigger(s) scheduled"
           + (f" ({', '.join(names)}); its copy is stored for the firings" if names else "; nothing stored"))
     return 0

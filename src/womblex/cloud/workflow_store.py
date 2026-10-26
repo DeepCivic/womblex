@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -110,6 +111,30 @@ class WebhookDestination(StrictModel):
     secret_env: str
 
 
+#: What an inbound hook may be sent (Requirement 35); each is acted on by `api/routes_inbound.py`.
+INBOUND_EVENTS = ("documents_added", "run_requested", "rerun_requested", "delivery_received")
+
+#: Set to `1` in the environment of a proof of concept to turn the inbound checks off. Read only from
+#: the environment, never from a spec, so a stored workflow cannot turn it on.
+INSECURE_INBOUND_ENV = "WOMBLEX_INSECURE_INBOUND"
+
+
+def insecure_inbound() -> bool:
+    return os.environ.get(INSECURE_INBOUND_ENV) == "1"
+
+
+class InboundHook(StrictModel):
+    """An endpoint other systems post to (`POST /v1/hooks/<workflow>/<name>`), signed with the key in `secret_env`.
+
+    `events` are the ones the hook accepts. Like a webhook destination it names the environment
+    variable holding its key, never the key; the signature is HMAC-SHA256 over the raw body.
+    """
+
+    name: str
+    secret_env: str
+    events: tuple[str, ...]
+
+
 #: The destination kinds a workflow can name, each added in the merge that delivers to it.
 WorkflowDestination = Annotated[
     ObjectStoreDestination | PostgresDestination | WebhookDestination, Field(discriminator="kind")]
@@ -127,6 +152,7 @@ class StoredWorkflowSpec(StrictModel):
     triggers: tuple[WorkflowTrigger, ...] = ()
     destinations: tuple[WorkflowDestination, ...] = ()
     collection: str | None = None
+    inbound: tuple[InboundHook, ...] = ()
 
 
 def _check_steps(spec: StoredWorkflowSpec) -> None:
@@ -196,6 +222,45 @@ def _check_collection(spec: StoredWorkflowSpec) -> None:
         raise ValueError(f"collection must be one safe token, got {spec.collection!r}")
 
 
+def _check_inbound(spec: StoredWorkflowSpec) -> None:
+    names = [h.name for h in spec.inbound]
+    for name in names:
+        if not is_safe_workflow_id(name):
+            raise ValueError(f"inbound hook name must be one safe token, got {name!r}")
+    if repeated := sorted({n for n in names if names.count(n) > 1}):
+        raise ValueError(f"inbound hook name(s) used more than once: {repeated}")
+    for h in spec.inbound:
+        if not h.events or (unknown := sorted(set(h.events) - set(INBOUND_EVENTS))):
+            raise ValueError(f"inbound hook {h.name!r}: events must be a non-empty subset of {list(INBOUND_EVENTS)}"
+                             + (f", not {unknown}" if h.events else ""))
+        if not h.secret_env.strip():
+            raise ValueError(f"inbound hook {h.name!r}: secret_env names the variable holding its key")
+    keys = [h.secret_env for h in spec.inbound]
+    if shared := sorted({k for k in keys if keys.count(k) > 1}):
+        _shared(f"inbound hooks of one workflow share a secret_env: {shared}")
+
+
+def _shared(problem: str) -> None:
+    """Refuse a shared inbound secret, or only warn under `WOMBLEX_INSECURE_INBOUND=1`."""
+    if not insecure_inbound():
+        raise ValueError(problem + " (each hook needs its own; set WOMBLEX_INSECURE_INBOUND=1 for a proof of concept)")
+    logger.warning("%s (allowed by %s)", problem, INSECURE_INBOUND_ENV)
+
+
+def check_shared_secrets(workflow_id: str, spec: StoredWorkflowSpec, others: list[StoredWorkflow]) -> None:
+    """Refuse a hook whose `secret_env` another stored workflow's hook names. The signature is over the
+    body alone, so a shared key lets one workflow's sender post to another's hook."""
+    mine = {h.secret_env for h in spec.inbound}
+    for other in others:
+        if other.id != workflow_id and (clash := sorted(mine & {h.secret_env for h in other.spec.inbound})):
+            _shared(f"inbound secret_env {clash} is also named by stored workflow {other.id!r}")
+
+
+def inbound_problems(spec: StoredWorkflowSpec) -> list[str]:
+    """Hooks whose key is not set in this environment (a pre-launch check, as for a webhook destination)."""
+    return [f"inbound hook {h.name!r}: {h.secret_env} not set" for h in spec.inbound if not os.environ.get(h.secret_env)]
+
+
 def combine_config(preset_config: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
     """A preset's config with a workflow's own `config` laid over it, merged key by key.
 
@@ -240,6 +305,7 @@ def check_spec(spec: StoredWorkflowSpec) -> None:
     _check_triggers(spec)
     _check_destinations(spec)
     _check_collection(spec)
+    _check_inbound(spec)
     _check_config_overlay(spec)
 
 
@@ -260,6 +326,8 @@ def workflow_digest(spec: StoredWorkflowSpec) -> str:
     if not payload["destinations"]:  # a workflow that names none keeps the digest it had before they existed
         del payload["destinations"]
     del payload["collection"]  # where documents are kept, not what runs on them: the digest is the recipe's
+    if not payload["inbound"]:  # a workflow that names no hook keeps the digest it had before they existed
+        del payload["inbound"]
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
 
@@ -397,6 +465,8 @@ class WorkflowStore:
         if not is_safe_workflow_id(workflow_id):
             raise ValueError(f"unsafe workflow id: {workflow_id!r}")
         check_spec(spec)
+        if spec.inbound:
+            check_shared_secrets(workflow_id, spec, self.list())
         try:
             self._write(workflow_id, spec, owner)
         except sqlalchemy.exc.IntegrityError:
@@ -451,6 +521,9 @@ class WorkflowStore:
 
 
 __all__ = [
+    "INBOUND_EVENTS",
+    "INSECURE_INBOUND_ENV",
+    "InboundHook",
     "ObjectStoreDestination",
     "PostgresDestination",
     "StoreCredentials",
@@ -462,9 +535,12 @@ __all__ = [
     "WorkflowStep",
     "WorkflowStore",
     "WorkflowTrigger",
+    "check_shared_secrets",
     "check_spec",
     "combine_config",
     "ensure_workflow_schema",
+    "inbound_problems",
+    "insecure_inbound",
     "is_safe_workflow_id",
     "validate_workflow_spec",
     "workflow_digest",

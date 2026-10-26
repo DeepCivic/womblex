@@ -603,6 +603,31 @@ These requirements described the admin console (`womblex ui`). The console now l
 
 **Out of scope:** creating, editing or removing a workflow through the API (so a non-admin owner is, for now, whoever the deployment stored the workflow for), document versions and document versions, each a later piece of the same requirement.
 
+## 35. Inbound Webhooks — Other Systems Act on a Stored Workflow
+
+**Paid:** An accepted `documents_added`, `run_requested` or `rerun_requested` event launches the workflow's paid steps, billed for the documents it processes (Requirement 27).
+
+**As** an operator,
+**I want** a stored workflow to name the endpoints other systems may post signed events to,
+**so that** an outside system can add documents or rerun a collection without a person running a command.
+
+**Given** a workflow file with `inbound` hooks
+**When** the operator schedules it
+**Then** each hook is validated and the workflow's copy is stored where the service finds it.
+
+**Acceptance criteria:**
+
+- A workflow may declare `inbound` hooks: a `name` (one safe token, unique in the workflow), a `secret_env` (the environment variable holding the hook's key, never the key) and the `events` it accepts, a non-empty subset of `documents_added`, `run_requested`, `rerun_requested` and `delivery_received`.
+- Each hook needs its own key: two hooks naming one `secret_env`, in one workflow or in two stored workflows, are refused, since the signature is over the body alone and a shared key would let one sender post to another's hook.
+- `schedule-workflow` refuses a hook whose key is not set in its environment, as it does a webhook destination's.
+- `WOMBLEX_INSECURE_INBOUND=1`, read from the environment only and never from a workflow, turns these checks into warnings for a proof of concept.
+- A workflow with inbound hooks keeps its stored copy without triggers or a collection, and the table that records the events it receives (`womblex_inbound_events`: the event id, workflow, hook, event, time and outcome) is created by `schedule-workflow`.
+- Hooks are part of the workflow's digest; a workflow with none keeps the digest it had.
+
+**Verification:** `tests/test_workflow_store.py` (validation, the digest, shared keys), `tests/test_inbound_store.py` and `tests/test_workflow_schedules.py` (the kept copy, the key check, the cross-workflow refusal).
+
+**Out of scope:** receiving the events (a later piece of this requirement), and the console.
+
 ## Outstanding
 
 Requirements not yet fully met. The detail lives in the **TO-DO** block under each requirement; this list is the index. When a gap is closed (or the criterion is deliberately narrowed), its TO-DO block and its entry here are removed in the same PR.

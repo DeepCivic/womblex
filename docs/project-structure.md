@@ -193,6 +193,7 @@ womblex/
 │   │   ├── workflow_order.py   # Up-front step-order check — inputs on disk or produced earlier, stable refusal codes
 │   │   ├── workflow_file.py    # A workflow file — the master copy every workflow command reads (YAML, unknown keys refused)
 │   │   ├── collections.py      # Collections for the API — stored workflows that feed one, add and rerun through them
+│   │   ├── inbound_store.py    # womblex_inbound_events — insert-first dedupe of inbound webhook events
 │   │   ├── workflow_schedules.py # Standing triggers — a workflow's cron triggers as DBOS schedules (sync/list/remove)
 │   │   ├── workflow_dispatch.py # `dispatch-workflow` — a workflow file to the fleet; refuse before any row
 │   │   ├── workflow_plan.py    # `womblex plan` — steps to run or skip and exact enrich/embed token counts, offline

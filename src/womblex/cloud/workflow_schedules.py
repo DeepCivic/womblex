@@ -8,7 +8,7 @@ workflow's last trigger unschedules it. The firing itself is `workflows.run_sche
 
 `schedule_workflow` is the one place a workflow is stored (Phase R, D10): it saves the
 copy the firings read and syncs its schedules in one action, so the two never disagree.
-The copy is kept while the workflow has triggers or a collection (something that fires it
+The copy is kept while the workflow has triggers, a collection or inbound hooks (something that fires it
 or that other systems find it by); `add_to_collection` fires it once, on demand, as a schedule would.
 """
 
@@ -51,8 +51,8 @@ def trigger_attributes(context: dict[str, Any], run_id: str, firing: str) -> dic
 
 
 def keeps_copy(spec: StoredWorkflowSpec) -> bool:
-    """Whether *spec* needs its copy stored: it has triggers to fire it or a collection to add to."""
-    return bool(spec.triggers or spec.collection)
+    """Whether *spec* needs its copy stored: triggers to fire it, a collection to add to or inbound hooks."""
+    return bool(spec.triggers or spec.collection or spec.inbound)
 
 
 def schedule_inputs(stored: StoredWorkflow) -> list[dict[str, Any]]:

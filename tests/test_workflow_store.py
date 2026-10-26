@@ -204,3 +204,48 @@ def test_a_table_made_before_owners_gains_the_column_and_reads_unowned(tmp_path)
     with WorkflowStore(dsn) as s:
         assert s.get("old").owner is None
         assert s.save("old", validate_workflow_spec(_MINIMAL), owner="bob").owner == "bob"
+
+
+# --- inbound hooks ------------------------------------------------------------
+
+_HOOK = {"name": "crm", "secret_env": "CRM_KEY", "events": ["documents_added", "run_requested"]}
+
+
+def test_inbound_hooks_parse_and_stay_out_of_the_digest_only_when_empty() -> None:
+    plain = validate_workflow_spec(_MINIMAL)
+    hooked = validate_workflow_spec({**_MINIMAL, "inbound": [_HOOK]})
+    assert hooked.inbound[0].events == ("documents_added", "run_requested")
+    assert workflow_digest(validate_workflow_spec({**_MINIMAL, "inbound": []})) == workflow_digest(plain)
+    assert workflow_digest(hooked) != workflow_digest(plain)  # which senders may act is part of the recipe
+
+
+@pytest.mark.parametrize(("hooks", "match"), [
+    ([{**_HOOK, "name": "a/b"}], "safe token"),
+    ([_HOOK, {**_HOOK, "secret_env": "OTHER"}], "more than once"),
+    ([{**_HOOK, "events": ["nope"]}], "subset of"),
+    ([{**_HOOK, "events": []}], "subset of"),
+    ([{**_HOOK, "secret_env": " "}], "secret_env"),
+    ([_HOOK, {**_HOOK, "name": "erp"}], "share a secret_env"),
+])
+def test_a_bad_inbound_hook_is_refused(hooks: list[dict], match: str) -> None:
+    with pytest.raises(ValueError, match=match):
+        validate_workflow_spec({**_MINIMAL, "inbound": hooks})
+
+
+def test_a_secret_shared_with_another_stored_workflow_is_refused_unless_insecure(store, monkeypatch, caplog) -> None:
+    store.save("one", validate_workflow_spec({**_MINIMAL, "inbound": [_HOOK]}))
+    rival = validate_workflow_spec({**_MINIMAL, "inbound": [{**_HOOK, "name": "other"}]})
+    with pytest.raises(ValueError, match="also named by stored workflow 'one'"):
+        store.save("two", rival)
+    assert store.get("two") is None
+    store.save("one", validate_workflow_spec({**_MINIMAL, "inbound": [_HOOK]}))  # resaving itself is fine
+    monkeypatch.setenv("WOMBLEX_INSECURE_INBOUND", "1")
+    assert store.save("two", rival).id == "two"
+    assert "allowed by WOMBLEX_INSECURE_INBOUND" in caplog.text
+
+
+def test_a_spec_cannot_turn_the_insecure_switch_on() -> None:
+    with pytest.raises(ValidationError):
+        validate_workflow_spec({**_MINIMAL, "insecure_inbound": True})
+    with pytest.raises(ValueError, match="share a secret_env"):
+        validate_workflow_spec({**_MINIMAL, "inbound": [_HOOK, {**_HOOK, "name": "erp"}]})

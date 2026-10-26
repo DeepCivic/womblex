@@ -67,14 +67,7 @@ The only identity change is that the run id stops being the workflow name. That 
 
 ## Phase B — Inbound webhooks (Requirement 35)
 
-**B1. Spec and storage.**
-- Add `inbound: [{name, secret_env, events}]` to the workflow spec, validated like `WebhookDestination`.
-- Each hook needs its own secret: validation refuses two hooks (in this workflow or another stored one) naming the same `secret_env`. The signature stays body-only, matching outbound `webhook.sign`, so a sender uses a standard HMAC.
-- Development switch: `WOMBLEX_INSECURE_INBOUND=1` turns the inbound checks off for a proof of concept:
-  - validation warns, rather than refuses, a shared or unset `secret_env`
-  - the route skips signature verification and logs a warning on every event it accepts unsigned
-  - it is read only from the environment, never from the spec, so a stored workflow cannot turn it on
-- New `cloud/inbound_store.py` creates the `womblex_inbound_events` table (`event_id` PK, `workflow_id`, `hook`, `event`, `received_at`, `outcome_json`). It follows the `womblex_workflows` / `worker_registry` DDL pattern: insert first, and an `IntegrityError` means the event was seen before.
+**B1. Spec and storage.** Built (Requirement 35). `WOMBLEX_INSECURE_INBOUND` is read by `workflow_store.insecure_inbound()`, and the route (B2) reads it from there.
 
 **B2. Route.** New `api/routes_inbound.py` serves `POST /v1/hooks/{workflow}/{hook}`.
 - Authentication is HMAC only, not the bearer token:

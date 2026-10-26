@@ -675,3 +675,53 @@ def test_a_scheduled_firing_of_an_owned_workflow_opens_a_run_its_owner_sees(flee
         assert board.runs(owner="bob") == []
     assert run.run_id == "c1" and run.counts.get("failed") is None
     assert kinds == ["batch", "downstream", "stage", "trigger"]  # every row of the firing is alice's
+
+
+def _inbound_file(fleet, name: str = "feed", secret_env: str = "CRM_KEY") -> str:  # noqa: F811
+    from tests.test_workflow_runner import write_workflow
+
+    return str(write_workflow(
+        fleet[2], name, ["normalise"], input_binding={"store": fleet[1], "ingest_prefix": "inbox"},
+        inbound=[{"name": "crm", "secret_env": secret_env, "events": ["documents_added"]}]))
+
+
+def test_a_workflow_with_inbound_hooks_keeps_its_copy_without_triggers_or_a_collection(
+    fleet, saved_preset, monkeypatch,  # noqa: F811
+) -> None:
+    import argparse
+
+    from womblex.cli.workflow import cmd_schedule_workflow
+
+    path = _inbound_file(fleet)
+    ensure_workflow_schema(None)
+    args = argparse.Namespace(workflow=path, dsn=None, remove=False, status=False, **_where(fleet))
+    monkeypatch.delenv("CRM_KEY", raising=False)
+    assert cmd_schedule_workflow(args) == 1  # the hook's key is not set here
+    with WorkflowStore(None) as store:
+        assert store.get("feed") is None
+    monkeypatch.setenv("CRM_KEY", "k")
+    assert cmd_schedule_workflow(args) == 0
+    with WorkflowStore(None) as store:
+        assert store.get("feed").spec.inbound[0].name == "crm"
+    from womblex.cloud.inbound_store import InboundEvents
+
+    with InboundEvents(None) as events:  # the writer made the events table
+        assert events.list("feed") == []
+
+
+def test_scheduling_refuses_a_hook_secret_another_stored_workflow_names(
+    fleet, saved_preset, monkeypatch, caplog,  # noqa: F811
+) -> None:
+    import argparse
+
+    from womblex.cli.workflow import cmd_schedule_workflow
+
+    monkeypatch.setenv("CRM_KEY", "k")
+    where = _where(fleet)
+    first = argparse.Namespace(workflow=_inbound_file(fleet, "feed"), dsn=None, remove=False, status=False, **where)
+    second = argparse.Namespace(workflow=_inbound_file(fleet, "feed-2"), dsn=None, remove=False, status=False, **where)
+    assert cmd_schedule_workflow(first) == 0
+    assert cmd_schedule_workflow(second) == 1
+    assert "also named by stored workflow 'feed'" in caplog.text
+    with WorkflowStore(None) as store:
+        assert store.get("feed-2") is None
