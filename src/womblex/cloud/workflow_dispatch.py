@@ -163,14 +163,28 @@ def _firing_kwargs(
             "dsn": dsn, "acted_on": ("triggers", "input_binding.store", "input_binding.ingest_prefix")}
 
 
+def _check_run_owner(stored: StoredWorkflow, run_id: str, dsn: str | None) -> None:
+    """Refuse an owned workflow's firing into a run another owner holds, as `RunBoard.enqueue` would."""
+    from womblex.cloud import dbos_app
+    from womblex.cloud.jobs import RunBoard, RunOwnedError
+
+    if stored.owner is None or (dsn is None and not dbos_app.local_database_path().exists()):
+        return  # an admin's firing inherits the run's owner; no database holds no run
+    try:
+        with RunBoard(dsn) as board:
+            board.check_owner(run_id, stored.owner)
+    except RunOwnedError as e:
+        raise WorkflowRefusedError(f"workflow {stored.id!r}: {e}", code=RefusalCode.RUN_OWNED) from e
+
+
 def check_firing(
     stored: StoredWorkflow, *, run_id: str, resolve_preset: Callable[[str], Preset | None],
     store: RemoteStore, dsn: str | None, ingest: RemoteStore | None = None,
 ) -> list[str]:
     """Every check a firing makes before it writes a row; the keys it would extract.
 
-    A dry-run dispatch, a named input store, a safe input prefix, and at least one document
-    there. *ingest* is the input store opened with the caller's credentials (a worker's own);
+    A dry-run dispatch, the run not owned by another owner than the workflow's, a named input
+    store, a safe input prefix, and at least one document there. *ingest* is the input store opened with the caller's credentials (a worker's own);
     `None` opens it from the workflow's URI. Raises
     `WorkflowRefusedError`; a firing and `schedule-workflow` both call it, so a workflow is
     refused at scheduling for exactly what its firing would refuse.
@@ -179,6 +193,7 @@ def check_firing(
     from womblex.cloud.dispatch import supported_keys
 
     dispatch_workflow(stored, dry_run=True, **_firing_kwargs(stored, run_id, resolve_preset, store, dsn))
+    _check_run_owner(stored, run_id, dsn)
     if not (ingest_root := stored.spec.input_binding.store):
         raise WorkflowRefusedError(f"workflow {stored.id!r}: a scheduled workflow names its input store "
                                    "(input_binding.store)", code=RefusalCode.SPEC_INVALID)
