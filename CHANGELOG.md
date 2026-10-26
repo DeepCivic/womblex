@@ -17,6 +17,8 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 - **Rerun a collection.** `womblex rerun-collection FILE` dispatches the workflow's current steps over its whole collection (`dispatch-workflow` without `--firing`, run id from the collection); unit receipts skip unchanged units. Re-extraction stays out.
 
+- **`/v1/collections`.** List and show a caller's collections (owner-scoped; admin sees all) and add to or rerun one through its stored workflow (`submit`), refused before any row with the workflow refusal's code. Every outbound webhook event carries the workflow's `collection`.
+
 ### Removed
 - **The console leaves Womblex for [womblex-console](https://github.com/DeepCivic/womblex-console).** `womblex ui`, `src/womblex/ui/`, the `ui/` SPA, `Dockerfile.ui`, the `ui` compose service and the console's CI and publish jobs are gone; the repository was seeded from this history. Requirements 15 to 21 and `DESIGN.md` went with it. The console depends on a pinned Womblex and Womblex no longer imports or tests it. The `[ui]` extra is removed in a dependency change of its own; its fastapi and uvicorn are in `[api]`.
 

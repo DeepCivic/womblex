@@ -46,6 +46,7 @@ from womblex.api.models import (
     RunSubmitted,
     UploadAccepted,
 )
+from womblex.api.routes_collections import collections_router
 from womblex.api.routes_config import config_router
 from womblex.api.routes_presets import presets_router
 from womblex.api.routes_queue import queue_router
@@ -159,6 +160,7 @@ def create_api_app(
     app.include_router(config_router(settings, can_read))
     app.include_router(presets_router(settings, can_read, can_admin))
     app.include_router(queue_router(db_dsn, can_read))
+    app.include_router(collections_router(settings, can_read, can_submit))
     app.include_router(resources_router(settings, can_admin))
 
     @contextmanager

@@ -515,7 +515,7 @@ These requirements described the admin console (`womblex ui`). The console now l
 - There are no per-document or per-batch events.
 - The run record lists every delivery.
 
-**Out of scope:** managing workflows through the API, pruning changed or deleted documents, resolving the source of a changed file's earlier version (its bytes are gone from the store, so `SourceResolver` reads it as `hash_mismatch`), backfill of missed firings, per-step destinations, databases other than Postgres (each needs its own requirement), registering webhooks through the API, and write-back from consumers.
+**Out of scope:** creating, editing or removing workflows through the API (listing, adding to and rerunning a collection through a stored workflow are Requirement 34), pruning changed or deleted documents, resolving the source of a changed file's earlier version (its bytes are gone from the store, so `SourceResolver` reads it as `hash_mismatch`), backfill of missed firings, per-step destinations, databases other than Postgres (each needs its own requirement), registering webhooks through the API, and write-back from consumers.
 
 ## 28. Fleet Runs — Honour the Dispatch, Report the Truth
 
@@ -594,7 +594,10 @@ These requirements described the admin console (`womblex ui`). The console now l
 - `rerun-collection` runs the workflow file's current steps over the whole collection, outside a firing. A unit whose version, stage config and inputs are unchanged since it was published is skipped, so adding `pii` runs only `pii` and a changed setting reruns the stages it changes. It is refused before any row for what `dispatch-workflow` refuses.
 - Limits: an in-place stage, `graph-refresh` and an output with no receipt run again over the whole collection on every rerun. Re-extraction is out: batch ids are deterministic and attach rather than rerun.
 
-**Out of scope:** the API and document versions, each a later piece of the same requirement.
+- The service API lists a caller's collections and shows one with its workflows, document count and the workflows its files record; another owner's collection is 404 and an admin sees all. Adding to and rerunning a collection (`submit` scope) act through the stored workflow, make the checks of `add-to-collection` and `rerun-collection`, and refuse before any row with the workflow refusal's code (409). A collection fed by several workflows needs one named.
+- Every outbound webhook event carries the workflow's `collection` (null when it names none).
+
+**Out of scope:** creating, editing or removing a workflow through the API (so a non-admin owner is, for now, whoever the deployment stored the workflow for), document versions and document versions, each a later piece of the same requirement.
 
 ## Outstanding
 

@@ -420,6 +420,10 @@ def test_openapi_surface_is_pinned(client):
             "GET /v1/queue": "200 QueueSnapshot",
             "GET /v1/resources": "200 Resources",
             "POST /v1/resources/test/{target}": "200 Reachability",
+            "GET /v1/collections": "200 CollectionList",
+            "GET /v1/collections/{name}": "200 CollectionDetail",
+            "POST /v1/collections/{name}/add": "202 CollectionAdded",
+            "POST /v1/collections/{name}/rerun": "202 CollectionRerun",
         },
         "models": {
             "DocumentText": ["layer", "rows", "run_id", "sensitivity", "source_hash"],
@@ -453,5 +457,11 @@ def test_openapi_surface_is_pinned(client):
             "PresetList": ["presets"],
             "PresetOut": ["config", "description", "formats", "name", "source"],
             "PresetSave": ["config", "description", "formats", "name"],
+            "CollectionList": ["collections"],
+            "CollectionSummary": ["name", "workflows"],
+            "CollectionDetail": ["documents", "name", "workflows", "written_by"],
+            "CollectionAction": ["workflow"],
+            "CollectionAdded": ["firing", "name", "workflow"],
+            "CollectionRerun": ["name", "newly_dispatched", "stages", "workflow"],
         },
     }

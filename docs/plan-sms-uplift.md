@@ -59,15 +59,7 @@ The only identity change is that the run id stops being the workflow name. That 
 
 **A2a. Workflow owner.** Built (Requirement 34): the store holds an owner and firings run under it. Nothing yet stores a workflow under a non-admin owner (the CLI stores none, and A4 does not create workflows); A4 must settle how an owned workflow comes to exist.
 
-**A4. API.**
-- New `api/routes_collections.py`:
-  - Owner-scoped like `/v1/runs`: a caller sees and acts on its own collections (A2a), another owner's is 404, admin sees all.
-  - `GET /v1/collections`: from `WorkflowStore` plus the store's runs.
-  - `GET /v1/collections/{name}`: documents, current-version counts, workflows that wrote to it (read from the run record's `workflows`).
-  - `POST /v1/collections/{name}/add` and `POST /v1/collections/{name}/rerun` (submit scope).
-  - These two routes reopen the "managing workflows through the API" exclusion in Requirement 27's out-of-scope list. They act on a stored workflow but neither creates, edits nor removes one. Record the narrowed exclusion in `docs/decisions-operations.md`.
-- Add a `collection` field to every outbound webhook `event_body` (`cloud/webhook.py`).
-- Update `test_openapi_surface_is_pinned`.
+**A4. API.** Built (Requirement 34), except `current_documents` on `GET /v1/collections/{name}`, which A5 adds with `is_current`.
 
 **A5. Document versions (the Requirement 31 need, document level).**
 - New `store/document_versions.py`. At consolidation (`cloud/finalize.py`, `store/run_manifest.write_run_manifest`) it adds three columns to the run-root `manifest.parquet`:

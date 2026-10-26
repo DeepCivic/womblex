@@ -41,11 +41,13 @@ def sign(secret: str, body: bytes) -> str:
     return "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
 
 
-def event_body(event: str, event_id: str, run_id: str, status: str, workflow: str, **fields: Any) -> bytes:
+def event_body(
+    event: str, event_id: str, run_id: str, status: str, workflow: str, collection: str | None = None, **fields: Any,
+) -> bytes:
     if event not in EVENTS:
         raise ValueError(f"unknown event {event!r}")
     return json.dumps({"event": event, "event_id": event_id, "run_id": run_id, "status": status,
-                       "workflow": workflow, "at": datetime.now(UTC).isoformat(timespec="seconds"), **fields},
+                       "workflow": workflow, "collection": collection, "at": datetime.now(UTC).isoformat(timespec="seconds"), **fields},
                       sort_keys=True).encode()
 
 
@@ -93,7 +95,7 @@ def emit(
     sent: list[dict[str, Any]] = []
     for d in stored.spec.destinations:
         if isinstance(d, WebhookDestination):
-            body = event_body(event, event_id, run_id, status, stored.id, **fields)
+            body = event_body(event, event_id, run_id, status, stored.id, stored.spec.collection, **fields)
             sent.append({"destination": d.name, **asdict(send_event(d, event, event_id, body))})
     return sent
 

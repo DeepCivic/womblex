@@ -94,9 +94,13 @@ that submitted them.
 | GET | `/v1/presets/{name}` | read | One preset; 404 when none |
 | POST | `/v1/presets` | admin | Save or replace a preset under the store's `presets/`; 400 for an unsafe name or a config that would not load |
 | DELETE | `/v1/presets/{name}` | admin | Delete a saved preset; 404 when none, and for a built-in |
+| GET | `/v1/collections` | read | The collections the caller's stored workflows feed (admin: all), with the workflows that feed each |
+| GET | `/v1/collections/{name}` | read | One collection: its workflows, its document count and the workflows its run's files record; 404 for another owner's |
+| POST | `/v1/collections/{name}/add` | submit | Fire the stored workflow now (`womblex add-to-collection`); 202 with the firing's board id. Body `{workflow}` names it when several feed the collection (409 otherwise); 409 `{code, message}` for a firing that would be refused, before any row |
+| POST | `/v1/collections/{name}/rerun` | submit | Dispatch the stored workflow's steps over the collection (`womblex rerun-collection`); 202 with the stages and the units newly dispatched; refused as `add` is |
 | POST | `/v1/config/yaml` | read | The posted config as YAML `womblex run --config` reads; 422 with the errors when invalid |
 
-`POST /v1/runs`, `POST /v1/uploads` and `POST /v1/presets` answer 201. Pydantic models generate the OpenAPI spec; a test
+`POST /v1/runs`, `POST /v1/uploads` and `POST /v1/presets` answer 201; the collection actions answer 202. Pydantic models generate the OpenAPI spec; a test
 pins its operation and model surface so breaking changes show in review.
 
 ### Uploads
