@@ -14,6 +14,7 @@ or that other systems find it by); `add_to_collection` fires it once, on demand,
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -34,7 +35,19 @@ def schedule_prefix(workflow_id: str) -> str:
 
 def firing_context(stored: StoredWorkflow) -> dict[str, Any]:
     """What a firing is told of its workflow: the same for a schedule's and an on-demand one."""
-    return {"workflow_id": stored.id, "run_id": stored.run_id, "store": stored.spec.input_binding.store}
+    context = {"workflow_id": stored.id, "run_id": stored.run_id, "store": stored.spec.input_binding.store}
+    if stored.owner is not None:  # the firing's own row joins the run it opens, so it carries the run's owner
+        context["owner"] = stored.owner
+    return context
+
+
+def trigger_attributes(context: dict[str, Any], run_id: str, firing: str) -> dict[str, Any]:
+    """The attributes of a firing's board row, from the context `firing_context` built."""
+    attrs: dict[str, Any] = {"run_id": run_id, "kind": dbos_app.KIND_TRIGGER,
+                             "workflow_id": context["workflow_id"], "firing": firing}
+    if context.get("owner") is not None:
+        attrs["owner"] = context["owner"]
+    return attrs
 
 
 def keeps_copy(spec: StoredWorkflowSpec) -> bool:
@@ -97,6 +110,7 @@ def schedule_workflow(
     reads a copy its schedules do not match; the error propagates.
     """
     previous = wf_store.get(stored.id)
+    stored = replace(stored, owner=owner)  # its schedules' context names the owner its firings run under
     if keeps_copy(stored.spec):
         wf_store.save(stored.id, stored.spec, owner=owner)
     try:
@@ -120,15 +134,14 @@ def add_to_collection(client: DBOSClient, stored: StoredWorkflow, *, now: dateti
     caller has checked the firing (`workflow_dispatch.check_firing`) before this writes a row.
     """
     firing = f"manual-{(now or datetime.now(UTC)):%Y%m%dT%H%M%SZ}"
-    run_id = stored.run_id
+    run_id, context = stored.run_id, firing_context(stored)
     workflow_id = dbos_app.trigger_id(run_id, firing)
     client.enqueue(
         {"workflow_name": dbos_app.TRIGGER_WORKFLOW,
          "queue_name": dbos_app.firing_queue(stored.spec.input_binding.store or ""),
          "workflow_id": workflow_id,
-         "attributes": {"run_id": run_id, "kind": dbos_app.KIND_TRIGGER,
-                        "workflow_id": stored.id, "firing": firing}},
-        run_id, firing_context(stored), firing,
+         "attributes": trigger_attributes(context, run_id, firing)},
+        run_id, context, firing,
     )
     return workflow_id
 

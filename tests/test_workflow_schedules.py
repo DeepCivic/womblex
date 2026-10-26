@@ -650,3 +650,28 @@ def test_rerun_collection_is_refused_before_any_row_for_a_step_the_fleet_cannot_
     assert "stage_not_dispatchable" in caplog.text
     with RunBoard(None) as board:
         assert board.runs() == []
+
+def test_a_scheduled_firing_of_an_owned_workflow_opens_a_run_its_owner_sees(fleet, saved_preset) -> None:  # noqa: F811
+    from womblex.cloud.workflow_schedules import schedule_workflow
+
+    _inbox(fleet)
+    ensure_workflow_schema(None)
+    client = dbos_app.open_client(None)
+    spec = validate_workflow_spec({
+        "preset": _PRESET.name, "steps": [{"stage": "normalise"}], "triggers": [_TRIGGER], "collection": "c1",
+        "input_binding": {"store": fleet[1], "ingest_prefix": "inbox"},
+    })
+    with WorkflowStore(None) as store:
+        schedule_workflow(client, store, StoredWorkflow("feed", spec, ""), owner="alice")
+        stored = store.get("feed")
+    assert stored is not None and stored.owner == "alice"
+    (sched,) = list_schedules(client, "feed")
+    assert sched["context"]["owner"] == "alice"
+    _fire_all_at_once(client, stored)
+    work(fleet, idle_timeout=4)
+    with RunBoard(None) as board:
+        (run,) = board.runs(owner="alice")
+        kinds = sorted((s.attributes or {}).get("kind") for s in board._list(run.run_id))
+        assert board.runs(owner="bob") == []
+    assert run.run_id == "c1" and run.counts.get("failed") is None
+    assert kinds == ["batch", "downstream", "stage", "trigger"]  # every row of the firing is alice's

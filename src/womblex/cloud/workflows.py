@@ -47,6 +47,7 @@ from womblex.cloud.stage_runner import (
     run_unit,
 )
 from womblex.cloud.unit_receipt import already_published
+from womblex.cloud.workflow_schedules import trigger_attributes
 from womblex.store.run_stamp import RunStamp, workflow_context
 from womblex.store.source_provenance import IngestProvenance
 from womblex.utils.log_format import log_context
@@ -377,8 +378,7 @@ def run_scheduled(scheduled_time: datetime, context: dict[str, Any]) -> dict[str
     context carried `run_id` falls back to the workflow, which was its run id). The firing runs
     under the stored workflow's owner (`fire_workflow`); a CLI-stored workflow's run is admin-only."""
     run_id, firing = context.get("run_id") or context["workflow_id"], firing_label(scheduled_time)
-    attrs: dict[str, Any] = {"run_id": run_id, "kind": dbos_app.KIND_TRIGGER,
-                             "workflow_id": context["workflow_id"], "firing": firing}
+    attrs = trigger_attributes(context, run_id, firing)
     with SetWorkflowID(dbos_app.trigger_id(run_id, firing)), SetWorkflowAttributes(attrs):
         # A schedule synced before workflows named a store has none: no worker serves an
         # unkeyed firing queue, so it goes where every worker serves, to be refused visibly.
