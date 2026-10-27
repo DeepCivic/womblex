@@ -216,7 +216,8 @@ Womblex is **alpha** and pre-1.0.
 - **Stable:** the on-disk data contract, versioned apart from the package
   (additive changes are minor bumps with back-fill; renames are major bumps with
   a reader shim), and the Python names in `womblex.__all__`, which change only
-  after one minor release of deprecation warnings. See [docs/contract.md](docs/contract.md).
+  after one minor release of deprecation warnings. See [STABILITY.md](STABILITY.md) for
+  the policy and [docs/contract.md](docs/contract.md) for the schema.
 - **Moving:** everything outside `__all__`, the CLI options, the stored-workflow
   commands.
 
