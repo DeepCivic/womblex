@@ -105,7 +105,8 @@ class EmbeddingProvider(Protocol):
         ...
 
 
-register(SLOT_EMBEDDING, DEFAULT_MODEL, make_isaacus_embedding, traits={"isaacus": True})
+register(SLOT_EMBEDDING, DEFAULT_MODEL, make_isaacus_embedding, traits={"isaacus": True},
+         deployments=("isaacus-api", "isaacus-sagemaker"), vendor_model=DEFAULT_MODEL)
 
 
 def calls_isaacus(model: str) -> bool:

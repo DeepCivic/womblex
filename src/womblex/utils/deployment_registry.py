@@ -34,7 +34,11 @@ logger = logging.getLogger(__name__)
 ENTRY_POINT_GROUP = "womblex.deployments"
 
 #: The modules that register the built-in deployments at import.
-_BUILTIN_MODULES: tuple[str, ...] = ()
+_BUILTIN_MODULES = (
+    "womblex.providers.bedrock.deployment",
+    "womblex.providers.isaacus.deployment",
+    "womblex.providers.ollama.deployment",
+)
 
 
 def serves_everything(model: str) -> bool:

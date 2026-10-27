@@ -309,10 +309,11 @@ register(SLOT_OCR, "paddleocr", _make_paddle, aliases=("paddle", "rapidocr"))
 register(
     SLOT_OCR, "mistral-ocr", _make_mistral, traits={"markdown": True},
     aliases=("mistral", "mistralocr", "pixtral", "bedrock"),
+    deployments=("bedrock",), vendor_model="mistral.pixtral-large-2502-v1:0",
 )
 register(
     SLOT_OCR, "ollama", _make_ollama, traits={"markdown": True},
-    aliases=("ollama-ocr",),
+    aliases=("ollama-ocr",), deployments=("ollama",), vendor_model="llama3.2-vision",
 )
 
 

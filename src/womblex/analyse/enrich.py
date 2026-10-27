@@ -411,7 +411,8 @@ class EnrichmentProvider(Protocol):
 
 
 register(SLOT_ENRICHMENT, DEFAULT_MODEL, make_isaacus_enrichment,
-         traits={"isaacus": True, "returns_document": True})
+         traits={"isaacus": True, "returns_document": True},
+         deployments=("isaacus-api", "isaacus-sagemaker"), vendor_model=DEFAULT_MODEL)
 
 
 def provider_traits(model: str) -> dict[str, object]:

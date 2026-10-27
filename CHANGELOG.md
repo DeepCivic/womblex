@@ -11,7 +11,7 @@ Entries are terse by design; rationale lives in the PR/commit history.
 ### Changed
 - **The Isaacus client and its slot adapters move into `providers/isaacus/` (Requirement 38, Phase A1).** `utils/isaacus_client.py` becomes `providers/isaacus/client.py`; `IsaacusEnrichment` and `IsaacusEmbedding` move out of `analyse/enrich.py` and `analyse/embed.py` into `enrichment.py` and `embedding.py` beside it. The old import paths re-export. No behaviour change.
 - **The OCR readers move into `providers/` (Requirement 38, Phase A2).** `ingest/llm_ocr.py` becomes `providers/bedrock/ocr.py` (Mistral on Bedrock); the Ollama reader moves to `providers/ollama/ocr.py`. `ingest/llm_ocr.py` re-exports both. No behaviour change.
-- **A deployment registry (Requirement 36, Phase B1).** `utils/deployment_registry.py` registers where a vendor's models are served from (environment variables, network and billing, a free check, a billed smoke call, models served, client), with a `womblex.deployments` entry-point group; `ModelEntry` gains `deployments` and `vendor_model`. Nothing reads it yet.
+- **A deployment registry (Requirement 36, Phase B1).** `utils/deployment_registry.py` registers where a vendor's models are served from (environment variables, network and billing, a free check, a billed smoke call, models served, client), with a `womblex.deployments` entry-point group; `ModelEntry` gains `deployments` and `vendor_model`. The four built-ins are declared (`isaacus-api`, `isaacus-sagemaker`, `bedrock`, `ollama`) and the default models name the deployments that serve them. Nothing reads the registry yet.
 
 ## [0.6.0] - YYYY-MM-DD <!-- TODO: set the release date before tagging -->
 
