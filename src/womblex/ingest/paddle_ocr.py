@@ -33,7 +33,7 @@ from womblex.utils.model_registry import (
 if TYPE_CHECKING:
     from rapidocr_onnxruntime import RapidOCR
 
-    from womblex.ingest.llm_ocr import MistralOCRReader, OllamaOCRReader
+    from womblex.providers.bedrock.ocr import MistralOCRReader, OllamaOCRReader
 
 logger = logging.getLogger(__name__)
 
@@ -287,7 +287,7 @@ def _make_paddle(lang: str = "eng", use_cls: bool = True, **_: object) -> Paddle
 def _make_mistral(
     model: str | None = None, region: str | None = None, **_: object
 ) -> MistralOCRReader:
-    from womblex.ingest.llm_ocr import get_mistral_reader
+    from womblex.providers.bedrock.ocr import get_mistral_reader
     return get_mistral_reader(model=model, region=region)
 
 
@@ -297,7 +297,7 @@ def _make_ollama(
     prompt: str | None = None,
     **_: object,
 ) -> OllamaOCRReader:
-    from womblex.ingest.llm_ocr import get_ollama_reader
+    from womblex.providers.bedrock.ocr import get_ollama_reader
     return get_ollama_reader(model=model, base_url=base_url, prompt=prompt)
 
 

@@ -72,7 +72,6 @@ womblex/
 │   │   ├── paddle_ocr.py        # PaddleOCR wrapper via rapidocr-onnxruntime (det/rec/cls)
 │   │   ├── layout_step.py       # The batch's one layout step — page selection, one analyser call per page, normalised regions on ExtractionResult
 │   │   ├── layout_onnx.py       # PPDocLayoutAnalyzer — PP-DocLayout-M layout detection (onnxruntime; registered default `pp-doclayout-m`)
-│   │   ├── llm_ocr.py           # LLM/VLM OCR backends: Mistral Pixtral Large via AWS Bedrock, + local Ollama
 │   │   ├── spreadsheet.py       # CSV/Excel extraction — one ExtractionResult per workbook with cells as elements
 │   │   ├── gnaf.py              # G-NAF PSV → Parquet ingest (standalone)
 │   │   ├── gnaf_schema.py       # G-NAF table schemas — static column definitions
@@ -214,6 +213,8 @@ womblex/
 │   │   ├── auth.py             # Service-token auth: client registry (WOMBLEX_API_CLIENTS), Caller + scopes, FastAPI dependencies
 │   │   └── models.py           # Pydantic response models — the OpenAPI surface
 │   ├── providers/            # One package per built-in vendor: client module beside one adapter module per slot
+│   │   ├── bedrock/
+│   │   │   └── ocr.py           # LLM/VLM OCR backends: Mistral Pixtral Large via AWS Bedrock, + local Ollama
 │   │   └── isaacus/
 │   │       ├── client.py        # Build the Isaacus SDK client (hosted API or private SageMaker)
 │   │       ├── enrichment.py    # IsaacusEnrichment, the kanon-2-enricher adapter

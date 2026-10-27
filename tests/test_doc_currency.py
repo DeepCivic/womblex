@@ -17,7 +17,7 @@ SRC = ROOT / "src" / "womblex"
 #: Modules the table has never listed. A new module is not added here: it gets a row.
 UNLISTED = {
     "config/process.py", "ingest/grid_projection.py", "ingest/heuristics_cv2.py",
-    "ingest/heuristics_numpy.py", "ingest/interfaces/protocols.py", "ingest/llm_ocr.py",
+    "ingest/heuristics_numpy.py", "ingest/interfaces/protocols.py",
     "ingest/markdown.py", "ingest/redaction.py", "ingest/spreadsheet.py", "ingest/strategies.py",
     "ingest/views.py", "process/quality.py", "process/quality_stage.py", "profile/columns.py",
     "redact/batch.py", "redact/utils.py", "score.py", "store/checkpoint.py", "store/demo_corpus.py",

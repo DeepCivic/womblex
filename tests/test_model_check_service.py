@@ -85,7 +85,7 @@ def test_smoke_warns_before_each_billed_request(fake_isaacus, caplog, monkeypatc
 
 
 def test_a_billed_ping_is_warned_before_it_is_sent(caplog) -> None:
-    from womblex.ingest.llm_ocr import MistralOCRReader
+    from womblex.providers.bedrock.ocr import MistralOCRReader
     from womblex.utils import model_registry as reg
     from womblex.utils.model_check import SCOPE_EXTRACT
 
