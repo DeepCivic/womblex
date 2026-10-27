@@ -1,7 +1,7 @@
 [project]
 name = "womblex"
 version = "0.6.0"
-description = "Document extraction pipeline for Australian government documents"
+description = "Turns messy government document releases (FOI bundles, scanned PDFs, Word files, spreadsheets) into a verbatim, versioned Parquet corpus for teams who need to search and analyse them with every result traced to its source."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = "Apache-2.0"
@@ -15,6 +15,10 @@ keywords = [
     "government-documents",
     "parquet",
     "nlp",
+    "civic-tech",
+    "document-pipeline",
+    "records",
+    "versioning",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
