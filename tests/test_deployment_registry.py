@@ -35,7 +35,7 @@ def clean(monkeypatch: pytest.MonkeyPatch):
 
 
 def _deployment(name: str = "acme", **kw) -> Deployment:
-    kw.setdefault("check", lambda model: None)
+    kw.setdefault("check", lambda models: None)
     kw.setdefault("needs_network", True)
     kw.setdefault("billed", True)
     return Deployment(name=name, **kw)
@@ -124,7 +124,7 @@ def test_a_pinging_model_without_a_deployment_is_given_one_built_from_its_ping(b
 
     d = dr.deployment_for_pinging_model("ocr", "My-Reader", Reader())
     assert d.name == "ocr:my-reader" and d.billed is billed
-    d.check("any-model")
+    d.check(["any-model"])
     assert calls == ["ping"]
     assert_conforms(d)
 
@@ -135,7 +135,7 @@ def test_a_failing_ping_surfaces_as_a_failing_check() -> None:
             raise ConnectionError("refused")
 
     with pytest.raises(ConnectionError):
-        dr.deployment_for_pinging_model("ocr", "r", Reader()).check("m")
+        dr.deployment_for_pinging_model("ocr", "r", Reader()).check(["m"])
 
 
 def test_a_model_registers_against_deployments_and_a_vendor_id(monkeypatch: pytest.MonkeyPatch) -> None:

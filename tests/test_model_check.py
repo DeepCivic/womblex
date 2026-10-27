@@ -561,11 +561,11 @@ def fake_isaacus(monkeypatch: pytest.MonkeyPatch):
     made: list[_FakeIsaacus] = []
 
     def install(fail: str | None = None) -> list[_FakeIsaacus]:
-        def make(*, models: object = ()) -> _FakeIsaacus:
+        def make() -> _FakeIsaacus:
             made.append(_FakeIsaacus(fail))
             return made[-1]
 
-        monkeypatch.setattr(isaacus_client, "make_isaacus_client", make)
+        monkeypatch.setattr(isaacus_client, "make_api_client", make)
         return made
 
     return install

@@ -9,7 +9,6 @@ from types import SimpleNamespace
 import pytest
 
 from tests.test_model_check import _PAID, _clean, _config, fake_isaacus  # noqa: F401
-from womblex.utils import model_check
 from womblex.utils.model_check import SCOPE_EMBED, SCOPE_ENRICH, check_models
 
 
@@ -30,7 +29,7 @@ def test_load_checks_connectivity_with_no_billed_request(fake_isaacus, hosted) -
     made = fake_isaacus()
     result = check_models(_config(**_PAID), "load", scopes=(SCOPE_ENRICH, SCOPE_EMBED))
     assert result.ok and made == []  # no client built, so nothing billed
-    assert hosted == ["https://api.isaacus.com/v1"] * 2  # one reachability request per model
+    assert hosted == ["https://api.isaacus.com/v1"]  # one reachability request for the deployment, not per model
 
 
 @pytest.mark.parametrize("why", ["no key", "unreachable"])
@@ -70,15 +69,17 @@ def test_load_on_sagemaker_asks_whether_the_endpoint_is_in_service(monkeypatch, 
 
 
 def test_smoke_warns_before_each_billed_request(fake_isaacus, caplog, monkeypatch) -> None:  # noqa: F811
+    from womblex.providers.isaacus import client
+
     made = fake_isaacus()
     warned_first: list[bool] = []
-    real = model_check._ping_isaacus
+    real = client.make_api_client  # the fixture's recording factory
 
-    def ping(use):  # the warning is already logged when the billed request goes
-        warned_first.append(any(use.name in r.getMessage() and "billed" in r.getMessage() for r in caplog.records))
-        return real(use)
+    def make():  # the warning is already logged when the billed request goes
+        warned_first.append(sum("billed" in r.getMessage() for r in caplog.records) == len(made) + 1)
+        return real()
 
-    monkeypatch.setattr(model_check, "_ping_isaacus", ping)
+    monkeypatch.setattr(client, "make_api_client", make)
     with caplog.at_level(logging.WARNING):
         assert check_models(_config(**_PAID), "smoke", scopes=(SCOPE_ENRICH, SCOPE_EMBED)).ok
     assert warned_first == [True, True] and len(made) == 2

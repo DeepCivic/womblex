@@ -7,16 +7,8 @@ every model; SageMaker serves what `ISAACUS_SAGEMAKER_ENDPOINTS` declares.
 
 from __future__ import annotations
 
-from womblex.providers.isaacus.client import (
-    API_KEY_ENV,
-    ENDPOINTS_ENV,
-    check_api_reachable,
-    check_sagemaker_reachable,
-    endpoints_from_env,
-    is_model_served,
-    make_api_client,
-    make_sagemaker_client,
-)
+from womblex.providers.isaacus import client
+from womblex.providers.isaacus.client import API_KEY_ENV, ENDPOINTS_ENV, endpoints_from_env, is_model_served
 from womblex.utils.deployment_registry import Deployment, register
 from womblex.utils.model_registry import SLOT_EMBEDDING
 
@@ -45,23 +37,28 @@ def smoke_call(client: object, slot: str, model: str) -> None:
 
 register(Deployment(
     name=API,
-    check=lambda model: check_api_reachable(),
+    check=lambda models: client.check_api_reachable(),
     needs_network=True,
     billed=True,
     env=((API_KEY_ENV,),),
     env_optional=("ISAACUS_BASE_URL",),
-    smoke=lambda slot, model: smoke_call(make_api_client(), slot, model),
-    make_client=lambda models: make_api_client(),
+    smoke=lambda slot, model: smoke_call(client.make_api_client(), slot, model),
+    make_client=lambda models: client.make_api_client(),
 ))
 
 register(Deployment(
     name=SAGEMAKER,
-    check=check_sagemaker_reachable,
+    check=lambda models: client.check_sagemaker_reachable(*models),
     needs_network=True,
     billed=True,
     env=((ENDPOINTS_ENV,),),
     env_optional=("ISAACUS_SAGEMAKER_REGION", "ISAACUS_SAGEMAKER_PROFILE"),
     serves=lambda model: is_model_served(model, endpoints_from_env()),
-    smoke=lambda slot, model: smoke_call(make_sagemaker_client(endpoints_from_env(), [model]), slot, model),
-    make_client=lambda models: make_sagemaker_client(endpoints_from_env(), models),
+    smoke=lambda slot, model: smoke_call(client.make_sagemaker_client(endpoints_from_env(), [model]), slot, model),
+    make_client=lambda models: client.make_sagemaker_client(endpoints_from_env(), models),
 ))
+
+
+def default_deployment() -> str:
+    """The deployment a model is served by with nothing chosen: SageMaker when its endpoints are declared, else hosted."""
+    return SAGEMAKER if endpoints_from_env() else API

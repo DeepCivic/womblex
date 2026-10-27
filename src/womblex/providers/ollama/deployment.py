@@ -6,15 +6,18 @@ models and raises unless it has the one asked for.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from womblex.utils.deployment_registry import Deployment, register
 
 NAME = "ollama"
 
 
-def _check(model: str) -> None:
+def _check(models: Sequence[str]) -> None:
     from womblex.providers.ollama.ocr import OllamaOCRReader
 
-    OllamaOCRReader(model=model).ping()
+    for model in models:
+        OllamaOCRReader(model=model).ping()
 
 
 register(Deployment(

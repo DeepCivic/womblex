@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
+from womblex.utils.deployment_check import check_deployed, check_pinging_model
 from womblex.utils.model_registry import (
     SLOT_EMBEDDING,
     SLOT_ENRICHMENT,
@@ -93,6 +94,8 @@ class ModelUse:
     name: str
     options: dict[str, Any]
     scopes: tuple[str, ...]
+    deployment: str = ""
+    """The deployment (`utils/deployment_registry.py`) that serves it, for a model checked through one."""
 
 
 @dataclass(frozen=True)
@@ -250,7 +253,9 @@ def isaacus_models(
     ):
         if model and scope in wanted:
             found.setdefault(model, []).append(scope)
-    return [ModelUse(ISAACUS, m, {}, tuple(s)) for m, s in found.items()]
+    from womblex.providers.isaacus.deployment import default_deployment
+
+    return [ModelUse(ISAACUS, m, {}, tuple(s), default_deployment()) for m, s in found.items()]
 
 
 def models_key(config: WomblexConfig, scope: str) -> str:
@@ -385,54 +390,7 @@ def _smoke(use: ModelUse, model: Any) -> None:
             raise RuntimeError(f"encode returned shape {shape}, expected (1, dim)")
 
 
-def _ping_isaacus(use: ModelUse) -> None:
-    """One minimal request to *use*'s model, through the client the stage builds."""
-    from womblex.providers.isaacus.client import make_isaacus_client
-
-    client = make_isaacus_client(models=[use.name])
-    try:
-        if SCOPE_EMBED in use.scopes:
-            resp = client.embeddings.create(
-                model=use.name, texts=[_PROBE_SENTENCE], task="retrieval/document",
-            )
-            if len(resp.embeddings) != 1 or not resp.embeddings[0].embedding:
-                raise RuntimeError("returned no embedding for the probe sentence")
-        else:
-            resp = client.enrichments.create(model=use.name, texts=[_PROBE_SENTENCE])
-            if len(resp.results) != 1:
-                raise RuntimeError("returned no enrichment for the probe sentence")
-    finally:
-        client.close()
-
-
-def _check_isaacus(use: ModelUse, level: CheckLevel) -> SlotCheck:
-    from womblex.providers.isaacus.client import sagemaker_configured
-
-    start = time.monotonic()
-    source = "isaacus-sagemaker" if sagemaker_configured() else "isaacus-api"
-    base = {"slot": use.slot, "name": use.name, "scopes": use.scopes, "level": level}
-    try:
-        if level is CheckLevel.SMOKE:
-            logger.warning("model check (smoke): sending one billed request to Isaacus model %r to verify it; "
-                           "processing.models_check=load checks it without a billed request", use.name)
-            _ping_isaacus(use)
-        else:
-            from womblex.providers.isaacus.client import check_reachable
-
-            check_reachable(use.name)
-    except Exception as exc:  # the SDK, boto3 and httpx raise their own types
-        return SlotCheck(
-            **base, ok=False, source=source,  # type: ignore[arg-type]
-            reason=f"{type(exc).__name__}: {exc}", seconds=time.monotonic() - start,
-        )
-    return SlotCheck(
-        **base, ok=True, source=source, seconds=time.monotonic() - start,  # type: ignore[arg-type]
-    )
-
-
 def _check_one(use: ModelUse, level: CheckLevel) -> SlotCheck:
-    if use.slot == ISAACUS:
-        return _check_isaacus(use, level)
     start = time.monotonic()
     base = {"slot": use.slot, "name": use.name, "scopes": use.scopes, "level": level}
     try:
@@ -444,10 +402,8 @@ def _check_one(use: ModelUse, level: CheckLevel) -> SlotCheck:
     try:
         model = _load(use)
         variant = getattr(model, "model_variant", None)
-        if callable(ping := getattr(model, "ping", None)):
-            if getattr(model, "ping_is_billed", False):
-                logger.warning("model check: sending one billed request to %s %r to verify it", use.slot, use.name)
-            ping()  # a model behind a service: reachable, authorised, served
+        if callable(getattr(model, "ping", None)):
+            check_pinging_model(use.slot, use.name, model)  # behind a service: reachable, authorised, served
         if level is CheckLevel.SMOKE:
             _smoke(use, model)
     except Exception as exc:  # a plugin may raise anything
@@ -516,7 +472,10 @@ def check_models(
     scopes = list(scopes) if scopes is not None else None
     uses = [*configured_models(config, scopes), *isaacus_models(config, scopes if isaacus_scopes is None else isaacus_scopes)]
     with suppress_use_recording(), suppress_recording():
-        checks = [_check_one(use, chosen) for use in uses]
+        checks = [
+            *(_check_one(use, chosen) for use in uses if not use.deployment),
+            *check_deployed([u for u in uses if u.deployment], chosen),
+        ]
     for check in checks:
         _STATE[(check.slot, check.name)] = check
         if check.ok:

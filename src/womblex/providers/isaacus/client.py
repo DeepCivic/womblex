@@ -279,23 +279,31 @@ def check_reachable(model: str, *, timeout: float = 10.0) -> None:
         check_api_reachable(timeout=timeout)
 
 
-def check_sagemaker_reachable(model: str) -> None:
-    """Raise unless an endpoint serves *model* and reports ``InService`` (``DescribeEndpoint``, free)."""
+def check_sagemaker_reachable(*models: str) -> None:
+    """Raise unless an endpoint serves each of *models* and reports ``InService`` (``DescribeEndpoint``, free).
+
+    An endpoint serving several of the models is described once.
+    """
     endpoints = endpoints_from_env()
     if not endpoints:
         raise ValueError(f"{ENDPOINTS_ENV} declares no SageMaker endpoint")
-    if unserved_models([model]):
-        raise ValueError(f"No SageMaker endpoint in {ENDPOINTS_ENV} serves {model}")
+    for model in models:
+        if unserved_models([model]):
+            raise ValueError(f"No SageMaker endpoint in {ENDPOINTS_ENV} serves {model}")
     import boto3
 
-    endpoint = next(e for e in endpoints if is_model_served(model, [e]))
+    chosen: dict[str, SageMakerEndpoint] = {}
+    for model in models:  # the endpoint the router picks for each model
+        endpoint = next(e for e in endpoints if is_model_served(model, [e]))
+        chosen.setdefault(endpoint.name, endpoint)
     profile = os.environ.get(PROFILE_ENV) or None
     session = boto3.Session(**({"profile_name": profile} if profile else {}))
-    region = endpoint.region or os.environ.get(REGION_ENV) or session.region_name
-    status = session.client("sagemaker", region_name=region).describe_endpoint(
-        EndpointName=endpoint.name)["EndpointStatus"]
-    if status != "InService":
-        raise RuntimeError(f"SageMaker endpoint {endpoint.name} is {status}, not InService")
+    for endpoint in chosen.values():
+        region = endpoint.region or os.environ.get(REGION_ENV) or session.region_name
+        status = session.client("sagemaker", region_name=region).describe_endpoint(
+            EndpointName=endpoint.name)["EndpointStatus"]
+        if status != "InService":
+            raise RuntimeError(f"SageMaker endpoint {endpoint.name} is {status}, not InService")
 
 
 def check_api_reachable(*, timeout: float = 10.0) -> None:

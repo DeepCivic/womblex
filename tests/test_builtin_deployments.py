@@ -36,7 +36,7 @@ def test_the_hosted_api_needs_its_key_and_serves_every_model(monkeypatch: pytest
     assert d.unset() == [("ISAACUS_API_KEY",)]
     assert d.serves("any-model")
     with pytest.raises(ValueError, match="ISAACUS_API_KEY is not set"):
-        d.check("kanon-2-embedder")
+        d.check(["kanon-2-embedder"])
 
 
 def test_sagemaker_serves_what_the_environment_declares(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -53,15 +53,15 @@ def test_the_sagemaker_check_refuses_a_model_no_endpoint_serves(monkeypatch: pyt
     d = dr.resolve("isaacus-sagemaker")
     monkeypatch.delenv("ISAACUS_SAGEMAKER_ENDPOINTS", raising=False)
     with pytest.raises(ValueError, match="declares no SageMaker endpoint"):
-        d.check("kanon-2-embedder")
+        d.check(["kanon-2-embedder"])
     monkeypatch.setenv("ISAACUS_SAGEMAKER_ENDPOINTS", "enrich-001=kanon-2-enricher")
     with pytest.raises(ValueError, match="serves kanon-2-embedder"):
-        d.check("kanon-2-embedder")
+        d.check(["kanon-2-embedder"])
 
 
 def test_check_reachable_still_picks_the_deployment_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[str] = []
-    monkeypatch.setattr(isaacus_client, "check_sagemaker_reachable", lambda m: seen.append(f"sagemaker:{m}"))
+    monkeypatch.setattr(isaacus_client, "check_sagemaker_reachable", lambda *m: seen.append(f"sagemaker:{m[0]}"))
     monkeypatch.setattr(isaacus_client, "check_api_reachable", lambda timeout=10.0: seen.append("api"))
     monkeypatch.setenv("ISAACUS_SAGEMAKER_ENDPOINTS", "e-001")
     isaacus_client.check_reachable("kanon-2-embedder")
@@ -111,7 +111,7 @@ def test_the_ocr_deployments_check_by_pinging_their_reader_for_the_model_asked(
     reader = getattr(importlib.import_module(module), cls)
     pinged: list[str] = []
     monkeypatch.setattr(reader, "ping", lambda self: pinged.append(getattr(self, "model_id", None) or self.model))
-    dr.resolve(deployment).check("some-model")
+    dr.resolve(deployment).check(["some-model"])
     assert pinged == ["some-model"]
 
 
@@ -123,4 +123,4 @@ def test_a_failing_ocr_ping_fails_the_check(monkeypatch: pytest.MonkeyPatch) -> 
 
     monkeypatch.setattr(OllamaOCRReader, "ping", refuse)
     with pytest.raises(ConnectionError):
-        dr.resolve("ollama").check("llama3.2-vision")
+        dr.resolve("ollama").check(["llama3.2-vision"])

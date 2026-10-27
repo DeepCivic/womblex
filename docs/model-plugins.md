@@ -67,6 +67,7 @@ giving it a public `load()` method. A model that lives behind a service
 (nothing local to load) should define `ping()`: it is called at `load` and
 `smoke` alike and should raise unless the service is reachable, the credentials
 are accepted and the model is served, at the smallest cost the service allows.
+A model served by a registered deployment (`utils/deployment_registry.py`) is checked through it instead, once per deployment.
 To report which variant of a model resolved
 (as PaddleOCR reports v5 or the wheel's v4), set a `model_variant` string on the
 object; it appears in the check result and the run record. A `smoke` check

@@ -23,7 +23,7 @@ from __future__ import annotations
 import importlib
 import logging
 import os
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -51,8 +51,8 @@ class Deployment:
     """A registered deployment; see the module docstring."""
 
     name: str
-    check: Callable[[str], None]
-    """Free reachability check for a model id: raises unless the deployment answers and serves it."""
+    check: Callable[[Sequence[str]], None]
+    """Free reachability check, called once with the model ids a run uses on it: raises unless it answers and serves them."""
     needs_network: bool
     billed: bool
     env: tuple[tuple[str, ...], ...] = ()
@@ -140,5 +140,5 @@ def deployment_for_pinging_model(slot: str, name: str, model: Any) -> Deployment
     """
     billed = bool(getattr(model, "ping_is_billed", False))
     return Deployment(
-        name=f"{slot}:{_norm(name)}", check=lambda _model: model.ping(), needs_network=billed, billed=billed,
+        name=f"{slot}:{_norm(name)}", check=lambda _models: model.ping(), needs_network=billed, billed=billed,
     )

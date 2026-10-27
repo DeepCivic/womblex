@@ -7,15 +7,18 @@ Credentials and region come from the standard boto3 chain.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from womblex.utils.deployment_registry import Deployment, register
 
 NAME = "bedrock"
 
 
-def _check(model: str) -> None:
+def _check(models: Sequence[str]) -> None:
     from womblex.providers.bedrock.ocr import MistralOCRReader
 
-    MistralOCRReader(model=model).ping()
+    for model in models:
+        MistralOCRReader(model=model).ping()
 
 
 register(Deployment(

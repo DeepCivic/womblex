@@ -18,13 +18,10 @@ from urllib.parse import urlsplit, urlunsplit
 
 from womblex.cloud.reachability import store_reachable
 from womblex.config import EmbeddingConfig, EnrichmentConfig
-from womblex.providers.isaacus.client import (
-    API_KEY_ENV,
-    endpoints_from_env,
-    misconfigured_endpoints_var,
-    unserved_models,
-)
+from womblex.providers.isaacus.client import API_KEY_ENV, endpoints_from_env, misconfigured_endpoints_var
+from womblex.providers.isaacus.deployment import SAGEMAKER
 from womblex.store.remote import is_remote_uri, storage_options_from_env
+from womblex.utils.deployment_registry import resolve
 
 if TYPE_CHECKING:
     from womblex.cloud.deployment import DeploymentSettings
@@ -94,7 +91,7 @@ def isaacus_description() -> dict[str, Any]:
         "api_key_configured": bool(api_key),
         "api_key_masked": mask_secret(api_key),
         "models_checked": list(ISAACUS_MODELS),
-        "unserved_models": unserved_models(ISAACUS_MODELS) if endpoints else [],
+        "unserved_models": [m for m in ISAACUS_MODELS if not resolve(SAGEMAKER).serves(m)] if endpoints else [],
         "endpoints_typo": misconfigured_endpoints_var() if not endpoints else None,
     }
 

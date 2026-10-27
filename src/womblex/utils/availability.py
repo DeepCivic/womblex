@@ -16,10 +16,7 @@ Two distinct capabilities, deliberately kept apart:
 from __future__ import annotations
 
 import importlib.util
-import os
 from pathlib import Path
-
-from womblex.providers.isaacus.client import API_KEY_ENV, sagemaker_configured
 
 
 def isaacus_available() -> bool:
@@ -38,9 +35,10 @@ def isaacus_available() -> bool:
     """
     if importlib.util.find_spec("isaacus") is None:
         return False
-    if sagemaker_configured():
-        return True
-    return bool(os.environ.get(API_KEY_ENV))
+    from womblex.providers.isaacus.deployment import default_deployment
+    from womblex.utils.deployment_registry import resolve
+
+    return not resolve(default_deployment()).unset()
 
 
 def tokenizer_available(tokenizer: str | object) -> bool:
