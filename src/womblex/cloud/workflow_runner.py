@@ -64,7 +64,7 @@ class RefusalCode(str, Enum):
     """A step's preflight, Isaacus or model check failed; `steps` names each."""
 
     STAGE_NOT_DISPATCHABLE = "stage_not_dispatchable"
-    """The fleet runs only `WORKFLOW_FLEET_STAGES`; `steps` names the others (`layout`, `quality`)."""
+    """The fleet runs only `WORKFLOW_FLEET_STAGES`, and a firing no run-scoped stage (`quality`); `steps` names them."""
 
     ORDER_NOT_PIPELINE = "order_not_pipeline"
     """The fleet runs stages in pipeline order, so a list in another order is not dispatched."""

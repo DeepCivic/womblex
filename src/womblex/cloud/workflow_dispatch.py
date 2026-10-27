@@ -31,7 +31,7 @@ from womblex.cloud.workflow_runner import (
     workflow_overlay,
 )
 from womblex.cloud.workflow_store import StoredWorkflow, check_spec
-from womblex.pipeline_order import WORKFLOW_FLEET_STAGES, in_pipeline_order
+from womblex.pipeline_order import RUN_SCOPED_STAGES, WORKFLOW_FLEET_STAGES, in_pipeline_order
 from womblex.store.retention import is_safe_run_id
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -100,6 +100,8 @@ def dispatch_workflow(
             "`run-workflow` locally)", RefusalCode.STAGE_NOT_DISPATCHABLE,
             steps=tuple((s, "not dispatchable") for s in bad),
         )
+    if firing is not None:
+        _refuse_run_scoped_in_firing(stored)
     if stages != tuple(in_pipeline_order(stages)):
         raise refuse(
             f"steps {list(stages)} are not in pipeline order {list(in_pipeline_order(stages))}; "
@@ -163,6 +165,16 @@ def _firing_kwargs(
             "dsn": dsn, "acted_on": ("triggers", "input_binding.store", "input_binding.ingest_prefix")}
 
 
+def _refuse_run_scoped_in_firing(stored: StoredWorkflow) -> None:
+    """A firing runs its steps over its own batches; a run-scoped stage over those alone would number
+    its clusters per firing, colliding with the ids earlier firings wrote."""
+    if scoped := [s.stage for s in stored.spec.steps if s.stage in RUN_SCOPED_STAGES]:
+        raise WorkflowRefusedError(
+            f"workflow {stored.id!r}: {', '.join(scoped)} spans the whole run, and a firing covers its own "
+            "batches only; run it with `rerun-collection` or `dispatch-workflow` without --firing",
+            code=RefusalCode.STAGE_NOT_DISPATCHABLE, steps=tuple((s, "run-scoped") for s in scoped))
+
+
 def _check_run_owner(stored: StoredWorkflow, run_id: str, dsn: str | None) -> None:
     """Refuse an owned workflow's firing into a run another owner holds, as `RunBoard.enqueue` would."""
     from womblex.cloud import dbos_app
@@ -192,6 +204,7 @@ def check_firing(
     from womblex.cli._shared import normalise_prefix
     from womblex.cloud.dispatch import supported_keys
 
+    _refuse_run_scoped_in_firing(stored)
     dispatch_workflow(stored, dry_run=True, **_firing_kwargs(stored, run_id, resolve_preset, store, dsn))
     _check_run_owner(stored, run_id, dsn)
     if not (ingest_root := stored.spec.input_binding.store):

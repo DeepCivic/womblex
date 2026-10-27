@@ -97,10 +97,11 @@ It replaces the bundle and the record.
 `run-workflow` runs the steps in the order listed. It refuses an order in which a
 step reads a required input that is missing, produced only by a later step, or
 rewritten by a later step. `dispatch-workflow` also needs pipeline order, since the
-coordinator runs stages in that order: `normalise`, `spellfix`, `enrich`, `chunk`,
-`graph-refresh`, `embed`, `money`, `link`, `pii`. The fleet dispatches only these;
-`layout` and `quality` run through `run-workflow` or `run-stage`. `pii` runs on the
-fleet only as a workflow's step: a run dispatched without a workflow never masks.
+coordinator runs stages in that order: `layout`, `normalise`, `spellfix`, `enrich`, `chunk`,
+`graph-refresh`, `embed`, `money`, `link`, `pii`, `quality`. `layout`, `pii` and `quality` run on the
+fleet only as a workflow's steps: a run dispatched without a workflow never re-lays out, masks or
+deduplicates. A firing covers its own batches only, so it refuses the run-scoped `quality`; run it
+with `rerun-collection` or `dispatch-workflow` without `--firing`.
 
 ## A trigger firing
 

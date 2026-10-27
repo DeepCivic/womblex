@@ -113,10 +113,14 @@ DOWNSTREAM_STAGES: tuple[str, ...] = (
 )
 
 
-#: What a dispatched workflow may name: the downstream stages, and `pii` (Phase 3). A workflow
-#: names `pii` deliberately, step by step, which is the deliberate act its absence from
-#: `DOWNSTREAM_STAGES` asks for; a run dispatched without a workflow still never masks.
-WORKFLOW_FLEET_STAGES: tuple[str, ...] = (*DOWNSTREAM_STAGES, "pii")
+#: What a dispatched workflow may name: every stage after extraction. A workflow names each step
+#: deliberately, which is the deliberate act the absence of `pii` and `layout` from
+#: `DOWNSTREAM_STAGES` asks for; a run dispatched without a workflow still never masks or
+#: re-lays out. `quality` is run-scoped, so a firing, which covers its own batches only, refuses it
+#: (`workflow_dispatch`); a dispatch over the whole run takes it.
+WORKFLOW_FLEET_STAGES: tuple[str, ...] = (*DOWNSTREAM_STAGES, "layout", "pii", "quality")
+#: Stages whose one unit spans the run: a firing's batches alone would give them a different answer.
+RUN_SCOPED_STAGES: tuple[str, ...] = ("quality",)
 
 
 def _normalise_wanted(config: WomblexConfig) -> bool:

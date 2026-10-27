@@ -36,8 +36,7 @@ def _duplicated_steps() -> StoredWorkflow:
 
 
 @pytest.mark.parametrize(("steps", "kw", "code"), [
-    (["quality"], {}, RefusalCode.STAGE_NOT_DISPATCHABLE),
-    (["layout"], {}, RefusalCode.STAGE_NOT_DISPATCHABLE),
+    (["quality"], {"firing": "f1"}, RefusalCode.STAGE_NOT_DISPATCHABLE),  # run-scoped: a firing covers its batches only
     (["chunk", "normalise"], {"config": _NORMALISED}, RefusalCode.ORDER_NOT_PIPELINE),
     (["chunk"], {"config": _NORMALISED}, RefusalCode.STEP_ORDER),
     (["normalise"], {"resolve": lambda _n: None}, RefusalCode.PRESET_UNKNOWN),
@@ -121,6 +120,19 @@ def test_a_workflow_that_names_pii_masks_on_the_fleet(fleet):  # noqa: F811
             "chunk": "done", "pii": "done"}
     clean = Path(str(store)) / "runs/r1/documents/batch-0001.clean_text.parquet"
     assert pq.read_metadata(str(clean)).metadata[b"womblex.workflow_digest"] == dispatched.digest.encode()
+
+
+def test_a_workflow_runs_layout_and_quality_on_the_fleet_over_the_whole_run(fleet):  # noqa: F811
+    """A named step is the deliberate act: `layout` and the run-scoped `quality` dispatch outside a firing."""
+    _, ingest, _ = fleet
+    with RunBoard(None) as board:
+        board.enqueue("r1", [batch(ingest)])
+    dispatched = _dispatch(fleet, ["layout", "chunk", "quality"])
+    assert dispatched.stages == ("layout", "chunk", "quality")
+    work(fleet, idle_timeout=3)
+    with RunBoard(None) as board:
+        assert {r.stage: r.status for r in board.list_jobs("r1") if r.kind == "stage"} == {
+            "layout": "done", "chunk": "done", "quality": "done"}
 
 
 def test_cli_exit_codes_and_one_line_per_refusal(fleet, caplog, monkeypatch):  # noqa: F811
