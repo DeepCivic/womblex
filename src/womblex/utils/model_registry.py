@@ -78,6 +78,10 @@ class ModelEntry:
     source: str = "builtin"
     traits: dict[str, Any] = field(default_factory=dict)
     version: str = ""
+    deployments: tuple[str, ...] = ()
+    """Names of the deployments (``utils/deployment_registry.py``) that may serve this model; none is a local model."""
+    vendor_model: str = ""
+    """The vendor's own id for the model, where it differs from the registered name."""
 
 
 _entries: dict[str, dict[str, ModelEntry]] = {slot: {} for slot in SLOTS}
@@ -114,6 +118,8 @@ def register(
     source: str = "builtin",
     traits: dict[str, Any] | None = None,
     version: str = "",
+    deployments: tuple[str, ...] = (),
+    vendor_model: str = "",
 ) -> None:
     """Register *factory* under *name* (and *aliases*) for *slot*.
 
@@ -134,10 +140,24 @@ def register(
                 f"{slot} model name {key!r} is already registered to {owner!r}"
             )
     _entries[slot][canonical] = ModelEntry(
-        slot, canonical, factory, source, dict(traits or {}), version
+        slot, canonical, factory, source, dict(traits or {}), version,
+        tuple(deployments), vendor_model,
     )
     for key in (canonical, *(_norm(a) for a in aliases)):
         _aliases[slot][key] = canonical
+
+
+def plugin_objects(group: str) -> Iterator[tuple[str, Any, str, str]]:
+    """``(name, object, distribution, version)`` for each installed entry point in *group* that loads."""
+    for ep in entry_points(group=group):
+        try:
+            obj = ep.load()
+        except Exception:
+            logger.exception("plugin %s (%s) failed to load", ep.name, group)
+            continue
+        dist = ep.dist.name if ep.dist is not None else "unknown"
+        version = getattr(ep.dist, "version", "") if ep.dist is not None else ""
+        yield ep.name, obj, dist, version
 
 
 def _load_plugins(slot: str) -> None:
@@ -145,21 +165,16 @@ def _load_plugins(slot: str) -> None:
     if slot in _loaded:
         return
     _loaded.add(slot)
-    for ep in entry_points(group=ENTRY_POINT_GROUP_PREFIX + slot):
-        try:
-            factory = ep.load()
-        except Exception:
-            logger.exception("model plugin %s (%s) failed to load", ep.name, slot)
-            continue
-        dist = ep.dist.name if ep.dist is not None else "unknown"
-        version = getattr(ep.dist, "version", "") if ep.dist is not None else ""
+    for name, factory, dist, version in plugin_objects(ENTRY_POINT_GROUP_PREFIX + slot):
         try:
             register(
-                slot, ep.name, factory, source=dist, version=version,
+                slot, name, factory, source=dist, version=version,
                 traits=getattr(factory, "womblex_traits", None),
+                deployments=tuple(getattr(factory, "womblex_deployments", ())),
+                vendor_model=getattr(factory, "womblex_vendor_model", ""),
             )
         except ValueError as exc:
-            logger.warning("model plugin %s (%s) skipped: %s", ep.name, slot, exc)
+            logger.warning("model plugin %s (%s) skipped: %s", name, slot, exc)
 
 
 def known_names(slot: str) -> list[str]:
