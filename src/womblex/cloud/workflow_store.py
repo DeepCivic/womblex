@@ -198,7 +198,7 @@ def _check_destinations(spec: StoredWorkflowSpec) -> None:
             raise ValueError(f"destination {d.name!r}: a URI names no credentials; use `credentials`")
         if isinstance(d, ObjectStoreDestination):
             try:  # `s3:/bucket` would otherwise deliver to a local folder named `s3:`
-                validate_location_uri(d.uri)
+                validate_location_uri(d.uri, require_backend=False)  # the workers carry the backend; check_destinations asks where it runs
             except ValueError as e:
                 raise ValueError(f"destination {d.name!r}: {e}") from e
         if isinstance(d, WebhookDestination):

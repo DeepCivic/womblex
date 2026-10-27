@@ -28,12 +28,14 @@ from womblex.utils.checksum import sha256_file
 
 logger = logging.getLogger(__name__)
 
-_REMOTE_PROTOCOLS = ("s3://", "s3a://", "gs://", "gcs://", "az://", "abfs://")
+#: Schemes that name this machine's own filesystem (or memory): no bucket, no remote service.
+_LOCAL_SCHEMES = ("file", "local", "memory")
 
 
 def is_remote_uri(uri: str) -> bool:
-    """True when *uri* names an object store (not a local/``file://`` path)."""
-    return uri.startswith(_REMOTE_PROTOCOLS)
+    """True when *uri* names a store fsspec opens by scheme (not a plain path or a ``file://`` one)."""
+    scheme, sep, _ = uri.partition("://")
+    return bool(sep) and scheme.isidentifier() and scheme not in ("file", "local")
 
 
 def storage_options_from_env(uri: str, *, credentials: tuple[str, str] | None = None) -> dict:
@@ -86,19 +88,54 @@ def storage_options_from_env(uri: str, *, credentials: tuple[str, str] | None = 
     return opts
 
 
-#: Protocols :class:`RemoteStore` can open. A URI with any other scheme is
-#: rejected before fsspec sees it — ``url_to_fs`` would otherwise try to
-#: resolve the host of e.g. ``ftp://`` during what is meant to be validation.
-SUPPORTED_PROTOCOLS = ("file", "s3", "s3a", "gs", "gcs", "az", "abfs")
+def scheme_problem(scheme: str, *, require_backend: bool = True) -> str | None:
+    """Why *scheme* cannot be opened here, or ``None`` when it can.
+
+    A scheme is usable when fsspec knows it and its backend imports in this install. One
+    fsspec knows whose backend is missing (``gs://`` without ``gcsfs``) is refused naming the
+    package; an unknown one is refused naming the usable schemes. Nothing is opened or resolved.
+    With ``require_backend=False`` only whether fsspec knows the scheme is asked, for a check
+    made on a host that need not carry what the workers do (a stored workflow's spec).
+    """
+    import fsspec
+    from fsspec.registry import known_implementations
+
+    try:
+        fsspec.get_filesystem_class(scheme)
+    except ValueError:
+        return f"scheme {scheme!r} is not one fsspec knows; usable here: {', '.join(usable_schemes())}"
+    except ImportError:
+        if not require_backend:
+            return None
+        package = known_implementations.get(scheme, {}).get("class", scheme).split(".")[0]
+        return f"scheme {scheme!r} needs the package {package!r}, which is not installed (install it to use {scheme}://)"
+    return None
 
 
-def validate_location_uri(uri: str) -> None:
+def usable_schemes() -> list[str]:
+    """The schemes fsspec knows whose backend package is installed here, sorted."""
+    from importlib.util import find_spec
+
+    from fsspec.registry import known_implementations, registry
+
+    def installed(scheme: str) -> bool:
+        package = known_implementations.get(scheme, {}).get("class", "").split(".")[0]
+        try:
+            return not package or find_spec(package) is not None
+        except (ImportError, ValueError):
+            return False
+
+    return sorted({s for s in known_implementations if installed(s)} | set(registry))
+
+
+def validate_location_uri(uri: str, *, require_backend: bool = True) -> None:
     """Raise ``ValueError`` unless *uri* names a location a store can open.
 
     Catches the typos a hand-typed location actually produces — ``s3:/bucket``
-    (one slash), ``S3://bucket``, a bare ``s3://`` with no bucket, an
-    unsupported scheme. Without this, ``s3:/bucket`` parses as a *relative
-    local path* and documents land in a folder literally named ``s3:``.
+    (one slash), ``S3://bucket``, a bare ``s3://`` with no bucket — and a scheme
+    this install cannot open (:func:`scheme_problem`). Without the first, ``s3:/bucket``
+    parses as a *relative local path* and documents land in a folder literally named ``s3:``.
+    The scheme is checked on the string and the installed packages, never by resolving a host.
     """
     if not uri or not uri.strip():
         raise ValueError("location is empty")
@@ -113,12 +150,9 @@ def validate_location_uri(uri: str) -> None:
         return  # a plain local path
     if scheme != scheme.lower():
         raise ValueError(f"{uri!r} is not a usable location — the scheme must be lowercase")
-    if scheme not in SUPPORTED_PROTOCOLS:
-        raise ValueError(
-            f"{uri!r} is not a usable location — scheme {scheme!r} is not one of "
-            f"{', '.join(SUPPORTED_PROTOCOLS)}"
-        )
-    if scheme != "file" and not rest.strip("/"):
+    if problem := scheme_problem(scheme, require_backend=require_backend):
+        raise ValueError(f"{uri!r} is not a usable location — {problem}")
+    if scheme not in _LOCAL_SCHEMES and not rest.strip("/"):
         raise ValueError(f"{uri!r} names no bucket")
 
 
@@ -138,7 +172,7 @@ def store_root(uri: str) -> tuple[str, str]:
     # and so this agrees with `_path_contains`, which drops them too.
     path = "/".join(part for part in path.split("/") if part)
     protocol = fs.protocol[0] if isinstance(fs.protocol, (list, tuple)) else fs.protocol
-    if protocol in ("s3", "s3a", "gs", "gcs", "az", "abfs"):
+    if protocol not in _LOCAL_SCHEMES:
         bucket, _, prefix = path.partition("/")
         return bucket, prefix
     return "", path
@@ -447,11 +481,11 @@ class RemoteStore:
 
 
 __all__ = [
-    "SUPPORTED_PROTOCOLS",
     "RemoteStore",
     "assert_disjoint_locations",
     "is_remote_uri",
     "same_location",
+    "scheme_problem",
     "storage_options_from_env",
     "store_root",
     "validate_location_uri",

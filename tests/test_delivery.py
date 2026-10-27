@@ -146,7 +146,7 @@ def test_a_workflow_that_delivers_runs_over_a_runs_documents(run_root: Path, tmp
     ([{"kind": "object_store", "name": "a", "uri": "/x"}, {"kind": "object_store", "name": "a", "uri": "/y"}],
      "more than once"),
     ([{"kind": "object_store", "name": "a", "uri": "s3:/bucket/x"}], "needs '://'"),
-    ([{"kind": "object_store", "name": "a", "uri": "ftp://host/x"}], "not one of"),
+    ([{"kind": "object_store", "name": "a", "uri": "nosuchscheme://host/x"}], "not one fsspec knows"),
 ])
 def test_a_destination_never_holds_a_secret_and_names_are_unique(destinations: list, message: str):
     with pytest.raises(ValueError, match=message):

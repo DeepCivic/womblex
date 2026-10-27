@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from womblex.store.delivery_record import delivery_key, dump_delivery, earlier_key, next_record, seq_of
-from womblex.store.remote import RemoteStore
+from womblex.store.remote import RemoteStore, scheme_problem
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from womblex.cloud.workflow_store import (
@@ -49,8 +49,6 @@ DELIVERY_BACKOFF_SECONDS = 2.0
 def check_destinations(destinations: tuple[WorkflowDestination, ...]) -> list[tuple[str, str]]:
     """``(destination, problem)`` for each destination that could not be delivered to; empty when
     every one can. Opens nothing remote and sends nothing."""
-    import fsspec
-
     from womblex.cloud.workflow_store import PostgresDestination, WebhookDestination
 
     problems: list[tuple[str, str]] = []
@@ -72,10 +70,8 @@ def check_destinations(destinations: tuple[WorkflowDestination, ...]) -> list[tu
             if unset:
                 problems.append((d.name, f"environment variable(s) {', '.join(unset)} not set"))
         protocol = d.uri.split("://", 1)[0] if "://" in d.uri else "file"
-        try:
-            fsspec.get_filesystem_class(protocol)
-        except (ImportError, ValueError) as e:
-            problems.append((d.name, f"cannot write to {protocol}:// here: {e}"))
+        if problem := scheme_problem(protocol):
+            problems.append((d.name, f"cannot write to {protocol}:// here: {problem}"))
     return problems
 
 
