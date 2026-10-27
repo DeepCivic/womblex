@@ -223,6 +223,9 @@ Womblex is **alpha** and pre-1.0.
 
 ## Contributing
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to branch, check and open a pull
+request, and [STABILITY.md](STABILITY.md) for what may change between releases.
+
 ```bash
 git clone https://github.com/DeepCivic/womblex.git && cd womblex
 uv sync --extra dev --extra api
