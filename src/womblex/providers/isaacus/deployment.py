@@ -54,6 +54,7 @@ register(Deployment(
     env=((ENDPOINTS_ENV,),),
     env_optional=("ISAACUS_SAGEMAKER_REGION", "ISAACUS_SAGEMAKER_PROFILE"),
     serves=lambda model: is_model_served(model, endpoints_from_env()),
+    served=lambda: ", ".join(e.describe() for e in endpoints_from_env()) or f"nothing ({ENDPOINTS_ENV} is not set)",
     smoke=lambda slot, model: smoke_call(client_for(SAGEMAKER, [model]), slot, model),
     make_client=lambda models: client.make_sagemaker_client(endpoints_from_env(), models),
 ))

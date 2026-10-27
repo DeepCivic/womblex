@@ -32,6 +32,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from womblex.utils.deployment_check import check_deployed, check_pinging_model
+from womblex.utils.deployment_choice import choice_problems, pick_deployment
 from womblex.utils.deployment_registry import ISAACUS_DEPLOYMENTS, deployments_for
 from womblex.utils.model_registry import (
     SLOT_EMBEDDING,
@@ -242,14 +243,6 @@ def _entry_deployments(slot: str, name: str) -> tuple[str, ...]:
         return ()  # the unknown name is reported by the model's own check
 
 
-def _pick_deployment(deployments: tuple[str, ...]) -> str:
-    """The deployment a model is served by with nothing chosen: the environment's Isaacus default if it may, else the first."""
-    from womblex.providers.isaacus.deployment import default_deployment
-
-    default = default_deployment()
-    return default if default in deployments else deployments[0]
-
-
 def deployed_models(
     config: WomblexConfig, scopes: Iterable[str] | None = None,
 ) -> list[ModelUse]:
@@ -265,13 +258,16 @@ def deployed_models(
     wanted = enabled_scopes(config) if scopes is None else set(scopes)
     chunk_model = ai_chunking_model(config)
     found: dict[str, tuple[str, str, list[str]]] = {}  # model -> (slot, deployment, scopes)
-    for scope, slot, model, deployments in (
-        (SCOPE_ENRICH, SLOT_ENRICHMENT, config.enrichment.model, _entry_deployments(SLOT_ENRICHMENT, config.enrichment.model)),
-        (SCOPE_CHUNK, SLOT_ENRICHMENT, chunk_model, ISAACUS_DEPLOYMENTS if chunk_model else ()),
-        (SCOPE_EMBED, SLOT_EMBEDDING, config.embedding.model, _entry_deployments(SLOT_EMBEDDING, config.embedding.model)),
+    for scope, slot, model, deployments, requested in (
+        (SCOPE_ENRICH, SLOT_ENRICHMENT, config.enrichment.model,
+         _entry_deployments(SLOT_ENRICHMENT, config.enrichment.model), config.enrichment.deployment),
+        (SCOPE_CHUNK, SLOT_ENRICHMENT, chunk_model, ISAACUS_DEPLOYMENTS if chunk_model else (),
+         config.chunking.chunking_deployment),
+        (SCOPE_EMBED, SLOT_EMBEDDING, config.embedding.model,
+         _entry_deployments(SLOT_EMBEDDING, config.embedding.model), config.embedding.deployment),
     ):
         if model and deployments and scope in wanted:
-            deployment = _pick_deployment(deployments)
+            deployment = pick_deployment(deployments, requested)
             found.setdefault(model, (ISAACUS if deployment.startswith("isaacus") else slot, deployment, []))[2].append(scope)
     return [ModelUse(slot, m, {}, tuple(s), deployment) for m, (slot, deployment, s) in found.items()]
 
@@ -302,6 +298,7 @@ def check_registered(config: WomblexConfig) -> None:
             resolve(use.slot, use.name)
         except ValueError as exc:
             problems.append(str(exc))
+    problems += [message for _scope, _slot, _model, message in choice_problems(config)]
     if problems:
         raise ValueError("; ".join(problems))
 
@@ -460,6 +457,11 @@ def reset_model_check() -> None:
     _OFF_REQUESTED = False
 
 
+def _refused(use: ModelUse, refused: list[SlotCheck]) -> bool:
+    """Whether every scope that uses *use* has already refused its model's `deployment` setting."""
+    return set(use.scopes) <= {s for c in refused if c.name == use.name for s in c.scopes}
+
+
 def check_models(
     config: WomblexConfig,
     level: CheckLevel | str | None = None,
@@ -489,10 +491,16 @@ def check_models(
         return ModelCheckResult(chosen)
     scopes = list(scopes) if scopes is not None else None
     uses = [*configured_models(config, scopes), *deployed_models(config, scopes if isaacus_scopes is None else isaacus_scopes)]
+    wanted = enabled_scopes(config) if scopes is None else set(scopes)
+    refused = [
+        SlotCheck(slot=slot, name=model, scopes=(scope,), level=chosen, ok=False, reason=message)
+        for scope, slot, model, message in choice_problems(config) if scope in wanted
+    ]
     with suppress_use_recording(), suppress_recording():
         checks = [
+            *refused,
             *(_check_one(use, chosen) for use in uses if not use.deployment),
-            *check_deployed([u for u in uses if u.deployment], chosen),
+            *check_deployed([u for u in uses if u.deployment and not _refused(u, refused)], chosen),
         ]
     for check in checks:
         _STATE[(check.slot, check.name)] = check

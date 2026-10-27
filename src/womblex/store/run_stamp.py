@@ -128,6 +128,19 @@ _DIGEST_EXCLUDE: dict = {
 _PREFERRED_SOURCES = (".elements.parquet", "._manifest.parquet")
 
 
+def _drop_unset_deployments(payload: dict) -> None:
+    """Leave the ``deployment`` settings out of the digest while they are unset.
+
+    A config that never names a deployment keeps the digest it had before the setting existed.
+    """
+    for section, key in (("extraction", "ocr"), ("enrichment", None), ("embedding", None), ("chunking", None)):
+        node = payload.get(section, {})
+        node = node.get(key, {}) if key else node
+        for name in ("deployment", "chunking_deployment"):
+            if name in node and node[name] is None:
+                del node[name]
+
+
 def config_digest(config: object) -> str:
     """``sha256:…`` over the validated configuration, minus the excluded keys.
 
@@ -136,6 +149,7 @@ def config_digest(config: object) -> str:
     ``IngestProvenance.from_config`` import-cycle free.
     """
     payload = config.model_dump(mode="json", exclude=_DIGEST_EXCLUDE)  # type: ignore[attr-defined]
+    _drop_unset_deployments(payload)
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
 

@@ -48,6 +48,13 @@ class OCRConfig(StrictModel):
     """
 
     engine: str = "paddleocr"
+    deployment: str | None = Field(
+        default=None,
+        description="The deployment (utils/deployment_registry.py) that serves the model. Null serves it "
+                    "as before: SageMaker when ISAACUS_SAGEMAKER_ENDPOINTS is set, else the hosted API, "
+                    "for an Isaacus model; its only deployment otherwise. A model the deployment does "
+                    "not serve is refused, never routed to another.",
+    )
 
     dpi: int = Field(default=200, ge=72, le=600)
     lang: str = "eng"
@@ -76,6 +83,13 @@ class EnrichmentConfig(StrictModel):
     enabled: bool = Field(default=False, description="Run enrichment stage")
 
     model: str = Field(default="kanon-2-enricher", description="Isaacus enrichment model")
+    deployment: str | None = Field(
+        default=None,
+        description="The deployment (utils/deployment_registry.py) that serves the model. Null serves it "
+                    "as before: SageMaker when ISAACUS_SAGEMAKER_ENDPOINTS is set, else the hosted API, "
+                    "for an Isaacus model; its only deployment otherwise. A model the deployment does "
+                    "not serve is refused, never routed to another.",
+    )
 
     overflow_strategy: str = Field(
         default="auto",
@@ -160,6 +174,13 @@ class EmbeddingConfig(StrictModel):
 
     enabled: bool = Field(default=False, description="Run the embed stage")
     model: str = Field(default="kanon-2-embedder", description="Isaacus embedding model")
+    deployment: str | None = Field(
+        default=None,
+        description="The deployment (utils/deployment_registry.py) that serves the model. Null serves it "
+                    "as before: SageMaker when ISAACUS_SAGEMAKER_ENDPOINTS is set, else the hosted API, "
+                    "for an Isaacus model; its only deployment otherwise. A model the deployment does "
+                    "not serve is refused, never routed to another.",
+    )
     task: str | None = Field(
         default="retrieval/document",
         description="Embedding task: retrieval/document (index) | retrieval/query | null.",

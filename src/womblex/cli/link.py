@@ -16,7 +16,6 @@ import logging
 from pathlib import Path
 
 from womblex.cli._shared import Command
-from womblex.providers.isaacus.client import make_isaacus_client
 
 logger = logging.getLogger("womblex")
 
@@ -47,13 +46,15 @@ def _register_enrich(p: argparse.ArgumentParser) -> None:
 
 def cmd_enrich(args: argparse.Namespace) -> int:
     """Enrich a shard directory through the configured enrichment provider (per-stage)."""
-    from womblex.analyse.enrich import calls_isaacus
     from womblex.analyse.enrich_stage import enrich_shards
     from womblex.config import EnrichmentConfig, load_config
     from womblex.process.text_overlay import MissingOverlayError
     from womblex.store.checkpoint import CheckpointManager
     from womblex.store.enrichment_output import ENRICHMENT_ENTITIES_SUFFIX
     from womblex.store.shard_audit import reconcile_stage_checkpoint_with_shards
+    from womblex.utils.deployment_choice import deployment_of
+    from womblex.utils.deployment_registry import client_for
+    from womblex.utils.model_registry import SLOT_ENRICHMENT
 
     shard_dir: Path = args.shards
     if not shard_dir.is_dir():
@@ -85,8 +86,9 @@ def cmd_enrich(args: argparse.Namespace) -> int:
         # Hosted API (ISAACUS_API_KEY) or SageMaker (ISAACUS_SAGEMAKER_ENDPOINTS),
         # whichever the environment declares; the model is checked against the
         # deployed endpoints up front. Another provider takes no client.
-        if calls_isaacus(enrichment_config.model):
-            client = make_isaacus_client(models=[enrichment_config.model])
+        deployment = deployment_of(SLOT_ENRICHMENT, enrichment_config.model, enrichment_config.deployment)
+        if deployment:
+            client = client_for(deployment, [enrichment_config.model])
     except ImportError as e:
         logger.error("Isaacus SDK not usable (reinstall womblex): %s", e)
         return 1

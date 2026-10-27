@@ -61,6 +61,8 @@ class Deployment:
     env_optional: tuple[str, ...] = ()
     """Variables read when set, with a default otherwise."""
     serves: Callable[[str], bool] = serves_everything
+    served: Callable[[], str] = lambda: "every model"
+    """What the deployment serves, in words, for a refusal that names it."""
     smoke: Callable[[str, str], None] | None = None
     """``smoke(slot, model)``: one billed minimal call that raises on failure; ``None`` where there is none."""
     make_client: Callable[[Iterable[str]], object] | None = None

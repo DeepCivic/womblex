@@ -645,15 +645,17 @@ def prepare_stage_context(contract: StageContract, config: WomblexConfig) -> Run
 
     ctx = RunContext()
     if contract.needs_client and contract.requires_deployment(config):
-        from womblex.providers.isaacus.client import make_isaacus_client
+        from womblex.utils.deployment_registry import client_for
+        from womblex.utils.model_check import deployed_models
 
+        (use, *_) = deployed_models(config, [contract.name])
         try:
-            ctx.client = make_isaacus_client(models=contract.models(config))
+            ctx.client = client_for(use.deployment, contract.models(config))
         except ImportError as e:
             raise StagePreconditionError(f"Isaacus SDK not usable (reinstall womblex): {e}") from e
         except Exception as e:
             raise StagePreconditionError(
-                "Could not construct Isaacus client (check ISAACUS_API_KEY, or "
+                f"Could not construct the client for deployment {use.deployment!r} (check ISAACUS_API_KEY, or "
                 f"ISAACUS_SAGEMAKER_ENDPOINTS for a private deployment): {e}"
             ) from e
     return ctx

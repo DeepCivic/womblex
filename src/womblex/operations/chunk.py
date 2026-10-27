@@ -73,7 +73,7 @@ def run_chunking(
         tokenizer=tokenizer,
         chunk_size=config.chunking.chunk_size,
         chunking_model=config.chunking.chunking_model,
-        isaacus_client=make_ai_chunking_client(config.chunking.chunking_model),
+        isaacus_client=make_ai_chunking_client(config.chunking.chunking_model, config.chunking.chunking_deployment),
         tokenizer_kwargs=config.chunking.tokenizer_kwargs,
         memoize=config.chunking.memoize,
         cache_maxsize=config.chunking.cache_maxsize,
