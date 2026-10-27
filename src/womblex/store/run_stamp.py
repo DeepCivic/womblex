@@ -77,6 +77,7 @@ import pyarrow.parquet as pq
 
 from womblex import __version__
 from womblex.store.build_info import resolve_commit
+from womblex.store.deployment_record import DEPLOYMENTS_KEY, deployments_payload
 from womblex.store.source_provenance import NAMESPACE
 from womblex.utils.model_check import footer_payload as model_check_payload
 from womblex.utils.model_registry import distribution_version, used_entries
@@ -268,6 +269,8 @@ class RunStamp:
                     "distribution": dist, "version": version,
                 })
             meta[SLOT_MODELS_KEY.encode()] = json.dumps(slot_payload).encode()
+        if deployments := deployments_payload():
+            meta[DEPLOYMENTS_KEY.encode()] = json.dumps(deployments).encode()
         if (check := model_check_payload()) is not None:
             meta[MODEL_CHECK_KEY.encode()] = json.dumps(check, sort_keys=True).encode()
         return meta

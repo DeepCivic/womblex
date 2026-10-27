@@ -25,6 +25,7 @@ from womblex.providers.isaacus.embedding import (  # noqa: F401 -- re-exported f
     IsaacusEmbedding,
     make_isaacus_embedding,
 )
+from womblex.utils.deployment_choice import deployment_of
 from womblex.utils.model_registry import SLOT_EMBEDDING, record_use, register, resolve
 from womblex.utils.token_packer import TokenCounter
 
@@ -121,5 +122,5 @@ def make_embedding_provider(config: EmbeddingConfig, client: object = None) -> E
     """Build the provider `config.model` names; *client* is used only by an Isaacus provider."""
     entry = resolve(SLOT_EMBEDDING, config.model)
     provider: EmbeddingProvider = entry.factory(config=config, client=client)
-    record_use(entry)
+    record_use(entry, deployment_of(SLOT_EMBEDDING, entry.name, config.deployment))
     return provider

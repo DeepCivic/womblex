@@ -179,11 +179,14 @@ def make_ai_chunking_client(chunking_model: str | None, deployment: str | None =
     """
     if not chunking_model:
         return None
-    if deployment:
-        from womblex.utils.deployment_registry import client_for
+    from womblex.providers.isaacus.deployment import default_deployment
+    from womblex.utils.deployment_registry import client_for
+    from womblex.utils.model_registry import record_deployment
 
-        return client_for(deployment.strip().lower(), [chunking_model])
-    return make_isaacus_client(models=[chunking_model])
+    name = deployment.strip().lower() if deployment else default_deployment()
+    client = client_for(name, [chunking_model])
+    record_deployment("chunking", chunking_model, name)
+    return client
 
 
 def make_api_client():  # type: ignore[no-untyped-def]

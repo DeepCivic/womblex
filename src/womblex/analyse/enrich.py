@@ -44,6 +44,7 @@ from womblex.providers.isaacus.enrichment import (  # noqa: F401 -- re-exported 
     isaacus_provider,
     make_isaacus_enrichment,
 )
+from womblex.utils.deployment_choice import deployment_of
 from womblex.utils.model_registry import SLOT_ENRICHMENT, record_use, register, resolve
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -441,7 +442,7 @@ def make_enrichment_provider(
     provider: EnrichmentProvider = entry.factory(
         config=config, client=client, token_counter=token_counter,
     )
-    record_use(entry)
+    record_use(entry, deployment_of(SLOT_ENRICHMENT, entry.name, config.deployment))
     return provider
 
 

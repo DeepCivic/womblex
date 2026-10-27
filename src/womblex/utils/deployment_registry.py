@@ -47,6 +47,11 @@ def serves_everything(model: str) -> bool:
     return True
 
 
+def no_detail(model: str) -> dict[str, str]:
+    """The default ``Deployment.detail``: nothing to add to the record."""
+    return {}
+
+
 @dataclass(frozen=True)
 class Deployment:
     """A registered deployment; see the module docstring."""
@@ -65,6 +70,8 @@ class Deployment:
     """What the deployment serves, in words, for a refusal that names it."""
     smoke: Callable[[str, str], None] | None = None
     """``smoke(slot, model)``: one billed minimal call that raises on failure; ``None`` where there is none."""
+    detail: Callable[[str], dict[str, str]] = no_detail
+    """What the footer may say about where *model* ran (an endpoint, a region): never a secret or an account id."""
     make_client: Callable[[Iterable[str]], object] | None = None
     """Build the client for the model ids a caller will use; ``None`` where a provider builds its own."""
     source: str = "builtin"

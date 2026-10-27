@@ -96,6 +96,10 @@ _loaded: set[str] = set()
 #: mirroring ``utils/models.record_loaded_path``'s opt-in shape.
 _used: dict[tuple[str, str], ModelEntry] = {}
 
+#: The deployment each model this process used ran on, keyed by (slot, name); AI chunking's
+#: model is under the slot ``chunking``. Recorded with the use, so a probe leaves none.
+_used_deployments: dict[tuple[str, str], str] = {}
+
 #: True while :func:`suppress_use_recording` is active.
 _suppress_use = False
 
@@ -200,7 +204,7 @@ def resolve(slot: str, name: str) -> ModelEntry:
     return _entries[slot][canonical]
 
 
-def record_use(entry: ModelEntry) -> None:
+def record_use(entry: ModelEntry, deployment: str | None = None) -> None:
     """Note that *entry*'s factory was actually built by this process.
 
     Called only at a real instantiation site, after the factory call
@@ -208,10 +212,26 @@ def record_use(entry: ModelEntry) -> None:
     probes whether a name is registered without building anything. First use
     wins, matching a slot resolving to one model per process. A no-op while
     :func:`suppress_use_recording` is active.
+
+    *deployment* is the one the model ran on; a model that declares deployments and is given
+    none ran on the first.
     """
     if _suppress_use:
         return
     _used.setdefault((entry.slot, entry.name), entry)
+    if deployment or entry.deployments:
+        record_deployment(entry.slot, entry.name, deployment or entry.deployments[0])
+
+
+def record_deployment(slot: str, name: str, deployment: str) -> None:
+    """Note the deployment a model of this process ran on; first use wins. A no-op while a probe runs."""
+    if not _suppress_use:
+        _used_deployments.setdefault((slot, name), deployment)
+
+
+def used_deployments() -> tuple[tuple[str, str, str], ...]:
+    """``(slot, name, deployment)`` for every model this process used on a deployment, sorted."""
+    return tuple(sorted((s, n, d) for (s, n), d in _used_deployments.items()))
 
 
 @contextmanager
@@ -261,6 +281,7 @@ def distribution_version(entry: ModelEntry) -> tuple[str, str]:
 def reset_used_entries() -> None:
     """Forget what this process built. For tests."""
     _used.clear()
+    _used_deployments.clear()
 
 
 def is_default_group(selections: dict[str, str]) -> bool:
