@@ -415,6 +415,38 @@ API key and no egress. Three choices behind `providers/isaacus/client.py`:
 Only *API* calls move; the vendored tokeniser makes offline chunking identical
 in both deployments.
 
+### Deployments are registered once; the slot setting chooses, the environment declares (Requirement 36)
+2026-10, cloud flexibility plan, Phases A and B.
+
+- **A registry beside the model registry.** A deployment (`utils/deployment_registry.py`) is
+  where a vendor's models are called from: the variables it reads, network and billing,
+  a free check, a billed smoke call, which models it serves, how its client is built.
+  Models in any slot name the deployments that may serve them. The `isaacus` trait stays
+  and means "served by the Isaacus deployments", so a plugin written before the registry
+  keeps working. *Rejected:* a branch per vendor in each gate, which is what five modules
+  carried for Isaacus.
+- **The environment still declares the topology; the config now chooses.** The decision
+  above stands for what is deployed (`ISAACUS_SAGEMAKER_ENDPOINTS` is read where the client is
+  built). What it could not do is put one vendor's two models on two deployments, so each
+  slot takes an optional `deployment:` (AI chunking's is `chunking.chunking_deployment`).
+  Left unset, a model is served exactly as before, and a config that names none keeps its
+  `config_digest`. *Rejected:* routing a model to another deployment when its chosen one does
+  not serve it, which would bill the wrong account silently.
+- **Checked once, attributed per model.** A deployment's free check is called once with every
+  model a run uses on it; only if it fails is each model retried alone, so the failure is
+  named for its cause. A reader with `ping()` is checked on the built reader, because the
+  reader carries the run's engine options that a deployment-level check would not see.
+- **Two refusals, because two hosts.** The static one (unknown deployment, a deployment the
+  model is not served by, a local model given one) reads registrations only, so
+  `POST /v1/runs` and `dispatch-workflow` can refuse on a host that carries no models. The
+  runtime one (the deployment does not serve the model in this environment) runs in the model
+  check for `run` and each worker. Both happen before launch.
+- **One client per deployment per process.** Keyed by name, so a second stage gets the first's
+  client; a later model the deployment does not serve is refused. The cache is not keyed by
+  the environment, which does not change during a run; tests clear it.
+- **The stage graph keeps `needs_isaacus_api`.** `/v1/stages` exposes it as the display answer;
+  the runtime gate is derived from the models a contract names (`requires_deployment`).
+
 ### Container images are built in CI and stamped with the commit they came from
 Two Dockerfiles existed that no workflow built, so a change that broke an image
 was found on deploy; and the image build context excludes `.git`, so a

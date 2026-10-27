@@ -135,3 +135,58 @@ def test_the_routes_are_admin_only(tmp_path: Path) -> None:
     assert api.post("/v1/resources/test/ingest", headers=ops).json()["reachable"] is False
     assert api.post("/v1/resources/test/queue", headers=ops).json()["reachable"] is False
     assert api.post("/v1/resources/test/nope", headers=ops).status_code == 422
+
+
+class TestDeployments:
+    """`deployments`: each registered deployment and the models it may serve, no value shown."""
+
+    def _by_name(self, tmp_path: Path) -> dict[str, dict]:
+        got = resources.deployment_resources(_local(tmp_path))["deployments"]
+        return {d["name"]: d for d in got}
+
+    def test_every_built_in_is_listed_with_the_models_that_name_it(self, tmp_path: Path) -> None:
+        listed = self._by_name(tmp_path)
+        assert {"isaacus-api", "isaacus-sagemaker", "bedrock", "ollama"} <= set(listed)
+        embedder = {"slot": "embedding", "name": "kanon-2-embedder", "vendor_model": "kanon-2-embedder"}
+        assert embedder.items() <= next(m for m in listed["isaacus-api"]["models"] if m["slot"] == "embedding").items()
+        assert [m["name"] for m in listed["bedrock"]["models"]] == ["mistral-ocr"]
+        assert [m["name"] for m in listed["ollama"]["models"]] == ["ollama"]
+        assert listed["ollama"]["billed"] is False and listed["isaacus-api"]["billed"] is True
+
+    def test_variables_are_reported_set_or_not_and_no_value_is_shown(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.delenv("ISAACUS_SAGEMAKER_ENDPOINTS", raising=False)
+        monkeypatch.setenv("ISAACUS_API_KEY", "iuak_live_value_1234")  # pragma: allowlist secret -- a test placeholder
+        monkeypatch.setenv("OLLAMA_BASE_URL", "http://10.0.0.7:11434")
+        listed = self._by_name(tmp_path)
+        assert listed["isaacus-api"]["variables"] == [{"names": ["ISAACUS_API_KEY"], "configured": True}]
+        assert listed["isaacus-sagemaker"]["variables"] == [{"names": ["ISAACUS_SAGEMAKER_ENDPOINTS"], "configured": False}]
+        assert "OLLAMA_BASE_URL" in listed["ollama"]["optional_variables"]
+        text = json.dumps(resources.deployment_resources(_local(tmp_path)))
+        assert "iuak_live_value_1234" not in text and "10.0.0.7" not in text
+
+    def test_sagemaker_serves_the_models_its_endpoints_declare(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("ISAACUS_SAGEMAKER_ENDPOINTS", "embed-001=kanon-2-embedder")
+        served = {m["name"]: m["served"] for m in self._by_name(tmp_path)["isaacus-sagemaker"]["models"]}
+        assert served == {"kanon-2-embedder": True, "kanon-2-enricher": False}
+
+    def test_a_plugin_deployment_and_its_models_are_listed_with_their_distribution(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from womblex.utils import deployment_registry as dr
+        from womblex.utils import model_registry as mr
+
+        monkeypatch.setattr(dr, "_deployments", dict(dr._deployments))
+        monkeypatch.setattr(mr, "_entries", {s: dict(m) for s, m in mr._entries.items()})
+        monkeypatch.setattr(mr, "_aliases", {s: dict(m) for s, m in mr._aliases.items()})
+        dr.register(dr.Deployment(name="acme", check=lambda m: None, needs_network=True, billed=True,
+                                  source="acme-dist", version="3.0"))
+        mr.register(mr.SLOT_EMBEDDING, "acme-embed", lambda **_: None, source="acme-dist",
+                    deployments=("acme",), vendor_model="acme-embed-v3")
+        acme = self._by_name(tmp_path)["acme"]
+        assert (acme["distribution"], acme["version"]) == ("acme-dist", "3.0")
+        assert acme["models"] == [{"slot": "embedding", "name": "acme-embed",
+                                   "vendor_model": "acme-embed-v3", "served": True}]

@@ -450,7 +450,7 @@ def test_openapi_surface_is_pinned(client):
             "RunLog": ["modified", "name", "size"],
             "StageProgress": ["run_id", "stages"],
             "Reachability": ["error", "reachable", "target"],
-            "Resources": ["ingest", "isaacus", "queue", "store"],
+            "Resources": ["deployments", "ingest", "isaacus", "queue", "store"],
             "QueueSnapshot": ["jobs", "run_id", "stale", "stale_after_seconds", "stats", "summary", "throughput", "total", "workers"],
             "RunLogs": ["logs", "run_id"],
             "DocumentDetail": ["chunks", "entities", "money_spans", "pii_spans", "quality", "run_id", "source_hash"],

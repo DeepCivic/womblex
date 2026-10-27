@@ -446,7 +446,7 @@ These requirements described the admin console (`womblex ui`). The console now l
 - The check has three levels, set by `processing.models_check` or `--models-check`: `off`; `load` (resolve and load the models, the default); `smoke` (also run one inference on a small built-in input).
 - `womblex run` checks the models of every enabled stage before batch one, before any output is written, so a run whose later stages cannot complete does not start.
 - A worker checks at startup and refuses jobs whose models fail the check, through the existing refused path. A job is refused only for the models it needs: a batch for the extraction models, a stage job for that stage's.
-- A model behind a service is checked with one minimal request at either level: each Isaacus model an enabled stage calls (enrich, embed, AI chunking), and an API-backed OCR engine (Bedrock, Ollama), so a run whose later paid stage cannot reach its service does not start.
+- A model behind a service is checked through its deployment (Requirement 36), once per deployment, at either level: each model an enabled stage calls on one (enrich, embed, AI chunking), and an API-backed OCR engine (Bedrock, Ollama), so a run whose later paid stage cannot reach its service does not start.
 - An API submission checks only that each named model is registered, because the API host may not carry the models.
 - Downstream stage preflight includes the model check, including the standalone `chunk`, `pii`, `spellfix` and `redact` commands, which check before writing anything.
 - The existing in-slot fallback (PaddleOCR v5 to the wheel's v4) stays, and the check reports which variant resolved.
@@ -468,6 +468,7 @@ These requirements described the admin console (`womblex ui`). The console now l
 - Plugin model weights appear in the loaded-model record alongside the built-ins.
 - The run record no longer lists the OCR engine as unestablished.
 - A model the pre-run check builds only to confirm it loads is not recorded as used — a run whose check built the model but whose stages never actually called it shows no entry for it; only a run's own build of it does.
+- Every pipeline Parquet's footer also records the deployment each model ran on (Requirement 36).
 - Benchmark reports (womblex-benchmark) name the models that produced them, suites can run against a named model, and `docs/accuracy/` stays labelled as the default group.
 
 ## 27. Workflows — Check, Run, Dispatch, Schedule and Deliver
@@ -636,6 +637,36 @@ These requirements described the admin console (`womblex ui`). The console now l
 - `GET /v1/workflows/{id}/inbound-events` (`read`) lists a workflow's inbound events newest first, each with its hook, event, time and outcome (the status, code and message it was given). It is owner-scoped like the runs: another owner's workflow is 404, and an admin sees all.
 
 **Out of scope:** the console.
+
+## 36. Deployments Registered Once, Shared by Every Model They Serve
+
+**Paid:** Adds no paid call by default. It moves the pre-run gating of the existing paid calls (`enrich`, `embed`, AI chunking in `chunk`, `mistral-ocr`) onto the deployment that serves them. A slot's `deployment:` setting can put two of one vendor's models on two deployments, billed two ways.
+
+**As** a maintainer adding a vendor that offers several functions through one API,
+**I want** the vendor's deployment registered once and every model it serves, in any slot, to reference it,
+**so that** credentials, reachability, billing and the client are declared and checked once per deployment, not once per function or in a branch per vendor.
+
+**Given** a registered deployment and models in several slots that reference it
+**When** a run, worker or dispatch starts
+**Then** the deployment is checked once, each model is checked as served by it, and every stage that uses one of its models is handed the same client.
+
+**Acceptance criteria:**
+
+- A deployment declares the environment variables it reads (alternatives allowed, so Isaacus reads `ISAACUS_API_KEY` or `ISAACUS_SAGEMAKER_ENDPOINTS`), whether it needs the network, whether its calls are billed, a free reachability check, a billed smoke call, the models it serves and how its client is built. A declaration names variables, never a secret. The built-ins are `isaacus-api`, `isaacus-sagemaker`, `bedrock` and `ollama`.
+- A model registers in a slot against the deployments that may serve it and a vendor model id. One model may be served by more than one deployment (Kanon-2 Embedder on the hosted API or a SageMaker endpoint), and one model id is both the `enrichment` provider and the AI chunking model (the latter chosen by `chunking.chunking_deployment`).
+- Each slot's config takes an optional `deployment:`. Left unset, a model is served as before: by SageMaker when `ISAACUS_SAGEMAKER_ENDPOINTS` is set, else the hosted API. A model the chosen deployment does not serve is refused, never routed to another deployment.
+- Before launch, a `deployment:` the model cannot use (unknown, or not one that may serve it) is refused naming the deployment and what serves the model, for `POST /v1/runs` and `dispatch-workflow` (registration only, since the host may not carry the workers' environment), and for `run` and a worker. A model its chosen deployment does not serve in this environment is refused naming the deployment and what it serves.
+- Each deployment's free check runs once however many slots use it, and a failure is named for the model that caused it. `load` runs the free check; `smoke` sends one billed call per model on the deployment, warning first.
+- A process builds one client per deployment and passes it to every provider that uses it.
+- A worker serves a stage only when every model the stage uses passes its deployment's check.
+- A deployment that needs the network is billed.
+- `GET /v1/resources` lists each registered deployment and the models it may serve; the variables it reads are reported set or not, and no value is shown.
+- Every sidecar records the deployment each model ran on, under the footer key `womblex.deployments`; an ARN is reduced to its endpoint name and region, as the run record does. Existing keys keep their values. The run record (version 10) lists them.
+- A plugin can register a deployment as it registers a model (`womblex.deployments` entry point, `womblex_deployments` on a factory); the run record names the distribution and version that supplied it.
+- Existing plugins keep working: the `isaacus` trait means "served by the Isaacus deployments", and a reader with `ping()` / `ping_is_billed` and no declared deployment is given one built from them.
+- With the default configuration the built-ins behave as before, with the same refusal codes, the same queues joined and the same `womblex.model_check` values; `config_digest` is unchanged for a config that names no deployment.
+
+**Verification:** `tests/test_deployment_registry.py` (the conformance every registered deployment meets, registration and plugins), `tests/test_deployment_check.py` (one check per deployment, attribution), `tests/test_deployment_gates.py` (contracts and workers), `tests/test_deployment_choice.py` (the setting, its refusals, a client per deployment, the unchanged digest), `tests/test_deployment_record.py` (the footer key and run record) and `tests/test_resources.py`.
 
 ## Outstanding
 

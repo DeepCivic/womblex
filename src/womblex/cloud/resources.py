@@ -96,8 +96,43 @@ def isaacus_description() -> dict[str, Any]:
     }
 
 
+def deployments_description() -> list[dict[str, Any]]:
+    """Each registered deployment and the registered models it serves, without a network call.
+
+    The variables a deployment reads are named and reported set or not; no value is shown. A model
+    is listed under every deployment that may serve it, ``served`` saying whether this host's
+    environment makes the deployment serve it now.
+    """
+    from womblex.analyse import embed, enrich  # noqa: F401 -- register the built-in models
+    from womblex.ingest import paddle_ocr  # noqa: F401
+    from womblex.utils.deployment_registry import deployments_for, distribution_version, known_deployments
+    from womblex.utils.deployment_registry import resolve as resolve_deployment
+    from womblex.utils.model_registry import SLOTS, known_names
+    from womblex.utils.model_registry import resolve as resolve_model
+
+    entries = [resolve_model(slot, name) for slot in SLOTS for name in known_names(slot)]
+    out: list[dict[str, Any]] = []
+    for name in known_deployments():
+        deployment = resolve_deployment(name)
+        distribution, version = distribution_version(deployment)
+        out.append({
+            "name": deployment.name,
+            "distribution": distribution,
+            "version": version,
+            "needs_network": deployment.needs_network,
+            "billed": deployment.billed,
+            "variables": [{"names": list(group), "configured": group not in deployment.unset()}
+                          for group in deployment.env],
+            "optional_variables": list(deployment.env_optional),
+            "models": [{"slot": e.slot, "name": e.name, "vendor_model": e.vendor_model or e.name,
+                        "served": deployment.serves(e.vendor_model or e.name)}
+                       for e in entries if deployment.name in deployments_for(e)],
+        })
+    return out
+
+
 def deployment_resources(settings: DeploymentSettings) -> dict[str, Any]:
-    """``store``, ``ingest``, ``queue`` and ``isaacus``, described without a network call."""
+    """``store``, ``ingest``, ``queue``, ``isaacus`` and ``deployments``, described without a network call."""
     if settings.is_remote:
         store = {"kind": "remote", **_location(cast(str, settings.store_uri))}
     else:
@@ -109,6 +144,7 @@ def deployment_resources(settings: DeploymentSettings) -> dict[str, Any]:
         "ingest": ingest,
         "queue": {"configured": bool(settings.db_dsn), "dsn_masked": mask_dsn(settings.db_dsn)},
         "isaacus": isaacus_description(),
+        "deployments": deployments_description(),
     }
 
 
