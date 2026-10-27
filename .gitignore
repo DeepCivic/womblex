@@ -52,3 +52,6 @@ fixtures/fixtures/
 
 # pytest logging (slow-test monitor + lib progress)
 pytest.log
+
+# Docs build output (mkdocs build)
+site/

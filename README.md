@@ -1,11 +1,43 @@
 # Womblex
 
-**Turn messy document releases into a versioned, verifiable Parquet corpus.**
+**Womblex turns messy government document releases (FOI bundles, scanned forms,
+printed spreadsheets) into a verbatim, versioned Parquet corpus you can search,
+analyse and trace back to its source.**
 
 [![CI](https://github.com/DeepCivic/womblex/actions/workflows/ci.yml/badge.svg)](https://github.com/DeepCivic/womblex/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/womblex)](https://pypi.org/project/womblex/)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue)](pyproject.toml)
 [![Licence: Apache-2.0](https://img.shields.io/badge/licence-Apache--2.0-blue)](LICENSE)
+
+```bash
+pip install womblex          # Python 3.12
+```
+
+Extract a redacted decision notice (a synthetic document from this repository's
+test set):
+
+```bash
+curl -LO https://raw.githubusercontent.com/DeepCivic/womblex/main/fixtures/synthetic/documents/quokka-care-decision-notice_redacted.pdf
+womblex extract quokka-care-decision-notice_redacted.pdf -o out/
+```
+
+`out/quokka-care-decision-notice_redacted.txt` (4,012 characters) begins:
+
+```text
+Notice of Administrative Decision
+
+Quokka Cove Out of School Hours Care
+Service approval number: SE-40099001 Provider approval number: PR-00099017
+Approved provider: Rottnest Community Services Incorporated
+Address: 1 Thomson Bay Road, ROTTNEST, WA 6161
+The Regulatory Authority has decided to issue a compliance direction to the approved
+provider under the Wildlife Care Services National Law.
+```
+
+<!-- TODO: add examples/ with the end-to-end walkthrough. -->
+See [examples/](https://github.com/DeepCivic/womblex/tree/main/examples) for an end-to-end walkthrough.
+
+## What it does
 
 Government document releases (FOI bundles, papers, scanned forms, printed
 spreadsheets) are hard to get text out of without losing key details. Womblex extracts it first and keeps it verbatim, as an ordered stream
@@ -156,6 +188,10 @@ surface.
 
 ## Documentation
 
+The API reference covers every public module, generated from its docstrings.
+Build it with `uv run --group docs mkdocs serve` (CI builds it on every PR).
+<!-- TODO: link the hosted API reference here, and add it to [project.urls], once it is published. -->
+
 | Document | Covers |
 |---|---|
 | [functional_requirements.md](docs/functional_requirements.md) | What Womblex must do |
@@ -180,11 +216,15 @@ Womblex is **alpha** and pre-1.0.
 - **Stable:** the on-disk data contract, versioned apart from the package
   (additive changes are minor bumps with back-fill; renames are major bumps with
   a reader shim), and the Python names in `womblex.__all__`, which change only
-  after one minor release of deprecation warnings. See [docs/contract.md](docs/contract.md).
+  after one minor release of deprecation warnings. See [STABILITY.md](STABILITY.md) for
+  the policy and [docs/contract.md](docs/contract.md) for the schema.
 - **Moving:** everything outside `__all__`, the CLI options, the stored-workflow
   commands.
 
 ## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to branch, check and open a pull
+request, and [STABILITY.md](STABILITY.md) for what may change between releases.
 
 ```bash
 git clone https://github.com/DeepCivic/womblex.git && cd womblex

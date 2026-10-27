@@ -150,7 +150,5 @@ in any release.
 
 ### Deprecation policy
 
-A name in `__all__`, or a signature it exposes, is removed or changed
-incompatibly only after one minor release in which it emits a
-`DeprecationWarning` naming the replacement. The removal is recorded in the
-CHANGELOG under `Removed`.
+The deprecation window for these names, and how a breaking change is
+announced, are in [STABILITY.md](https://github.com/DeepCivic/womblex/blob/main/STABILITY.md).
