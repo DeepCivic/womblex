@@ -622,7 +622,7 @@ def prepare_stage_context(contract: StageContract, config: WomblexConfig) -> Run
         except Exception as e:
             raise StagePreconditionError(f"{contract.name} preflight failed: {e}") from e
 
-    if contract.requires_isaacus_api(config):
+    if contract.requires_deployment(config):
         from womblex.utils.availability import isaacus_available
 
         # Cheap and network-free, so it runs before the model check's own
@@ -644,7 +644,7 @@ def prepare_stage_context(contract: StageContract, config: WomblexConfig) -> Run
         )
 
     ctx = RunContext()
-    if contract.needs_client and contract.requires_isaacus_api(config):
+    if contract.needs_client and contract.requires_deployment(config):
         from womblex.providers.isaacus.client import make_isaacus_client
 
         try:

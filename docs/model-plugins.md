@@ -103,7 +103,9 @@ Two factory traits answer the pre-launch gates before anything is built.
 `returns_document` declares that `enrich` hands back a Document AI chunking
 can reuse; without it nothing is persisted, `chunking.chunking_model` is set
 aside, and chunks come from semchunk's local token splitting. `isaacus` gates the stage on an Isaacus deployment; leave it off a
-provider Isaacus does not serve. A provider with neither runs with
+provider Isaacus does not serve. A provider served by another deployment declares
+it as `womblex_deployments` on its factory (with `womblex_vendor_model`), and the
+stage is gated on and checked through that deployment instead. A provider with neither runs with
 `client=None` and is checked like any local model.
 
 ```toml

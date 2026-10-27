@@ -527,7 +527,7 @@ from types import SimpleNamespace
 from womblex.providers.bedrock.ocr import MistralOCRReader
 from womblex.providers.isaacus import client as isaacus_client
 from womblex.providers.ollama.ocr import OllamaOCRReader
-from womblex.utils.model_check import ISAACUS, SCOPE_EMBED, SCOPE_ENRICH, isaacus_models
+from womblex.utils.model_check import ISAACUS, SCOPE_EMBED, SCOPE_ENRICH, deployed_models
 
 
 class _FakeIsaacus:
@@ -580,7 +580,7 @@ _PAID = {
 
 class TestIsaacus:
     def test_each_enabled_stage_names_the_model_it_calls(self) -> None:
-        uses = {u.name: u.scopes for u in isaacus_models(_config(**_PAID))}
+        uses = {u.name: u.scopes for u in deployed_models(_config(**_PAID))}
         # AI chunking and enrich call the same enricher: one check, both scopes.
         assert uses == {
             "kanon-2-enricher": (SCOPE_ENRICH, SCOPE_CHUNK),
@@ -589,7 +589,7 @@ class TestIsaacus:
 
     def test_nothing_is_called_when_no_stage_needs_isaacus(self) -> None:
         # Plain chunking runs offline on the vendored tokeniser.
-        assert isaacus_models(_config()) == []
+        assert deployed_models(_config()) == []
 
     def test_smoke_sends_every_model_one_billed_request_and_records_it(self, fake_isaacus) -> None:
         made = fake_isaacus()
@@ -617,7 +617,7 @@ class TestIsaacus:
     def test_womblex_run_checks_isaacus_before_extraction(self) -> None:
         """No scopes = every enabled stage, which is what `womblex run` asks for."""
         cfg = _config(embedding={"enabled": True})
-        assert [(u.name, u.scopes) for u in isaacus_models(cfg)] == [
+        assert [(u.name, u.scopes) for u in deployed_models(cfg)] == [
             ("kanon-2-embedder", (SCOPE_EMBED,)),
         ]
 

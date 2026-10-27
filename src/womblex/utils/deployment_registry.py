@@ -27,7 +27,7 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
-from womblex.utils.model_registry import plugin_objects
+from womblex.utils.model_registry import ModelEntry, plugin_objects
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +120,20 @@ def resolve(name: str) -> Deployment:
         return _deployments[_norm(name)]
     except KeyError:
         raise ValueError(f"unknown deployment: {name!r} (known: {sorted(_deployments)})") from None
+
+
+#: What the ``isaacus`` model trait means: served by the Isaacus deployments.
+ISAACUS_DEPLOYMENTS = ("isaacus-api", "isaacus-sagemaker")
+
+
+def deployments_for(entry: ModelEntry) -> tuple[str, ...]:
+    """The deployments that may serve *entry*: those it declares, else Isaacus's for the ``isaacus`` trait.
+
+    Empty for a model that runs locally.
+    """
+    if entry.deployments:
+        return entry.deployments
+    return ISAACUS_DEPLOYMENTS if entry.traits.get("isaacus") else ()
 
 
 def distribution_version(deployment: Deployment) -> tuple[str, str]:

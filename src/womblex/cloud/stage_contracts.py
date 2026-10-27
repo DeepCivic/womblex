@@ -32,8 +32,8 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from womblex.analyse.embed import calls_isaacus as embedding_calls_isaacus
-from womblex.analyse.enrich import ai_chunking_model, calls_isaacus, effective_chunking, returns_document
+import womblex.analyse.embed  # noqa: F401 -- registers the embedding slot's built-in
+from womblex.analyse.enrich import ai_chunking_model, effective_chunking, returns_document
 from womblex.pipeline_order import sort_by_pipeline
 
 # `_SUFFIX` / `_SHARD_SUFFIX` are imported rather than re-spelled so a schema
@@ -57,6 +57,8 @@ from womblex.store.output import _SHARD_ROLES, _SHARD_SUFFIX, CHUNKS_SUFFIX
 from womblex.store.pii_output import CLEAN_TEXT_SUFFIX, PII_SPANS_SUFFIX
 from womblex.store.quality_output import CHUNK_QUALITY_SUFFIX
 from womblex.store.spellfix_output import SPELLFIX_CORRECTIONS_SUFFIX, SPELLFIX_TEXT_SUFFIX
+from womblex.utils.deployment_registry import deployments_for
+from womblex.utils.model_registry import SLOT_EMBEDDING, SLOT_ENRICHMENT, resolve
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from womblex.config import WomblexConfig
@@ -111,17 +113,23 @@ def _no_models(_config: WomblexConfig) -> tuple[str, ...]:
     return ()
 
 
-def _chunk_needs_api(config: WomblexConfig) -> bool:
-    """``chunk`` needs the Isaacus API only when AI chunking is enabled.
+def _deployed(slot: str, name: str) -> tuple[str, ...]:
+    """``(name,)`` when the model registered as *name* in *slot* is served by a deployment, else ``()``."""
+    try:
+        return (name,) if deployments_for(resolve(slot, name)) else ()
+    except ValueError:
+        return ()  # the model check reports an unknown name
 
-    Plain token chunking sizes chunks with the vendored kanon-2 tokeniser and
-    runs fully offline, so a keyless local run must still chunk. AI chunking
-    (``chunking.chunking_model`` set) calls the enricher API per document at
-    chunk time, so it needs a deployment. The static ``needs_isaacus_api=True``
-    on the contract is the *display* answer (chunk can use the API); this is
-    the *runtime-gate* answer, resolved from config.
+
+def _chunk_models(config: WomblexConfig) -> tuple[str, ...]:
+    """The model ``chunk`` calls, which is the AI chunking model alone.
+
+    Plain token chunking sizes chunks with the vendored kanon-2 tokeniser and runs
+    fully offline, so a keyless local run still chunks; only ``chunking.chunking_model``
+    calls a deployment, once per document at chunk time.
     """
-    return bool(ai_chunking_model(config))
+    model = ai_chunking_model(config)
+    return (model,) if model else ()
 
 
 @dataclass
@@ -151,19 +159,14 @@ class StageContract:
     outputs: Callable[[WomblexConfig], tuple[str, ...]]
     run: Callable[[Path, WomblexConfig, RunContext], None]
     needs_isaacus_api: bool = False
+    """Display only (`/v1/stages`): this stage can call the Isaacus API. The runtime gate is `models`."""
     needs_client: bool = False
-    # Isaacus model ids the stage calls. Checked against the deployed endpoints
-    # when the run targets a SageMaker deployment (subscriptions are per model,
-    # so an endpoint need not serve all of them); ignored on the hosted API.
+    # The model ids this config makes the stage call on a deployment. The stage needs
+    # those deployments, and on SageMaker each model must be served by an endpoint
+    # (subscriptions are per model); a stage that calls none runs offline.
     models: Callable[[WomblexConfig], tuple[str, ...]] = _no_models
     checkpoint_dirname: str | None = None
     preflight: Callable[[WomblexConfig], None] | None = None
-    # Config-aware override of the runtime Isaacus gate. When set, the runner's
-    # pre-flight consults this instead of the static ``needs_isaacus_api`` flag
-    # — the flag stays the coarse "this stage can call the API" answer used for
-    # display (the composer graph), while this resolves whether *this config*
-    # actually will (e.g. ``chunk`` calls the API only under AI chunking).
-    needs_isaacus_api_for: Callable[[WomblexConfig], bool] | None = None
     # The stage re-reads the source documents, not just the shards: the runner
     # hands it a fetcher for the ingest store (`RunContext.source_fetcher`).
     needs_sources: bool = False
@@ -171,11 +174,9 @@ class StageContract:
     # change under outputs it already wrote (graph-refresh after a rechunk).
     skip_if_output_present: bool = True
 
-    def requires_isaacus_api(self, config: WomblexConfig) -> bool:
-        """Whether *config* makes this stage call the Isaacus API at runtime."""
-        if self.needs_isaacus_api_for is not None:
-            return self.needs_isaacus_api_for(config)
-        return self.needs_isaacus_api
+    def requires_deployment(self, config: WomblexConfig) -> bool:
+        """Whether *config* makes this stage call a model on a deployment at runtime."""
+        return bool(self.models(config))
 
     def input_suffixes(self, config: WomblexConfig) -> tuple[str, ...]:
         """Required + conditional inputs for *config*, de-duplicated, in order."""
@@ -473,12 +474,8 @@ STAGE_CONTRACTS: dict[str, StageContract] = {
         conditional_inputs=_chunk_conditional,
         outputs=lambda _c: (CHUNKS_SUFFIX,),
         run=_run_chunk,
-        # `needs_isaacus_api=True` is the display answer (chunk *can* call the
-        # enricher API, under AI chunking). The runtime gate is config-aware:
-        # plain token chunking uses the vendored tokeniser and runs offline, so
-        # only AI chunking (`chunking_model`) actually needs a deployment.
-        needs_isaacus_api=True,
-        needs_isaacus_api_for=_chunk_needs_api,
+        needs_isaacus_api=True,  # display: chunk can call the enricher, under AI chunking
+        models=_chunk_models,
         checkpoint_dirname=".chunk-checkpoint",
     ),
     "money": StageContract(
@@ -500,9 +497,8 @@ STAGE_CONTRACTS: dict[str, StageContract] = {
         outputs=_enrich_outputs,
         run=_run_enrich,
         needs_isaacus_api=True,
-        needs_isaacus_api_for=lambda c: calls_isaacus(c.enrichment.model),
         needs_client=True,
-        models=lambda c: (c.enrichment.model,) if calls_isaacus(c.enrichment.model) else (),
+        models=lambda c: _deployed(SLOT_ENRICHMENT, c.enrichment.model),
         checkpoint_dirname=".enrich-checkpoint",
     ),
     "embed": StageContract(
@@ -514,9 +510,8 @@ STAGE_CONTRACTS: dict[str, StageContract] = {
         outputs=lambda _c: (EMBEDDINGS_SUFFIX,),
         run=_run_embed,
         needs_isaacus_api=True,
-        needs_isaacus_api_for=lambda c: embedding_calls_isaacus(c.embedding.model),
         needs_client=True,
-        models=lambda c: (c.embedding.model,) if embedding_calls_isaacus(c.embedding.model) else (),
+        models=lambda c: _deployed(SLOT_EMBEDDING, c.embedding.model),
         checkpoint_dirname=".embed-checkpoint",
     ),
     "link": StageContract(

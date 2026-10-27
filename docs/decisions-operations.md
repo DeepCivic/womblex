@@ -235,10 +235,10 @@ Decisions inside it:
   / `enrich` / `money` read the overlay sidecar named by `processing.text_source`
   (with `money.text_source` outranking it); `pii` writes `*.clean_text.parquet`
   only when `write_clean_text`; `enrich` writes `*.enrichment_doc.parquet` only
-  when persisting. The Isaacus gate is config-aware for the same reason: `chunk`
-  needs the API only under AI chunking (`requires_isaacus_api(config)` returns
-  `chunking_model` truthiness), while the static `needs_isaacus_api=True` stays
-  the coarse display answer for the composer graph. Resolving any of these from
+  when persisting. The deployment gate is config-aware for the same reason: a stage needs
+  deployments only for the models its `models(config)` names (`requires_deployment(config)`
+  is whether any), so `chunk` needs one only under AI chunking, while the static
+  `needs_isaacus_api=True` stays the coarse display answer for the composer graph. Resolving any of these from
   the stage name would download the wrong files and — worse — let the
   output-exists skip fire on an incomplete set, or refuse a keyless offline
   chunk run.

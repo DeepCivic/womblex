@@ -221,7 +221,7 @@ class TestAiChunkingLive:
 
     Boundaries follow the enricher's structure spans instead of the offline
     token split, so this exercises the one chunk path that actually calls the
-    Isaacus API — the path the config-aware gate (``requires_isaacus_api``)
+    Isaacus API — the path the config-aware gate (``requires_deployment``)
     protects.
     """
 

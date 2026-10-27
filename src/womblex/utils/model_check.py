@@ -32,6 +32,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from womblex.utils.deployment_check import check_deployed, check_pinging_model
+from womblex.utils.deployment_registry import ISAACUS_DEPLOYMENTS, deployments_for
 from womblex.utils.model_registry import (
     SLOT_EMBEDDING,
     SLOT_ENRICHMENT,
@@ -183,12 +184,9 @@ def _candidates(config: WomblexConfig) -> list[tuple[str, str, str, dict[str, An
         SCOPE_SPELLFIX, SLOT_SPELLFIX_DICTIONARY, config.spellfix.dict_name,
         dict(config.spellfix.dict_options),
     ))
-    from womblex.analyse.embed import calls_isaacus as embedding_calls_isaacus
-    from womblex.analyse.enrich import calls_isaacus
-
-    if not calls_isaacus(config.enrichment.model):  # an Isaacus provider is pinged instead
+    if not _entry_deployments(SLOT_ENRICHMENT, config.enrichment.model):  # a deployed model is checked through its deployment
         out.append((SCOPE_ENRICH, SLOT_ENRICHMENT, config.enrichment.model, {}))
-    if not embedding_calls_isaacus(config.embedding.model):
+    if not _entry_deployments(SLOT_EMBEDDING, config.embedding.model):
         out.append((SCOPE_EMBED, SLOT_EMBEDDING, config.embedding.model, {}))
     if config.pii.use_regex_backstop:  # the only consumer of the context model
         out.append((SCOPE_PII, SLOT_PII_CONTEXT, config.pii.model, dict(config.pii.model_options)))
@@ -209,6 +207,11 @@ def enabled_scopes(config: WomblexConfig) -> set[str]:
     }
 
 
+def _register_builtins() -> None:
+    for module in _BUILTIN_MODULES:
+        importlib.import_module(module)
+
+
 def configured_models(
     config: WomblexConfig, scopes: Iterable[str] | None = None,
 ) -> list[ModelUse]:
@@ -217,8 +220,7 @@ def configured_models(
     A model several scopes use (the layout analyser for OCR and for redaction)
     is listed once, so it is loaded once.
     """
-    for module in _BUILTIN_MODULES:
-        importlib.import_module(module)
+    _register_builtins()
     wanted = enabled_scopes(config) if scopes is None else set(scopes)
     merged: dict[tuple[str, str, str], tuple[dict[str, Any], list[str]]] = {}
     for scope, slot, name, options in _candidates(config):
@@ -232,30 +234,46 @@ def configured_models(
     ]
 
 
-def isaacus_models(
-    config: WomblexConfig, scopes: Iterable[str] | None = None,
-) -> list[ModelUse]:
-    """The Isaacus models *config* calls for *scopes* (every enabled stage if ``None``).
+def _entry_deployments(slot: str, name: str) -> tuple[str, ...]:
+    """The deployments that may serve the model registered as *name* in *slot*; none if it runs locally or is unknown."""
+    try:
+        return deployments_for(resolve(slot, name))
+    except ValueError:
+        return ()  # the unknown name is reported by the model's own check
 
-    Enrich and embed call their model when the provider is Isaacus's; chunk
-    calls the enricher only under AI chunking (``chunking.chunking_model``) —
-    plain chunking is offline.
-    """
-    from womblex.analyse.embed import calls_isaacus as embedding_calls_isaacus
-    from womblex.analyse.enrich import ai_chunking_model, calls_isaacus
 
-    wanted = enabled_scopes(config) if scopes is None else set(scopes)
-    found: dict[str, list[str]] = {}
-    for scope, model in (
-        (SCOPE_ENRICH, config.enrichment.model if calls_isaacus(config.enrichment.model) else None),
-        (SCOPE_CHUNK, ai_chunking_model(config)),
-        (SCOPE_EMBED, config.embedding.model if embedding_calls_isaacus(config.embedding.model) else None),
-    ):
-        if model and scope in wanted:
-            found.setdefault(model, []).append(scope)
+def _pick_deployment(deployments: tuple[str, ...]) -> str:
+    """The deployment a model is served by with nothing chosen: the environment's Isaacus default if it may, else the first."""
     from womblex.providers.isaacus.deployment import default_deployment
 
-    return [ModelUse(ISAACUS, m, {}, tuple(s), default_deployment()) for m, s in found.items()]
+    default = default_deployment()
+    return default if default in deployments else deployments[0]
+
+
+def deployed_models(
+    config: WomblexConfig, scopes: Iterable[str] | None = None,
+) -> list[ModelUse]:
+    """The models *config* calls on a deployment for *scopes* (every enabled stage if ``None``).
+
+    Enrich and embed call their model when a deployment serves it; chunk calls the
+    enricher only under AI chunking (``chunking.chunking_model``) — plain chunking is offline.
+    An Isaacus-served model is recorded under the ``isaacus`` slot.
+    """
+    from womblex.analyse.enrich import ai_chunking_model
+
+    _register_builtins()
+    wanted = enabled_scopes(config) if scopes is None else set(scopes)
+    chunk_model = ai_chunking_model(config)
+    found: dict[str, tuple[str, str, list[str]]] = {}  # model -> (slot, deployment, scopes)
+    for scope, slot, model, deployments in (
+        (SCOPE_ENRICH, SLOT_ENRICHMENT, config.enrichment.model, _entry_deployments(SLOT_ENRICHMENT, config.enrichment.model)),
+        (SCOPE_CHUNK, SLOT_ENRICHMENT, chunk_model, ISAACUS_DEPLOYMENTS if chunk_model else ()),
+        (SCOPE_EMBED, SLOT_EMBEDDING, config.embedding.model, _entry_deployments(SLOT_EMBEDDING, config.embedding.model)),
+    ):
+        if model and deployments and scope in wanted:
+            deployment = _pick_deployment(deployments)
+            found.setdefault(model, (ISAACUS if deployment.startswith("isaacus") else slot, deployment, []))[2].append(scope)
+    return [ModelUse(slot, m, {}, tuple(s), deployment) for m, (slot, deployment, s) in found.items()]
 
 
 def models_key(config: WomblexConfig, scope: str) -> str:
@@ -264,7 +282,7 @@ def models_key(config: WomblexConfig, scope: str) -> str:
     The identity work is routed by (Phase R, D8): a queue named with it is joined only by a
     worker whose own config names the same models and whose check of them passed.
     """
-    uses = [*configured_models(config, [scope]), *isaacus_models(config, [scope])]
+    uses = [*configured_models(config, [scope]), *deployed_models(config, [scope])]
     if not uses:
         return ""
     ident = sorted((u.slot, u.name.strip().lower(), json.dumps(u.options, sort_keys=True, default=str)) for u in uses)
@@ -470,7 +488,7 @@ def check_models(
         _OFF_REQUESTED = True
         return ModelCheckResult(chosen)
     scopes = list(scopes) if scopes is not None else None
-    uses = [*configured_models(config, scopes), *isaacus_models(config, scopes if isaacus_scopes is None else isaacus_scopes)]
+    uses = [*configured_models(config, scopes), *deployed_models(config, scopes if isaacus_scopes is None else isaacus_scopes)]
     with suppress_use_recording(), suppress_recording():
         checks = [
             *(_check_one(use, chosen) for use in uses if not use.deployment),
@@ -509,9 +527,9 @@ __all__ = [
     "check_models",
     "check_registered",
     "configured_models",
+    "deployed_models",
     "enabled_scopes",
     "footer_payload",
-    "isaacus_models",
     "models_key",
     "reset_model_check",
 ]
