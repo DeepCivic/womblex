@@ -66,7 +66,7 @@ A different `paddle2onnx` version may change the ONNX digest.
 | `kanon-2-enricher` (as `chunking.chunking_model`) | Isaacus | `process/chunker.py` via semchunk 4 | AI chunking: boundaries follow the enrichment's structure. Reuses a persisted `*.enrichment_doc.parquet` Document when its text matches; only an enrichment provider that returns a Document persists one, and with any other `chunking_model` is set aside for local semchunk token splitting | `chunking.chunking_model` set |
 | `kanon-2-embedder` | Isaacus | `analyse/embed.py`, `analyse/embed_stage.py` | The default `embedding` provider (`embedding.model`; another is installed through `womblex.models.embedding`). Chunk embeddings (`retrieval/document`; `retrieval/query` for queries) | `embed` stage + Isaacus credentials |
 | `mistral.pixtral-large-2502-v1:0` | Mistral Pixtral Large via AWS Bedrock | `providers/bedrock/ocr.py` | VLM OCR returning markdown with reading order resolved. No regions, so it skips the layout pass and table reconstruction | `ocr.engine: mistral-ocr` + AWS credentials. Override with `engine_options.model` or `MISTRAL_OCR_MODEL_ID` |
-| `llama3.2-vision` (default) | Local Ollama, OpenAI-compatible endpoint | `providers/bedrock/ocr.py` (`OllamaOCRReader`) | Same role and shape as the Mistral engine | `ocr.engine: ollama`; endpoint from `OLLAMA_BASE_URL` |
+| `llama3.2-vision` (default) | Local Ollama, OpenAI-compatible endpoint | `providers/ollama/ocr.py` (`OllamaOCRReader`) | Same role and shape as the Mistral engine | `ocr.engine: ollama`; endpoint from `OLLAMA_BASE_URL` |
 
 The default OCR engine is `paddleocr`, so a default run calls no hosted OCR.
 

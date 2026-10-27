@@ -524,8 +524,9 @@ class TestMarkdownEngines:
 
 from types import SimpleNamespace
 
-from womblex.providers.bedrock.ocr import MistralOCRReader, OllamaOCRReader
+from womblex.providers.bedrock.ocr import MistralOCRReader
 from womblex.providers.isaacus import client as isaacus_client
+from womblex.providers.ollama.ocr import OllamaOCRReader
 from womblex.utils.model_check import ISAACUS, SCOPE_EMBED, SCOPE_ENRICH, isaacus_models
 
 
@@ -712,3 +713,25 @@ def test_the_worker_registry_names_the_queues_live_workers_serve(tmp_path: Path)
         assert registry.live_queues(within_seconds=-1) == {}  # none refreshed in time
         registry.remove("w1")
         assert registry.live_queues() == {"q-b": ["w2"]}
+
+
+def test_the_old_llm_ocr_path_re_exports_both_readers():
+    from womblex.ingest import llm_ocr
+    from womblex.providers.bedrock import ocr as bedrock
+    from womblex.providers.ollama import ocr as ollama
+
+    assert llm_ocr.MistralOCRReader is bedrock.MistralOCRReader
+    assert llm_ocr.get_mistral_reader is bedrock.get_mistral_reader
+    assert llm_ocr.OllamaOCRReader is ollama.OllamaOCRReader
+    assert llm_ocr.get_ollama_reader is ollama.get_ollama_reader
+
+
+def test_the_old_llm_ocr_path_re_exports_both_readers():
+    from womblex.ingest import llm_ocr
+    from womblex.providers.bedrock import ocr as bedrock
+    from womblex.providers.ollama import ocr as ollama
+
+    assert llm_ocr.MistralOCRReader is bedrock.MistralOCRReader
+    assert llm_ocr.get_mistral_reader is bedrock.get_mistral_reader
+    assert llm_ocr.OllamaOCRReader is ollama.OllamaOCRReader
+    assert llm_ocr.get_ollama_reader is ollama.get_ollama_reader

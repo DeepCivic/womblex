@@ -33,7 +33,8 @@ from womblex.utils.model_registry import (
 if TYPE_CHECKING:
     from rapidocr_onnxruntime import RapidOCR
 
-    from womblex.providers.bedrock.ocr import MistralOCRReader, OllamaOCRReader
+    from womblex.providers.bedrock.ocr import MistralOCRReader
+    from womblex.providers.ollama.ocr import OllamaOCRReader
 
 logger = logging.getLogger(__name__)
 
@@ -297,7 +298,7 @@ def _make_ollama(
     prompt: str | None = None,
     **_: object,
 ) -> OllamaOCRReader:
-    from womblex.providers.bedrock.ocr import get_ollama_reader
+    from womblex.providers.ollama.ocr import get_ollama_reader
     return get_ollama_reader(model=model, base_url=base_url, prompt=prompt)
 
 

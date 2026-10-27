@@ -214,7 +214,10 @@ womblex/
 │   │   └── models.py           # Pydantic response models — the OpenAPI surface
 │   ├── providers/            # One package per built-in vendor: client module beside one adapter module per slot
 │   │   ├── bedrock/
-│   │   │   └── ocr.py           # LLM/VLM OCR backends: Mistral Pixtral Large via AWS Bedrock, + local Ollama
+│   │   │   └── ocr.py           # Mistral Pixtral Large OCR via AWS Bedrock
+│   │   ├── ollama/
+│   │   │   └── ocr.py           # Local Ollama (OpenAI-compatible) OCR
+│   │   ├── _images.py           # Page-image PNG encoding shared by the OCR readers
 │   │   └── isaacus/
 │   │       ├── client.py        # Build the Isaacus SDK client (hosted API or private SageMaker)
 │   │       ├── enrichment.py    # IsaacusEnrichment, the kanon-2-enricher adapter

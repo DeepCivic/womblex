@@ -10,7 +10,7 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 ### Changed
 - **The Isaacus client and its slot adapters move into `providers/isaacus/` (Requirement 38, Phase A1).** `utils/isaacus_client.py` becomes `providers/isaacus/client.py`; `IsaacusEnrichment` and `IsaacusEmbedding` move out of `analyse/enrich.py` and `analyse/embed.py` into `enrichment.py` and `embedding.py` beside it. The old import paths re-export. No behaviour change.
-- **The OCR readers move to `providers/bedrock/ocr.py` (Requirement 38, Phase A2).** A rename of `ingest/llm_ocr.py`; callers import from the new path, and the old path re-exports in the next merge of the stack. No behaviour change.
+- **The OCR readers move into `providers/` (Requirement 38, Phase A2).** `ingest/llm_ocr.py` becomes `providers/bedrock/ocr.py` (Mistral on Bedrock); the Ollama reader moves to `providers/ollama/ocr.py`. `ingest/llm_ocr.py` re-exports both. No behaviour change.
 
 ## [0.6.0] - YYYY-MM-DD <!-- TODO: set the release date before tagging -->
 
