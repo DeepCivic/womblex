@@ -18,8 +18,13 @@ from urllib.parse import urlsplit, urlunsplit
 
 from womblex.cloud.reachability import store_reachable
 from womblex.config import EmbeddingConfig, EnrichmentConfig
+from womblex.providers.isaacus.client import (
+    API_KEY_ENV,
+    endpoints_from_env,
+    misconfigured_endpoints_var,
+    unserved_models,
+)
 from womblex.store.remote import is_remote_uri, storage_options_from_env
-from womblex.utils.isaacus_client import API_KEY_ENV, endpoints_from_env, misconfigured_endpoints_var, unserved_models
 
 if TYPE_CHECKING:
     from womblex.cloud.deployment import DeploymentSettings

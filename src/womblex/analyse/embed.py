@@ -121,7 +121,7 @@ class IsaacusEmbedding:
 
 
 def _make_isaacus(*, config: EmbeddingConfig, client: object = None, **_: object) -> IsaacusEmbedding:
-    from womblex.utils.isaacus_client import with_retries
+    from womblex.providers.isaacus.client import with_retries
 
     return IsaacusEmbedding(with_retries(client, config.max_retries), config)
 

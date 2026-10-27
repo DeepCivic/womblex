@@ -387,7 +387,7 @@ copy, which is also what makes a moved corpus re-resolve.
 
 ### Isaacus deployment is environment-shaped, and endpoints are declared, not assumed
 SageMaker support (2026-08) lets an air-gapped AWS account serve Kanon-2 with no
-API key and no egress. Three choices behind `utils/isaacus_client.py`:
+API key and no egress. Three choices behind `providers/isaacus/client.py`:
 
 - **Environment, not YAML.** Which deployment answers a call is a property of
   *where Womblex is running*, like `ISAACUS_API_KEY`, `WOMBLEX_STORE_URI` and

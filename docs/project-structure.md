@@ -213,6 +213,9 @@ womblex/
 │   │   ├── readers.py          # Document text rows by layer (masked / chunks / elements), read in place with a source_hash filter
 │   │   ├── auth.py             # Service-token auth: client registry (WOMBLEX_API_CLIENTS), Caller + scopes, FastAPI dependencies
 │   │   └── models.py           # Pydantic response models — the OpenAPI surface
+│   ├── providers/            # One package per built-in vendor: client module beside one adapter module per slot
+│   │   └── isaacus/
+│   │       └── client.py        # Build the Isaacus SDK client (hosted API or private SageMaker)
 │   └── utils/
 │       ├── metrics.py       # CER, WER, CER-s accuracy metrics (numpy-accelerated Levenshtein + spatial sort)
 │       ├── tabular_metrics.py # Tabular extraction accuracy (structural fidelity, data integrity)
@@ -220,7 +223,6 @@ womblex/
 │       ├── model_registry.py # Named model registry per slot (OCR, layout, PII context, tokeniser, spellfix dictionary): built-in names + `womblex.models.<slot>` entry-point plugins; records which entry each slot actually built, with its distribution and version
 │       ├── models.py        # Local model path resolution (WOMBLEX_MODELS_DIR, _models/, models/ + HF snapshot layout) + load record with byte digests
 │       ├── checksum.py      # Streamed MD5 (register ingests) and SHA-256 (published run files) helpers
-│       ├── isaacus_client.py # Build the Isaacus SDK client (hosted API or private SageMaker)
 │       ├── run_log.py       # capture_batch_log() — tee a batch's womblex log lines to a file beside its shards
 │       ├── money_metrics.py # Money recall / precision / scale accuracy against typed transcript tags
 │       ├── log_format.py    # JsonFormatter + log_context for --log-format json (run_id/job_id/stage/source_hash)

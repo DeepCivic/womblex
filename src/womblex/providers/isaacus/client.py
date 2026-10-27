@@ -298,6 +298,7 @@ def check_reachable(model: str, *, timeout: float = 10.0) -> None:
 
 
 __all__ = [
+    "API_KEY_ENV",
     "ENDPOINTS_ENV",
     "PROFILE_ENV",
     "REGION_ENV",
@@ -311,4 +312,5 @@ __all__ = [
     "parse_endpoints",
     "sagemaker_configured",
     "unserved_models",
+    "with_retries",
 ]

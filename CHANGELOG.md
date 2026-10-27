@@ -8,6 +8,9 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 ## [Unreleased]
 
+### Changed
+- **The Isaacus client moves to `providers/isaacus/client.py` (Requirement 38, Phase A1).** A rename of `utils/isaacus_client.py`; callers import from the new path. The old path re-exports in the next merge of the stack. No behaviour change.
+
 ## [0.6.0] - YYYY-MM-DD <!-- TODO: set the release date before tagging -->
 
 ### Added

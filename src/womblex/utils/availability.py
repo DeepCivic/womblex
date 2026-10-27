@@ -19,7 +19,7 @@ import importlib.util
 import os
 from pathlib import Path
 
-from womblex.utils.isaacus_client import API_KEY_ENV, sagemaker_configured
+from womblex.providers.isaacus.client import API_KEY_ENV, sagemaker_configured
 
 
 def isaacus_available() -> bool:

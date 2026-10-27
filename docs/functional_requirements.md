@@ -71,7 +71,7 @@ Terms the requirements use, as the code defines them.
 
 - **`verify-shards --compare-to` does not compare `content_digest`.** It prints each run's aggregate counts (`store/shard_audit.py`, `format_audit_diff`) side by side and flags nothing, so a document whose `content_digest` differs between a local and a fleet run goes unreported. Compare the manifests' `content_digest` per `source_hash` and report each difference.
 - **Azure storage URIs aren't credential-wired.** `storage_options_from_env` (`store/remote.py`) wires only `s3://`; `az://`/`abfs://` fall through to adlfs unauthed and untested. Add an `az`/`abfs` branch reading `AZURE_STORAGE_*`, plus coverage.
-- **No Azure ML connection in the enrichment paths.** `utils/isaacus_client.py` handles the hosted API and AWS SageMaker (`ISAACUS_SAGEMAKER_ENDPOINTS`) but has no Azure ML equivalent. Add an Azure ML connection option so those paths can reach an Azure ML endpoint (`AZUREML_ENDPOINTS`, client factory, `unserved_models` pre-flight).
+- **No Azure ML connection in the enrichment paths.** `providers/isaacus/client.py` handles the hosted API and AWS SageMaker (`ISAACUS_SAGEMAKER_ENDPOINTS`) but has no Azure ML equivalent. Add an Azure ML connection option so those paths can reach an Azure ML endpoint (`AZUREML_ENDPOINTS`, client factory, `unserved_models` pre-flight).
 
 ## 3. Ingest-First Data Flow and Operation Composition
 

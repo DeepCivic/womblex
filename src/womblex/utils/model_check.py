@@ -387,7 +387,7 @@ def _smoke(use: ModelUse, model: Any) -> None:
 
 def _ping_isaacus(use: ModelUse) -> None:
     """One minimal request to *use*'s model, through the client the stage builds."""
-    from womblex.utils.isaacus_client import make_isaacus_client
+    from womblex.providers.isaacus.client import make_isaacus_client
 
     client = make_isaacus_client(models=[use.name])
     try:
@@ -406,7 +406,7 @@ def _ping_isaacus(use: ModelUse) -> None:
 
 
 def _check_isaacus(use: ModelUse, level: CheckLevel) -> SlotCheck:
-    from womblex.utils.isaacus_client import sagemaker_configured
+    from womblex.providers.isaacus.client import sagemaker_configured
 
     start = time.monotonic()
     source = "isaacus-sagemaker" if sagemaker_configured() else "isaacus-api"
@@ -417,7 +417,7 @@ def _check_isaacus(use: ModelUse, level: CheckLevel) -> SlotCheck:
                            "processing.models_check=load checks it without a billed request", use.name)
             _ping_isaacus(use)
         else:
-            from womblex.utils.isaacus_client import check_reachable
+            from womblex.providers.isaacus.client import check_reachable
 
             check_reachable(use.name)
     except Exception as exc:  # the SDK, boto3 and httpx raise their own types
