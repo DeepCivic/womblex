@@ -724,14 +724,3 @@ def test_the_old_llm_ocr_path_re_exports_both_readers():
     assert llm_ocr.get_mistral_reader is bedrock.get_mistral_reader
     assert llm_ocr.OllamaOCRReader is ollama.OllamaOCRReader
     assert llm_ocr.get_ollama_reader is ollama.get_ollama_reader
-
-
-def test_the_old_llm_ocr_path_re_exports_both_readers():
-    from womblex.ingest import llm_ocr
-    from womblex.providers.bedrock import ocr as bedrock
-    from womblex.providers.ollama import ocr as ollama
-
-    assert llm_ocr.MistralOCRReader is bedrock.MistralOCRReader
-    assert llm_ocr.get_mistral_reader is bedrock.get_mistral_reader
-    assert llm_ocr.OllamaOCRReader is ollama.OllamaOCRReader
-    assert llm_ocr.get_ollama_reader is ollama.get_ollama_reader
