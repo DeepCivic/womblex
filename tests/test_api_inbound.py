@@ -141,3 +141,53 @@ def test_delivery_received_lands_on_the_named_seq_and_an_unknown_seq_is_refused(
     assert (unknown.status_code, unknown.json()["code"]) == (409, "unknown_delivery")
     with RunBoard(None) as board:
         assert board.runs() == []  # the run's status is never touched
+
+
+def test_a_body_over_the_cap_is_refused_before_any_check(hooks) -> None:
+    from womblex.cloud.inbound import MAX_BODY_BYTES
+
+    body = {"event": "documents_added", "event_id": "e1", "pad": "x" * MAX_BODY_BYTES}
+    refused = send(hooks, body)
+    assert (refused.status_code, refused.json()["code"]) == (413, "body_too_large")
+    assert stored_events() == [] and trigger_rows() == 0
+
+
+def test_an_event_left_with_no_outcome_is_handled_again_on_resend(hooks, caplog) -> None:
+    with InboundEvents(None) as events:  # a handling that died before storing its outcome
+        assert events.begin("feed:crm:e1", "feed", "crm", "documents_added") is None
+    answer = send(hooks, {"event": "documents_added", "event_id": "e1"})
+    assert answer.status_code == 202 and "has no stored outcome" in caplog.text
+    assert send(hooks, {"event": "documents_added", "event_id": "e1"}).json() == answer.json()
+    assert trigger_rows() == 1
+
+
+def test_two_hooks_sending_one_event_id_fire_separately(hooks, fleet, monkeypatch) -> None:  # noqa: F811
+    monkeypatch.setenv("ERP_KEY", "erp")
+    spec = _spec(fleet[1]).model_dump(mode="json")
+    spec["inbound"].append({"name": "erp", "secret_env": "ERP_KEY", "events": ["documents_added"]})
+    with WorkflowStore(None) as store:
+        store.save("feed", validate_workflow_spec(spec), owner="alice")
+    crm = send(hooks, {"event": "documents_added", "event_id": "e1"}).json()["firing"]
+    erp = send(hooks, {"event": "documents_added", "event_id": "e1"}, hook="erp", key="erp").json()["firing"]
+    assert crm != erp and trigger_rows() == 2
+
+
+def test_an_acknowledgement_handled_again_is_not_appended_twice(hooks, fleet) -> None:  # noqa: F811
+    import sqlalchemy as sa
+
+    deliveries = Path(str(fleet[0])) / "runs/c1/deliveries"
+    deliveries.mkdir(parents=True)
+    (deliveries / "archive.json").write_text(json.dumps({"destination": "archive", "seq": 1}))
+    ack = {"event": "delivery_received", "destination": "archive", "seq": 1, "event_id": "d1"}
+    assert send(hooks, ack).status_code == 202
+    with InboundEvents(None) as events, events._engine.begin() as conn:  # as if it died before storing its outcome
+        conn.execute(sa.update(events._table).values(outcome_json=None))
+    assert send(hooks, ack).status_code == 202
+    acks = json.loads((deliveries / "archive.json").read_text())["acknowledgements"]
+    assert [(a["event_id"], a["hook"]) for a in acks] == [("d1", "crm")]
+
+
+def test_a_key_unset_on_this_host_is_logged_for_the_operator(hooks, monkeypatch, caplog) -> None:
+    monkeypatch.delenv("CRM_KEY")
+    assert send(hooks, {"event": "documents_added", "event_id": "e1"}).json()["code"] == "bad_signature"
+    assert "CRM_KEY is not set on this host" in caplog.text

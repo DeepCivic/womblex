@@ -6,7 +6,9 @@ in order: the workflow and hook are stored, the signature, the event is one the 
 then the event id is inserted (`inbound_store`): an id seen before returns the stored outcome,
 acceptance or refusal, and does nothing else. Only then are the firing's own checks made, before
 any queue row, and their outcome is stored. A refusal before the insert writes nothing, so an
-unauthenticated or malformed request never fills the table.
+unauthenticated or malformed request never fills the table. An id recorded with no outcome (a
+handling that died before storing one) is handled again on resend, with a warning: every action
+attaches to deterministic ids, so a repeat starts nothing twice.
 """
 
 from __future__ import annotations
@@ -49,6 +51,9 @@ logger = logging.getLogger(__name__)
 #: Longest event id taken; the id is a primary key.
 MAX_EVENT_ID = 200
 
+#: Largest body read (nginx's default `client_max_body_size`); a larger one is 413 before any check.
+MAX_BODY_BYTES = 1024 * 1024
+
 
 @dataclass(frozen=True)
 class Answer:
@@ -77,6 +82,8 @@ def _authenticated(hook: InboundHook, raw: bytes, signature: str | None) -> bool
         logger.warning("inbound %s: accepted without checking its signature (%s=1)", hook.name, INSECURE_INBOUND_ENV)
         return True
     secret = os.environ.get(hook.secret_env)
+    if not secret:  # the sender is told only that the signature failed; the operator is told why
+        logger.error("inbound %s: %s is not set on this host, so no event can be verified", hook.name, hook.secret_env)
     return bool(secret and signature and hmac.compare_digest(sign(secret, raw), signature))
 
 
@@ -95,11 +102,12 @@ def _event(raw: bytes) -> tuple[dict[str, Any], str, str] | None:
 
 
 def acknowledge_delivery(
-    settings: DeploymentSettings, stored: StoredWorkflow, payload: dict[str, Any], event_id: str,
+    settings: DeploymentSettings, stored: StoredWorkflow, payload: dict[str, Any], event_id: str, hook: str = "",
 ) -> Answer:
     """Append a consumer's acknowledgement to the delivery record it names (`destination`, `seq`).
 
-    The run's status is not touched. A destination or `seq` with no record is refused.
+    The run's status is not touched. A destination or `seq` with no record is refused. An
+    acknowledgement already on the record under this hook and event id is not appended again.
     """
     from womblex.store.remote import RemoteStore
 
@@ -118,17 +126,20 @@ def acknowledge_delivery(
         record = json.loads(store.read_text(key)) if store.exists(key) else None
     if record is None:
         return refuse(409, "unknown_delivery", f"no delivery record for {dest!r} with seq {seq}")
-    record.setdefault("acknowledgements", []).append({
-        "event_id": event_id, "at": datetime.now(UTC).isoformat(timespec="seconds"), "detail": payload.get("detail")})
-    store.write_stream(io.BytesIO(dump_delivery(record).encode()), key)
+    acks = record.setdefault("acknowledgements", [])
+    if not any(a.get("event_id") == event_id and a.get("hook", hook) == hook for a in acks):
+        acks.append({"event_id": event_id, "hook": hook, "at": datetime.now(UTC).isoformat(timespec="seconds"),
+                     "detail": payload.get("detail")})
+        store.write_stream(io.BytesIO(dump_delivery(record).encode()), key)
     return Answer(202, {"status": "accepted", "destination": dest, "seq": seq})
 
 
 def _act(
-    settings: DeploymentSettings, stored: StoredWorkflow, event: str, payload: dict[str, Any], event_id: str,
-    resolve_preset: Callable[[str], Preset | None],
+    settings: DeploymentSettings, stored: StoredWorkflow, hook: str, event: str, payload: dict[str, Any],
+    event_id: str, key: str, resolve_preset: Callable[[str], Preset | None],
 ) -> Answer:
-    firing = f"event-{hashlib.sha256(event_id.encode()).hexdigest()[:8]}"
+    # Over the hook-scoped key, as the event row is: two hooks feeding one collection may send the same id.
+    firing = f"event-{hashlib.sha256(key.encode()).hexdigest()[:8]}"
     try:
         if event in ("documents_added", "run_requested"):
             row = coll.add_documents(settings, stored, resolve_preset, firing=firing)
@@ -136,7 +147,7 @@ def _act(
         if event == "rerun_requested":
             sent = coll.rerun_documents(settings, stored, resolve_preset)
             return Answer(202, {"status": "accepted", "stages": list(sent.stages), "newly_dispatched": sent.newly_enqueued})
-        return acknowledge_delivery(settings, stored, payload, event_id)
+        return acknowledge_delivery(settings, stored, payload, event_id, hook)
     except WorkflowRefusedError as e:
         return refuse(409, e.code.value, str(e))
     except RunOwnedError as e:
@@ -163,11 +174,12 @@ def handle_event(
     with InboundEvents(settings.db_dsn) as events:
         key = f"{workflow_id}:{hook_name}:{event_id}"  # an id is the sender's, so it is kept to its own hook
         if (seen := events.begin(key, workflow_id, hook_name, event)) is not None:
-            if seen.outcome is None:
-                return refuse(409, "in_progress", "this event is still being handled; resend it shortly")
-            return Answer(seen.outcome["http_status"], seen.outcome["body"])
+            if seen.outcome is not None:
+                return Answer(seen.outcome["http_status"], seen.outcome["body"])
+            logger.warning("inbound %s/%s: event %r, received %s, has no stored outcome; handling it again",
+                           workflow_id, hook_name, event_id, seen.received_at)
         try:
-            answer = _act(settings, stored, event, payload, event_id, resolve_preset)
+            answer = _act(settings, stored, hook_name, event, payload, event_id, key, resolve_preset)
         except Exception:  # not a refusal: the sender may resend the same id once the fault is fixed
             events.forget(key)
             raise
@@ -175,4 +187,4 @@ def handle_event(
     return answer
 
 
-__all__ = ["Answer", "acknowledge_delivery", "handle_event", "refuse"]
+__all__ = ["MAX_BODY_BYTES", "Answer", "acknowledge_delivery", "handle_event", "refuse"]
