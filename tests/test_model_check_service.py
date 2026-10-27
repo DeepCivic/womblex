@@ -75,14 +75,19 @@ def test_smoke_warns_before_each_billed_request(fake_isaacus, caplog, monkeypatc
     warned_first: list[bool] = []
     real = client.make_api_client  # the fixture's recording factory
 
-    def make():  # the warning is already logged when the billed request goes
-        warned_first.append(sum("billed" in r.getMessage() for r in caplog.records) == len(made) + 1)
-        return real()
+    def make():  # each billed request finds its warning already logged
+        fake = real()
+        for api in (fake.embeddings, fake.enrichments):
+            def create(_orig=api.create, **kw):
+                warned_first.append(sum("billed" in r.getMessage() for r in caplog.records) == len(warned_first) + 1)
+                return _orig(**kw)
+            api.create = create
+        return fake
 
     monkeypatch.setattr(client, "make_api_client", make)
     with caplog.at_level(logging.WARNING):
         assert check_models(_config(**_PAID), "smoke", scopes=(SCOPE_ENRICH, SCOPE_EMBED)).ok
-    assert warned_first == [True, True] and len(made) == 2
+    assert warned_first == [True, True] and len(made) == 1
 
 
 def test_a_billed_ping_is_warned_before_it_is_sent(caplog) -> None:

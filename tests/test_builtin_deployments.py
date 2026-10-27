@@ -78,25 +78,23 @@ def _client(embedding: list[float] | None = None, results: int = 1) -> MagicMock
     return client
 
 
-def test_the_smoke_call_sends_the_slots_request_and_closes_the_client() -> None:
+def test_the_smoke_call_sends_the_slots_request_and_leaves_the_shared_client_open() -> None:
     c = _client(embedding=[0.1])
     smoke_call(c, mr.SLOT_EMBEDDING, "kanon-2-embedder")
     assert c.embeddings.create.call_args.kwargs["model"] == "kanon-2-embedder"
-    c.close.assert_called_once()
     c = _client()
     smoke_call(c, mr.SLOT_ENRICHMENT, "kanon-2-enricher")
     c.enrichments.create.assert_called_once()
-    c.close.assert_called_once()
+    c.close.assert_not_called()
 
 
 @pytest.mark.parametrize("slot,client", [
     (mr.SLOT_EMBEDDING, _client(embedding=[])),
     (mr.SLOT_ENRICHMENT, _client(results=0)),
 ])
-def test_a_smoke_call_that_returns_nothing_fails_and_still_closes_the_client(slot: str, client: MagicMock) -> None:
+def test_a_smoke_call_that_returns_nothing_fails(slot: str, client: MagicMock) -> None:
     with pytest.raises(RuntimeError, match="returned no"):
         smoke_call(client, slot, "m")
-    client.close.assert_called_once()
 
 
 @pytest.mark.parametrize("deployment,module,cls", [

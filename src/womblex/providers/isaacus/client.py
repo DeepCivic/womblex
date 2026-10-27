@@ -155,16 +155,18 @@ def unserved_models(models: Iterable[str]) -> list[str]:
 
 
 def make_isaacus_client(*, models: Iterable[str] = ()):  # type: ignore[no-untyped-def]
-    """Construct an Isaacus client for whichever deployment is configured.
+    """The process's Isaacus client for whichever deployment is configured.
 
+    One client per deployment: the first call builds it (``make_api_client`` or
+    ``make_sagemaker_client``) and every later call, in any stage, gets the same one.
     ``models`` are the model ids the caller intends to use. On SageMaker they
     are checked against the declared endpoints up front; on the hosted API they
     are ignored (every model is reachable with a valid key).
     """
-    endpoints = endpoints_from_env()
-    if endpoints:
-        return make_sagemaker_client(endpoints, models)
-    return make_api_client()
+    from womblex.providers.isaacus.deployment import default_deployment
+    from womblex.utils.deployment_registry import client_for
+
+    return client_for(default_deployment(), models)
 
 
 def make_ai_chunking_client(chunking_model: str | None):  # type: ignore[no-untyped-def]

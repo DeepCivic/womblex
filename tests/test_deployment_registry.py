@@ -161,3 +161,41 @@ def test_a_plugin_factory_declares_its_deployments_as_it_declares_traits(monkeyp
         [("acme-embed", factory, "acme-dist", "1.0")] if group.endswith(".embedding") else []))
     entry = mr.resolve(mr.SLOT_EMBEDDING, "acme-embed")
     assert (entry.deployments, entry.vendor_model, entry.source) == (("acme",), "acme-1", "acme-dist")
+
+
+def test_a_process_builds_one_client_per_deployment_and_every_caller_gets_it(clean) -> None:
+    built: list[list[str]] = []
+    dr.register(_deployment(make_client=lambda models: built.append(list(models)) or object()))
+    first = dr.client_for("acme", ["m1"])
+    assert dr.client_for("acme", ["m1", "m2"]) is first  # a second stage, a second model
+    assert built == [["m1"]]
+    dr.reset_clients()
+    assert dr.client_for("acme") is not first
+
+
+def test_a_later_caller_asking_for_a_model_the_deployment_does_not_serve_is_refused(clean) -> None:
+    dr.register(_deployment(serves=lambda model: model == "m1", make_client=lambda models: object()))
+    dr.client_for("acme", ["m1"])
+    with pytest.raises(ValueError, match="deployment 'acme' does not serve m2"):
+        dr.client_for("acme", ["m1", "m2"])
+
+
+def test_a_deployment_that_builds_no_client_says_so(clean) -> None:
+    dr.register(_deployment())
+    with pytest.raises(ValueError, match="builds no client"):
+        dr.client_for("acme")
+
+
+def test_a_client_that_fails_to_build_is_not_cached(clean) -> None:
+    attempts: list[int] = []
+
+    def make(models):
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise ConnectionError("no route")
+        return object()
+
+    dr.register(_deployment(make_client=make))
+    with pytest.raises(ConnectionError):
+        dr.client_for("acme")
+    assert dr.client_for("acme") is dr.client_for("acme") and len(attempts) == 2

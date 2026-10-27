@@ -23,6 +23,7 @@ from __future__ import annotations
 import importlib
 import logging
 import os
+import threading
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
@@ -74,6 +75,8 @@ class Deployment:
 
 _deployments: dict[str, Deployment] = {}
 _loaded = False
+_clients: dict[str, object] = {}
+_clients_lock = threading.Lock()
 
 
 def _norm(name: str) -> str:
@@ -120,6 +123,34 @@ def resolve(name: str) -> Deployment:
         return _deployments[_norm(name)]
     except KeyError:
         raise ValueError(f"unknown deployment: {name!r} (known: {sorted(_deployments)})") from None
+
+
+def client_for(name: str, models: Iterable[str] = ()) -> object:
+    """The one client this process holds for deployment *name*, built on first use.
+
+    Every provider on a deployment is handed the same client. *models* are the ids the
+    caller will use: the deployment's client is built to serve them, and a later caller's
+    must be served by the deployment too, or this raises.
+    """
+    deployment = resolve(name)
+    if deployment.make_client is None:
+        raise ValueError(f"deployment {deployment.name!r} builds no client")
+    wanted = list(models)
+    with _clients_lock:
+        client = _clients.get(deployment.name)
+        if client is None:
+            client = _clients[deployment.name] = deployment.make_client(wanted)
+            return client
+    unserved = [m for m in wanted if not deployment.serves(m)]
+    if unserved:
+        raise ValueError(f"deployment {deployment.name!r} does not serve {', '.join(unserved)}")
+    return client
+
+
+def reset_clients() -> None:
+    """Forget the clients this process built. For tests, and after the environment changes."""
+    with _clients_lock:
+        _clients.clear()
 
 
 #: What the ``isaacus`` model trait means: served by the Isaacus deployments.

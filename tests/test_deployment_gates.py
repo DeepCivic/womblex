@@ -15,6 +15,7 @@ from womblex.cloud.stage_contracts import STAGE_CONTRACTS
 from womblex.cloud.worker import WORKER_SCOPES, served_queues
 from womblex.utils import deployment_registry as dr
 from womblex.utils import model_check
+from womblex.utils import model_registry as mr
 from womblex.utils.deployment_registry import Deployment
 from womblex.utils.model_registry import SLOT_ENRICHMENT, register
 
@@ -30,9 +31,16 @@ class _Provider:
         return []
 
 
-register(SLOT_ENRICHMENT, REMOTE, lambda **_: _Provider(), source="tests", deployments=("acme",))
-register(SLOT_ENRICHMENT, LOCAL, lambda **_: _Provider(), source="tests")
-register(SLOT_ENRICHMENT, LEGACY, lambda **_: _Provider(), source="tests", traits={"isaacus": True})
+
+@pytest.fixture(autouse=True)
+def _providers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Register the test providers for one test only, so no other test sees a deployment it lacks."""
+    model_check._register_builtins()  # import the built-ins first: they register once per process, not per copy
+    monkeypatch.setattr(mr, "_entries", {s: dict(m) for s, m in mr._entries.items()})
+    monkeypatch.setattr(mr, "_aliases", {s: dict(m) for s, m in mr._aliases.items()})
+    register(SLOT_ENRICHMENT, REMOTE, lambda **_: _Provider(), source="tests", deployments=("acme",))
+    register(SLOT_ENRICHMENT, LOCAL, lambda **_: _Provider(), source="tests")
+    register(SLOT_ENRICHMENT, LEGACY, lambda **_: _Provider(), source="tests", traits={"isaacus": True})
 
 
 def _config(tmp_path, model: str):

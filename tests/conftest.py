@@ -147,3 +147,13 @@ def pytest_runtest_call(item: pytest.Item):
         yield
     finally:
         stop.set()
+
+
+@pytest.fixture(autouse=True)
+def _fresh_deployment_clients():
+    """A process holds one client per deployment; a test must not inherit another's."""
+    from womblex.utils.deployment_registry import reset_clients
+
+    reset_clients()
+    yield
+    reset_clients()

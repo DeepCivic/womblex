@@ -595,11 +595,11 @@ class TestIsaacus:
         made = fake_isaacus()
         result = check_models(_config(**_PAID), "smoke", scopes=(SCOPE_ENRICH, SCOPE_EMBED))
         assert result.ok
-        kinds = sorted(c.calls[0][0] for c in made)
-        assert kinds == ["embed", "enrich"]
-        embed = next(c for c in made if c.calls[0][0] == "embed")
-        assert embed.calls[0][1]["task"] == "retrieval/document"
-        assert all(c.closed for c in made)
+        assert len(made) == 1  # one client for the deployment, however many models use it
+        assert sorted(kind for kind, _ in made[0].calls) == ["embed", "enrich"]
+        embed = next(kw for kind, kw in made[0].calls if kind == "embed")
+        assert embed["task"] == "retrieval/document"
+        assert not made[0].closed  # the shared client stays open for the stages that follow
         assert {(c.slot, c.source) for c in result.checks} == {(ISAACUS, "isaacus-api")}
         names = {e["name"] for e in footer_payload()["checks"]}
         assert names == {"kanon-2-enricher", "kanon-2-embedder"}
