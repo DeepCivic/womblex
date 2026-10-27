@@ -39,6 +39,11 @@ from womblex.analyse.models import (
     Term,
     Website,
 )
+from womblex.providers.isaacus.enrichment import (  # noqa: F401 -- re-exported for one release
+    IsaacusEnrichment,
+    isaacus_provider,
+    make_isaacus_enrichment,
+)
 from womblex.utils.model_registry import SLOT_ENRICHMENT, record_use, register, resolve
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -405,51 +410,7 @@ class EnrichmentProvider(Protocol):
         ...
 
 
-@dataclass
-class IsaacusEnrichment:
-    """Kanon-2 enrichment through the Isaacus SDK.
-
-    The API accepts 8 texts a request and long input whole (`overflow_strategy`), so the
-    limits are `max_texts_per_request` and no split ceiling unless `split_ceiling` sets one.
-    """
-
-    client: object
-    config: EnrichmentConfig
-    limits: ProviderLimits
-    name: str = "isaacus"
-
-    def enrich(self, texts: list[str]) -> list[tuple[EnrichmentResult, object | None]]:
-        return list(enrich_documents_raw(
-            texts, self.client,
-            model=self.config.model,
-            overflow_strategy=self.config.overflow_strategy,
-        ))
-
-
-def isaacus_provider(
-    config: EnrichmentConfig, client: object, token_counter: TokenCounter | None = None,
-) -> IsaacusEnrichment:
-    """The Isaacus provider; *client* may be `None` where only the limits are read (`plan`)."""
-    from womblex.providers.isaacus.client import with_retries
-    from womblex.utils.token_packer import TokenCounter
-
-    return IsaacusEnrichment(with_retries(client, config.max_retries), config, ProviderLimits(
-        max_texts_per_request=config.max_texts_per_request,
-        token_ceiling=config.split_ceiling,
-        token_counter=token_counter or TokenCounter(config.tokenizer),
-        needs_network=True,
-        returns_document=True,
-    ))
-
-
-def _make_isaacus(
-    *, config: EnrichmentConfig, client: object = None, token_counter: TokenCounter | None = None,
-    **_: object,
-) -> IsaacusEnrichment:
-    return isaacus_provider(config, client, token_counter)
-
-
-register(SLOT_ENRICHMENT, DEFAULT_MODEL, _make_isaacus,
+register(SLOT_ENRICHMENT, DEFAULT_MODEL, make_isaacus_enrichment,
          traits={"isaacus": True, "returns_document": True})
 
 

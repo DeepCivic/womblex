@@ -21,6 +21,10 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
+from womblex.providers.isaacus.embedding import (  # noqa: F401 -- re-exported for one release
+    IsaacusEmbedding,
+    make_isaacus_embedding,
+)
 from womblex.utils.model_registry import SLOT_EMBEDDING, record_use, register, resolve
 from womblex.utils.token_packer import TokenCounter
 
@@ -101,32 +105,7 @@ class EmbeddingProvider(Protocol):
         ...
 
 
-@dataclass
-class IsaacusEmbedding:
-    """Kanon-2 embeddings through the Isaacus SDK, under `EmbeddingConfig`'s task and dimensions."""
-
-    client: object
-    config: EmbeddingConfig
-    limits: EmbeddingLimits = EmbeddingLimits(MAX_TEXTS_PER_REQUEST, needs_network=True,
-                                              token_counter=TokenCounter())  # Kanon-2's own, offline
-    name: str = "isaacus"
-
-    def embed(self, texts: list[str]) -> list[list[float]]:
-        return embed_texts(
-            texts, self.client,
-            model=self.config.model,
-            task=self.config.task,
-            dimensions=self.config.dimensions,
-        )
-
-
-def _make_isaacus(*, config: EmbeddingConfig, client: object = None, **_: object) -> IsaacusEmbedding:
-    from womblex.providers.isaacus.client import with_retries
-
-    return IsaacusEmbedding(with_retries(client, config.max_retries), config)
-
-
-register(SLOT_EMBEDDING, DEFAULT_MODEL, _make_isaacus, traits={"isaacus": True})
+register(SLOT_EMBEDDING, DEFAULT_MODEL, make_isaacus_embedding, traits={"isaacus": True})
 
 
 def calls_isaacus(model: str) -> bool:
