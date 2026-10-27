@@ -20,7 +20,8 @@ from womblex.cloud.reachability import store_reachable
 from womblex.config import EmbeddingConfig, EnrichmentConfig
 from womblex.providers.isaacus.client import API_KEY_ENV, endpoints_from_env, misconfigured_endpoints_var
 from womblex.providers.isaacus.deployment import SAGEMAKER
-from womblex.store.remote import is_remote_uri, storage_options_from_env
+from womblex.store.remote import is_remote_uri, location_options_from_env, storage_options_from_env
+from womblex.store.storage_options import describe_options
 from womblex.utils.deployment_registry import resolve
 
 if TYPE_CHECKING:
@@ -60,8 +61,14 @@ def mask_dsn(dsn: str | None) -> str | None:
     return _KEYWORD_PASSWORD.sub(r"\1***", dsn)
 
 
-def _location(uri: str) -> dict[str, Any]:
-    opts = storage_options_from_env(uri)
+def _location(uri: str, explicit: dict | None = None) -> dict[str, Any]:
+    """*uri* described: the S3-variable options as masked values, and its own ``storage_options`` as written.
+
+    A ``{"env": NAME}`` reference is shown as the name and never resolved, so describing a
+    location needs none of the variables set; a literal secret is masked.
+    """
+    opts = storage_options_from_env(uri, explicit={})  # the S3 variables alone, no reference resolved
+    declared = explicit if explicit is not None else location_options_from_env(uri)
     client_kwargs = opts.get("client_kwargs", {})
     configured = bool(opts.get("key") and opts.get("secret"))
     return {
@@ -73,6 +80,7 @@ def _location(uri: str) -> dict[str, Any]:
             "endpoint_url": client_kwargs.get("endpoint_url"),
             "region": client_kwargs.get("region_name"),
         },
+        "storage_options": describe_options(declared),
     }
 
 
@@ -134,10 +142,10 @@ def deployments_description() -> list[dict[str, Any]]:
 def deployment_resources(settings: DeploymentSettings) -> dict[str, Any]:
     """``store``, ``ingest``, ``queue``, ``isaacus`` and ``deployments``, described without a network call."""
     if settings.is_remote:
-        store = {"kind": "remote", **_location(cast(str, settings.store_uri))}
+        store = {"kind": "remote", **_location(cast(str, settings.store_uri), settings.store_options)}
     else:
         store = {"kind": "local", "uri": str(settings.output_root), "is_object_store": False, "options": {}}
-    ingest = ({"configured": True, **_location(settings.ingest_uri)} if settings.ingest_uri
+    ingest = ({"configured": True, **_location(settings.ingest_uri, settings.ingest_options)} if settings.ingest_uri
               else {"configured": False, "uri": None, "is_object_store": False, "options": {}})
     return {
         "store": store,

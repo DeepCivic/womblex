@@ -42,7 +42,8 @@ def ingest_preflight(
 
     kind = "remote" if is_remote_uri(settings.ingest_uri) else "local"
     try:
-        _, keys = supported_keys(RemoteStore.from_uri(settings.ingest_uri), settings.ingest_uri, prefix)
+        _, keys = supported_keys(
+            RemoteStore.from_uri(settings.ingest_uri, explicit=settings.ingest_options), settings.ingest_uri, prefix)
     except NestedCorpusError as e:
         return {
             **empty, "kind": kind, "reachable": True, "error": str(e),

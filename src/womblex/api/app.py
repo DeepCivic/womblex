@@ -64,7 +64,7 @@ from womblex.cloud.worker_registry import NoLiveWorker
 from womblex.cloud.workflow_order import StageOrderError
 from womblex.presets import get_any_preset
 from womblex.store.contract import read_footer_contract
-from womblex.store.remote import RemoteStore
+from womblex.store.remote import RemoteStore, location_options_from_env
 from womblex.store.remote_manifest import StoreUnreachable, remote_manifest_rows
 from womblex.store.retention import generate_run_id
 
@@ -142,6 +142,8 @@ def create_api_app(
     registry: ClientRegistry | None,
     ingest_uri: str | None = None,
     max_upload_bytes: int = MAX_UPLOAD_BYTES,
+    store_options: dict | None = None,
+    ingest_options: dict | None = None,
 ) -> FastAPI:
     """Build the API, bound to one store and queue for its lifetime.
 
@@ -151,6 +153,9 @@ def create_api_app(
     """
     settings = DeploymentSettings(
         output_root=None, store_uri=store_uri, db_dsn=db_dsn, ingest_uri=ingest_uri,
+        store_options=store_options if store_options is not None else location_options_from_env(store_uri),
+        ingest_options=ingest_options if ingest_options is not None or not ingest_uri
+        else location_options_from_env(ingest_uri),
     )
     app = FastAPI(title="Womblex API", version="1")
     get_caller = caller_dependency(registry)
@@ -279,7 +284,7 @@ def create_api_app(
         upload_id = mint_run_id()
         prefix = f"{caller.client_id}/{upload_id}"
         try:
-            store = RemoteStore.from_uri(ingest_uri)
+            store = RemoteStore.from_uri(ingest_uri, explicit=settings.ingest_options)
             for name, f in zip(names, files, strict=True):
                 store.write_stream(f.file, f"{prefix}/{name}")
         except Exception as e:
@@ -298,7 +303,7 @@ def create_api_app(
         with queue() as q:
             find_run(q, caller, run_id)
         try:
-            rows = remote_manifest_rows(store_uri, run_id)
+            rows = remote_manifest_rows(store_uri, run_id, settings.store_options)
         except StoreUnreachable as e:
             raise HTTPException(status_code=503, detail=f"run store unreachable: {e}") from e
         return RunManifest(run_id=run_id, documents=rows or [])
@@ -308,7 +313,7 @@ def create_api_app(
         with queue() as q:
             find_run(q, caller, run_id)
         try:
-            store = RemoteStore.from_uri(store_uri)
+            store = RemoteStore.from_uri(store_uri, explicit=settings.store_options)
             keys = sorted(store.find(f"runs/{run_id}"))
         except Exception as e:
             raise HTTPException(status_code=503, detail=f"run store unreachable: {e}") from e

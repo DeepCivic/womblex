@@ -172,7 +172,7 @@ def _supported_under(settings: DeploymentSettings, prefix: str) -> tuple[str, li
     from womblex.store.remote import RemoteStore
 
     ingest_uri = cast(str, settings.ingest_uri)
-    return supported_keys(RemoteStore.from_uri(ingest_uri), ingest_uri, prefix)
+    return supported_keys(RemoteStore.from_uri(ingest_uri, explicit=settings.ingest_options), ingest_uri, prefix)
 
 
 def supported_keys(ingest_store: RemoteStore, ingest_uri: str, prefix: str) -> tuple[str, list[str]]:

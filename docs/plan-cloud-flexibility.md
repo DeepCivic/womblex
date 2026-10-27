@@ -1,6 +1,6 @@
 # Cloud flexibility — plan
 
-*Status: Phases A and B are built (the provider packages and Requirement 36, deployments registered once); Phases C to F are proposed. A piece is removed from this plan when it is built, and this document is deleted when its last phase lands.*
+*Status: Phases A to C are built (the provider packages, Requirement 36 deployments registered once, and Requirement 37 object stores as fsspec opens them); Phases D to F are proposed. A piece is removed from this plan when it is built, and this document is deleted when its last phase lands.*
 
 ## Context
 
@@ -23,8 +23,8 @@ plugin package (Requirement 24). The weight is elsewhere:
 - **Documentation steps are remembered, not checked.** A billed model's `docs/models.md` entry
   and **Paid:** line rely on the author.
 
-**Requirement numbers:** Requirements 37 to 39 are working labels for this plan only.
-`docs/functional_requirements.md` stops at Requirement 36. As each requirement is delivered, it
+**Requirement numbers:** Requirements 38 and 39 are working labels for this plan only.
+`docs/functional_requirements.md` stops at Requirement 37. As each requirement is delivered, it
 is written there as built, in that file's conventions, and removed from this plan in the same
 merge.
 
@@ -56,28 +56,6 @@ merge.
   codes, queue keys and existing footer values unchanged.
 
 ## Requirements (working drafts)
-
-### 37. Object Stores Are Whatever fsspec Can Open
-
-**As** an operator,
-**I want** any storage fsspec can open to be usable as a store, an ingest location or a destination, configured with fsspec's own options,
-**so that** adding a storage backend is installing it and naming it, not editing Womblex.
-
-**Given** an installed fsspec backend and its options in the deployment's settings
-**When** a run, worker, API or egress names its scheme
-**Then** it works with no change to Womblex.
-
-**Acceptance criteria:**
-
-- A scheme is usable when fsspec knows it and its backend is importable in this install. A scheme fsspec knows whose backend is not installed (`gs://` without `gcsfs`) is refused before launch, naming the package; an unknown scheme is refused naming the usable ones. The same check covers a store, an ingest location, the API's upload location and a destination.
-- The existing typo checks stay: a missing `://`, an uppercase scheme, no bucket.
-- Each location (store, ingest, destination) takes its own `storage_options`, set in the deployment's settings and, for containers, from one JSON environment variable per location. They reach fsspec unchanged; Womblex adds no per-backend option. A secret is written `{"env": "NAME"}` and resolved at use, so `GET /v1/resources` and the run record show the variable, never the value.
-- S3-compatible stores (MinIO, Cloudflare R2, others) need configuration only. The ingest and output stores may be different accounts or vendors.
-- The existing S3 variables (`WOMBLEX_S3_ENDPOINT`, `WOMBLEX_S3_ACCESS_KEY_ID`, `WOMBLEX_S3_SECRET_ACCESS_KEY`, the `AWS_*` fallbacks) keep working, below explicit `storage_options` in precedence, and still keep a store key out of the ambient AWS credentials the SageMaker signer relies on.
-- The ingest/output disjointness check applies to every scheme.
-- No dependency is added; an operator installs `gcsfs` or `adlfs` for the store they use.
-
-**Verification:** a test runs extract → chunk → finalize → egress over fsspec's built-in `memory://` filesystem with no Womblex edit; a `gs://` store with `gcsfs` absent is refused before any output, naming `gcsfs`.
 
 ### 38. Adding a Provider Is a Bounded Change
 
@@ -125,23 +103,6 @@ merge.
 
 **Verification:** the embedding conformance test passes for it with a mocked transport; a live test skips without its endpoint, like the Isaacus ones.
 
-## Phase C — Object stores (Requirement 37)
-
-Independent of the built phases; may land in parallel as its own stack.
-
-**C1. Schemes from fsspec.**
-- `validate_location_uri` asks fsspec whether it knows the scheme and whether its backend imports; `SUPPORTED_PROTOCOLS` and `_REMOTE_PROTOCOLS` go. Its callers (`cloud/deployment.py`, `cloud/workflow_store.py`, `cloud/ingest_preview.py`, `store/source_provenance.py`, `store/egress.py`, `cli/cloud.py`) are unchanged.
-- `cloud/delivery.check_destinations`'s backend check moves into `store/remote.py`, so store, ingest and destination share one.
-- The disjointness check covers every scheme.
-- The `memory://` end-to-end test.
-
-**C2. Storage options per location.**
-- `DeploymentSettings` gains options for the store and ingest locations; a destination's go in its spec. The environment form is one JSON variable per location.
-- `{"env": "NAME"}` values resolved at use; `cloud/resources.py` shows the variable name.
-- Precedence: explicit options, then the `WOMBLEX_S3_*` variables, then `AWS_*`, matching `storage_options_from_env` today.
-- The compose files' comments show an R2 and an Azure example.
-- Delivers Requirement 37 and closes Requirement 2's Azure storage gap (its Outstanding entry is narrowed to the Azure ML enrichment gap).
-
 ## Phase D — Checked documentation steps (Requirement 38)
 
 **D1. The checks and the checklist.**
@@ -171,5 +132,5 @@ Stocktake section. This plan is deleted in it.
 
 ## Order
 
-D → E, with C beside them. D's conformance and paid checks need the deployments built in Phase B;
+D → E. D's conformance and paid checks need the deployments built in Phase B;
 E needs those deployments and D's conformance tests.

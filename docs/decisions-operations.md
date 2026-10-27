@@ -447,6 +447,33 @@ in both deployments.
 - **The stage graph keeps `needs_isaacus_api`.** `/v1/stages` exposes it as the display answer;
   the runtime gate is derived from the models a contract names (`requires_deployment`).
 
+### A store is whatever fsspec opens; a location carries its own options (Requirement 37)
+2026-10, cloud flexibility plan, Phase C.
+
+- **The scheme list was a second registry.** `store/remote.py` kept its own list of schemes,
+  so `gs://` was accepted and failed at first use for want of `gcsfs`, and a backend fsspec
+  already had needed an edit to Womblex. The check now asks fsspec: known and importable, else
+  refused before launch naming the package or the usable schemes. *Rejected:* adding `gcsfs` and
+  `adlfs` as dependencies, which is a dependency change for every install to serve some.
+- **Options per location, as fsspec writes them.** The run store and the ingest location are
+  often different accounts or vendors, and one set of `WOMBLEX_S3_*` variables could not serve
+  both. Each takes a JSON object passed to fsspec unchanged; Womblex adds no per-backend key
+  (an `AZURE_STORAGE_*` branch was the other way to close the Azure gap, and the next vendor
+  would have needed another). The `WOMBLEX_S3_*` then `AWS_*` variables remain as the lower layers.
+- **A secret is a name.** In settings, an environment variable or a stored workflow, a secret
+  is `{"env": "NAME"}`, resolved when the location is opened; what is shown is the name. This
+  extends the `key_env` / `secret_env` / `dsn_env` pattern a destination already used, instead
+  of adding a store. A stored workflow refuses a secret-looking option written as a value, since
+  the spec is kept. *Rejected:* a literal in the spec with a warning, which would keep the
+  secret in the system database and every export of it.
+- **The environment is matched by location.** The options variables apply to a URI inside the
+  location `WOMBLEX_STORE_URI` / `WOMBLEX_INGEST_URI` names, so the many call sites that hold
+  only a string need no change. A location given only by a flag with another URI gets none from
+  the environment; settings can carry them (`store_options`, `ingest_options`).
+- **A spec asks less than a run.** A stored workflow is validated on a host that need not carry
+  the backends its workers have, so its destinations are checked only for whether fsspec knows
+  the scheme; `check_destinations` asks where it runs, keeping the refusal code.
+
 ### Container images are built in CI and stamped with the commit they came from
 Two Dockerfiles existed that no workflow built, so a change that broke an image
 was found on deploy; and the image build context excludes `.git`, so a

@@ -6,8 +6,9 @@ a job queue, an ingest location and a directory of operator-saved presets.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from womblex.store.remote import assert_disjoint_locations, is_remote_uri
 
@@ -31,6 +32,10 @@ class DeploymentSettings:
     ``store_uri`` / ``output_root``. ``None`` means nothing can be dispatched.
     When both it and a store are set they must be disjoint of the store's
     effective ``runs/`` prefix, enforced here at construction.
+
+    ``store_options`` and ``ingest_options`` are each location's own fsspec ``storage_options``
+    (`store/storage_options.py`) as written, ``{"env": NAME}`` references unresolved; ``None``
+    leaves the environment's (`WOMBLEX_STORE_STORAGE_OPTIONS`, `WOMBLEX_INGEST_STORAGE_OPTIONS`) to apply.
     """
 
     output_root: Path | None
@@ -38,6 +43,8 @@ class DeploymentSettings:
     db_dsn: str | None = None
     presets_dir: Path | None = None
     ingest_uri: str | None = None
+    store_options: dict[str, Any] | None = field(default=None, compare=False)
+    ingest_options: dict[str, Any] | None = field(default=None, compare=False)
 
     def __post_init__(self) -> None:
         if bool(self.output_root) == bool(self.store_uri):

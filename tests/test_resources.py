@@ -190,3 +190,37 @@ class TestDeployments:
         assert (acme["distribution"], acme["version"]) == ("acme-dist", "3.0")
         assert acme["models"] == [{"slot": "embedding", "name": "acme-embed",
                                    "vendor_model": "acme-embed-v3", "served": True}]
+
+
+class TestStorageOptions:
+    """A location's own `storage_options` are described by name, never by value, and never resolved."""
+
+    def test_an_env_reference_is_shown_as_the_variable_and_a_literal_secret_is_masked(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.delenv("R2_SECRET", raising=False)  # unset: describing a location must not need it
+        settings = DeploymentSettings(
+            output_root=None, store_uri=f"s3://{tmp_path.name}/bucket",
+            store_options={"key": "r2-id", "secret": {"env": "R2_SECRET"},
+                           "client_kwargs": {"endpoint_url": "https://acct.r2.example"}},
+        )
+        shown = resources.deployment_resources(settings)["store"]["storage_options"]
+        assert shown == {"key": "••••••••", "secret": {"env": "R2_SECRET"},
+                         "client_kwargs": {"endpoint_url": "https://acct.r2.example"}}
+        assert "r2-id" not in json.dumps(resources.deployment_resources(settings))
+
+    def test_the_environment_declares_each_locations_options_and_settings_report_them(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        store, ingest = f"s3://{tmp_path.name}-store/womblex", f"s3://{tmp_path.name}-in/in"
+        monkeypatch.setenv("WOMBLEX_STORE_URI", store)
+        monkeypatch.setenv("WOMBLEX_INGEST_URI", ingest)
+        monkeypatch.setenv("WOMBLEX_STORE_STORAGE_OPTIONS", '{"anon": false}')
+        monkeypatch.setenv("ACME_TOKEN", "t-value")
+        monkeypatch.setenv("WOMBLEX_INGEST_STORAGE_OPTIONS", '{"profile": "acme", "token": {"env": "ACME_TOKEN"}}')
+        got = resources.deployment_resources(DeploymentSettings(output_root=None, store_uri=store, ingest_uri=ingest))
+        assert got["store"]["storage_options"] == {"anon": False}
+        assert got["ingest"]["storage_options"] == {"profile": "acme", "token": {"env": "ACME_TOKEN"}}
+
+    def test_a_location_with_none_shows_an_empty_object(self, tmp_path: Path) -> None:
+        assert resources.deployment_resources(_s3(tmp_path))["store"]["storage_options"] == {}

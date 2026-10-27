@@ -176,3 +176,45 @@ def test_delivery_opens_the_destination_with_its_own_options(run_root: Path, tmp
     result = run_workflow_local(stored, run_root / "documents", resolve_preset=_resolve)
     assert result.exit_code == 0 and {"anon": False} in opened
     assert delivery  # the module under test is the one the runner delivered through
+
+
+def test_the_api_opens_the_ingest_location_with_its_own_options(monkeypatch, tmp_path: Path) -> None:
+    """An upload to an ingest store on another account is opened with that location's options."""
+    from fastapi.testclient import TestClient
+
+    from womblex.api.app import create_api_app
+    from womblex.api.auth import hash_token, parse_registry
+
+    opened: list[dict | None] = []
+    real = RemoteStore.from_uri.__func__  # type: ignore[attr-defined]
+
+    def spy(cls, uri, **kw):
+        opened.append(kw.get("explicit"))
+        return real(cls, uri, **{k: v for k, v in kw.items() if k != "explicit"})
+
+    monkeypatch.setattr(RemoteStore, "from_uri", classmethod(spy))
+    registry = parse_registry({"clients": [
+        {"client_id": "alice", "token_sha256": hash_token("ta"), "scopes": ["submit"]}]})
+    app = create_api_app(
+        store_uri=str(tmp_path / "store"), db_dsn="postgresql://x/y", registry=registry,
+        ingest_uri=str(tmp_path / "ingest"), ingest_options={"anon": False},
+    )
+    response = TestClient(app).post("/v1/uploads", headers={"Authorization": "Bearer ta"},
+                                    files=[("files", ("a.pdf", b"%PDF-1.4"))])
+    assert response.status_code == 201
+    assert {"anon": False} in opened
+
+
+def test_settings_default_to_the_options_the_environment_declares(monkeypatch, tmp_path: Path) -> None:
+    from womblex.api.app import create_api_app
+
+    monkeypatch.setenv("WOMBLEX_INGEST_URI", str(tmp_path / "ingest"))
+    monkeypatch.setenv("WOMBLEX_INGEST_STORAGE_OPTIONS", '{"anon": true}')
+    seen: list = []
+    from womblex.api import app as api_app
+
+    real = api_app.DeploymentSettings
+    monkeypatch.setattr(api_app, "DeploymentSettings", lambda **kw: seen.append(kw) or real(**kw))
+    create_api_app(store_uri=str(tmp_path / "store"), db_dsn="postgresql://x/y", registry=None,
+                   ingest_uri=str(tmp_path / "ingest"))
+    assert seen[0]["ingest_options"] == {"anon": True} and seen[0]["store_options"] is None

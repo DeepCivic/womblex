@@ -70,7 +70,6 @@ Terms the requirements use, as the code defines them.
 **TO-DO:**
 
 - **`verify-shards --compare-to` does not compare `content_digest`.** It prints each run's aggregate counts (`store/shard_audit.py`, `format_audit_diff`) side by side and flags nothing, so a document whose `content_digest` differs between a local and a fleet run goes unreported. Compare the manifests' `content_digest` per `source_hash` and report each difference.
-- **Azure storage URIs aren't credential-wired.** `storage_options_from_env` (`store/remote.py`) wires only `s3://`; `az://`/`abfs://` fall through to adlfs unauthed and untested. Add an `az`/`abfs` branch reading `AZURE_STORAGE_*`, plus coverage.
 - **No Azure ML connection in the enrichment paths.** `providers/isaacus/client.py` handles the hosted API and AWS SageMaker (`ISAACUS_SAGEMAKER_ENDPOINTS`) but has no Azure ML equivalent. Add an Azure ML connection option so those paths can reach an Azure ML endpoint (`AZUREML_ENDPOINTS`, client factory, `unserved_models` pre-flight).
 
 ## 3. Ingest-First Data Flow and Operation Composition
@@ -668,12 +667,35 @@ These requirements described the admin console (`womblex ui`). The console now l
 
 **Verification:** `tests/test_deployment_registry.py` (the conformance every registered deployment meets, registration and plugins), `tests/test_deployment_check.py` (one check per deployment, attribution), `tests/test_deployment_gates.py` (contracts and workers), `tests/test_deployment_choice.py` (the setting, its refusals, a client per deployment, the unchanged digest), `tests/test_deployment_record.py` (the footer key and run record) and `tests/test_resources.py`.
 
+## 37. Object Stores Are Whatever fsspec Can Open
+
+**As** an operator,
+**I want** any storage fsspec can open to be usable as a store, an ingest location or a destination, configured with fsspec's own options,
+**so that** adding a storage backend is installing it and naming it, not editing Womblex.
+
+**Given** an installed fsspec backend and its options in the deployment's settings
+**When** a run, worker, API or egress names its scheme
+**Then** it works with no change to Womblex.
+
+**Acceptance criteria:**
+
+- A scheme is usable when fsspec knows it and its backend is importable in this install. A scheme fsspec knows whose backend is not installed (`gs://` without `gcsfs`) is refused before launch, naming the package; an unknown scheme is refused naming the usable ones. The same check covers a store, an ingest location, the API's upload location and a destination; a stored workflow's spec asks only whether fsspec knows a destination's scheme, and the check that the backend is installed is made where the workflow runs.
+- The existing typo checks stay: a missing `://`, an uppercase scheme, no bucket.
+- Each location (store, ingest, destination) takes its own `storage_options`: the store's and ingest location's in the deployment's settings (`store_options`, `ingest_options`) and, for containers, from one JSON environment variable per location (`WOMBLEX_STORE_STORAGE_OPTIONS`, `WOMBLEX_INGEST_STORAGE_OPTIONS`, applied to any URI inside the location `WOMBLEX_STORE_URI` / `WOMBLEX_INGEST_URI` names), a destination's in its spec. They reach fsspec unchanged; Womblex adds no per-backend option.
+- A secret is written `{"env": "NAME"}` and resolved when the location is opened, so `GET /v1/resources` shows the variable, never the value (a literal secret in settings is masked). A stored workflow refuses a secret-looking destination option written as a value.
+- S3-compatible stores (MinIO, Cloudflare R2, others) need configuration only. The ingest and output stores may be different accounts or vendors.
+- The existing S3 variables (`WOMBLEX_S3_ENDPOINT`, `WOMBLEX_S3_ACCESS_KEY_ID`, `WOMBLEX_S3_SECRET_ACCESS_KEY`, the `AWS_*` fallbacks) keep working, below explicit `storage_options` in precedence, and still keep a store key out of the ambient AWS credentials the SageMaker signer relies on.
+- The ingest/output disjointness check applies to every scheme.
+- No dependency is added; an operator installs `gcsfs` or `adlfs` for the store they use.
+
+**Verification:** `tests/test_remote_schemes.py` runs extract, chunk, finalize and egress over fsspec's built-in `memory://` filesystem with no Womblex edit, and refuses a `gs://` store with `gcsfs` absent, naming `gcsfs`; `tests/test_storage_options.py` covers the options, their precedence, the secrets rule and the digest of a destination that gives none; `tests/test_resources.py` the masked view.
+
 ## Outstanding
 
 Requirements not yet fully met. The detail lives in the **TO-DO** block under each requirement; this list is the index. When a gap is closed (or the criterion is deliberately narrowed), its TO-DO block and its entry here are removed in the same PR.
 
 
-- **Requirement 2 (Scale-Out):** `verify-shards --compare-to` does not compare `content_digest`; Azure storage URIs (`az://` / `abfs://`) are not credential-wired, and the enrichment paths have no Azure ML connection.
+- **Requirement 2 (Scale-Out):** `verify-shards --compare-to` does not compare `content_digest`; the enrichment paths have no Azure ML connection.
 - **Requirement 3 (Ingest-First Data Flow):** up-front composition check covers workflows (local and `dispatch-workflow`) and dispatch, not a lone `run-stage --store` (per-base `NotReady`).
 - **Requirement 6 (Native Office and Spreadsheet Extraction):** multi-row headers are emitted for DOCX only; spreadsheets and the legacy table view collapse to row 0, no per-cell header-row coordinate exists, and cell formulas are never captured.
 - **Requirement 7 (Standalone Reference Register Ingestion):** G-NAF and geospatial writes are not guarded against partial output.

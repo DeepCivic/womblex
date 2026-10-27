@@ -40,14 +40,14 @@ def hash_column(path: str, *, filesystem: object | None = None) -> str:
 
 def store_with_run(settings: DeploymentSettings, run_id: str) -> RemoteStore | None:
     """The deployment's store, or ``None`` when it holds no run *run_id*."""
-    store = open_store(cast(str, settings.store_uri))
+    store = open_store(cast(str, settings.store_uri), settings.store_options)
     return store if run_id in store.list_dirs(RUNS_PREFIX) else None
 
 
 def list_run_summaries(settings: DeploymentSettings) -> list[RunDescription]:
     """Every run the source holds, with its document count and stages present, newest id first."""
     if settings.is_remote:
-        store = open_store(cast(str, settings.store_uri))
+        store = open_store(cast(str, settings.store_uri), settings.store_options)
         runs = [_describe_remote_run(store, run_id) for run_id in store.list_dirs(RUNS_PREFIX)]
     else:
         runs = [describe_run(p) for p in list_runs(cast(Path, settings.output_root))]
