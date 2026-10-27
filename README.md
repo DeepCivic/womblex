@@ -156,6 +156,10 @@ surface.
 
 ## Documentation
 
+The API reference covers every public module, generated from its docstrings.
+Build it with `uv run --group docs mkdocs serve` (CI builds it on every PR).
+<!-- TODO: link the hosted API reference here, and add it to [project.urls], once it is published. -->
+
 | Document | Covers |
 |---|---|
 | [functional_requirements.md](docs/functional_requirements.md) | What Womblex must do |
