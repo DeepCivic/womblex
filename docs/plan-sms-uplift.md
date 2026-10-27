@@ -185,7 +185,7 @@ A docs-only merge per CLAUDE.md "Stocktake":
   - an unreadable file in two firings gives two distinct `source_hash`es in one chain
   - a schedule synced before the `collection` field (no `run_id` in its context) still fires into the run named for the workflow
   - changing the workflow's `name` while keeping `collection: c1` fires into run `c1`. The old name's stored copy and schedules stay until `remove-workflow` removes them
-  - `rerun-collection` after adding a step runs only that step among the sidecar stages (built, `tests/test_workflow_schedules.py`)
+  - `rerun-collection` after adding a step runs only that step among the sidecar stages (built, `tests/test_collections_cli.py`)
   - the API lists `c1` for its owner and admin, and 404s for another owner
   - `remove-workflow c1` removes the copy and schedules and leaves the run
 - **B:** `TestClient` tests:
