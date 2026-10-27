@@ -98,7 +98,7 @@ class DeliveryOutcome:
 
 def _open(d: ObjectStoreDestination) -> RemoteStore:
     creds = (os.environ[d.credentials.key_env], os.environ[d.credentials.secret_env]) if d.credentials else None
-    return RemoteStore.from_uri(d.uri, credentials=creds)
+    return RemoteStore.from_uri(d.uri, credentials=creds, explicit=d.storage_options)
 
 
 def deliver(

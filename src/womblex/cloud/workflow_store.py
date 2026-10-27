@@ -28,6 +28,7 @@ from womblex.cloud import dbos_app
 from womblex.cloud.stage_contracts import STAGE_NAMES
 from womblex.config.process import StrictModel
 from womblex.store.remote import validate_location_uri
+from womblex.store.storage_options import secrets_outside_env
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,9 @@ class ObjectStoreDestination(StrictModel):
     """Deliver the run's egress bundle (`store/egress.py`) to `uri`, under the run id.
 
     `credentials` names where an S3 key and secret are found; without it the store's own
-    environment applies, as for any store.
+    environment applies, as for any store. `storage_options` are fsspec's own for this
+    location, passed unchanged (`store/storage_options.py`); a secret in them is written
+    `{"env": "NAME"}`, never as its value.
     """
 
     kind: Literal["object_store"]
@@ -86,6 +89,7 @@ class ObjectStoreDestination(StrictModel):
     uri: str
     include_sources: bool = True
     credentials: StoreCredentials | None = None
+    storage_options: dict[str, Any] | None = None
 
 
 class PostgresDestination(StrictModel):
@@ -196,6 +200,11 @@ def _check_destinations(spec: StoredWorkflowSpec) -> None:
     for d in spec.destinations:
         if isinstance(d, ObjectStoreDestination) and "@" in urlsplit(d.uri).netloc:
             raise ValueError(f"destination {d.name!r}: a URI names no credentials; use `credentials`")
+        if isinstance(d, ObjectStoreDestination) and (literal := secrets_outside_env(d.storage_options)):
+            raise ValueError(
+                f"destination {d.name!r}: storage_options.{literal[0]} holds a secret as a value; "
+                'write it as {"env": "NAME"} (a workflow names where a secret lives, never the secret)'
+            )
         if isinstance(d, ObjectStoreDestination):
             try:  # `s3:/bucket` would otherwise deliver to a local folder named `s3:`
                 validate_location_uri(d.uri, require_backend=False)  # the workers carry the backend; check_destinations asks where it runs
@@ -328,6 +337,9 @@ def workflow_digest(spec: StoredWorkflowSpec) -> str:
     del payload["collection"]  # where documents are kept, not what runs on them: the digest is the recipe's
     if not payload["inbound"]:  # a workflow that names no hook keeps the digest it had before they existed
         del payload["inbound"]
+    for destination in payload.get("destinations", ()):  # ...and one that gives no options, as before they existed
+        if destination.get("storage_options") is None:
+            destination.pop("storage_options", None)
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
 

@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, cast
 
+from womblex.store.storage_options import merge_options, parse_options, resolve_options
 from womblex.utils.checksum import sha256_file
 
 logger = logging.getLogger(__name__)
@@ -38,15 +39,46 @@ def is_remote_uri(uri: str) -> bool:
     return bool(sep) and scheme.isidentifier() and scheme not in ("file", "local")
 
 
-def storage_options_from_env(uri: str, *, credentials: tuple[str, str] | None = None) -> dict:
-    """Build fsspec storage options for *uri* from env vars.
+#: A location's own storage options, one JSON object per location (`store/storage_options.py`),
+#: applied to any URI inside the location the matching `*_URI` variable names.
+STORE_OPTIONS_ENV = "WOMBLEX_STORE_STORAGE_OPTIONS"
+INGEST_OPTIONS_ENV = "WOMBLEX_INGEST_STORAGE_OPTIONS"
+_LOCATIONS = (("WOMBLEX_STORE_URI", STORE_OPTIONS_ENV), ("WOMBLEX_INGEST_URI", INGEST_OPTIONS_ENV))
 
-    Only ``s3://`` gets explicit options: an S3 access key/secret plus an
+
+def _within(location: str, uri: str) -> bool:
+    base = location.rstrip("/")
+    return uri.rstrip("/") == base or uri.startswith(base + "/")
+
+
+def location_options_from_env(uri: str) -> dict | None:
+    """The options the environment declares for the location *uri* lies in, as written (unresolved).
+
+    ``None`` when *uri* is in neither the store nor the ingest location, or the location
+    declares none. ``ValueError`` naming the variable when its JSON is not an object.
+    """
+    for uri_env, options_env in _LOCATIONS:
+        location, raw = os.environ.get(uri_env), os.environ.get(options_env)
+        if location and raw and _within(location, uri):
+            return parse_options(raw, f"${options_env}")
+    return None
+
+
+def storage_options_from_env(
+    uri: str, *, credentials: tuple[str, str] | None = None, explicit: dict | None = None,
+) -> dict:
+    """Build fsspec storage options for *uri*: explicit options over what the environment gives.
+
+    *explicit* (a location's own options, in settings or a destination's spec), else the
+    environment's JSON for the location *uri* lies in, goes to fsspec unchanged with each
+    ``{"env": NAME}`` resolved; it wins, key by key, over the rest.
+
+    Only ``s3://`` also gets options from the S3 variables: an S3 access key/secret plus an
     endpoint override (``WOMBLEX_S3_ENDPOINT`` or ``AWS_ENDPOINT_URL``) so
     MinIO and other S3-compatible stores work without code changes. Every
-    other backend — ``gs://``, ``az://``, local — returns an empty dict and
+    other backend — ``gs://``, ``az://``, local — adds nothing here and
     authenticates via its own native mechanism (gcsfs/adlfs ambient
-    credentials); these kwargs are s3fs-shaped and would misconfigure them.
+    credentials) unless options are given; these kwargs are s3fs-shaped and would misconfigure them.
 
     *credentials*, when given as ``(key, secret)``, is an explicit override
     that wins over the environment, so a rotated key is used *moving forward*
@@ -63,6 +95,13 @@ def storage_options_from_env(uri: str, *, credentials: tuple[str, str] | None = 
     403). Leaving ``AWS_ACCESS_KEY_ID`` unset lets that signer reach the EC2
     instance role, while s3fs still gets MinIO's key explicitly here.
     """
+    declared = explicit if explicit is not None else location_options_from_env(uri)
+    given = resolve_options(declared, f"storage options for {uri}") if declared else {}
+    return merge_options(_s3_options(uri, credentials), given)
+
+
+def _s3_options(uri: str, credentials: tuple[str, str] | None) -> dict:
+    """The S3 variables as fsspec options; empty for any other scheme."""
     if not uri.startswith("s3://"):
         return {}
     endpoint = os.environ.get("WOMBLEX_S3_ENDPOINT") or os.environ.get("AWS_ENDPOINT_URL")
@@ -248,19 +287,22 @@ class RemoteStore:
         *,
         storage_options: dict | None = None,
         credentials: tuple[str, str] | None = None,
+        explicit: dict | None = None,
     ) -> RemoteStore:
         """Open a store at *uri* (e.g. ``s3://bucket/runs`` or ``/data/runs``).
 
         *credentials* is an explicit ``(key, secret)`` S3 override that wins
         over the environment (see :func:`storage_options_from_env`) — the path
         an operator-saved credential takes. Ignored when *storage_options* is
-        passed (the caller has already built the full options dict).
+        passed (the caller has already built the full options dict). *explicit* is
+        this location's own options, layered over the environment's (see
+        :func:`storage_options_from_env`).
         """
         fsspec = _require_fsspec()
         opts = (
             storage_options
             if storage_options is not None
-            else storage_options_from_env(uri, credentials=credentials)
+            else storage_options_from_env(uri, credentials=credentials, explicit=explicit)
         )
         fs, root = fsspec.core.url_to_fs(uri, **opts)
         return cls(fs=fs, root=root.rstrip("/"))
@@ -481,9 +523,12 @@ class RemoteStore:
 
 
 __all__ = [
+    "INGEST_OPTIONS_ENV",
+    "STORE_OPTIONS_ENV",
     "RemoteStore",
     "assert_disjoint_locations",
     "is_remote_uri",
+    "location_options_from_env",
     "same_location",
     "scheme_problem",
     "storage_options_from_env",
