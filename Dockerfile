@@ -13,7 +13,7 @@
 
 # uv exports the lock at build time; it is mounted, never installed. A stage
 # of its own so the pin is a FROM line that dependency updates can read.
-FROM ghcr.io/astral-sh/uv:0.13.5 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.6 AS uv
 
 FROM python:3.12-slim AS base
 
