@@ -154,6 +154,8 @@ One row per source file in the batch.
 | `extracted_at_iso` | string |
 | `parser_version` | string |
 | `content_digest` | string (SHA-256 over ordered elements; null in shards written before the column) |
+| `replaces`, `replaced_by` | string — the earlier / later version of the same `source_relpath` (`source_hash`); null on a per-batch manifest and, on the run manifest, where there is none |
+| `is_current` | bool — the last version of its `source_relpath`; null on a per-batch manifest, filled on the run manifest (`store/document_versions.py`) |
 
 All four shard files also carry the ingest root, the collection and the
 batch's relative paths in their Parquet footer key-value metadata, under

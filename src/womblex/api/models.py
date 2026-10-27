@@ -69,6 +69,59 @@ class RunSubmitted(BaseModel):
     stages: list[str]
 
 
+class CollectionSummary(BaseModel):
+    name: str
+    workflows: list[str]
+
+
+class CollectionList(BaseModel):
+    collections: list[CollectionSummary]
+
+
+class CollectionDetail(BaseModel):
+    """A collection: the stored workflows that feed it, its document count and the workflows its files record."""
+
+    name: str
+    workflows: list[str]
+    documents: int
+    current_documents: int | None = None
+    written_by: list[dict[str, Any]]
+
+
+class CollectionAction(BaseModel):
+    """Which workflow to act through; needed only when several feed the collection."""
+
+    workflow: str | None = None
+
+
+class CollectionAdded(BaseModel):
+    name: str
+    workflow: str
+    firing: str
+
+
+class CollectionRerun(BaseModel):
+    name: str
+    workflow: str
+    stages: list[str]
+    newly_dispatched: int
+
+
+class InboundEventOut(BaseModel):
+    """One inbound event: the sender's id, and the outcome it was given (null while it is being handled)."""
+
+    event_id: str
+    hook: str
+    event: str
+    received_at: str
+    outcome: dict[str, Any] | None
+
+
+class InboundEventList(BaseModel):
+    workflow: str
+    events: list[InboundEventOut]
+
+
 class RunFile(BaseModel):
     """One object under the run. Contract keys are null for a non-Parquet or pre-contract file."""
 

@@ -8,6 +8,29 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 ## [Unreleased]
 
+### Added
+- **A workflow may name a `collection`.** Its scheduled firings append to the run named for the collection instead of the workflow (Requirement 34; `StoredWorkflow.run_id`). The schedule context carries `run_id`, and one without it still fires into the run named for the workflow. The collection is outside `workflow_digest`, and a firing's extraction files record it (else the workflow's name) as the provenance collection, where they recorded the preset name.
+
+- **Add to a collection on demand.** `womblex add-to-collection FILE` fires a stored workflow once, as a schedule's firing (same checks, queue and replay safety). `womblex remove-workflow NAME` removes a workflow's schedules and stored copy, leaving its run. A workflow with a collection keeps its stored copy without triggers, and `schedule-workflow --remove` now only unschedules (it used to delete the copy too).
+
+- **A stored workflow has an owner.** `womblex_workflows` gains an `owner` column (added to an existing table by `ensure_workflow_schema`), set from the caller that stores the copy; firings enqueue under it, and a run owned by another owner refuses the firing. Reverses "a workflow has no owner".
+
+- **Rerun a collection.** `womblex rerun-collection FILE` dispatches the workflow's current steps over its whole collection (`dispatch-workflow` without `--firing`, run id from the collection); unit receipts skip unchanged units. Re-extraction stays out.
+
+- **`/v1/collections`.** List and show a caller's collections (owner-scoped; admin sees all) and add to or rerun one through its stored workflow (`submit`), refused before any row with the workflow refusal's code. Every outbound webhook event carries the workflow's `collection`.
+
+- **Document versions on the run manifest (contract 3.1).** `manifest.parquet` gains `replaces`, `replaced_by` and `is_current`, chained per `source_relpath` in batch order (`store/document_versions.py`); per-batch manifests carry them null and older shards back-fill null. `GET /v1/collections/{name}` reports `current_documents`.
+
+- **A redelivery leaves a trace; run record 9.** `<destination>.json` stays the latest delivery record and a redelivery keeps the one it replaces as `<destination>.<seq>.json`. Each record carries `seq`, `replaces`, the manifest's per-document digests and the documents whose digest moved; the run record lists every delivery with `replaced_by` and a `documents_changed` count.
+
+- **A workflow may declare `inbound` hooks.** `name`, `secret_env` and `events`, validated like a webhook destination; each hook needs its own key across stored workflows (`WOMBLEX_INSECURE_INBOUND=1` downgrades the check to a warning), `schedule-workflow` checks the key is set and creates `womblex_inbound_events` (`cloud/inbound_store.py`), and a workflow with hooks keeps its stored copy. Nothing receives events yet.
+
+- **Inbound webhooks.** `POST /v1/hooks/{workflow}/{hook}` takes a signed event for a stored workflow's hook: `documents_added` / `run_requested` fire it into its collection, `rerun_requested` dispatches its steps over the collection, `delivery_received` is appended to the delivery record it names. Authenticated by the hook's HMAC (`WOMBLEX_INSECURE_INBOUND=1` skips it), recorded once per event id, and refused before any row for what a firing would refuse.
+
+- **`GET /v1/workflows/{id}/inbound-events`** lists a workflow's inbound events with their outcomes, owner-scoped. `delivery_received` narrows Requirement 27's write-back exclusion to an acknowledgement of a delivery.
+
+- **A workflow may name `layout` and `quality` on the fleet.** `dispatch-workflow`, `rerun-collection` and the API rerun take them; a firing refuses the run-scoped `quality` before any row (`stage_not_dispatchable`), since it covers its own batches only. A run dispatched without a workflow still never runs either.
+
 ### Removed
 - **The console leaves Womblex for [womblex-console](https://github.com/DeepCivic/womblex-console).** `womblex ui`, `src/womblex/ui/`, the `ui/` SPA, `Dockerfile.ui`, the `ui` compose service and the console's CI and publish jobs are gone; the repository was seeded from this history. Requirements 15 to 21 and `DESIGN.md` went with it. The console depends on a pinned Womblex and Womblex no longer imports or tests it. The `[ui]` extra is removed in a dependency change of its own; its fastapi and uvicorn are in `[api]`.
 

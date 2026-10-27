@@ -31,7 +31,7 @@ from womblex.cloud.workflow_runner import (
     workflow_overlay,
 )
 from womblex.cloud.workflow_store import StoredWorkflow, check_spec
-from womblex.pipeline_order import WORKFLOW_FLEET_STAGES, in_pipeline_order
+from womblex.pipeline_order import RUN_SCOPED_STAGES, WORKFLOW_FLEET_STAGES, in_pipeline_order
 from womblex.store.retention import is_safe_run_id
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -100,6 +100,8 @@ def dispatch_workflow(
             "`run-workflow` locally)", RefusalCode.STAGE_NOT_DISPATCHABLE,
             steps=tuple((s, "not dispatchable") for s in bad),
         )
+    if firing is not None:
+        _refuse_run_scoped_in_firing(stored)
     if stages != tuple(in_pipeline_order(stages)):
         raise refuse(
             f"steps {list(stages)} are not in pipeline order {list(in_pipeline_order(stages))}; "
@@ -146,6 +148,7 @@ def dispatch_workflow(
             run_id, list(stages), shard_prefix, max_attempts=max_attempts,
             workflow={"id": stored.id, "digest": stored.digest, "preset": stored.spec.preset,
                       "config": overlay, "spec": stored.spec.model_dump(mode="json")}, firing=firing, bases=bases,
+            owner=stored.owner,
         )
     if left := [f for f in not_acted_on(stored) if f not in acted_on]:
         logger.warning("workflow %s: %s stored but not acted on by dispatch", stored.id, ", ".join(left))
@@ -162,14 +165,38 @@ def _firing_kwargs(
             "dsn": dsn, "acted_on": ("triggers", "input_binding.store", "input_binding.ingest_prefix")}
 
 
+def _refuse_run_scoped_in_firing(stored: StoredWorkflow) -> None:
+    """A firing runs its steps over its own batches; a run-scoped stage over those alone would number
+    its clusters per firing, colliding with the ids earlier firings wrote."""
+    if scoped := [s.stage for s in stored.spec.steps if s.stage in RUN_SCOPED_STAGES]:
+        raise WorkflowRefusedError(
+            f"workflow {stored.id!r}: {', '.join(scoped)} spans the whole run, and a firing covers its own "
+            "batches only; run it with `rerun-collection` or `dispatch-workflow` without --firing",
+            code=RefusalCode.STAGE_NOT_DISPATCHABLE, steps=tuple((s, "run-scoped") for s in scoped))
+
+
+def _check_run_owner(stored: StoredWorkflow, run_id: str, dsn: str | None) -> None:
+    """Refuse an owned workflow's firing into a run another owner holds, as `RunBoard.enqueue` would."""
+    from womblex.cloud import dbos_app
+    from womblex.cloud.jobs import RunBoard, RunOwnedError
+
+    if stored.owner is None or (dsn is None and not dbos_app.local_database_path().exists()):
+        return  # an admin's firing inherits the run's owner; no database holds no run
+    try:
+        with RunBoard(dsn) as board:
+            board.check_owner(run_id, stored.owner)
+    except RunOwnedError as e:
+        raise WorkflowRefusedError(f"workflow {stored.id!r}: {e}", code=RefusalCode.RUN_OWNED) from e
+
+
 def check_firing(
     stored: StoredWorkflow, *, run_id: str, resolve_preset: Callable[[str], Preset | None],
     store: RemoteStore, dsn: str | None, ingest: RemoteStore | None = None,
 ) -> list[str]:
     """Every check a firing makes before it writes a row; the keys it would extract.
 
-    A dry-run dispatch, a named input store, a safe input prefix, and at least one document
-    there. *ingest* is the input store opened with the caller's credentials (a worker's own);
+    A dry-run dispatch, the run not owned by another owner than the workflow's, a named input
+    store, a safe input prefix, and at least one document there. *ingest* is the input store opened with the caller's credentials (a worker's own);
     `None` opens it from the workflow's URI. Raises
     `WorkflowRefusedError`; a firing and `schedule-workflow` both call it, so a workflow is
     refused at scheduling for exactly what its firing would refuse.
@@ -177,7 +204,9 @@ def check_firing(
     from womblex.cli._shared import normalise_prefix
     from womblex.cloud.dispatch import supported_keys
 
+    _refuse_run_scoped_in_firing(stored)
     dispatch_workflow(stored, dry_run=True, **_firing_kwargs(stored, run_id, resolve_preset, store, dsn))
+    _check_run_owner(stored, run_id, dsn)
     if not (ingest_root := stored.spec.input_binding.store):
         raise WorkflowRefusedError(f"workflow {stored.id!r}: a scheduled workflow names its input store "
                                    "(input_binding.store)", code=RefusalCode.SPEC_INVALID)
@@ -252,7 +281,7 @@ def fire_workflow(
             recipe = config_from_overlay(stored.spec.preset, workflow_overlay(stored, resolve_preset))
             named = {"id": stored.id, "digest": stored.digest, "spec": stored.spec.model_dump(mode="json")}
             board.enqueue(run_id, specs, firing=firing, fingerprints=prints, config=config_payload(recipe),
-                          workflow=named)
+                          workflow=named, owner=stored.owner)
     try:
         sent = dispatch_workflow(stored, firing=firing, **_firing_kwargs(stored, run_id, resolve_preset, store, dsn))
     except Exception:

@@ -15,18 +15,21 @@ with the commands that use it in its comments.
 
 Every command checks the file first and refuses what could never run: an unknown
 key, an unknown stage, a stage listed twice, a bad cron expression or timezone,
-or a config that does not validate. A workflow has no owner; the runs it starts
-are admin-only, like CLI runs. Its digest (`sha256:…`) is over the parsed spec,
+or a config that does not validate. A stored workflow's owner is the API caller
+that stored it (none, admin, from the CLI); the runs it starts are theirs, and a CLI-stored
+workflow's are admin-only, like CLI runs. Its digest (`sha256:…`) is over the parsed spec,
 so formatting and comments do not change it, and is stamped on every sidecar
 its steps write.
 
 | Field | Meaning |
 |---|---|
-| `name` | The workflow's id: its schedules, its stored copy and its runs are named for it. |
+| `name` | The workflow's id: its schedules, its stored copy and its runs are named for it (a `collection` names the run instead). |
 | `preset` | The base config, a built-in preset or one saved under `--presets-dir`. `dataset` and `paths` are never taken from the workflow. |
 | `config` | Overlay on the preset's config: mappings merge, anything else replaces, `null` drops a key to its default. |
 | `input_binding` | `store` (the input store a firing lists and extracts from; a scheduled workflow must name it, spelt exactly as the workers' `--ingest`, or `--store` where they have none, since firings are routed by that string), `ingest_prefix` (the documents under it a firing extracts) and `batch_size`. Extraction is not a step. |
 | `steps` | Downstream stages, each at most once, run in the order listed (`dispatch-workflow` needs pipeline order). |
+| `inbound` | Optional. Hooks other systems post signed events to: `name`, `secret_env` (the environment variable holding the hook's HMAC key, never the key) and `events` (`documents_added`, `run_requested`, `rerun_requested`, `delivery_received`). Each hook needs its own `secret_env`, unique across stored workflows; `schedule-workflow` checks it is set. A workflow with hooks keeps its stored copy. |
+| `collection` | Optional. The run the workflow's firings append to, in place of the workflow's name: one safe token. Not part of the digest. |
 | `triggers` | Cron expressions scheduled by `schedule-workflow`. |
 | `destinations` | Where the run is delivered after its last step. `object_store`: `name`, `uri` (a local path or a URI a store can open, checked when the file is read), `include_sources` (default `true`) and optional `credentials` (`key_env` and `secret_env`, the environment variables holding an S3 key and secret, never the values). `postgres`: `name`, `dsn_env` (the environment variable holding the connection string), `table` (default `womblex_chunks`) and `text_layer` (`masked`, the default, or `raw`). `webhook`: `name`, `url` and `secret_env` (the environment variable holding the signing key). |
 
@@ -86,16 +89,19 @@ It replaces the bundle and the record.
 | `womblex plan FILE --shards DIR [--assume-price enrich=…]` | Which steps would run or skip, which are free (local) and which paid, and the exact tokens every paid call would send (`enrich`, `embed`, and AI chunking in `chunk`), in each provider's own tokens. Calls no paid API; a cost appears only for a price you supply. |
 | `womblex run-workflow FILE --shards DIR` | Run the steps over a local shard directory. Refused before the first step, never halted after it: a failed step is recorded and the later steps still run. |
 | `womblex dispatch-workflow FILE --run-id R --store URI [--firing T] [--dry-run]` | Queue the steps for the fleet; the run receives the whole workflow (its name, full spec, resolved config and digest), so nothing is stored. Refused before any queue row for anything the local runner refuses, a step the fleet does not dispatch (`layout`, `quality`), an order the coordinator would change, or work no live worker serves under the workflow's config (`no_worker`). A workflow dispatched over a run another workflow worked runs its own stages. `--firing` dispatches the steps of a scheduled firing whose dispatch failed, over that firing's batches alone. |
-| `womblex schedule-workflow FILE [--store URI]` | Store the copy the firings read and make the queue's schedules equal its triggers, in one action; a workflow with no triggers is unscheduled and its copy deleted. Refuses a workflow its firing would refuse (no input store, an unsafe input prefix, no documents, a failing dry-run dispatch). |
-| `womblex schedule-workflow FILE\|NAME --remove \| --status` | Unschedule the workflow and delete its stored copy, or list its schedules. Takes the name when the file is gone. |
+| `womblex schedule-workflow FILE [--store URI] [--owner CLIENT_ID]` | Store the copy the firings read (on behalf of `--owner`, whose runs its firings then are; none: admin) and make the queue's schedules equal its triggers, in one action; a workflow with no triggers is unscheduled, and its copy deleted unless it names a collection. Refuses a workflow its firing would refuse (no input store, an unsafe input prefix, no documents, a failing dry-run dispatch). |
+| `womblex schedule-workflow FILE\|NAME --remove \| --status` | Unschedule the workflow (its stored copy stays), or list its schedules. Takes the name when the file is gone. |
+| `womblex add-to-collection FILE\|NAME [--store URI]` | Fire the stored copy once, now, as a schedule's firing would: the same checks before any row, only the documents the collection has not seen. |
+| `womblex remove-workflow FILE\|NAME` | Remove the schedules and the stored copy; the collection's run and shards stay. |
 
 `run-workflow` runs the steps in the order listed. It refuses an order in which a
 step reads a required input that is missing, produced only by a later step, or
 rewritten by a later step. `dispatch-workflow` also needs pipeline order, since the
-coordinator runs stages in that order: `normalise`, `spellfix`, `enrich`, `chunk`,
-`graph-refresh`, `embed`, `money`, `link`, `pii`. The fleet dispatches only these;
-`layout` and `quality` run through `run-workflow` or `run-stage`. `pii` runs on the
-fleet only as a workflow's step: a run dispatched without a workflow never masks.
+coordinator runs stages in that order: `layout`, `normalise`, `spellfix`, `enrich`, `chunk`,
+`graph-refresh`, `embed`, `money`, `link`, `pii`, `quality`. `layout`, `pii` and `quality` run on the
+fleet only as a workflow's steps: a run dispatched without a workflow never re-lays out, masks or
+deduplicates. A firing covers its own batches only, so it refuses the run-scoped `quality`; run it
+with `rerun-collection` or `dispatch-workflow` without `--firing`.
 
 ## A trigger firing
 
@@ -111,7 +117,7 @@ fails after the batches are queued, the batches run on and the run reads `orphan
 (`womblex jobs`, `/v1/runs`) until you dispatch that firing's steps with
 `womblex dispatch-workflow FILE --run-id <name> --firing <UTC time> --store <uri>`.
 There is no backfill of missed firings. Deleting a workflow file does not unschedule it: run
-`schedule-workflow <name> --remove`.
+`schedule-workflow <name> --remove` (or `remove-workflow <name>` to delete its stored copy too).
 
 ## When a stage fails
 

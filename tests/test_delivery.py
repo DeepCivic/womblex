@@ -100,12 +100,13 @@ def test_a_failing_destination_is_retried_then_recorded_and_the_run_completes(
     assert saved["status"] == "failed" and "refused the write" in saved["error"]
 
 
-def test_a_redelivery_replaces_the_record(run_root: Path, tmp_path: Path):
+def test_a_redelivery_writes_the_next_record_and_keeps_the_one_it_replaced(run_root: Path, tmp_path: Path):
     stored = _stored(["normalise"], destinations=[_to(tmp_path, include_sources=False)])
     for _ in range(2):
         run_workflow_local(stored, run_root / "documents", resolve_preset=_resolve)
-    assert [p.name for p in (run_root / "deliveries").iterdir()] == ["archive.json"]
-    assert len(read_run_record(run_root / "manifest.parquet")["deliveries"]) == 1
+    assert sorted(p.name for p in (run_root / "deliveries").iterdir()) == ["archive.1.json", "archive.json"]
+    listed = read_run_record(run_root / "manifest.parquet")["deliveries"]
+    assert [(d["seq"], d["replaces"], d["replaced_by"]) for d in listed] == [(1, None, 2), (2, 1, None)]
 
 
 @pytest.mark.parametrize("destination, problem", [

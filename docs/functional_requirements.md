@@ -500,7 +500,7 @@ These requirements described the admin console (`womblex ui`). The console now l
 - After an edit and reschedule, the new version applies to new documents only; earlier documents keep their results.
 - A firing with no new documents runs nothing and logs that.
 - A file whose content changed is a new document; the earlier version stays in the run. A file rewritten with the same bytes is not a new document.
-- A workflow has no owner; the runs it starts are admin-only, like CLI runs.
+- A stored workflow has an owner, the API caller that stored it (none for the CLI); the runs it starts belong to that owner, and a run already owned by another owner is refused. A workflow with no owner starts admin-only runs, like CLI runs.
 - Fleet runs perform `pii` when a workflow includes it; runs without a workflow never do.
 - A workflow can name destinations: an object store, a Postgres database with embeddings, and a webhook.
 - A workflow names where secrets are found, never the secrets. No secret is written to the file or the stored copy.
@@ -508,14 +508,14 @@ These requirements described the admin console (`womblex ui`). The console now l
 - A Postgres destination requires the `embed` step, and sending masked text requires `pii`; a workflow missing either is refused before launch.
 - Results are delivered after the last step, even when a step failed, and a delivery after a failure names the failed steps.
 - A failed delivery is retried a set number of times, then recorded on the run. It never stops the run.
-- After a failed stage is retried successfully, the retry command prints how to redeliver. Redelivery replaces: files are rewritten and rows upserted.
+- After a failed stage is retried successfully, the retry command prints how to redeliver. Redelivery replaces: files are rewritten and rows upserted; the delivery record is kept as a trace (Requirement 34).
 - An object-store destination receives the Requirement 23 bundle; each destination chooses whether raw sources are included.
 - A Postgres destination gets one row per chunk with its embedding: masked text by default, raw only where the workflow asks, each row naming its layer.
 - A webhook receives six events: `extraction_settled`, `stage_finished`, `stage_failed`, `run_finished`, `delivered` and `delivery_failed`. Each carries an `event_id` (kept when the event is resent, so the receiver can drop a duplicate), the `run_id` and the run's status in the API's words, and is signed with a key held on the worker.
 - There are no per-document or per-batch events.
 - The run record lists every delivery.
 
-**Out of scope:** managing workflows through the API, pruning changed or deleted documents, resolving the source of a changed file's earlier version (its bytes are gone from the store, so `SourceResolver` reads it as `hash_mismatch`), workflow owners, backfill of missed firings, per-step destinations, databases other than Postgres (each needs its own requirement), registering webhooks through the API, and write-back from consumers.
+**Out of scope:** creating, editing or removing workflows through the API (listing, adding to and rerunning a collection through a stored workflow are Requirement 34), pruning changed or deleted documents, resolving the source of a changed file's earlier version (its bytes are gone from the store, so `SourceResolver` reads it as `hash_mismatch`), backfill of missed firings, per-step destinations, databases other than Postgres (each needs its own requirement), registering webhooks through the API, and write-back from consumers other than an acknowledgement of a delivery (`delivery_received`, Requirement 35).
 
 ## 28. Fleet Runs — Honour the Dispatch, Report the Truth
 
@@ -564,6 +564,78 @@ These requirements described the admin console (`womblex ui`). The console now l
 - The adapter declares that it returns a Document. The raw Document is written only when `persist_document` is set; what reads it is Requirement 10's.
 
 **Out of scope:** AI chunking (Requirement 10) and the Isaacus embedder (`embed`).
+
+## 34. Collections — A Long-Lived Run Named for What It Holds
+
+**Paid:** A firing that adds a collection's documents launches the workflow's paid steps, billed for the documents it adds (Requirement 27).
+
+**As** an operator,
+**I want** a workflow's documents kept in a run named for a collection, not for the workflow,
+**so that** a collection keeps its identity when the workflow that feeds it is renamed or replaced.
+
+**Given** a workflow file with a `collection`
+**When** the operator schedules it and it fires
+**Then** every firing appends to the one run named for the collection.
+
+**Acceptance criteria:**
+
+- A workflow may name a `collection`: one safe token, as a workflow name is. Without one, the run is named for the workflow, as before.
+- A scheduled firing appends to the run named for the collection. Renaming the workflow while keeping the collection fires into the same run.
+- A schedule synced before the `collection` field existed still fires into the run named for its workflow.
+- The workflow's digest does not cover the collection, so naming or changing it leaves the digest of an otherwise unchanged workflow as it was.
+- The source-provenance collection recorded in a firing's extraction files is the collection, else the workflow's name; extraction from a run no workflow started still records the preset name. Files written earlier keep what they were written with.
+
+**Verification:** `tests/test_workflow_store.py` (the digest and an unsafe collection) and `tests/test_workflow_schedules.py` (a renamed workflow firing into its collection, with the provenance footer; a schedule synced without `run_id` firing into the run named for its workflow), `tests/test_collections_cli.py` (on-demand adds, the kept copy, `remove-workflow` and `rerun-collection`; owners) with `tests/test_unit_receipt.py` for the skip rule.
+
+- `add-to-collection` fires the stored workflow once, now, on the queue of its input store, as a schedule's firing: it makes the same checks before any row (a workflow not stored, or one the firing would refuse, queues nothing), adds only the documents the collection has not seen, and a repeat within the same second attaches rather than firing twice.
+- A stored workflow's owner is the client it was stored for (`schedule-workflow --owner <client_id>`; none, admin, otherwise), and a copy stored before owners reads as unowned. Its firings run under that owner, so the collection's run is owned like an API run, and a firing for a run another owner holds is refused.
+- A workflow with a collection and no triggers keeps its stored copy. `schedule-workflow --remove` unschedules and keeps the copy; `remove-workflow` removes the schedules and the copy by name, even when the file is gone, and leaves the collection's run and shards.
+
+- `rerun-collection` runs the workflow file's current steps over the whole collection, outside a firing. A unit whose version, stage config and inputs are unchanged since it was published is skipped, so adding `pii` runs only `pii` and a changed setting reruns the stages it changes. It is refused before any row for what `dispatch-workflow` refuses.
+- A workflow's steps may include `layout` and `quality` on the fleet. A firing, and so a scheduled or on-demand add, refuses `quality` before any row, since it covers its own batches and `quality` spans the run; a rerun runs it over the whole collection.
+- Limits: an in-place stage (`layout`), `graph-refresh` and an output with no receipt run again over the whole collection on every rerun. Re-extraction is out: batch ids are deterministic and attach rather than rerun.
+
+- The service API lists a caller's collections and shows one with its workflows, document count and the workflows its files record; another owner's collection is 404 and an admin sees all, including a collection whose run the store holds after its workflows were removed (adding to or rerunning that one is 404). Adding to and rerunning a collection (`submit` scope) act through the stored workflow, make the checks of `add-to-collection` and `rerun-collection`, and refuse before any row with the workflow refusal's code (409). A collection fed by several workflows needs one named.
+- Every outbound webhook event carries the workflow's `collection` (null when it names none).
+
+- A redelivery to a destination writes a new delivery record with the next `seq` and the `seq` it `replaces`, and keeps the earlier record as it was. A record names the documents whose `content_digest` changed since the delivery it replaces, and the run record (version 9) lists every delivery with the one that replaced it.
+- The run manifest marks each document's version: `replaces` and `replaced_by` name the earlier and later version of the same `source_relpath` (by `source_hash`), and `is_current` is true for the latest. Versions follow batch order, never time. Per-batch manifests are not rewritten; they carry the columns null, as do shards written before them. The collection's detail reports how many documents are current.
+- Limits: a moved or renamed file starts a new chain, and identical bytes at two paths form two chains.
+
+**Out of scope:** creating, editing or removing a workflow through the API (so a non-admin owner is, for now, whoever the deployment stored the workflow for), document versions and document versions, each a later piece of the same requirement.
+
+## 35. Inbound Webhooks — Other Systems Act on a Stored Workflow
+
+**Paid:** An accepted `documents_added`, `run_requested` or `rerun_requested` event launches the workflow's paid steps, billed for the documents it processes (Requirement 27).
+
+**As** an operator,
+**I want** a stored workflow to name the endpoints other systems may post signed events to,
+**so that** an outside system can add documents or rerun a collection without a person running a command.
+
+**Given** a workflow file with `inbound` hooks
+**When** the operator schedules it
+**Then** each hook is validated and the workflow's copy is stored where the service finds it.
+
+**Acceptance criteria:**
+
+- A workflow may declare `inbound` hooks: a `name` (one safe token, unique in the workflow), a `secret_env` (the environment variable holding the hook's key, never the key) and the `events` it accepts, a non-empty subset of `documents_added`, `run_requested`, `rerun_requested` and `delivery_received`.
+- Each hook needs its own key: two hooks naming one `secret_env`, in one workflow or in two stored workflows, are refused, since the signature is over the body alone and a shared key would let one sender post to another's hook.
+- `schedule-workflow` refuses a hook whose key is not set in its environment, as it does a webhook destination's.
+- `WOMBLEX_INSECURE_INBOUND=1`, read from the environment only and never from a workflow, turns these checks into warnings for a proof of concept.
+- A workflow with inbound hooks keeps its stored copy without triggers or a collection, and the table that records the events it receives (`womblex_inbound_events`: the event id, workflow, hook, event, time and outcome) is created by `schedule-workflow`.
+- Hooks are part of the workflow's digest; a workflow with none keeps the digest it had.
+
+**Verification:** `tests/test_workflow_store.py` (validation, the digest, shared keys), `tests/test_inbound_store.py`, `tests/test_workflow_schedules.py` (the kept copy, the key check, the cross-workflow refusal) and `tests/test_api_inbound.py` (signed, repeated, refused and acknowledged events, and the listing).
+
+- `POST /v1/hooks/{workflow}/{hook}` authenticates by the hook's key only: an HMAC-SHA256 over the raw body in `X-Womblex-Signature`, the recipe an outbound webhook uses. A service token is not asked for, and `--insecure-no-auth` does not skip it; only `WOMBLEX_INSECURE_INBOUND=1` does, logging a warning for every event it accepts unsigned.
+- An event is a JSON body with an `event` and an `event_id`. A workflow or hook that is not stored (404 `unknown_hook`), a signature that does not match (401 `bad_signature`), a body that is not an event (400 `bad_event`) and an event the hook does not declare (403 `event_not_declared`) are refused and write nothing, so an unauthenticated or malformed request never fills the event table. A body over 1 MiB (nginx's default request limit) is refused (413 `body_too_large`) before it is read in full.
+- An event id is recorded once per hook. A resend of a seen id returns the first outcome, acceptance or refusal, and does nothing else; a sender who wants a refused event retried sends a new id. An id whose handling stopped before an outcome was stored (a failure, or the service stopping mid-request) is handled again on resend, with a warning in the log; the action attaches to the work the first attempt started rather than starting it twice.
+- `documents_added` and `run_requested` fire the workflow into its collection under the workflow's owner, once per event id; `rerun_requested` dispatches its steps over the collection (`rerun-collection`). Both make the checks a scheduled firing makes before any queue row; a refusal (409) carries the workflow refusal's code and is stored as the event's outcome.
+- `delivery_received` names a `destination` and the `seq` of the delivery it acknowledges, and is appended to that delivery record, once per hook and event id. A `seq` with no record is refused (409 `unknown_delivery`). The run's status is never touched.
+
+- `GET /v1/workflows/{id}/inbound-events` (`read`) lists a workflow's inbound events newest first, each with its hook, event, time and outcome (the status, code and message it was given). It is owner-scoped like the runs: another owner's workflow is 404, and an admin sees all.
+
+**Out of scope:** the console.
 
 ## Outstanding
 

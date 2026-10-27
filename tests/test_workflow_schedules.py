@@ -150,7 +150,7 @@ def test_remove_and_status_work_after_the_workflow_file_is_deleted(
     assert cmd_schedule_workflow(argparse.Namespace(**{**vars(by_name), "remove": True})) == 0
     assert list_schedules(dbos_app.open_client(None), "gone") == []
     with WorkflowStore(None) as store:
-        assert store.get("gone") is None
+        assert store.get("gone") is not None  # --remove unschedules; `remove-workflow` deletes the copy
 
 
 def test_a_firing_extracts_the_prefix_and_runs_the_workflow_unowned_and_stamped(
@@ -178,6 +178,54 @@ def test_a_firing_extracts_the_prefix_and_runs_the_workflow_unowned_and_stamped(
         meta = pq.read_metadata(str(out / name)).metadata
         assert meta[b"womblex.workflow_digest"] == stored.digest.encode()
         assert b'"name": "nightly"' in meta[b"womblex.workflow"]
+
+
+def test_a_collection_names_the_run_whatever_the_workflow_is_called(fleet, saved_preset) -> None:  # noqa: F811
+    from womblex.store.source_provenance import COLLECTION_ID_KEY
+
+    store_dir, _, _ = fleet
+    _inbox(fleet)
+    ensure_workflow_schema(None)
+    spec = validate_workflow_spec({
+        "preset": _PRESET.name, "steps": [{"stage": "normalise"}], "triggers": [_TRIGGER],
+        "input_binding": {"store": fleet[1], "ingest_prefix": "inbox"}, "collection": "c1",
+    })
+    with WorkflowStore(None) as store:
+        stored = store.save("renamed", spec)
+    client = dbos_app.open_client(None)
+    sync_schedules(client, stored)
+    (sched,) = list_schedules(client, "renamed")
+    assert sched["context"]["run_id"] == "c1" and sched["context"]["workflow_id"] == "renamed"
+    _fire_all_at_once(client, stored)
+    work(fleet, idle_timeout=4)
+    with RunBoard(None) as board:
+        (run,) = board.runs()
+    assert run.run_id == "c1"
+    meta = pq.read_metadata(str(Path(str(store_dir)) / "runs/c1/documents/batch-0001.elements.parquet")).metadata
+    assert meta[COLLECTION_ID_KEY.encode()] == b"c1"  # the collection, not the preset name
+
+
+def test_a_schedule_synced_before_run_id_fires_into_the_run_named_for_the_workflow(
+    fleet, saved_preset,  # noqa: F811
+) -> None:
+    from datetime import UTC, datetime
+
+    _inbox(fleet)
+    ensure_workflow_schema(None)
+    spec = validate_workflow_spec({
+        "preset": _PRESET.name, "steps": [{"stage": "normalise"}], "triggers": [_TRIGGER],
+        "input_binding": {"store": fleet[1], "ingest_prefix": "inbox"}, "collection": "c1",
+    })
+    with WorkflowStore(None) as store:
+        stored = store.save("legacy", spec)
+    client = dbos_app.open_client(None)
+    sync_schedules(client, stored)
+    (sched,) = list_schedules(client, "legacy")
+    old = {k: v for k, v in sched["context"].items() if k != "run_id"}  # the context as synced before the field
+    client.enqueue({"workflow_name": sched["workflow_name"], "queue_name": sched["queue_name"]}, datetime.now(UTC), old)
+    work(fleet, idle_timeout=4)
+    with RunBoard(None) as board:
+        assert [r.run_id for r in board.runs()] == ["legacy"]
 
 
 def test_a_firing_that_cannot_complete_queues_nothing(fleet, saved_preset) -> None:  # noqa: F811
@@ -467,3 +515,53 @@ def test_a_file_found_unchanged_is_not_hashed_again(fleet, saved_preset, monkeyp
     assert len(hashed) == 1  # the second firing hashed it; the third found its fingerprint seen
     with RunBoard(None) as board:
         assert board.next_batch_num("nightly") == 2  # one batch: the touched file was never queued again
+
+
+def _inbound_file(fleet, name: str = "feed", secret_env: str = "CRM_KEY") -> str:  # noqa: F811
+    from tests.test_workflow_runner import write_workflow
+
+    return str(write_workflow(
+        fleet[2], name, ["normalise"], input_binding={"store": fleet[1], "ingest_prefix": "inbox"},
+        inbound=[{"name": "crm", "secret_env": secret_env, "events": ["documents_added"]}]))
+
+
+def test_a_workflow_with_inbound_hooks_keeps_its_copy_without_triggers_or_a_collection(
+    fleet, saved_preset, monkeypatch,  # noqa: F811
+) -> None:
+    import argparse
+
+    from womblex.cli.workflow import cmd_schedule_workflow
+
+    path = _inbound_file(fleet)
+    ensure_workflow_schema(None)
+    args = argparse.Namespace(workflow=path, dsn=None, remove=False, status=False, **_where(fleet))
+    monkeypatch.delenv("CRM_KEY", raising=False)
+    assert cmd_schedule_workflow(args) == 1  # the hook's key is not set here
+    with WorkflowStore(None) as store:
+        assert store.get("feed") is None
+    monkeypatch.setenv("CRM_KEY", "k")
+    assert cmd_schedule_workflow(args) == 0
+    with WorkflowStore(None) as store:
+        assert store.get("feed").spec.inbound[0].name == "crm"
+    from womblex.cloud.inbound_store import InboundEvents
+
+    with InboundEvents(None) as events:  # the writer made the events table
+        assert events.list("feed") == []
+
+
+def test_scheduling_refuses_a_hook_secret_another_stored_workflow_names(
+    fleet, saved_preset, monkeypatch, caplog,  # noqa: F811
+) -> None:
+    import argparse
+
+    from womblex.cli.workflow import cmd_schedule_workflow
+
+    monkeypatch.setenv("CRM_KEY", "k")
+    where = _where(fleet)
+    first = argparse.Namespace(workflow=_inbound_file(fleet, "feed"), dsn=None, remove=False, status=False, **where)
+    second = argparse.Namespace(workflow=_inbound_file(fleet, "feed-2"), dsn=None, remove=False, status=False, **where)
+    assert cmd_schedule_workflow(first) == 0
+    assert cmd_schedule_workflow(second) == 1
+    assert "also named by stored workflow 'feed'" in caplog.text
+    with WorkflowStore(None) as store:
+        assert store.get("feed-2") is None

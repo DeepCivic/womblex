@@ -89,6 +89,15 @@ def test_a_local_run_sends_its_events_signed_and_records_them(run_root: Path, tm
     assert sorted(d["destination"] for d in record["deliveries"]) == ["archive", "hook"]
 
 
+def test_every_event_names_the_workflows_collection_or_none(run_root: Path, tmp_path: Path, receiver):  # noqa: F811
+    run_workflow_local(_stored(["normalise"], destinations=[_HOOK], collection="c1"),
+                       run_root / "documents", resolve_preset=_resolve)
+    assert {b["collection"] for b, _, _ in receiver.calls} == {"c1"}
+    receiver.calls.clear()
+    run_workflow_local(_stored(["normalise"], destinations=[_HOOK]), run_root / "documents", resolve_preset=_resolve)
+    assert {b["collection"] for b, _, _ in receiver.calls} == {None}
+
+
 def test_a_webhook_that_is_down_never_stops_the_run(run_root: Path, tmp_path: Path, receiver):  # noqa: F811
     receiver.statuses = [500] * 100
     result = run_workflow_local(_stored(["normalise"], destinations=[_HOOK]), run_root / "documents",

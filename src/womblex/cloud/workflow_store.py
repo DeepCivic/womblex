@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -110,6 +111,30 @@ class WebhookDestination(StrictModel):
     secret_env: str
 
 
+#: What an inbound hook may be sent (Requirement 35); each is acted on by `api/routes_inbound.py`.
+INBOUND_EVENTS = ("documents_added", "run_requested", "rerun_requested", "delivery_received")
+
+#: Set to `1` in the environment of a proof of concept to turn the inbound checks off. Read only from
+#: the environment, never from a spec, so a stored workflow cannot turn it on.
+INSECURE_INBOUND_ENV = "WOMBLEX_INSECURE_INBOUND"
+
+
+def insecure_inbound() -> bool:
+    return os.environ.get(INSECURE_INBOUND_ENV) == "1"
+
+
+class InboundHook(StrictModel):
+    """An endpoint other systems post to (`POST /v1/hooks/<workflow>/<name>`), signed with the key in `secret_env`.
+
+    `events` are the ones the hook accepts. Like a webhook destination it names the environment
+    variable holding its key, never the key; the signature is HMAC-SHA256 over the raw body.
+    """
+
+    name: str
+    secret_env: str
+    events: tuple[str, ...]
+
+
 #: The destination kinds a workflow can name, each added in the merge that delivers to it.
 WorkflowDestination = Annotated[
     ObjectStoreDestination | PostgresDestination | WebhookDestination, Field(discriminator="kind")]
@@ -126,6 +151,8 @@ class StoredWorkflowSpec(StrictModel):
     steps: tuple[WorkflowStep, ...]
     triggers: tuple[WorkflowTrigger, ...] = ()
     destinations: tuple[WorkflowDestination, ...] = ()
+    collection: str | None = None
+    inbound: tuple[InboundHook, ...] = ()
 
 
 def _check_steps(spec: StoredWorkflowSpec) -> None:
@@ -188,6 +215,52 @@ def _check_destinations(spec: StoredWorkflowSpec) -> None:
                                  "(or `text_layer: raw` to send the chunk text)")
 
 
+def _check_collection(spec: StoredWorkflowSpec) -> None:
+    from womblex.store.retention import is_safe_run_id
+
+    if spec.collection is not None and not (is_safe_workflow_id(spec.collection) and is_safe_run_id(spec.collection)):
+        raise ValueError(f"collection must be one safe token, got {spec.collection!r}")
+
+
+def _check_inbound(spec: StoredWorkflowSpec) -> None:
+    names = [h.name for h in spec.inbound]
+    for name in names:
+        if not is_safe_workflow_id(name):
+            raise ValueError(f"inbound hook name must be one safe token, got {name!r}")
+    if repeated := sorted({n for n in names if names.count(n) > 1}):
+        raise ValueError(f"inbound hook name(s) used more than once: {repeated}")
+    for h in spec.inbound:
+        if not h.events or (unknown := sorted(set(h.events) - set(INBOUND_EVENTS))):
+            raise ValueError(f"inbound hook {h.name!r}: events must be a non-empty subset of {list(INBOUND_EVENTS)}"
+                             + (f", not {unknown}" if h.events else ""))
+        if not h.secret_env.strip():
+            raise ValueError(f"inbound hook {h.name!r}: secret_env names the variable holding its key")
+    keys = [h.secret_env for h in spec.inbound]
+    if shared := sorted({k for k in keys if keys.count(k) > 1}):
+        _shared(f"inbound hooks of one workflow share a secret_env: {shared}")
+
+
+def _shared(problem: str) -> None:
+    """Refuse a shared inbound secret, or only warn under `WOMBLEX_INSECURE_INBOUND=1`."""
+    if not insecure_inbound():
+        raise ValueError(problem + " (each hook needs its own; set WOMBLEX_INSECURE_INBOUND=1 for a proof of concept)")
+    logger.warning("%s (allowed by %s)", problem, INSECURE_INBOUND_ENV)
+
+
+def check_shared_secrets(workflow_id: str, spec: StoredWorkflowSpec, others: list[StoredWorkflow]) -> None:
+    """Refuse a hook whose `secret_env` another stored workflow's hook names. The signature is over the
+    body alone, so a shared key lets one workflow's sender post to another's hook."""
+    mine = {h.secret_env for h in spec.inbound}
+    for other in others:
+        if other.id != workflow_id and (clash := sorted(mine & {h.secret_env for h in other.spec.inbound})):
+            _shared(f"inbound secret_env {clash} is also named by stored workflow {other.id!r}")
+
+
+def inbound_problems(spec: StoredWorkflowSpec) -> list[str]:
+    """Hooks whose key is not set in this environment (a pre-launch check, as for a webhook destination)."""
+    return [f"inbound hook {h.name!r}: {h.secret_env} not set" for h in spec.inbound if not os.environ.get(h.secret_env)]
+
+
 def combine_config(preset_config: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
     """A preset's config with a workflow's own `config` laid over it, merged key by key.
 
@@ -231,6 +304,8 @@ def check_spec(spec: StoredWorkflowSpec) -> None:
     _check_steps(spec)
     _check_triggers(spec)
     _check_destinations(spec)
+    _check_collection(spec)
+    _check_inbound(spec)
     _check_config_overlay(spec)
 
 
@@ -250,6 +325,9 @@ def workflow_digest(spec: StoredWorkflowSpec) -> str:
     payload = spec.model_dump(mode="json")
     if not payload["destinations"]:  # a workflow that names none keeps the digest it had before they existed
         del payload["destinations"]
+    del payload["collection"]  # where documents are kept, not what runs on them: the digest is the recipe's
+    if not payload["inbound"]:  # a workflow that names no hook keeps the digest it had before they existed
+        del payload["inbound"]
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
 
@@ -263,6 +341,12 @@ class StoredWorkflow:
     digest: str
     created_at: str = ""
     updated_at: str = ""
+    owner: str | None = None  # the API caller that stored it; `None` is admin (the CLI)
+
+    @property
+    def run_id(self) -> str:
+        """The run a firing appends to: the collection, else the workflow's own id."""
+        return self.spec.collection or self.id
 
 
 _TABLE = "womblex_workflows"
@@ -279,6 +363,7 @@ def _ddl() -> Any:
         sa.Column("digest", sa.Text, nullable=False),
         sa.Column("created_at", sa.Text, nullable=False),
         sa.Column("updated_at", sa.Text, nullable=False),
+        sa.Column("owner", sa.Text, nullable=True),
     ), metadata
 
 
@@ -290,6 +375,9 @@ def ensure_workflow_schema(dsn: str | None) -> None:
     engine = sa.create_engine(dbos_app.system_database_url(dsn))
     try:
         metadata.create_all(engine, tables=[table])
+        if "owner" not in {c["name"] for c in sa.inspect(engine).get_columns(_TABLE)}:  # a table made before owners
+            with engine.begin() as conn:
+                conn.execute(sa.text(f"ALTER TABLE {_TABLE} ADD COLUMN owner TEXT"))
     finally:
         engine.dispose()
 
@@ -331,6 +419,7 @@ def _row_to_stored(row: Any) -> StoredWorkflow:
         digest=digest,
         created_at=row.created_at,
         updated_at=row.updated_at,
+        owner=row.owner,
     )
 
 
@@ -341,6 +430,7 @@ class WorkflowStore:
         import sqlalchemy as sa
 
         self._table, _ = _ddl()
+        self._has_owner: bool | None = None
         url = dbos_app.system_database_url(dsn)
         if connect_timeout is not None and not url.startswith("sqlite"):
             self._engine = sa.create_engine(
@@ -360,13 +450,21 @@ class WorkflowStore:
     def __exit__(self, *exc: object) -> None:
         self.close()
 
-    def _get_row(self, conn: Any, workflow_id: str) -> Any:
+    def _select(self, conn: Any) -> Any:
+        """Every column, with `owner` read as null from a table made before owners: readers do not migrate."""
         import sqlalchemy as sa
 
-        return conn.execute(sa.select(self._table).where(self._table.c.id == workflow_id)).first()
+        if self._has_owner is None and sa.inspect(conn).has_table(_TABLE):
+            self._has_owner = "owner" in {c["name"] for c in sa.inspect(conn).get_columns(_TABLE)}
+        if self._has_owner is False:
+            return sa.select(*[c for c in self._table.c if c.name != "owner"], sa.null().label("owner"))
+        return sa.select(self._table)
 
-    def save(self, workflow_id: str, spec: StoredWorkflowSpec) -> StoredWorkflow:
-        """Create or replace *workflow_id*'s definition.
+    def _get_row(self, conn: Any, workflow_id: str) -> Any:
+        return conn.execute(self._select(conn).where(self._table.c.id == workflow_id)).first()
+
+    def save(self, workflow_id: str, spec: StoredWorkflowSpec, *, owner: str | None = None) -> StoredWorkflow:
+        """Create or replace *workflow_id*'s definition, stored by *owner* (`None`: admin).
 
         Raises `ValueError` if *workflow_id* is unsafe or the spec fails `check_spec`
         (`pydantic.ValidationError` for a bad config overlay).
@@ -376,16 +474,18 @@ class WorkflowStore:
         if not is_safe_workflow_id(workflow_id):
             raise ValueError(f"unsafe workflow id: {workflow_id!r}")
         check_spec(spec)
+        if spec.inbound:
+            check_shared_secrets(workflow_id, spec, self.list())
         try:
-            self._write(workflow_id, spec)
+            self._write(workflow_id, spec, owner)
         except sqlalchemy.exc.IntegrityError:
             # A concurrent save created the row first; the retry replaces it.
-            self._write(workflow_id, spec)
+            self._write(workflow_id, spec, owner)
         stored = self.get(workflow_id)
         assert stored is not None  # just written and committed
         return stored
 
-    def _write(self, workflow_id: str, spec: StoredWorkflowSpec) -> None:
+    def _write(self, workflow_id: str, spec: StoredWorkflowSpec, owner: str | None) -> None:
         import sqlalchemy as sa
 
         now = datetime.now(UTC).isoformat()
@@ -397,6 +497,7 @@ class WorkflowStore:
                 "digest": workflow_digest(spec),
                 "created_at": created_at,
                 "updated_at": now,
+                "owner": owner,
             }
             if existing is not None:
                 conn.execute(
@@ -413,11 +514,8 @@ class WorkflowStore:
 
     def list(self) -> list[StoredWorkflow]:
         """Every workflow, oldest first."""
-        import sqlalchemy as sa
-
-        stmt = sa.select(self._table).order_by(self._table.c.created_at)
         with self._engine.connect() as conn:
-            rows = conn.execute(stmt).fetchall()
+            rows = conn.execute(self._select(conn).order_by(self._table.c.created_at)).fetchall()
         return [_row_to_stored(r) for r in rows]
 
     def delete(self, workflow_id: str) -> None:
@@ -429,6 +527,9 @@ class WorkflowStore:
 
 
 __all__ = [
+    "INBOUND_EVENTS",
+    "INSECURE_INBOUND_ENV",
+    "InboundHook",
     "ObjectStoreDestination",
     "PostgresDestination",
     "StoreCredentials",
@@ -440,9 +541,12 @@ __all__ = [
     "WorkflowStep",
     "WorkflowStore",
     "WorkflowTrigger",
+    "check_shared_secrets",
     "check_spec",
     "combine_config",
     "ensure_workflow_schema",
+    "inbound_problems",
+    "insecure_inbound",
     "is_safe_workflow_id",
     "validate_workflow_spec",
     "workflow_digest",

@@ -54,13 +54,22 @@ def _register_plan(p: argparse.ArgumentParser) -> None:
 def _register_dispatch(p: argparse.ArgumentParser) -> None:
     p.add_argument("workflow", type=Path, help="Workflow file (YAML) to dispatch")
     p.add_argument("--run-id", required=True, help="Run whose extraction the stages follow")
+    p.add_argument("--firing", default=None,
+                   help="A scheduled firing whose stages failed to dispatch: run the steps over its batches only")
+    _dispatch_options(p)
+
+
+def _register_rerun(p: argparse.ArgumentParser) -> None:
+    p.add_argument("workflow", type=Path, help="Workflow file (YAML) whose steps to run over its whole collection")
+    _dispatch_options(p)
+
+
+def _dispatch_options(p: argparse.ArgumentParser) -> None:
     p.add_argument("--store", default=None,
                    help="Object-store URI the run's shards are in (or $WOMBLEX_STORE_URI)")
     p.add_argument("--output-prefix", default=None, help="Default: runs/<run-id>")
     p.add_argument("--max-attempts", type=int, default=3)
     p.add_argument("--dry-run", action="store_true", help="Run every check, write no queue row")
-    p.add_argument("--firing", default=None,
-                   help="A scheduled firing whose stages failed to dispatch: run the steps over its batches only")
     p.add_argument("--dsn", default=None,
                    help="DBOS system database holding the queue "
                         "(or $WOMBLEX_DB_DSN / $DATABASE_URL). Default: the local SQLite file.")
@@ -78,9 +87,12 @@ def _register_schedule(p: argparse.ArgumentParser) -> None:
                         "workflow's own input store (input_binding.store).")
     p.add_argument("--presets-dir", type=Path, default=None,
                    help="Directory of operator-saved presets (or $WOMBLEX_UI_PRESETS_DIR).")
+    p.add_argument("--owner", default=None,
+                   help="Store the copy on behalf of this API client_id, so its firings run under that owner and "
+                        "the client sees the collection. Default: none (admin); storing again without it clears it.")
     mode = p.add_mutually_exclusive_group()
     mode.add_argument("--remove", action="store_true",
-                      help="Unschedule every trigger of the workflow and delete its stored copy")
+                      help="Unschedule every trigger of the workflow; its stored copy stays (`remove-workflow` deletes it)")
     mode.add_argument("--status", action="store_true", help="List its schedules; change nothing")
 
 
@@ -272,6 +284,19 @@ def cmd_dispatch_workflow(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_rerun_collection(args: argparse.Namespace) -> int:
+    """Run a workflow file's current steps over its whole collection: `dispatch-workflow` outside a firing.
+
+    The run is the workflow's collection (else its name). A unit whose version, stage config and
+    inputs are unchanged since it was published is skipped; an in-place stage, `graph-refresh` and
+    an output with no receipt run again over every batch.
+    """
+    if (stored := _load_workflow(args)) is None:
+        return 1
+    args.run_id = stored.run_id
+    return cmd_dispatch_workflow(args)
+
+
 def _check_firing(args: argparse.Namespace, stored, dsn: str | None) -> bool:  # type: ignore[no-untyped-def]
     """Run the checks a firing would make, so a workflow it would refuse is not scheduled."""
     from womblex.cloud.workflow_dispatch import check_firing
@@ -284,13 +309,25 @@ def _check_firing(args: argparse.Namespace, stored, dsn: str | None) -> bool:  #
         return False
     try:
         check_firing(
-            stored, run_id=stored.id,
+            stored, run_id=stored.run_id,
             resolve_preset=_preset_resolver(args),  # type: ignore[arg-type]
             store=RemoteStore.from_uri(store_uri), dsn=dsn,
         )
     except WorkflowRefusedError as e:
         logger.error("not scheduled, a firing would refuse it: [%s] %s", e.code.value, e)
         return False
+    return True
+
+
+def _check_inbound(stored) -> bool:  # type: ignore[no-untyped-def]
+    """Each hook's key is set here (as a webhook destination's is), or only warned under the insecure switch."""
+    from womblex.cloud.workflow_store import inbound_problems, insecure_inbound
+
+    for problem in inbound_problems(stored.spec):
+        if not insecure_inbound():
+            logger.error("not scheduled: %s", problem)
+            return False
+        logger.warning("%s (allowed by WOMBLEX_INSECURE_INBOUND)", problem)
     return True
 
 
@@ -314,8 +351,9 @@ def _workflow_name(arg: str) -> str | None:
 def cmd_schedule_workflow(args: argparse.Namespace) -> int:
     """Store a workflow's copy and make the board's schedules equal its triggers (workers fire them)."""
     from womblex.cloud import dbos_app
-    from womblex.cloud.workflow_schedules import list_schedules, schedule_workflow, unschedule_workflow
-    from womblex.cloud.workflow_store import WorkflowStore, ensure_workflow_schema
+    from womblex.cloud.inbound_store import ensure_inbound_schema
+    from womblex.cloud.workflow_schedules import keeps_copy, list_schedules, remove_schedules, schedule_workflow
+    from womblex.cloud.workflow_store import WorkflowStore, ensure_workflow_schema, is_safe_workflow_id
 
     dsn = args.dsn or os.environ.get("WOMBLEX_DB_DSN") or os.environ.get("DATABASE_URL")
     # --status and --remove take a name too: a workflow's file may be gone while its schedules stay.
@@ -327,7 +365,12 @@ def cmd_schedule_workflow(args: argparse.Namespace) -> int:
         return 1
     else:
         name = stored.id
+    if (owner := getattr(args, "owner", None)) is not None and not is_safe_workflow_id(owner):
+        logger.error("--owner must be one safe token (an API client_id), got %r", owner)
+        return 1
     if stored is not None and stored.spec.triggers and not _check_firing(args, stored, dsn):
+        return 1
+    if stored is not None and stored.spec.inbound and not _check_inbound(stored):
         return 1
     if args.status and not dsn and not dbos_app.local_database_path().exists():
         return 0  # nothing scheduled, and --status creates no database to say so
@@ -342,12 +385,84 @@ def cmd_schedule_workflow(args: argparse.Namespace) -> int:
     client = dbos_app.open_client(dsn)
     with WorkflowStore(dsn) as wf_store:
         if args.remove:
-            print(f"unscheduled {unschedule_workflow(client, wf_store, name)} trigger(s) of {name}")
+            print(f"unscheduled {remove_schedules(client, name)} trigger(s) of {name}")
             return 0
         assert stored is not None  # neither --status nor --remove
-        names = schedule_workflow(client, wf_store, stored)
+        if stored.spec.inbound:
+            ensure_inbound_schema(dsn)
+        try:
+            names = schedule_workflow(client, wf_store, stored, owner=getattr(args, "owner", None))
+        except ValueError as e:  # a hook secret another stored workflow names; nothing was stored
+            logger.error("not stored: %s", e)
+            return 1
+    kept = "its copy is stored" if keeps_copy(stored.spec) else "nothing stored"
     print(f"{stored.id} ({stored.digest}): {len(names)} trigger(s) scheduled"
-          + (f" ({', '.join(names)}); its copy is stored for the firings" if names else "; nothing stored"))
+          + (f" ({', '.join(names)}); its copy is stored for the firings" if names else f"; {kept}"))
+    return 0
+
+
+def _register_collection_commands(p: argparse.ArgumentParser) -> None:
+    p.add_argument("workflow", help="The workflow's file or its name")
+    p.add_argument("--dsn", default=None,
+                   help="DBOS system database (or $WOMBLEX_DB_DSN / $DATABASE_URL). Default: the local SQLite file.")
+    p.add_argument("--store", default=None,
+                   help="Object-store URI the firing writes to (or $WOMBLEX_STORE_URI)")
+    p.add_argument("--presets-dir", type=Path, default=None,
+                   help="Directory of operator-saved presets (or $WOMBLEX_UI_PRESETS_DIR).")
+
+
+def cmd_add_to_collection(args: argparse.Namespace) -> int:
+    """Fire a stored workflow once, now: add its input prefix's new documents to its collection.
+
+    The stored copy is what fires (`schedule-workflow` stores it), checked as a schedule's firing
+    is before any row; a workflow not stored, or one a firing would refuse, queues nothing.
+    """
+    import sqlalchemy.exc
+
+    from womblex.cloud import dbos_app
+    from womblex.cloud.jobs import schema_missing
+    from womblex.cloud.workflow_schedules import add_to_collection
+    from womblex.cloud.workflow_store import WorkflowStore
+
+    dsn = args.dsn or os.environ.get("WOMBLEX_DB_DSN") or os.environ.get("DATABASE_URL")
+    if (name := _workflow_name(args.workflow)) is None:
+        return 1
+    if not dbos_app.local_database_path().exists() and not dsn:
+        logger.error("workflow %s is not stored: run `womblex schedule-workflow` on its file first", name)
+        return 1
+    try:
+        with WorkflowStore(dsn) as wf_store:
+            stored = wf_store.get(name)
+    except sqlalchemy.exc.DBAPIError as e:
+        if not schema_missing(e):
+            raise
+        stored = None  # a database no `schedule-workflow` has written to holds no workflow
+    if stored is None:
+        logger.error("workflow %s is not stored: run `womblex schedule-workflow` on its file first", name)
+        return 1
+    if Path(args.workflow).is_file() and (loaded := _load_workflow(args)) and loaded.digest != stored.digest:
+        logger.warning("%s differs from the stored copy of %s; the firing uses the stored copy "
+                       "(`womblex schedule-workflow` stores the file's)", args.workflow, name)
+    if not _check_firing(args, stored, dsn):
+        return 1
+    print(add_to_collection(dbos_app.open_client(dsn), stored))
+    return 0
+
+
+def cmd_remove_workflow(args: argparse.Namespace) -> int:
+    """Remove a workflow's schedules and its stored copy. The run it fed, and its shards, are untouched."""
+    from womblex.cloud import dbos_app
+    from womblex.cloud.workflow_schedules import unschedule_workflow
+    from womblex.cloud.workflow_store import WorkflowStore, ensure_workflow_schema
+
+    dsn = args.dsn or os.environ.get("WOMBLEX_DB_DSN") or os.environ.get("DATABASE_URL")
+    if (name := _workflow_name(args.workflow)) is None:
+        return 1
+    dbos_app.ensure_schema(dsn)
+    ensure_workflow_schema(dsn)
+    with WorkflowStore(dsn) as wf_store:
+        print(f"removed {name}: {unschedule_workflow(dbos_app.open_client(dsn), wf_store, name)} schedule(s) "
+              "and its stored copy")
     return 0
 
 
@@ -414,8 +529,14 @@ COMMANDS = [
             _register_run_workflow, cmd_run_workflow),
     Command("dispatch-workflow", "Queue a workflow file's steps for the fleet (object-store run)",
             _register_dispatch, cmd_dispatch_workflow),
+    Command("rerun-collection", "Run a workflow file's steps over its whole collection (receipts skip unchanged units)",
+            _register_rerun, cmd_rerun_collection),
     Command("schedule-workflow", "Store a workflow file's copy and schedule its cron triggers (workers fire them)",
             _register_schedule, cmd_schedule_workflow),
+    Command("add-to-collection", "Fire a stored workflow once now, adding its input prefix's new documents to its collection",
+            _register_collection_commands, cmd_add_to_collection),
+    Command("remove-workflow", "Remove a workflow's schedules and stored copy (its run and shards stay)",
+            _register_collection_commands, cmd_remove_workflow),
     Command("plan", "Say what a workflow file would run and spend, calling no paid API",
             _register_plan, cmd_plan),
     Command("validate", "Check a workflow file would run, without running it",

@@ -18,6 +18,7 @@ row per embedded chunk with its embedding (`cloud/destination_postgres.py`).
 from __future__ import annotations
 
 import io
+import json
 import logging
 import os
 import time
@@ -26,7 +27,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from womblex.store.delivery_record import delivery_key, dump_delivery
+from womblex.store.delivery_record import delivery_key, dump_delivery, earlier_key, next_record, seq_of
 from womblex.store.remote import RemoteStore
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -137,7 +138,7 @@ def deliver(
                 continue
             outcome.status, outcome.error = "delivered", None
             break
-        outcome.delivered_at = datetime.now(UTC).isoformat(timespec="seconds")
+        outcome.delivered_at = datetime.now(UTC).isoformat()  # microseconds: only a replay matches it
         if after_failed:
             logger.warning("delivered to %s after failed step(s) %s", d.name, ", ".join(after_failed))
         logger.info("delivery to %s (%s): %s after %d attempt(s)", d.name, where, outcome.status, outcome.attempts)
@@ -164,10 +165,53 @@ def _deliver_one(
     outcome.documents, outcome.sources_by_status = bundle.documents, bundle.sources_by_status
 
 
+def _manifest_digests(run: RemoteStore) -> dict[str, str] | None:
+    """Each document's `content_digest` in the run's manifest, or `None` where it cannot be read."""
+    import tempfile
+
+    import pyarrow.parquet as pq
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="womblex-delivery-") as tmp:
+            local = run.download_file("manifest.parquet", Path(tmp) / "manifest.parquet")
+            table = pq.read_table(str(local), columns=["source_hash", "content_digest"])
+    except Exception as e:  # a record without digests is still a record; the delivery is already done
+        logger.warning("delivery record: no document digests (manifest.parquet unreadable: %s)", e)
+        return None
+    return {h: d or "" for h, d in zip(table["source_hash"].to_pylist(), table["content_digest"].to_pylist(), strict=True)}
+
+
+def _same_delivery(previous: dict[str, Any], outcome: dict[str, Any]) -> bool:
+    """Whether *previous* records *outcome* itself. A webhook's record is built when it is written,
+    so its time moves on a replay; its events (each id and result) say which delivery it was."""
+    ignore = {"delivered_at"} if outcome.get("kind") == "webhook" else set()
+    return all(previous.get(k) == v for k, v in outcome.items() if k not in ignore)
+
+
 def record_deliveries(run: RemoteStore, outcomes: list[DeliveryOutcome]) -> None:
-    """Write each outcome as its destination's delivery record in the *run*'s directory."""
+    """Write each outcome as its destination's latest delivery record in the *run*'s directory.
+
+    A redelivery first keeps the record it replaces under its own sequence number
+    (`delivery_record.earlier_key`), unchanged, then writes the next. The same outcome recorded
+    again (a recovered coordinator step) writes nothing, so it is not counted as a redelivery.
+    """
+    digests = _manifest_digests(run)
     for o in outcomes:
-        run.write_stream(io.BytesIO(dump_delivery(asdict(o)).encode()), delivery_key(o.destination))
+        key, previous, outcome = delivery_key(o.destination), None, asdict(o)
+        if run.exists(key):
+            text = run.read_text(key)
+            try:
+                previous = json.loads(text)
+            except json.JSONDecodeError:
+                previous = None
+            if isinstance(previous, dict) and _same_delivery(previous, outcome):
+                continue  # a recovered step recording again: the delivery it records is already the latest
+            if isinstance(previous, dict):
+                run.write_stream(io.BytesIO(text.encode()), earlier_key(o.destination, seq_of(previous)))
+            else:
+                previous = None
+        record = next_record(outcome, previous, digests)
+        run.write_stream(io.BytesIO(dump_delivery(record).encode()), key)
 
 
 def dispatched_workflow(workflow: dict[str, Any]) -> StoredWorkflow:

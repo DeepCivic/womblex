@@ -364,11 +364,13 @@ def test_content_digest_covers_sheet_cells_and_meta():
     assert content_digest([t1]) != content_digest([t2])
 
 
-def test_manifest_without_content_digest_reads_back_null(tmp_path):
+def test_manifest_without_content_digest_or_version_columns_reads_back_null(tmp_path):
     shard = tmp_path / "batch-0001._manifest.parquet"
-    legacy = pa.schema([f for f in MANIFEST_SCHEMA if f.name != "content_digest"])
+    later = {"content_digest", "replaces", "replaced_by", "is_current"}
+    legacy = pa.schema([f for f in MANIFEST_SCHEMA if f.name not in later])
     row = {f.name: ("x" if pa.types.is_string(f.type) else 0) for f in legacy}
     pq.write_table(pa.Table.from_pylist([row], schema=legacy), str(shard))
     from womblex.store.output import _read_shard
 
-    assert _read_shard(shard, "manifest").to_pylist()[0]["content_digest"] is None
+    read = _read_shard(shard, "manifest").to_pylist()[0]
+    assert {name: read[name] for name in later} == dict.fromkeys(later)

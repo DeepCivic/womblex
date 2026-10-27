@@ -64,7 +64,7 @@ class RefusalCode(str, Enum):
     """A step's preflight, Isaacus or model check failed; `steps` names each."""
 
     STAGE_NOT_DISPATCHABLE = "stage_not_dispatchable"
-    """The fleet runs only `WORKFLOW_FLEET_STAGES`; `steps` names the others (`layout`, `quality`)."""
+    """The fleet runs only `WORKFLOW_FLEET_STAGES`, and a firing no run-scoped stage (`quality`); `steps` names them."""
 
     ORDER_NOT_PIPELINE = "order_not_pipeline"
     """The fleet runs stages in pipeline order, so a list in another order is not dispatched."""
@@ -74,6 +74,9 @@ class RefusalCode(str, Enum):
 
     NO_WORKER = "no_worker"
     """No live worker serves a step's (or a firing's extraction's) work under the workflow's config."""
+
+    RUN_OWNED = "run_owned"
+    """The run a firing appends to is owned by another owner than the stored workflow's."""
 
     BATCHES_CANCELLED = "batches_cancelled"
     """A replayed firing's own batches were cancelled; re-queueing would attach to them and never run."""

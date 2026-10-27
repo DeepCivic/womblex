@@ -31,7 +31,7 @@ womblex/
 │   │   ├── profile.py      # profile subcommand
 │   │   ├── demo.py         # seed-demo subcommand (publish the vendored demo run)
 │   │   ├── verify.py       # verify-shards, verify-evidence, resolve-source subcommands
-│   │   └── workflow.py     # run-workflow / validate / plan / dispatch-workflow / schedule-workflow subcommands, each over a workflow file
+│   │   └── workflow.py     # run-workflow / validate / plan / dispatch-workflow / schedule-workflow / add-to-collection / rerun-collection / remove-workflow subcommands, each over a workflow file
 │   ├── config/             # Pydantic config models (__init__: YAML loader + WomblexConfig; process.py: process-stage models)
 │   ├── pipeline_order.py   # PIPELINE_ORDER — what runs when; enabled_downstream_stages(config)
 │   ├── config_tools.py     # A composed config: JSON Schema without paths, validation and YAML under a deployment's paths
@@ -154,6 +154,7 @@ womblex/
 │   │   ├── run_stamp.py     # RunStamp — run id / version / commit / config digest / stage / preset (config name) / loaded models / slot models (distribution + version), as womblex.* footer keys; workflow_context → womblex.workflow_digest on a workflow step's sidecars and a scheduled firing's extraction files
 │   │   ├── content_digest.py # content_digest(elements): the manifest's determinism handle (kind / order / text / cells / fields / sheet cells / meta)
 │   │   ├── contract.py      # womblex.contract_version + womblex.sensitivity (raw / masked / none) footer keys, on every pipeline Parquet
+│   │   ├── document_versions.py # replaces / replaced_by / is_current on the run manifest — versions chained per source_relpath
 │   │   ├── run_manifest.py  # Consolidate per-batch manifests into a run-root manifest.parquet + the run record in its footer
 │   │   ├── run_reads.py     # Runs as the store or output root holds them: listing, stage presence, shard audit
 │   │   ├── document_detail.py # One document's chunks with its entities, PII spans, money and quality rows
@@ -172,6 +173,7 @@ womblex/
 │   │   ├── destination_postgres.py # A workflow's Postgres destination — one row per embedded chunk, masked by default, upserted
 │   │   ├── webhook.py          # A workflow's webhook destination — six run events, signed, resent under one id, recorded
 │   │   ├── delivery.py         # Deliver a finished run to its workflow's destinations — checked before launch, bounded retries, recorded on the run
+│   │   ├── run_owner.py        # run_owners() / owned_rows() — a run is the owner its first row names
 │   │   ├── run_status.py       # run_sentence() — a run's status as one sentence from exact per-stage counts
 │   │   ├── finalize.py         # finalize_run() — a run's manifest.parquet in its store; `womblex finalize` and the coordinator's last step
 │   │   ├── retry.py            # retry_stage() — fork a failed stage from its first failed unit, refusing before the fork
@@ -191,6 +193,9 @@ womblex/
 │   │   ├── workflow_store.py   # Workflow object (preset ref, input binding, steps, triggers) — schema, validation, the scheduled copies' table
 │   │   ├── workflow_order.py   # Up-front step-order check — inputs on disk or produced earlier, stable refusal codes
 │   │   ├── workflow_file.py    # A workflow file — the master copy every workflow command reads (YAML, unknown keys refused)
+│   │   ├── collections.py      # Collections for the API — stored workflows that feed one, add and rerun through them
+│   │   ├── inbound.py          # An inbound webhook event — authenticate, record once, act
+│   │   ├── inbound_store.py    # womblex_inbound_events — insert-first dedupe of inbound webhook events
 │   │   ├── workflow_schedules.py # Standing triggers — a workflow's cron triggers as DBOS schedules (sync/list/remove)
 │   │   ├── workflow_dispatch.py # `dispatch-workflow` — a workflow file to the fleet; refuse before any row
 │   │   ├── workflow_plan.py    # `womblex plan` — steps to run or skip and exact enrich/embed token counts, offline
@@ -200,6 +205,8 @@ womblex/
 │   │   ├── app.py              # create_api_app() — `/v1` health/ready, run submit, list/detail, manifest, files, document text, metrics; owner-scoped
 │   │   ├── routes_config.py    # /v1/stages and /v1/config/schema, validate, yaml
 │   │   ├── routes_queue.py     # /v1/queue — the queue in one read, owner-scoped
+│   │   ├── routes_inbound.py   # POST /v1/hooks/{workflow}/{hook} — inbound webhooks, HMAC-authenticated
+│   │   ├── routes_collections.py # /v1/collections — list, detail, add and rerun through a stored workflow, owner-scoped
 │   │   ├── routes_resources.py # /v1/resources and its live checks (admin)
 │   │   ├── routes_runs.py      # /v1/store/runs (admin), per-run stage presence, shard audit, document detail, logs, progress
 │   │   ├── routes_presets.py   # /v1/presets list, fetch (read), save, delete (admin)
