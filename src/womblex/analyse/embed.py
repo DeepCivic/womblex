@@ -30,7 +30,7 @@ from womblex.utils.model_registry import SLOT_EMBEDDING, record_use, register, r
 from womblex.utils.token_packer import TokenCounter
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from womblex.config import EmbeddingConfig
+    from womblex.config import EmbeddingConfig, WomblexConfig
 
 logger = logging.getLogger(__name__)
 
@@ -97,16 +97,59 @@ class EmbeddingLimits:
     token_counter: TokenCounter | None = None
 
 
+#: What an embedding is for. Each provider maps these to its own terms (Isaacus: the `retrieval/*`
+#: tasks), or to nothing where it has none, and says so in its `docs/models.md` entry.
+ROLES = ("document", "query")
+_ROLE_OF_TASK = {"retrieval/document": "document", "retrieval/query": "query"}
+#: `embedding.task` accepts these as aliases of the Isaacus values.
+TASK_ALIASES = {"document": "retrieval/document", "query": "retrieval/query"}
+
+
+def role_of(task: str | None) -> str | None:
+    """The role `embedding.task` asks for (`document` / `query`), or `None` for a task that is neither."""
+    return _ROLE_OF_TASK.get(TASK_ALIASES.get(task or "", task or ""))
+
+
 class EmbeddingProvider(Protocol):
     name: str
     limits: EmbeddingLimits
 
-    def embed(self, texts: list[str]) -> list[list[float]]:
-        """One vector per text, in input order."""
+    def embed(self, texts: list[str], role: str | None = None) -> list[list[float]]:
+        """One vector per text, in input order; *role* is `document`, `query` or `None` (a provider
+        with no such terms ignores it). A provider whose `embed` takes no `role` is called without."""
         ...
 
 
-register(SLOT_EMBEDDING, DEFAULT_MODEL, make_isaacus_embedding, traits={"isaacus": True},
+def embed_with_role(provider: EmbeddingProvider, texts: list[str], role: str | None) -> list[list[float]]:
+    """`provider.embed(texts)`, passing *role* only to a provider whose `embed` accepts it."""
+    import inspect
+
+    if role is not None and "role" in inspect.signature(provider.embed).parameters:
+        return provider.embed(texts, role=role)
+    return provider.embed(texts)
+
+
+def capability_problems(config: WomblexConfig) -> list[tuple[str, str, str, str]]:
+    """`(scope, slot, model, message)` for a setting the configured provider cannot honour.
+
+    A provider declares the `dimensions` trait when it can return vectors of a requested width;
+    `embedding.dimensions` on one that has not is refused before launch, not ignored.
+    """
+    model = config.embedding.model
+    if config.embedding.dimensions is None:
+        return []
+    try:
+        honours = bool(resolve(SLOT_EMBEDDING, model).traits.get("dimensions"))
+    except ValueError:
+        return []  # the model check reports the unknown name
+    if honours:
+        return []
+    message = (f"embedding model {model!r} cannot return vectors of a requested width; "
+               f"remove embedding.dimensions ({config.embedding.dimensions})")
+    return [("embed", SLOT_EMBEDDING, model, message)]
+
+
+register(SLOT_EMBEDDING, DEFAULT_MODEL, make_isaacus_embedding, traits={"isaacus": True, "dimensions": True},
          deployments=("isaacus-api", "isaacus-sagemaker"), vendor_model=DEFAULT_MODEL)
 
 

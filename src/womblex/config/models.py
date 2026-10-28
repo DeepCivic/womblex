@@ -183,8 +183,14 @@ class EmbeddingConfig(StrictModel):
     )
     task: str | None = Field(
         default="retrieval/document",
-        description="Embedding task: retrieval/document (index) | retrieval/query | null.",
+        description="Embedding task: retrieval/document (index) | retrieval/query | null. `document` and "
+                    "`query` are accepted as aliases of the first two. A provider maps the role to its own terms.",
     )
+
+    @field_validator("task")
+    @classmethod
+    def _task_alias(cls, v: str | None) -> str | None:
+        return {"document": "retrieval/document", "query": "retrieval/query"}.get(v or "", v)
     dimensions: int | None = Field(
         default=None, description="Optional output dimensionality (model default if null).",
     )

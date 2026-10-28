@@ -298,7 +298,7 @@ def check_registered(config: WomblexConfig) -> None:
             resolve(use.slot, use.name)
         except ValueError as exc:
             problems.append(str(exc))
-    problems += [message for _scope, _slot, _model, message in choice_problems(config)]
+    problems += [message for _scope, _slot, _model, message in _static_problems(config)]
     if problems:
         raise ValueError("; ".join(problems))
 
@@ -457,6 +457,13 @@ def reset_model_check() -> None:
     _OFF_REQUESTED = False
 
 
+def _static_problems(config: WomblexConfig) -> list[tuple[str, str, str, str]]:
+    """Settings the registry cannot honour, read from registrations alone: a `deployment:` and an unsupported `dimensions`."""
+    from womblex.analyse.embed import capability_problems
+
+    return [*choice_problems(config), *capability_problems(config)]
+
+
 def _refused(use: ModelUse, refused: list[SlotCheck]) -> bool:
     """Whether every scope that uses *use* has already refused its model's `deployment` setting."""
     return set(use.scopes) <= {s for c in refused if c.name == use.name for s in c.scopes}
@@ -494,7 +501,7 @@ def check_models(
     wanted = enabled_scopes(config) if scopes is None else set(scopes)
     refused = [
         SlotCheck(slot=slot, name=model, scopes=(scope,), level=chosen, ok=False, reason=message)
-        for scope, slot, model, message in choice_problems(config) if scope in wanted
+        for scope, slot, model, message in _static_problems(config) if scope in wanted
     ]
     with suppress_use_recording(), suppress_recording():
         checks = [

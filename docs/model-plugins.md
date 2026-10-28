@@ -92,7 +92,12 @@ lines and the results offset-merged), `token_counter` (`count_batch(texts) -> li
 An embedding provider has a `name`, a `limits` (`EmbeddingLimits`:
 `max_texts_per_request`, `needs_network`, and an optional `token_counter`
 `plan` counts its tokens with) and `embed(texts) -> list[list[float]]`,
-one vector per text in order.
+one vector per text in order. `embed` may take a `role` (`document` or `query`, or `None`), which the stage
+passes from `embedding.task` (`retrieval/document` and `document` are the first role, `retrieval/query` and `query`
+the second); a provider maps it to its own terms or ignores it, and its `docs/models.md` entry says which. A provider
+whose `embed` takes no `role` is called without one. A provider that can return vectors of a requested width sets the
+`dimensions` trait on its factory (`womblex_traits = {"dimensions": True}`); `embedding.dimensions` on one that has not is
+refused before launch, as `POST /v1/runs`, `dispatch-workflow`, `run` and a worker all refuse.
 
 Womblex keeps everything around the call: request packing, long-document
 splitting, the table pass, the sidecars, the evidence reference and the

@@ -34,13 +34,14 @@ class IsaacusEmbedding:
     limits: EmbeddingLimits = field(default_factory=_kanon_limits)
     name: str = "isaacus"
 
-    def embed(self, texts: list[str]) -> list[list[float]]:
-        from womblex.analyse.embed import embed_texts
+    def embed(self, texts: list[str], role: str | None = None) -> list[list[float]]:
+        """Embed *texts*; a `document` or `query` *role* is Isaacus's `retrieval/document` or `retrieval/query` task."""
+        from womblex.analyse.embed import TASK_ALIASES, embed_texts
 
         return embed_texts(
             texts, self.client,
             model=self.config.model,
-            task=self.config.task,
+            task=TASK_ALIASES.get(role, self.config.task) if role else self.config.task,
             dimensions=self.config.dimensions,
         )
 
