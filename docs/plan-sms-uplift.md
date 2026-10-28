@@ -32,7 +32,7 @@ removed from this plan in the same merge.
 **Merge rules (CLAUDE.md):**
 - Each merge is ≤500 changed lines and passes ruff, mypy and pytest on its own.
 - A file near the 750-line cap gets no new responsibility; new code goes in a new module beside it:
-  - `store/output.py`: 707 lines
+  - `store/output.py`: 684 lines
   - `cloud/jobs.py`: 673
   - `store/run_manifest.py`: 635
   - `store/shard_audit.py`: 709
@@ -41,8 +41,6 @@ removed from this plan in the same merge.
 - A merge that delivers a piece of this plan writes its requirement as built into `docs/functional_requirements.md` and removes that piece from this plan.
 
 ## Phase D — Withheld, omitted and failed documents
-
-**D0. Make room.** Move manifest row building out of `store/output.py` (707 lines) into a new `store/manifest_rows.py`. This merge is mechanical only.
 
 **D1. Failed documents get manifest rows.**
 - `operations/persist.py` and `cli/pipeline.py` pass errored results through, so the existing `status: error` branch is finally reached.
