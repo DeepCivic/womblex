@@ -81,7 +81,7 @@ def embed_shards(
                         "source_hash": r["source_hash"],
                         "chunk_index": r["chunk_index"],
                         "content_type": r["content_type"],
-                        "model": embedding_config.model,
+                        "model": getattr(provider, "vendor_model", embedding_config.model),
                         "task": embedding_config.task or "",
                         "dim": len(vec),
                         "vector": list(vec),

@@ -132,8 +132,11 @@ _PREFERRED_SOURCES = (".elements.parquet", "._manifest.parquet")
 def _drop_unset_deployments(payload: dict) -> None:
     """Leave the ``deployment`` settings out of the digest while they are unset.
 
-    A config that never names a deployment keeps the digest it had before the setting existed.
+    A config that never names a deployment keeps the digest it had before the setting existed,
+    and so does one that gives the embedding provider no options.
     """
+    if payload.get("embedding", {}).get("provider_options") == {}:
+        del payload["embedding"]["provider_options"]
     for section, key in (("extraction", "ocr"), ("enrichment", None), ("embedding", None), ("chunking", None)):
         node = payload.get(section, {})
         node = node.get(key, {}) if key else node

@@ -400,7 +400,7 @@ These requirements described the admin console (`womblex ui`). The console now l
 
 ## 24. Swappable Models Without a Schema Change
 
-**Paid:** The OCR, enrichment and embedding slots can hold paid models; swapping a slot can add or remove a paid call.
+**Paid:** The OCR, enrichment and embedding slots can hold paid models; swapping a slot can add or remove a paid call. The built-in `openai-compatible` embedding provider is billed per request when pointed at a hosted vendor, and nothing when `OPENAI_COMPAT_BILLED=false` marks a self-hosted server.
 
 **As** a user with my own models, local or API-backed,
 **I want** to swap the model behind a pipeline slot without forking Womblex,

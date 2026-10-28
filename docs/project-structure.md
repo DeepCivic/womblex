@@ -222,6 +222,9 @@ womblex/
 │   │   ├── ollama/
 │   │   │   ├── ocr.py           # Local Ollama (OpenAI-compatible) OCR
 │   │   │   └── deployment.py    # The `ollama` deployment
+│   │   ├── openai_compat/
+│   │   │   ├── deployment.py    # The `openai-compatible` deployment (base URL, optional key, billed by its own setting)
+│   │   │   └── embedding.py     # OpenAI-compatible /v1/embeddings provider over httpx
 │   │   ├── _images.py           # Page-image PNG encoding shared by the OCR readers
 │   │   └── isaacus/
 │   │       ├── client.py        # Build the Isaacus SDK client (hosted API or private SageMaker)

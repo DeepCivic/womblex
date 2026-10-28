@@ -197,3 +197,8 @@ class EmbeddingConfig(StrictModel):
     max_retries: int | None = Field(
         default=None, ge=0, description="The Isaacus SDK's own retry count; null keeps the SDK default.",
     )
+    provider_options: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Passed to the embedding provider unchanged. For `openai-compatible`: `model` (the server's "
+                    "model id, required) and `max_texts_per_request` (default 64).",
+    )

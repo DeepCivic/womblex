@@ -25,6 +25,7 @@ from womblex.providers.isaacus.embedding import (  # noqa: F401 -- re-exported f
     IsaacusEmbedding,
     make_isaacus_embedding,
 )
+from womblex.providers.openai_compat.embedding import make_openai_compat_embedding
 from womblex.utils.deployment_choice import deployment_of
 from womblex.utils.model_registry import SLOT_EMBEDDING, record_use, register, resolve
 from womblex.utils.token_packer import TokenCounter
@@ -133,24 +134,32 @@ def capability_problems(config: WomblexConfig) -> list[tuple[str, str, str, str]
     """`(scope, slot, model, message)` for a setting the configured provider cannot honour.
 
     A provider declares the `dimensions` trait when it can return vectors of a requested width;
-    `embedding.dimensions` on one that has not is refused before launch, not ignored.
+    `embedding.dimensions` on one that has not is refused before launch, not ignored. A
+    `required_options` trait names the `embedding.provider_options` it cannot run without.
     """
     model = config.embedding.model
-    if config.embedding.dimensions is None:
-        return []
     try:
-        honours = bool(resolve(SLOT_EMBEDDING, model).traits.get("dimensions"))
+        traits = resolve(SLOT_EMBEDDING, model).traits
     except ValueError:
         return []  # the model check reports the unknown name
-    if honours:
-        return []
-    message = (f"embedding model {model!r} cannot return vectors of a requested width; "
-               f"remove embedding.dimensions ({config.embedding.dimensions})")
-    return [("embed", SLOT_EMBEDDING, model, message)]
+    out = []
+    if config.embedding.dimensions is not None and not traits.get("dimensions"):
+        width = (f"embedding model {model!r} cannot return vectors of a requested width; "
+                 f"remove embedding.dimensions ({config.embedding.dimensions})")
+        out.append(("embed", SLOT_EMBEDDING, model, width))
+    missing = [o for o in traits.get("required_options", ()) if not config.embedding.provider_options.get(o)]
+    if missing:
+        out.append(("embed", SLOT_EMBEDDING, model,
+                    f"embedding model {model!r} needs embedding.provider_options: {', '.join(missing)}"))
+    return out
 
 
 register(SLOT_EMBEDDING, DEFAULT_MODEL, make_isaacus_embedding, traits={"isaacus": True, "dimensions": True},
          deployments=("isaacus-api", "isaacus-sagemaker"), vendor_model=DEFAULT_MODEL)
+
+
+register(SLOT_EMBEDDING, "openai-compatible", make_openai_compat_embedding, aliases=("openai",),
+         traits={"dimensions": True, "required_options": ("model",)}, deployments=("openai-compatible",))
 
 
 def calls_isaacus(model: str) -> bool:
