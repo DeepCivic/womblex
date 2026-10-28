@@ -107,3 +107,21 @@ def test_an_unknown_deployment_name_on_a_model_fails_its_check_naming_the_known_
     assert "unknown deployment: 'acme'" in bad.reason
     with pytest.raises(model_check.ModelCheckError):
         result.raise_for_failures((model_check.SCOPE_ENRICH,))
+
+
+def test_a_stage_on_a_non_isaacus_deployment_is_gated_on_that_deployment_not_on_isaacus(tmp_path, monkeypatch) -> None:
+    from womblex.cloud.stage_runner import StagePreconditionError, prepare_stage_context
+    from womblex.utils import availability
+
+    monkeypatch.setattr(dr, "_deployments", dict(dr._deployments))
+    dr.register(Deployment(name="acme", check=lambda m: None, needs_network=True, billed=True,
+                           env=(("ACME_KEY",),)))
+    monkeypatch.setattr(availability, "isaacus_available", lambda: False)
+    monkeypatch.delenv("ACME_KEY", raising=False)
+    config = _config(tmp_path, REMOTE)
+    with pytest.raises(StagePreconditionError, match="needs deployment 'acme' \\(ACME_KEY unset\\)"):
+        prepare_stage_context(STAGE_CONTRACTS["enrich"], config)
+    monkeypatch.setenv("ACME_KEY", "set")
+    with pytest.raises(StagePreconditionError) as exc:  # past the gate: B3 still builds the Isaacus client
+        prepare_stage_context(STAGE_CONTRACTS["enrich"], config)
+    assert "needs" not in str(exc.value)
