@@ -219,7 +219,7 @@ Terms the requirements use, as the code defines them.
 - Solid redaction regions are detected per page, whether drawn as native filled shapes or present only in the page image.
 - Multiple modes are supported: `flag` (annotation only, no text change), `blackout` (prepend a `<REDACTED>` marker to affected page text), and `delete` (clear affected page text). The `<REDACTED>` marker is a content marker, distinct from the human-readable warning strings described below.
 - A redaction report is attached to the extraction result, and per-page warning strings (e.g. `page N: K redacted region(s) detected`) are appended to the extraction's warnings.
-- Detected redactions are written as an independent Parquet sidecar (`*.redactions.parquet`). The regions themselves are kept in `*.redaction_regions.parquet` (`source_hash`, `page`, `bbox` in PDF points converted from the detection dpi, and `area`), written by a batch run with redaction enabled and by the standalone shard CLI alike; it is empty when detection found none, and absent when detection did not run.
+- Detected redactions are written as an independent Parquet sidecar (`*.redactions.parquet`). The regions themselves are kept in `*.redaction_regions.parquet` (`source_hash`, `page`, `bbox_pt` in PDF points converted from the detection dpi, and `area`), written by a batch run with redaction enabled and by the standalone shard CLI alike; it is empty when detection found none, and absent when detection did not run.
 - Redaction detection runs at a single fixed point, immediately after extraction.
 
 **TO-DO:**

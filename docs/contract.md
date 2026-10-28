@@ -53,7 +53,7 @@ the single source). An unknown role reads as `raw`.
 | `money_columns` | `source_hash` plus `column_id` (`parent_elem_order` / `sheet`) | none |
 | `layout_regions` | `(source_hash, page)`; boxes are normalised like element `bbox` ([layout.md](layout.md)) | none |
 | `redactions`, `source_index` | `source_hash` | none |
-| `redaction_regions` | `(source_hash, page)`; `bbox` is in PDF points, not normalised ([extraction.md](extraction.md)) | none |
+| `redaction_regions` | `(source_hash, page)`; `bbox_pt` is in PDF points, not normalised ([extraction.md](extraction.md)) | none |
 | `omitted` (run root) | `source_relpath` and `reason`; the files under the ingest location a run passes over. Not keyed by `source_hash`: nothing was read | none |
 | `provenance` | `source_hash` | raw |
 

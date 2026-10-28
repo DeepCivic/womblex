@@ -41,7 +41,7 @@ def test_pixels_at_the_detection_dpi_become_points_on_the_page():
     (row,) = region_rows("h", report)
 
     assert row["page"] == 2 and row["source_hash"] == "h"
-    assert row["bbox"] == {"x": 72.0, "y": 144.0, "width": 144.0, "height": 36.0}
+    assert row["bbox_pt"] == {"x": 72.0, "y": 144.0, "width": 144.0, "height": 36.0}
     assert row["area"] == 144.0 * 36.0
 
 
@@ -58,7 +58,7 @@ def test_the_batch_annotator_writes_each_region_with_its_page_and_box(tmp_path: 
     assert table.schema.equals(REDACTION_REGIONS_SCHEMA)
     (row,) = table.to_pylist()
     assert (row["source_hash"], row["page"]) == ("h1", 0)
-    assert row["bbox"] == pytest.approx({"x": 100, "y": 100, "width": 200, "height": 40}, abs=1.5)
+    assert row["bbox_pt"] == pytest.approx({"x": 100, "y": 100, "width": 200, "height": 40}, abs=1.5)
     assert row["area"] == pytest.approx(200 * 40, rel=0.05)
 
 
@@ -100,7 +100,7 @@ def test_a_batch_run_with_redaction_writes_regions_keyed_by_its_manifest(tmp_pat
     regions = read_redaction_regions(outcome.shard_path).to_pylist()
     assert regions, "the redacted notice has withheld regions"
     assert {r["source_hash"] for r in regions} == {rows["notice.pdf"]["source_hash"]}
-    assert all(r["bbox"]["width"] > 0 and r["bbox"]["height"] > 0 and r["page"] >= 0 for r in regions)
+    assert all(r["bbox_pt"]["width"] > 0 and r["bbox_pt"]["height"] > 0 and r["page"] >= 0 for r in regions)
 
 
 def test_a_batch_run_without_redaction_writes_no_regions_file(tmp_path: Path):

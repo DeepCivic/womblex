@@ -5,8 +5,8 @@ themselves, so a consumer can tell a withheld region from a gap. One file per ba
 ``*.elements.parquet`` on ``(source_hash, page)``. Written whenever redaction detection ran over the
 batch (empty when it found none), so a missing file means it did not run.
 
-``bbox`` is in PDF points (72 to the inch), top-left origin, converted from the pixels at the
-detection dpi, and ``area`` is its width times height in square points. Unlike ``elements.bbox`` it
+``bbox_pt`` is in PDF points (72 to the inch), top-left origin, converted from the pixels at the
+detection dpi, and ``area`` is its width times height in square points. Unlike ``elements.bbox`` (hence the name) it
 is not normalised: a withheld region is measured on the source page.
 """
 
@@ -27,7 +27,7 @@ REDACTION_REGIONS_SUFFIX = ".redaction_regions.parquet"
 REDACTION_REGIONS_SCHEMA = pa.schema([
     ("source_hash", pa.string()),
     ("page", pa.int32()),  # 0-based, as elements.page
-    ("bbox", _BBOX_TYPE),  # PDF points, top-left origin
+    ("bbox_pt", _BBOX_TYPE),  # PDF points, top-left origin
     ("area", pa.float32()),  # square points
 ])
 

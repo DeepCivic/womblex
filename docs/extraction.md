@@ -178,7 +178,7 @@ detection ran and found none; a missing file means it did not run. Joins to `ele
 |---|---|---|
 | `source_hash` | string | FK to the manifest |
 | `page` | int32 | 0-based, as `elements.page` |
-| `bbox` | struct&lt;x, y, width, height&gt; (float32) | **PDF points** (72 to the inch), top-left origin, converted from the pixels at the detection dpi. Unlike `elements.bbox`, not normalised |
+| `bbox_pt` | struct&lt;x, y, width, height&gt; (float32) | **PDF points** (72 to the inch), top-left origin, converted from the pixels at the detection dpi. Unlike `elements.bbox`, not normalised |
 | `area` | float32 | `width * height`, in square points |
 
 ### *.redactions.parquet (optional sidecar)

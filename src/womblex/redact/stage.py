@@ -65,7 +65,7 @@ def region_rows(source_hash: str, report: RedactionReport) -> list[dict]:
             x1, y1, x2, y2 = (v * to_points for v in r.bbox)
             rows.append({
                 "source_hash": source_hash, "page": page,
-                "bbox": {"x": x1, "y": y1, "width": x2 - x1, "height": y2 - y1},
+                "bbox_pt": {"x": x1, "y": y1, "width": x2 - x1, "height": y2 - y1},
                 "area": (x2 - x1) * (y2 - y1),
             })
     return rows
