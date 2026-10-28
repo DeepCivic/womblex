@@ -41,6 +41,7 @@ def write_batch_parquet(
     provenance: IngestProvenance | None = None,
     stamp: RunStamp | None = None,
     batch_num: int = 0,
+    redaction_regions: bool = False,
 ) -> Path | None:
     """Write the batch's results to Parquet, failed documents as ``status: error`` rows.
 
@@ -48,6 +49,8 @@ def write_batch_parquet(
     from; it reaches the manifest columns and every shard's footer. ``stamp``
     names the run that produced them, in the same footer. ``batch_num`` keys the
     placeholder hash of a source that could not be read (``store.manifest_rows``).
+    ``redaction_regions`` is true when redaction detection ran over the batch: the regions it
+    found are written beside the shard (``*.redaction_regions.parquet``, empty if there were none).
     """
     from womblex.store.output import write_results
 
@@ -56,7 +59,30 @@ def write_batch_parquet(
         logger.warning("No results to write to Parquet")
         return None
 
-    return write_results(rows, output_path, provenance=provenance, stamp=stamp, batch_num=batch_num)
+    written = write_results(rows, output_path, provenance=provenance, stamp=stamp, batch_num=batch_num)
+    if redaction_regions:
+        _write_regions(rows, written)
+    return written
+
+
+def _write_regions(rows: list[tuple[str, str, ExtractionResult]], shard_path: Path) -> None:
+    """Write the regions the batch's redaction reports hold, keyed by the shard's own `source_hash`es.
+
+    The manifest has one row per result, in order, so the hashes pair with *rows* by position.
+    """
+    from womblex.redact.stage import region_rows
+    from womblex.store.output import read_manifest
+    from womblex.store.redaction_regions_output import write_redaction_regions
+    from womblex.store.run_stamp import sidecar_footer
+
+    hashes = read_manifest(shard_path).column("source_hash").to_pylist()
+    regions = [
+        region
+        for source_hash, (_, _, extraction) in zip(hashes, rows, strict=True)
+        if extraction.redaction_report is not None
+        for region in region_rows(source_hash, extraction.redaction_report)
+    ]
+    write_redaction_regions(regions, shard_path, metadata=sidecar_footer(shard_path, "redact"))
 
 
 def write_batch_enrichment(batch: BatchResult, output_dir: Path) -> dict[str, Path | None]:

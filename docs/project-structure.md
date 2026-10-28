@@ -128,6 +128,7 @@ womblex/
 │   │   ├── models.py        # ILGS data models (Span, Segment, Person, Location, Term, etc.)
 │   │   └── query.py         # Load enrichment graph from Parquet for PII masking and internal use
 │   ├── store/
+│   │   ├── redaction_regions_output.py # *.redaction_regions.parquet: withheld regions, bbox in PDF points
 │   │   ├── omitted_output.py # omitted.parquet at the run root: the files a run passes over, with a reason
 │   │   ├── manifest_rows.py # The manifest row a batch writes for one document, and the source-bytes hash that keys it
 │   │   ├── output.py        # Parquet output: elements + table_cells + form_fields + manifest + chunks sidecars + integrity checks

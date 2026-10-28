@@ -167,6 +167,20 @@ directory; both `ingest_root` and `source_relpath` are empty for a writer that
 declared no root. Masking never rewrites the manifest — it is not a masking
 surface, and a `pii` run over a completed run leaves it byte-identical.
 
+### *.redaction_regions.parquet
+
+One row per withheld region a redaction detector found, written beside the shard by a batch run
+with `redaction.enabled` and by `womblex.redact.batch.annotate_redactions_for_shards`. Empty when
+detection ran and found none; a missing file means it did not run. Joins to `elements` on
+`(source_hash, page)`.
+
+| column | type | notes |
+|---|---|---|
+| `source_hash` | string | FK to the manifest |
+| `page` | int32 | 0-based, as `elements.page` |
+| `bbox` | struct&lt;x, y, width, height&gt; (float32) | **PDF points** (72 to the inch), top-left origin, converted from the pixels at the detection dpi. Unlike `elements.bbox`, not normalised |
+| `area` | float32 | `width * height`, in square points |
+
 ### *.redactions.parquet (optional sidecar)
 
 Written by `womblex.redact.batch.annotate_redactions_for_shards` as an

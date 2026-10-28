@@ -92,7 +92,10 @@ def process_batch(
     batch = BatchResult(results=results)
     shard_path = shard_dir / f"batch-{batch_num:04d}.parquet"
     rows_written = len(result_rows(batch))
-    write_batch_parquet(batch, shard_path, provenance=provenance, stamp=stamp, batch_num=batch_num)
+    write_batch_parquet(
+        batch, shard_path, provenance=provenance, stamp=stamp, batch_num=batch_num,
+        redaction_regions=config.redaction.enabled,
+    )
     return BatchOutcome(batch=batch, shard_path=shard_path, rows_written=rows_written)
 
 
