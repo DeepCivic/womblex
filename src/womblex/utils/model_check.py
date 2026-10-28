@@ -244,6 +244,14 @@ def _entry_deployments(slot: str, name: str) -> tuple[str, ...]:
         return ()  # the unknown name is reported by the model's own check
 
 
+def _vendor_model(slot: str, name: str) -> str:
+    """The vendor id registered for *name* in *slot*; empty where it is the name, or the name is unregistered."""
+    try:
+        return resolve(slot, name).vendor_model
+    except ValueError:
+        return ""
+
+
 def _pick_deployment(deployments: tuple[str, ...]) -> str:
     """The deployment a model is served by with nothing chosen: the environment's Isaacus default if it may, else the first."""
     from womblex.providers.isaacus.deployment import default_deployment
@@ -267,6 +275,7 @@ def deployed_models(
     wanted = enabled_scopes(config) if scopes is None else set(scopes)
     chunk_model = ai_chunking_model(config)
     found: dict[str, tuple[str, str, list[str]]] = {}  # model -> (slot, deployment, scopes)
+    vendor: dict[str, str] = {}
     for scope, slot, model, deployments in (
         (SCOPE_ENRICH, SLOT_ENRICHMENT, config.enrichment.model, _entry_deployments(SLOT_ENRICHMENT, config.enrichment.model)),
         (SCOPE_CHUNK, SLOT_ENRICHMENT, chunk_model, ISAACUS_DEPLOYMENTS if chunk_model else ()),
@@ -274,8 +283,10 @@ def deployed_models(
     ):
         if model and deployments and scope in wanted:
             deployment = _pick_deployment(deployments)
-            found.setdefault(model, (ISAACUS if deployment.startswith("isaacus") else slot, deployment, []))[2].append(scope)
-    return [ModelUse(slot, m, {}, tuple(s), deployment) for m, (slot, deployment, s) in found.items()]
+            found.setdefault(model, (ISAACUS if deployment.startswith("isaacus") else slot, deployment, []))[2].append(
+                scope)
+            vendor.setdefault(model, _vendor_model(slot, model))
+    return [ModelUse(slot, m, {}, tuple(s), deployment, vendor[m]) for m, (slot, deployment, s) in found.items()]
 
 
 def models_key(config: WomblexConfig, scope: str) -> str:
