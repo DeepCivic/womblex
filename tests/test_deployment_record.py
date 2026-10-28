@@ -36,6 +36,7 @@ def test_a_model_is_recorded_with_the_deployment_it_ran_on(monkeypatch) -> None:
     from womblex import __version__
 
     monkeypatch.delenv("ISAACUS_SAGEMAKER_ENDPOINTS", raising=False)
+    monkeypatch.delenv("ISAACUS_BASE_URL", raising=False)
     _embed()
     assert deployments_payload() == [{
         "slot": "embedding", "name": "kanon-2-embedder", "deployment": "isaacus-api",
@@ -121,3 +122,28 @@ def test_enrichment_is_recorded_too(monkeypatch) -> None:
     monkeypatch.delenv("ISAACUS_SAGEMAKER_ENDPOINTS", raising=False)
     make_enrichment_provider(EnrichmentConfig(), client=object())
     assert [(e["slot"], e["deployment"]) for e in deployments_payload()] == [("enrichment", "isaacus-api")]
+
+
+@pytest.mark.parametrize(("value", "endpoint"), [
+    (None, "sdk-default"),
+    ("https://gateway.example.gov.au/isaacus/v1/", "https://gateway.example.gov.au/isaacus/v1"),
+    ("https://user:hunter2@proxy.internal:8443/v1?token=abc#x", "https://proxy.internal:8443/v1"),  # pragma: allowlist secret
+    ("not a url", "unnamed-endpoint"),
+])
+def test_the_hosted_api_endpoint_is_the_base_url_with_credentials_dropped(monkeypatch, value, endpoint) -> None:
+    from womblex.store.endpoint_identity import api_endpoint
+
+    if value is None:
+        monkeypatch.delenv("ISAACUS_BASE_URL", raising=False)
+    else:
+        monkeypatch.setenv("ISAACUS_BASE_URL", value)
+    assert api_endpoint() == endpoint
+
+
+def test_a_base_url_reaches_the_footer_without_its_credentials(monkeypatch) -> None:
+    monkeypatch.delenv("ISAACUS_SAGEMAKER_ENDPOINTS", raising=False)
+    monkeypatch.setenv("ISAACUS_BASE_URL", "https://user:hunter2@proxy.internal/v1")  # pragma: allowlist secret
+    _embed()
+    (entry,) = deployments_payload()
+    assert entry["endpoint"] == "https://proxy.internal/v1"
+    assert "hunter2" not in json.dumps(deployments_payload())
