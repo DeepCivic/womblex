@@ -125,6 +125,15 @@ def test_the_sidecar_records_the_servers_model_id(shard_with_chunks, monkeypatch
     assert {r["model"] for r in read_embeddings(shard_with_chunks).to_pylist()} == {"text-embed-1"}
 
 
+def test_its_deployment_is_handed_the_servers_model_id_not_the_registered_name() -> None:
+    from womblex.utils.model_check import deployed_models
+
+    config = _config(embedding={"enabled": True, "model": "openai-compatible",
+                                "provider_options": {"model": "text-embed-1"}})
+    (use,) = deployed_models(config, (SCOPE_EMBED,))
+    assert (use.name, use.deployment, use.vendor_model) == ("openai-compatible", "openai-compatible", "text-embed-1")
+
+
 @pytest.fixture
 def base_url(monkeypatch):
     monkeypatch.setenv("OPENAI_COMPAT_BASE_URL", "https://user:pw@api.vendor.test/v1?token=abc")
