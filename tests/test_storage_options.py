@@ -218,3 +218,14 @@ def test_settings_default_to_the_options_the_environment_declares(monkeypatch, t
     create_api_app(store_uri=str(tmp_path / "store"), db_dsn="postgresql://x/y", registry=None,
                    ingest_uri=str(tmp_path / "ingest"))
     assert seen[0]["ingest_options"] == {"anon": True} and seen[0]["store_options"] is None
+
+
+def test_a_destination_whose_option_names_an_unset_variable_is_refused_before_launch(tmp_path: Path, monkeypatch) -> None:
+    from womblex.cloud.delivery import check_destinations
+
+    monkeypatch.delenv("ACME_KEY", raising=False)
+    spec = _stored(["normalise"], destinations=[_to(tmp_path, storage_options={"account_key": {"env": "ACME_KEY"}})]).spec
+    ((name, problem),) = check_destinations(spec.destinations)
+    assert name == "archive" and "account_key reads environment variable ACME_KEY, which is not set" in problem
+    monkeypatch.setenv("ACME_KEY", "k")
+    assert check_destinations(spec.destinations) == []
