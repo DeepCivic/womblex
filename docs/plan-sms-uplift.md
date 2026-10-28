@@ -16,7 +16,6 @@ requirement is written there as built, in that file's conventions and numbering.
 removed from this plan in the same merge.
 
 **In scope:**
-- progress webhooks
 - write-time timestamps
 - withheld and omitted documents recorded as atoms
 - failed-document manifest rows
@@ -43,12 +42,6 @@ removed from this plan in the same merge.
 - A merge that delivers a piece of this plan writes its requirement as built into `docs/functional_requirements.md` and removes that piece from this plan.
 
 ## Phase C — Progress events and timestamps
-
-**C1. Progress webhooks.**
-- Add `stage_started` and `batch_progress` events. `batch_progress` fires once per extraction batch settling and once per stage unit, carrying `stage`, `done`, `failed`, `total`.
-- `WebhookDestination` gets an optional `events:` filter, so a consumer can subscribe to coarse events only.
-- Reopen the "no per-batch events" rule in the `cloud/webhook.py` docstring and the decisions doc.
-- Emitters go in a new `cloud/run_events.py`, because `cloud/workflows.py` is at 540 lines. Each emit is a DBOS step with an idempotent id. `run_stage` emits per unit, and the coordinator emits `stage_started`.
 
 **C2. Write time.**
 - `sidecar_footer` / `contract_footer` add a `womblex.written_at` footer key. It is never a column, so `content_digest` and the rows don't change.
