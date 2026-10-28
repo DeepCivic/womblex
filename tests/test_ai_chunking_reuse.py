@@ -246,7 +246,7 @@ def test_the_chunk_stage_logs_each_enricher_call_and_counts_them_in_the_footer(t
                    RecordFieldMapping(id_field="version_id", text_field="text"))
     monkeypatch.setattr(chunk_stage, "resolve_tokenizer", lambda *a, **k: object())
     monkeypatch.setattr(chunk_stage, "isaacus_available", lambda: True)
-    monkeypatch.setattr(chunk_stage, "make_ai_chunking_client", lambda model: None)
+    monkeypatch.setattr(chunk_stage, "make_ai_chunking_client", lambda model, deployment=None: None)
     monkeypatch.setattr(chunk_stage, "create_chunker", lambda **k: _AiChunker())
 
     with caplog.at_level(logging.INFO):
