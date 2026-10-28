@@ -1,6 +1,6 @@
 # Weekly dependency updates, so upgrades arrive small and each is tested by the
-# lock-based CI on its own PR rather than surfacing on `main`
-# (docs/security-upgrade-plan.md, M1). Minor and patch updates are grouped into
+# lock-based CI on its own PR rather than surfacing on `main`.
+# Minor and patch updates are grouped into
 # one PR per ecosystem; a major update gets a PR of its own.
 #
 # An update that cannot land green (it does not resolve, or it pulls in a
@@ -34,6 +34,15 @@ updates:
       interval: weekly
     groups:
       images-minor-patch:
+        update-types: [minor, patch]
+
+  # docker-compose.yml: the bundled backends' images.
+  - package-ecosystem: docker-compose
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      compose-minor-patch:
         update-types: [minor, patch]
 
   - package-ecosystem: github-actions

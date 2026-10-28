@@ -13,9 +13,9 @@
 
 # uv exports the lock at build time; it is mounted, never installed. A stage
 # of its own so the pin is a FROM line that dependency updates can read.
-FROM ghcr.io/astral-sh/uv:0.13.6 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.6@sha256:af22a52f5eafef3d78e551599d405c02df61919d18028f0cea8eda93bc9986d0 AS uv
 
-FROM python:3.12-slim AS base
+FROM python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159 AS base
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -35,7 +35,7 @@ WORKDIR /app
 
 # Dependencies install from `uv.lock`, hash-checked, rather than from a fresh
 # resolve of pyproject.toml's ranges, so the image ships exactly the set CI
-# tested and the dependency alerts name (docs/security-upgrade-plan.md, M0).
+# tested and the dependency alerts name.
 # Only the two files the export reads are copied first, so this layer stays
 # cached until the lock changes. uv is mounted for the export, not installed.
 # `.` installs the core deps (S3 + queue included); a worker needs nothing

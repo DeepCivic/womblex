@@ -12,7 +12,7 @@ jobs:
     # The job queue's tests need a real Postgres; without one they skip.
     services:
       postgres:
-        image: postgres:16
+        image: postgres:16.15@sha256:1beaa3084eee2676f20a9cd9928f0bf2c5bf674f8e49f81017912183d377c61c
         env:
           POSTGRES_PASSWORD: womblex
           POSTGRES_DB: womblex
@@ -24,12 +24,12 @@ jobs:
       matrix:
         python-version: ["3.12"]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up uv and Python ${{ matrix.python-version }}
-        # setup-uv publishes no floating major tag from v8 on (`@v10` does not
-        # resolve), so the release is named in full.
-        uses: astral-sh/setup-uv@v10.3.2
+        # Every action is pinned to a commit, its release named beside it;
+        # Dependabot moves both.
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           version: "0.11.7"
           python-version: ${{ matrix.python-version }}
@@ -42,8 +42,8 @@ jobs:
 
       - name: Install from the lock
         # The locked set, not a fresh resolve of pyproject.toml's ranges: a new
-        # upstream release reaches CI only through a lock change on a PR
-        # (docs/security-upgrade-plan.md, M0). The isaacus SDK is core, so the
+        # upstream release reaches CI only through a lock change on a PR.
+        # The isaacus SDK is core, so the
         # enrich/graph/query/embed suites' `importorskip("isaacus")` never skips
         # wholesale; tests that need a live endpoint still skip on the missing
         # ISAACUS_API_KEY. [api] brings python-multipart: `create_api_app`
@@ -69,10 +69,10 @@ jobs:
     name: API reference
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v10.3.2
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           version: "0.11.7"
           python-version: "3.12"
@@ -88,16 +88,13 @@ jobs:
   audit:
     name: Dependency advisories
     runs-on: ubuntu-latest
-    # Known advisories in the locked Python set, so a new one shows on the PR
-    # that would ship it (docs/security-upgrade-plan.md,
-    # M1). Reported, not yet gating: the advisories open today are cleared by
-    # the plan's upgrade merges (M2 to M5), and this line goes when they land.
-    continue-on-error: true
+    # Known advisories in the locked Python set, so a new one fails the PR
+    # that would ship it.
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v10.3.2
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           version: "0.11.7"
           python-version: "3.12"
@@ -122,7 +119,7 @@ jobs:
           - name: pipeline
             dockerfile: Dockerfile
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Reclaim runner disk
         # The preinstalled toolchains are what the build would otherwise run
@@ -131,10 +128,10 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
           df -h /
 
-      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Build
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: ${{ matrix.dockerfile }}
@@ -148,6 +145,15 @@ jobs:
             REQUIRE_STAMP=1
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,scope=${{ matrix.name }}
+
+      - name: Scan the image
+        # High and critical findings in the image's OS packages and installed
+        # set, reported on the run. The lock's own advisories gate in `audit`.
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: womblex-${{ matrix.name }}:ci
+          severity: HIGH,CRITICAL
+          exit-code: "0"
 
       - name: The image names its commit
         # Both halves of it: the label a registry can read without running the
