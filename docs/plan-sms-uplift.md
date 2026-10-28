@@ -1,6 +1,6 @@
 # SMS uplift — plan
 
-*Status: Phases C to G are proposed and may follow later. A piece is removed from this plan when it is built, and this document is deleted when its last phase lands.*
+*Status: Phases D to G are proposed and may follow later. A piece is removed from this plan when it is built, and this document is deleted when its last phase lands.*
 
 ## Context
 
@@ -16,7 +16,6 @@ requirement is written there as built, in that file's conventions and numbering.
 removed from this plan in the same merge.
 
 **In scope:**
-- write-time timestamps
 - withheld and omitted documents recorded as atoms
 - failed-document manifest rows
 - a spike on element evidence and fingerprints, with clean-up
@@ -40,21 +39,6 @@ removed from this plan in the same merge.
 - A new module lands in the CLAUDE.md table, `docs/architecture.md` and `docs/project-structure.md`
   in the same merge (`tests/test_doc_currency.py`).
 - A merge that delivers a piece of this plan writes its requirement as built into `docs/functional_requirements.md` and removes that piece from this plan.
-
-## Phase C — Progress events and timestamps
-
-**C2. Write time.**
-- `sidecar_footer` / `contract_footer` add a `womblex.written_at` footer key. It is never a column, so `content_digest` and the rows don't change.
-- Reword the byte-identical claims ("identical aside from the write time"):
-  - `docs/decisions-operations.md` (two places)
-  - `docs/composable-design.md` (money output before or after `enrich`)
-  - `cloud/unit_receipt.py`
-  - the `batch.process_batch` docstring
-- The footer is part of the file's bytes, so every rewrite changes a file's ETag / checksum even when its rows don't. Each check that compares file bytes, and how it copes:
-  - `RemoteStore.fingerprints` and receipt output fingerprints (`cloud/unit_receipt.py`): a receipt compares the published output with the fingerprint it recorded when it wrote that output, so a file that was not rewritten still matches. A rerun writes a new receipt. No change.
-  - `published_checksums` (`cloud/finalize.py`) and the run record's checksums: they record what was published, so they change on every rewrite, and that is correct. The docs must stop calling them stable across reruns.
-  - Local-vs-fleet and rerun comparisons in the tests that assert byte identity (`tests/test_records.py`, `tests/test_stage_runner.py` (the local-vs-remote parity check), `tests/test_enrich_stage.py`, `tests/test_enrichment_output.py`, `tests/test_source_provenance.py`, `tests/test_ground_truth.py`, `tests/test_workflow_plan.py`): compare rows plus the footer minus `womblex.written_at`. Add a shared test helper for that comparison rather than editing each assertion.
-  - Determinism stays `content_digest`, which never covers footers.
 
 ## Phase D — Withheld, omitted and failed documents
 
@@ -123,5 +107,4 @@ A docs-only merge per CLAUDE.md "Stocktake":
 
 - `uv run ruff check src/ tests/` && `uv run mypy src/` && `uv run python -m pytest tests/ -v -m "not benchmark"`
 - `git diff --stat $(git merge-base HEAD origin/main)..HEAD` ≤500 lines; `wc -l` on every touched file.
-- **C:** the `test_webhook.py` receiver sees `stage_started` and `batch_progress` with counts summing to the total. The `events` filter drops them.
 - **D:** a fixture with an unreadable file, an unsupported file and a redacted PDF gives an error manifest row (`extraction_method` `unreadable`, which `SourceResolver` declines as `unsupported_basis`), an `omitted.parquet` row and region rows with page and bbox. An unreadable file in two firings of one collection gives two distinct `source_hash`es in one chain.
