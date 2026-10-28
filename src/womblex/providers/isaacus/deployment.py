@@ -17,7 +17,7 @@ from womblex.providers.isaacus.client import (
     endpoints_from_env,
     is_model_served,
 )
-from womblex.store.endpoint_identity import endpoint_identity
+from womblex.store.endpoint_identity import api_endpoint, endpoint_identity
 from womblex.utils.deployment_registry import Deployment, client_for, register
 from womblex.utils.model_registry import SLOT_EMBEDDING
 
@@ -60,7 +60,7 @@ register(Deployment(
     billed=True,
     env=((API_KEY_ENV,),),
     env_optional=("ISAACUS_BASE_URL",),
-    detail=lambda model: {"endpoint": "sdk-default"},  # the SDK resolves its own endpoint; none is invented
+    detail=lambda model: {"endpoint": api_endpoint()},
     smoke=lambda slot, model: smoke_call(client_for(API, [model]), slot, model),
     make_client=lambda models: client.make_api_client(),
 ))

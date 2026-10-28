@@ -1,7 +1,7 @@
 """Pre-run checks of the deployments the configured models are served by.
 
-A deployment (`utils/deployment_registry.py`) is checked once however many slots
-use it: at ``load`` its free check is called once with every model the run uses on
+A deployment (`utils/deployment_registry.py`) is handed vendor model ids, never
+Womblex's registered names, and is checked once however many slots use it: at ``load`` its free check is called once with every model the run uses on
 it, and only if that fails is each model checked alone, so a failure is attributed
 to the model that caused it. At ``smoke`` each model is sent one billed request,
 warned first. A reader that declares no deployment but has ``ping()`` is wrapped in
@@ -31,6 +31,11 @@ def _result(use: ModelUse, level: CheckLevel, source: str, start: float, error: 
         slot=use.slot, name=use.name, scopes=use.scopes, level=level, ok=error is None, source=source,
         reason="" if error is None else f"{type(error).__name__}: {error}", seconds=time.monotonic() - start,
     )
+
+
+def _vendor(use: ModelUse) -> str:
+    """The id *use*'s deployment knows its model by."""
+    return use.vendor_model or use.name
 
 
 def _free_errors(check: Any, models: Sequence[str]) -> dict[str, Exception | None]:
@@ -73,7 +78,7 @@ def check_deployed(uses: Sequence[ModelUse], level: CheckLevel) -> list[SlotChec
             continue
         served = []
         for i in indexes:
-            if deployment.serves(uses[i].name):
+            if deployment.serves(_vendor(uses[i])):
                 served.append(i)
             else:
                 out[i] = _result(uses[i], level, deployment.name, start, ValueError(
@@ -87,15 +92,15 @@ def check_deployed(uses: Sequence[ModelUse], level: CheckLevel) -> list[SlotChec
                     "processing.models_check=load checks it without a billed request", use.name, deployment.name)
                 slot = SLOT_EMBEDDING if SCOPE_EMBED in use.scopes else SLOT_ENRICHMENT
                 try:
-                    deployment.smoke(slot, use.name)
+                    deployment.smoke(slot, _vendor(use))
                     error: Exception | None = None
                 except Exception as exc:
                     error = exc
                 out[i] = _result(use, level, deployment.name, start, error)
         elif served:
-            errors = _free_errors(deployment.check, list(dict.fromkeys(uses[i].name for i in served)))
+            errors = _free_errors(deployment.check, list(dict.fromkeys(_vendor(uses[i]) for i in served)))
             for i in served:
-                out[i] = _result(uses[i], level, deployment.name, start, errors[uses[i].name])
+                out[i] = _result(uses[i], level, deployment.name, start, errors[_vendor(uses[i])])
     return [out[i] for i in range(len(uses))]
 
 

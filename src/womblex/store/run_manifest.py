@@ -56,7 +56,7 @@ from womblex.store.contract import contract_footer
 from womblex.store.delivery_record import read_delivery_records
 from womblex.store.deployment_record import read_footer_deployments
 from womblex.store.document_versions import add_versions
-from womblex.store.endpoint_identity import endpoint_identity
+from womblex.store.endpoint_identity import api_endpoint, endpoint_identity
 from womblex.store.output import read_manifest
 from womblex.store.run_stamp import (
     read_footer_model_check,
@@ -93,7 +93,8 @@ RUN_MANIFEST_FILENAME = "manifest.parquet"
 #: (`store/delivery_record.py`) — so an empty list means no delivery was made.
 #: Version 10 adds ``deployments`` — the deployment each model ran on, read from the
 #: ``womblex.deployments`` key (`store/deployment_record.py`) — so an empty list means no
-#: model ran on a deployment, not a record that predates the key.
+#: model ran on a deployment, not a record that predates the key. From version 10 a hosted-API
+#: service names ``ISAACUS_BASE_URL`` when it is set (`store/endpoint_identity.api_endpoint`).
 RUN_RECORD_KEY = f"{NAMESPACE}.run_record"
 RUN_RECORD_VERSION = 10
 
@@ -384,9 +385,9 @@ def _services(shard_dir: Path) -> list[dict]:
     if called:
         return [{
             "kind": "isaacus-hosted-api",
-            # Not spelled out: the SDK resolves its own default endpoint, and
-            # naming a URL this module does not read would be inventing one.
-            "endpoint": "sdk-default",
+            # ISAACUS_BASE_URL as the SDK reads it, credentials dropped; unset,
+            # the SDK's own default is not spelled out (that would invent one).
+            "endpoint": api_endpoint(),
             "region": None,
             "models": called,
         }]
