@@ -104,26 +104,37 @@ def scheme_problem(scheme: str, *, require_backend: bool = True) -> str | None:
         fsspec.get_filesystem_class(scheme)
     except ValueError:
         return f"scheme {scheme!r} is not one fsspec knows; usable here: {', '.join(usable_schemes())}"
-    except ImportError:
+    except ImportError as e:
         if not require_backend:
             return None
-        package = known_implementations.get(scheme, {}).get("class", scheme).split(".")[0]
+        known = known_implementations.get(scheme, {})
+        package = known.get("class", scheme).split(".")[0]
+        if package == "fsspec":  # a backend fsspec ships whose own dependency is missing (sftp: paramiko)
+            return f"scheme {scheme!r} cannot be opened here: {known.get('err') or e}"
         return f"scheme {scheme!r} needs the package {package!r}, which is not installed (install it to use {scheme}://)"
     return None
 
 
 def usable_schemes() -> list[str]:
-    """The schemes fsspec knows whose backend package is installed here, sorted."""
+    """The schemes fsspec knows whose backend imports here, sorted.
+
+    A backend in its own package is asked for by name, never imported; one fsspec ships is
+    imported, since its own dependency (``paramiko`` for ``sftp``) is what may be missing.
+    """
     from importlib.util import find_spec
 
+    import fsspec
     from fsspec.registry import known_implementations, registry
 
     def installed(scheme: str) -> bool:
         package = known_implementations.get(scheme, {}).get("class", "").split(".")[0]
         try:
-            return not package or find_spec(package) is not None
-        except (ImportError, ValueError):
+            if package and package != "fsspec":
+                return find_spec(package) is not None
+            fsspec.get_filesystem_class(scheme)
+        except Exception:  # any failure to import a backend means it is not usable here
             return False
+        return True
 
     return sorted({s for s in known_implementations if installed(s)} | set(registry))
 
@@ -488,5 +499,6 @@ __all__ = [
     "scheme_problem",
     "storage_options_from_env",
     "store_root",
+    "usable_schemes",
     "validate_location_uri",
 ]
