@@ -124,6 +124,6 @@ def test_a_stage_on_a_non_isaacus_deployment_is_gated_on_that_deployment_not_on_
     with pytest.raises(StagePreconditionError, match="needs deployment 'acme' \\(ACME_KEY unset\\)"):
         prepare_stage_context(STAGE_CONTRACTS["enrich"], config)
     monkeypatch.setenv("ACME_KEY", "set")
-    with pytest.raises(StagePreconditionError) as exc:  # past the gate: B3 still builds the Isaacus client
+    with pytest.raises(StagePreconditionError) as exc:  # past the gate: 'acme' builds no client
         prepare_stage_context(STAGE_CONTRACTS["enrich"], config)
     assert "needs" not in str(exc.value)

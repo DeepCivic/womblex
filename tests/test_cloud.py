@@ -174,14 +174,14 @@ def test_validate_location_uri_rejects_the_typos_operators_actually_make():
     local path* is refused rather than accepted."""
     validate_location_uri("s3://womblex/inbox")
     validate_location_uri("/data/inbox")
-    validate_location_uri("gs://bucket/inbox")
+    validate_location_uri("memory://inbox")
 
     with pytest.raises(ValueError, match="s3://"):
         validate_location_uri("s3:/womblex/inbox")  # one slash
     with pytest.raises(ValueError, match="lowercase"):
         validate_location_uri("S3://womblex/inbox")
-    with pytest.raises(ValueError, match="not one of"):
-        validate_location_uri("ftp://host/inbox")
+    with pytest.raises(ValueError, match="not one fsspec knows; usable here: .*s3"):
+        validate_location_uri("nosuchscheme://host/inbox")
     with pytest.raises(ValueError, match="no bucket"):
         validate_location_uri("s3://")
     with pytest.raises(ValueError, match="empty"):
@@ -192,7 +192,7 @@ def test_validate_location_uri_runs_before_any_network_lookup():
     """An unsupported scheme is refused on the string, so validating an
     operator-supplied URI never resolves a hostname."""
     with pytest.raises(ValueError):
-        store_root("ftp://never-resolved.invalid/inbox")
+        store_root("nosuchscheme://never-resolved.invalid/inbox")
 
 
 def test_same_location_ignores_spelling_that_opens_the_same_place():

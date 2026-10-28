@@ -136,7 +136,7 @@ def chunk_shards(
         tokenizer=tokenizer,
         chunk_size=chunking_config.chunk_size,
         chunking_model=chunking_config.chunking_model,
-        isaacus_client=make_ai_chunking_client(chunking_config.chunking_model),
+        isaacus_client=make_ai_chunking_client(chunking_config.chunking_model, chunking_config.chunking_deployment),
         tokenizer_kwargs=chunking_config.tokenizer_kwargs,
         memoize=chunking_config.memoize,
         cache_maxsize=chunking_config.cache_maxsize,

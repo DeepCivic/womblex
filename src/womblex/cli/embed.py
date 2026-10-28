@@ -13,7 +13,6 @@ import logging
 from pathlib import Path
 
 from womblex.cli._shared import Command
-from womblex.providers.isaacus.client import make_isaacus_client
 
 logger = logging.getLogger("womblex")
 
@@ -39,12 +38,14 @@ def _register_embed(p: argparse.ArgumentParser) -> None:
 
 def cmd_embed(args: argparse.Namespace) -> int:
     """Embed a shard directory's chunks through the configured embedding provider."""
-    from womblex.analyse.embed import calls_isaacus
     from womblex.analyse.embed_stage import embed_shards
     from womblex.config import EmbeddingConfig, load_config
     from womblex.store.checkpoint import CheckpointManager
     from womblex.store.embed_output import EMBEDDINGS_SUFFIX
     from womblex.store.shard_audit import reconcile_stage_checkpoint_with_shards
+    from womblex.utils.deployment_choice import deployment_of
+    from womblex.utils.deployment_registry import client_for
+    from womblex.utils.model_registry import SLOT_EMBEDDING
 
     shard_dir: Path = args.shards
     if not shard_dir.is_dir():
@@ -64,8 +65,9 @@ def cmd_embed(args: argparse.Namespace) -> int:
         # Hosted API (ISAACUS_API_KEY) or SageMaker (ISAACUS_SAGEMAKER_ENDPOINTS),
         # whichever the environment declares; the model is checked against the
         # deployed endpoints up front. Another provider takes no client.
-        if calls_isaacus(embedding_config.model):
-            client = make_isaacus_client(models=[embedding_config.model])
+        deployment = deployment_of(SLOT_EMBEDDING, embedding_config.model, embedding_config.deployment)
+        if deployment:
+            client = client_for(deployment, [embedding_config.model])
     except ImportError as e:
         logger.error("Isaacus SDK not usable (reinstall womblex): %s", e)
         return 1

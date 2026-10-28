@@ -579,6 +579,24 @@ be re-derivable, and the first pass's were not.
   one process-wide `threading.Lock` around every pdfium call, not per-object
   isolation — the restriction is process-wide, not per-document.
 
+### A second embedding provider proves the deployment seam (Requirement 39)
+2026-10, cloud flexibility plan, Phase E.
+
+- **One thin adapter for the protocol, not a vendor.** `/v1/embeddings` is what hosted vendors and self-hosted servers (vLLM,
+  Ollama, TEI) share, so one `openai-compatible` provider over `httpx` serves both, with the server's own retries and limits
+  and no dependency added. *Rejected:* a provider per vendor, which is the cost this plan exists to remove.
+- **Roles, not tasks.** The embedding contract speaks `document` and `query`; the Isaacus adapter maps them to its
+  `retrieval/*` tasks and this provider has no equivalent and ignores them. `embedding.task` keeps its Isaacus values and
+  accepts the two short names.
+- **What a provider cannot do is refused up front.** A provider declares the `dimensions` trait; `embedding.dimensions`
+  on one without it is refused before launch, where it used to be silently ignored. This provider declares it, sends the
+  setting, and treats a returned width that differs as that batch's error.
+- **Billed by its own setting.** A hosted vendor bills per request; a self-hosted server does not and is off the network.
+  `OPENAI_COMPAT_BILLED=false` says which, read when the deployment registers, and is the only way a network deployment is
+  unbilled (the deployment conformance test requires a network deployment to be billed).
+- **No token ceiling.** There is no tokeniser for an arbitrary vendor's model, so counting against a ceiling would be a
+  guess. The server's rejection is the ceiling and becomes the batch's recorded error.
+
 ### Isaacus's parts are named separately, and the adapter is thin
 2026-10, decided 19 October for Phase 4 of the trust plan.
 

@@ -119,7 +119,7 @@ run, or disagree, is written unstamped. Further keys name what produced a file:
 (`store/run_stamp.read_footer_models`); `womblex.slot_models` names which
 swappable-slot model (`docs/model-plugins.md`) each slot actually built, by
 slot, name, and the distribution and version that supplied it
-(`read_footer_slot_models`); `womblex.model_check` records the pre-run model
+(`read_footer_slot_models`); `womblex.deployments` names the deployment each model ran on, as slot, model, deployment, the distribution and version that supplied the deployment, and where it ran where the deployment may say (an endpoint name and region, an ARN reduced to those; never a key or an account id) (`store/deployment_record.read_footer_deployments`); `womblex.model_check` records the pre-run model
 check's result (`read_footer_model_check`); `womblex.workflow_digest` names the
 workflow whose step wrote a sidecar (locally through `run-workflow`, or on a worker for a stage dispatched with the workflow) and `womblex.workflow` holds that workflow's name and full spec as JSON (`read_footer_stamp`),
 and the same two keys are on every file a scheduled firing's extraction batches write (the four extraction files and the layout sidecar beside them); they are absent from other extraction files and from sidecars written outside a workflow; `womblex.ai_chunking_calls` on a chunks file counts the Kanon-2 Enricher calls AI chunking made for that batch, and is absent when `chunking.chunking_model` was not set. Each is written only when it has a

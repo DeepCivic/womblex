@@ -27,7 +27,7 @@ def test_the_run_record_lists_every_delivery_by_destination(tmp_path: Path):
     write_run_manifest(run_root / "documents")
 
     record = read_run_record(run_root / "manifest.parquet")
-    assert record["record_version"] == RUN_RECORD_VERSION == 9
+    assert record["record_version"] == RUN_RECORD_VERSION == 10
     assert [(d["destination"], d["status"]) for d in record["deliveries"]] == [
         ("archive", "delivered"), ("warehouse", "failed")]
 
