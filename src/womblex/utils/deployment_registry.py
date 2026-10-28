@@ -53,7 +53,10 @@ class Deployment:
 
     name: str
     check: Callable[[Sequence[str]], None]
-    """Free reachability check, called once with the model ids a run uses on it: raises unless it answers and serves them."""
+    """Free reachability check, called once with the vendor model ids a run uses on it: raises unless it answers and serves them.
+
+    Every callable here takes vendor ids (``ModelEntry.vendor_model``), never Womblex's registered names.
+    """
     needs_network: bool
     billed: bool
     env: tuple[tuple[str, ...], ...] = ()
