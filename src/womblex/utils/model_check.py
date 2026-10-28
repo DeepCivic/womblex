@@ -97,6 +97,8 @@ class ModelUse:
     scopes: tuple[str, ...]
     deployment: str = ""
     """The deployment (`utils/deployment_registry.py`) that serves it, for a model checked through one."""
+    vendor_model: str = ""
+    """The vendor's id for it, which its deployment is handed; empty where it is ``name``."""
 
 
 @dataclass(frozen=True)
