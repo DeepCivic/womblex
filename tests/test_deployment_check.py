@@ -49,6 +49,15 @@ def test_a_failure_is_attributed_to_the_model_that_caused_it(acme) -> None:
     assert acme == [("check", ["good", "bad"]), ("check", ["good"]), ("check", ["bad"])]
 
 
+def test_a_deployment_is_handed_the_vendor_id_and_the_result_keeps_the_registered_name(acme) -> None:
+    use = ModelUse("ocr", "mistral-ocr", {}, (SCOPE_ENRICH,), "acme", "mistral.pixtral-large-2502-v1:0")
+    (check,) = check_deployed([use], CheckLevel.LOAD)
+    check_deployed([use], CheckLevel.SMOKE)
+    assert acme == [("check", ["mistral.pixtral-large-2502-v1:0"]),
+                    ("smoke", ("enrichment", "mistral.pixtral-large-2502-v1:0"))]
+    assert (check.name, check.ok) == ("mistral-ocr", True)
+
+
 def test_one_model_on_two_scopes_is_checked_once(acme) -> None:
     check_deployed([_use("m1"), _use("m1", "chunk")], CheckLevel.LOAD)
     assert acme == [("check", ["m1"])]
