@@ -26,6 +26,7 @@ from pydantic import Field, ValidationError
 
 from womblex.cloud import dbos_app
 from womblex.cloud.stage_contracts import STAGE_NAMES
+from womblex.cloud.webhook import EVENTS
 from womblex.config.process import StrictModel
 from womblex.store.remote import validate_location_uri
 from womblex.store.storage_options import secrets_outside_env
@@ -107,12 +108,16 @@ class PostgresDestination(StrictModel):
 
 
 class WebhookDestination(StrictModel):
-    """Send the run's events to `url` (`cloud/webhook.py`), signed with the key in `secret_env`."""
+    """Send the run's events to `url` (`cloud/webhook.py`), signed with the key in `secret_env`.
+
+    `events` narrows what is sent, so a consumer can take the coarse events alone; `None` sends them all.
+    """
 
     kind: Literal["webhook"]
     name: str
     url: str
     secret_env: str
+    events: tuple[str, ...] | None = None
 
 
 #: What an inbound hook may be sent (Requirement 35); each is acted on by `api/routes_inbound.py`.
@@ -214,6 +219,10 @@ def _check_destinations(spec: StoredWorkflowSpec) -> None:
             url = urlsplit(d.url)
             if url.scheme not in {"http", "https"} or not url.netloc or "@" in url.netloc:
                 raise ValueError(f"destination {d.name!r}: a webhook URL is http(s) and names no credentials")
+            if d.events is not None and (unknown := sorted(set(d.events) - set(EVENTS))):
+                raise ValueError(f"destination {d.name!r}: unknown event(s) {unknown}; events are {list(EVENTS)}")
+            if d.events == ():
+                raise ValueError(f"destination {d.name!r}: `events` is empty; leave it out to send every event")
         if isinstance(d, PostgresDestination):
             if not _TABLE_NAME.match(d.table):
                 raise ValueError(f"destination {d.name!r}: table must be `name` or `schema.name`, got {d.table!r}")
@@ -340,6 +349,8 @@ def workflow_digest(spec: StoredWorkflowSpec) -> str:
     for destination in payload.get("destinations", ()):  # ...and one that gives no options, as before they existed
         if destination.get("storage_options") is None:
             destination.pop("storage_options", None)
+        if destination.get("events") is None:  # ...and a webhook that names no events, as before they could be chosen
+            destination.pop("events", None)
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
 

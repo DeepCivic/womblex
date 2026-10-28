@@ -174,7 +174,8 @@ womblex/
 │   │   ├── dbos_app.py         # DBOS wiring — system database URL, queue/workflow names and ids, client
 │   │   ├── jobs.py             # RunBoard — enqueue + read runs over DBOS workflows; run `owner` scoping; stage attempts and the fork
 │   │   ├── destination_postgres.py # A workflow's Postgres destination — one row per embedded chunk, masked by default, upserted
-│   │   ├── webhook.py          # A workflow's webhook destination — six run events, signed, resent under one id, recorded
+│   │   ├── webhook.py          # A workflow's webhook destination — eight run events, signed, resent under one id, recorded
+│   │   ├── run_events.py       # The run events a fleet worker sends, each a recorded DBOS step; extraction and unit progress
 │   │   ├── delivery.py         # Deliver a finished run to its workflow's destinations — checked before launch, bounded retries, recorded on the run
 │   │   ├── run_owner.py        # run_owners() / owned_rows() — a run is the owner its first row names
 │   │   ├── run_status.py       # run_sentence() — a run's status as one sentence from exact per-stage counts

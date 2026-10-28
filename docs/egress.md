@@ -177,10 +177,11 @@ and counted in the delivery record (`rows_skipped`). No sources and no other sid
 are sent.
 
 **Webhook** (`kind: webhook`) — the run's events, never its data: `extraction_settled`,
-`stage_finished`, `stage_failed`, `delivered`, `delivery_failed` and `run_finished`.
+`stage_started`, `batch_progress`, `stage_finished`, `stage_failed`, `delivered`,
+`delivery_failed` and `run_finished`; an optional `events` list narrows them.
 Each is a JSON `POST` with `event`, `event_id`, `run_id`, `workflow`, `status` (the
 run's state as `/v1/runs` words it: `running`, then `done`, `failed` or `cancelled`), `at`, and the event's own `stage`, `destination`,
-`error`, `ran_after_failed` or `after_failed`. Headers: `X-Womblex-Event`,
+`error`, `ran_after_failed` or `after_failed`; `batch_progress` carries `stage`, `done`, `failed` and `total`. Headers: `X-Womblex-Event`,
 `X-Womblex-Event-Id` and `X-Womblex-Signature: sha256=<hex>`, the HMAC-SHA256 of the raw
 body under the key in `secret_env`. A receiver recomputes the signature before
 trusting a body and drops an `event_id` it has seen, since an event is resent under

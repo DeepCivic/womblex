@@ -31,7 +31,7 @@ its steps write.
 | `inbound` | Optional. Hooks other systems post signed events to: `name`, `secret_env` (the environment variable holding the hook's HMAC key, never the key) and `events` (`documents_added`, `run_requested`, `rerun_requested`, `delivery_received`). Each hook needs its own `secret_env`, unique across stored workflows; `schedule-workflow` checks it is set. A workflow with hooks keeps its stored copy. |
 | `collection` | Optional. The run the workflow's firings append to, in place of the workflow's name: one safe token. Not part of the digest. |
 | `triggers` | Cron expressions scheduled by `schedule-workflow`. |
-| `destinations` | Where the run is delivered after its last step. `object_store`: `name`, `uri` (a local path or a URI a store can open, checked when the file is read), `include_sources` (default `true`) and optional `credentials` (`key_env` and `secret_env`, the environment variables holding an S3 key and secret, never the values). `postgres`: `name`, `dsn_env` (the environment variable holding the connection string), `table` (default `womblex_chunks`) and `text_layer` (`masked`, the default, or `raw`). `webhook`: `name`, `url` and `secret_env` (the environment variable holding the signing key). |
+| `destinations` | Where the run is delivered after its last step. `object_store`: `name`, `uri` (a local path or a URI a store can open, checked when the file is read), `include_sources` (default `true`) and optional `credentials` (`key_env` and `secret_env`, the environment variables holding an S3 key and secret, never the values). `postgres`: `name`, `dsn_env` (the environment variable holding the connection string), `table` (default `womblex_chunks`) and `text_layer` (`masked`, the default, or `raw`). `webhook`: `name`, `url`, `secret_env` (the environment variable holding the signing key) and optional `events` (the ones it is sent; left out, all eight). |
 
 ## Delivery
 
@@ -55,8 +55,10 @@ replaces the bundle, upserts the rows (and removes the run's rows it did not wri
 replaces the record.
 
 A `webhook` destination is sent the run's events, not its results: `extraction_settled`,
-`stage_finished` and `stage_failed` (per step), `delivered` and `delivery_failed` (per
-other destination) and `run_finished`; nothing per document or batch. Each is a JSON
+`stage_started`, `stage_finished` and `stage_failed` (per step), `batch_progress` (as each
+extraction batch settles and each unit of a step finishes, with `stage`, `done`, `failed` and
+`total`), `delivered` and `delivery_failed` (per other destination) and `run_finished`;
+nothing per document. `events` narrows what a webhook is sent. Each is a JSON
 body with `event`, `event_id`, `run_id`, `workflow`, `status` (the API's `running`,
 then `done`, `failed` or `cancelled`; `run_finished` is `failed` only when a step
 failed, since a failed delivery has its own event) and the event's own fields (`stage`,
