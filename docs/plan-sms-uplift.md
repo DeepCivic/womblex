@@ -16,7 +16,7 @@ requirement is written there as built, in that file's conventions and numbering.
 removed from this plan in the same merge.
 
 **In scope:**
-- withheld and omitted documents recorded as atoms
+- withheld regions recorded as atoms
 - a spike on element evidence and fingerprints, with clean-up
 - a spike on statement identity across versions, with clean-up
 - the rest of the draft: location fingerprints, evidence fallback, Requirement 32 payload, records hash
@@ -40,9 +40,6 @@ removed from this plan in the same merge.
 - A merge that delivers a piece of this plan writes its requirement as built into `docs/functional_requirements.md` and removes that piece from this plan.
 
 ## Phase D — Withheld, omitted and failed documents
-
-**D2. Skipped-short documents.** (The omitted-files half is built.)
-- Enrichment's `skip_short_documents` writes one `enrichment_meta` row per skipped document with `status = skipped_short`, so the document is recorded as "not looked for". This is an additive column.
 
 **D3. Withheld regions.**
 - New sidecar `*.redaction_regions.parquet` (`source_hash`, `page`, `bbox` in PDF points converted from detection DPI, `area`), written by the in-batch path (`operations/redact.py`) and by `redact/batch.py`.
