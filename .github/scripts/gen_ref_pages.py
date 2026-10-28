@@ -9,7 +9,7 @@ from pathlib import Path
 
 import mkdocs_gen_files
 
-SRC = Path(__file__).parent.parent / "src"
+SRC = Path(__file__).parents[2] / "src"
 
 nav = mkdocs_gen_files.Nav()
 
