@@ -12,7 +12,7 @@ from womblex.cloud.dispatch import QUEUE_CONNECT_TIMEOUT
 logger = logging.getLogger(__name__)
 
 
-def store_reachable(store_uri: str) -> tuple[bool, str | None]:
+def store_reachable(store_uri: str, explicit: dict | None = None) -> tuple[bool, str | None]:
     """Whether the object store at *store_uri* answers a listing of its ``runs/`` prefix.
 
     A valid but still-empty bucket has no ``runs/`` prefix (an object store has
@@ -23,7 +23,7 @@ def store_reachable(store_uri: str) -> tuple[bool, str | None]:
     try:
         from womblex.store.remote import RemoteStore
 
-        RemoteStore.from_uri(store_uri).list_dirs("runs")
+        RemoteStore.from_uri(store_uri, explicit=explicit).list_dirs("runs")
     except Exception as e:
         logger.warning("store unreachable: %s", e)
         return False, str(e)

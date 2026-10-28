@@ -201,7 +201,7 @@ def create_api_app(
 
     @app.get("/v1/ready", response_model=Ready, tags=["ops"])
     def ready(response: Response) -> Ready:
-        store_ok, _ = store_reachable(store_uri)
+        store_ok, _ = store_reachable(store_uri, settings.store_options)
         queue_ok, _ = queue_reachable(db_dsn)
         ok = store_ok and queue_ok
         if not ok:
@@ -340,7 +340,7 @@ def create_api_app(
         with queue() as q:
             find_run(q, caller, run_id)
         try:
-            rows = readers.document_rows(store_uri, run_id, source_hash, spec)
+            rows = readers.document_rows(store_uri, run_id, source_hash, spec, settings.store_options)
         except Exception as e:
             raise HTTPException(status_code=503, detail=f"run store unreachable: {e}") from e
         if not rows:
