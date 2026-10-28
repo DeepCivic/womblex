@@ -15,6 +15,7 @@ from womblex.cli._shared import (
     apply_models_check,
     check_stage_models,
     discover_files,
+    discover_selection,
     format_eta,
 )
 from womblex.utils.model_check import SCOPE_CHUNK, SCOPE_EXTRACT
@@ -59,6 +60,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     from womblex.batch import process_batch
     from womblex.config import load_config
     from womblex.store.checkpoint import CheckpointManager
+    from womblex.store.omitted_output import write_omitted
     from womblex.store.output import ShardVerificationError, verify_shard_persistence
     from womblex.store.retention import apply_retention, generate_run_id, most_recent_run
     from womblex.store.run_stamp import RunStamp
@@ -77,7 +79,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 1
 
     try:
-        all_files = discover_files(input_root, args.limit, args.skip)
+        all_files, omitted = discover_selection(input_root, args.limit, args.skip)
     except NestedCorpusError as e:
         logger.error(str(e))
         return 1
@@ -117,6 +119,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     run_root = output_root / run_id
     shard_dir = run_root / "documents"
     shard_dir.mkdir(parents=True, exist_ok=True)
+    write_omitted(omitted, run_root)
     # Batch logs land in a `logs/` sibling of `documents/`, the same layout the
     # cloud worker publishes to the store, so `ui/readers.py` reads both by one
     # `runs/<run_id>/logs/batch-NNNN.log` convention.

@@ -68,6 +68,7 @@ ROLE_SENSITIVITY: dict[str, Sensitivity] = {
     "enrichment_meta": "none",
     "chunk_quality": "none",
     "redactions": "none",
+    "omitted": "none",
     "money_spans": "none",
     "money_columns": "none",
     "layout_regions": "none",
