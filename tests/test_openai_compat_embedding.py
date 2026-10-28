@@ -131,6 +131,15 @@ def base_url(monkeypatch):
     monkeypatch.delenv("OPENAI_COMPAT_API_KEY", raising=False)
 
 
+def test_the_deployment_is_a_built_in_found_without_importing_its_module() -> None:
+    import subprocess
+    import sys
+
+    code = "from womblex.utils.deployment_registry import known_deployments; print(known_deployments())"
+    out = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True, check=True).stdout
+    assert "openai-compatible" in out
+
+
 def test_the_deployment_is_billed_and_networked_by_default_and_conforms() -> None:
     from tests.test_deployment_registry import assert_conforms
 
