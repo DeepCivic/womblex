@@ -57,7 +57,11 @@ def _free_errors(check: Any, models: Sequence[str]) -> dict[str, Exception | Non
 
 
 def check_deployed(uses: Sequence[ModelUse], level: CheckLevel) -> list[SlotCheck]:
-    """One `SlotCheck` per use, in order, each checked through the deployment its `deployment` names."""
+    """One `SlotCheck` per use, in order, each checked through the deployment its `deployment` names.
+
+    A model its deployment does not serve is refused, naming the deployment and what it serves,
+    before any request is made for it.
+    """
     from womblex.utils.model_check import SCOPE_EMBED, CheckLevel
 
     out: dict[int, SlotCheck] = {}
@@ -72,8 +76,15 @@ def check_deployed(uses: Sequence[ModelUse], level: CheckLevel) -> list[SlotChec
             for i in indexes:
                 out[i] = _result(uses[i], level, "", start, exc)
             continue
+        served = []
+        for i in indexes:
+            if deployment.serves(_vendor(uses[i])):
+                served.append(i)
+            else:
+                out[i] = _result(uses[i], level, deployment.name, start, ValueError(
+                    f"deployment {deployment.name!r} does not serve {uses[i].name!r}; it serves: {deployment.served()}"))
         if level is CheckLevel.SMOKE and deployment.smoke is not None:
-            for i in indexes:
+            for i in served:
                 use = uses[i]
                 start = time.monotonic()
                 logger.warning(
@@ -86,10 +97,10 @@ def check_deployed(uses: Sequence[ModelUse], level: CheckLevel) -> list[SlotChec
                 except Exception as exc:
                     error = exc
                 out[i] = _result(use, level, deployment.name, start, error)
-            continue
-        errors = _free_errors(deployment.check, list(dict.fromkeys(_vendor(uses[i]) for i in indexes)))
-        for i in indexes:
-            out[i] = _result(uses[i], level, deployment.name, start, errors[_vendor(uses[i])])
+        elif served:
+            errors = _free_errors(deployment.check, list(dict.fromkeys(_vendor(uses[i]) for i in served)))
+            for i in served:
+                out[i] = _result(uses[i], level, deployment.name, start, errors[_vendor(uses[i])])
     return [out[i] for i in range(len(uses))]
 
 

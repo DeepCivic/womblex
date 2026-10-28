@@ -28,7 +28,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from womblex.store.delivery_record import delivery_key, dump_delivery, earlier_key, next_record, seq_of
-from womblex.store.remote import RemoteStore
+from womblex.store.remote import RemoteStore, scheme_problem
+from womblex.store.storage_options import resolve_options
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from womblex.cloud.workflow_store import (
@@ -49,8 +50,6 @@ DELIVERY_BACKOFF_SECONDS = 2.0
 def check_destinations(destinations: tuple[WorkflowDestination, ...]) -> list[tuple[str, str]]:
     """``(destination, problem)`` for each destination that could not be delivered to; empty when
     every one can. Opens nothing remote and sends nothing."""
-    import fsspec
-
     from womblex.cloud.workflow_store import PostgresDestination, WebhookDestination
 
     problems: list[tuple[str, str]] = []
@@ -71,11 +70,13 @@ def check_destinations(destinations: tuple[WorkflowDestination, ...]) -> list[tu
             unset = [v for v in (d.credentials.key_env, d.credentials.secret_env) if not os.environ.get(v)]
             if unset:
                 problems.append((d.name, f"environment variable(s) {', '.join(unset)} not set"))
+        try:  # a `{"env": NAME}` option unset here would fail the delivery after the run's work
+            resolve_options(d.storage_options, "storage_options")
+        except ValueError as e:
+            problems.append((d.name, str(e)))
         protocol = d.uri.split("://", 1)[0] if "://" in d.uri else "file"
-        try:
-            fsspec.get_filesystem_class(protocol)
-        except (ImportError, ValueError) as e:
-            problems.append((d.name, f"cannot write to {protocol}:// here: {e}"))
+        if problem := scheme_problem(protocol):
+            problems.append((d.name, f"cannot write to {protocol}:// here: {problem}"))
     return problems
 
 
@@ -102,7 +103,7 @@ class DeliveryOutcome:
 
 def _open(d: ObjectStoreDestination) -> RemoteStore:
     creds = (os.environ[d.credentials.key_env], os.environ[d.credentials.secret_env]) if d.credentials else None
-    return RemoteStore.from_uri(d.uri, credentials=creds)
+    return RemoteStore.from_uri(d.uri, credentials=creds, explicit=d.storage_options)
 
 
 def deliver(

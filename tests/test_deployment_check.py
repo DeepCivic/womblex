@@ -115,7 +115,7 @@ def test_sagemaker_names_the_unserved_model_and_still_passes_the_served_one(monk
     result = check_models(cfg, "load", scopes=(SCOPE_ENRICH, SCOPE_EMBED))
     assert {c.name: c.ok for c in result.checks} == {"kanon-2-enricher": True, "kanon-2-embedder": False}
     (bad,) = result.failures
-    assert "serves kanon-2-embedder" in bad.reason and bad.source == "isaacus-sagemaker"
+    assert "does not serve 'kanon-2-embedder'" in bad.reason and bad.source == "isaacus-sagemaker"
 
 
 def test_a_billed_ping_is_warned_and_an_unbilled_one_is_not(caplog) -> None:

@@ -77,6 +77,13 @@ class ChunkingConfig(StrictModel):
         ),
     )
 
+    chunking_deployment: str | None = Field(
+        default=None,
+        description="The deployment that serves chunking_model, as the slot settings' `deployment`. "
+                    "Null serves it as before: SageMaker when ISAACUS_SAGEMAKER_ENDPOINTS is set, "
+                    "else the hosted API. Needs chunking_model.",
+    )
+
     tokenizer_kwargs: dict | None = Field(
         default=None,
         description="Extra keyword arguments forwarded to the tokeniser / token "

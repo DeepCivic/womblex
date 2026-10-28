@@ -24,27 +24,61 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, cast
 
+from womblex.store.storage_options import merge_options, parse_options, resolve_options
 from womblex.utils.checksum import sha256_file
 
 logger = logging.getLogger(__name__)
 
-_REMOTE_PROTOCOLS = ("s3://", "s3a://", "gs://", "gcs://", "az://", "abfs://")
+#: Schemes that name this machine's own filesystem (or memory): no bucket, no remote service.
+_LOCAL_SCHEMES = ("file", "local", "memory")
 
 
 def is_remote_uri(uri: str) -> bool:
-    """True when *uri* names an object store (not a local/``file://`` path)."""
-    return uri.startswith(_REMOTE_PROTOCOLS)
+    """True when *uri* names a store fsspec opens by scheme (not a plain path or a ``file://`` one)."""
+    scheme, sep, _ = uri.partition("://")
+    return bool(sep) and scheme.isidentifier() and scheme not in ("file", "local")
 
 
-def storage_options_from_env(uri: str, *, credentials: tuple[str, str] | None = None) -> dict:
-    """Build fsspec storage options for *uri* from env vars.
+#: A location's own storage options, one JSON object per location (`store/storage_options.py`),
+#: applied to any URI inside the location the matching `*_URI` variable names.
+STORE_OPTIONS_ENV = "WOMBLEX_STORE_STORAGE_OPTIONS"
+INGEST_OPTIONS_ENV = "WOMBLEX_INGEST_STORAGE_OPTIONS"
+_LOCATIONS = (("WOMBLEX_STORE_URI", STORE_OPTIONS_ENV), ("WOMBLEX_INGEST_URI", INGEST_OPTIONS_ENV))
 
-    Only ``s3://`` gets explicit options: an S3 access key/secret plus an
+
+def _within(location: str, uri: str) -> bool:
+    base = location.rstrip("/")
+    return uri.rstrip("/") == base or uri.startswith(base + "/")
+
+
+def location_options_from_env(uri: str) -> dict | None:
+    """The options the environment declares for the location *uri* lies in, as written (unresolved).
+
+    ``None`` when *uri* is in neither the store nor the ingest location, or the location
+    declares none. ``ValueError`` naming the variable when its JSON is not an object.
+    """
+    for uri_env, options_env in _LOCATIONS:
+        location, raw = os.environ.get(uri_env), os.environ.get(options_env)
+        if location and raw and _within(location, uri):
+            return parse_options(raw, f"${options_env}")
+    return None
+
+
+def storage_options_from_env(
+    uri: str, *, credentials: tuple[str, str] | None = None, explicit: dict | None = None,
+) -> dict:
+    """Build fsspec storage options for *uri*: explicit options over what the environment gives.
+
+    *explicit* (a location's own options, in settings or a destination's spec), else the
+    environment's JSON for the location *uri* lies in, goes to fsspec unchanged with each
+    ``{"env": NAME}`` resolved; it wins, key by key, over the rest.
+
+    Only ``s3://`` also gets options from the S3 variables: an S3 access key/secret plus an
     endpoint override (``WOMBLEX_S3_ENDPOINT`` or ``AWS_ENDPOINT_URL``) so
     MinIO and other S3-compatible stores work without code changes. Every
-    other backend — ``gs://``, ``az://``, local — returns an empty dict and
+    other backend — ``gs://``, ``az://``, local — adds nothing here and
     authenticates via its own native mechanism (gcsfs/adlfs ambient
-    credentials); these kwargs are s3fs-shaped and would misconfigure them.
+    credentials) unless options are given; these kwargs are s3fs-shaped and would misconfigure them.
 
     *credentials*, when given as ``(key, secret)``, is an explicit override
     that wins over the environment, so a rotated key is used *moving forward*
@@ -61,6 +95,13 @@ def storage_options_from_env(uri: str, *, credentials: tuple[str, str] | None = 
     403). Leaving ``AWS_ACCESS_KEY_ID`` unset lets that signer reach the EC2
     instance role, while s3fs still gets MinIO's key explicitly here.
     """
+    declared = explicit if explicit is not None else location_options_from_env(uri)
+    given = resolve_options(declared, f"storage options for {uri}") if declared else {}
+    return merge_options(_s3_options(uri, credentials), given)
+
+
+def _s3_options(uri: str, credentials: tuple[str, str] | None) -> dict:
+    """The S3 variables as fsspec options; empty for any other scheme."""
     if not uri.startswith("s3://"):
         return {}
     endpoint = os.environ.get("WOMBLEX_S3_ENDPOINT") or os.environ.get("AWS_ENDPOINT_URL")
@@ -86,19 +127,65 @@ def storage_options_from_env(uri: str, *, credentials: tuple[str, str] | None = 
     return opts
 
 
-#: Protocols :class:`RemoteStore` can open. A URI with any other scheme is
-#: rejected before fsspec sees it — ``url_to_fs`` would otherwise try to
-#: resolve the host of e.g. ``ftp://`` during what is meant to be validation.
-SUPPORTED_PROTOCOLS = ("file", "s3", "s3a", "gs", "gcs", "az", "abfs")
+def scheme_problem(scheme: str, *, require_backend: bool = True) -> str | None:
+    """Why *scheme* cannot be opened here, or ``None`` when it can.
+
+    A scheme is usable when fsspec knows it and its backend imports in this install. One
+    fsspec knows whose backend is missing (``gs://`` without ``gcsfs``) is refused naming the
+    package; an unknown one is refused naming the usable schemes. Nothing is opened or resolved.
+    With ``require_backend=False`` only whether fsspec knows the scheme is asked, for a check
+    made on a host that need not carry what the workers do (a stored workflow's spec).
+    """
+    import fsspec
+    from fsspec.registry import known_implementations
+
+    try:
+        fsspec.get_filesystem_class(scheme)
+    except ValueError:
+        return f"scheme {scheme!r} is not one fsspec knows; usable here: {', '.join(usable_schemes())}"
+    except ImportError as e:
+        if not require_backend:
+            return None
+        known = known_implementations.get(scheme, {})
+        package = known.get("class", scheme).split(".")[0]
+        if package == "fsspec":  # a backend fsspec ships whose own dependency is missing (sftp: paramiko)
+            return f"scheme {scheme!r} cannot be opened here: {known.get('err') or e}"
+        return f"scheme {scheme!r} needs the package {package!r}, which is not installed (install it to use {scheme}://)"
+    return None
 
 
-def validate_location_uri(uri: str) -> None:
+def usable_schemes() -> list[str]:
+    """The schemes fsspec knows whose backend imports here, sorted.
+
+    A backend in its own package is asked for by name, never imported; one fsspec ships is
+    imported, since its own dependency (``paramiko`` for ``sftp``) is what may be missing.
+    """
+    from importlib.util import find_spec
+
+    import fsspec
+    from fsspec.registry import known_implementations, registry
+
+    def installed(scheme: str) -> bool:
+        package = known_implementations.get(scheme, {}).get("class", "").split(".")[0]
+        try:
+            if package and package != "fsspec":
+                return find_spec(package) is not None
+            fsspec.get_filesystem_class(scheme)
+        except Exception:  # any failure to import a backend means it is not usable here
+            return False
+        return True
+
+    return sorted({s for s in known_implementations if installed(s)} | set(registry))
+
+
+def validate_location_uri(uri: str, *, require_backend: bool = True) -> None:
     """Raise ``ValueError`` unless *uri* names a location a store can open.
 
     Catches the typos a hand-typed location actually produces — ``s3:/bucket``
-    (one slash), ``S3://bucket``, a bare ``s3://`` with no bucket, an
-    unsupported scheme. Without this, ``s3:/bucket`` parses as a *relative
-    local path* and documents land in a folder literally named ``s3:``.
+    (one slash), ``S3://bucket``, a bare ``s3://`` with no bucket — and a scheme
+    this install cannot open (:func:`scheme_problem`). Without the first, ``s3:/bucket``
+    parses as a *relative local path* and documents land in a folder literally named ``s3:``.
+    The scheme is checked on the string and the installed packages, never by resolving a host.
     """
     if not uri or not uri.strip():
         raise ValueError("location is empty")
@@ -113,12 +200,9 @@ def validate_location_uri(uri: str) -> None:
         return  # a plain local path
     if scheme != scheme.lower():
         raise ValueError(f"{uri!r} is not a usable location — the scheme must be lowercase")
-    if scheme not in SUPPORTED_PROTOCOLS:
-        raise ValueError(
-            f"{uri!r} is not a usable location — scheme {scheme!r} is not one of "
-            f"{', '.join(SUPPORTED_PROTOCOLS)}"
-        )
-    if scheme != "file" and not rest.strip("/"):
+    if problem := scheme_problem(scheme, require_backend=require_backend):
+        raise ValueError(f"{uri!r} is not a usable location — {problem}")
+    if scheme not in _LOCAL_SCHEMES and not rest.strip("/"):
         raise ValueError(f"{uri!r} names no bucket")
 
 
@@ -138,7 +222,7 @@ def store_root(uri: str) -> tuple[str, str]:
     # and so this agrees with `_path_contains`, which drops them too.
     path = "/".join(part for part in path.split("/") if part)
     protocol = fs.protocol[0] if isinstance(fs.protocol, (list, tuple)) else fs.protocol
-    if protocol in ("s3", "s3a", "gs", "gcs", "az", "abfs"):
+    if protocol not in _LOCAL_SCHEMES:
         bucket, _, prefix = path.partition("/")
         return bucket, prefix
     return "", path
@@ -214,19 +298,22 @@ class RemoteStore:
         *,
         storage_options: dict | None = None,
         credentials: tuple[str, str] | None = None,
+        explicit: dict | None = None,
     ) -> RemoteStore:
         """Open a store at *uri* (e.g. ``s3://bucket/runs`` or ``/data/runs``).
 
         *credentials* is an explicit ``(key, secret)`` S3 override that wins
         over the environment (see :func:`storage_options_from_env`) — the path
         an operator-saved credential takes. Ignored when *storage_options* is
-        passed (the caller has already built the full options dict).
+        passed (the caller has already built the full options dict). *explicit* is
+        this location's own options, layered over the environment's (see
+        :func:`storage_options_from_env`).
         """
         fsspec = _require_fsspec()
         opts = (
             storage_options
             if storage_options is not None
-            else storage_options_from_env(uri, credentials=credentials)
+            else storage_options_from_env(uri, credentials=credentials, explicit=explicit)
         )
         fs, root = fsspec.core.url_to_fs(uri, **opts)
         return cls(fs=fs, root=root.rstrip("/"))
@@ -447,12 +534,16 @@ class RemoteStore:
 
 
 __all__ = [
-    "SUPPORTED_PROTOCOLS",
+    "INGEST_OPTIONS_ENV",
+    "STORE_OPTIONS_ENV",
     "RemoteStore",
     "assert_disjoint_locations",
     "is_remote_uri",
+    "location_options_from_env",
     "same_location",
+    "scheme_problem",
     "storage_options_from_env",
     "store_root",
+    "usable_schemes",
     "validate_location_uri",
 ]

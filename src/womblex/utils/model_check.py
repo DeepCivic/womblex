@@ -32,6 +32,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from womblex.utils.deployment_check import check_deployed, check_pinging_model
+from womblex.utils.deployment_choice import choice_problems, pick_deployment
 from womblex.utils.deployment_registry import ISAACUS_DEPLOYMENTS, deployments_for
 from womblex.utils.model_registry import (
     SLOT_EMBEDDING,
@@ -245,19 +246,14 @@ def _entry_deployments(slot: str, name: str) -> tuple[str, ...]:
 
 
 def _vendor_model(slot: str, name: str) -> str:
-    """The vendor id registered for *name* in *slot*; empty where it is the name, or the name is unregistered."""
+    """The vendor id registered for *name* in *slot*; empty where it is the name, or the name is unregistered.
+
+    A slot setting that names the vendor's model itself (``embedding.provider_options.model``) wins over it.
+    """
     try:
         return resolve(slot, name).vendor_model
     except ValueError:
         return ""
-
-
-def _pick_deployment(deployments: tuple[str, ...]) -> str:
-    """The deployment a model is served by with nothing chosen: the environment's Isaacus default if it may, else the first."""
-    from womblex.providers.isaacus.deployment import default_deployment
-
-    default = default_deployment()
-    return default if default in deployments else deployments[0]
 
 
 def deployed_models(
@@ -274,19 +270,23 @@ def deployed_models(
     _register_builtins()
     wanted = enabled_scopes(config) if scopes is None else set(scopes)
     chunk_model = ai_chunking_model(config)
-    found: dict[str, tuple[str, str, list[str]]] = {}  # model -> (slot, deployment, scopes)
+    # One use per model and deployment: a model two slots put on two deployments is checked on both.
+    found: dict[tuple[str, str], tuple[str, list[str]]] = {}  # (model, deployment) -> (slot, scopes)
     vendor: dict[str, str] = {}
-    for scope, slot, model, deployments in (
-        (SCOPE_ENRICH, SLOT_ENRICHMENT, config.enrichment.model, _entry_deployments(SLOT_ENRICHMENT, config.enrichment.model)),
-        (SCOPE_CHUNK, SLOT_ENRICHMENT, chunk_model, ISAACUS_DEPLOYMENTS if chunk_model else ()),
-        (SCOPE_EMBED, SLOT_EMBEDDING, config.embedding.model, _entry_deployments(SLOT_EMBEDDING, config.embedding.model)),
+    for scope, slot, model, deployments, requested in (
+        (SCOPE_ENRICH, SLOT_ENRICHMENT, config.enrichment.model,
+         _entry_deployments(SLOT_ENRICHMENT, config.enrichment.model), config.enrichment.deployment),
+        (SCOPE_CHUNK, SLOT_ENRICHMENT, chunk_model, ISAACUS_DEPLOYMENTS if chunk_model else (),
+         config.chunking.chunking_deployment),
+        (SCOPE_EMBED, SLOT_EMBEDDING, config.embedding.model,
+         _entry_deployments(SLOT_EMBEDDING, config.embedding.model), config.embedding.deployment),
     ):
         if model and deployments and scope in wanted:
-            deployment = _pick_deployment(deployments)
-            found.setdefault(model, (ISAACUS if deployment.startswith("isaacus") else slot, deployment, []))[2].append(
-                scope)
-            vendor.setdefault(model, _vendor_model(slot, model))
-    return [ModelUse(slot, m, {}, tuple(s), deployment, vendor[m]) for m, (slot, deployment, s) in found.items()]
+            deployment = pick_deployment(deployments, requested)
+            found.setdefault((model, deployment), (ISAACUS if deployment.startswith("isaacus") else slot, []))[1].append(scope)
+            configured = config.embedding.provider_options.get("model") if scope == SCOPE_EMBED else None
+            vendor.setdefault(model, str(configured) if configured else _vendor_model(slot, model))
+    return [ModelUse(slot, m, {}, tuple(s), d, vendor[m]) for (m, d), (slot, s) in found.items()]
 
 
 def models_key(config: WomblexConfig, scope: str) -> str:
@@ -315,6 +315,7 @@ def check_registered(config: WomblexConfig) -> None:
             resolve(use.slot, use.name)
         except ValueError as exc:
             problems.append(str(exc))
+    problems += [message for _scope, _slot, _model, message in _static_problems(config)]
     if problems:
         raise ValueError("; ".join(problems))
 
@@ -473,6 +474,18 @@ def reset_model_check() -> None:
     _OFF_REQUESTED = False
 
 
+def _static_problems(config: WomblexConfig) -> list[tuple[str, str, str, str]]:
+    """Settings the registry cannot honour, read from registrations alone: a `deployment:` and an unsupported `dimensions`."""
+    from womblex.analyse.embed import capability_problems
+
+    return [*choice_problems(config), *capability_problems(config)]
+
+
+def _refused(use: ModelUse, refused: list[SlotCheck]) -> bool:
+    """Whether every scope that uses *use* has already refused its model's `deployment` setting."""
+    return set(use.scopes) <= {s for c in refused if c.name == use.name for s in c.scopes}
+
+
 def check_models(
     config: WomblexConfig,
     level: CheckLevel | str | None = None,
@@ -502,10 +515,16 @@ def check_models(
         return ModelCheckResult(chosen)
     scopes = list(scopes) if scopes is not None else None
     uses = [*configured_models(config, scopes), *deployed_models(config, scopes if isaacus_scopes is None else isaacus_scopes)]
+    wanted = enabled_scopes(config) if scopes is None else set(scopes)
+    refused = [
+        SlotCheck(slot=slot, name=model, scopes=(scope,), level=chosen, ok=False, reason=message)
+        for scope, slot, model, message in _static_problems(config) if scope in wanted
+    ]
     with suppress_use_recording(), suppress_recording():
         checks = [
+            *refused,
             *(_check_one(use, chosen) for use in uses if not use.deployment),
-            *check_deployed([u for u in uses if u.deployment], chosen),
+            *check_deployed([u for u in uses if u.deployment and not _refused(u, refused)], chosen),
         ]
     for check in checks:
         _STATE[(check.slot, check.name)] = check

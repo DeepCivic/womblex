@@ -32,7 +32,7 @@ womblex/
 │   │   ├── demo.py         # seed-demo subcommand (publish the vendored demo run)
 │   │   ├── verify.py       # verify-shards, verify-evidence, resolve-source subcommands
 │   │   └── workflow.py     # run-workflow / validate / plan / dispatch-workflow / schedule-workflow / add-to-collection / rerun-collection / remove-workflow subcommands, each over a workflow file
-│   ├── config/             # Pydantic config models (__init__: YAML loader + WomblexConfig; process.py: process-stage models)
+│   ├── config/             # Pydantic config models (__init__: YAML loader + WomblexConfig; process.py: process-stage models; models.py: the OCR, enrichment and embedding model-slot settings)
 │   ├── pipeline_order.py   # PIPELINE_ORDER — what runs when; enabled_downstream_stages(config)
 │   ├── config_tools.py     # A composed config: JSON Schema without paths, validation and YAML under a deployment's paths
 │   ├── presets.py          # Named partial configs (built-in DEFAULT-Isaacus + operator-saved): read, list, save, delete
@@ -152,6 +152,9 @@ womblex/
 │   │   ├── egress.py             # build_bundle() — export one finished run (local or in a store) store to store with its resolved raw sources, to any RemoteStore destination (contract: docs/egress.md; CLI verb `womblex egress`)
 │   │   ├── build_info.py    # BuildInfo — package version + source commit, or unavailable with a reason
 │   │   ├── run_stamp.py     # RunStamp — run id / version / commit / config digest / stage / preset (config name) / loaded models / slot models (distribution + version), as womblex.* footer keys; workflow_context → womblex.workflow_digest on a workflow step's sidecars and a scheduled firing's extraction files
+│   │   ├── storage_options.py # A location's own fsspec storage_options: env references resolved at use, secrets never as values
+│   │   ├── deployment_record.py # womblex.deployments footer key: the deployment each model ran on, plus its reader
+│   │   ├── endpoint_identity.py # A SageMaker endpoint's name and region with any AWS account id removed
 │   │   ├── content_digest.py # content_digest(elements): the manifest's determinism handle (kind / order / text / cells / fields / sheet cells / meta)
 │   │   ├── contract.py      # womblex.contract_version + womblex.sensitivity (raw / masked / none) footer keys, on every pipeline Parquet
 │   │   ├── document_versions.py # replaces / replaced_by / is_current on the run manifest — versions chained per source_relpath
@@ -220,6 +223,9 @@ womblex/
 │   │   ├── ollama/
 │   │   │   ├── ocr.py           # Local Ollama (OpenAI-compatible) OCR
 │   │   │   └── deployment.py    # The `ollama` deployment
+│   │   ├── openai_compat/
+│   │   │   ├── deployment.py    # The `openai-compatible` deployment (base URL, optional key, billed by its own setting)
+│   │   │   └── embedding.py     # OpenAI-compatible /v1/embeddings provider over httpx
 │   │   ├── _images.py           # Page-image PNG encoding shared by the OCR readers
 │   │   └── isaacus/
 │   │       ├── client.py        # Build the Isaacus SDK client (hosted API or private SageMaker)
@@ -231,6 +237,7 @@ womblex/
 │       ├── tabular_metrics.py # Tabular extraction accuracy (structural fidelity, data integrity)
 │       ├── model_check.py   # Pre-run model check: off/load/smoke per slot and scope, Isaacus connectivity at load and one warned, billed request per model at smoke, a ping per service-backed OCR model, remembered for the footer and run record
 │       ├── model_registry.py # Named model registry per slot (OCR, layout, PII context, tokeniser, spellfix dictionary): built-in names + `womblex.models.<slot>` entry-point plugins; records which entry each slot actually built, with its distribution and version
+│       ├── deployment_choice.py # Which deployment serves each model a config names; static `deployment:` refusals
 │       ├── deployment_check.py # Pre-run deployment checks: one free check per deployment, a warned billed smoke call per model
 │       ├── deployment_registry.py # Named deployment registry: env, billing, free check, smoke call, models served, client; built-ins + `womblex.deployments` entry-point plugins
 │       ├── models.py        # Local model path resolution (WOMBLEX_MODELS_DIR, _models/, models/ + HF snapshot layout) + load record with byte digests

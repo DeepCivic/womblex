@@ -415,6 +415,77 @@ API key and no egress. Three choices behind `providers/isaacus/client.py`:
 Only *API* calls move; the vendored tokeniser makes offline chunking identical
 in both deployments.
 
+### Deployments are registered once; the slot setting chooses, the environment declares (Requirement 36)
+2026-10, cloud flexibility plan, Phases A and B.
+
+- **A registry beside the model registry.** A deployment (`utils/deployment_registry.py`) is
+  where a vendor's models are called from: the variables it reads, network and billing,
+  a free check, a billed smoke call, which models it serves, how its client is built.
+  Models in any slot name the deployments that may serve them. The `isaacus` trait stays
+  and means "served by the Isaacus deployments", so a plugin written before the registry
+  keeps working. *Rejected:* a branch per vendor in each gate, which is what five modules
+  carried for Isaacus.
+- **The environment still declares the topology; the config now chooses.** The decision
+  above stands for what is deployed (`ISAACUS_SAGEMAKER_ENDPOINTS` is read where the client is
+  built). What it could not do is put one vendor's two models on two deployments, so each
+  slot takes an optional `deployment:` (AI chunking's is `chunking.chunking_deployment`).
+  Left unset, a model is served exactly as before, and a config that names none keeps its
+  `config_digest`. *Rejected:* routing a model to another deployment when its chosen one does
+  not serve it, which would bill the wrong account silently.
+- **Checked once, attributed per model.** A deployment's free check is called once with every
+  model a run uses on it; only if it fails is each model retried alone, so the failure is
+  named for its cause. A reader with `ping()` is checked on the built reader, because the
+  reader carries the run's engine options that a deployment-level check would not see.
+- **A deployment is handed vendor model ids.** Its `check`, `serves`, `smoke` and `detail`
+  take the vendor's id (`ModelEntry.vendor_model`, else the registered name), never
+  Womblex's registered names or aliases, since the endpoint spec, a Bedrock `modelId` and
+  an Ollama tag all speak the vendor's; results and the footer keep the registered name.
+  *Rejected:* the registered name everywhere, which makes every deployment, a plugin's
+  included, mirror Womblex's registry; and passing both ids, which widens every callable
+  for a value most ignore.
+- **The hosted API is recorded at the base URL it was called on.** `ISAACUS_BASE_URL`, read
+  by the SDK, is named when set, reduced to scheme, host, port and path; unset, the SDK's
+  default stays `sdk-default`. *Rejected:* `sdk-default` regardless, which misstates where
+  paid calls went; the URL verbatim, whose userinfo or query can carry a credential; and
+  spelling out the SDK's default, which Womblex does not own.
+- **Two refusals, because two hosts.** The static one (unknown deployment, a deployment the
+  model is not served by, a local model given one) reads registrations only, so
+  `POST /v1/runs` and `dispatch-workflow` can refuse on a host that carries no models. The
+  runtime one (the deployment does not serve the model in this environment) runs in the model
+  check for `run` and each worker. Both happen before launch.
+- **One client per deployment per process.** Keyed by name, so a second stage gets the first's
+  client; a later model the deployment does not serve is refused. The cache is not keyed by
+  the environment, which does not change during a run; tests clear it.
+- **The stage graph keeps `needs_isaacus_api`.** `/v1/stages` exposes it as the display answer;
+  the runtime gate is derived from the models a contract names (`requires_deployment`).
+
+### A store is whatever fsspec opens; a location carries its own options (Requirement 37)
+2026-10, cloud flexibility plan, Phase C.
+
+- **The scheme list was a second registry.** `store/remote.py` kept its own list of schemes,
+  so `gs://` was accepted and failed at first use for want of `gcsfs`, and a backend fsspec
+  already had needed an edit to Womblex. The check now asks fsspec: known and importable, else
+  refused before launch naming the package or the usable schemes. *Rejected:* adding `gcsfs` and
+  `adlfs` as dependencies, which is a dependency change for every install to serve some.
+- **Options per location, as fsspec writes them.** The run store and the ingest location are
+  often different accounts or vendors, and one set of `WOMBLEX_S3_*` variables could not serve
+  both. Each takes a JSON object passed to fsspec unchanged; Womblex adds no per-backend key
+  (an `AZURE_STORAGE_*` branch was the other way to close the Azure gap, and the next vendor
+  would have needed another). The `WOMBLEX_S3_*` then `AWS_*` variables remain as the lower layers.
+- **A secret is a name.** In settings, an environment variable or a stored workflow, a secret
+  is `{"env": "NAME"}`, resolved when the location is opened; what is shown is the name. This
+  extends the `key_env` / `secret_env` / `dsn_env` pattern a destination already used, instead
+  of adding a store. A stored workflow refuses a secret-looking option written as a value, since
+  the spec is kept. *Rejected:* a literal in the spec with a warning, which would keep the
+  secret in the system database and every export of it.
+- **The environment is matched by location.** The options variables apply to a URI inside the
+  location `WOMBLEX_STORE_URI` / `WOMBLEX_INGEST_URI` names, so the many call sites that hold
+  only a string need no change. A location given only by a flag with another URI gets none from
+  the environment; settings can carry them (`store_options`, `ingest_options`).
+- **A spec asks less than a run.** A stored workflow is validated on a host that need not carry
+  the backends its workers have, so its destinations are checked only for whether fsspec knows
+  the scheme; `check_destinations` asks where it runs, keeping the refusal code.
+
 ### Container images are built in CI and stamped with the commit they came from
 Two Dockerfiles existed that no workflow built, so a change that broke an image
 was found on deploy; and the image build context excludes `.git`, so a

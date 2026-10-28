@@ -169,16 +169,24 @@ def make_isaacus_client(*, models: Iterable[str] = ()):  # type: ignore[no-untyp
     return client_for(default_deployment(), models)
 
 
-def make_ai_chunking_client(chunking_model: str | None):  # type: ignore[no-untyped-def]
+def make_ai_chunking_client(chunking_model: str | None, deployment: str | None = None):  # type: ignore[no-untyped-def]
     """Client for semchunk's AI chunking, or ``None`` when it isn't enabled.
 
     Passed ``None``, semchunk builds its own client from ``ISAACUS_API_KEY`` —
     which an air-gapped SageMaker deployment does not have. Constructing it
-    here routes AI chunking through whichever deployment is configured.
+    here routes AI chunking through *deployment* (``chunking.chunking_deployment``),
+    else whichever deployment is configured.
     """
     if not chunking_model:
         return None
-    return make_isaacus_client(models=[chunking_model])
+    from womblex.providers.isaacus.deployment import default_deployment
+    from womblex.utils.deployment_registry import client_for
+    from womblex.utils.model_registry import record_deployment
+
+    name = deployment.strip().lower() if deployment else default_deployment()
+    client = client_for(name, [chunking_model])
+    record_deployment("chunking", chunking_model, name)
+    return client
 
 
 def make_api_client():  # type: ignore[no-untyped-def]

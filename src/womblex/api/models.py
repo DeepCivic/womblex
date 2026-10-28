@@ -290,6 +290,7 @@ class Resources(BaseModel):
     ingest: dict[str, Any]
     queue: dict[str, Any]
     isaacus: dict[str, Any]
+    deployments: list[dict[str, Any]] = []
 
 
 class Reachability(BaseModel):

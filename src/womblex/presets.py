@@ -311,7 +311,7 @@ def read_saved_presets(settings: DeploymentSettings) -> dict[str, Preset]:
     if settings.is_remote:
         from womblex.store.remote_manifest import open_store
 
-        store = open_store(str(settings.store_uri))
+        store = open_store(str(settings.store_uri), settings.store_options)
         for key in store.list_files(PRESETS_DIRNAME, "*"):
             name = preset_name_from_filename(key.rsplit("/", 1)[-1])
             if name is None:
@@ -364,7 +364,7 @@ def save_preset(
 
         from womblex.store.remote_manifest import open_store
 
-        open_store(str(settings.store_uri)).write_stream(io.BytesIO(body), f"{PRESETS_DIRNAME}/{filename}")
+        open_store(str(settings.store_uri), settings.store_options).write_stream(io.BytesIO(body), f"{PRESETS_DIRNAME}/{filename}")
     else:
         presets_dir = cast(Path, settings.presets_dir)
         presets_dir.mkdir(parents=True, exist_ok=True)
@@ -382,7 +382,7 @@ def delete_saved_preset(settings: DeploymentSettings, name: str) -> bool:
     if settings.is_remote:
         from womblex.store.remote_manifest import open_store
 
-        store = open_store(str(settings.store_uri))
+        store = open_store(str(settings.store_uri), settings.store_options)
         key = f"{PRESETS_DIRNAME}/{filename}"
         if not store.exists(key):
             return False
