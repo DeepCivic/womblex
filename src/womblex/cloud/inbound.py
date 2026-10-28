@@ -115,7 +115,7 @@ def acknowledge_delivery(
     if not (isinstance(dest, str) and is_safe_workflow_id(dest) and isinstance(seq, int) and seq >= 1):
         return refuse(400, "bad_event", "delivery_received names a `destination` and an integer `seq`")
     run = f"runs/{stored.run_id}"
-    store = RemoteStore.from_uri(settings.store_uri or "")
+    store = RemoteStore.from_uri(settings.store_uri or "", explicit=settings.store_options)
     latest = f"{run}/{delivery_key(dest)}"
     record: dict[str, Any] | None = None
     key = latest
