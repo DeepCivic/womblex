@@ -46,7 +46,7 @@ def collections_router(
             raise HTTPException(status_code=503, detail="job queue unreachable") from e
         if caller.owner is None:
             try:
-                for name in coll.store_collections(settings.store_uri):
+                for name in coll.store_collections(settings.store_uri, settings.store_options):
                     found.setdefault(name, [])
             except StoreUnreachable as e:
                 raise HTTPException(status_code=503, detail=f"run store unreachable: {e}") from e
@@ -85,7 +85,8 @@ def collections_router(
     def get_collection(name: str, caller: Caller = Depends(can_read)) -> CollectionDetail:  # noqa: B008
         workflows = feeding(caller, name)
         try:
-            documents, current, written_by = coll.collection_documents(settings.store_uri or "", name)
+            documents, current, written_by = coll.collection_documents(
+                settings.store_uri or "", name, settings.store_options)
         except StoreUnreachable as e:
             raise HTTPException(status_code=503, detail=f"run store unreachable: {e}") from e
         return CollectionDetail(name=name, workflows=sorted(w.id for w in workflows),

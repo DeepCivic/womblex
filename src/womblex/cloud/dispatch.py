@@ -382,7 +382,7 @@ def check_stage_order(
 
     paths, _ = deployment_paths(settings)
     validated = WomblexConfig(**{"dataset": {"name": "console"}, **config, "paths": paths})
-    store = RemoteStore.from_uri(settings.store_uri) if settings.store_uri else None
+    store = RemoteStore.from_uri(settings.store_uri, explicit=settings.store_options) if settings.store_uri else None
     check_dispatch_order(stages, validated, store, f"runs/{run_id}/documents")
 
 

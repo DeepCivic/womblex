@@ -159,7 +159,7 @@ def deployment_resources(settings: DeploymentSettings) -> dict[str, Any]:
 def check_store(settings: DeploymentSettings) -> tuple[bool, str | None]:
     """Whether the run source answers: a store's listing completes, or a local root is a directory."""
     if settings.is_remote:
-        return store_reachable(cast(str, settings.store_uri))
+        return store_reachable(cast(str, settings.store_uri), settings.store_options)
     root = cast(Path, settings.output_root)
     return (True, None) if root.is_dir() else (False, f"{root} is not a directory")
 
@@ -171,7 +171,7 @@ def check_ingest(settings: DeploymentSettings) -> tuple[bool, str | None]:
     try:
         from womblex.store.remote import RemoteStore
 
-        RemoteStore.from_uri(settings.ingest_uri).list_files("", "*")
+        RemoteStore.from_uri(settings.ingest_uri, explicit=settings.ingest_options).list_files("", "*")
     except Exception as e:
         logger.warning("ingest unreachable: %s", e)
         return False, str(e)
