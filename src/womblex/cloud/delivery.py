@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 
 from womblex.store.delivery_record import delivery_key, dump_delivery, earlier_key, next_record, seq_of
 from womblex.store.remote import RemoteStore, scheme_problem
+from womblex.store.storage_options import resolve_options
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from womblex.cloud.workflow_store import (
@@ -69,6 +70,10 @@ def check_destinations(destinations: tuple[WorkflowDestination, ...]) -> list[tu
             unset = [v for v in (d.credentials.key_env, d.credentials.secret_env) if not os.environ.get(v)]
             if unset:
                 problems.append((d.name, f"environment variable(s) {', '.join(unset)} not set"))
+        try:  # a `{"env": NAME}` option unset here would fail the delivery after the run's work
+            resolve_options(d.storage_options, "storage_options")
+        except ValueError as e:
+            problems.append((d.name, str(e)))
         protocol = d.uri.split("://", 1)[0] if "://" in d.uri else "file"
         if problem := scheme_problem(protocol):
             problems.append((d.name, f"cannot write to {protocol}:// here: {problem}"))

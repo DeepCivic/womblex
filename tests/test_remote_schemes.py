@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import fsspec
 import pyarrow.parquet as pq
 import pytest
 
-from tests.test_run_record import _extracted, extraction  # noqa: F401
 from tests.test_stage_runner import _config as _stage_config
 from womblex.cloud.deployment import DeploymentSettings
 from womblex.cloud.finalize import finalize_run
@@ -46,6 +44,21 @@ def test_a_scheme_whose_backend_is_missing_is_refused_naming_the_package(monkeyp
     with pytest.raises(ValueError, match="needs the package 'gcsfs', which is not installed"):
         validate_location_uri("gs://bucket/inbox")
     validate_location_uri("gs://bucket/inbox", require_backend=False)  # a spec is checked where the workers' backend need not be
+
+
+def test_a_backend_fsspec_ships_whose_dependency_is_missing_is_refused_naming_the_dependency(monkeypatch) -> None:
+    real = fsspec.get_filesystem_class
+
+    def get(scheme: str):
+        if scheme == "sftp":
+            raise ImportError("No module named 'paramiko'")
+        return real(scheme)
+
+    monkeypatch.setattr(fsspec, "get_filesystem_class", get)
+    with pytest.raises(ValueError, match="cannot be opened here: .*paramiko") as refused:
+        validate_location_uri("sftp://host/inbox")
+    assert "'fsspec'" not in str(refused.value)  # fsspec is installed; its backend's dependency is not
+    assert "sftp" not in usable_schemes() and "memory" in usable_schemes()
 
 
 def test_an_unknown_scheme_is_refused_naming_the_usable_ones() -> None:
@@ -92,13 +105,23 @@ def test_a_destination_on_a_scheme_nothing_here_opens_is_refused_before_any_step
     assert name == "archive" and "cannot write to nosuchscheme:// here: scheme 'nosuchscheme' is not one fsspec knows" in problem
 
 
-def test_extract_chunk_finalize_and_egress_over_memory_with_no_womblex_edit(tmp_path: Path, extraction) -> None:  # noqa: F811
-    store = RemoteStore.from_uri("memory://womblex-c1")
-    local = _extracted(tmp_path, extraction)
-    for path in sorted(local.glob("batch-0001*.parquet")):
-        store.upload_file(path, f"run-A/documents/{path.name}")
+def test_extract_chunk_finalize_and_egress_over_memory_with_no_womblex_edit() -> None:
+    """The fleet's own extraction step reads the ingest location and publishes to the store, both `memory://`."""
+    from tests._synthetic import BUDGET_DOCX
+    from womblex.cloud import workflows
 
-    summary = run_stage_remote(STAGE_CONTRACTS["chunk"], store, "run-A/documents", _stage_config())
+    ingest, store = RemoteStore.from_uri("memory://womblex-c1-in"), RemoteStore.from_uri("memory://womblex-c1")
+    ingest.upload_file(BUDGET_DOCX, "docs/budget.docx")
+    config = _stage_config()
+    workflows.set_context(workflows.WorkerContext(config=config, store=store, ingest=ingest,
+                                                  ingest_root="memory://womblex-c1-in"))
+    try:
+        published = workflows._extract("run-A", 1, ["docs/budget.docx"], "run-A/documents", "memory://womblex-c1-in")
+    finally:
+        workflows.set_context(None)
+    assert "run-A/documents/batch-0001.elements.parquet" in published
+
+    summary = run_stage_remote(STAGE_CONTRACTS["chunk"], store, "run-A/documents", config)
     assert (summary.failed, summary.processed) == (0, 1) and summary.error is None
     assert store.exists("run-A/documents/batch-0001.chunks.parquet")
 
@@ -106,10 +129,10 @@ def test_extract_chunk_finalize_and_egress_over_memory_with_no_womblex_edit(tmp_
     assert finalized is not None and store.exists("run-A/manifest.parquet")
 
     destination = RemoteStore.from_uri("memory://womblex-c1-bundle")
-    result = build_bundle("memory://womblex-c1/run-A", destination, run_id="run-A", include_sources=False)
-    assert destination.exists("run-A/egress_manifest.json")
+    result = build_bundle("memory://womblex-c1/run-A", destination, run_id="run-A")
     descriptor = json.loads(destination.read_text("run-A/egress_manifest.json"))
-    assert descriptor["run_id"] == "run-A" and (result.documents, result.sources_copied) == (1, 0)
+    assert descriptor["run_id"] == "run-A" and (result.documents, result.sources_copied) == (1, 1)
     assert destination.exists("run-A/corpus/batch-0001.chunks.parquet")
+    assert len(destination.find("run-A/sources")) == 1  # the source fetched back from the memory:// ingest location
     with destination.fs.open(destination._full("run-A/corpus/manifest.parquet"), "rb") as handle:
         assert pq.read_table(handle).num_rows >= 1
