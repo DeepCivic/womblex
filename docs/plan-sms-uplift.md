@@ -1,6 +1,6 @@
 # SMS uplift — plan
 
-*Status: Phases A (collections) and B (inbound webhooks) are built (Requirements 34 and 35); C to G are proposed and may follow later. A piece is removed from this plan when it is built, and this document is deleted when its last phase lands.*
+*Status: Phases C to G are proposed and may follow later. Collections and inbound webhooks, which came first, are built and recorded as Requirements 34 and 35 in `docs/functional_requirements.md`. A piece is removed from this plan when it is built, and this document is deleted when its last phase lands.*
 
 ## Context
 
@@ -8,17 +8,14 @@ SMS-validate reads Womblex output and assigns kinds itself. Womblex's job is to 
 general-purpose atoms, and to give other systems enough capability to manage data
 around it. Womblex does not become a warehouse. No SMS-named stage goes in Womblex.
 
-**Priority:** collections (Requirement 34) and inbound webhooks (Requirement 35) came first and are built.
-Everything after them can be delayed without leaving the tree half-built.
+**Priority:** each phase can be delayed without leaving the tree half-built.
 
-**Requirement numbers:** Requirements 30 to 35 are working labels for this plan only.
-`docs/functional_requirements.md` stops at Requirement 29. As each piece is delivered, its
+**Requirement numbers:** Requirements 30 to 33 are working labels for this plan only.
+`docs/functional_requirements.md` holds none of them yet. As each piece is delivered, its
 requirement is written there as built, in that file's conventions and numbering. The piece is then
 removed from this plan in the same merge.
 
 **In scope:**
-- collections
-- inbound webhooks
 - progress webhooks
 - write-time timestamps
 - withheld and omitted documents recorded as atoms
@@ -44,26 +41,6 @@ removed from this plan in the same merge.
 - A new module lands in the CLAUDE.md table, `docs/architecture.md` and `docs/project-structure.md`
   in the same merge (`tests/test_doc_currency.py`).
 - A merge that delivers a piece of this plan writes its requirement as built into `docs/functional_requirements.md` and removes that piece from this plan.
-
-## Phase A — Collections (Requirement 34)
-
-Design: **a collection is a long-lived run whose id is the collection name.** This reuses
-existing machinery as-is:
-- `fire_workflow` adds new and changed documents, deduplicated by fingerprint and content hash, and keeps earlier versions
-- `next_batch_num` numbers new batches after the run's last
-- finalize consolidates the run manifest
-
-The only identity change is that the run id stops being the workflow name. That change is built (Requirement 34): a workflow's `collection` names its run, and the schedule context carries the run id.
-
-Items A1 to A6, including A2a, are built (Requirement 34). One question is open: the plan
-says a workflow's owner is the API caller that stored it, but the CLI stores none and the API
-routes do not create workflows, so nothing yet stores a workflow under a non-admin owner and
-only an admin sees collections until that is settled (`docs/decisions-operations.md`, "Acting on
-a collection through the API").
-
-## Phase B — Inbound webhooks (Requirement 35)
-
-Items B1 to B3 are built (Requirement 35).
 
 ## Phase C — Progress events and timestamps
 
@@ -92,7 +69,7 @@ Items B1 to B3 are built (Requirement 35).
 
 **D1. Failed documents get manifest rows.**
 - `operations/persist.py` and `cli/pipeline.py` pass errored results through, so the existing `status: error` branch is finally reached.
-- A source that can't be read is recorded as failed. Its `source_hash` is SHA-256 over `unreadable:` + `source_relpath` + `:` + the batch number, so join keys are never empty and an unreadable file in two firings of one collection gets two distinct hashes (A5). This replaces the empty string `_source_hash` returns today.
+- A source that can't be read is recorded as failed. Its `source_hash` is SHA-256 over `unreadable:` + `source_relpath` + `:` + the batch number, so join keys are never empty and an unreadable file in two firings of one collection gets two distinct hashes in its version chain (Requirement 34). This replaces the empty string `_source_hash` returns today.
 - The row's `extraction_method` is `unreadable`. A row that failed after its bytes were read keeps its file-bytes hash and its method, so `status: error` alone does not mark this case.
 - Hash basis (`store/source_resolver.py`):
   - add `HASH_BASIS_UNREADABLE`. `hash_basis_for` maps `extraction_method == "unreadable"` to it, the way `_RECORD_METHODS` maps to `record_id+text`; today it would read as `file_bytes`
@@ -153,6 +130,5 @@ A docs-only merge per CLAUDE.md "Stocktake":
 
 - `uv run ruff check src/ tests/` && `uv run mypy src/` && `uv run python -m pytest tests/ -v -m "not benchmark"`
 - `git diff --stat $(git merge-base HEAD origin/main)..HEAD` ≤500 lines; `wc -l` on every touched file.
-- **A and B:** built; each requirement's **Verification** line (34 and 35 in `functional_requirements.md`) names its tests. One check waits on D1: an unreadable file in two firings gives two distinct `source_hash`es in one chain.
 - **C:** the `test_webhook.py` receiver sees `stage_started` and `batch_progress` with counts summing to the total. The `events` filter drops them.
-- **D:** a fixture with an unreadable file, an unsupported file and a redacted PDF gives an error manifest row (`extraction_method` `unreadable`, which `SourceResolver` declines as `unsupported_basis`), an `omitted.parquet` row and region rows with page and bbox.
+- **D:** a fixture with an unreadable file, an unsupported file and a redacted PDF gives an error manifest row (`extraction_method` `unreadable`, which `SourceResolver` declines as `unsupported_basis`), an `omitted.parquet` row and region rows with page and bbox. An unreadable file in two firings of one collection gives two distinct `source_hash`es in one chain.
