@@ -13,9 +13,18 @@ from collections.abc import Mapping
 
 from womblex.store.source_provenance import NAMESPACE
 from womblex.utils.deployment_registry import distribution_version, resolve
+from womblex.utils.model_registry import resolve as resolve_model
 from womblex.utils.model_registry import used_deployments
 
 DEPLOYMENTS_KEY = f"{NAMESPACE}.deployments"
+
+
+def _vendor_id(slot: str, name: str) -> str:
+    """The id a deployment knows *name* by; AI chunking's model (slot ``chunking``) is already one."""
+    try:
+        return resolve_model(slot, name).vendor_model or name
+    except ValueError:
+        return name
 
 
 def deployments_payload() -> list[dict[str, str]]:
@@ -29,7 +38,7 @@ def deployments_payload() -> list[dict[str, str]]:
             out.append(entry)
             continue
         dist, version = distribution_version(registered)
-        out.append({**entry, "distribution": dist, "version": version, **registered.detail(name)})
+        out.append({**entry, "distribution": dist, "version": version, **registered.detail(_vendor_id(slot, name))})
     return out
 
 
