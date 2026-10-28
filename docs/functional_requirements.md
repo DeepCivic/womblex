@@ -286,7 +286,7 @@ Terms the requirements use, as the code defines them.
 
 - Womblex owns, for every provider alike: packing requests to the provider's declared limits (texts per request, token ceiling, the provider's own token counter), sending each table's markdown as its own text beside the narrative, splitting a text only when it exceeds the provider's declared ceiling, offset-merging the parts, the entity, edge and metadata sidecars, evidence references, and the mention-to-chunk links.
 - Retries, back-off and fitting long input to the model are the provider adapter's concern; Womblex adds none of its own around a provider.
-- A request that still fails is recorded against its documents, and the rest of the stage continues.
+- A request that still fails is recorded against its documents, and the rest of the stage continues. A document whose narrative is under `enrichment.skip_short_documents` is not sent and is recorded in `enrichment_meta` with `status: skipped_short`, so it reads as not looked for rather than as having no entities.
 - The provider's entities and relationships are written as returned. Womblex does not build or alter the provider's graph; the mention-to-chunk link layer is the one part Womblex derives, from character offsets, for any provider.
 - Graph refresh writes its links to a sidecar of its own, which records the chunk version it linked against, and never rewrites earlier stages' files.
 - Readers can tell when refreshed links no longer match the current chunks, and use the matching links wherever they exist.
