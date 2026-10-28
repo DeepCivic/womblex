@@ -13,7 +13,7 @@ import logging
 from pathlib import Path
 
 from womblex.cli._shared import Command
-from womblex.utils.isaacus_client import make_isaacus_client
+from womblex.providers.isaacus.client import make_isaacus_client
 
 logger = logging.getLogger("womblex")
 

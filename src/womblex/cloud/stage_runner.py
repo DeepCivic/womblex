@@ -645,7 +645,7 @@ def prepare_stage_context(contract: StageContract, config: WomblexConfig) -> Run
 
     ctx = RunContext()
     if contract.needs_client and contract.requires_isaacus_api(config):
-        from womblex.utils.isaacus_client import make_isaacus_client
+        from womblex.providers.isaacus.client import make_isaacus_client
 
         try:
             ctx.client = make_isaacus_client(models=contract.models(config))

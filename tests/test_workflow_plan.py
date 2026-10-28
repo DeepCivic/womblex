@@ -27,7 +27,7 @@ def _no_paid_path(monkeypatch: pytest.MonkeyPatch) -> None:
     def boom(*_a, **_k):
         raise AssertionError("plan reached a paid or model-probing path")
 
-    monkeypatch.setattr("womblex.utils.isaacus_client.make_isaacus_client", boom)
+    monkeypatch.setattr("womblex.providers.isaacus.client.make_isaacus_client", boom)
     monkeypatch.setattr("womblex.utils.model_check.check_models", boom)
 
 

@@ -10,8 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from womblex.utils.availability import isaacus_available
-from womblex.utils.isaacus_client import (
+from womblex.providers.isaacus.client import (
     ENDPOINTS_ENV,
     PROFILE_ENV,
     REGION_ENV,
@@ -23,6 +22,7 @@ from womblex.utils.isaacus_client import (
     sagemaker_configured,
     unserved_models,
 )
+from womblex.utils.availability import isaacus_available
 
 # ---------------------------------------------------------------------------
 # Spec parsing
@@ -112,7 +112,7 @@ def test_hosted_api_client_strips_a_pasted_key(monkeypatch):
     """The whitespace strip moved modules with the factory — a trailing newline
     otherwise reaches httpx as an illegal header value."""
     pytest.importorskip("isaacus")
-    from womblex.utils.isaacus_client import make_isaacus_client
+    from womblex.providers.isaacus.client import make_isaacus_client
 
     monkeypatch.delenv(ENDPOINTS_ENV, raising=False)
     # Deliberately not key-shaped. The strip is what is under test, and a value
@@ -126,7 +126,7 @@ def test_hosted_api_client_strips_a_pasted_key(monkeypatch):
 def test_sagemaker_client_rejects_undeployed_model(monkeypatch):
     pytest.importorskip("isaacus")
     pytest.importorskip("isaacus_sagemaker")
-    from womblex.utils.isaacus_client import make_isaacus_client
+    from womblex.providers.isaacus.client import make_isaacus_client
 
     monkeypatch.setenv(ENDPOINTS_ENV, "embed-001=kanon-2-embedder")
     monkeypatch.setenv(REGION_ENV, "ap-southeast-2")
@@ -138,7 +138,7 @@ def test_sagemaker_client_builds_without_api_key(monkeypatch):
     """The integration signs with AWS credentials; no Isaacus key is involved."""
     pytest.importorskip("isaacus")
     pytest.importorskip("isaacus_sagemaker")
-    from womblex.utils.isaacus_client import make_isaacus_client
+    from womblex.providers.isaacus.client import make_isaacus_client
 
     monkeypatch.delenv("ISAACUS_API_KEY", raising=False)
     monkeypatch.delenv(PROFILE_ENV, raising=False)
@@ -154,7 +154,7 @@ def test_sagemaker_client_requires_a_resolvable_region(monkeypatch):
     """A missing region otherwise surfaces as a bare AssertionError per request."""
     pytest.importorskip("isaacus")
     pytest.importorskip("isaacus_sagemaker")
-    from womblex.utils.isaacus_client import make_isaacus_client
+    from womblex.providers.isaacus.client import make_isaacus_client
 
     monkeypatch.setenv(ENDPOINTS_ENV, "universal-001")
     monkeypatch.delenv(REGION_ENV, raising=False)
@@ -168,3 +168,12 @@ class _NoRegionSession:
     """Stands in for an AWS session with no region configured anywhere."""
 
     region_name = None
+
+
+def test_the_old_import_path_re_exports_the_client():
+    """`utils/isaacus_client` is the same objects as the provider package's, not a copy."""
+    from womblex.providers.isaacus import client
+    from womblex.utils import isaacus_client as old
+
+    for name in old.__all__:
+        assert getattr(old, name) is getattr(client, name)

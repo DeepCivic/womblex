@@ -430,7 +430,7 @@ def isaacus_provider(
     config: EnrichmentConfig, client: object, token_counter: TokenCounter | None = None,
 ) -> IsaacusEnrichment:
     """The Isaacus provider; *client* may be `None` where only the limits are read (`plan`)."""
-    from womblex.utils.isaacus_client import with_retries
+    from womblex.providers.isaacus.client import with_retries
     from womblex.utils.token_packer import TokenCounter
 
     return IsaacusEnrichment(with_retries(client, config.max_retries), config, ProviderLimits(
