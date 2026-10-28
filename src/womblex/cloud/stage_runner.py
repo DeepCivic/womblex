@@ -623,15 +623,15 @@ def prepare_stage_context(contract: StageContract, config: WomblexConfig) -> Run
             raise StagePreconditionError(f"{contract.name} preflight failed: {e}") from e
 
     if contract.requires_deployment(config):
-        from womblex.utils.availability import isaacus_available
+        from womblex.utils.deployment_check import unconfigured
+        from womblex.utils.model_check import deployed_models
 
         # Cheap and network-free, so it runs before the model check's own
-        # Isaacus probe — a deployment that is not configured at all should
-        # fail with this message, not with the probe's raw SDK error.
-        if not isaacus_available():
+        # probe — a deployment that is not configured at all should fail
+        # with this message, not with the probe's raw SDK error.
+        if missing := unconfigured(deployed_models(config, [contract.name])):
             raise StagePreconditionError(
-                f"{contract.name} needs Isaacus (isaacus SDK + ISAACUS_API_KEY, or "
-                "ISAACUS_SAGEMAKER_ENDPOINTS for a private deployment); none is "
+                f"{contract.name} needs {'; '.join(missing)}; none is "
                 "resolvable. Refusing to run rather than publishing nothing."
             )
 
