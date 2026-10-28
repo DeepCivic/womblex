@@ -53,7 +53,9 @@ dependencies = [
     "pillow>=10.0",
     "rapidocr-onnxruntime>=1.4",
     "onnxruntime>=1.20",
-    "opencv-python-headless",
+    # OpenCV 5 changed HoughLinesP's output layout and broke every OCR
+    # extraction, so a major moves only by hand.
+    "opencv-python-headless<6",
     "semchunk>=4.0",
     "pandas>=2.0",
     "openpyxl",
