@@ -120,6 +120,15 @@ def test_two_models_of_one_vendor_can_run_on_two_deployments(monkeypatch) -> Non
     assert result.ok and {c.source for c in result.checks} == {"isaacus-api", "isaacus-sagemaker"}
 
 
+def test_one_model_two_slots_put_on_two_deployments_is_checked_on_both(monkeypatch) -> None:
+    monkeypatch.setenv("ISAACUS_SAGEMAKER_ENDPOINTS", "e-001")
+    config = _config(enrichment={"enabled": True, "deployment": "isaacus-api"},
+                     chunking={"chunking_model": "kanon-2-enricher", "chunking_deployment": "isaacus-sagemaker"})
+    uses = {(u.name, u.deployment): u.scopes for u in model_check.deployed_models(config, (SCOPE_ENRICH, SCOPE_CHUNK))}
+    assert uses == {("kanon-2-enricher", "isaacus-api"): (SCOPE_ENRICH,),
+                    ("kanon-2-enricher", "isaacus-sagemaker"): (SCOPE_CHUNK,)}
+
+
 def test_each_deployment_gets_its_own_client(monkeypatch) -> None:
     made: list[str] = []
     monkeypatch.setenv("ISAACUS_SAGEMAKER_ENDPOINTS", "e-001")
