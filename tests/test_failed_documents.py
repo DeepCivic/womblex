@@ -139,3 +139,28 @@ def test_egress_reports_an_unreadable_row_unsupported_with_nothing_under_sources
     outcome = StoreSources(manifest, None).copy(_rows(shards)["vanished.pdf"]["source_hash"], object(), "prefix")  # type: ignore[arg-type]
 
     assert (outcome.status, outcome.raw_key) == (UNSUPPORTED_BASIS, None)
+
+
+@pytest.mark.parametrize("stage", ["normalise", "spellfix", "money", "enrich", "pii"])
+def test_no_downstream_stage_trips_over_a_shard_holding_failed_rows(corpus: Path, tmp_path: Path, stage: str):
+    from womblex.analyse.enrich_stage import enrich_shards
+    from womblex.config import EnrichmentConfig, MoneyConfig, NormaliseConfig, PIIConfig, SpellfixConfig
+    from womblex.pii.pii_stage import pii_shards
+    from womblex.process.money_stage import money_shards
+    from womblex.process.normalise_stage import normalise_shards
+    from womblex.process.spellfix_stage import spellfix_shards
+
+    shards = tmp_path / "documents"
+    _batch(corpus, shards, 1, tmp_path)
+    runs = {
+        "normalise": lambda: normalise_shards(shards, NormaliseConfig()),
+        "spellfix": lambda: spellfix_shards(shards, SpellfixConfig()),
+        "money": lambda: money_shards(shards, MoneyConfig()),
+        # Every narrative is under the minimum, so no request is made: the stage must still land.
+        "enrich": lambda: enrich_shards(
+            shards, EnrichmentConfig(skip_short_documents=10**9, include_tables=False), client=object()),
+        "pii": lambda: (chunk_shards(shards, ChunkingConfig(chunk_size=64), text_source="elements"),
+                        pii_shards(shards, PIIConfig(use_regex_backstop=False)))[1],  # pii reads chunks
+    }
+
+    assert runs[stage]().batches_written == 1
