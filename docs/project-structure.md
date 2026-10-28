@@ -72,6 +72,7 @@ womblex/
 │   │   ├── paddle_ocr.py        # PaddleOCR wrapper via rapidocr-onnxruntime (det/rec/cls)
 │   │   ├── layout_step.py       # The batch's one layout step — page selection, one analyser call per page, normalised regions on ExtractionResult
 │   │   ├── layout_onnx.py       # PPDocLayoutAnalyzer — PP-DocLayout-M layout detection (onnxruntime; registered default `pp-doclayout-m`)
+│   │   ├── llm_ocr.py           # Re-export of the OCR readers in providers/, for one release
 │   │   ├── spreadsheet.py       # CSV/Excel extraction — one ExtractionResult per workbook with cells as elements
 │   │   ├── gnaf.py              # G-NAF PSV → Parquet ingest (standalone)
 │   │   ├── gnaf_schema.py       # G-NAF table schemas — static column definitions

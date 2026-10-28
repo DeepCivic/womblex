@@ -1,6 +1,6 @@
 # Cloud flexibility — plan
 
-*Status: proposed; nothing is built. A piece is removed from this plan when it is built, and this document is deleted when its last phase lands.*
+*Status: Phase A (the provider packages) is built; Phases B to F are proposed. A piece is removed from this plan when it is built, and this document is deleted when its last phase lands.*
 
 ## Context
 
@@ -154,20 +154,6 @@ merge.
 - Isaacus remains the default; with nothing configured, outputs are unchanged.
 
 **Verification:** the embedding conformance test passes for it with a mocked transport; a live test skips without its endpoint, like the Isaacus ones.
-
-## Phase A — Provider packages (Requirement 38, mechanical)
-
-Lands first so every later merge writes into the new layout. No behaviour change.
-
-**A1. Isaacus package.**
-- `utils/isaacus_client.py` → `providers/isaacus/client.py` (a rename; the old path re-exports).
-- `IsaacusEnrichment` and its factory out of `analyse/enrich.py` → `providers/isaacus/enrichment.py`; `IsaacusEmbedding` out of `analyse/embed.py` → `providers/isaacus/embedding.py`. The provider protocols, limits and `make_*_provider` stay in `analyse/`.
-- Registration still happens on import of `analyse/enrich.py` / `analyse/embed.py`, which import the adapters, so nothing that resolves a model changes.
-- One `providers/` row in the CLAUDE.md table.
-
-**A2. OCR engines.**
-- A2a: `ingest/llm_ocr.py` → `providers/bedrock/ocr.py` as a rename, the old path re-exporting. Remove `ingest/llm_ocr.py` from `UNLISTED` in `tests/test_doc_currency.py`.
-- A2b: the Ollama reader out of it → `providers/ollama/ocr.py`. `ingest/paddle_ocr.py` keeps the registrations, importing from the new modules.
 
 ## Phase B — Deployment registry (Requirement 36)
 
