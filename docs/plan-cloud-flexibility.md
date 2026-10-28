@@ -1,6 +1,6 @@
 # Cloud flexibility — plan
 
-*Status: Phases A to C are built (the provider packages, Requirement 36 deployments registered once, and Requirement 37 object stores as fsspec opens them); Phases D to F are proposed. A piece is removed from this plan when it is built, and this document is deleted when its last phase lands.*
+*Status: Phases A to D are built (the provider packages, Requirement 36 deployments registered once, Requirement 37 object stores as fsspec opens them, and Requirement 38 the checked provider checklist); Phases E and F are proposed. A piece is removed from this plan when it is built, and this document is deleted when its last phase lands.*
 
 ## Context
 
@@ -23,8 +23,8 @@ plugin package (Requirement 24). The weight is elsewhere:
 - **Documentation steps are remembered, not checked.** A billed model's `docs/models.md` entry
   and **Paid:** line rely on the author.
 
-**Requirement numbers:** Requirements 38 and 39 are working labels for this plan only.
-`docs/functional_requirements.md` stops at Requirement 37. As each requirement is delivered, it
+**Requirement numbers:** Requirement 39 is a working label for this plan only.
+`docs/functional_requirements.md` stops at Requirement 38. As each requirement is delivered, it
 is written there as built, in that file's conventions, and removed from this plan in the same
 merge.
 
@@ -57,28 +57,6 @@ merge.
 
 ## Requirements (working drafts)
 
-### 38. Adding a Provider Is a Bounded Change
-
-**As** a contributor adding a model, deployment or storage backend,
-**I want** one checklist whose documentation steps the suite checks,
-**so that** the cost of a new option is its adapter and its test, not a search across the docs.
-
-**Given** a new built-in or plugin provider
-**When** it is added
-**Then** the checklist names every file it touches, and the suite fails on any step left out.
-
-**Acceptance criteria:**
-
-- The model-plugin guide (Requirement 24) carries the checklist for a built-in and for a plugin: the deployment (Requirement 36), if new; its model registrations; conformance tests; one `docs/models.md` entry per model; one CHANGELOG line.
-- One plugin package can register a deployment and models in several slots, and installing it makes all of them selectable.
-- A built-in vendor lives in its own package under `providers/` (its client module beside one adapter module per slot), and the module table covers `providers/` in one row, so a new vendor adds no row.
-- A model on a billed deployment with no `docs/models.md` entry under its canonical name, or whose slot's requirement has no **Paid:** line naming it, fails the suite.
-- Each slot's conformance test runs against every model registered in it, and the deployment conformance test against every registered deployment, so a new built-in is tested by registering it.
-- The current import paths of the moved adapters (`ingest/llm_ocr.py`, the Isaacus adapters in `analyse/enrich.py` and `analyse/embed.py`, `utils/isaacus_client.py`) re-export for one release, and the CHANGELOG names the release that removes them.
-- A womblex-benchmark pair is needed only when `SLOTS` or `DEFAULT_MODELS` change; a new non-default model needs none.
-
-**Verification:** a fixture plugin under `tests/` registering one deployment and models in two slots touches only its own module and test, and every conformance test picks it up; `tests/test_doc_currency.py` fails for a billed model missing from `docs/models.md`.
-
 ### 39. A Second Embedding Provider
 
 **Paid:** Adds one paid call when pointed at a hosted vendor: that vendor's embedding model, billed per request, called only when `embedding.model` names it. Pointed at a self-hosted server marked unbilled (Requirement 36), nothing is billed.
@@ -103,16 +81,6 @@ merge.
 
 **Verification:** the embedding conformance test passes for it with a mocked transport; a live test skips without its endpoint, like the Isaacus ones.
 
-## Phase D — Checked documentation steps (Requirement 38)
-
-**D1. The checks and the checklist.**
-- A test fails for a model on a billed deployment with no `docs/models.md` entry under its canonical name, or no **Paid:** line naming it in its slot's requirement.
-- Each slot's conformance test parametrised over every registered model.
-- A fixture plugin under `tests/` registering one deployment and models in two slots.
-- The checklist in `docs/model-plugins.md`.
-- The CHANGELOG names the release that removes the re-exports of the moved paths (`utils/isaacus_client.py`, `ingest/llm_ocr.py`, and the Isaacus adapters in `analyse/enrich.py` and `analyse/embed.py`).
-- Delivers Requirement 38.
-
 ## Phase E — OpenAI-compatible embedding (Requirement 39)
 
 **E1. Embedding roles and capabilities.**
@@ -132,5 +100,4 @@ Stocktake section. This plan is deleted in it.
 
 ## Order
 
-D → E. D's conformance and paid checks need the deployments built in Phase B;
-E needs those deployments and D's conformance tests.
+E needs the deployments (built) and the conformance tests (built), then F.
