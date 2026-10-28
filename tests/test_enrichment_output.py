@@ -297,8 +297,8 @@ class TestJoinKeyName:
     """
 
     # The register ingests bypass the NLP pipeline, hash no source document and
-    # have no source_hash to carry — the one schema outside the convention.
-    EXEMPT: ClassVar[set[str]] = {"REGISTER_MANIFEST_SCHEMA"}
+    # have no source_hash to carry. `omitted.parquet` names files nothing read, so it has none either.
+    EXEMPT: ClassVar[set[str]] = {"REGISTER_MANIFEST_SCHEMA", "OMITTED_SCHEMA"}
 
     def _store_schemas(self) -> dict[str, pa.Schema]:
         import importlib
