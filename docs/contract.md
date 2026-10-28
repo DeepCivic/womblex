@@ -21,6 +21,13 @@ alone.
 A file with no `contract_version` key was written before the contract existed
 and is read as `1.0`-compatible.
 
+`womblex.written_at` (UTC, to the second) rides beside it. It is a footer key and
+never a column, so it is not a schema change and the version is not bumped. It is
+part of the file's bytes: a rewrite of unchanged rows changes the file's checksum,
+so a published checksum records what was published and is not stable across reruns.
+To compare two files, compare their rows and footers without this key; determinism
+is the manifest's `content_digest`, which never covers a footer.
+
 ## Files, join keys and sensitivity
 
 `womblex.sensitivity` is set per file role (`store/contract.ROLE_SENSITIVITY`,

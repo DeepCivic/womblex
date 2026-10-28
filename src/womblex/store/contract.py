@@ -1,6 +1,6 @@
 """Which contract a file was written under, and how sensitive its content is.
 
-Two footer keys ride on every pipeline Parquet, whether or not the run can be
+Three footer keys ride on every pipeline Parquet, whether or not the run can be
 named (unlike the run stamp, which is written only for a run that can):
 
 - ``womblex.contract_version`` — the on-disk contract the file conforms to.
@@ -13,6 +13,11 @@ named (unlike the run stamp, which is written only for a run that can):
   every role. A role this module does not know reads as ``raw``: an
   unclassified file is treated as the sensitive kind, never the safe one.
 
+- ``womblex.written_at`` — when the file was written (UTC, to the second). A
+  footer key and never a column, so rows and ``content_digest`` do not change;
+  but it is part of the file's bytes, so two writes of the same rows differ in
+  their checksum. Compare rows and footers minus this key to compare content.
+
 ``none`` is a claim about text, not about derivation: embeddings are computed
 from unmasked chunks and are labelled ``none`` because they carry no text.
 """
@@ -20,6 +25,7 @@ from unmasked chunks and are labelled ``none`` because they carry no text.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
@@ -28,6 +34,7 @@ from womblex.store.source_provenance import NAMESPACE
 CONTRACT_VERSION = "3.1"
 CONTRACT_VERSION_KEY = f"{NAMESPACE}.contract_version"
 SENSITIVITY_KEY = f"{NAMESPACE}.sensitivity"
+WRITTEN_AT_KEY = f"{NAMESPACE}.written_at"
 
 Sensitivity = Literal["raw", "masked", "none"]
 
@@ -83,6 +90,7 @@ def contract_footer(path: Path, *, role: str | None = None) -> dict[bytes, bytes
     return {
         CONTRACT_VERSION_KEY.encode(): CONTRACT_VERSION.encode(),
         SENSITIVITY_KEY.encode(): sensitivity_for(role or role_of(path)).encode(),
+        WRITTEN_AT_KEY.encode(): datetime.now(UTC).isoformat(timespec="seconds").encode(),
     }
 
 
@@ -99,6 +107,7 @@ __all__ = [
     "CONTRACT_VERSION_KEY",
     "ROLE_SENSITIVITY",
     "SENSITIVITY_KEY",
+    "WRITTEN_AT_KEY",
     "Sensitivity",
     "contract_footer",
     "read_footer_contract",

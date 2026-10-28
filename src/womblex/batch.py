@@ -67,7 +67,8 @@ def process_batch(
     and the other downstream stages are ``run-stage`` contracts and are never
     run here — so ``config.chunking.enabled`` / ``config.pii.enabled`` mean
     "this stage is in the pipeline", not "run it inside extraction". A worker
-    fed the same config produces byte-identical shards. Returns a
+    fed the same config produces identical shards, aside from the write time
+    (``womblex.written_at``) their footers carry. Returns a
     :class:`BatchOutcome`; the caller decides how to verify, checkpoint, or
     publish.
 
