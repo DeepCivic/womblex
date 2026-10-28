@@ -436,6 +436,18 @@ in both deployments.
   model a run uses on it; only if it fails is each model retried alone, so the failure is
   named for its cause. A reader with `ping()` is checked on the built reader, because the
   reader carries the run's engine options that a deployment-level check would not see.
+- **A deployment is handed vendor model ids.** Its `check`, `serves`, `smoke` and `detail`
+  take the vendor's id (`ModelEntry.vendor_model`, else the registered name), never
+  Womblex's registered names or aliases, since the endpoint spec, a Bedrock `modelId` and
+  an Ollama tag all speak the vendor's; results and the footer keep the registered name.
+  *Rejected:* the registered name everywhere, which makes every deployment, a plugin's
+  included, mirror Womblex's registry; and passing both ids, which widens every callable
+  for a value most ignore.
+- **The hosted API is recorded at the base URL it was called on.** `ISAACUS_BASE_URL`, read
+  by the SDK, is named when set, reduced to scheme, host, port and path; unset, the SDK's
+  default stays `sdk-default`. *Rejected:* `sdk-default` regardless, which misstates where
+  paid calls went; the URL verbatim, whose userinfo or query can carry a credential; and
+  spelling out the SDK's default, which Womblex does not own.
 - **Two refusals, because two hosts.** The static one (unknown deployment, a deployment the
   model is not served by, a local model given one) reads registrations only, so
   `POST /v1/runs` and `dispatch-workflow` can refuse on a host that carries no models. The

@@ -1,10 +1,16 @@
-"""An endpoint's name and region with any AWS account identifier removed.
+"""An endpoint's name and region with any AWS account identifier or credential removed.
 
 Shared by the run record's services and the deployments footer key, so neither can emit an
-account id.
+account id or a secret a URL carries.
 """
 
 from __future__ import annotations
+
+import os
+from urllib.parse import urlsplit
+
+#: The variable the Isaacus SDK reads its hosted-API base URL from.
+BASE_URL_ENV = "ISAACUS_BASE_URL"
 
 #: An endpoint given as a full ARN carries the AWS account id in its fifth
 #: field. The record must not, so the ARN is reduced to the endpoint name it
@@ -33,3 +39,23 @@ def endpoint_identity(name: str, region: str | None) -> tuple[str, str | None]:
     resolved = resource.rsplit("/", 1)[-1].strip() or "unnamed-endpoint"
     arn_region = parts[3].strip() if len(parts) > 3 else ""
     return resolved, region or arn_region or None
+
+
+def api_endpoint() -> str:
+    """The hosted API's endpoint as ``ISAACUS_BASE_URL`` names it, else ``sdk-default``.
+
+    Scheme, host, port and path only: userinfo, query and fragment can carry a credential,
+    so they are dropped. A value that is not a URL with a host yields ``unnamed-endpoint``
+    rather than risk emitting it. Unset, the SDK's own default is not spelled out.
+    """
+    url = (os.environ.get(BASE_URL_ENV) or "").strip()
+    if not url:
+        return "sdk-default"
+    try:
+        parts = urlsplit(url)
+        host, port = parts.hostname, parts.port
+    except ValueError:
+        return "unnamed-endpoint"
+    if not parts.scheme or not host:
+        return "unnamed-endpoint"
+    return f"{parts.scheme}://{host}{f':{port}' if port else ''}{parts.path.rstrip('/')}"
