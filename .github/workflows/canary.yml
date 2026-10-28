@@ -1,8 +1,8 @@
 name: Canary
 
 # Early warning of upstream breakage: the test suite against the newest
-# releases pyproject.toml's ranges allow, without moving the lock
-# (docs/security-upgrade-plan.md, M1). The breaks on record (DBOS dropping its
+# releases pyproject.toml's ranges allow, without moving the lock.
+# The breaks on record (DBOS dropping its
 # vendored croniter, OpenCV 5's HoughLinesP layout) are the kind it catches.
 # It never gates a merge: it runs on a schedule, not on pull requests, and a
 # red run means the next lock upgrade needs work first.
@@ -15,10 +15,10 @@ jobs:
   upgraded:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up uv and Python 3.12
-        uses: astral-sh/setup-uv@v10.3.2
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           version: "0.11.7"
           python-version: "3.12"

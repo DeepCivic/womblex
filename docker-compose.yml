@@ -148,7 +148,7 @@ services:
   # dependency. Start them explicitly for the local stack:
   #   docker compose --profile local up -d postgres minio createbuckets init
   postgres:
-    image: postgres:16
+    image: postgres:16.15@sha256:1beaa3084eee2676f20a9cd9928f0bf2c5bf674f8e49f81017912183d377c61c
     profiles: ["local"]
     environment:
       POSTGRES_USER: womblex
