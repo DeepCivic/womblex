@@ -712,3 +712,11 @@ def test_the_worker_registry_names_the_queues_live_workers_serve(tmp_path: Path)
         assert registry.live_queues(within_seconds=-1) == {}  # none refreshed in time
         registry.remove("w1")
         assert registry.live_queues() == {"q-b": ["w2"]}
+
+
+def test_the_old_llm_ocr_path_re_exports_both_readers():
+    from womblex.ingest import llm_ocr
+    from womblex.providers.bedrock import ocr as bedrock
+
+    for name in llm_ocr.__all__:
+        assert getattr(llm_ocr, name) is getattr(bedrock, name)
