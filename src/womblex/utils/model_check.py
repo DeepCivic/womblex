@@ -246,7 +246,10 @@ def _entry_deployments(slot: str, name: str) -> tuple[str, ...]:
 
 
 def _vendor_model(slot: str, name: str) -> str:
-    """The vendor id registered for *name* in *slot*; empty where it is the name, or the name is unregistered."""
+    """The vendor id registered for *name* in *slot*; empty where it is the name, or the name is unregistered.
+
+    A slot setting that names the vendor's model itself (``embedding.provider_options.model``) wins over it.
+    """
     try:
         return resolve(slot, name).vendor_model
     except ValueError:
@@ -281,7 +284,8 @@ def deployed_models(
         if model and deployments and scope in wanted:
             deployment = pick_deployment(deployments, requested)
             found.setdefault((model, deployment), (ISAACUS if deployment.startswith("isaacus") else slot, []))[1].append(scope)
-            vendor.setdefault(model, _vendor_model(slot, model))
+            configured = config.embedding.provider_options.get("model") if scope == SCOPE_EMBED else None
+            vendor.setdefault(model, str(configured) if configured else _vendor_model(slot, model))
     return [ModelUse(slot, m, {}, tuple(s), d, vendor[m]) for (m, d), (slot, s) in found.items()]
 
 
