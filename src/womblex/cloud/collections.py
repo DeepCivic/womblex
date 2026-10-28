@@ -83,7 +83,7 @@ def _recorded_workflows(store: RemoteStore, name: str) -> tuple[int, list[dict[s
     return rows, [w for w in written if isinstance(w, dict)]
 
 
-def store_collections(store_uri: str | None) -> set[str]:
+def store_collections(store_uri: str | None, explicit: dict | None = None) -> set[str]:
     """The store's runs whose run record names a workflow that kept it as its `collection`.
 
     What the store holds, whatever is stored now: a collection whose workflows were removed
@@ -92,7 +92,7 @@ def store_collections(store_uri: str | None) -> set[str]:
     """
     if not store_uri:
         return set()
-    store = open_store(store_uri)
+    store = open_store(store_uri, explicit)
     found = set()
     for run in store.list_dirs("runs"):
         recorded = _recorded_workflows(store, run)
@@ -101,13 +101,15 @@ def store_collections(store_uri: str | None) -> set[str]:
     return found
 
 
-def collection_documents(store_uri: str, name: str) -> tuple[int, int | None, list[dict[str, Any]]]:
+def collection_documents(
+    store_uri: str, name: str, explicit: dict | None = None,
+) -> tuple[int, int | None, list[dict[str, Any]]]:
     """The collection's document count, how many are the current version, and the workflows its files record.
 
     The count of current documents is `None` until the run has a consolidated manifest that
     marks versions (`store/document_versions.py`). Raises `StoreUnreachable`.
     """
-    store = open_store(store_uri)
+    store = open_store(store_uri, explicit)
     table = remote_manifest_table(store, f"runs/{name}")
     current: int | None = None
     if "is_current" in table.schema.names and table.column("is_current").null_count == 0:
@@ -130,7 +132,7 @@ def add_documents(
 
     store_uri = settings.store_uri or ""
     check_firing(stored, run_id=stored.run_id, resolve_preset=resolve_preset,
-                 store=RemoteStore.from_uri(store_uri), dsn=settings.db_dsn)
+                 store=RemoteStore.from_uri(store_uri, explicit=settings.store_options), dsn=settings.db_dsn)
     return add_to_collection(dbos_app.open_client(settings.db_dsn), stored, firing=firing)
 
 
@@ -138,8 +140,11 @@ def rerun_documents(
     settings: DeploymentSettings, stored: StoredWorkflow, resolve_preset: Callable[[str], Preset | None],
 ) -> WorkflowDispatch:
     """Dispatch *stored*'s current steps over its whole collection (`rerun-collection`, from the stored copy)."""
+    from womblex.store.remote import RemoteStore
+
+    store = RemoteStore.from_uri(settings.store_uri, explicit=settings.store_options) if settings.store_uri else None
     return dispatch_workflow(stored, resolve_preset=resolve_preset, run_id=stored.run_id,
-                             store_uri=settings.store_uri, dsn=settings.db_dsn)
+                             store_uri=settings.store_uri, store=store, dsn=settings.db_dsn)
 
 
 __all__ = [

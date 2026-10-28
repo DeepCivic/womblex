@@ -218,3 +218,41 @@ def test_settings_default_to_the_options_the_environment_declares(monkeypatch, t
     create_api_app(store_uri=str(tmp_path / "store"), db_dsn="postgresql://x/y", registry=None,
                    ingest_uri=str(tmp_path / "ingest"))
     assert seen[0]["ingest_options"] == {"anon": True} and seen[0]["store_options"] is None
+
+
+def test_a_destination_whose_option_names_an_unset_variable_is_refused_before_launch(tmp_path: Path, monkeypatch) -> None:
+    from womblex.cloud.delivery import check_destinations
+
+    monkeypatch.delenv("ACME_KEY", raising=False)
+    spec = _stored(["normalise"], destinations=[_to(tmp_path, storage_options={"account_key": {"env": "ACME_KEY"}})]).spec
+    ((name, problem),) = check_destinations(spec.destinations)
+    assert name == "archive" and "account_key reads environment variable ACME_KEY, which is not set" in problem
+    monkeypatch.setenv("ACME_KEY", "k")
+    assert check_destinations(spec.destinations) == []
+
+
+def test_every_read_the_settings_make_opens_the_location_with_its_own_options(monkeypatch, tmp_path: Path) -> None:
+    """Settings given their own options (not the environment's) reach the live checks, reads and collections too."""
+    from womblex.api import readers
+    from womblex.cloud import collections, resources
+    from womblex.cloud.deployment import DeploymentSettings
+    from womblex.cloud.reachability import store_reachable
+
+    opened: list[tuple[str, dict | None]] = []
+    real = RemoteStore.from_uri.__func__  # type: ignore[attr-defined]
+
+    def spy(cls, uri, **kw):
+        opened.append((uri, kw.get("explicit")))
+        return real(cls, uri, **{k: v for k, v in kw.items() if k != "explicit"})
+
+    monkeypatch.setattr(RemoteStore, "from_uri", classmethod(spy))
+    store, ingest = str(tmp_path / "store"), str(tmp_path / "ingest")
+    (tmp_path / "ingest").mkdir()
+    settings = DeploymentSettings(output_root=None, store_uri=store, ingest_uri=ingest,
+                                  store_options={"anon": False}, ingest_options={"anon": True})
+    store_reachable(store, settings.store_options)
+    resources.check_store(settings)
+    resources.check_ingest(settings)
+    readers.document_rows(store, "run-a", "h", readers.LAYERS["masked"], settings.store_options)
+    collections.store_collections(store, settings.store_options)
+    assert opened and all(options == ({"anon": True} if uri == ingest else {"anon": False}) for uri, options in opened)

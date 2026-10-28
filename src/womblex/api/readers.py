@@ -47,9 +47,11 @@ LAYERS: dict[str, Layer] = {
 }
 
 
-def document_rows(store_uri: str, run_id: str, source_hash: str, layer: Layer) -> list[dict]:
-    """Rows of *layer* for one document, in document order; empty when it has none."""
-    store = RemoteStore.from_uri(store_uri)
+def document_rows(
+    store_uri: str, run_id: str, source_hash: str, layer: Layer, explicit: dict | None = None,
+) -> list[dict]:
+    """Rows of *layer* for one document, in document order; empty when it has none. *explicit* is the store's own options."""
+    store = RemoteStore.from_uri(store_uri, explicit=explicit)
     rows: list[dict] = []
     for key in store.list_files(f"runs/{run_id}/documents", f"*{layer.suffix}"):
         try:
