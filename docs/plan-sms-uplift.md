@@ -1,6 +1,6 @@
 # SMS uplift — plan
 
-*Status: Phases D to G are proposed and may follow later. A piece is removed from this plan when it is built, and this document is deleted when its last phase lands.*
+*Status: Phases E to G are proposed and may follow later. A piece is removed from this plan when it is built, and this document is deleted when its last phase lands.*
 
 ## Context
 
@@ -16,7 +16,6 @@ requirement is written there as built, in that file's conventions and numbering.
 removed from this plan in the same merge.
 
 **In scope:**
-- withheld regions recorded as atoms
 - a spike on element evidence and fingerprints, with clean-up
 - a spike on statement identity across versions, with clean-up
 - the rest of the draft: location fingerprints, evidence fallback, Requirement 32 payload, records hash
@@ -38,12 +37,6 @@ removed from this plan in the same merge.
 - A new module lands in the CLAUDE.md table, `docs/architecture.md` and `docs/project-structure.md`
   in the same merge (`tests/test_doc_currency.py`).
 - A merge that delivers a piece of this plan writes its requirement as built into `docs/functional_requirements.md` and removes that piece from this plan.
-
-## Phase D — Withheld, omitted and failed documents
-
-**D3. Withheld regions.**
-- New sidecar `*.redaction_regions.parquet` (`source_hash`, `page`, `bbox` in PDF points converted from detection DPI, `area`), written by the in-batch path (`operations/redact.py`) and by `redact/batch.py`.
-- Today region boxes are never persisted; only page-level `has_redaction` is.
 
 ## Phase E — Spikes, then clean-up
 
@@ -90,4 +83,3 @@ A docs-only merge per CLAUDE.md "Stocktake":
 
 - `uv run ruff check src/ tests/` && `uv run mypy src/` && `uv run python -m pytest tests/ -v -m "not benchmark"`
 - `git diff --stat $(git merge-base HEAD origin/main)..HEAD` ≤500 lines; `wc -l` on every touched file.
-- **D:** a fixture with an unreadable file, an unsupported file and a redacted PDF gives an error manifest row (`extraction_method` `unreadable`, which `SourceResolver` declines as `unsupported_basis`), an `omitted.parquet` row and region rows with page and bbox. An unreadable file in two firings of one collection gives two distinct `source_hash`es in one chain.
