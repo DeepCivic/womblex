@@ -38,7 +38,8 @@ def _providers(monkeypatch: pytest.MonkeyPatch) -> None:
     model_check._register_builtins()  # import the built-ins first: they register once per process, not per copy
     monkeypatch.setattr(mr, "_entries", {s: dict(m) for s, m in mr._entries.items()})
     monkeypatch.setattr(mr, "_aliases", {s: dict(m) for s, m in mr._aliases.items()})
-    register(SLOT_ENRICHMENT, REMOTE, lambda **_: _Provider(), source="tests", deployments=("acme",))
+    register(SLOT_ENRICHMENT, REMOTE, lambda **_: _Provider(), source="tests", deployments=("acme",),
+             vendor_model="acme/ner-v2")
     register(SLOT_ENRICHMENT, LOCAL, lambda **_: _Provider(), source="tests")
     register(SLOT_ENRICHMENT, LEGACY, lambda **_: _Provider(), source="tests", traits={"isaacus": True})
 
@@ -56,6 +57,7 @@ def test_a_model_on_a_non_isaacus_deployment_is_gated_and_checked_through_it(tmp
     assert STAGE_CONTRACTS["enrich"].models(config) == (REMOTE,)
     (use,) = model_check.deployed_models(config, (model_check.SCOPE_ENRICH,))
     assert (use.slot, use.name, use.deployment) == (SLOT_ENRICHMENT, REMOTE, "acme")  # not recorded as Isaacus
+    assert use.vendor_model == "acme/ner-v2"  # what the deployment is handed
     # a deployed model is not also built and loaded as if it ran locally
     assert not [u for u in model_check.configured_models(config, (model_check.SCOPE_ENRICH,)) if u.name == REMOTE]
 
