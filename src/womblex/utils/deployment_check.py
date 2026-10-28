@@ -15,7 +15,7 @@ import time
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
-from womblex.utils.deployment_registry import deployment_for_pinging_model, resolve
+from womblex.utils.deployment_registry import ISAACUS_DEPLOYMENTS, deployment_for_pinging_model, resolve
 from womblex.utils.model_registry import SLOT_EMBEDDING, SLOT_ENRICHMENT
 
 if TYPE_CHECKING:
@@ -97,6 +97,30 @@ def check_deployed(uses: Sequence[ModelUse], level: CheckLevel) -> list[SlotChec
             for i in served:
                 out[i] = _result(uses[i], level, deployment.name, start, errors[uses[i].name])
     return [out[i] for i in range(len(uses))]
+
+
+def unconfigured(uses: Sequence[ModelUse]) -> list[str]:
+    """What is missing for each deployment *uses* are served by, in words; network-free.
+
+    An Isaacus deployment needs the SDK and its variables (`utils/availability.py`); any other
+    needs its required variables set. An unknown deployment is left to the model check.
+    """
+    from womblex.utils import availability
+
+    missing: list[str] = []
+    for name in dict.fromkeys(u.deployment for u in uses if u.deployment):
+        if name in ISAACUS_DEPLOYMENTS:
+            if not availability.isaacus_available():
+                missing.append("Isaacus (isaacus SDK + ISAACUS_API_KEY, or ISAACUS_SAGEMAKER_ENDPOINTS "
+                               "for a private deployment)")
+            continue
+        try:
+            unset = resolve(name).unset()
+        except ValueError:
+            continue
+        if unset:
+            missing.append(f"deployment {name!r} ({'; '.join(' or '.join(g) for g in unset)} unset)")
+    return missing
 
 
 def check_pinging_model(slot: str, name: str, model: Any) -> None:
