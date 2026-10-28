@@ -17,7 +17,6 @@ removed from this plan in the same merge.
 
 **In scope:**
 - withheld and omitted documents recorded as atoms
-- failed-document manifest rows
 - a spike on element evidence and fingerprints, with clean-up
 - a spike on statement identity across versions, with clean-up
 - the rest of the draft: location fingerprints, evidence fallback, Requirement 32 payload, records hash
@@ -41,15 +40,6 @@ removed from this plan in the same merge.
 - A merge that delivers a piece of this plan writes its requirement as built into `docs/functional_requirements.md` and removes that piece from this plan.
 
 ## Phase D — Withheld, omitted and failed documents
-
-**D1. Failed documents get manifest rows.**
-- `operations/persist.py` and `cli/pipeline.py` pass errored results through, so the existing `status: error` branch is finally reached.
-- A source that can't be read is recorded as failed. Its `source_hash` is SHA-256 over `unreadable:` + `source_relpath` + `:` + the batch number, so join keys are never empty and an unreadable file in two firings of one collection gets two distinct hashes in its version chain (Requirement 34). This replaces the empty string `_source_hash` returns today.
-- The row's `extraction_method` is `unreadable`. A row that failed after its bytes were read keeps its file-bytes hash and its method, so `status: error` alone does not mark this case.
-- Hash basis (`store/source_resolver.py`):
-  - add `HASH_BASIS_UNREADABLE`. `hash_basis_for` maps `extraction_method == "unreadable"` to it, the way `_RECORD_METHODS` maps to `record_id+text`; today it would read as `file_bytes`
-  - `SourceResolver` declines the row as `unsupported_basis`, with a reason naming its `source_relpath`. It never resolves one: `resolved` always means the bytes matched `source_hash` ("Path first, then hash", `docs/decisions-operations.md`), and this hash is not over bytes
-  - egress already reports `unsupported_basis` with no entry under `sources/` (`docs/egress.md`). Add the unreadable case beside the records-ingest one there.
 
 **D2. Omitted files.**
 - `select_supported` and `dispatch.supported_keys` return the files they dropped.
