@@ -155,31 +155,41 @@ def unserved_models(models: Iterable[str]) -> list[str]:
 
 
 def make_isaacus_client(*, models: Iterable[str] = ()):  # type: ignore[no-untyped-def]
-    """Construct an Isaacus client for whichever deployment is configured.
+    """The process's Isaacus client for whichever deployment is configured.
 
+    One client per deployment: the first call builds it (``make_api_client`` or
+    ``make_sagemaker_client``) and every later call, in any stage, gets the same one.
     ``models`` are the model ids the caller intends to use. On SageMaker they
     are checked against the declared endpoints up front; on the hosted API they
     are ignored (every model is reachable with a valid key).
     """
-    endpoints = endpoints_from_env()
-    if endpoints:
-        return _sagemaker_client(endpoints, models)
-    return _api_client()
+    from womblex.providers.isaacus.deployment import default_deployment
+    from womblex.utils.deployment_registry import client_for
+
+    return client_for(default_deployment(), models)
 
 
-def make_ai_chunking_client(chunking_model: str | None):  # type: ignore[no-untyped-def]
+def make_ai_chunking_client(chunking_model: str | None, deployment: str | None = None):  # type: ignore[no-untyped-def]
     """Client for semchunk's AI chunking, or ``None`` when it isn't enabled.
 
     Passed ``None``, semchunk builds its own client from ``ISAACUS_API_KEY`` —
     which an air-gapped SageMaker deployment does not have. Constructing it
-    here routes AI chunking through whichever deployment is configured.
+    here routes AI chunking through *deployment* (``chunking.chunking_deployment``),
+    else whichever deployment is configured.
     """
     if not chunking_model:
         return None
-    return make_isaacus_client(models=[chunking_model])
+    from womblex.providers.isaacus.deployment import default_deployment
+    from womblex.utils.deployment_registry import client_for
+    from womblex.utils.model_registry import record_deployment
+
+    name = deployment.strip().lower() if deployment else default_deployment()
+    client = client_for(name, [chunking_model])
+    record_deployment("chunking", chunking_model, name)
+    return client
 
 
-def _api_client():  # type: ignore[no-untyped-def]
+def make_api_client():  # type: ignore[no-untyped-def]
     """Hosted-API client, stripping whitespace from the API key.
 
     The Isaacus SDK reads ``ISAACUS_API_KEY`` from the environment as-is, so a
@@ -195,7 +205,7 @@ def _api_client():  # type: ignore[no-untyped-def]
     return isaacus.Isaacus()
 
 
-def _sagemaker_client(endpoints: list[SageMakerEndpoint], models: Iterable[str]):  # type: ignore[no-untyped-def]
+def make_sagemaker_client(endpoints: list[SageMakerEndpoint], models: Iterable[str]):  # type: ignore[no-untyped-def]
     import isaacus
 
     try:
@@ -270,26 +280,47 @@ def _require_region(
 def check_reachable(model: str, *, timeout: float = 10.0) -> None:
     """Raise unless a deployment for *model* is configured and answers, with no billed request.
 
-    The hosted API needs ``ISAACUS_API_KEY`` set and its base URL (``ISAACUS_BASE_URL``, else
-    the SDK's) to answer an HTTP request; the key itself is taken as active. A SageMaker
-    deployment needs an endpoint that serves *model* and reports ``InService``
-    (``DescribeEndpoint``, a free control-plane call).
+    A declared SageMaker deployment is checked by :func:`check_sagemaker_reachable`, else the
+    hosted API by :func:`check_api_reachable`.
+    """
+    if endpoints_from_env():
+        check_sagemaker_reachable(model)
+    else:
+        check_api_reachable(timeout=timeout)
+
+
+def check_sagemaker_reachable(*models: str) -> None:
+    """Raise unless an endpoint serves each of *models* and reports ``InService`` (``DescribeEndpoint``, free).
+
+    An endpoint serving several of the models is described once.
     """
     endpoints = endpoints_from_env()
-    if endpoints:
+    if not endpoints:
+        raise ValueError(f"{ENDPOINTS_ENV} declares no SageMaker endpoint")
+    for model in models:
         if unserved_models([model]):
             raise ValueError(f"No SageMaker endpoint in {ENDPOINTS_ENV} serves {model}")
-        import boto3
+    import boto3
 
+    chosen: dict[str, SageMakerEndpoint] = {}
+    for model in models:  # the endpoint the router picks for each model
         endpoint = next(e for e in endpoints if is_model_served(model, [e]))
-        profile = os.environ.get(PROFILE_ENV) or None
-        session = boto3.Session(**({"profile_name": profile} if profile else {}))
+        chosen.setdefault(endpoint.name, endpoint)
+    profile = os.environ.get(PROFILE_ENV) or None
+    session = boto3.Session(**({"profile_name": profile} if profile else {}))
+    for endpoint in chosen.values():
         region = endpoint.region or os.environ.get(REGION_ENV) or session.region_name
         status = session.client("sagemaker", region_name=region).describe_endpoint(
             EndpointName=endpoint.name)["EndpointStatus"]
         if status != "InService":
             raise RuntimeError(f"SageMaker endpoint {endpoint.name} is {status}, not InService")
-        return
+
+
+def check_api_reachable(*, timeout: float = 10.0) -> None:
+    """Raise unless ``ISAACUS_API_KEY`` is set and the API (``ISAACUS_BASE_URL``, else the SDK's) answers.
+
+    The key itself is taken as active; any HTTP answer counts.
+    """
     if not (os.environ.get(API_KEY_ENV) or "").strip():
         raise ValueError(f"{API_KEY_ENV} is not set, and {ENDPOINTS_ENV} declares no SageMaker endpoint")
     import httpx
@@ -303,11 +334,15 @@ __all__ = [
     "PROFILE_ENV",
     "REGION_ENV",
     "SageMakerEndpoint",
+    "check_api_reachable",
     "check_reachable",
+    "check_sagemaker_reachable",
     "endpoints_from_env",
     "is_model_served",
     "make_ai_chunking_client",
+    "make_api_client",
     "make_isaacus_client",
+    "make_sagemaker_client",
     "misconfigured_endpoints_var",
     "parse_endpoints",
     "sagemaker_configured",

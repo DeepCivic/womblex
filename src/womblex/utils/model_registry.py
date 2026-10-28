@@ -78,6 +78,10 @@ class ModelEntry:
     source: str = "builtin"
     traits: dict[str, Any] = field(default_factory=dict)
     version: str = ""
+    deployments: tuple[str, ...] = ()
+    """Names of the deployments (``utils/deployment_registry.py``) that may serve this model; none is a local model."""
+    vendor_model: str = ""
+    """The vendor's own id for the model, where it differs from the registered name."""
 
 
 _entries: dict[str, dict[str, ModelEntry]] = {slot: {} for slot in SLOTS}
@@ -91,6 +95,10 @@ _loaded: set[str] = set()
 #: the call sites that actually invoke ``entry.factory(...)`` record one,
 #: mirroring ``utils/models.record_loaded_path``'s opt-in shape.
 _used: dict[tuple[str, str], ModelEntry] = {}
+
+#: The deployment each model this process used ran on, keyed by (slot, name); AI chunking's
+#: model is under the slot ``chunking``. Recorded with the use, so a probe leaves none.
+_used_deployments: dict[tuple[str, str], str] = {}
 
 #: True while :func:`suppress_use_recording` is active.
 _suppress_use = False
@@ -114,6 +122,8 @@ def register(
     source: str = "builtin",
     traits: dict[str, Any] | None = None,
     version: str = "",
+    deployments: tuple[str, ...] = (),
+    vendor_model: str = "",
 ) -> None:
     """Register *factory* under *name* (and *aliases*) for *slot*.
 
@@ -134,10 +144,24 @@ def register(
                 f"{slot} model name {key!r} is already registered to {owner!r}"
             )
     _entries[slot][canonical] = ModelEntry(
-        slot, canonical, factory, source, dict(traits or {}), version
+        slot, canonical, factory, source, dict(traits or {}), version,
+        tuple(deployments), vendor_model,
     )
     for key in (canonical, *(_norm(a) for a in aliases)):
         _aliases[slot][key] = canonical
+
+
+def plugin_objects(group: str) -> Iterator[tuple[str, Any, str, str]]:
+    """``(name, object, distribution, version)`` for each installed entry point in *group* that loads."""
+    for ep in entry_points(group=group):
+        try:
+            obj = ep.load()
+        except Exception:
+            logger.exception("plugin %s (%s) failed to load", ep.name, group)
+            continue
+        dist = ep.dist.name if ep.dist is not None else "unknown"
+        version = getattr(ep.dist, "version", "") if ep.dist is not None else ""
+        yield ep.name, obj, dist, version
 
 
 def _load_plugins(slot: str) -> None:
@@ -145,21 +169,16 @@ def _load_plugins(slot: str) -> None:
     if slot in _loaded:
         return
     _loaded.add(slot)
-    for ep in entry_points(group=ENTRY_POINT_GROUP_PREFIX + slot):
-        try:
-            factory = ep.load()
-        except Exception:
-            logger.exception("model plugin %s (%s) failed to load", ep.name, slot)
-            continue
-        dist = ep.dist.name if ep.dist is not None else "unknown"
-        version = getattr(ep.dist, "version", "") if ep.dist is not None else ""
+    for name, factory, dist, version in plugin_objects(ENTRY_POINT_GROUP_PREFIX + slot):
         try:
             register(
-                slot, ep.name, factory, source=dist, version=version,
+                slot, name, factory, source=dist, version=version,
                 traits=getattr(factory, "womblex_traits", None),
+                deployments=tuple(getattr(factory, "womblex_deployments", ())),
+                vendor_model=getattr(factory, "womblex_vendor_model", ""),
             )
         except ValueError as exc:
-            logger.warning("model plugin %s (%s) skipped: %s", ep.name, slot, exc)
+            logger.warning("model plugin %s (%s) skipped: %s", name, slot, exc)
 
 
 def known_names(slot: str) -> list[str]:
@@ -185,7 +204,7 @@ def resolve(slot: str, name: str) -> ModelEntry:
     return _entries[slot][canonical]
 
 
-def record_use(entry: ModelEntry) -> None:
+def record_use(entry: ModelEntry, deployment: str | None = None) -> None:
     """Note that *entry*'s factory was actually built by this process.
 
     Called only at a real instantiation site, after the factory call
@@ -193,10 +212,26 @@ def record_use(entry: ModelEntry) -> None:
     probes whether a name is registered without building anything. First use
     wins, matching a slot resolving to one model per process. A no-op while
     :func:`suppress_use_recording` is active.
+
+    *deployment* is the one the model ran on; a model that declares deployments and is given
+    none ran on the first.
     """
     if _suppress_use:
         return
     _used.setdefault((entry.slot, entry.name), entry)
+    if deployment or entry.deployments:
+        record_deployment(entry.slot, entry.name, deployment or entry.deployments[0])
+
+
+def record_deployment(slot: str, name: str, deployment: str) -> None:
+    """Note the deployment a model of this process ran on; first use wins. A no-op while a probe runs."""
+    if not _suppress_use:
+        _used_deployments.setdefault((slot, name), deployment)
+
+
+def used_deployments() -> tuple[tuple[str, str, str], ...]:
+    """``(slot, name, deployment)`` for every model this process used on a deployment, sorted."""
+    return tuple(sorted((s, n, d) for (s, n), d in _used_deployments.items()))
 
 
 @contextmanager
@@ -246,6 +281,7 @@ def distribution_version(entry: ModelEntry) -> tuple[str, str]:
 def reset_used_entries() -> None:
     """Forget what this process built. For tests."""
     _used.clear()
+    _used_deployments.clear()
 
 
 def is_default_group(selections: dict[str, str]) -> bool:

@@ -91,7 +91,7 @@ def _estimate(stage: str, index: int, stages: list[str], config: WomblexConfig, 
     wanted = set(contract.required_inputs) | {c.suffix for c in contract.conditional_inputs(config) if c.strict}
     for earlier in stages[:index]:
         c = STAGE_CONTRACTS[earlier]
-        simulable = earlier in _FEEDS[stage] and not c.requires_isaacus_api(config)
+        simulable = earlier in _FEEDS[stage] and not c.requires_deployment(config)
         if not simulable and c.mutation is MutationMode.SIDECAR and wanted & set(c.outputs(config)):
             return TokenEstimate("pending", f"{earlier!r} produces an input of {stage!r} and cannot be run "
                                  "offline; counted once it has run")

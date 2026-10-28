@@ -132,7 +132,7 @@ def test_run_state(counts, state):
 
 
 def test_manifest_serves_the_run_documents_table(client, monkeypatch):
-    monkeypatch.setattr(api_app, "remote_manifest_rows", lambda uri, run_id: [{"source_hash": "h"}])
+    monkeypatch.setattr(api_app, "remote_manifest_rows", lambda uri, run_id, explicit=None: [{"source_hash": "h"}])
     body = client.get("/v1/runs/run-a/manifest", headers=auth("ta")).json()
     assert body == {"run_id": "run-a", "documents": [{"source_hash": "h"}]}
 
@@ -450,7 +450,7 @@ def test_openapi_surface_is_pinned(client):
             "RunLog": ["modified", "name", "size"],
             "StageProgress": ["run_id", "stages"],
             "Reachability": ["error", "reachable", "target"],
-            "Resources": ["ingest", "isaacus", "queue", "store"],
+            "Resources": ["deployments", "ingest", "isaacus", "queue", "store"],
             "QueueSnapshot": ["jobs", "run_id", "stale", "stale_after_seconds", "stats", "summary", "throughput", "total", "workers"],
             "RunLogs": ["logs", "run_id"],
             "DocumentDetail": ["chunks", "entities", "money_spans", "pii_spans", "quality", "run_id", "source_hash"],

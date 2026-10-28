@@ -86,10 +86,10 @@ def test_the_contract_and_model_check_key_off_the_provider(tmp_path, model: str,
     config = _minimal_config(tmp_path)
     config.embedding.enabled, config.embedding.model = True, model
     embed = STAGE_CONTRACTS["embed"]
-    assert embed.requires_isaacus_api(config) is isaacus
+    assert embed.requires_deployment(config) is isaacus
     assert embed.models(config) == ((model,) if isaacus else ())
     scopes = (model_check.SCOPE_EMBED,)
-    assert [u.name for u in model_check.isaacus_models(config, scopes)] == ([model] if isaacus else [])
+    assert [u.name for u in model_check.deployed_models(config, scopes)] == ([model] if isaacus else [])
     assert (SLOT_EMBEDDING in [u.slot for u in model_check.configured_models(config, scopes)]) is not isaacus
     if not isaacus:
         assert model_check.check_models(config, "smoke", scopes=scopes).ok

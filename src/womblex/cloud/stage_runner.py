@@ -622,16 +622,16 @@ def prepare_stage_context(contract: StageContract, config: WomblexConfig) -> Run
         except Exception as e:
             raise StagePreconditionError(f"{contract.name} preflight failed: {e}") from e
 
-    if contract.requires_isaacus_api(config):
-        from womblex.utils.availability import isaacus_available
+    if contract.requires_deployment(config):
+        from womblex.utils.deployment_check import unconfigured
+        from womblex.utils.model_check import deployed_models
 
         # Cheap and network-free, so it runs before the model check's own
-        # Isaacus probe — a deployment that is not configured at all should
-        # fail with this message, not with the probe's raw SDK error.
-        if not isaacus_available():
+        # probe — a deployment that is not configured at all should fail
+        # with this message, not with the probe's raw SDK error.
+        if missing := unconfigured(deployed_models(config, [contract.name])):
             raise StagePreconditionError(
-                f"{contract.name} needs Isaacus (isaacus SDK + ISAACUS_API_KEY, or "
-                "ISAACUS_SAGEMAKER_ENDPOINTS for a private deployment); none is "
+                f"{contract.name} needs {'; '.join(missing)}; none is "
                 "resolvable. Refusing to run rather than publishing nothing."
             )
 
@@ -644,16 +644,18 @@ def prepare_stage_context(contract: StageContract, config: WomblexConfig) -> Run
         )
 
     ctx = RunContext()
-    if contract.needs_client and contract.requires_isaacus_api(config):
-        from womblex.providers.isaacus.client import make_isaacus_client
+    if contract.needs_client and contract.requires_deployment(config):
+        from womblex.utils.deployment_registry import client_for
+        from womblex.utils.model_check import deployed_models
 
+        (use, *_) = deployed_models(config, [contract.name])
         try:
-            ctx.client = make_isaacus_client(models=contract.models(config))
+            ctx.client = client_for(use.deployment, contract.models(config))
         except ImportError as e:
             raise StagePreconditionError(f"Isaacus SDK not usable (reinstall womblex): {e}") from e
         except Exception as e:
             raise StagePreconditionError(
-                "Could not construct Isaacus client (check ISAACUS_API_KEY, or "
+                f"Could not construct the client for deployment {use.deployment!r} (check ISAACUS_API_KEY, or "
                 f"ISAACUS_SAGEMAKER_ENDPOINTS for a private deployment): {e}"
             ) from e
     return ctx

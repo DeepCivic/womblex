@@ -33,20 +33,20 @@ class StoreUnreachable(Exception):
     """
 
 
-def open_store(store_uri: str) -> RemoteStore:
-    """Open the store at *store_uri*, or raise :class:`StoreUnreachable`."""
+def open_store(store_uri: str, explicit: dict | None = None) -> RemoteStore:
+    """Open the store at *store_uri* with its own *explicit* options, or raise :class:`StoreUnreachable`."""
     from womblex.store.remote import RemoteStore
 
     try:
-        return RemoteStore.from_uri(store_uri)
+        return RemoteStore.from_uri(store_uri, explicit=explicit)
     except Exception as e:
         logger.warning("store unreachable (%s): %s", store_uri, e)
         raise StoreUnreachable(str(e)) from e
 
 
-def remote_manifest_rows(store_uri: str, run_id: str) -> list[dict] | None:
+def remote_manifest_rows(store_uri: str, run_id: str, explicit: dict | None = None) -> list[dict] | None:
     """Manifest rows (one per document) for *run_id*, or ``None`` if the run does not exist."""
-    store = open_store(store_uri)
+    store = open_store(store_uri, explicit)
     if run_id not in store.list_dirs("runs"):
         return None
     return list(remote_manifest_table(store, f"runs/{run_id}").to_pylist())

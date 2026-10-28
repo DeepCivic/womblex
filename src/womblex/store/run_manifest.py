@@ -54,7 +54,9 @@ from womblex.providers.isaacus.client import endpoints_from_env, sagemaker_confi
 from womblex.store.build_info import image_info
 from womblex.store.contract import contract_footer
 from womblex.store.delivery_record import read_delivery_records
+from womblex.store.deployment_record import read_footer_deployments
 from womblex.store.document_versions import add_versions
+from womblex.store.endpoint_identity import api_endpoint, endpoint_identity
 from womblex.store.output import read_manifest
 from womblex.store.run_stamp import (
     read_footer_model_check,
@@ -89,8 +91,12 @@ RUN_MANIFEST_FILENAME = "manifest.parquet"
 #: ``womblex.workflow`` key its files carry; ``null`` for files written before that key.
 #: Version 8 adds ``deliveries`` — one record per workflow destination delivered to
 #: (`store/delivery_record.py`) — so an empty list means no delivery was made.
+#: Version 10 adds ``deployments`` — the deployment each model ran on, read from the
+#: ``womblex.deployments`` key (`store/deployment_record.py`) — so an empty list means no
+#: model ran on a deployment, not a record that predates the key. From version 10 a hosted-API
+#: service names ``ISAACUS_BASE_URL`` when it is set (`store/endpoint_identity.api_endpoint`).
 RUN_RECORD_KEY = f"{NAMESPACE}.run_record"
-RUN_RECORD_VERSION = 9
+RUN_RECORD_VERSION = 10
 
 #: What one observed parquet contributes: its footer key-value metadata and its
 #: row count. A caller that reads files where they live supplies these rather
@@ -293,6 +299,28 @@ def _observed_slot_models(footers: FooterList) -> list[dict]:
     ]
 
 
+def _observed_deployments(footers: FooterList) -> list[dict]:
+    """The deployments the run's files recorded each model running on, with the stages that carried them.
+
+    Keyed on everything an entry reports, so a model that ran on the hosted API in one batch and
+    on SageMaker in another comes back as two entries.
+    """
+    stages: dict[str, set[str]] = {}
+    entries: dict[str, dict] = {}
+    for meta, _rows in footers:
+        stage = read_footer_stamp(meta).get("stage", "")
+        for use in read_footer_deployments(meta):
+            key = json.dumps(use, sort_keys=True)
+            entries[key] = use
+            stages.setdefault(key, set())
+            if stage:
+                stages[key].add(stage)
+    return [
+        {**entries[key], "stages": sorted(stages[key])}
+        for key in sorted(entries, key=lambda k: (entries[k]["slot"], entries[k]["name"], k))
+    ]
+
+
 def _observed_model_checks(footers: FooterList) -> list[dict]:
     """The pre-run model checks the run's files recorded, with the stages that carried them.
 
@@ -328,35 +356,6 @@ def _called_models(shard_dir: Path) -> list[str]:
     return sorted(seen)
 
 
-#: An endpoint given as a full ARN carries the AWS account id in its fifth
-#: field. The record must not, so the ARN is reduced to the endpoint name it
-#: ends with and the region it names — better data as well as safer.
-_ARN_PREFIX = "arn:aws:sagemaker:"
-
-
-def _endpoint_identity(name: str, region: str | None) -> tuple[str, str | None]:
-    """*name* and *region* with any account identifier removed.
-
-    ``arn:aws:sagemaker:<region>:<account>:endpoint/<name>`` reduces to
-    ``<name>`` plus ``<region>``. A string that is not an ARN passes through
-    untouched; one that is, but in a shape this does not recognise, still does
-    not — it yields ``unnamed-endpoint`` rather than risk emitting the account
-    field as a name. The declared region wins over the ARN's, since a deployer
-    who spelled one out meant it.
-    """
-    if not name.startswith(_ARN_PREFIX):
-        return name, region
-    # Parse strictly by ARN field index rather than by "the last segment":
-    # field 4 is the account, and an ARN truncated at it would otherwise be
-    # emitted as the endpoint name. Fields are region(3), account(4),
-    # resource(5+) — so an ARN with no resource has no name to give.
-    parts = name.split(":")
-    resource = ":".join(parts[5:]) if len(parts) > 5 else ""
-    resolved = resource.rsplit("/", 1)[-1].strip() or "unnamed-endpoint"
-    arn_region = parts[3].strip() if len(parts) > 3 else ""
-    return resolved, region or arn_region or None
-
-
 def _services(shard_dir: Path) -> list[dict]:
     """The external services the run reached, by endpoint, region and models.
 
@@ -375,7 +374,7 @@ def _services(shard_dir: Path) -> list[dict]:
     if sagemaker_configured():
         declared = []
         for e in endpoints_from_env():
-            endpoint, region = _endpoint_identity(e.name, e.region)
+            endpoint, region = endpoint_identity(e.name, e.region)
             declared.append({
                 "kind": "isaacus-sagemaker",
                 "endpoint": endpoint,
@@ -386,9 +385,9 @@ def _services(shard_dir: Path) -> list[dict]:
     if called:
         return [{
             "kind": "isaacus-hosted-api",
-            # Not spelled out: the SDK resolves its own default endpoint, and
-            # naming a URL this module does not read would be inventing one.
-            "endpoint": "sdk-default",
+            # ISAACUS_BASE_URL as the SDK reads it, credentials dropped; unset,
+            # the SDK's own default is not spelled out (that would invent one).
+            "endpoint": api_endpoint(),
             "region": None,
             "models": called,
         }]
@@ -540,6 +539,7 @@ def build_run_record(
         "workflows": _observed_workflows(footers),
         "local_models": _observed_models(footers),
         "slot_models": _observed_slot_models(footers),
+        "deployments": _observed_deployments(footers),
         "model_check": _observed_model_checks(footers),
         "services": _services(shard_dir),
         "image": image_info().as_record(),

@@ -65,7 +65,7 @@ def test_a_step_that_cannot_run_offline_leaves_the_count_pending(
     shards: Path, monkeypatch: pytest.MonkeyPatch,  # noqa: F811
 ) -> None:
     monkeypatch.setitem(STAGE_CONTRACTS, "chunk", replace(
-        STAGE_CONTRACTS["chunk"], needs_isaacus_api_for=lambda _c: True))
+        STAGE_CONTRACTS["chunk"], models=lambda _c: ("kanon-2-enricher",)))
     plan = plan_workflow(_stored(["chunk", "embed"]), shards, resolve_preset=_resolve, prices={"embed": 2.0})
     t = plan.steps[1].tokens
     assert t is not None and t.basis == "pending" and "'chunk'" in t.note and t.tokens == 0

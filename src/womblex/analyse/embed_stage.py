@@ -14,7 +14,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-from womblex.analyse.embed import make_embedding_provider
+from womblex.analyse.embed import embed_with_role, make_embedding_provider, role_of
 from womblex.config import EmbeddingConfig
 from womblex.process.chunk_stage import _batch_bases
 from womblex.store.checkpoint import CheckpointManager
@@ -55,6 +55,7 @@ def embed_shards(
     batches_written = 0
     chunks_embedded = 0
 
+    role = role_of(embedding_config.task)
     for base in bases:
         if checkpoint_mgr is not None and _all_docs_checkpointed(base, checkpoint_mgr):
             logger.info("embed_shards: skipping %s (all docs checkpointed)", base.stem)
@@ -68,7 +69,7 @@ def embed_shards(
             try:
                 vectors = [
                     v for i in range(0, len(texts), per_request)
-                    for v in provider.embed(texts[i : i + per_request])
+                    for v in embed_with_role(provider, texts[i : i + per_request], role)
                 ]
             except Exception as e:  # transient — leave batch for retry
                 logger.error("embed_shards: embedding failed for %s: %s", base.stem, e)
@@ -80,7 +81,7 @@ def embed_shards(
                         "source_hash": r["source_hash"],
                         "chunk_index": r["chunk_index"],
                         "content_type": r["content_type"],
-                        "model": embedding_config.model,
+                        "model": getattr(provider, "vendor_model", embedding_config.model),
                         "task": embedding_config.task or "",
                         "dim": len(vec),
                         "vector": list(vec),

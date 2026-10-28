@@ -77,6 +77,7 @@ import pyarrow.parquet as pq
 
 from womblex import __version__
 from womblex.store.build_info import resolve_commit
+from womblex.store.deployment_record import DEPLOYMENTS_KEY, deployments_payload
 from womblex.store.source_provenance import NAMESPACE
 from womblex.utils.model_check import footer_payload as model_check_payload
 from womblex.utils.model_registry import distribution_version, used_entries
@@ -128,6 +129,22 @@ _DIGEST_EXCLUDE: dict = {
 _PREFERRED_SOURCES = (".elements.parquet", "._manifest.parquet")
 
 
+def _drop_unset_deployments(payload: dict) -> None:
+    """Leave the ``deployment`` settings out of the digest while they are unset.
+
+    A config that never names a deployment keeps the digest it had before the setting existed,
+    and so does one that gives the embedding provider no options.
+    """
+    if payload.get("embedding", {}).get("provider_options") == {}:
+        del payload["embedding"]["provider_options"]
+    for section, key in (("extraction", "ocr"), ("enrichment", None), ("embedding", None), ("chunking", None)):
+        node = payload.get(section, {})
+        node = node.get(key, {}) if key else node
+        for name in ("deployment", "chunking_deployment"):
+            if name in node and node[name] is None:
+                del node[name]
+
+
 def config_digest(config: object) -> str:
     """``sha256:…`` over the validated configuration, minus the excluded keys.
 
@@ -136,6 +153,7 @@ def config_digest(config: object) -> str:
     ``IngestProvenance.from_config`` import-cycle free.
     """
     payload = config.model_dump(mode="json", exclude=_DIGEST_EXCLUDE)  # type: ignore[attr-defined]
+    _drop_unset_deployments(payload)
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
 
@@ -254,6 +272,8 @@ class RunStamp:
                     "distribution": dist, "version": version,
                 })
             meta[SLOT_MODELS_KEY.encode()] = json.dumps(slot_payload).encode()
+        if deployments := deployments_payload():
+            meta[DEPLOYMENTS_KEY.encode()] = json.dumps(deployments).encode()
         if (check := model_check_payload()) is not None:
             meta[MODEL_CHECK_KEY.encode()] = json.dumps(check, sort_keys=True).encode()
         return meta

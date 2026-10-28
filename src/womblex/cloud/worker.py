@@ -33,8 +33,8 @@ from womblex.utils.model_check import (
     CheckLevel,
     ModelCheckResult,
     check_models,
+    deployed_models,
     enabled_scopes,
-    isaacus_models,
     models_key,
 )
 
@@ -71,14 +71,14 @@ def served_queues(
         for key in {"", models_key(config, SCOPE_EXTRACT) if config else ""}:
             queues[dbos_app.extract_queue(ingest_root, key)] = 1
     unchecked = set() if config is None or check.level is CheckLevel.OFF else (
-        {s for u in isaacus_models(config, WORKER_SCOPES) for s in u.scopes} - enabled_scopes(config))
+        {s for u in deployed_models(config, WORKER_SCOPES) for s in u.scopes} - enabled_scopes(config))
     for stage in STAGE_CONTRACTS:
         bad = check.failures_for((stage,))
         if bad:
             logger.error("not serving stage %s: model check failed: %s", stage, check.message(bad))
             continue
         if stage in unchecked:
-            logger.info("not serving stage %s: its Isaacus model is checked only when this worker's config "
+            logger.info("not serving stage %s: its deployed model is checked only when this worker's config "
                         "enables the stage", stage)
             continue
         for key in {"", models_key(config, stage) if config else ""}:

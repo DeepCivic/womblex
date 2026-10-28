@@ -97,7 +97,7 @@ def test_the_isaacus_provider_still_persists_its_document(tmp_path) -> None:
 def test_the_contracts_key_off_the_provider(tmp_path, model: str, isaacus: bool) -> None:
     config = _config(tmp_path, model)
     enrich, chunk = STAGE_CONTRACTS["enrich"], STAGE_CONTRACTS["chunk"]
-    assert enrich.requires_isaacus_api(config) is isaacus
+    assert enrich.requires_deployment(config) is isaacus
     assert enrich.models(config) == ((model,) if isaacus else ())
     assert any(s.endswith("enrichment_doc.parquet") for s in enrich.outputs(config)) is isaacus
     assert any(c.suffix.endswith("enrichment_doc.parquet")
@@ -108,7 +108,7 @@ def test_the_contracts_key_off_the_provider(tmp_path, model: str, isaacus: bool)
 def test_the_model_check_pings_isaacus_and_loads_anything_else(tmp_path, model: str, isaacus: bool) -> None:
     config = _config(tmp_path, model)
     scopes = (model_check.SCOPE_ENRICH,)
-    assert [u.name for u in model_check.isaacus_models(config, scopes)] == ([model] if isaacus else [])
+    assert [u.name for u in model_check.deployed_models(config, scopes)] == ([model] if isaacus else [])
     slots = [u.slot for u in model_check.configured_models(config, scopes)]
     assert (SLOT_ENRICHMENT in slots) is not isaacus
     if not isaacus:
@@ -128,8 +128,8 @@ def test_without_a_document_to_reuse_chunking_is_local_semchunk(tmp_path, caplog
     """AI chunking reuses the enricher's Document; without one it is off, never a paid call of its own."""
     config = _config(tmp_path, model)
     config.chunking.enabled = True
-    assert STAGE_CONTRACTS["chunk"].requires_isaacus_api(config) is ai
-    assert [u.name for u in model_check.isaacus_models(config, (model_check.SCOPE_CHUNK,))] == (
+    assert STAGE_CONTRACTS["chunk"].requires_deployment(config) is ai
+    assert [u.name for u in model_check.deployed_models(config, (model_check.SCOPE_CHUNK,))] == (
         ["kanon-2-enricher"] if ai else [])
     assert ("graph-refresh" in enabled_downstream_stages(config)) is ai
     assert effective_chunking(config).chunking_model == ("kanon-2-enricher" if ai else None)

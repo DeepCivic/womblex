@@ -524,9 +524,10 @@ class TestMarkdownEngines:
 
 from types import SimpleNamespace
 
-from womblex.ingest.llm_ocr import MistralOCRReader, OllamaOCRReader
+from womblex.providers.bedrock.ocr import MistralOCRReader
 from womblex.providers.isaacus import client as isaacus_client
-from womblex.utils.model_check import ISAACUS, SCOPE_EMBED, SCOPE_ENRICH, isaacus_models
+from womblex.providers.ollama.ocr import OllamaOCRReader
+from womblex.utils.model_check import ISAACUS, SCOPE_EMBED, SCOPE_ENRICH, deployed_models
 
 
 class _FakeIsaacus:
@@ -560,11 +561,11 @@ def fake_isaacus(monkeypatch: pytest.MonkeyPatch):
     made: list[_FakeIsaacus] = []
 
     def install(fail: str | None = None) -> list[_FakeIsaacus]:
-        def make(*, models: object = ()) -> _FakeIsaacus:
+        def make() -> _FakeIsaacus:
             made.append(_FakeIsaacus(fail))
             return made[-1]
 
-        monkeypatch.setattr(isaacus_client, "make_isaacus_client", make)
+        monkeypatch.setattr(isaacus_client, "make_api_client", make)
         return made
 
     return install
@@ -579,7 +580,7 @@ _PAID = {
 
 class TestIsaacus:
     def test_each_enabled_stage_names_the_model_it_calls(self) -> None:
-        uses = {u.name: u.scopes for u in isaacus_models(_config(**_PAID))}
+        uses = {u.name: u.scopes for u in deployed_models(_config(**_PAID))}
         # AI chunking and enrich call the same enricher: one check, both scopes.
         assert uses == {
             "kanon-2-enricher": (SCOPE_ENRICH, SCOPE_CHUNK),
@@ -588,17 +589,17 @@ class TestIsaacus:
 
     def test_nothing_is_called_when_no_stage_needs_isaacus(self) -> None:
         # Plain chunking runs offline on the vendored tokeniser.
-        assert isaacus_models(_config()) == []
+        assert deployed_models(_config()) == []
 
     def test_smoke_sends_every_model_one_billed_request_and_records_it(self, fake_isaacus) -> None:
         made = fake_isaacus()
         result = check_models(_config(**_PAID), "smoke", scopes=(SCOPE_ENRICH, SCOPE_EMBED))
         assert result.ok
-        kinds = sorted(c.calls[0][0] for c in made)
-        assert kinds == ["embed", "enrich"]
-        embed = next(c for c in made if c.calls[0][0] == "embed")
-        assert embed.calls[0][1]["task"] == "retrieval/document"
-        assert all(c.closed for c in made)
+        assert len(made) == 1  # one client for the deployment, however many models use it
+        assert sorted(kind for kind, _ in made[0].calls) == ["embed", "enrich"]
+        embed = next(kw for kind, kw in made[0].calls if kind == "embed")
+        assert embed["task"] == "retrieval/document"
+        assert not made[0].closed  # the shared client stays open for the stages that follow
         assert {(c.slot, c.source) for c in result.checks} == {(ISAACUS, "isaacus-api")}
         names = {e["name"] for e in footer_payload()["checks"]}
         assert names == {"kanon-2-enricher", "kanon-2-embedder"}
@@ -616,7 +617,7 @@ class TestIsaacus:
     def test_womblex_run_checks_isaacus_before_extraction(self) -> None:
         """No scopes = every enabled stage, which is what `womblex run` asks for."""
         cfg = _config(embedding={"enabled": True})
-        assert [(u.name, u.scopes) for u in isaacus_models(cfg)] == [
+        assert [(u.name, u.scopes) for u in deployed_models(cfg)] == [
             ("kanon-2-embedder", (SCOPE_EMBED,)),
         ]
 
@@ -712,3 +713,14 @@ def test_the_worker_registry_names_the_queues_live_workers_serve(tmp_path: Path)
         assert registry.live_queues(within_seconds=-1) == {}  # none refreshed in time
         registry.remove("w1")
         assert registry.live_queues() == {"q-b": ["w2"]}
+
+
+def test_the_old_llm_ocr_path_re_exports_both_readers():
+    from womblex.ingest import llm_ocr
+    from womblex.providers.bedrock import ocr as bedrock
+    from womblex.providers.ollama import ocr as ollama
+
+    assert llm_ocr.MistralOCRReader is bedrock.MistralOCRReader
+    assert llm_ocr.get_mistral_reader is bedrock.get_mistral_reader
+    assert llm_ocr.OllamaOCRReader is ollama.OllamaOCRReader
+    assert llm_ocr.get_ollama_reader is ollama.get_ollama_reader

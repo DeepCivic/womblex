@@ -69,6 +69,7 @@ chunking:
   chunk_size: 480       # Max tokens/chunk. null = auto-derive from tokeniser's model_max_length.
   enabled: true
   chunk_tables: true
+  # chunking_deployment: isaacus-api  # where chunking_model is served; null = as enrichment.deployment's default
   # chunking_model: kanon-2-enricher  # semchunk 4 AI chunking — boundaries follow the
   #                        # Isaacus enricher's structure spans. null (default) = offline
   #                        # token chunking. With the enrich stage also on, run `enrich`
@@ -154,6 +155,8 @@ pii:
 enrichment:
   enabled: false
   model: kanon-2-enricher
+  # deployment: isaacus-sagemaker  # where the model is served; null = SageMaker if
+  #                             # ISAACUS_SAGEMAKER_ENDPOINTS is set, else isaacus-api
   overflow_strategy: auto       # auto/chunk = internal chunk+stitch (>16k tokens); drop_end | null
   # skip_short_documents: 0     # skip docs shorter than N chars (0 = enrich all)
   # include_tables: true        # also enrich each table's markdown on its own, so table
@@ -195,6 +198,7 @@ linking:
 embedding:
   enabled: false
   model: kanon-2-embedder
+  # deployment: isaacus-api      # as enrichment.deployment; the two may differ
   task: retrieval/document        # retrieval/document (index) | retrieval/query | null
   # dimensions: null              # model default unless set
 

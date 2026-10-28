@@ -4,7 +4,7 @@ This document is the single source of truth for **what** Womblex must do, expres
 as user stories with testable acceptance criteria. It deliberately does **not**
 cover *how* the system is built, why decisions were made, or measured accuracy.
 
-**Paid features are tagged.** A requirement whose behaviour can start a call billed by a third party carries a **Paid:** line under its heading, saying what is billed and which setting switches it on. A requirement without one engages nothing paid. The paid models are the Kanon-2 Enricher and Kanon-2 Embedder (Isaacus, on the hosted API or a SageMaker endpoint) and Mistral Pixtral Large on AWS Bedrock (`mistral-ocr`). Everything else runs locally and costs nothing per call, including semchunk (MIT), the Kanon-2 tokeniser (Apache-2.0), PaddleOCR, PP-DocLayout-M and a self-hosted Ollama. A merge that adds, removes or changes a paid call updates the line in the same merge.
+**Paid features are tagged.** A requirement whose behaviour can start a call billed by a third party carries a **Paid:** line under its heading, saying what is billed and which setting switches it on. A requirement without one engages nothing paid. The paid models are the Kanon-2 Enricher and Kanon-2 Embedder (Isaacus, on the hosted API or a SageMaker endpoint), Mistral Pixtral Large on AWS Bedrock (`mistral-ocr`), and whatever model a hosted vendor serves behind the `openai-compatible` embedding provider. Everything else runs locally and costs nothing per call, including semchunk (MIT), the Kanon-2 tokeniser (Apache-2.0), PaddleOCR, PP-DocLayout-M, a self-hosted Ollama, and a self-hosted server behind `openai-compatible` (`OPENAI_COMPAT_BILLED=false`). A merge that adds, removes or changes a paid call updates the line in the same merge.
 
 Acceptance criteria name outcomes a user can observe. How a criterion is tested goes on the requirement's **Verification:** line.
 
@@ -61,7 +61,7 @@ Terms the requirements use, as the code defines them.
 - A stage dispatched again under new stage ids (a changed workflow, a later firing) skips a unit whose outputs were published by the same Womblex version under the same stage config from unchanged inputs, so identical work is neither redone nor re-paid. Any difference runs the unit, and a retry runs every unit it holds.
 - Distributed run shards can be synced locally and consumed unchanged by local per-stage commands.
 - A stage can execute in place over object storage under the same contract as local execution.
-- A storage location may be a local path or a `file://`, `s3://` (S3 and MinIO), `s3a://`, `gs://`, `gcs://`, `az://` or `abfs://` URI.
+- A storage location may be a local path or a URI whose scheme fsspec knows and whose backend is installed (`s3://` for S3 and MinIO is bundled; `gs://` and `az://` need `gcsfs` and `adlfs`). A scheme fsspec knows whose backend is missing is refused before launch naming the package; an unknown one is refused naming the usable schemes.
 - Object-storage writes are all-or-none per unit: every declared output exists before any is published, and a unit left partial by a failed upload never reads as complete, so the next run redoes and overwrites it. A failed unit is recorded and the rest of the run continues. A stage that rewrites outputs in place commits atomically, so an interrupted publish leaves the previous outputs intact.
 - A distributed run writes `<run>/manifest.parquet` when its stages finish. `womblex finalize` still writes it on demand, with the same result.
 
@@ -70,7 +70,6 @@ Terms the requirements use, as the code defines them.
 **TO-DO:**
 
 - **`verify-shards --compare-to` does not compare `content_digest`.** It prints each run's aggregate counts (`store/shard_audit.py`, `format_audit_diff`) side by side and flags nothing, so a document whose `content_digest` differs between a local and a fleet run goes unreported. Compare the manifests' `content_digest` per `source_hash` and report each difference.
-- **Azure storage URIs aren't credential-wired.** `storage_options_from_env` (`store/remote.py`) wires only `s3://`; `az://`/`abfs://` fall through to adlfs unauthed and untested. Add an `az`/`abfs` branch reading `AZURE_STORAGE_*`, plus coverage.
 - **No Azure ML connection in the enrichment paths.** `providers/isaacus/client.py` handles the hosted API and AWS SageMaker (`ISAACUS_SAGEMAKER_ENDPOINTS`) but has no Azure ML equivalent. Add an Azure ML connection option so those paths can reach an Azure ML endpoint (`AZUREML_ENDPOINTS`, client factory, `unserved_models` pre-flight).
 
 ## 3. Ingest-First Data Flow and Operation Composition
@@ -401,7 +400,7 @@ These requirements described the admin console (`womblex ui`). The console now l
 
 ## 24. Swappable Models Without a Schema Change
 
-**Paid:** The OCR, enrichment and embedding slots can hold paid models; swapping a slot can add or remove a paid call.
+**Paid:** The OCR, enrichment and embedding slots can hold paid models; swapping a slot can add or remove a paid call. The built-in `openai-compatible` embedding provider is billed per request when pointed at a hosted vendor, and nothing when `OPENAI_COMPAT_BILLED=false` marks a self-hosted server.
 
 **As** a user with my own models, local or API-backed,
 **I want** to swap the model behind a pipeline slot without forking Womblex,
@@ -446,7 +445,7 @@ These requirements described the admin console (`womblex ui`). The console now l
 - The check has three levels, set by `processing.models_check` or `--models-check`: `off`; `load` (resolve and load the models, the default); `smoke` (also run one inference on a small built-in input).
 - `womblex run` checks the models of every enabled stage before batch one, before any output is written, so a run whose later stages cannot complete does not start.
 - A worker checks at startup and refuses jobs whose models fail the check, through the existing refused path. A job is refused only for the models it needs: a batch for the extraction models, a stage job for that stage's.
-- A model behind a service is checked with one minimal request at either level: each Isaacus model an enabled stage calls (enrich, embed, AI chunking), and an API-backed OCR engine (Bedrock, Ollama), so a run whose later paid stage cannot reach its service does not start.
+- A model behind a service is checked through its deployment (Requirement 36), once per deployment, at either level: each model an enabled stage calls on one (enrich, embed, AI chunking), and an API-backed OCR engine (Bedrock, Ollama), so a run whose later paid stage cannot reach its service does not start.
 - An API submission checks only that each named model is registered, because the API host may not carry the models.
 - Downstream stage preflight includes the model check, including the standalone `chunk`, `pii`, `spellfix` and `redact` commands, which check before writing anything.
 - The existing in-slot fallback (PaddleOCR v5 to the wheel's v4) stays, and the check reports which variant resolved.
@@ -468,6 +467,7 @@ These requirements described the admin console (`womblex ui`). The console now l
 - Plugin model weights appear in the loaded-model record alongside the built-ins.
 - The run record no longer lists the OCR engine as unestablished.
 - A model the pre-run check builds only to confirm it loads is not recorded as used — a run whose check built the model but whose stages never actually called it shows no entry for it; only a run's own build of it does.
+- Every pipeline Parquet's footer also records the deployment each model ran on (Requirement 36).
 - Benchmark reports (womblex-benchmark) name the models that produced them, suites can run against a named model, and `docs/accuracy/` stays labelled as the default group.
 
 ## 27. Workflows — Check, Run, Dispatch, Schedule and Deliver
@@ -637,12 +637,110 @@ These requirements described the admin console (`womblex ui`). The console now l
 
 **Out of scope:** the console.
 
+## 36. Deployments Registered Once, Shared by Every Model They Serve
+
+**Paid:** Adds no paid call by default. It moves the pre-run gating of the existing paid calls (`enrich`, `embed`, AI chunking in `chunk`, `mistral-ocr`) onto the deployment that serves them. A slot's `deployment:` setting can put two of one vendor's models on two deployments, billed two ways.
+
+**As** a maintainer adding a vendor that offers several functions through one API,
+**I want** the vendor's deployment registered once and every model it serves, in any slot, to reference it,
+**so that** credentials, reachability, billing and the client are declared and checked once per deployment, not once per function or in a branch per vendor.
+
+**Given** a registered deployment and models in several slots that reference it
+**When** a run, worker or dispatch starts
+**Then** the deployment is checked once, each model is checked as served by it, and every stage that uses one of its models is handed the same client.
+
+**Acceptance criteria:**
+
+- A deployment declares the environment variables it reads (alternatives allowed, so Isaacus reads `ISAACUS_API_KEY` or `ISAACUS_SAGEMAKER_ENDPOINTS`), whether it needs the network, whether its calls are billed, a free reachability check, a billed smoke call, the models it serves and how its client is built. A declaration names variables, never a secret. The built-ins are `isaacus-api`, `isaacus-sagemaker`, `bedrock` and `ollama`.
+- A model registers in a slot against the deployments that may serve it and a vendor model id; a deployment is handed that vendor id, never the registered name. One model may be served by more than one deployment (Kanon-2 Embedder on the hosted API or a SageMaker endpoint), and one model id is both the `enrichment` provider and the AI chunking model (the latter chosen by `chunking.chunking_deployment`).
+- Each slot's config takes an optional `deployment:`. Left unset, a model is served as before: by SageMaker when `ISAACUS_SAGEMAKER_ENDPOINTS` is set, else the hosted API. A model the chosen deployment does not serve is refused, never routed to another deployment.
+- Before launch, a `deployment:` the model cannot use (unknown, or not one that may serve it) is refused naming the deployment and what serves the model, for `POST /v1/runs` and `dispatch-workflow` (registration only, since the host may not carry the workers' environment), and for `run` and a worker. A model its chosen deployment does not serve in this environment is refused naming the deployment and what it serves.
+- Each deployment's free check runs once however many slots use it, and a failure is named for the model that caused it. `load` runs the free check; `smoke` sends one billed call per model on the deployment, warning first.
+- A process builds one client per deployment and passes it to every provider that uses it.
+- A worker serves a stage only when every model the stage uses passes its deployment's check.
+- A deployment that needs the network is billed.
+- `GET /v1/resources` lists each registered deployment and the models it may serve; the variables it reads are reported set or not, and no value is shown.
+- Every sidecar records the deployment each model ran on, under the footer key `womblex.deployments`; an ARN is reduced to its endpoint name and region, as the run record does, and the hosted API is named by `ISAACUS_BASE_URL` when set, without its userinfo, query or fragment. Existing keys keep their values. The run record (version 10) lists them.
+- A plugin can register a deployment as it registers a model (`womblex.deployments` entry point, `womblex_deployments` on a factory); the run record names the distribution and version that supplied it.
+- Existing plugins keep working: the `isaacus` trait means "served by the Isaacus deployments", and a reader with `ping()` / `ping_is_billed` and no declared deployment is given one built from them.
+- With the default configuration the built-ins behave as before, with the same refusal codes, the same queues joined and the same `womblex.model_check` values; `config_digest` is unchanged for a config that names no deployment.
+
+**Verification:** `tests/test_deployment_registry.py` (the conformance every registered deployment meets, registration and plugins), `tests/test_deployment_check.py` (one check per deployment, attribution), `tests/test_deployment_gates.py` (contracts and workers), `tests/test_deployment_choice.py` (the setting, its refusals, a client per deployment, the unchanged digest), `tests/test_deployment_record.py` (the footer key and run record) and `tests/test_resources.py`.
+
+## 37. Object Stores Are Whatever fsspec Can Open
+
+**As** an operator,
+**I want** any storage fsspec can open to be usable as a store, an ingest location or a destination, configured with fsspec's own options,
+**so that** adding a storage backend is installing it and naming it, not editing Womblex.
+
+**Given** an installed fsspec backend and its options in the deployment's settings
+**When** a run, worker, API or egress names its scheme
+**Then** it works with no change to Womblex.
+
+**Acceptance criteria:**
+
+- A scheme is usable when fsspec knows it and its backend is importable in this install. A scheme fsspec knows whose backend is not installed (`gs://` without `gcsfs`) is refused before launch, naming the package; an unknown scheme is refused naming the usable ones. The same check covers a store, an ingest location, the API's upload location and a destination; a stored workflow's spec asks only whether fsspec knows a destination's scheme, and the check that the backend is installed is made where the workflow runs.
+- The existing typo checks stay: a missing `://`, an uppercase scheme, no bucket.
+- Each location (store, ingest, destination) takes its own `storage_options`: the store's and ingest location's in the deployment's settings (`store_options`, `ingest_options`) and, for containers, from one JSON environment variable per location (`WOMBLEX_STORE_STORAGE_OPTIONS`, `WOMBLEX_INGEST_STORAGE_OPTIONS`, applied to any URI inside the location `WOMBLEX_STORE_URI` / `WOMBLEX_INGEST_URI` names), a destination's in its spec. They reach fsspec unchanged; Womblex adds no per-backend option.
+- A secret is written `{"env": "NAME"}` and resolved when the location is opened, so `GET /v1/resources` shows the variable, never the value (a literal secret in settings is masked). A stored workflow refuses a secret-looking destination option written as a value.
+- S3-compatible stores (MinIO, Cloudflare R2, others) need configuration only. The ingest and output stores may be different accounts or vendors.
+- The existing S3 variables (`WOMBLEX_S3_ENDPOINT`, `WOMBLEX_S3_ACCESS_KEY_ID`, `WOMBLEX_S3_SECRET_ACCESS_KEY`, the `AWS_*` fallbacks) keep working, below explicit `storage_options` in precedence, and still keep a store key out of the ambient AWS credentials the SageMaker signer relies on.
+- The ingest/output disjointness check applies to every scheme.
+- No dependency is added; an operator installs `gcsfs` or `adlfs` for the store they use.
+
+**Verification:** `tests/test_remote_schemes.py` runs extract, chunk, finalize and egress over fsspec's built-in `memory://` filesystem with no Womblex edit, and refuses a `gs://` store with `gcsfs` absent, naming `gcsfs`; `tests/test_storage_options.py` covers the options, their precedence, the secrets rule and the digest of a destination that gives none; `tests/test_resources.py` the masked view.
+
+## 38. Adding a Provider Is a Bounded Change
+
+**As** a contributor adding a model, deployment or storage backend,
+**I want** one checklist whose documentation steps the suite checks,
+**so that** the cost of a new option is its adapter and its test, not a search across the docs.
+
+**Given** a new built-in or plugin provider
+**When** it is added
+**Then** the checklist names every file it touches, and the suite fails on any step left out.
+
+**Acceptance criteria:**
+
+- The model-plugin guide (Requirement 24) carries the checklist for a built-in and for a plugin: the deployment (Requirement 36), if new; its model registrations; conformance tests; one `docs/models.md` entry per model; one CHANGELOG line.
+- One plugin package can register a deployment and models in several slots, and installing it makes all of them selectable.
+- A built-in vendor lives in its own package under `providers/` (its client module beside one adapter module per slot), and the module table covers `providers/` in one row, so a new vendor adds no row.
+- A model on a billed deployment with no `docs/models.md` entry under its canonical name or its vendor model id, or that no **Paid:** line in this document names, fails the suite.
+- Each slot's conformance test runs against every model registered in it, and the deployment conformance test against every registered deployment, so a new built-in is tested by registering it.
+- The previous import paths of the moved adapters (`ingest/llm_ocr.py`, the Isaacus adapters in `analyse/enrich.py` and `analyse/embed.py`, `utils/isaacus_client.py`) re-export for one release, and the CHANGELOG says when they are removed.
+- A womblex-benchmark pair is needed only when `SLOTS` or `DEFAULT_MODELS` change; a new non-default model needs none.
+
+**Verification:** `tests/_fixture_vendor.py` presents a package registering one deployment and models in two slots through the entry-point groups, and `tests/test_provider_conformance.py` and `tests/test_provider_docs.py` pick it up; the latter fails for a billed model missing its entry or its **Paid:** line.
+
+## 39. A Second Embedding Provider
+
+**Paid:** Adds one paid call when pointed at a hosted vendor: that vendor's embedding model, billed per request, called only when `embedding.model` is `openai-compatible`. Pointed at a self-hosted server marked unbilled (`OPENAI_COMPAT_BILLED=false`, Requirement 36), nothing is billed.
+
+**As** a user without an Isaacus deployment, or wanting a second option,
+**I want** a built-in embedding provider for any OpenAI-compatible endpoint,
+**so that** hosted vendors and self-hosted servers are one setting away, and Requirement 36 is proven by a second real vendor.
+
+**Given** `embedding.model` set to the OpenAI-compatible provider and its deployment declared
+**When** the `embed` stage runs
+**Then** `*.embeddings.parquet` is written with the same schema, `dim` taken from the vectors returned.
+
+**Acceptance criteria:**
+
+- A thin adapter over `/v1/embeddings` through `httpx`, adding no dependency; retries and limits are the server's, with no retry loop of Womblex's own. It serves hosted vendors and self-hosted servers (vLLM, Ollama, TEI) alike.
+- It declares its deployment (Requirement 36: `OPENAI_COMPAT_BASE_URL`, an optional `OPENAI_COMPAT_API_KEY`, billed unless `OPENAI_COMPAT_BILLED=false`) and its texts per request (`embedding.provider_options.max_texts_per_request`, default 64) and network need (Requirement 24). The server's model id is `embedding.provider_options.model`, required, and refused before launch when missing.
+- Embedding roles are `document` and `query`; each provider maps them to its own terms, or to nothing when it has none, and says so in its `docs/models.md` entry. `embedding.task` keeps accepting `retrieval/document` and `retrieval/query`, and `document` and `query`. This provider has no such terms and ignores the role.
+- A `dimensions` setting the provider cannot honour is refused before launch. This provider sends it and checks the width of what comes back, so a server that ignores it is that batch's error.
+- No token ceiling is enforced: a chunk the server rejects as too long is that batch's recorded error, and the stage goes on.
+- A workflow's Postgres destination stores vectors of any width beside their `model`, as its untyped `vector` column does today; `docs/models.md` notes that a similarity index needs one width. The `model` recorded for this provider is the server's model id.
+- Isaacus remains the default; with nothing configured, outputs are unchanged.
+
+**Verification:** `tests/test_openai_compat_embedding.py` runs the embedding conformance and the provider and its deployment over a mocked transport; `tests/test_openai_compat_live.py` is a live test that skips without `OPENAI_COMPAT_BASE_URL` and `OPENAI_COMPAT_TEST_MODEL`, like the Isaacus ones.
+
 ## Outstanding
 
 Requirements not yet fully met. The detail lives in the **TO-DO** block under each requirement; this list is the index. When a gap is closed (or the criterion is deliberately narrowed), its TO-DO block and its entry here are removed in the same PR.
 
-
-- **Requirement 2 (Scale-Out):** `verify-shards --compare-to` does not compare `content_digest`; Azure storage URIs (`az://` / `abfs://`) are not credential-wired, and the enrichment paths have no Azure ML connection.
+- **Requirement 2 (Scale-Out):** `verify-shards --compare-to` does not compare `content_digest`; the enrichment paths have no Azure ML connection.
 - **Requirement 3 (Ingest-First Data Flow):** up-front composition check covers workflows (local and `dispatch-workflow`) and dispatch, not a lone `run-stage --store` (per-base `NotReady`).
 - **Requirement 6 (Native Office and Spreadsheet Extraction):** multi-row headers are emitted for DOCX only; spreadsheets and the legacy table view collapse to row 0, no per-cell header-row coordinate exists, and cell formulas are never captured.
 - **Requirement 7 (Standalone Reference Register Ingestion):** G-NAF and geospatial writes are not guarded against partial output.

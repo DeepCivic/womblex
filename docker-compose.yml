@@ -40,6 +40,18 @@
 #     export AWS_REGION=...
 #     # S3 store credentials go on the STORE-SPECIFIC vars, NOT AWS_ACCESS_KEY_ID:
 #     export WOMBLEX_S3_ACCESS_KEY_ID=...  WOMBLEX_S3_SECRET_ACCESS_KEY=...
+#
+#     Any other fsspec store, or a different account per location, is configuration
+#     only: each location takes its own fsspec options as one JSON object, and a
+#     secret is {"env": "NAME"}, the name of a variable set in the same container.
+#     (gs:// and az:// also need the gcsfs / adlfs package installed in the image.)
+#       Cloudflare R2 for the store, an Azure container for the ingest location:
+#         export WOMBLEX_STORE_URI=s3://womblex-runs
+#         export WOMBLEX_STORE_STORAGE_OPTIONS='{"key": "<access key id>", "secret": {"env": "R2_SECRET"},
+#           "client_kwargs": {"endpoint_url": "https://<account>.r2.cloudflarestorage.com"}}'
+#         export WOMBLEX_INGEST_URI=az://documents/inbox
+#         export WOMBLEX_INGEST_STORAGE_OPTIONS='{"account_name": "<account>",
+#           "account_key": {"env": "AZURE_STORAGE_KEY"}}'
 #     # Leave AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY UNSET. Setting them is
 #     # process-global and disables boto3's instance-role resolution for the
 #     # isaacus-sagemaker SigV4 signer, which then signs the store key against
@@ -97,6 +109,9 @@ x-cloud-env: &cloud-env
   # Source documents live on their own prefix of the same bucket, disjoint
   # from the store's runs/ output — see assert_disjoint_locations.
   WOMBLEX_INGEST_URI: ${WOMBLEX_INGEST_URI:-s3://womblex/inbox}
+  # Each location's own fsspec options (see the CLOUD example above); empty => none.
+  WOMBLEX_STORE_STORAGE_OPTIONS: ${WOMBLEX_STORE_STORAGE_OPTIONS:-}
+  WOMBLEX_INGEST_STORAGE_OPTIONS: ${WOMBLEX_INGEST_STORAGE_OPTIONS:-}
   # Empty WOMBLEX_S3_ENDPOINT (the cloud case) => s3fs talks to real AWS S3;
   # the bundled default points at MinIO.
   WOMBLEX_S3_ENDPOINT: ${WOMBLEX_S3_ENDPOINT:-http://minio:9000}

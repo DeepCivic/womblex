@@ -31,6 +31,9 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
+from womblex.utils.deployment_check import check_deployed, check_pinging_model
+from womblex.utils.deployment_choice import choice_problems, pick_deployment
+from womblex.utils.deployment_registry import ISAACUS_DEPLOYMENTS, deployments_for
 from womblex.utils.model_registry import (
     SLOT_EMBEDDING,
     SLOT_ENRICHMENT,
@@ -93,6 +96,10 @@ class ModelUse:
     name: str
     options: dict[str, Any]
     scopes: tuple[str, ...]
+    deployment: str = ""
+    """The deployment (`utils/deployment_registry.py`) that serves it, for a model checked through one."""
+    vendor_model: str = ""
+    """The vendor's id for it, which its deployment is handed; empty where it is ``name``."""
 
 
 @dataclass(frozen=True)
@@ -180,12 +187,9 @@ def _candidates(config: WomblexConfig) -> list[tuple[str, str, str, dict[str, An
         SCOPE_SPELLFIX, SLOT_SPELLFIX_DICTIONARY, config.spellfix.dict_name,
         dict(config.spellfix.dict_options),
     ))
-    from womblex.analyse.embed import calls_isaacus as embedding_calls_isaacus
-    from womblex.analyse.enrich import calls_isaacus
-
-    if not calls_isaacus(config.enrichment.model):  # an Isaacus provider is pinged instead
+    if not _entry_deployments(SLOT_ENRICHMENT, config.enrichment.model):  # a deployed model is checked through its deployment
         out.append((SCOPE_ENRICH, SLOT_ENRICHMENT, config.enrichment.model, {}))
-    if not embedding_calls_isaacus(config.embedding.model):
+    if not _entry_deployments(SLOT_EMBEDDING, config.embedding.model):
         out.append((SCOPE_EMBED, SLOT_EMBEDDING, config.embedding.model, {}))
     if config.pii.use_regex_backstop:  # the only consumer of the context model
         out.append((SCOPE_PII, SLOT_PII_CONTEXT, config.pii.model, dict(config.pii.model_options)))
@@ -206,6 +210,11 @@ def enabled_scopes(config: WomblexConfig) -> set[str]:
     }
 
 
+def _register_builtins() -> None:
+    for module in _BUILTIN_MODULES:
+        importlib.import_module(module)
+
+
 def configured_models(
     config: WomblexConfig, scopes: Iterable[str] | None = None,
 ) -> list[ModelUse]:
@@ -214,8 +223,7 @@ def configured_models(
     A model several scopes use (the layout analyser for OCR and for redaction)
     is listed once, so it is loaded once.
     """
-    for module in _BUILTIN_MODULES:
-        importlib.import_module(module)
+    _register_builtins()
     wanted = enabled_scopes(config) if scopes is None else set(scopes)
     merged: dict[tuple[str, str, str], tuple[dict[str, Any], list[str]]] = {}
     for scope, slot, name, options in _candidates(config):
@@ -229,28 +237,56 @@ def configured_models(
     ]
 
 
-def isaacus_models(
+def _entry_deployments(slot: str, name: str) -> tuple[str, ...]:
+    """The deployments that may serve the model registered as *name* in *slot*; none if it runs locally or is unknown."""
+    try:
+        return deployments_for(resolve(slot, name))
+    except ValueError:
+        return ()  # the unknown name is reported by the model's own check
+
+
+def _vendor_model(slot: str, name: str) -> str:
+    """The vendor id registered for *name* in *slot*; empty where it is the name, or the name is unregistered.
+
+    A slot setting that names the vendor's model itself (``embedding.provider_options.model``) wins over it.
+    """
+    try:
+        return resolve(slot, name).vendor_model
+    except ValueError:
+        return ""
+
+
+def deployed_models(
     config: WomblexConfig, scopes: Iterable[str] | None = None,
 ) -> list[ModelUse]:
-    """The Isaacus models *config* calls for *scopes* (every enabled stage if ``None``).
+    """The models *config* calls on a deployment for *scopes* (every enabled stage if ``None``).
 
-    Enrich and embed call their model when the provider is Isaacus's; chunk
-    calls the enricher only under AI chunking (``chunking.chunking_model``) —
-    plain chunking is offline.
+    Enrich and embed call their model when a deployment serves it; chunk calls the
+    enricher only under AI chunking (``chunking.chunking_model``) — plain chunking is offline.
+    An Isaacus-served model is recorded under the ``isaacus`` slot.
     """
-    from womblex.analyse.embed import calls_isaacus as embedding_calls_isaacus
-    from womblex.analyse.enrich import ai_chunking_model, calls_isaacus
+    from womblex.analyse.enrich import ai_chunking_model
 
+    _register_builtins()
     wanted = enabled_scopes(config) if scopes is None else set(scopes)
-    found: dict[str, list[str]] = {}
-    for scope, model in (
-        (SCOPE_ENRICH, config.enrichment.model if calls_isaacus(config.enrichment.model) else None),
-        (SCOPE_CHUNK, ai_chunking_model(config)),
-        (SCOPE_EMBED, config.embedding.model if embedding_calls_isaacus(config.embedding.model) else None),
+    chunk_model = ai_chunking_model(config)
+    # One use per model and deployment: a model two slots put on two deployments is checked on both.
+    found: dict[tuple[str, str], tuple[str, list[str]]] = {}  # (model, deployment) -> (slot, scopes)
+    vendor: dict[str, str] = {}
+    for scope, slot, model, deployments, requested in (
+        (SCOPE_ENRICH, SLOT_ENRICHMENT, config.enrichment.model,
+         _entry_deployments(SLOT_ENRICHMENT, config.enrichment.model), config.enrichment.deployment),
+        (SCOPE_CHUNK, SLOT_ENRICHMENT, chunk_model, ISAACUS_DEPLOYMENTS if chunk_model else (),
+         config.chunking.chunking_deployment),
+        (SCOPE_EMBED, SLOT_EMBEDDING, config.embedding.model,
+         _entry_deployments(SLOT_EMBEDDING, config.embedding.model), config.embedding.deployment),
     ):
-        if model and scope in wanted:
-            found.setdefault(model, []).append(scope)
-    return [ModelUse(ISAACUS, m, {}, tuple(s)) for m, s in found.items()]
+        if model and deployments and scope in wanted:
+            deployment = pick_deployment(deployments, requested)
+            found.setdefault((model, deployment), (ISAACUS if deployment.startswith("isaacus") else slot, []))[1].append(scope)
+            configured = config.embedding.provider_options.get("model") if scope == SCOPE_EMBED else None
+            vendor.setdefault(model, str(configured) if configured else _vendor_model(slot, model))
+    return [ModelUse(slot, m, {}, tuple(s), d, vendor[m]) for (m, d), (slot, s) in found.items()]
 
 
 def models_key(config: WomblexConfig, scope: str) -> str:
@@ -259,7 +295,7 @@ def models_key(config: WomblexConfig, scope: str) -> str:
     The identity work is routed by (Phase R, D8): a queue named with it is joined only by a
     worker whose own config names the same models and whose check of them passed.
     """
-    uses = [*configured_models(config, [scope]), *isaacus_models(config, [scope])]
+    uses = [*configured_models(config, [scope]), *deployed_models(config, [scope])]
     if not uses:
         return ""
     ident = sorted((u.slot, u.name.strip().lower(), json.dumps(u.options, sort_keys=True, default=str)) for u in uses)
@@ -279,6 +315,7 @@ def check_registered(config: WomblexConfig) -> None:
             resolve(use.slot, use.name)
         except ValueError as exc:
             problems.append(str(exc))
+    problems += [message for _scope, _slot, _model, message in _static_problems(config)]
     if problems:
         raise ValueError("; ".join(problems))
 
@@ -385,54 +422,7 @@ def _smoke(use: ModelUse, model: Any) -> None:
             raise RuntimeError(f"encode returned shape {shape}, expected (1, dim)")
 
 
-def _ping_isaacus(use: ModelUse) -> None:
-    """One minimal request to *use*'s model, through the client the stage builds."""
-    from womblex.providers.isaacus.client import make_isaacus_client
-
-    client = make_isaacus_client(models=[use.name])
-    try:
-        if SCOPE_EMBED in use.scopes:
-            resp = client.embeddings.create(
-                model=use.name, texts=[_PROBE_SENTENCE], task="retrieval/document",
-            )
-            if len(resp.embeddings) != 1 or not resp.embeddings[0].embedding:
-                raise RuntimeError("returned no embedding for the probe sentence")
-        else:
-            resp = client.enrichments.create(model=use.name, texts=[_PROBE_SENTENCE])
-            if len(resp.results) != 1:
-                raise RuntimeError("returned no enrichment for the probe sentence")
-    finally:
-        client.close()
-
-
-def _check_isaacus(use: ModelUse, level: CheckLevel) -> SlotCheck:
-    from womblex.providers.isaacus.client import sagemaker_configured
-
-    start = time.monotonic()
-    source = "isaacus-sagemaker" if sagemaker_configured() else "isaacus-api"
-    base = {"slot": use.slot, "name": use.name, "scopes": use.scopes, "level": level}
-    try:
-        if level is CheckLevel.SMOKE:
-            logger.warning("model check (smoke): sending one billed request to Isaacus model %r to verify it; "
-                           "processing.models_check=load checks it without a billed request", use.name)
-            _ping_isaacus(use)
-        else:
-            from womblex.providers.isaacus.client import check_reachable
-
-            check_reachable(use.name)
-    except Exception as exc:  # the SDK, boto3 and httpx raise their own types
-        return SlotCheck(
-            **base, ok=False, source=source,  # type: ignore[arg-type]
-            reason=f"{type(exc).__name__}: {exc}", seconds=time.monotonic() - start,
-        )
-    return SlotCheck(
-        **base, ok=True, source=source, seconds=time.monotonic() - start,  # type: ignore[arg-type]
-    )
-
-
 def _check_one(use: ModelUse, level: CheckLevel) -> SlotCheck:
-    if use.slot == ISAACUS:
-        return _check_isaacus(use, level)
     start = time.monotonic()
     base = {"slot": use.slot, "name": use.name, "scopes": use.scopes, "level": level}
     try:
@@ -444,10 +434,8 @@ def _check_one(use: ModelUse, level: CheckLevel) -> SlotCheck:
     try:
         model = _load(use)
         variant = getattr(model, "model_variant", None)
-        if callable(ping := getattr(model, "ping", None)):
-            if getattr(model, "ping_is_billed", False):
-                logger.warning("model check: sending one billed request to %s %r to verify it", use.slot, use.name)
-            ping()  # a model behind a service: reachable, authorised, served
+        if callable(getattr(model, "ping", None)):
+            check_pinging_model(use.slot, use.name, model)  # behind a service: reachable, authorised, served
         if level is CheckLevel.SMOKE:
             _smoke(use, model)
     except Exception as exc:  # a plugin may raise anything
@@ -486,6 +474,18 @@ def reset_model_check() -> None:
     _OFF_REQUESTED = False
 
 
+def _static_problems(config: WomblexConfig) -> list[tuple[str, str, str, str]]:
+    """Settings the registry cannot honour, read from registrations alone: a `deployment:` and an unsupported `dimensions`."""
+    from womblex.analyse.embed import capability_problems
+
+    return [*choice_problems(config), *capability_problems(config)]
+
+
+def _refused(use: ModelUse, refused: list[SlotCheck]) -> bool:
+    """Whether every scope that uses *use* has already refused its model's `deployment` setting."""
+    return set(use.scopes) <= {s for c in refused if c.name == use.name for s in c.scopes}
+
+
 def check_models(
     config: WomblexConfig,
     level: CheckLevel | str | None = None,
@@ -514,9 +514,18 @@ def check_models(
         _OFF_REQUESTED = True
         return ModelCheckResult(chosen)
     scopes = list(scopes) if scopes is not None else None
-    uses = [*configured_models(config, scopes), *isaacus_models(config, scopes if isaacus_scopes is None else isaacus_scopes)]
+    uses = [*configured_models(config, scopes), *deployed_models(config, scopes if isaacus_scopes is None else isaacus_scopes)]
+    wanted = enabled_scopes(config) if scopes is None else set(scopes)
+    refused = [
+        SlotCheck(slot=slot, name=model, scopes=(scope,), level=chosen, ok=False, reason=message)
+        for scope, slot, model, message in _static_problems(config) if scope in wanted
+    ]
     with suppress_use_recording(), suppress_recording():
-        checks = [_check_one(use, chosen) for use in uses]
+        checks = [
+            *refused,
+            *(_check_one(use, chosen) for use in uses if not use.deployment),
+            *check_deployed([u for u in uses if u.deployment and not _refused(u, refused)], chosen),
+        ]
     for check in checks:
         _STATE[(check.slot, check.name)] = check
         if check.ok:
@@ -550,9 +559,9 @@ __all__ = [
     "check_models",
     "check_registered",
     "configured_models",
+    "deployed_models",
     "enabled_scopes",
     "footer_payload",
-    "isaacus_models",
     "models_key",
     "reset_model_check",
 ]
