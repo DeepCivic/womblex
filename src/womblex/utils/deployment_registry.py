@@ -39,6 +39,7 @@ _BUILTIN_MODULES = (
     "womblex.providers.bedrock.deployment",
     "womblex.providers.isaacus.deployment",
     "womblex.providers.ollama.deployment",
+    "womblex.providers.openai_compat.deployment",
 )
 
 
