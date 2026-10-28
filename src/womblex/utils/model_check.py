@@ -257,7 +257,8 @@ def deployed_models(
     _register_builtins()
     wanted = enabled_scopes(config) if scopes is None else set(scopes)
     chunk_model = ai_chunking_model(config)
-    found: dict[str, tuple[str, str, list[str]]] = {}  # model -> (slot, deployment, scopes)
+    # One use per model and deployment: a model two slots put on two deployments is checked on both.
+    found: dict[tuple[str, str], tuple[str, list[str]]] = {}  # (model, deployment) -> (slot, scopes)
     for scope, slot, model, deployments, requested in (
         (SCOPE_ENRICH, SLOT_ENRICHMENT, config.enrichment.model,
          _entry_deployments(SLOT_ENRICHMENT, config.enrichment.model), config.enrichment.deployment),
@@ -268,8 +269,8 @@ def deployed_models(
     ):
         if model and deployments and scope in wanted:
             deployment = pick_deployment(deployments, requested)
-            found.setdefault(model, (ISAACUS if deployment.startswith("isaacus") else slot, deployment, []))[2].append(scope)
-    return [ModelUse(slot, m, {}, tuple(s), deployment) for m, (slot, deployment, s) in found.items()]
+            found.setdefault((model, deployment), (ISAACUS if deployment.startswith("isaacus") else slot, []))[1].append(scope)
+    return [ModelUse(slot, m, {}, tuple(s), d) for (m, d), (slot, s) in found.items()]
 
 
 def models_key(config: WomblexConfig, scope: str) -> str:
