@@ -2471,7 +2471,7 @@ docs = [
     { name = "mkdocs", specifier = ">=1.6" },
     { name = "mkdocs-gen-files", specifier = ">=0.5" },
     { name = "mkdocs-literate-nav", specifier = ">=0.6" },
-    { name = "mkdocstrings", extras = ["python"], specifier = ">=0.26" },
+    { name = "mkdocstrings", extras = ["python"], specifier = ">=1.0.8" },
 ]
 
 [[package]]
