@@ -1,6 +1,6 @@
 # SMS uplift — plan
 
-*Status: Phases C to G are proposed and may follow later. Collections and inbound webhooks, which came first, are built and recorded as Requirements 34 and 35 in `docs/functional_requirements.md`. A piece is removed from this plan when it is built, and this document is deleted when its last phase lands.*
+*Status: Phases C to G are proposed and may follow later. A piece is removed from this plan when it is built, and this document is deleted when its last phase lands.*
 
 ## Context
 
