@@ -31,6 +31,7 @@ from pathlib import Path
 from womblex.config import WomblexConfig
 from womblex.operations import (
     BatchResult,
+    result_rows,
     run_extraction,
     run_redaction,
     write_batch_parquet,
@@ -90,10 +91,8 @@ def process_batch(
 
     batch = BatchResult(results=results)
     shard_path = shard_dir / f"batch-{batch_num:04d}.parquet"
-    rows_written = sum(
-        1 for r in batch.results if r.status == "completed" and r.extraction is not None
-    )
-    write_batch_parquet(batch, shard_path, provenance=provenance, stamp=stamp)
+    rows_written = len(result_rows(batch))
+    write_batch_parquet(batch, shard_path, provenance=provenance, stamp=stamp, batch_num=batch_num)
     return BatchOutcome(batch=batch, shard_path=shard_path, rows_written=rows_written)
 
 

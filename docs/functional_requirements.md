@@ -331,7 +331,7 @@ Terms the requirements use, as the code defines them.
 
 - Processing occurs in configurable batches, appending results and writing a checkpoint as each batch completes.
 - Resuming an interrupted run reconciles checkpoints and skips completed documents.
-- A document error is isolated, recorded in the manifest, and does not stop its batch.
+- A document error is isolated, recorded in the manifest as a `status: error` row, and does not stop its batch. A source that could not be read has `extraction_method: unreadable` and a `source_hash` over `unreadable:`, its `source_relpath`, `:` and the batch number (never empty, and distinct in each firing of a collection); a document that failed after its bytes were read keeps its file-bytes hash and its method. `SourceResolver` declines an unreadable row as `unsupported_basis`, naming its `source_relpath`.
 - Stages can be dispatched independently from the CLI; idempotent queueing keeps dependent stages in order.
 - `womblex retry-stage` forks a failed distributed stage from its first failed unit, so finished units are not rerun.
 - A retry is a launch, refused before the fork with one of these codes: `not_found` (no such run or stage), `still_running`, `not_failed`, `earlier_failed` (a stage it ran after has not succeeded since), `already_retried`, `config_invalid` (the config does not load with registered models), `step_order` (an input the stage needs is missing from the store or out of order) or `no_worker` (no live worker passes the model check for the stage). A run another owner holds is refused before the fork too.
@@ -389,7 +389,7 @@ These requirements described the admin console (`womblex ui`). The console now l
 - `corpus/` mirrors the run's shard directory, every downstream sidecar included, plus the consolidated `manifest.parquet`, unchanged.
 - Raw sources are written to `sources/<source_hash><ext>`, deduplicated by hash; two documents sharing a hash point at one file.
 - `source_index.parquet` has one row per document (`source_hash`, `doc_id`, `filename`, `ext`, `raw_key`, and a status of `resolved`, `hash_mismatch`, `not_found`, `unsupported_basis` or `upload_failed`); `raw_key` is null wherever no file was produced.
-- Source resolution never aborts the export: a source whose status is `not_found`, `hash_mismatch`, `unsupported_basis` (a records-ingested document) or `upload_failed` is reported in the index and in `egress_manifest.json`.
+- Source resolution never aborts the export: a source whose status is `not_found`, `hash_mismatch`, `unsupported_basis` (a records-ingested document, or a source that could not be read) or `upload_failed` is reported in the index and in `egress_manifest.json`.
 - `egress_manifest.json` carries the contract version and a per-document resolution report.
 - A corpus-only export (`--no-sources` / `--corpus-only`) skips resolution and writes no `sources/` or `source_index.parquet`.
 - `--source-root` resolves sources for a moved corpus; `--run-id` defaults to the run root's name and must agree with the run's stamp, if any.

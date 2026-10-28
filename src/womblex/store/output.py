@@ -62,7 +62,7 @@ import pyarrow.parquet as pq
 
 from womblex.ingest.extract import ExtractionResult
 from womblex.store.contract import contract_footer
-from womblex.store.manifest_rows import _source_hash, manifest_row
+from womblex.store.manifest_rows import _source_hash, manifest_row, unreadable_hash
 from womblex.store.run_stamp import RunStamp, sidecar_footer, workflow_footer
 from womblex.store.source_provenance import IngestProvenance
 
@@ -250,6 +250,7 @@ def write_results(
     collection_id: str = "",
     provenance: IngestProvenance | None = None,
     stamp: RunStamp | None = None,
+    batch_num: int = 0,
 ) -> Path:
     """Write a batch's results to sibling element + sidecar + manifest parquets.
 
@@ -270,6 +271,10 @@ def write_results(
     caller for the same reason ``provenance`` is: only the caller knows the run
     id. Omitted, no run keys are written. Inside a ``workflow_context`` (a
     scheduled firing's batches) the workflow keys are written too.
+
+    A result that carries an error is written as a ``status: error`` row. A source whose bytes
+    cannot be read gets ``extraction_method: unreadable`` and a ``source_hash`` over its relpath
+    and *batch_num* (``manifest_rows.unreadable_hash``), so the row still joins.
     """
     paths = _shard_paths(output_path)
     if provenance is not None:
@@ -284,10 +289,13 @@ def write_results(
     hashes: list[str] = []
 
     for doc_id, source_path, res in results:
-        src_hash = _source_hash(source_path)
-        hashes.append(src_hash)
         relpath = provenance.relpath_for(source_path) if provenance is not None else ""
         relpaths.append(relpath)
+        src_hash = _source_hash(source_path)
+        unreadable = not src_hash
+        if unreadable:  # the placeholder names the file by its relpath, else its filename
+            src_hash = unreadable_hash(relpath or Path(source_path).name, batch_num)
+        hashes.append(src_hash)
         tc_count = 0
         ff_count = 0
 
@@ -344,6 +352,7 @@ def write_results(
             doc_id, source_path, res, source_hash=src_hash, collection_id=collection_id,
             ingest_root=provenance.ingest_root if provenance is not None else "", relpath=relpath,
             tc_count=tc_count, ff_count=ff_count, extracted_at=extracted_at, parser_version=PARSER_VERSION,
+            unreadable=unreadable,
         ))
 
     output_path.parent.mkdir(parents=True, exist_ok=True)

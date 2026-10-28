@@ -330,14 +330,11 @@ def cmd_extract(args: argparse.Namespace) -> int:
         out_path.write_text(r.extraction.full_text, encoding="utf-8")
         logger.info("  %s -> %s (%d chars)", r.doc_id, out_path, len(r.extraction.full_text))
     else:
+        from womblex.operations import BatchResult, result_rows
         from womblex.store.output import write_results
         from womblex.store.source_provenance import IngestProvenance
 
-        rows = [
-            (r.doc_id, str(r.path), r.extraction)
-            for r in results
-            if r.status == "completed" and r.extraction
-        ]
+        rows = result_rows(BatchResult(results=results))
         if rows:
             out_path = output_dir / f"{path.stem}.parquet"
             write_results(

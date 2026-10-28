@@ -147,10 +147,10 @@ One row per source file in the batch.
 | `source_hash`, `collection_id`, `doc_id`, `filename`, `ext` | string |
 | `ingest_root` | string — scheme-qualified corpus root (`file://…`, `s3://…`) |
 | `source_relpath` | string — path under that root; root + relpath names the document |
-| `extraction_method` | string |
+| `extraction_method` | string — `unreadable` where the source could not be read (its `source_hash` is then SHA-256 over `unreadable:<source_relpath>:<batch number>`, or the filename where no root is declared, not over bytes) |
 | `elements_count`, `table_cells_count`, `form_fields_count` | int64 |
-| `status` | string — `completed` (only completed results are written; a failed document gets no row) |
-| `error` | string — empty on success |
+| `status` | string — `completed`, or `error` for a document that failed (written as a row with no elements, so every document a batch was given is accounted for) |
+| `error` | string — empty on success; the failure otherwise |
 | `extracted_at_iso` | string |
 | `parser_version` | string |
 | `content_digest` | string (SHA-256 over ordered elements; null in shards written before the column) |

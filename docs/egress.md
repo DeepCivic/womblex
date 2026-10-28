@@ -102,8 +102,9 @@ status drawn from the existing `SourceResolver` vocabulary — `resolved`,
 of its own, `upload_failed`, for a source that resolved but whose copy to the
 destination raised; each is isolated per source, so one failed upload never
 aborts the export. A records-ingested document (hashed over id and text, not
-file bytes) resolves `unsupported_basis` and has no entry under `sources/`; this
-is reported, never an error.
+file bytes) and a source that could not be read (`extraction_method: unreadable`,
+hashed over its relpath and batch number) resolve `unsupported_basis` and have no
+entry under `sources/`; this is reported, never an error.
 
 Raw files are deduplicated by `source_hash`: two manifest rows sharing one hash
 (the same bytes ingested under two names) point at one file under `sources/`,
