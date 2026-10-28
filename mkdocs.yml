@@ -14,7 +14,6 @@ exclude_docs: |
   !/service-api.md
   !/contract.md
   /accuracy/
-  /gen_ref_pages.py
 
 nav:
   - Home: index.md
@@ -26,7 +25,7 @@ plugins:
   - search
   - gen-files:
       scripts:
-        - docs/gen_ref_pages.py
+        - .github/scripts/gen_ref_pages.py
   - literate-nav:
       nav_file: SUMMARY.md
   - mkdocstrings:
