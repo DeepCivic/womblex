@@ -1,6 +1,6 @@
 # Cloud flexibility — plan
 
-*Status: Phases A to D are built (the provider packages, Requirement 36 deployments registered once, Requirement 37 object stores as fsspec opens them, and Requirement 38 the checked provider checklist); Phases E and F are proposed. A piece is removed from this plan when it is built, and this document is deleted when its last phase lands.*
+*Status: Phases A to E are built (the provider packages, Requirements 36 to 39); Phase F, the stocktake, remains. A piece is removed from this plan when it is built, and this document is deleted when its last phase lands.*
 
 ## Context
 
@@ -23,8 +23,7 @@ plugin package (Requirement 24). The weight is elsewhere:
 - **Documentation steps are remembered, not checked.** A billed model's `docs/models.md` entry
   and **Paid:** line rely on the author.
 
-**Requirement numbers:** Requirement 39 is a working label for this plan only.
-`docs/functional_requirements.md` stops at Requirement 38. As each requirement is delivered, it
+**Requirement numbers:** The requirements this plan carried (36 to 39) are all written in `docs/functional_requirements.md`. As each requirement is delivered, it
 is written there as built, in that file's conventions, and removed from this plan in the same
 merge.
 
@@ -57,42 +56,6 @@ merge.
 
 ## Requirements (working drafts)
 
-### 39. A Second Embedding Provider
-
-**Paid:** Adds one paid call when pointed at a hosted vendor: that vendor's embedding model, billed per request, called only when `embedding.model` names it. Pointed at a self-hosted server marked unbilled (Requirement 36), nothing is billed.
-
-**As** a user without an Isaacus deployment, or wanting a second option,
-**I want** a built-in embedding provider for any OpenAI-compatible endpoint,
-**so that** hosted vendors and self-hosted servers are one setting away, and Requirement 36 is proven by a second real vendor.
-
-**Given** `embedding.model` set to the OpenAI-compatible provider and its deployment declared
-**When** the `embed` stage runs
-**Then** `*.embeddings.parquet` is written with the same schema, `dim` taken from the vectors returned.
-
-**Acceptance criteria:**
-
-- A thin adapter over `/v1/embeddings` through `httpx`, adding no dependency; retries and limits are the server's, with no retry loop of Womblex's own. It serves hosted vendors and self-hosted servers (vLLM, Ollama, TEI) alike.
-- It declares its deployment (Requirement 36) and its texts per request and network need (Requirement 24).
-- Embedding roles are `document` and `query`; each provider maps them to its own terms, or to nothing when it has none, and says so in its `docs/models.md` entry. `embedding.task` keeps accepting `retrieval/document` and `retrieval/query`.
-- A `dimensions` setting the provider cannot honour is refused before launch.
-- A token ceiling is optional, from the provider's settings. A chunk the server rejects as too long is that batch's recorded error; the stage goes on.
-- A workflow's Postgres destination stores vectors of any width beside their `model`, as its untyped `vector` column does today; `docs/models.md` notes that a similarity index needs one width.
-- Isaacus remains the default; with nothing configured, outputs are unchanged.
-
-**Verification:** the embedding conformance test passes for it with a mocked transport; a live test skips without its endpoint, like the Isaacus ones.
-
-## Phase E — OpenAI-compatible embedding (Requirement 39)
-
-**E1. Embedding roles and capabilities.**
-- `document` / `query` roles on the embedding provider contract; `embedding.task`'s Isaacus values accepted as aliases; the Isaacus adapter maps them to its tasks.
-- A provider declares whether it honours `dimensions`; a setting it cannot honour is refused before launch.
-
-**E2. The provider.**
-- `providers/openai_compat/embedding.py` over `httpx`, and its deployment (base URL and key variable, `billed` from its own setting).
-- Conformance with a mocked transport; a live test skipping without an endpoint.
-- Its `docs/models.md` entry (roles, the one-width note for similarity indexes), the **Paid:** line, and the paid-models paragraph at the top of `docs/functional_requirements.md`.
-- Delivers Requirement 39.
-
 ## Phase F — Stocktake
 
 The last merge is docs-only, recorded in its PR body, covering every check in CLAUDE.md's
@@ -100,4 +63,4 @@ Stocktake section. This plan is deleted in it.
 
 ## Order
 
-E needs the deployments (built) and the conformance tests (built), then F.
+Only F remains.

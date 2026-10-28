@@ -4,7 +4,7 @@ This document is the single source of truth for **what** Womblex must do, expres
 as user stories with testable acceptance criteria. It deliberately does **not**
 cover *how* the system is built, why decisions were made, or measured accuracy.
 
-**Paid features are tagged.** A requirement whose behaviour can start a call billed by a third party carries a **Paid:** line under its heading, saying what is billed and which setting switches it on. A requirement without one engages nothing paid. The paid models are the Kanon-2 Enricher and Kanon-2 Embedder (Isaacus, on the hosted API or a SageMaker endpoint) and Mistral Pixtral Large on AWS Bedrock (`mistral-ocr`). Everything else runs locally and costs nothing per call, including semchunk (MIT), the Kanon-2 tokeniser (Apache-2.0), PaddleOCR, PP-DocLayout-M and a self-hosted Ollama. A merge that adds, removes or changes a paid call updates the line in the same merge.
+**Paid features are tagged.** A requirement whose behaviour can start a call billed by a third party carries a **Paid:** line under its heading, saying what is billed and which setting switches it on. A requirement without one engages nothing paid. The paid models are the Kanon-2 Enricher and Kanon-2 Embedder (Isaacus, on the hosted API or a SageMaker endpoint), Mistral Pixtral Large on AWS Bedrock (`mistral-ocr`), and whatever model a hosted vendor serves behind the `openai-compatible` embedding provider. Everything else runs locally and costs nothing per call, including semchunk (MIT), the Kanon-2 tokeniser (Apache-2.0), PaddleOCR, PP-DocLayout-M, a self-hosted Ollama, and a self-hosted server behind `openai-compatible` (`OPENAI_COMPAT_BILLED=false`). A merge that adds, removes or changes a paid call updates the line in the same merge.
 
 Acceptance criteria name outcomes a user can observe. How a criterion is tested goes on the requirement's **Verification:** line.
 
@@ -711,6 +711,30 @@ These requirements described the admin console (`womblex ui`). The console now l
 - A womblex-benchmark pair is needed only when `SLOTS` or `DEFAULT_MODELS` change; a new non-default model needs none.
 
 **Verification:** `tests/_fixture_vendor.py` presents a package registering one deployment and models in two slots through the entry-point groups, and `tests/test_provider_conformance.py` and `tests/test_provider_docs.py` pick it up; the latter fails for a billed model missing its entry or its **Paid:** line.
+
+## 39. A Second Embedding Provider
+
+**Paid:** Adds one paid call when pointed at a hosted vendor: that vendor's embedding model, billed per request, called only when `embedding.model` is `openai-compatible`. Pointed at a self-hosted server marked unbilled (`OPENAI_COMPAT_BILLED=false`, Requirement 36), nothing is billed.
+
+**As** a user without an Isaacus deployment, or wanting a second option,
+**I want** a built-in embedding provider for any OpenAI-compatible endpoint,
+**so that** hosted vendors and self-hosted servers are one setting away, and Requirement 36 is proven by a second real vendor.
+
+**Given** `embedding.model` set to the OpenAI-compatible provider and its deployment declared
+**When** the `embed` stage runs
+**Then** `*.embeddings.parquet` is written with the same schema, `dim` taken from the vectors returned.
+
+**Acceptance criteria:**
+
+- A thin adapter over `/v1/embeddings` through `httpx`, adding no dependency; retries and limits are the server's, with no retry loop of Womblex's own. It serves hosted vendors and self-hosted servers (vLLM, Ollama, TEI) alike.
+- It declares its deployment (Requirement 36: `OPENAI_COMPAT_BASE_URL`, an optional `OPENAI_COMPAT_API_KEY`, billed unless `OPENAI_COMPAT_BILLED=false`) and its texts per request (`embedding.provider_options.max_texts_per_request`, default 64) and network need (Requirement 24). The server's model id is `embedding.provider_options.model`, required, and refused before launch when missing.
+- Embedding roles are `document` and `query`; each provider maps them to its own terms, or to nothing when it has none, and says so in its `docs/models.md` entry. `embedding.task` keeps accepting `retrieval/document` and `retrieval/query`, and `document` and `query`. This provider has no such terms and ignores the role.
+- A `dimensions` setting the provider cannot honour is refused before launch. This provider sends it and checks the width of what comes back, so a server that ignores it is that batch's error.
+- No token ceiling is enforced: a chunk the server rejects as too long is that batch's recorded error, and the stage goes on.
+- A workflow's Postgres destination stores vectors of any width beside their `model`, as its untyped `vector` column does today; `docs/models.md` notes that a similarity index needs one width. The `model` recorded for this provider is the server's model id.
+- Isaacus remains the default; with nothing configured, outputs are unchanged.
+
+**Verification:** `tests/test_openai_compat_embedding.py` runs the embedding conformance and the provider and its deployment over a mocked transport; `tests/test_openai_compat_live.py` is a live test that skips without `OPENAI_COMPAT_BASE_URL` and `OPENAI_COMPAT_TEST_MODEL`, like the Isaacus ones.
 
 ## Outstanding
 
