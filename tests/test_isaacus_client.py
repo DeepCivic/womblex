@@ -168,3 +168,12 @@ class _NoRegionSession:
     """Stands in for an AWS session with no region configured anywhere."""
 
     region_name = None
+
+
+def test_the_old_import_path_re_exports_the_client():
+    """`utils/isaacus_client` is the same objects as the provider package's, not a copy."""
+    from womblex.providers.isaacus import client
+    from womblex.utils import isaacus_client as old
+
+    for name in old.__all__:
+        assert getattr(old, name) is getattr(client, name)

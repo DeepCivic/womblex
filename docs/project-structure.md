@@ -223,6 +223,7 @@ womblex/
 │       ├── model_registry.py # Named model registry per slot (OCR, layout, PII context, tokeniser, spellfix dictionary): built-in names + `womblex.models.<slot>` entry-point plugins; records which entry each slot actually built, with its distribution and version
 │       ├── models.py        # Local model path resolution (WOMBLEX_MODELS_DIR, _models/, models/ + HF snapshot layout) + load record with byte digests
 │       ├── checksum.py      # Streamed MD5 (register ingests) and SHA-256 (published run files) helpers
+│       ├── isaacus_client.py # Re-export of providers/isaacus/client.py, for one release
 │       ├── run_log.py       # capture_batch_log() — tee a batch's womblex log lines to a file beside its shards
 │       ├── money_metrics.py # Money recall / precision / scale accuracy against typed transcript tags
 │       ├── log_format.py    # JsonFormatter + log_context for --log-format json (run_id/job_id/stage/source_hash)
