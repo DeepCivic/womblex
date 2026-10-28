@@ -41,9 +41,7 @@ removed from this plan in the same merge.
 
 ## Phase D — Withheld, omitted and failed documents
 
-**D2. Omitted files.**
-- `select_supported` and `dispatch.supported_keys` return the files they dropped.
-- New `store/omitted_output.py` writes a run-root `omitted.parquet` (`source_relpath`, `reason`: `unsupported_type`, `nested`) at enqueue or at the start of a local run.
+**D2. Skipped-short documents.** (The omitted-files half is built.)
 - Enrichment's `skip_short_documents` writes one `enrichment_meta` row per skipped document with `status = skipped_short`, so the document is recorded as "not looked for". This is an additive column.
 
 **D3. Withheld regions.**
