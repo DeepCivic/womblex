@@ -98,6 +98,8 @@ class ModelUse:
     scopes: tuple[str, ...]
     deployment: str = ""
     """The deployment (`utils/deployment_registry.py`) that serves it, for a model checked through one."""
+    vendor_model: str = ""
+    """The vendor's id for it, which its deployment is handed; empty where it is ``name``."""
 
 
 @dataclass(frozen=True)
@@ -243,6 +245,14 @@ def _entry_deployments(slot: str, name: str) -> tuple[str, ...]:
         return ()  # the unknown name is reported by the model's own check
 
 
+def _vendor_model(slot: str, name: str) -> str:
+    """The vendor id registered for *name* in *slot*; empty where it is the name, or the name is unregistered."""
+    try:
+        return resolve(slot, name).vendor_model
+    except ValueError:
+        return ""
+
+
 def deployed_models(
     config: WomblexConfig, scopes: Iterable[str] | None = None,
 ) -> list[ModelUse]:
@@ -259,6 +269,7 @@ def deployed_models(
     chunk_model = ai_chunking_model(config)
     # One use per model and deployment: a model two slots put on two deployments is checked on both.
     found: dict[tuple[str, str], tuple[str, list[str]]] = {}  # (model, deployment) -> (slot, scopes)
+    vendor: dict[str, str] = {}
     for scope, slot, model, deployments, requested in (
         (SCOPE_ENRICH, SLOT_ENRICHMENT, config.enrichment.model,
          _entry_deployments(SLOT_ENRICHMENT, config.enrichment.model), config.enrichment.deployment),
@@ -270,7 +281,8 @@ def deployed_models(
         if model and deployments and scope in wanted:
             deployment = pick_deployment(deployments, requested)
             found.setdefault((model, deployment), (ISAACUS if deployment.startswith("isaacus") else slot, []))[1].append(scope)
-    return [ModelUse(slot, m, {}, tuple(s), d) for (m, d), (slot, s) in found.items()]
+            vendor.setdefault(model, _vendor_model(slot, model))
+    return [ModelUse(slot, m, {}, tuple(s), d, vendor[m]) for (m, d), (slot, s) in found.items()]
 
 
 def models_key(config: WomblexConfig, scope: str) -> str:
