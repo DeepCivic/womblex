@@ -45,6 +45,7 @@ from womblex.process.chunker import (
     resolve_tokenizer,
 )
 from womblex.process.text_overlay import apply_overlay, load_overlay, require_overlays
+from womblex.providers.isaacus.client import make_ai_chunking_client
 from womblex.store.checkpoint import CheckpointManager
 from womblex.store.enrichment_doc import read_enrichment_docs
 from womblex.store.output import (
@@ -58,7 +59,6 @@ from womblex.store.output import (
     write_chunks,
 )
 from womblex.utils.availability import isaacus_available, tokenizer_available
-from womblex.utils.isaacus_client import make_ai_chunking_client
 
 logger = logging.getLogger(__name__)
 

@@ -50,6 +50,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from womblex.pipeline_order import stage_rank
+from womblex.providers.isaacus.client import endpoints_from_env, sagemaker_configured
 from womblex.store.build_info import image_info
 from womblex.store.contract import contract_footer
 from womblex.store.delivery_record import read_delivery_records
@@ -63,7 +64,6 @@ from womblex.store.run_stamp import (
     stamp_from_footers,
 )
 from womblex.store.source_provenance import NAMESPACE, IngestProvenance
-from womblex.utils.isaacus_client import endpoints_from_env, sagemaker_configured
 
 logger = logging.getLogger(__name__)
 

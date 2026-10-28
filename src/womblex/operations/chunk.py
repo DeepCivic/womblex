@@ -13,9 +13,9 @@ from womblex.process.chunker import (
     create_chunker,
     resolve_tokenizer,
 )
+from womblex.providers.isaacus.client import make_ai_chunking_client
 from womblex.redact.stage import annotate_chunks
 from womblex.utils.availability import isaacus_available, tokenizer_available
-from womblex.utils.isaacus_client import make_ai_chunking_client
 
 if TYPE_CHECKING:
     from womblex.ingest.extract import ExtractionResult

@@ -525,7 +525,7 @@ class TestMarkdownEngines:
 from types import SimpleNamespace
 
 from womblex.ingest.llm_ocr import MistralOCRReader, OllamaOCRReader
-from womblex.utils import isaacus_client
+from womblex.providers.isaacus import client as isaacus_client
 from womblex.utils.model_check import ISAACUS, SCOPE_EMBED, SCOPE_ENRICH, isaacus_models
 
 
