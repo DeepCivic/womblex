@@ -91,6 +91,8 @@ EXEMPT: dict[str, str] = {
     "write_source_index": "an egress bundle file at run grain with no batch shard beside it; "
                           "takes the run's stamp explicitly, covered in test_egress_output.py",
     "write_provenance_shard": "the pre-extracted records ingest, which is not a run",
+    "write_omitted": "a run-root file written as the run is enqueued or starts, before any batch "
+                     "shard exists to inherit a run from; carries the contract keys",
     "write_corpus_manifest": "the pre-extracted records ingest, which is not a run",
     "write_entity_mentions": "whole-corpus E2E writer: no per-batch shard to inherit from",
     "write_graph_edges": "whole-corpus E2E writer: no per-batch shard to inherit from",
