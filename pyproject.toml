@@ -53,7 +53,9 @@ dependencies = [
     "pillow>=10.0",
     "rapidocr-onnxruntime>=1.4",
     "onnxruntime>=1.20",
-    "opencv-python-headless",
+    # OpenCV 5 changed HoughLinesP's output layout and broke every OCR
+    # extraction, so a major moves only by hand.
+    "opencv-python-headless<6",
     "semchunk>=4.0",
     "pandas>=2.0",
     "openpyxl",
@@ -73,7 +75,7 @@ dependencies = [
     "boto3>=1.34",
     "fsspec>=2024.0",
     "s3fs>=2024.0",
-    "psycopg[binary]>=3.1",
+    "psycopg[binary]>=3.3.6",
     # Durable workflows (docs/decisions-operations.md, "Distributed execution"): replaces
     # the cloud/ queue, worker and stage runner. SQLite system database on a
     # local run, so the base install still needs no database server.
@@ -255,5 +257,5 @@ docs = [
     "mkdocs>=1.6",
     "mkdocs-gen-files>=0.5",
     "mkdocs-literate-nav>=0.6",
-    "mkdocstrings[python]>=0.26",
+    "mkdocstrings[python]>=1.0.8",
 ]

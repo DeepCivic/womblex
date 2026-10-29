@@ -44,6 +44,7 @@ from urllib.parse import unquote
 import pyarrow as pa
 
 from womblex.cli._shared import NestedCorpusError, discover_files, select_supported
+from womblex.store.manifest_rows import UNREADABLE_METHOD
 from womblex.store.output import _read_shard, _source_hash, read_manifest
 from womblex.store.run_manifest import RUN_MANIFEST_FILENAME
 
@@ -53,6 +54,7 @@ logger = logging.getLogger(__name__)
 #: consumer never has to infer it from the value's shape.
 HASH_BASIS_FILE_BYTES = "file_bytes"
 HASH_BASIS_RECORD_ID_TEXT = "record_id+text"
+HASH_BASIS_UNREADABLE = "unreadable+relpath+batch"
 
 #: ``extraction_method`` values whose hash is not over file bytes.
 _RECORD_METHODS = frozenset({"records"})
@@ -92,11 +94,9 @@ class Resolution:
 
 def hash_basis_for(extraction_method: str) -> str:
     """The hash basis a manifest row's ``extraction_method`` implies."""
-    return (
-        HASH_BASIS_RECORD_ID_TEXT
-        if extraction_method in _RECORD_METHODS
-        else HASH_BASIS_FILE_BYTES
-    )
+    if extraction_method == UNREADABLE_METHOD:
+        return HASH_BASIS_UNREADABLE
+    return HASH_BASIS_RECORD_ID_TEXT if extraction_method in _RECORD_METHODS else HASH_BASIS_FILE_BYTES
 
 
 def load_manifest(location: Path) -> pa.Table:
@@ -201,6 +201,13 @@ class SourceResolver:
                 "no manifest row carries this source_hash",
             )
         basis = hash_basis_for(row.extraction_method)
+        if basis == HASH_BASIS_UNREADABLE:
+            return Resolution(
+                source_hash, UNSUPPORTED_BASIS, basis,
+                f"hashed over {basis}, not file bytes — the source at {row.relpath or row.filename} "
+                "could not be read when it was extracted, so there is no file to resolve",
+                doc_id=row.doc_id, source_relpath=row.relpath,
+            )
         if basis != HASH_BASIS_FILE_BYTES:
             return Resolution(
                 source_hash, UNSUPPORTED_BASIS, basis,
@@ -305,6 +312,7 @@ def _declared_root(manifest: pa.Table, location: Path) -> str:
 __all__ = [
     "HASH_BASIS_FILE_BYTES",
     "HASH_BASIS_RECORD_ID_TEXT",
+    "HASH_BASIS_UNREADABLE",
     "HASH_MISMATCH",
     "NOT_FOUND",
     "RESOLVED",

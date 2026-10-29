@@ -6,11 +6,32 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from womblex.operations.models import BatchResult
+from womblex.ingest.extract import ExtractionResult
+from womblex.operations.models import BatchResult, DocumentResult
 from womblex.store.run_stamp import RunStamp
 from womblex.store.source_provenance import IngestProvenance
 
 logger = logging.getLogger(__name__)
+
+
+def _failed_extraction(r: DocumentResult) -> ExtractionResult:
+    """What a document that failed before any extraction exists writes: no elements, the error, and the
+    document type detection had reached, if any."""
+    method = r.profile.doc_type.value if r.profile is not None else ""
+    return ExtractionResult(method=method, error=r.error or "extraction failed", document_id=r.doc_id)
+
+
+def result_rows(batch: BatchResult) -> list[tuple[str, str, ExtractionResult]]:
+    """One ``(doc_id, path, extraction)`` per result, failed documents included, in batch order.
+
+    A failure is written as a ``status: error`` manifest row, never dropped, so every document the
+    batch was given is accounted for in its shard.
+    """
+    return [
+        (r.doc_id, str(r.path), r.extraction if r.extraction is not None else _failed_extraction(r))
+        for r in batch.results
+        if r.status in ("completed", "error")
+    ]
 
 
 def write_batch_parquet(
@@ -19,25 +40,49 @@ def write_batch_parquet(
     *,
     provenance: IngestProvenance | None = None,
     stamp: RunStamp | None = None,
+    batch_num: int = 0,
+    redaction_regions: bool = False,
 ) -> Path | None:
-    """Write completed batch results to Parquet.
+    """Write the batch's results to Parquet, failed documents as ``status: error`` rows.
 
     ``provenance`` names the declared ingest root the documents were read
     from; it reaches the manifest columns and every shard's footer. ``stamp``
-    names the run that produced them, in the same footer.
+    names the run that produced them, in the same footer. ``batch_num`` keys the
+    placeholder hash of a source that could not be read (``store.manifest_rows``).
+    ``redaction_regions`` is true when redaction detection ran over the batch: the regions it
+    found are written beside the shard (``*.redaction_regions.parquet``, empty if there were none).
     """
     from womblex.store.output import write_results
 
-    rows = []
-    for r in batch.results:
-        if r.status == "completed" and r.extraction:
-            rows.append((r.doc_id, str(r.path), r.extraction))
-
+    rows = result_rows(batch)
     if not rows:
-        logger.warning("No completed results to write to Parquet")
+        logger.warning("No results to write to Parquet")
         return None
 
-    return write_results(rows, output_path, provenance=provenance, stamp=stamp)
+    written = write_results(rows, output_path, provenance=provenance, stamp=stamp, batch_num=batch_num)
+    if redaction_regions:
+        _write_regions(rows, written)
+    return written
+
+
+def _write_regions(rows: list[tuple[str, str, ExtractionResult]], shard_path: Path) -> None:
+    """Write the regions the batch's redaction reports hold, keyed by the shard's own `source_hash`es.
+
+    The manifest has one row per result, in order, so the hashes pair with *rows* by position.
+    """
+    from womblex.redact.stage import region_rows
+    from womblex.store.output import read_manifest
+    from womblex.store.redaction_regions_output import write_redaction_regions
+    from womblex.store.run_stamp import sidecar_footer
+
+    hashes = read_manifest(shard_path).column("source_hash").to_pylist()
+    regions = [
+        region
+        for source_hash, (_, _, extraction) in zip(hashes, rows, strict=True)
+        if extraction.redaction_report is not None
+        for region in region_rows(source_hash, extraction.redaction_report)
+    ]
+    write_redaction_regions(regions, shard_path, metadata=sidecar_footer(shard_path, "redact"))
 
 
 def write_batch_enrichment(batch: BatchResult, output_dir: Path) -> dict[str, Path | None]:

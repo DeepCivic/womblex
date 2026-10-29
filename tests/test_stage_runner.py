@@ -18,6 +18,7 @@ import pytest
 
 pytest.importorskip("fsspec")
 
+from tests._parquet import assert_same_parquet
 from womblex.cli.cloud import RUN_STAGE_CHOICES, cmd_run_stage
 from womblex.cloud.stage_contracts import (
     STAGE_CONTRACTS,
@@ -570,7 +571,7 @@ def test_local_and_remote_paths_produce_identical_bytes(extraction_run, tmp_path
     for batch in ("batch-0001", "batch-0002"):
         name = f"{batch}.normalised_text.parquet"
         remote_copy = store.download_file(f"{prefix}/{name}", tmp_path / "dl" / name)
-        assert remote_copy.read_bytes() == (local / name).read_bytes()
+        assert_same_parquet(remote_copy, local / name)
 
 
 def test_checkpoint_directory_is_staged_in_and_out(extraction_run, tmp_path):

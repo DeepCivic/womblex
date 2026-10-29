@@ -38,13 +38,15 @@ import pyarrow.parquet as pq
 
 from womblex.config import LayoutConfig, RedactionConfig
 from womblex.ingest.pdf import open_document
-from womblex.redact.stage import build_detector, detect_redactions
+from womblex.redact.stage import build_detector, detect_redactions, region_rows
 from womblex.store.layout_output import (
     REDACTION_UNFILTERED_KEY,
     layout_regions_path_for,
     read_page_layouts,
 )
 from womblex.store.output import _write_rows
+from womblex.store.redaction_regions_output import write_redaction_regions
+from womblex.store.run_stamp import sidecar_footer
 
 if TYPE_CHECKING:
     from womblex.ingest.layout_step import PageLayout
@@ -164,6 +166,7 @@ def annotate_redactions_for_shards(
                 batch_stem,
             )
         unfiltered: dict[str, list[int]] = {}
+        regions: list[dict] = []
         rows = _annotate_one_batch(
             elements_path=elements_path,
             manifest_path=manifest_path,
@@ -174,10 +177,13 @@ def annotate_redactions_for_shards(
             use_layout_filter=config.use_layout_filter,
             layouts=read_page_layouts(layout_path) if layout_path.exists() else {},
             unfiltered=unfiltered,
+            regions=regions,
         )
 
         out_path = output_dir / f"{batch_stem}.redactions.parquet"
         _write_redactions_parquet(rows, out_path, unfiltered)
+        write_redaction_regions(regions, output_dir / f"{batch_stem}.parquet",
+                                metadata=sidecar_footer(shard_dir / f"{batch_stem}.parquet", "redact"))
         logger.info("batch %s: %d affected elements → %s", batch_stem, len(rows), out_path)
 
         processed_batches.add(batch_stem)
@@ -207,9 +213,11 @@ def _annotate_one_batch(
     use_layout_filter: bool = True,
     layouts: Mapping[str, Mapping[int, PageLayout]] | None = None,
     unfiltered: dict[str, list[int]] | None = None,
+    regions: list[dict] | None = None,
 ) -> list[tuple[str, int]]:
     """Process a single batch; mutate *summary* (and *unfiltered*, the pages run
-    without exclusion zones) and return ``[(source_hash, elem_order), ...]``."""
+    without exclusion zones; and *regions*, the rows of ``*.redaction_regions.parquet``) and
+    return ``[(source_hash, elem_order), ...]``."""
     manifest_tbl = pq.read_table(manifest_path, columns=["source_hash", "filename"])
     elements_tbl = pq.read_table(elements_path, columns=["source_hash", "elem_order", "page"])
 
@@ -254,6 +262,8 @@ def _annotate_one_batch(
             unfiltered[source_hash] = report.unfiltered_pages
         if not report.total:
             continue
+        if regions is not None:
+            regions.extend(region_rows(source_hash, report))
 
         affected = set(report.affected_pages)
         for elem_order, page in elements_by_hash.get(source_hash, []):

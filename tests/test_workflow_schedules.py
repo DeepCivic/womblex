@@ -364,6 +364,7 @@ def test_firings_append_only_new_documents_to_one_run(fleet, saved_preset, monke
         fire("1", "1", "2")  # a replayed firing reuses its batches; one with nothing new runs nothing
         inbox = Path(ingest) / "inbox"
         (inbox / "more.csv").write_text("name,role\nBob,Clerk\n")
+        (inbox / "notes.txt").write_text("not a supported type")
         (inbox / "people.csv").write_text("name,role\nAlice,Secretary\n")  # changed: a new document
         fire("3")
     real_calls = [c for c in calls if not c.get("dry_run")]
@@ -375,6 +376,10 @@ def test_firings_append_only_new_documents_to_one_run(fleet, saved_preset, monke
     assert sorted(j.id for j in jobs if j.kind == "batch") == ["nightly:batch:0001", "nightly:batch:0002"]
     assert len([j for j in jobs if j.kind == "downstream"]) == 2
     assert "no new documents under its input prefix; firing 2 runs nothing" in caplog.text
+    import pyarrow.parquet as pq
+
+    omitted = pq.read_table(str(Path(str(store_dir)) / "runs/nightly/omitted.parquet")).to_pylist()
+    assert omitted == [{"source_relpath": "inbox/notes.txt", "reason": "unsupported_type"}]  # as the last firing found it
     work(fleet, idle_timeout=4)
     (third,) = dbos_app.open_client(None).list_workflows(workflow_ids=["nightly:fire-3:stage:normalise"])
     assert third.output["units"] == 1  # the third firing's stage ran over its own batch alone

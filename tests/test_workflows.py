@@ -543,10 +543,19 @@ def test_a_fleet_run_sends_its_events_once_each_and_records_them(fleet, monkeypa
     bodies = [b for b, _, _ in got.calls]
     stage, status = ("stage_failed", "failed") if fails else ("stage_finished", "done")
     assert [(b["event"], b["status"]) for b in bodies] == [
-        ("extraction_settled", "running"), (stage, "running"), ("run_finished", status)]
-    assert bodies[1]["stage"] == "normalise" and len({b["event_id"] for b in bodies}) == 3
+        ("batch_progress", "running"), ("extraction_settled", "running"), ("stage_started", "running"),
+        ("batch_progress", "running"), (stage, "running"), ("run_finished", status)]
+    extraction, _, _, units = (bodies[i] for i in range(4))
+    assert {k: extraction[k] for k in ("stage", "done", "failed", "total")} == {
+        "stage": "extract", "done": 1, "failed": 0, "total": 1}
+    assert {k: units[k] for k in ("stage", "done", "failed", "total")} == {
+        "stage": "normalise", "done": 0 if fails else 1, "failed": 1 if fails else 0, "total": 1}
+    assert bodies[4]["stage"] == "normalise" and len({b["event_id"] for b in bodies}) == 6
     saved = json.loads((store_root / "runs/r1/deliveries/hook.json").read_text())
-    assert [e["event"] for e in saved["events"]] == ["extraction_settled", stage, "run_finished"]
+    # A failed stage raises, so its unit events were sent but never reach the coordinator's record.
+    assert [e["event"] for e in saved["events"]] == [
+        "batch_progress", "extraction_settled", "stage_started", *([] if fails else ["batch_progress"]),
+        stage, "run_finished"]
 
 
 class _Row:

@@ -259,7 +259,7 @@ element's `elem_order` as a document-order anchor (see below).
 
 The footer's `womblex.chunks_digest` is the digest of the chunks the links were computed against; readers use the file only while the chunks beside it still hash to it.
 
-**enrichment_meta.parquet** — one row per enriched document
+**enrichment_meta.parquet** — one row per enriched or skipped-short document
 
 | Column | Description |
 |--------|-------------|
@@ -271,6 +271,7 @@ The footer's `womblex.chunks_digest` is the digest of the chunks the links were 
 | `location_count` | Number of locations identified |
 | `term_count` | Number of defined terms |
 | `external_doc_count`, `date_count`, `heading_count`, `junk_span_count` | Further per-document enrichment counts |
+| `status` | `enriched`, or `skipped_short` for a document whose narrative was under `skip_short_documents` and never sent (its counts are zero); null in files written before contract 3.2 |
 | `table_count` | Tables sent to the enricher on their own; null when none were, when `enrichment.include_tables` is off, and for a document with a table that failed. A document with tables but no narrative still gets a row |
 
 ## G-NAF Standalone Ingest

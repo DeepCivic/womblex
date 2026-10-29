@@ -351,7 +351,10 @@ def run_workflow_local(
 
     run_id = local_run_id(shard_dir)
     events = RunEvents(stored, run_id, f"{run_id}:local-{uuid.uuid4().hex[:12]}")
-    events.emit("extraction_settled", "running")  # a local run's extraction is done before its steps
+    batches = len(list(shard_dir.glob("*._manifest.parquet")))  # a local run's extraction is done before its steps
+    for settled in range(1, batches + 1):
+        events.emit("batch_progress", "running", f"extract:{settled}", stage="extract", done=settled, failed=0, total=batches)
+    events.emit("extraction_settled", "running")
     with workflow_context(stored.digest, stored.id, stored.spec.model_dump(mode="json")):
         for step, ctx in zip(stored.spec.steps, contexts, strict=True):
             ctx.source_root, ctx.force = source_root, force
@@ -359,6 +362,7 @@ def run_workflow_local(
             if earlier:
                 logger.warning("%s: running after failed step(s) %s", step.stage, ", ".join(earlier))
             summary: StageRunSummary | None = None
+            events.emit("stage_started", "running", step.stage, stage=step.stage)
             try:
                 summary = run_stage_local(STAGE_CONTRACTS[step.stage], shard_dir, config, ctx=ctx)
                 error = summary.error
@@ -367,6 +371,9 @@ def run_workflow_local(
                 logger.exception("%s: failed", step.stage)
                 error, status = f"{type(e).__name__}: {e}", "failed"
             result.steps.append(StepOutcome(step.stage, status, summary, error, earlier))
+            # A local stage runs the whole directory as its one unit.
+            events.emit("batch_progress", "running", step.stage, stage=step.stage,
+                        done=int(status == "ok"), failed=int(status == "failed"), total=1)
             events.emit("stage_failed" if status == "failed" else "stage_finished", "running", step.stage,
                         stage=step.stage, error=error, ran_after_failed=list(earlier))
     if stored.spec.destinations:

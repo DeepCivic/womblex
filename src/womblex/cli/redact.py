@@ -166,6 +166,7 @@ def _cmd_redact_config(args: argparse.Namespace) -> int:
         batch,
         output_root / "documents.parquet",
         provenance=IngestProvenance.from_config(config),
+        redaction_regions=True,
     )
 
     redacted_count = sum(

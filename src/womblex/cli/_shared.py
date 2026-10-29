@@ -94,8 +94,24 @@ class NestedCorpusError(ValueError):
         )
 
 
+class Omitted(NamedTuple):
+    """A file under the ingest location that a run does not look at, and why."""
+
+    source_relpath: str
+    reason: str  # "unsupported_type" | "nested"
+
+
 def select_supported(relpaths: Iterable[str], *, location: str) -> list[str]:
-    """The supported documents directly under *location*, from its full listing.
+    """The supported documents directly under *location*; see :func:`select_files`."""
+    return select_files(relpaths, location=location)[0]
+
+
+def select_files(relpaths: Iterable[str], *, location: str) -> tuple[list[str], list[Omitted]]:
+    """`(supported, omitted)` for the files directly under *location*, from its full listing.
+
+    *omitted* is every file the run passes over, sorted: an unsupported type at the top level
+    (`unsupported_type`), and any file in a subdirectory (`nested`; a supported document there is
+    refused instead, below).
 
     *relpaths* is every file under the location, relative to it, from a
     recursive listing — the walk is what makes a nested corpus visible rather
@@ -111,18 +127,22 @@ def select_supported(relpaths: Iterable[str], *, location: str) -> list[str]:
     they cannot drift apart again.
     """
     top: list[str] = []
+    omitted: list[Omitted] = []
     nested: dict[str, int] = {}
     for rel in relpaths:
         parts = PurePosixPath(rel).parts
-        if not parts or PurePosixPath(rel).suffix.lower() not in SUPPORTED_EXTENSIONS:
+        if not parts:
             continue
-        if len(parts) == 1:
+        supported = PurePosixPath(rel).suffix.lower() in SUPPORTED_EXTENSIONS
+        if supported and len(parts) == 1:
             top.append(rel)
-        else:
+        elif supported:
             nested[parts[0]] = nested.get(parts[0], 0) + 1
+        else:
+            omitted.append(Omitted(rel, "unsupported_type" if len(parts) == 1 else "nested"))
     if nested:
         raise NestedCorpusError(location, nested)
-    return sorted(top)
+    return sorted(top), sorted(omitted)
 
 
 # An ingest-relative prefix becomes a path segment joined onto the ingest root,
@@ -164,17 +184,25 @@ def discover_files(input_root: Path, limit: int | None = None, skip: int = 0) ->
 
     Raises :class:`NestedCorpusError` for a corpus with documents a level down.
     """
+    return discover_selection(input_root, limit, skip)[0]
+
+
+def discover_selection(
+    input_root: Path, limit: int | None = None, skip: int = 0,
+) -> tuple[list[Path], list[Omitted]]:
+    """`(files, omitted)`: :func:`discover_files` and the files under *input_root* a run passes over."""
     listing = (
         p.relative_to(input_root).as_posix()
         for p in input_root.rglob("*")
         if p.is_file()
     )
-    files = [input_root / name for name in select_supported(listing, location=str(input_root))]
+    names, omitted = select_files(listing, location=str(input_root))
+    files = [input_root / name for name in names]
     if skip:
         files = files[skip:]
     if limit:
         files = files[:limit]
-    return files
+    return files, omitted
 
 
 def format_eta(seconds: float) -> str:

@@ -1,7 +1,10 @@
 """A workflow's webhook destination: run events, signed, sent with bounded retries (Requirement 27).
 
-Six events and no others (no per-document or per-batch events): `extraction_settled`,
-`stage_finished`, `stage_failed`, `run_finished`, `delivered` and `delivery_failed`. Each body
+Eight events and no others, none per document: `extraction_settled`, `stage_started`,
+`batch_progress`, `stage_finished`, `stage_failed`, `run_finished`, `delivered` and
+`delivery_failed`. `batch_progress` is the one fine-grained event: it fires as each extraction
+batch settles and as each unit of a stage finishes, carrying `stage` (`extract` for extraction),
+`done`, `failed` and `total`. A destination's `events` setting narrows what it is sent. Each body
 carries an `event_id`, kept when the event is resent so a receiver can drop a duplicate, the
 `run_id` and the run's status in the API's words (`pending` / `running` / `done` / `failed` /
 `cancelled`). The body is signed with HMAC-SHA256 under the key in the environment variable the
@@ -29,7 +32,10 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 logger = logging.getLogger(__name__)
 
-EVENTS = ("extraction_settled", "stage_finished", "stage_failed", "run_finished", "delivered", "delivery_failed")
+EVENTS = (
+    "extraction_settled", "stage_started", "batch_progress", "stage_finished", "stage_failed",
+    "run_finished", "delivered", "delivery_failed",
+)
 SIGNATURE_HEADER = "X-Womblex-Signature"
 EVENT_ATTEMPTS = 3
 EVENT_BACKOFF_SECONDS = 2.0
@@ -89,12 +95,12 @@ def send_event(
 def emit(
     stored: StoredWorkflow, run_id: str, event: str, event_id: str, status: str, **fields: Any,
 ) -> list[dict[str, Any]]:
-    """Send *event* to each of *stored*'s webhooks; one outcome per webhook, as plain dicts."""
+    """Send *event* to each of *stored*'s webhooks that takes it; one outcome per webhook, as plain dicts."""
     from womblex.cloud.workflow_store import WebhookDestination
 
     sent: list[dict[str, Any]] = []
     for d in stored.spec.destinations:
-        if isinstance(d, WebhookDestination):
+        if isinstance(d, WebhookDestination) and (d.events is None or event in d.events):
             body = event_body(event, event_id, run_id, status, stored.id, stored.spec.collection, **fields)
             sent.append({"destination": d.name, **asdict(send_event(d, event, event_id, body))})
     return sent

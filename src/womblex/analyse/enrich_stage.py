@@ -171,7 +171,8 @@ def enrich_shards(
             results, base, text_layer=text_source, tables=table_results)
         write_enrichment_meta_shard(results, base, table_counts={
             h: len(ts) for h, ts in tables.items() if h not in errored
-        } if enrichment_config.include_tables else None)
+        } if enrichment_config.include_tables else None,
+            skipped=narratives.keys() - {h for h, _ in packable})
         chunks_by_hash = _load_chunks(base)
         write_graph_edges_shard(
             [

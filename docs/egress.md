@@ -102,8 +102,9 @@ status drawn from the existing `SourceResolver` vocabulary — `resolved`,
 of its own, `upload_failed`, for a source that resolved but whose copy to the
 destination raised; each is isolated per source, so one failed upload never
 aborts the export. A records-ingested document (hashed over id and text, not
-file bytes) resolves `unsupported_basis` and has no entry under `sources/`; this
-is reported, never an error.
+file bytes) and a source that could not be read (`extraction_method: unreadable`,
+hashed over its relpath and batch number) resolve `unsupported_basis` and have no
+entry under `sources/`; this is reported, never an error.
 
 Raw files are deduplicated by `source_hash`: two manifest rows sharing one hash
 (the same bytes ingested under two names) point at one file under `sources/`,
@@ -177,10 +178,11 @@ and counted in the delivery record (`rows_skipped`). No sources and no other sid
 are sent.
 
 **Webhook** (`kind: webhook`) — the run's events, never its data: `extraction_settled`,
-`stage_finished`, `stage_failed`, `delivered`, `delivery_failed` and `run_finished`.
+`stage_started`, `batch_progress`, `stage_finished`, `stage_failed`, `delivered`,
+`delivery_failed` and `run_finished`; an optional `events` list narrows them.
 Each is a JSON `POST` with `event`, `event_id`, `run_id`, `workflow`, `status` (the
 run's state as `/v1/runs` words it: `running`, then `done`, `failed` or `cancelled`), `at`, and the event's own `stage`, `destination`,
-`error`, `ran_after_failed` or `after_failed`. Headers: `X-Womblex-Event`,
+`error`, `ran_after_failed` or `after_failed`; `batch_progress` carries `stage`, `done`, `failed` and `total`. Headers: `X-Womblex-Event`,
 `X-Womblex-Event-Id` and `X-Womblex-Signature: sha256=<hex>`, the HMAC-SHA256 of the raw
 body under the key in `secret_env`. A receiver recomputes the signature before
 trusting a body and drops an `event_id` it has seen, since an event is resent under

@@ -597,6 +597,13 @@ be re-derivable, and the first pass's were not.
 - **No token ceiling.** There is no tokeniser for an arbitrary vendor's model, so counting against a ceiling would be a
   guess. The server's rejection is the ceiling and becomes the batch's recorded error.
 
+### A failed document is a manifest row; an unreadable one hashes its relpath
+2026-10, SMS uplift D1.
+
+- **Failures are rows.** `write_batch_parquet` and `extract` pass errored results through, so the `status: error` branch of the manifest writer is reached and every document a batch was given is accounted for. A document that failed before any extraction exists is written with no elements and the document type detection had reached, if any, as its method. `BatchOutcome.rows_written` counts these rows, since the shard check compares it with the manifest.
+- **An unreadable source hashes `unreadable:<source_relpath>:<batch number>`** (the filename where no root is declared), replacing the empty string `_source_hash` returned, so a join key is never empty and an unreadable file in two firings of one collection has two versions in its chain. `extraction_method: unreadable` marks it: `status: error` alone does not, since a document that failed after its bytes were read keeps its file-bytes hash and its method.
+- **The resolver never resolves one.** `HASH_BASIS_UNREADABLE`, beside the records basis: `SourceResolver` declines the row as `unsupported_basis` with a reason naming its `source_relpath`, because `resolved` always means the bytes matched `source_hash` and this hash is not over bytes. Egress reports it as it does a records-ingested row.
+
 ### Isaacus's parts are named separately, and the adapter is thin
 2026-10, decided 19 October for Phase 4 of the trust plan.
 
