@@ -18,9 +18,12 @@ def _source_hash(source_path: str) -> str:
     if not p.exists() or not p.is_file():
         return ""
     h = hashlib.sha256()
-    with open(p, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
+    try:
+        with open(p, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+    except OSError:  # present but not readable (permissions, a read error): unreadable, not a failed batch
+        return ""
     return h.hexdigest()
 
 
