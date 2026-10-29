@@ -12,7 +12,7 @@ jobs:
     # The job queue's tests need a real Postgres; without one they skip.
     services:
       postgres:
-        image: postgres:16.15@sha256:1beaa3084eee2676f20a9cd9928f0bf2c5bf674f8e49f81017912183d377c61c
+        image: postgres:18.4@sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636
         env:
           POSTGRES_PASSWORD: womblex
           POSTGRES_DB: womblex

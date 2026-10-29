@@ -155,7 +155,10 @@ services:
       POSTGRES_PASSWORD: womblex
       POSTGRES_DB: womblex
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # Postgres 18+ keeps its data in /var/lib/postgresql/18/docker, so the volume
+      # mounts at /var/lib/postgresql. A pgdata volume made by 16 holds 16 data that
+      # 18 does not read: recreate it for the local stack.
+      - pgdata:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U womblex"]
       interval: 5s

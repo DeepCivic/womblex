@@ -77,7 +77,7 @@ enumerated like any other.
 | `worker` | base | published | `${WOMBLEX_PIPELINE_IMAGE:-ghcr.io/deepcivic/womblex:latest}` | — | Published — pipeline image |
 | `seed-demo` | base | published | `${WOMBLEX_PIPELINE_IMAGE:-ghcr.io/deepcivic/womblex:latest}` | `seed` | Published — pipeline image |
 | `api` | base | published | `${WOMBLEX_PIPELINE_IMAGE:-ghcr.io/deepcivic/womblex:latest}` | `api` | Published — pipeline image |
-| `postgres` | base | image | `postgres:16.15@sha256:1beaa3084eee2676f20a9cd9928f0bf2c5bf674f8e49f81017912183d377c61c` | `local` | Third party — tag and digest pinned |
+| `postgres` | base | image | `postgres:18.4@sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636` | `local` | Third party — tag and digest pinned |
 | `minio` | base | image | `minio/minio` | `local` | Third party — tag unpinned |
 | `createbuckets` | base | image | `minio/mc` | `local` | Third party — tag unpinned |
 | `init` | override | build | `Dockerfile` | — | Built locally — the development path |
