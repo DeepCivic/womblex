@@ -76,6 +76,28 @@ def test_every_document_given_to_a_batch_has_a_manifest_row(corpus: Path, tmp_pa
     assert vanished["error"]
 
 
+def test_a_source_present_but_not_openable_is_unreadable_and_the_batch_still_lands(
+    corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    import builtins
+
+    from womblex.store import manifest_rows
+
+    def locked(path, *args, **kwargs):  # what a permission-denied file does on open
+        if Path(path).name == "corrupt.pdf":
+            raise PermissionError(13, "Permission denied", str(path))
+        return builtins.open(path, *args, **kwargs)
+
+    monkeypatch.setattr(manifest_rows, "open", locked, raising=False)
+    shards = tmp_path / "documents"
+    outcome = _batch(corpus, shards, 1, tmp_path)
+
+    assert outcome.rows_written == 3
+    corrupt = _rows(shards)["corrupt.pdf"]
+    assert (corrupt["status"], corrupt["extraction_method"]) == ("error", UNREADABLE_METHOD)
+    assert corrupt["source_hash"] == unreadable_hash("corrupt.pdf", 1)
+
+
 def test_a_failure_after_the_bytes_were_read_keeps_its_file_hash_and_is_not_marked_unreadable(
     corpus: Path, tmp_path: Path,
 ):

@@ -304,7 +304,6 @@ def enqueue_extraction(
         raise ValueError(f"no supported documents under {location}")
 
     output_prefix = f"runs/{resolved_run_id}"
-    _record_omitted(settings, output_prefix, omitted)
     shard_prefix = f"{output_prefix}/documents"
     specs = batch_specs(keys, shard_prefix=shard_prefix, ingest_root=ingest_uri,
                         batch_size=batch_size, max_attempts=max_attempts)
@@ -312,6 +311,8 @@ def enqueue_extraction(
     ensure_schema(settings.db_dsn)
     with RunBoard(settings.db_dsn, connect_timeout=QUEUE_CONNECT_TIMEOUT) as board:
         newly = board.enqueue(resolved_run_id, specs, owner=owner, config=payload)
+    # Only once the run exists: a refused enqueue must leave no run directory in the store.
+    _record_omitted(settings, output_prefix, omitted)
 
     logger.info(
         "enqueue: run_id=%s, %d doc(s) -> %d batch(es), %d newly enqueued",
