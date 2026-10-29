@@ -102,6 +102,28 @@ def test_the_api_enqueue_records_them_too(tmp_path: Path, monkeypatch):
         {"source_relpath": "cover.txt", "reason": "unsupported_type"}]
 
 
+def test_a_refused_enqueue_leaves_no_run_in_the_store(tmp_path: Path, monkeypatch):
+    from tests.test_dispatch import _Board, _seed, _settings
+    from womblex.cloud import dispatch
+    from womblex.cloud.jobs import RunOwnedError
+
+    class _Owned(_Board):
+        def enqueue(self, run_id: str, specs: list, **kw: object) -> int:
+            raise RunOwnedError(f"run {run_id!r} is owned by another owner")
+
+    monkeypatch.setattr("womblex.cloud.jobs.RunBoard", _Owned)
+    monkeypatch.setattr("womblex.cloud.dispatch.ensure_schema", lambda _dsn: None)
+    monkeypatch.setattr("womblex.cloud.worker_registry.require_served", lambda _dsn, _needed: None)
+    settings = _settings(tmp_path)
+    _seed(settings, "a.pdf")
+    (Path(str(settings.ingest_uri)) / "cover.txt").write_text("x")
+
+    with pytest.raises(RunOwnedError):
+        dispatch.enqueue_extraction(settings, run_id="r1", owner="client-b")
+
+    assert not (tmp_path / "store" / "runs" / "r1").exists()  # no phantom run for the store listing to find
+
+
 def test_a_record_that_cannot_be_written_is_a_warning_and_never_holds_the_run(caplog):
     class _Broken:
         def upload_file(self, *_a: object, **_k: object) -> None:

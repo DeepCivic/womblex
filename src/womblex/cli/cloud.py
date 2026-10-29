@@ -168,10 +168,11 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
 
     from womblex.store.omitted_output import publish_omitted
 
-    publish_omitted(omitted, RemoteStore.from_uri(store_uri), output_prefix)
     ensure_schema(dsn)
     with RunBoard(dsn) as board:
         inserted = board.enqueue(run_id, specs, config=config_payload(config))
+    # Only once the run exists: a refused enqueue must leave no run directory in the store.
+    publish_omitted(omitted, RemoteStore.from_uri(store_uri), output_prefix)
 
     logger.info(
         "run_id=%s: %d document(s) -> %d batch(es), %d newly enqueued. Shards -> %s/%s",
