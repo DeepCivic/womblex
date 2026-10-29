@@ -24,6 +24,7 @@ what every model (local and hosted) does in the pipeline.
 ### kanon-2-tokenizer/
 
 - **Type:** Kanon-2 tokeniser (Hugging Face `isaacus/kanon-2-tokenizer`)
+- **Licence:** Apache-2.0 per its Hugging Face card; the licence text ships beside it in `LICENSE`
 - **Size:** ~5 MB
 - **Used by:** `process/chunker.py` (semchunk token counting) and `utils/token_packer.py` (token-budgeted enrichment requests and ground-truth segments). Local only — no API call
 

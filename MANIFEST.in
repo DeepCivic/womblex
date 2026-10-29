@@ -1,7 +1,6 @@
 include README.md
 include LICENSE
 include CHANGELOG.md
-include py.typed
 
 recursive-include src/womblex *.py py.typed
 # Only the small artefacts ship (see pyproject package-data): the en_AU

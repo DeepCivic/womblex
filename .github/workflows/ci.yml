@@ -85,6 +85,45 @@ jobs:
           uv sync --frozen --only-group docs
           uv run --no-sync mkdocs build --strict
 
+  package:
+    name: Package (sdist and wheel)
+    runs-on: ubuntu-latest
+    # What release.yml publishes, built on every PR so a packaging fault is
+    # found before a tag, not at it.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.11.7"
+          python-version: "3.12"
+
+      - name: Build and check
+        # uv builds the sdist, then the wheel from it, so MANIFEST.in is tested too.
+        run: |
+          uv build --out-dir "$RUNNER_TEMP/dist"
+          uvx twine@6.1.0 check "$RUNNER_TEMP"/dist/*
+
+      - name: The wheel ships what the code reads at run time
+        run: |
+          python3 - "$RUNNER_TEMP"/dist/*.whl <<'EOF'
+          import sys
+          import zipfile
+
+          shipped = set(zipfile.ZipFile(sys.argv[1]).namelist())
+          models = "womblex/_models"
+          required = [
+              "womblex/py.typed",
+              *(f"{models}/en_AU/{n}" for n in ("LICENSE", "index.aff", "index.dic")),
+              *(f"{models}/kanon-2-tokenizer/{n}"
+                for n in ("LICENSE", "merges.txt", "tokenizer.json", "tokenizer_config.json", "vocab.json")),
+          ]
+          missing = [n for n in required if n not in shipped]
+          if missing:
+              raise SystemExit(f"missing from the wheel: {missing}")
+          EOF
+
   audit:
     name: Dependency advisories
     runs-on: ubuntu-latest

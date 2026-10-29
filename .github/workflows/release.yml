@@ -20,6 +20,24 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Check the tag names the package version
+        # A tag that disagrees with pyproject.toml would publish one version
+        # under another's name; PyPI refuses to take either back.
+        run: |
+          python3 - <<'EOF'
+          import os
+          import re
+          import tomllib
+
+          tag = os.environ["GITHUB_REF_NAME"].removeprefix("v")
+          with open("pyproject.toml", "rb") as f:
+              project = tomllib.load(f)["project"]["version"]
+          with open("src/womblex/__init__.py") as f:
+              package = re.search(r'^__version__ = "([^"]+)"', f.read(), re.M).group(1)
+          if not tag == project == package:
+              raise SystemExit(f"tag {tag!r}, pyproject.toml {project!r}, __version__ {package!r}: they must match")
+          EOF
+
       - name: Stamp the commit into the package
         # Written before the build so the wheel carries it. A checkout resolves
         # its commit from the work tree; an installed wheel has none, so this
