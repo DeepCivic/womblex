@@ -84,6 +84,8 @@ SIDECAR_WRITERS: list[tuple[object, str]] = [
 EXEMPT: dict[str, str] = {
     "write_results": "the extraction writer; takes the run's stamp explicitly (part 1)",
     "write_layout_regions": "written by write_results, which passes it the batch's own footer",
+    "write_redaction_regions": "its callers (operations/persist.py, redact/batch.py) pass it the "
+                               "footer of the batch shard it sits beside",
     "write_run_manifest": "consolidates the batch stamps; covered by its own cases here",
     "write_sidecar": "a ground-truth .meta.json: JSON, and the run is recorded inside "
                      "the sidecar's derivation block, not as parquet footer keys",
@@ -91,6 +93,8 @@ EXEMPT: dict[str, str] = {
     "write_source_index": "an egress bundle file at run grain with no batch shard beside it; "
                           "takes the run's stamp explicitly, covered in test_egress_output.py",
     "write_provenance_shard": "the pre-extracted records ingest, which is not a run",
+    "write_omitted": "a run-root file written as the run is enqueued or starts, before any batch "
+                     "shard exists to inherit a run from; carries the contract keys",
     "write_corpus_manifest": "the pre-extracted records ingest, which is not a run",
     "write_entity_mentions": "whole-corpus E2E writer: no per-batch shard to inherit from",
     "write_graph_edges": "whole-corpus E2E writer: no per-batch shard to inherit from",

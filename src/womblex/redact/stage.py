@@ -41,6 +41,8 @@ class RedactionReport:
     page_redactions: dict[int, list[RedactionInfo]] = field(default_factory=dict)
     # Raster pages the layout filter was asked of but had no usable layout for.
     unfiltered_pages: list[int] = field(default_factory=list)
+    # The resolution the region boxes are in, for converting them to PDF points.
+    dpi: int = 150
 
     @property
     def total(self) -> int:
@@ -49,6 +51,24 @@ class RedactionReport:
     @property
     def affected_pages(self) -> list[int]:
         return sorted(self.page_redactions.keys())
+
+
+def region_rows(source_hash: str, report: RedactionReport) -> list[dict]:
+    """`*.redaction_regions.parquet` rows for one document: each region's page, box in PDF points and area.
+
+    The detector reports pixels at the report's dpi; PDF points are 1/72 inch.
+    """
+    to_points = 72.0 / report.dpi
+    rows: list[dict] = []
+    for page in report.affected_pages:
+        for r in report.page_redactions[page]:
+            x1, y1, x2, y2 = (v * to_points for v in r.bbox)
+            rows.append({
+                "source_hash": source_hash, "page": page,
+                "bbox_pt": {"x": x1, "y": y1, "width": x2 - x1, "height": y2 - y1},
+                "area": (x2 - x1) * (y2 - y1),
+            })
+    return rows
 
 
 def build_detector(config: RedactionConfig) -> RedactionDetector:
@@ -113,7 +133,7 @@ def detect_redactions(
     """
     from womblex.ingest.pdf import open_document
 
-    report = RedactionReport()
+    report = RedactionReport(dpi=dpi)
     try:
         with open_document(path) as doc:
             pages_to_scan = min(page_count, len(doc))

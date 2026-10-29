@@ -35,6 +35,7 @@ from womblex.pipeline_order import RUN_SCOPED_STAGES, WORKFLOW_FLEET_STAGES, in_
 from womblex.store.retention import is_safe_run_id
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from womblex.cli._shared import Omitted
     from womblex.presets import Preset
     from womblex.store.remote import RemoteStore
 
@@ -192,8 +193,8 @@ def _check_run_owner(stored: StoredWorkflow, run_id: str, dsn: str | None) -> No
 def check_firing(
     stored: StoredWorkflow, *, run_id: str, resolve_preset: Callable[[str], Preset | None],
     store: RemoteStore, dsn: str | None, ingest: RemoteStore | None = None,
-) -> list[str]:
-    """Every check a firing makes before it writes a row; the keys it would extract.
+) -> tuple[list[str], list[Omitted]]:
+    """Every check a firing makes before it writes a row; the keys it would extract and the files it passes over.
 
     A dry-run dispatch, the run not owned by another owner than the workflow's, a named input
     store, a safe input prefix, and at least one document there. *ingest* is the input store opened with the caller's credentials (a worker's own);
@@ -202,7 +203,7 @@ def check_firing(
     refused at scheduling for exactly what its firing would refuse.
     """
     from womblex.cli._shared import normalise_prefix
-    from womblex.cloud.dispatch import supported_keys
+    from womblex.cloud.dispatch import ingest_listing
 
     _refuse_run_scoped_in_firing(stored)
     dispatch_workflow(stored, dry_run=True, **_firing_kwargs(stored, run_id, resolve_preset, store, dsn))
@@ -222,11 +223,11 @@ def check_firing(
         require_served(dsn, needed_queues(recipe, ingest_root=ingest_root))
     except NoLiveWorker as e:
         raise WorkflowRefusedError(f"workflow {stored.id!r}: {e}", code=RefusalCode.NO_WORKER) from e
-    location, keys = supported_keys(ingest or RemoteStore.from_uri(ingest_root), ingest_root, prefix)
+    location, keys, omitted = ingest_listing(ingest or RemoteStore.from_uri(ingest_root), ingest_root, prefix)
     if not keys:
         raise WorkflowRefusedError(f"workflow {stored.id!r}: no supported documents under {location}",
                                    code=RefusalCode.NO_DOCUMENTS)
-    return keys
+    return keys, omitted
 
 
 def fire_workflow(
@@ -256,8 +257,9 @@ def fire_workflow(
     from womblex.cli._shared import normalise_prefix
     from womblex.cloud.dispatch import batch_specs
     from womblex.cloud.jobs import RunBoard
+    from womblex.store.omitted_output import publish_omitted
 
-    keys = check_firing(stored, run_id=run_id, resolve_preset=resolve_preset, store=store,
+    keys, omitted = check_firing(stored, run_id=run_id, resolve_preset=resolve_preset, store=store,
                         ingest=ingest, dsn=dsn)
     binding = stored.spec.input_binding
     shard_prefix = f"runs/{run_id}/documents"
@@ -266,6 +268,7 @@ def fire_workflow(
         if cancelled := board.cancelled_batches(run_id, firing):  # a replayed firing: they would never run
             raise WorkflowRefusedError(f"firing {firing} of run {run_id!r} has cancelled batches "
                                        f"({', '.join(cancelled)})", code=RefusalCode.BATCHES_CANCELLED)
+        publish_omitted(omitted, store, f"runs/{run_id}")  # the input prefix as this firing found it
         if not board.firing_batches(run_id, firing):  # a replay reuses its batches and fingerprints nothing
             prints = ingest.fingerprints(keys, under=normalise_prefix(binding.ingest_prefix))
             seen = board.seen_inputs(run_id)

@@ -9,7 +9,8 @@ retry, a rechunk), a rewritten output or a new version runs it again, and an out
 (written before receipts, or by `--shards`) is never skipped. A receipt names the stage workflow that
 wrote it, and a unit is never skipped against its own workflow's receipt: a step recovered after
 publishing runs again, as before receipts, so its checksums are recorded. The receipt sits beside the run's
-`logs/`, outside `documents/`, so the sidecars stay byte-identical to a local run's.
+`logs/`, outside `documents/`, so the sidecars stay identical to a local run's, aside from the write time
+(`womblex.written_at`) their footers carry.
 """
 
 from __future__ import annotations

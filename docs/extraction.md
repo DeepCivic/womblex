@@ -147,10 +147,10 @@ One row per source file in the batch.
 | `source_hash`, `collection_id`, `doc_id`, `filename`, `ext` | string |
 | `ingest_root` | string — scheme-qualified corpus root (`file://…`, `s3://…`) |
 | `source_relpath` | string — path under that root; root + relpath names the document |
-| `extraction_method` | string |
+| `extraction_method` | string — `unreadable` where the source could not be read (its `source_hash` is then SHA-256 over `unreadable:<source_relpath>:<batch number>`, or the filename where no root is declared, not over bytes) |
 | `elements_count`, `table_cells_count`, `form_fields_count` | int64 |
-| `status` | string — `completed` (only completed results are written; a failed document gets no row) |
-| `error` | string — empty on success |
+| `status` | string — `completed`, or `error` for a document that failed (written as a row with no elements, so every document a batch was given is accounted for) |
+| `error` | string — empty on success; the failure otherwise |
 | `extracted_at_iso` | string |
 | `parser_version` | string |
 | `content_digest` | string (SHA-256 over ordered elements; null in shards written before the column) |
@@ -166,6 +166,20 @@ unset, by `paths.input_root`) and is never inferred from the working
 directory; both `ingest_root` and `source_relpath` are empty for a writer that
 declared no root. Masking never rewrites the manifest — it is not a masking
 surface, and a `pii` run over a completed run leaves it byte-identical.
+
+### *.redaction_regions.parquet
+
+One row per withheld region a redaction detector found, written beside the shard by a batch run
+with `redaction.enabled` and by `womblex.redact.batch.annotate_redactions_for_shards`. Empty when
+detection ran and found none; a missing file means it did not run. Joins to `elements` on
+`(source_hash, page)`.
+
+| column | type | notes |
+|---|---|---|
+| `source_hash` | string | FK to the manifest |
+| `page` | int32 | 0-based, as `elements.page` |
+| `bbox_pt` | struct&lt;x, y, width, height&gt; (float32) | **PDF points** (72 to the inch), top-left origin, converted from the pixels at the detection dpi. Unlike `elements.bbox`, not normalised |
+| `area` | float32 | `width * height`, in square points |
 
 ### *.redactions.parquet (optional sidecar)
 

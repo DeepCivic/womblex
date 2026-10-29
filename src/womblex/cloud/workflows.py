@@ -36,7 +36,7 @@ from dbos import DBOS, SetWorkflowAttributes, SetWorkflowID, StepOptions
 from dbos import error as dbos_error
 
 from womblex.batch import process_batch
-from womblex.cloud import dbos_app
+from womblex.cloud import dbos_app, run_events
 from womblex.cloud.finalize import NoShardManifests, finalize_from_board
 from womblex.cloud.stage_contracts import PRODUCER_OF, STAGE_CONTRACTS
 from womblex.cloud.stage_runner import (
@@ -302,9 +302,10 @@ def run_stage(
     workflow: dict[str, Any] | None = None, bases: list[str] | None = None, config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     units = DBOS.run_step({"name": "plan"}, _plan, stage, shard_prefix, workflow, bases, config)
-    published = skipped = 0
+    published = skipped = done = 0
     checksums: dict[str, str] = {}
     failed: list[str] = []
+    events: list[dict[str, Any]] = []  # the `batch_progress` events sent, for the coordinator's record
     for unit in units:
         label = unit[0] if len(unit) == 1 else "run"
         try:
@@ -315,15 +316,20 @@ def run_stage(
         except Exception as e:  # one bad unit must not stop the others
             failed.append(f"{label} ({_carried(e)})")
             logger.warning("%s: %s failed; the stage's other units still run: %s", stage, label, failed[-1])
-            continue
-        published += len(recorded)
-        skipped += not recorded
-        checksums.update(_digests(recorded))
+        else:
+            published += len(recorded)
+            skipped += not recorded
+            checksums.update(_digests(recorded))
+            done += 1
+        events += run_events.record(
+            run_id, workflow, "batch_progress", f"batch_progress:{stage}:{done + len(failed)}",
+            stage=stage, done=done, failed=len(failed), total=len(units))
     if failed:
         raise StageIncomplete(
             f"{stage}: {len(failed)} of {len(units)} unit(s) failed; every unit ran — {'; '.join(failed)}"
         )
-    return {"stage": stage, "units": len(units), "published": published, "skipped": skipped, "checksums": checksums}
+    return {"stage": stage, "units": len(units), "published": published, "skipped": skipped, "checksums": checksums,
+            **({"events": events} if events else {})}
 
 
 # --- scheduled firings ---------------------------------------------------------
@@ -414,15 +420,6 @@ def _deliver(run_id: str, shard_prefix: str, workflow: dict[str, Any], failed: l
     return [asdict(o) for o in deliver(dispatched_workflow(workflow), run, run_id, after_failed=tuple(failed))]
 
 
-def _emit(run_id: str, workflow: dict[str, Any], event: str, event_id: str, status: str,
-          fields: dict[str, Any]) -> list[dict[str, Any]]:
-    """Send one run event to the workflow's webhooks (`cloud/webhook.py`); never raises."""
-    from womblex.cloud.delivery import dispatched_workflow
-    from womblex.cloud.webhook import emit
-
-    return emit(dispatched_workflow(workflow), run_id, event, event_id, status, **fields)
-
-
 def _run_status(run_id: str) -> str:
     """The run's status in the API's words, this coordinator, still running, left out."""
     from womblex.cloud.jobs import RunBoard, run_state
@@ -471,20 +468,22 @@ def run_downstream(
     A workflow's webhooks are sent the run's events as they happen, each a
     recorded step whose id is this coordinator's, so a recovery does not resend.
     """
-    while DBOS.run_step({"name": "await-extraction"}, _unsettled_batches, run_id):
-        DBOS.sleep(SETTLE_POLL_SECONDS)
     destinations = (workflow or {}).get("spec", {}).get("destinations") or []
-    hooks = any(d.get("kind") == "webhook" for d in destinations)
+    hooks = run_events.has_webhook(workflow)
     sent: list[dict[str, Any]] = []
 
     def event(name: str, subject: str = "", status: str = "running", **fields: Any) -> None:
         """One run event to the workflow's webhooks, as a recorded step, so a recovered coordinator
         does not send it again; its id is this coordinator's, so a resend keeps it."""
-        if workflow is not None and hooks:
-            key = f"{name}:{subject}" if subject else name
-            sent.extend(DBOS.run_step({"name": f"event:{key}"}, _emit, run_id, workflow, name,
-                                      f"{DBOS.workflow_id}:{key}", status, fields))
+        sent.extend(run_events.record(run_id, workflow, name, f"{name}:{subject}" if subject else name,
+                                      status, **fields))
 
+    settled = 0
+    while DBOS.run_step({"name": "await-extraction"}, _unsettled_batches, run_id):
+        settled, progress = run_events.extraction_progress(run_id, workflow, bases, settled)
+        sent.extend(progress)
+        DBOS.sleep(SETTLE_POLL_SECONDS)
+    sent.extend(run_events.extraction_progress(run_id, workflow, bases, settled)[1])
     event("extraction_settled")
 
     results: list[dict[str, Any]] = []
@@ -505,13 +504,16 @@ def run_downstream(
         scope = dbos_app.stage_scope(firing, workflow["digest"] if workflow else None)
         # Routed by the models the stage needs under the run's config, so only a worker checked for them claims it.
         models = models_key(_stage_config(workflow, config), stage) if workflow or config else ""
+        event("stage_started", stage, stage=stage)
         with SetWorkflowID(dbos_app.stage_id(run_id, stage, scope)), SetWorkflowAttributes(attrs):
             handle = DBOS.enqueue_workflow(
                 dbos_app.stage_queue(stage, models), run_stage, run_id, stage, shard_prefix, max_attempts,
                 workflow, bases, config,
             )
         try:
-            results.append({**handle.get_result(), "ran_after_failed": list(failed)})
+            finished = handle.get_result()
+            sent.extend(finished.pop("events", []))
+            results.append({**finished, "ran_after_failed": list(failed)})
         except Exception as e:  # a failed stage must not stop the ones after it
             results.append({"stage": stage, "error": _carried(e), "ran_after_failed": list(failed)})
             logger.warning("run %s: %s failed; later stages still run: %s", run_id, stage, results[-1]["error"])

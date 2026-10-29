@@ -101,7 +101,7 @@ def _register_enqueue(p: argparse.ArgumentParser) -> None:
 
 def cmd_enqueue(args: argparse.Namespace) -> int:
     from womblex.cloud.dbos_app import ensure_schema
-    from womblex.cloud.dispatch import batch_specs, supported_keys
+    from womblex.cloud.dispatch import batch_specs, ingest_listing
     from womblex.cloud.jobs import RunBoard
     from womblex.store.remote import RemoteStore, assert_disjoint_locations
     from womblex.store.retention import generate_run_id
@@ -150,7 +150,7 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
 
     root = ingest_uri or store_uri
     try:
-        location, keys = supported_keys(RemoteStore.from_uri(root), root, input_prefix)
+        location, keys, omitted = ingest_listing(RemoteStore.from_uri(root), root, input_prefix)
     except NestedCorpusError as e:
         logger.error(str(e))
         return 1
@@ -166,9 +166,13 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
         logger.error("%s", refusal)
         return 1
 
+    from womblex.store.omitted_output import publish_omitted
+
     ensure_schema(dsn)
     with RunBoard(dsn) as board:
         inserted = board.enqueue(run_id, specs, config=config_payload(config))
+    # Only once the run exists: a refused enqueue must leave no run directory in the store.
+    publish_omitted(omitted, RemoteStore.from_uri(store_uri), output_prefix)
 
     logger.info(
         "run_id=%s: %d document(s) -> %d batch(es), %d newly enqueued. Shards -> %s/%s",

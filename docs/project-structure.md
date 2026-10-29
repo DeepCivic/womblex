@@ -128,6 +128,9 @@ womblex/
 │   │   ├── models.py        # ILGS data models (Span, Segment, Person, Location, Term, etc.)
 │   │   └── query.py         # Load enrichment graph from Parquet for PII masking and internal use
 │   ├── store/
+│   │   ├── redaction_regions_output.py # *.redaction_regions.parquet: withheld regions, bbox in PDF points
+│   │   ├── omitted_output.py # omitted.parquet at the run root: the files a run passes over, with a reason
+│   │   ├── manifest_rows.py # The manifest row a batch writes for one document, and the source-bytes hash that keys it
 │   │   ├── output.py        # Parquet output: elements + table_cells + form_fields + manifest + chunks sidecars + integrity checks
 │   │   ├── shard_audit.py   # Directory-level shard integrity + chunks-side audit + reconcile-with-checkpoint
 │   │   ├── enrichment_output.py  # Enrichment-specific output
@@ -156,7 +159,7 @@ womblex/
 │   │   ├── deployment_record.py # womblex.deployments footer key: the deployment each model ran on, plus its reader
 │   │   ├── endpoint_identity.py # A SageMaker endpoint's name and region with any AWS account id removed
 │   │   ├── content_digest.py # content_digest(elements): the manifest's determinism handle (kind / order / text / cells / fields / sheet cells / meta)
-│   │   ├── contract.py      # womblex.contract_version + womblex.sensitivity (raw / masked / none) footer keys, on every pipeline Parquet
+│   │   ├── contract.py      # womblex.contract_version + womblex.sensitivity (raw / masked / none) + womblex.written_at footer keys, on every pipeline Parquet
 │   │   ├── document_versions.py # replaces / replaced_by / is_current on the run manifest — versions chained per source_relpath
 │   │   ├── run_manifest.py  # Consolidate per-batch manifests into a run-root manifest.parquet + the run record in its footer
 │   │   ├── run_reads.py     # Runs as the store or output root holds them: listing, stage presence, shard audit
@@ -174,7 +177,8 @@ womblex/
 │   │   ├── dbos_app.py         # DBOS wiring — system database URL, queue/workflow names and ids, client
 │   │   ├── jobs.py             # RunBoard — enqueue + read runs over DBOS workflows; run `owner` scoping; stage attempts and the fork
 │   │   ├── destination_postgres.py # A workflow's Postgres destination — one row per embedded chunk, masked by default, upserted
-│   │   ├── webhook.py          # A workflow's webhook destination — six run events, signed, resent under one id, recorded
+│   │   ├── webhook.py          # A workflow's webhook destination — eight run events, signed, resent under one id, recorded
+│   │   ├── run_events.py       # The run events a fleet worker sends, each a recorded DBOS step; extraction and unit progress
 │   │   ├── delivery.py         # Deliver a finished run to its workflow's destinations — checked before launch, bounded retries, recorded on the run
 │   │   ├── run_owner.py        # run_owners() / owned_rows() — a run is the owner its first row names
 │   │   ├── run_status.py       # run_sentence() — a run's status as one sentence from exact per-stage counts

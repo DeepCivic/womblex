@@ -31,6 +31,7 @@ from pathlib import Path
 from womblex.config import WomblexConfig
 from womblex.operations import (
     BatchResult,
+    result_rows,
     run_extraction,
     run_redaction,
     write_batch_parquet,
@@ -67,7 +68,8 @@ def process_batch(
     and the other downstream stages are ``run-stage`` contracts and are never
     run here — so ``config.chunking.enabled`` / ``config.pii.enabled`` mean
     "this stage is in the pipeline", not "run it inside extraction". A worker
-    fed the same config produces byte-identical shards. Returns a
+    fed the same config produces identical shards, aside from the write time
+    (``womblex.written_at``) their footers carry. Returns a
     :class:`BatchOutcome`; the caller decides how to verify, checkpoint, or
     publish.
 
@@ -89,10 +91,11 @@ def process_batch(
 
     batch = BatchResult(results=results)
     shard_path = shard_dir / f"batch-{batch_num:04d}.parquet"
-    rows_written = sum(
-        1 for r in batch.results if r.status == "completed" and r.extraction is not None
+    rows_written = len(result_rows(batch))
+    write_batch_parquet(
+        batch, shard_path, provenance=provenance, stamp=stamp, batch_num=batch_num,
+        redaction_regions=config.redaction.enabled,
     )
-    write_batch_parquet(batch, shard_path, provenance=provenance, stamp=stamp)
     return BatchOutcome(batch=batch, shard_path=shard_path, rows_written=rows_written)
 
 

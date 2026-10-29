@@ -196,10 +196,10 @@ Terms the requirements use, as the code defines them.
 - Multi-unit inputs and all downstream stages output standard Parquet files universally keyed by `source_hash`.
 - A strict verbatim text policy applies: downstream operations (redaction, PII, etc.) write separate sidecar overlays and never rewrite the base extracted text.
 - Standard extraction yields a parent elements file, with complex child rows (table cells, form fields) joining via `source_hash` and element order.
-- A unified run-level manifest correctly consolidates provenance, statuses, and counts for all source files.
+- A unified run-level manifest correctly consolidates provenance, statuses, and counts for all source files. The files a run passes over are recorded beside it in `omitted.parquet` (`source_relpath`, and a `reason`: `unsupported_type` for a top-level file of a type the run does not ingest, `nested` for any file in a subdirectory), written when the run is enqueued, fired or started; a run that omitted nothing writes it with no rows, and a record that cannot be written is a warning, not a refusal.
 - A persistence verifier ensures all required shard files exist, are readable, match expected document counts, and prevent accidental overwrites.
 - `source_hash` is content-addressed (SHA-256 of the source bytes) and stable across environments and runs; logical row order within a shard is stable given the same inputs and iteration order.
-- Output is **not** byte-for-byte reproducible across runs; content is. For a given `source_hash`, version, configuration and model set, extraction content and row order are stable, and the manifest's per-document `content_digest` lets a later run confirm it. A mismatch is explained by the stamped version, configuration and model digests and never blocks output.
+- Output is **not** byte-for-byte reproducible across runs; content is. Every pipeline Parquet records when it was written in its footer (`womblex.written_at`, never a column), so a rewrite changes the file's checksum even when its rows are unchanged. For a given `source_hash`, version, configuration and model set, extraction content and row order are stable, and the manifest's per-document `content_digest` lets a later run confirm it. A mismatch is explained by the stamped version, configuration and model digests and never blocks output.
 - Every pipeline Parquet and `egress_manifest.json` declare a contract version, versioned apart from the package, and every pipeline Parquet declares its sensitivity (`raw`, `masked` or `none`). Additive schema changes are back-filled for older files; renames and removals ship a reader shim.
 - Only files whose footer says `masked` or `none` are safe to hand onward; anything `raw`, or with no sensitivity key, stays inside the trust boundary.
 - `womblex.__all__` declares the stable Python API, pinned by a test; `import womblex` does not load the extraction stack. A name in it is removed or changed incompatibly only after one minor release emitting a `DeprecationWarning` that names the replacement.
@@ -219,7 +219,7 @@ Terms the requirements use, as the code defines them.
 - Solid redaction regions are detected per page, whether drawn as native filled shapes or present only in the page image.
 - Multiple modes are supported: `flag` (annotation only, no text change), `blackout` (prepend a `<REDACTED>` marker to affected page text), and `delete` (clear affected page text). The `<REDACTED>` marker is a content marker, distinct from the human-readable warning strings described below.
 - A redaction report is attached to the extraction result, and per-page warning strings (e.g. `page N: K redacted region(s) detected`) are appended to the extraction's warnings.
-- Detected redactions are written as an independent Parquet sidecar (`*.redactions.parquet`).
+- Detected redactions are written as an independent Parquet sidecar (`*.redactions.parquet`). The regions themselves are kept in `*.redaction_regions.parquet` (`source_hash`, `page`, `bbox_pt` in PDF points converted from the detection dpi, and `area`), written by a batch run with redaction enabled and by the standalone shard CLI alike; it is empty when detection found none, and absent when detection did not run.
 - Redaction detection runs at a single fixed point, immediately after extraction.
 
 **TO-DO:**
@@ -286,7 +286,7 @@ Terms the requirements use, as the code defines them.
 
 - Womblex owns, for every provider alike: packing requests to the provider's declared limits (texts per request, token ceiling, the provider's own token counter), sending each table's markdown as its own text beside the narrative, splitting a text only when it exceeds the provider's declared ceiling, offset-merging the parts, the entity, edge and metadata sidecars, evidence references, and the mention-to-chunk links.
 - Retries, back-off and fitting long input to the model are the provider adapter's concern; Womblex adds none of its own around a provider.
-- A request that still fails is recorded against its documents, and the rest of the stage continues.
+- A request that still fails is recorded against its documents, and the rest of the stage continues. A document whose narrative is under `enrichment.skip_short_documents` is not sent and is recorded in `enrichment_meta` with `status: skipped_short`, so it reads as not looked for rather than as having no entities.
 - The provider's entities and relationships are written as returned. Womblex does not build or alter the provider's graph; the mention-to-chunk link layer is the one part Womblex derives, from character offsets, for any provider.
 - Graph refresh writes its links to a sidecar of its own, which records the chunk version it linked against, and never rewrites earlier stages' files.
 - Readers can tell when refreshed links no longer match the current chunks, and use the matching links wherever they exist.
@@ -331,7 +331,7 @@ Terms the requirements use, as the code defines them.
 
 - Processing occurs in configurable batches, appending results and writing a checkpoint as each batch completes.
 - Resuming an interrupted run reconciles checkpoints and skips completed documents.
-- A document error is isolated, recorded in the manifest, and does not stop its batch.
+- A document error is isolated, recorded in the manifest as a `status: error` row, and does not stop its batch. A source that could not be read has `extraction_method: unreadable` and a `source_hash` over `unreadable:`, its `source_relpath`, `:` and the batch number (never empty, and distinct in each firing of a collection); a document that failed after its bytes were read keeps its file-bytes hash and its method. `SourceResolver` declines an unreadable row as `unsupported_basis`, naming its `source_relpath`.
 - Stages can be dispatched independently from the CLI; idempotent queueing keeps dependent stages in order.
 - `womblex retry-stage` forks a failed distributed stage from its first failed unit, so finished units are not rerun.
 - A retry is a launch, refused before the fork with one of these codes: `not_found` (no such run or stage), `still_running`, `not_failed`, `earlier_failed` (a stage it ran after has not succeeded since), `already_retried`, `config_invalid` (the config does not load with registered models), `step_order` (an input the stage needs is missing from the store or out of order) or `no_worker` (no live worker passes the model check for the stage). A run another owner holds is refused before the fork too.
@@ -389,7 +389,7 @@ These requirements described the admin console (`womblex ui`). The console now l
 - `corpus/` mirrors the run's shard directory, every downstream sidecar included, plus the consolidated `manifest.parquet`, unchanged.
 - Raw sources are written to `sources/<source_hash><ext>`, deduplicated by hash; two documents sharing a hash point at one file.
 - `source_index.parquet` has one row per document (`source_hash`, `doc_id`, `filename`, `ext`, `raw_key`, and a status of `resolved`, `hash_mismatch`, `not_found`, `unsupported_basis` or `upload_failed`); `raw_key` is null wherever no file was produced.
-- Source resolution never aborts the export: a source whose status is `not_found`, `hash_mismatch`, `unsupported_basis` (a records-ingested document) or `upload_failed` is reported in the index and in `egress_manifest.json`.
+- Source resolution never aborts the export: a source whose status is `not_found`, `hash_mismatch`, `unsupported_basis` (a records-ingested document, or a source that could not be read) or `upload_failed` is reported in the index and in `egress_manifest.json`.
 - `egress_manifest.json` carries the contract version and a per-document resolution report.
 - A corpus-only export (`--no-sources` / `--corpus-only`) skips resolution and writes no `sources/` or `source_index.parquet`.
 - `--source-root` resolves sources for a moved corpus; `--run-id` defaults to the run root's name and must agree with the run's stamp, if any.
@@ -511,8 +511,8 @@ These requirements described the admin console (`womblex ui`). The console now l
 - After a failed stage is retried successfully, the retry command prints how to redeliver. Redelivery replaces: files are rewritten and rows upserted; the delivery record is kept as a trace (Requirement 34).
 - An object-store destination receives the Requirement 23 bundle; each destination chooses whether raw sources are included.
 - A Postgres destination gets one row per chunk with its embedding: masked text by default, raw only where the workflow asks, each row naming its layer.
-- A webhook receives six events: `extraction_settled`, `stage_finished`, `stage_failed`, `run_finished`, `delivered` and `delivery_failed`. Each carries an `event_id` (kept when the event is resent, so the receiver can drop a duplicate), the `run_id` and the run's status in the API's words, and is signed with a key held on the worker.
-- There are no per-document or per-batch events.
+- A webhook receives eight events: `extraction_settled`, `stage_started`, `batch_progress`, `stage_finished`, `stage_failed`, `run_finished`, `delivered` and `delivery_failed`. Each carries an `event_id` (kept when the event is resent, so the receiver can drop a duplicate), the `run_id` and the run's status in the API's words, and is signed with a key held on the worker.
+- `batch_progress` fires as each extraction batch settles and as each unit of a stage finishes, carrying `stage` (`extract` for extraction), `done`, `failed` and `total`, and the counts reach `total`; `stage_started` fires as a stage begins. There are no per-document events. A webhook can name the `events` it is sent (an unknown or empty list is refused before launch); left out, it is sent all eight.
 - The run record lists every delivery.
 
 **Out of scope:** creating, editing or removing workflows through the API (listing, adding to and rerunning a collection through a stored workflow are Requirement 34), pruning changed or deleted documents, resolving the source of a changed file's earlier version (its bytes are gone from the store, so `SourceResolver` reads it as `hash_mismatch`), backfill of missed firings, per-step destinations, databases other than Postgres (each needs its own requirement), registering webhooks through the API, and write-back from consumers other than an acknowledgement of a delivery (`delivery_received`, Requirement 35).

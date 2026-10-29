@@ -7,7 +7,7 @@ column-level schemas are in [extraction.md](extraction.md).
 
 ## Contract version
 
-`womblex.contract_version` (currently `3.1`, `store/contract.CONTRACT_VERSION`)
+`womblex.contract_version` (currently `3.2`, `store/contract.CONTRACT_VERSION`)
 is in the footer of every pipeline Parquet and in `egress_manifest.json`. It is
 versioned apart from the package: a release that changes no schema leaves it
 alone.
@@ -20,6 +20,13 @@ alone.
 
 A file with no `contract_version` key was written before the contract existed
 and is read as `1.0`-compatible.
+
+`womblex.written_at` (UTC, to the second) rides beside it. It is a footer key and
+never a column, so it is not a schema change and the version is not bumped. It is
+part of the file's bytes: a rewrite of unchanged rows changes the file's checksum,
+so a published checksum records what was published and is not stable across reruns.
+To compare two files, compare their rows and footers without this key; determinism
+is the manifest's `content_digest`, which never covers a footer.
 
 ## Files, join keys and sensitivity
 
@@ -38,7 +45,7 @@ the single source). An unknown role reads as `raw`.
 | `graph_edges` | `source_hash` + `source_id` / `target_id` to `enrichment_entities.entity_id`; its `mentioned_in` edges are enrich's, present only where chunks existed when it ran; `graph-refresh` leaves the file as it is, and a reader derives those edges from `graph_links` while the links match | raw |
 | `graph_links` | `(source_hash, entity_id, mention_start, mention_end)` to `enrichment_entities`; `chunk_index` is the first overlapping narrative chunk (`-1` for none) and `chunk_indices` all of them. The footer key `womblex.chunks_digest` is the digest of the chunks it was computed against: a reader uses the links only while the `chunks` beside them hash to it. Written by `graph-refresh`; absent from earlier runs, which read as before | raw |
 | `enrichment_doc` | `source_hash` (one row per document) | raw |
-| `enrichment_meta` | `source_hash`; `table_count` is tables sent to the enricher on their own, null where none were (1.4) | none |
+| `enrichment_meta` | `source_hash`; `table_count` is tables sent to the enricher on their own, null where none were (1.4); `status` is `enriched`, or `skipped_short` for a document whose narrative was under `enrichment.skip_short_documents` and so never sent (3.2; null on older files) | none |
 | `entity_links` | `source_hash` plus the evidence reference; its `entity_id` is the reference-register id and `mention_text` the enricher's text for the mention (null where the provider gave none) | raw |
 | `pii_spans` | `(source_hash, chunk_index)` plus the evidence reference; `entity_id` to `enrichment_entities` | raw |
 | `clean_text` | `(source_hash, chunk_index)`; `mask_status` is `masked`, `no_entity` or `not_masked` (verbatim, no candidate source covered the chunk); files written before contract 1.2 read back as `masked` where `n_masked` is above zero, null otherwise | masked |
@@ -46,6 +53,8 @@ the single source). An unknown role reads as `raw`.
 | `money_columns` | `source_hash` plus `column_id` (`parent_elem_order` / `sheet`) | none |
 | `layout_regions` | `(source_hash, page)`; boxes are normalised like element `bbox` ([layout.md](layout.md)) | none |
 | `redactions`, `source_index` | `source_hash` | none |
+| `redaction_regions` | `(source_hash, page)`; `bbox_pt` is in PDF points, not normalised ([extraction.md](extraction.md)) | none |
+| `omitted` (run root) | `source_relpath` and `reason`; the files under the ingest location a run passes over. Not keyed by `source_hash`: nothing was read | none |
 | `provenance` | `source_hash` | raw |
 
 `none` is a claim about text, not derivation: embeddings come from unmasked
@@ -97,6 +106,9 @@ The 3.1 bump added `replaces`, `replaced_by` and `is_current` to the manifest. T
 `manifest.parquet` fills them when it is consolidated (`store/document_versions.py`): versions are
 chained per `source_relpath` in batch order, never by time. A per-batch manifest is never
 rewritten, so it carries them null, as does a shard written before the columns.
+
+The 3.2 bump added `enrichment_meta.status` (`enriched` or `skipped_short`; older files read it as null), and
+the `omitted` file role (`omitted.parquet`, at the run root).
 
 ## Determinism
 

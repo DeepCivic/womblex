@@ -11,6 +11,7 @@ documents Parquet via ``enrichment_metadata_columns()``.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -54,7 +55,7 @@ ENTITY_SCHEMA = pa.schema([
 
 # Columns an older file may lack; read back as null.
 _ENTITY_NULL_BACKFILL = ("text_layer", "elem_order", "sheet", "mention_text")
-_META_NULL_BACKFILL = ("table_count",)
+_META_NULL_BACKFILL = ("table_count", "status")
 
 #: Meta footer key set when the batch's tables were sent to the enricher — the
 #: resume guard's marker, since a null ``table_count`` cannot tell "tables off"
@@ -94,7 +95,13 @@ ENRICHMENT_META_SCHEMA = pa.schema([
     # Tables sent to the enricher on their own; null where none were (or the
     # file predates the table pass) and for a document with a table that failed.
     ("table_count", pa.int32()),
+    # `enriched`, or `skipped_short` for a document the enricher was not sent because its narrative is
+    # under `skip_short_documents`: not looked for. Null on a file written before the column.
+    ("status", pa.string()),
 ])
+
+STATUS_ENRICHED = "enriched"
+STATUS_SKIPPED_SHORT = "skipped_short"
 
 
 # ---------------------------------------------------------------------------
@@ -263,6 +270,7 @@ def _enrichment_meta_row(
         "heading_count": len(enrichment.headings),
         "junk_span_count": len(enrichment.junk),
         "table_count": None,
+        "status": STATUS_ENRICHED,
     }
 
 
@@ -418,24 +426,28 @@ def write_enrichment_entities_shard(
 
 def write_enrichment_meta_shard(
     results: list[tuple[str, EnrichmentResult]], base_path: Path,
-    *, table_counts: dict[str, int] | None = None,
+    *, table_counts: dict[str, int] | None = None, skipped: Iterable[str] = (),
 ) -> Path:
     """Write a batch's per-doc enrichment metadata to ``<base>.enrichment_meta.parquet``.
 
     ``table_counts`` is tables sent to the enricher per document, ``None`` when
     the table pass was off. A document with tables but no narrative result
     still gets a row (all counts zero), so the table coverage is not lost.
+    ``skipped`` are the documents whose narrative was too short to send: each
+    gets a ``skipped_short`` row, so "not looked for" is not read as "found nothing".
     """
+    skipped = set(skipped)
     counts = table_counts or {}
     rows = [_enrichment_meta_row(src, enr) for src, enr in results]
     for r in rows:
         r["table_count"] = counts.get(r["source_hash"])
     seen = {r["source_hash"] for r in rows}
-    for src, n in counts.items():
+    for src in sorted(skipped | counts.keys()):
         if src not in seen:
             rows.append({f.name: 0 for f in ENRICHMENT_META_SCHEMA} | {
                 "source_hash": src, "doc_type_enriched": "", "jurisdiction": "",
-                "title": "", "table_count": n,
+                "title": "", "table_count": counts.get(src),
+                "status": STATUS_SKIPPED_SHORT if src in skipped else STATUS_ENRICHED,
             })
     footer = sidecar_footer(base_path, "enrich") or {}
     if table_counts is not None:
@@ -493,6 +505,21 @@ def read_enrichment_entities(path: Path) -> pa.Table:
         return pa.concat_tables([_read_enrichment_shard(s, ENTITY_SCHEMA) for s in shards])
     target = p if p.name.endswith(ENRICHMENT_ENTITIES_SUFFIX) else enrichment_entities_path_for(p)
     return _read_enrichment_shard(target, ENTITY_SCHEMA)
+
+
+def read_enrichment_meta(path: Path) -> pa.Table:
+    """Read per-document enrichment metadata from a single sibling file or a shard-dir glob."""
+    p = Path(path)
+    if p.is_dir():
+        shards = sorted(p.glob(f"*{ENRICHMENT_META_SUFFIX}"))
+        if not shards:
+            return pa.table(
+                {f.name: pa.array([], type=f.type) for f in ENRICHMENT_META_SCHEMA},
+                schema=ENRICHMENT_META_SCHEMA,
+            )
+        return pa.concat_tables([_read_enrichment_shard(s, ENRICHMENT_META_SCHEMA) for s in shards])
+    target = p if p.name.endswith(ENRICHMENT_META_SUFFIX) else enrichment_meta_path_for(p)
+    return _read_enrichment_shard(target, ENRICHMENT_META_SCHEMA)
 
 
 def _write_enrichment_rows(

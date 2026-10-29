@@ -17,7 +17,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
-from womblex.cli._shared import normalise_prefix, select_supported
+from womblex.cli._shared import Omitted, normalise_prefix, select_files
 from womblex.cloud.dbos_app import ensure_schema
 from womblex.cloud.deployment import DeploymentSettings, deployment_paths
 from womblex.store.retention import generate_run_id, is_safe_run_id
@@ -161,8 +161,8 @@ def check_served(
     require_served(settings.db_dsn, needed_queues(validated, stages, settings.ingest_uri if extraction else None))
 
 
-def _supported_under(settings: DeploymentSettings, prefix: str) -> tuple[str, list[str]]:
-    """The location *prefix* names, and the store keys a run there would ingest.
+def _supported_under(settings: DeploymentSettings, prefix: str) -> tuple[str, list[str], list[Omitted]]:
+    """The location *prefix* names, the store keys a run there would ingest, and the files it passes over.
 
     One listing for both write and preview, so the count the composer shows is
     the count its press enqueues rather than a second walk that agrees today.
@@ -172,17 +172,33 @@ def _supported_under(settings: DeploymentSettings, prefix: str) -> tuple[str, li
     from womblex.store.remote import RemoteStore
 
     ingest_uri = cast(str, settings.ingest_uri)
-    return supported_keys(RemoteStore.from_uri(ingest_uri, explicit=settings.ingest_options), ingest_uri, prefix)
+    return ingest_listing(RemoteStore.from_uri(ingest_uri, explicit=settings.ingest_options), ingest_uri, prefix)
 
 
-def supported_keys(ingest_store: RemoteStore, ingest_uri: str, prefix: str) -> tuple[str, list[str]]:
-    """`(location, keys)`: what a run over *prefix* of *ingest_store* would ingest."""
+def _record_omitted(settings: DeploymentSettings, output_prefix: str, omitted: list[Omitted]) -> None:
+    """Record the files the run passes over beside its shards (`store/omitted_output.py`)."""
+    from womblex.store.omitted_output import publish_omitted
+    from womblex.store.remote import RemoteStore
+
+    publish_omitted(omitted, RemoteStore.from_uri(cast(str, settings.store_uri), explicit=settings.store_options),
+                    output_prefix)
+
+
+def ingest_listing(ingest_store: RemoteStore, ingest_uri: str, prefix: str) -> tuple[str, list[str], list[Omitted]]:
+    """`(location, keys, omitted)`: what a run over *prefix* of *ingest_store* would ingest, and the
+    files under it that it passes over. Keys and omitted paths are both relative to the ingest root."""
     location = f"{ingest_uri}/{prefix}".rstrip("/")
     all_keys = ingest_store.list_files(prefix, "*", recursive=True)
     # Store-relative keys: strip the prefix for the nesting check, restore after.
     scope = f"{prefix}/" if prefix else ""
-    names = select_supported((k.removeprefix(scope) for k in all_keys), location=location)
-    return location, [f"{scope}{n}" for n in names]
+    names, omitted = select_files((k.removeprefix(scope) for k in all_keys), location=location)
+    return location, [f"{scope}{n}" for n in names], [Omitted(f"{scope}{o.source_relpath}", o.reason) for o in omitted]
+
+
+def supported_keys(ingest_store: RemoteStore, ingest_uri: str, prefix: str) -> tuple[str, list[str]]:
+    """`(location, keys)`: what a run over *prefix* of *ingest_store* would ingest."""
+    location, keys, _ = ingest_listing(ingest_store, ingest_uri, prefix)
+    return location, keys
 
 
 class PrefixNotOwned(ValueError):
@@ -283,7 +299,7 @@ def enqueue_extraction(
     payload = run_config(settings, config)
     check_served(settings, config, extraction=True)
     ingest_uri = cast(str, settings.ingest_uri)
-    location, keys = _supported_under(settings, normalise_prefix(input_prefix))
+    location, keys, omitted = _supported_under(settings, normalise_prefix(input_prefix))
     if not keys:
         raise ValueError(f"no supported documents under {location}")
 
@@ -295,6 +311,8 @@ def enqueue_extraction(
     ensure_schema(settings.db_dsn)
     with RunBoard(settings.db_dsn, connect_timeout=QUEUE_CONNECT_TIMEOUT) as board:
         newly = board.enqueue(resolved_run_id, specs, owner=owner, config=payload)
+    # Only once the run exists: a refused enqueue must leave no run directory in the store.
+    _record_omitted(settings, output_prefix, omitted)
 
     logger.info(
         "enqueue: run_id=%s, %d doc(s) -> %d batch(es), %d newly enqueued",
