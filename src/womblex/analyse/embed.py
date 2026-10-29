@@ -18,13 +18,11 @@ and its `isaacus` trait answers the pre-launch gates before anything is built.
 from __future__ import annotations
 
 import logging
+import warnings
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from womblex.providers.isaacus.embedding import (  # noqa: F401 -- re-exported for one release
-    IsaacusEmbedding,
-    make_isaacus_embedding,
-)
+from womblex.providers.isaacus.embedding import make_isaacus_embedding
 from womblex.providers.openai_compat.embedding import make_openai_compat_embedding
 from womblex.utils.deployment_choice import deployment_of
 from womblex.utils.model_registry import SLOT_EMBEDDING, record_use, register, resolve
@@ -176,3 +174,18 @@ def make_embedding_provider(config: EmbeddingConfig, client: object = None) -> E
     provider: EmbeddingProvider = entry.factory(config=config, client=client)
     record_use(entry, deployment_of(SLOT_EMBEDDING, entry.name, config.deployment))
     return provider
+
+
+def __getattr__(name: str) -> object:
+    """Serve ``IsaacusEmbedding``, which moved to ``providers/isaacus/embedding.py``, with a warning."""
+    if name == "IsaacusEmbedding":
+        from womblex.providers.isaacus import embedding
+
+        warnings.warn(
+            "womblex.analyse.embed.IsaacusEmbedding is deprecated and will be removed in 0.7.0; "
+            "import it from womblex.providers.isaacus.embedding",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return embedding.IsaacusEmbedding
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

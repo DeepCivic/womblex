@@ -170,19 +170,34 @@ class _NoRegionSession:
     region_name = None
 
 
-def test_the_old_import_path_re_exports_the_client():
+def test_the_old_import_path_re_exports_the_client_and_warns():
     """`utils/isaacus_client` is the same objects as the provider package's, not a copy."""
+    import importlib
+
     from womblex.providers.isaacus import client
     from womblex.utils import isaacus_client as old
 
+    with pytest.warns(DeprecationWarning, match="removed in 0.7.0.*providers.isaacus.client"):
+        importlib.reload(old)
     for name in old.__all__:
         assert getattr(old, name) is getattr(client, name)
 
 
-def test_the_old_adapter_import_paths_re_export_the_adapters():
+def test_the_old_adapter_import_paths_re_export_the_adapters_and_warn():
     from womblex.analyse import embed, enrich
     from womblex.providers.isaacus import embedding, enrichment
 
-    assert enrich.IsaacusEnrichment is enrichment.IsaacusEnrichment
-    assert enrich.isaacus_provider is enrichment.isaacus_provider
-    assert embed.IsaacusEmbedding is embedding.IsaacusEmbedding
+    with pytest.warns(DeprecationWarning, match="removed in 0.7.0.*providers.isaacus.enrichment"):
+        assert enrich.IsaacusEnrichment is enrichment.IsaacusEnrichment
+    with pytest.warns(DeprecationWarning, match="removed in 0.7.0.*providers.isaacus.enrichment"):
+        assert enrich.isaacus_provider is enrichment.isaacus_provider
+    with pytest.warns(DeprecationWarning, match="removed in 0.7.0.*providers.isaacus.embedding"):
+        assert embed.IsaacusEmbedding is embedding.IsaacusEmbedding
+
+
+def test_a_name_the_old_adapter_modules_never_had_is_still_an_attribute_error():
+    from womblex.analyse import embed, enrich
+
+    for module in (enrich, embed):
+        with pytest.raises(AttributeError):
+            module.no_such_name  # noqa: B018

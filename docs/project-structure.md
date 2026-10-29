@@ -72,7 +72,7 @@ womblex/
 │   │   ├── paddle_ocr.py        # PaddleOCR wrapper via rapidocr-onnxruntime (det/rec/cls)
 │   │   ├── layout_step.py       # The batch's one layout step — page selection, one analyser call per page, normalised regions on ExtractionResult
 │   │   ├── layout_onnx.py       # PPDocLayoutAnalyzer — PP-DocLayout-M layout detection (onnxruntime; registered default `pp-doclayout-m`)
-│   │   ├── llm_ocr.py           # Re-export of the OCR readers in providers/, for one release
+│   │   ├── llm_ocr.py           # Re-export of the OCR readers in providers/; deprecated, removed in 0.7.0
 │   │   ├── spreadsheet.py       # CSV/Excel extraction — one ExtractionResult per workbook with cells as elements
 │   │   ├── gnaf.py              # G-NAF PSV → Parquet ingest (standalone)
 │   │   ├── gnaf_schema.py       # G-NAF table schemas — static column definitions
@@ -246,7 +246,7 @@ womblex/
 │       ├── deployment_registry.py # Named deployment registry: env, billing, free check, smoke call, models served, client; built-ins + `womblex.deployments` entry-point plugins
 │       ├── models.py        # Local model path resolution (WOMBLEX_MODELS_DIR, _models/, models/ + HF snapshot layout) + load record with byte digests
 │       ├── checksum.py      # Streamed MD5 (register ingests) and SHA-256 (published run files) helpers
-│       ├── isaacus_client.py # Re-export of providers/isaacus/client.py, for one release
+│       ├── isaacus_client.py # Re-export of providers/isaacus/client.py; deprecated, removed in 0.7.0
 │       ├── run_log.py       # capture_batch_log() — tee a batch's womblex log lines to a file beside its shards
 │       ├── money_metrics.py # Money recall / precision / scale accuracy against typed transcript tags
 │       ├── log_format.py    # JsonFormatter + log_context for --log-format json (run_id/job_id/stage/source_hash)

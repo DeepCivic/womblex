@@ -715,11 +715,13 @@ def test_the_worker_registry_names_the_queues_live_workers_serve(tmp_path: Path)
         assert registry.live_queues() == {"q-b": ["w2"]}
 
 
-def test_the_old_llm_ocr_path_re_exports_both_readers():
+def test_the_old_llm_ocr_path_re_exports_both_readers_and_warns():
     from womblex.ingest import llm_ocr
     from womblex.providers.bedrock import ocr as bedrock
     from womblex.providers.ollama import ocr as ollama
 
+    with pytest.warns(DeprecationWarning, match="removed in 0.7.0.*providers.bedrock.ocr"):
+        importlib.reload(llm_ocr)
     assert llm_ocr.MistralOCRReader is bedrock.MistralOCRReader
     assert llm_ocr.get_mistral_reader is bedrock.get_mistral_reader
     assert llm_ocr.OllamaOCRReader is ollama.OllamaOCRReader

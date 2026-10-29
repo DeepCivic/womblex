@@ -253,7 +253,7 @@ class TestEnrichDocument:
         assert client.enrichments.create.call_count == 1  # no Womblex retry loop
 
     def test_max_retries_is_passed_to_the_sdk_client(self) -> None:
-        from womblex.analyse.enrich import isaacus_provider
+        from womblex.providers.isaacus.enrichment import isaacus_provider
         from womblex.config import EnrichmentConfig
 
         client = MagicMock()
@@ -265,7 +265,7 @@ class TestEnrichDocument:
         assert isaacus_provider(EnrichmentConfig(), unset, token_counter=MagicMock()).client is unset  # SDK default
 
     def test_the_isaacus_adapter_declares_the_apis_limits_and_no_split_ceiling(self) -> None:
-        from womblex.analyse.enrich import isaacus_provider
+        from womblex.providers.isaacus.enrichment import isaacus_provider
         from womblex.config import EnrichmentConfig
 
         limits = isaacus_provider(EnrichmentConfig(), None, token_counter=MagicMock()).limits

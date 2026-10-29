@@ -20,6 +20,7 @@ than a paid call of its own.
 from __future__ import annotations
 
 import logging
+import warnings
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
@@ -39,11 +40,7 @@ from womblex.analyse.models import (
     Term,
     Website,
 )
-from womblex.providers.isaacus.enrichment import (  # noqa: F401 -- re-exported for one release
-    IsaacusEnrichment,
-    isaacus_provider,
-    make_isaacus_enrichment,
-)
+from womblex.providers.isaacus.enrichment import make_isaacus_enrichment
 from womblex.utils.deployment_choice import deployment_of
 from womblex.utils.model_registry import SLOT_ENRICHMENT, record_use, register, resolve
 
@@ -466,3 +463,18 @@ def effective_chunking(config: WomblexConfig) -> ChunkingConfig:
         )
         return config.chunking.model_copy(update={"chunking_model": None})
     return config.chunking
+
+
+def __getattr__(name: str) -> object:
+    """Serve the names that moved to ``providers/isaacus/enrichment.py``, with a warning."""
+    if name in {"IsaacusEnrichment", "isaacus_provider"}:
+        from womblex.providers.isaacus import enrichment
+
+        warnings.warn(
+            f"womblex.analyse.enrich.{name} is deprecated and will be removed in 0.7.0; "
+            f"import it from womblex.providers.isaacus.enrichment",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return getattr(enrichment, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

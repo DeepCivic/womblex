@@ -707,7 +707,7 @@ These requirements described the admin console (`womblex ui`). The console now l
 - A built-in vendor lives in its own package under `providers/` (its client module beside one adapter module per slot), and the module table covers `providers/` in one row, so a new vendor adds no row.
 - A model on a billed deployment with no `docs/models.md` entry under its canonical name or its vendor model id, or that no **Paid:** line in this document names, fails the suite.
 - Each slot's conformance test runs against every model registered in it, and the deployment conformance test against every registered deployment, so a new built-in is tested by registering it.
-- The previous import paths of the moved adapters (`ingest/llm_ocr.py`, the Isaacus adapters in `analyse/enrich.py` and `analyse/embed.py`, `utils/isaacus_client.py`) re-export for one release, and the CHANGELOG says when they are removed.
+- The previous import paths of the moved adapters (`ingest/llm_ocr.py`, the Isaacus adapters in `analyse/enrich.py` and `analyse/embed.py`, `utils/isaacus_client.py`) re-export with a `DeprecationWarning` and are removed in 0.7.0, as the CHANGELOG records.
 - A womblex-benchmark pair is needed only when `SLOTS` or `DEFAULT_MODELS` change; a new non-default model needs none.
 
 **Verification:** `tests/_fixture_vendor.py` presents a package registering one deployment and models in two slots through the entry-point groups, and `tests/test_provider_conformance.py` and `tests/test_provider_docs.py` pick it up; the latter fails for a billed model missing its entry or its **Paid:** line.

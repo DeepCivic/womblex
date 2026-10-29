@@ -1,4 +1,6 @@
-"""Re-export of :mod:`womblex.providers.isaacus.client`, kept for one release."""
+"""Re-export of :mod:`womblex.providers.isaacus.client`; deprecated, removed in 0.7.0."""
+
+import warnings
 
 from womblex.providers.isaacus.client import (
     API_KEY_ENV,
@@ -35,3 +37,10 @@ __all__ = [
     "unserved_models",
     "with_retries",
 ]
+
+warnings.warn(
+    "womblex.utils.isaacus_client is deprecated and will be removed in 0.7.0; "
+    "import from womblex.providers.isaacus.client",
+    DeprecationWarning,
+    stacklevel=2,
+)

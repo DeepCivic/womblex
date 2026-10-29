@@ -223,7 +223,7 @@ Table chunks take their candidates from the table's own enrichment (each table's
 
 ### 9. Analyse — Enrichment
 
-Wrappers in `analyse/` call the enrichment provider and the Isaacus SDK. The Isaacus client and its two slot adapters (`IsaacusEnrichment`, `IsaacusEmbedding`) live in `providers/isaacus/`; `analyse/` keeps the provider protocols, limits and request batching and registers the adapters, and the old import paths re-export for one release:
+Wrappers in `analyse/` call the enrichment provider and the Isaacus SDK. The Isaacus client and its two slot adapters (`IsaacusEnrichment`, `IsaacusEmbedding`) live in `providers/isaacus/`; `analyse/` keeps the provider protocols, limits and request batching and registers the adapters, and the old import paths re-export with a `DeprecationWarning` and are removed in 0.7.0:
 
 - `enrich.py` — the `enrichment` slot: an `EnrichmentProvider` takes texts and returns one `EnrichmentResult` each, declaring its `ProviderLimits` (texts per request, token ceiling, token counter, network need, whether it returns a Document). The default, `kanon-2-enricher`, produces structured ILGS Documents containing segments, entities, and relationships, with retries left to the SDK (`max_retries`, passed through) and no split ceiling declared. The enrich contract's Isaacus gate, `unserved_models` and the model check apply only to a provider registered with the `isaacus` trait; any other is loaded and smoke-tested like a local model.
 - `graph.py` — builds a `DocumentGraph` from enrichment results, mapping entities (persons, locations, terms, external documents) to graph nodes and relationships (cross-references, contact info, dates) to edges. Chunk-level mention links are computed from span offsets.
