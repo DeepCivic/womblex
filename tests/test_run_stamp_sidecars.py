@@ -84,6 +84,8 @@ SIDECAR_WRITERS: list[tuple[object, str]] = [
 EXEMPT: dict[str, str] = {
     "write_results": "the extraction writer; takes the run's stamp explicitly (part 1)",
     "write_layout_regions": "written by write_results, which passes it the batch's own footer",
+    "write_redaction_regions": "its callers (operations/persist.py, redact/batch.py) pass it the "
+                               "footer of the batch shard it sits beside",
     "write_run_manifest": "consolidates the batch stamps; covered by its own cases here",
     "write_sidecar": "a ground-truth .meta.json: JSON, and the run is recorded inside "
                      "the sidecar's derivation block, not as parquet footer keys",

@@ -46,6 +46,7 @@ from womblex.store.layout_output import (
 )
 from womblex.store.output import _write_rows
 from womblex.store.redaction_regions_output import write_redaction_regions
+from womblex.store.run_stamp import sidecar_footer
 
 if TYPE_CHECKING:
     from womblex.ingest.layout_step import PageLayout
@@ -181,7 +182,8 @@ def annotate_redactions_for_shards(
 
         out_path = output_dir / f"{batch_stem}.redactions.parquet"
         _write_redactions_parquet(rows, out_path, unfiltered)
-        write_redaction_regions(regions, output_dir / f"{batch_stem}.parquet")
+        write_redaction_regions(regions, output_dir / f"{batch_stem}.parquet",
+                                metadata=sidecar_footer(shard_dir / f"{batch_stem}.parquet", "redact"))
         logger.info("batch %s: %d affected elements → %s", batch_stem, len(rows), out_path)
 
         processed_batches.add(batch_stem)
