@@ -1,8 +1,8 @@
 # SMS uplift Phase E — spike results (for review)
 
 This report covers Phase E of [plan-sms-uplift.md](plan-sms-uplift.md): E1 (element evidence
-and fingerprint) and E2 (statement identity). It records what was measured. Nothing in it is a
-decision yet. No entry has been written to [decisions.md](decisions.md) or
+and fingerprint) and E2 (statement identity). It records what was measured, and its last
+section proposes a second iteration built on those results. Nothing in it is a decision yet. No entry has been written to [decisions.md](decisions.md) or
 [decisions-dead-ends.md](decisions-dead-ends.md), and Phase F is unchanged.
 
 The spikes ran against `60bdfea`. Phases C and D have landed on main since. Each finding below
@@ -280,3 +280,132 @@ Findings:
 - **E2 key.**
   - The plan's key, or the two-pass key, which depends on E1.
   - Whether to measure over more document pairs, or a scanned or OCR pair, before deciding.
+
+## Second iteration — revised approach
+
+This is a proposal and has not been run. It carries forward what the first iteration measured
+and closes the gaps found when the results were reviewed. It answers none of the open questions
+above. Each step names the question it feeds.
+
+### What carries forward
+
+- **Baseline variant.** The second-pass reduced variant:
+  - order-free basis over the verbatim layer
+  - one serialisation shared with `content_digest`
+  - the narrative span as two int32 columns
+  - null backfill in `conform_shard`
+  - the records writer updated
+
+  The first pass's order-inclusive basis and hex storage are not measured again. The figures
+  above stand for them.
+- **Still measured as variants, because they are still open:**
+  - width (32 or 16 bytes)
+  - fingerprints on table cells
+  - fingerprints on `sheet_cell` rows
+  - the evidence struct beside the two span columns
+- **E2 key shapes carried forward:**
+  - K0, the plan's key, as a control
+  - K6 and K7
+
+  K1, K2b and K5 are dropped: on the first sample, K6 matched more statements than each of them
+  with no more false matches.
+
+### Method changes
+
+- **Reproducible figures.**
+  - The spike branch is pushed and kept until the clean-up step.
+  - Each figure names the script and the commit it ran at.
+  - The first iteration's figures could not be re-run during review.
+- **Basis on every figure.** Each count names the fingerprint it was taken over: basis and width.
+- **Duplicates counted two ways.**
+  - rows in a duplicate group
+  - rows beyond the first in each group
+
+  The first report's figure of 26 is the second count, but its breakdown lists the first count
+  (31).
+- **Truth written first.** Each E2 pair's truth table is written to a file before any key runs.
+  For each statement it records the counterpart (or none) and the kind of edit.
+- **Ratios per shape, not only per batch.** `sheet_cell` makes up 87% of the synthetic batch's
+  rows, so a whole-batch ratio mostly measures spreadsheets.
+
+### E1 — measurements
+
+1. **Collisions per kind and width.**
+   - Duplicate fingerprints per kind, at 32 and 16 bytes, for elements, table cells (order-free
+     cell hash) and form fields.
+   - The first iteration did not count table-cell duplicates, and K6 relies on table-cell
+     fingerprints.
+   - Feeds: width, cell fingerprints.
+2. **Fingerprint plus occurrence ordinal.**
+   - Prototype the ordinal: the nth element in the document with that fingerprint.
+   - Measure its uniqueness, and how many ordinals shift under the E2 edits.
+   - Feeds: the E2 key.
+3. **Overlays.**
+   - The synthetic set cannot measure divergence: normalise changed 0 of 370 text elements and
+     spellfix changed 1.
+   - On the spike branch only, generate text in the shapes those stages rewrite:
+     - footer-glyph spacing
+     - runs of inline whitespace
+     - digit-for-letter OCR confusions
+   - Run both options over it:
+     - Overlay rows carry the base element's fingerprint. Measure how many rows are stale after
+       a base change, and the size cost.
+     - Each layer carries its own fingerprint. Measure the size cost, and how often an overlay's
+       fingerprint differs from its base.
+   - Feeds: overlays.
+4. **Keyed fingerprint.**
+   - HMAC-SHA-256 beside plain SHA-256: write time and size.
+   - What a key needs: where it lives, and what rotating it breaks.
+   - Show that hashing candidate values recovers short values from a plain fingerprint but not
+     from a keyed one.
+   - Feeds: sensitivity.
+5. **Older shards and the records writer.**
+   - A test that reads an elements, table-cells and form-fields shard written before the new
+     columns.
+   - A records-ingest shard written by the updated writer, with each new column checked
+     non-null wherever it should be.
+   - Feeds: contract bump size (hazards 1, 2 and 5).
+6. **Sensitivity audit of every role.**
+   - Every role in `ROLE_SENSITIVITY` is checked for columns that hold document text.
+   - The first iteration checked the money roles only.
+   - Feeds: the defect.
+
+### E2 — measurements
+
+1. **More pairs, one per shape:**
+   - the first iteration's DOCX pair, unchanged, as a control
+   - a native PDF pair
+   - a spreadsheet pair, to measure statements at the `sheet_cell` locus (the first iteration
+     had none)
+   - a scanned pair: the same pages rendered at two resolutions, so the OCR text differs where
+     the content does not
+   - a renamed pair and a moved pair, with v2 under a different `source_relpath`
+   - a pair split across two collections
+
+   A script on the spike branch generates the pairs. Nothing is added to `fixtures/synthetic/`.
+2. **Key shapes:**
+   - **K0, K6 and K7**, as before.
+   - **K8.** K6 first, then K3 (24 characters of context either side), then K0 where K0 is
+     unique on both sides. K3 made no false match in the first iteration and may recover
+     statements in edited paragraphs.
+   - **K9.** K8 without `source_relpath`, matched within the collection. Measures what the
+     renamed and moved pairs gain, and what collisions across documents it adds.
+   - **K10.** K8 without `collection`. Measures whether `collection` separates anything.
+3. **Reporting.**
+   - Matched, false match and missed for each key, broken down by stage and by edit kind, as
+     counts.
+   - The scanned pair is reported on its own, because its unchanged statements may still
+     differ through OCR.
+
+### Out of scope for this iteration
+
+- **Fixing the defect.** It changes a contract label, so it is a decision for review. Step 6
+  only measures how far it extends.
+- **Real documents.** Measuring size on a womblex-benchmark corpus would give ratios outside the
+  synthetic mix. It runs against third-party data, so it waits for the reviewer's go-ahead. It
+  is an option, not a step.
+
+### Exit criteria
+
+The second report answers each open question above with a figure, or says why it could not.
+The clean-up steps in [plan-sms-uplift.md](plan-sms-uplift.md) follow review, as before.
