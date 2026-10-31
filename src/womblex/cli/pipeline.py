@@ -59,7 +59,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     """
     from womblex.batch import process_batch
     from womblex.config import load_config
-    from womblex.store.checkpoint import CheckpointManager
+    from womblex.store.checkpoint import CheckpointManager, relpath_key
     from womblex.store.omitted_output import write_omitted
     from womblex.store.output import ShardVerificationError, verify_shard_persistence
     from womblex.store.retention import apply_retention, generate_run_id, most_recent_run
@@ -165,7 +165,7 @@ def cmd_run(args: argparse.Namespace) -> int:
                     s.stat().st_size for s in shard_dir.glob("*.parquet")
                 )
         batch_num_offset = checkpoint_mgr.state.last_batch
-        all_files = checkpoint_mgr.filter_unprocessed(all_files)
+        all_files = checkpoint_mgr.filter_unprocessed(all_files, input_root)
         logger.info("Resuming: %d documents remaining (next batch=%d)", len(all_files), batch_num_offset + 1)
     else:
         checkpoint_mgr.clear()
@@ -245,7 +245,10 @@ def cmd_run(args: argparse.Namespace) -> int:
                 raise
 
         doc_ids = [r.doc_id for r in batch.results]
-        checkpoint_mgr.update(doc_ids, batch.succeeded, batch.failed, batch_num)
+        checkpoint_mgr.update(
+            doc_ids, batch.succeeded, batch.failed, batch_num,
+            paths=[relpath_key(r.path, input_root) for r in batch.results],
+        )
 
         batch_elapsed = time.time() - batch_start
         docs_done = i + len(batch_files)
