@@ -1,8 +1,8 @@
 # Womblex
 
-**Womblex turns messy government document releases (FOI bundles, scanned forms,
-printed spreadsheets) into a verbatim, versioned Parquet corpus you can search,
-analyse and trace back to its source.**
+**Womblex turns document collections (native and scanned PDFs, page images, Word
+files, spreadsheets and Markdown) into a verbatim, versioned Parquet corpus you
+can search, analyse and trace back to its source.**
 
 [![CI](https://github.com/DeepCivic/womblex/actions/workflows/ci.yml/badge.svg)](https://github.com/DeepCivic/womblex/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/womblex)](https://pypi.org/project/womblex/)
@@ -39,20 +39,50 @@ See [examples/](https://github.com/DeepCivic/womblex/tree/main/examples) for an 
 
 ## What it does
 
-Government document releases (FOI bundles, papers, scanned forms, printed
-spreadsheets) are hard to get text out of without losing key details. Womblex extracts it first and keeps it verbatim, as an ordered stream
-of paragraphs, headings, tables and forms. Independent stages then clean, chunk,
-annotate, enrich and mask the corpus, each writing its own sidecar beside the
-extraction output, so every derived row points back at the source it came from.
+Reports, budget papers, decision notices, registers, forms, correspondence and
+document releases are hard to get text out of without losing detail, especially
+when one file mixes typed pages, scans and printed tables. Womblex extracts the
+text first and keeps it verbatim, as an ordered stream of paragraphs, headings,
+tables and forms. Independent stages then clean, chunk, annotate, enrich and
+mask the corpus. Each stage writes its own sidecar beside the extraction output,
+so every derived row points back at the source it came from.
 
 It runs on a laptop with no network access, and the same code scales out to a
 fleet of workers.
+
+## What you can run through it
+
+| Documents | File types | How they are read |
+|---|---|---|
+| Born-digital PDFs: reports, papers, letters, notices | `.pdf` | The text layer, with headings, lists and tables found from page geometry |
+| Scanned PDFs and page images: scanned letters, forms, survey sheets | `.pdf`, `.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff`, `.bmp`, `.gif`, `.jp2` | OCR (PaddleOCR models, run locally), with layout analysis and table-cell reconstruction |
+| Mixed PDFs: a cover letter, then scans, then a table | `.pdf` | Each page is profiled and routed on its own, native or OCR |
+| Spreadsheets printed to PDF: schedules, indexes, registers | `.pdf` | Rebuilt as one table across pages, with its header and any metadata block above it |
+| Forms | `.pdf`, page images | Label–value pairs from AcroForm fields, page layout or OCR'd lines |
+| Word documents | `.docx` | Paragraphs, headings and tables in document order |
+| Spreadsheets | `.csv`, `.xlsx` | One element per cell, with header detection and merged ranges |
+| Markdown | `.md`, `.markdown` | Headings, lists and tables |
+| Plain text | `.txt` | `womblex extract` only; `womblex run` does not pick up `.txt` files |
+| Reference registers: G-NAF addresses, the ABN bulk extract, shapefiles | `.psv`, `.xml`, `.shp` | Their own ingest commands, straight to Parquet or GeoParquet, outside the document pipeline |
+
+Limits worth knowing before you start:
+
+- **Legacy Excel (`.xls`)** is accepted by `womblex run`, but the default install
+  has no reader for it: pandas needs `python-calamine`, which is not a
+  dependency, so each `.xls` file is recorded as a failed document. Convert to
+  `.xlsx` or install `python-calamine`.
+- **Handwriting** is recognised poorly by the default OCR models (see
+  [docs/steering.md](docs/steering.md)).
+- **Other formats** (`.doc`, `.pptx`, email and so on) are not read. A run lists
+  every file it passed over in `omitted.parquet`.
+- **Folders:** a run reads the files directly under its input folder and refuses
+  a layout with supported documents in subfolders, rather than reading part of it.
 
 ## Features
 
 - **Page-level routing for PDFs and images.** Every page is profiled and routed
   on its own signals (native text, OCR, tables, forms, a spreadsheet printed to
-  PDF), so a bundle mixing a cover letter, a scanned form and a printed table is
+  PDF), so a file mixing a cover letter, a scanned form and a printed table is
   handled page by page.
 - **Word, Markdown and spreadsheets** read natively, in document order;
   spreadsheets become a cell-grained stream with header detection.
@@ -71,10 +101,68 @@ fleet of workers.
 - **Reference registers.** G-NAF, the ABN bulk extract and shapefiles have their
   own ingests to typed Parquet or GeoParquet.
 
-## Installation
+## System requirements
 
-Requires Python 3.12 (the OCR engine, `rapidocr-onnxruntime`, does not install
-on 3.13).
+### Local
+
+- **Python 3.12** exactly (the OCR engine, `rapidocr-onnxruntime`, does not
+  install on 3.13).
+- **Linux x86_64** is the platform CI tests and the published image runs on.
+  Other platforms are untested.
+- **CPU only.** No GPU is used, and no network, account or API key is needed
+  unless you configure a hosted model.
+- **Disk:** about 6.2 GB for a fresh `pip install womblex` on Linux x86_64. Most
+  of that is PyTorch and its NVIDIA CUDA libraries (about 5 GB), pulled in by
+  `sentence-transformers` even though Womblex runs them on the CPU. The local
+  models add about 45 MB (OCR and layout) and 88 MB (the PII context model).
+  Output is small: 880 KB of Parquet for the 90-document run below, with its
+  chunk and PII sidecars.
+- **Memory and time:** measured below. Extraction peaked at 1.19 GiB for 18
+  documents and 1.34 GiB for 90.
+
+### Cloud (a fleet of workers)
+
+- **Workers:** the same package, or the published image
+  (`ghcr.io/deepcivic/womblex`, see [docs/deployment-images.md](docs/deployment-images.md)).
+  Each worker has the local requirements above. A worker extracting the
+  90-document run below peaked at 1.55 GiB.
+- **Object storage** for the documents and the run output: any scheme fsspec
+  opens whose backend is installed (S3 and S3-compatible stores such as MinIO
+  through the bundled `s3fs`).
+- **PostgreSQL** for the job queue (DBOS's system database) once more than one
+  host takes part. Without `--dsn` the queue is a local SQLite file only that
+  host can see. The Compose stack runs PostgreSQL 18.4.
+- **Optional:** the `[api]` extra for `womblex serve`; the `[pgvector]` extra and
+  the `vector` extension for a workflow's PostgreSQL destination; outbound
+  network access and credentials for any hosted model you configure (the
+  Isaacus API or a SageMaker endpoint for enrichment and embedding, AWS Bedrock
+  for Mistral OCR). See [docs/models.md](docs/models.md).
+
+### Measured
+
+Womblex 0.6.1 from PyPI with [`configs/example.yaml`](configs/example.yaml)
+(PaddleOCR, PP-DocLayout-M, redaction detection on), on a Linux x86_64
+container with 4 vCPUs (Intel Xeon, 2.1 GHz) and 15 GiB of RAM. The corpus was
+the 18 synthetic fixtures in [`fixtures/synthetic/`](fixtures/synthetic/README.md)
+(30 pages in all: 6 PDFs, 9 page images, a DOCX, a CSV and an XLSX), and five
+copies of it for the 90-document runs. Peak memory is the process's maximum
+resident set.
+
+| Workload | Time | Peak memory |
+|---|---|---|
+| `womblex extract`, one native PDF | 1.8 s | 324 MiB |
+| `womblex extract`, one scanned page image | 4.4 s | 832 MiB |
+| `womblex run`, 18 documents (one batch) | 44 s | 1.19 GiB |
+| `womblex run`, 90 documents (four batches of 25) | 2 min 47 s | 1.34 GiB |
+| `normalise`, `spellfix`, `money` over the 90 | 1–2 s each | 209–254 MiB |
+| `chunk` over the 90 | 6.9 s | 974 MiB |
+| `pii` over the 90, regex backstop on (loads the PII context model) | 37 s | 1.38 GiB |
+| `womblex worker` extracting the 90 (SQLite queue, local file store) | — | 1.55 GiB |
+
+These are small documents; long scanned documents were not measured. Neither
+were the hosted stages (`enrich`, `embed`).
+
+## Installation
 
 ```bash
 pip install womblex          # the whole pipeline, CPU-only
