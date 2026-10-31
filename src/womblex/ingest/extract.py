@@ -29,6 +29,8 @@ from womblex.ingest.views import (  # re-exported for back-compat
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from womblex.ingest.layout_step import LayoutSettings
     from womblex.ingest.pdf.types import Document, FoundTable, Page, Rect
 
@@ -350,13 +352,27 @@ def _ends_joined(text: str) -> bool:
     return text[-1].isspace() or (text.endswith("-") and len(text) > 1 and text[-2].isalpha())
 
 
-def _build_text_blocks(page: Page) -> list[TextBlock]:
-    """Extract text blocks with positional data and type classification."""
+def _centre_in_any(box: Rect, rects: Sequence[Rect]) -> bool:
+    cx, cy = (box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2
+    return any(r.x0 <= cx <= r.x1 and r.y0 <= cy <= r.y1 for r in rects)
+
+
+def _build_text_blocks(
+    page: Page, *, exclude_rects: Sequence[Rect] | None = None,
+) -> list[TextBlock]:
+    """Extract text blocks with positional data and type classification.
+
+    A block whose centre falls inside an ``exclude_rects`` rect (a table the
+    page emits as its own element) is left out, so table text is not also a
+    paragraph.
+    """
     blocks: list[TextBlock] = []
     pw, ph = page.rect.width, page.rect.height
 
     for block in page.text_dict():
         if block.kind != "text":
+            continue
+        if exclude_rects and _centre_in_any(block.bbox, exclude_rects):
             continue
         pos = _normalise_bbox(block.bbox.as_tuple(), pw, ph)
 

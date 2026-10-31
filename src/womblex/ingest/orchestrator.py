@@ -123,7 +123,8 @@ def _apply_native_page(
     accum.text = native_text
     accum.method = "native"
     accum.confidence = 95.0
-    accum.blocks.extend(_build_text_blocks(page))
+    # A table is its own element: its text is not also a paragraph.
+    accum.blocks.extend(_build_text_blocks(page, exclude_rects=[r for _td, r, _c in table_records]))
     accum.tables.extend(td for td, _rect, _cells in table_records)
     accum.forms.extend(_extract_forms(page))
     accum.images.extend(_extract_images_from_page(page))
