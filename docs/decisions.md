@@ -413,8 +413,10 @@ The native path had the same double-count the OCR path was fixed for:
 `_build_text_blocks` emitted every text block on the page as a paragraph,
 including the blocks inside a detected table, so money, enrichment (billed per
 token) and PII counted a table twice. A block whose centre lies inside a table
-the page emits (`_find_native_tables`, ruled or text-strategy) is left out of
-the paragraphs. On a spreadsheet-print document the same rule uses the manifest
+the page emits as a ruled table (`_find_native_tables`, confidence 0.8 or more)
+is left out of the paragraphs. A text-strategy hit keeps its prose: it over-fires
+on multi-column prose and can carry no text (the residual table fabrication in
+`docs/decisions-dead-ends.md`), so its prose leaving the paragraphs would lose it. On a spreadsheet-print document the same rule uses the manifest
 table's area on each page (`extract_spreadsheet_print_zones`: the header and
 body the table took, in the displayed frame, so a rotated page's blocks are
 rotated into it first); the metadata lines above the header stay narrative.

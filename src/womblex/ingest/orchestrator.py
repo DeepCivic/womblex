@@ -124,11 +124,12 @@ def _apply_native_page(
     accum.text = native_text
     accum.method = "native"
     accum.confidence = 95.0
-    # A table is its own element: its text is not also a paragraph.
+    # A ruled table is its own element: its text is not also a paragraph. A
+    # text-strategy hit keeps its prose, for the over-firing reason above.
     # ``table_zone`` is the spreadsheet-print table's area, in the displayed frame.
     accum.blocks.extend(_build_text_blocks(
         page,
-        exclude_rects=[r for _td, r, _c in table_records],
+        exclude_rects=ruled_rects,
         displayed_rects=[table_zone] if table_zone else None,
     ))
     accum.tables.extend(td for td, _rect, _cells in table_records)
