@@ -180,7 +180,7 @@ are sent.
 **Webhook** (`kind: webhook`) — the run's events, never its data: `extraction_settled`,
 `stage_started`, `batch_progress`, `stage_finished`, `stage_failed`, `delivered`,
 `delivery_failed` and `run_finished`; an optional `events` list narrows them.
-Each is a JSON `POST` with `event`, `event_id`, `run_id`, `workflow`, `status` (the
+Each is a JSON `POST` with `event`, `event_id`, `run_id`, `workflow`, `collection` (null when the workflow names none), `status` (the
 run's state as `/v1/runs` words it: `running`, then `done`, `failed` or `cancelled`), `at`, and the event's own `stage`, `destination`,
 `error`, `ran_after_failed` or `after_failed`; `batch_progress` carries `stage`, `done`, `failed` and `total`. Headers: `X-Womblex-Event`,
 `X-Womblex-Event-Id` and `X-Womblex-Signature: sha256=<hex>`, the HMAC-SHA256 of the raw
@@ -190,10 +190,12 @@ the same id.
 
 **Retries and records.** A delivery or event is tried three times with backoff; one
 that still fails is recorded and never stops the run. Each destination's record is
-`<run>/deliveries/<name>.json` (status, attempts, error, `after_failed`, counts, and a
-webhook's `events`), and the run record in `manifest.parquet` lists every one.
+`<run>/deliveries/<name>.json` (status, attempts, error, `after_failed`, counts, a
+webhook's `events`, its `seq` and the `seq` it `replaces`, each document's `content_digest`
+and the documents whose digest moved since the delivery it replaces), and the run record in `manifest.parquet` lists every one.
 Delivering again replaces: the bundle is rewritten, the rows upserted (the run's rows
-the delivery did not write are removed), and the record replaced. Nothing redelivers
+the delivery did not write are removed), and the next record written, the one it replaces kept
+as `<name>.<seq>.json`. Nothing redelivers
 by itself; after a successful `retry-stage`, the command prints the `womblex deliver`
 line.
 
