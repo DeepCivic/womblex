@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import numpy as np
@@ -357,14 +357,19 @@ class PIICleaner:
             candidates.extend(
                 self._enrichment_candidates(len(text), text_offset, known_spans)
             )
-        # Sort by position, prefer higher score on overlap, keep first
+        # Overlapping candidates merge into one span covering both, taking the
+        # type, id and detector of the higher-scoring one (first on a tie).
         candidates.sort(key=lambda c: (c.start, -c.score))
         deduped: list[_Candidate] = []
-        last_end = -1
         for cand in candidates:
-            if cand.start >= last_end:
-                deduped.append(cand)
-                last_end = cand.end
+            if deduped and cand.start < deduped[-1].end:
+                cur = deduped[-1]
+                if cand.score > cur.score:
+                    cur.entity_type, cur.score = cand.entity_type, cand.score
+                    cur.detector, cur.entity_id = cand.detector, cand.entity_id
+                cur.end = max(cur.end, cand.end)
+            else:
+                deduped.append(replace(cand))
         return deduped
 
     def _anonymize(self, text: str, candidates: list[_Candidate]) -> tuple[str, int]:
