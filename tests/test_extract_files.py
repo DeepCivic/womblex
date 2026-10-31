@@ -152,6 +152,15 @@ class TestSpreadsheetExtractor:
         sheet_meta = next(e for e in result.elements if e.kind == "sheet_meta")
         assert (sheet_meta.meta or {}).get("preamble") == "Contract Notice Export"
 
+    def test_windows_1252_csv_keeps_its_accents(self, tmp_path: Path) -> None:
+        path = tmp_path / "cp1252.csv"
+        path.write_bytes("Name,Place\nO’Brien,Café\n".encode("cp1252"))
+
+        result = SpreadsheetExtractor().extract_path(path)
+        assert result.error is None
+        values = [e.value for e in result.elements if e.kind == "sheet_cell"]
+        assert "O’Brien" in values and "Café" in values
+
     def test_two_column_key_value_sheet_keeps_row0_header(self, tmp_path: Path) -> None:
         """Uniformly narrow sheets are not mistaken for preamble + header."""
         path = tmp_path / "kv.csv"
@@ -469,6 +478,34 @@ class TestDocxExtractor:
         # python-docx not installed in test env
         assert result.error is not None
         assert "docx" in result.error.lower()
+
+    def test_content_control_paragraphs_and_tables_are_kept_in_order(self, tmp_path: Path) -> None:
+        docx = pytest.importorskip("docx")
+        from docx.oxml import parse_xml
+        from docx.oxml.ns import nsdecls
+
+        d = docx.Document()
+        d.add_paragraph("Before control")
+        d.add_paragraph("After control")
+        after = d.paragraphs[1]._p
+        sdt = parse_xml(
+            f"<w:sdt {nsdecls('w')}><w:sdtContent>"
+            "<w:p><w:r><w:t>Inside control</w:t></w:r></w:p>"
+            "<w:tbl><w:tblPr/><w:tblGrid><w:gridCol/></w:tblGrid>"
+            "<w:tr><w:tc><w:p><w:r><w:t>Cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl>"
+            "</w:sdtContent></w:sdt>"
+        )
+        after.addprevious(sdt)
+        path = tmp_path / "sdt.docx"
+        d.save(path)
+
+        result = DocxExtractor().extract_path(path)
+        assert result.error is None
+        assert [e.kind for e in result.elements] == ["paragraph", "paragraph", "table", "paragraph"]
+        assert [e.text for e in result.elements if e.kind == "paragraph"] == [
+            "Before control", "Inside control", "After control",
+        ]
+        assert result.elements[2].cells[0].value == "Cell"
 
     def test_multi_row_header_band_from_tbl_header(self, tmp_path: Path) -> None:
         """A two-row header declared via ``w:tblHeader`` populates ``header_rows``.

@@ -34,11 +34,15 @@ PARITY = {
 
 #: Element kinds and counts over the whole extraction. The FOI index differs from
 #: MuPDF's 12 headings: MuPDF glued a block's lines, and its four bold column-header
-#: rows, spaced, run past the 80-character bold-heading limit.
+#: rows, spaced, run past the 80-character bold-heading limit. The audit's six
+#: paragraphs and one heading that MuPDF counted were the ruled table's own text,
+#: which is now the table element alone. The FOI index's eight headings and 148
+#: paragraphs were the manifest's own rows, now the table alone; the two blocks
+#: left are the metadata lines above the header.
 KINDS = {
-    AUDIT_PDF: {"header": 6, "paragraph": 24, "footer": 6, "page_break": 5, "table": 1, "heading": 1},
+    AUDIT_PDF: {"header": 6, "paragraph": 18, "footer": 6, "page_break": 5, "table": 1},
     SPACING_PDF: {"header": 6, "heading": 6, "page_break": 5, "paragraph": 12},
-    FOI_INDEX_PDF: {"heading": 8, "paragraph": 148, "footer": 2, "page_break": 3, "table": 1},
+    FOI_INDEX_PDF: {"footer": 2, "page_break": 3, "table": 1},
 }
 
 
@@ -132,3 +136,33 @@ def test_vertical_text_keeps_content_order(angle: int, tmp_path: Path) -> None:
         for page in open_document(path) for b in page.text_dict() for line in b.lines
     ]
     assert lines == ["L0", "L1", "L2"]
+
+
+@pytest.mark.parametrize("path", [AUDIT_PDF, FOI_INDEX_PDF, SCHEDULE_PDF], ids=lambda p: p.name)
+def test_a_tables_text_is_not_also_a_paragraph(path: Path) -> None:
+    """A ruled table and a printed-spreadsheet manifest each own their text."""
+    result = extract_text(path, detect_file_type(path))[0]
+    prose = [e.text for e in result.elements if e.kind not in ("table", "form") and e.text]
+    cells = [c.value for e in result.elements if e.kind == "table" for c in e.cells if len(c.value or "") > 6]
+    assert cells
+    assert not [v for v in cells if any(v in t for t in prose)]
+
+
+@pytest.mark.parametrize(("confidence", "kept"), [(0.6, True), (0.8, False)])
+def test_only_a_ruled_table_takes_the_page_prose(
+    confidence: float, kept: bool, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A text-strategy hit over-fires on multi-column prose, so its prose stays a paragraph."""
+    from womblex.ingest import orchestrator
+    from womblex.ingest.elements import BBox
+    from womblex.ingest.extract import TableData
+    from womblex.ingest.pdf.types import Page, Rect
+
+    def whole_page(page: Page) -> list[tuple[TableData, Rect, list[list[str]]]]:
+        table = TableData(headers=["a", "b"], rows=[["", ""]], position=BBox(0, 0, 1, 1), confidence=confidence)
+        return [(table, Rect(0, 0, page.rect.width, page.rect.height), [["a", "b"], ["", ""]])]
+
+    monkeypatch.setattr(orchestrator, "_find_native_tables", whole_page)
+    result = extract_text(SPACING_PDF, detect_file_type(SPACING_PDF))[0]
+    prose = [e for e in result.elements if e.kind in ("paragraph", "heading")]
+    assert bool(prose) is kept

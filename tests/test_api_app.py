@@ -366,6 +366,41 @@ def test_upload_over_the_cap_is_413(tmp_path, monkeypatch):
     assert not (tmp_path / "ingest").exists()
 
 
+def _capped_client(tmp_path):
+    registry = parse_registry({"clients": [
+        {"client_id": "alice", "token_sha256": hash_token("ta"), "scopes": ["submit"]},
+    ]})
+    app = create_api_app(
+        store_uri=str(tmp_path / "store"), db_dsn="postgresql://x/y", registry=registry,
+        ingest_uri=str(tmp_path / "ingest"), max_upload_bytes=4,
+    )
+    return TestClient(app)
+
+
+def test_an_oversized_body_is_refused_before_the_form_is_parsed(tmp_path, monkeypatch):
+    from starlette.formparsers import MultiPartParser
+
+    def parsed(*a, **k):
+        raise AssertionError("the multipart parser ran")
+
+    monkeypatch.setattr(MultiPartParser, "parse", parsed)
+    resp = _upload(_capped_client(tmp_path), [("a.pdf", b"x" * (2 << 20))])
+    assert resp.status_code == 413
+
+
+def test_a_body_without_a_length_is_cut_off_as_it_arrives(tmp_path):
+    def chunks():
+        for _ in range(3):
+            yield b"x" * (1 << 20)
+
+    resp = _capped_client(tmp_path).post(
+        "/v1/uploads", content=chunks(),
+        headers={**auth("ta"), "content-type": "multipart/form-data; boundary=b"},
+    )
+    assert resp.status_code == 413
+    assert not (tmp_path / "ingest").exists()
+
+
 def test_upload_without_an_ingest_location_is_503(tmp_path):
     app = create_api_app(store_uri=str(tmp_path), db_dsn="postgresql://x/y", registry=None)
     assert _upload(TestClient(app), [("a.pdf", b"x")]).status_code == 503

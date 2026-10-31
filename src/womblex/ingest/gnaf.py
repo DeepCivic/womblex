@@ -103,10 +103,11 @@ def ingest_psv(
         logger.warning("gnaf: no schema for table %s, skipping: %s", table_name, psv_path.name)
         return None
 
-    # Read with pyarrow.csv — streamed, constant memory, all columns as strings
-    # (zero semantic mutation: no type coercion, no null inference). The G-NAF
-    # header row, when present, is skipped so it never lands as a data row;
-    # column names come from the schema regardless.
+    # Stream with pyarrow.csv.open_csv — one block at a time, so memory does not
+    # scale with the file — all columns as strings (zero semantic mutation: no
+    # type coercion, no null inference). The G-NAF header row, when present, is
+    # skipped so it never lands as a data row; column names come from the
+    # schema regardless.
     read_opts = pcsv.ReadOptions(
         column_names=columns,
         skip_rows=1 if _has_header_row(psv_path, columns) else 0,
@@ -118,51 +119,48 @@ def ingest_psv(
         strings_can_be_null=False,
     )
 
-    try:
-        table = pcsv.read_csv(
-            str(psv_path),
-            read_options=read_opts,
-            parse_options=parse_opts,
-            convert_options=convert_opts,
-        )
-    except Exception as e:
-        logger.error("gnaf: failed to read %s: %s", psv_path.name, e)
-        return None
-
-    # Validate column count matches schema.
-    if table.num_columns != len(columns):
-        logger.error(
-            "gnaf: column count mismatch for %s: expected %d, got %d",
-            psv_path.name, len(columns), table.num_columns,
-        )
-        return None
-
-    # Provenance metadata.
+    # Provenance metadata. The row count is known only once the stream ends, so
+    # it is added to the footer at close.
     metadata = {
         b"gnaf.schema_version": SCHEMA_VERSION.encode(),
         b"gnaf.table_name": table_name.encode(),
         b"gnaf.source_file": psv_path.name.encode(),
-        b"gnaf.row_count": str(table.num_rows).encode(),
     }
     if state:
         metadata[b"gnaf.state"] = state.encode()
     if compute_md5:
         metadata[b"gnaf.source_md5"] = md5_file(psv_path).encode()
 
-    # Merge with any existing Arrow metadata.
-    existing = table.schema.metadata or {}
-    table = table.replace_schema_metadata({**existing, **metadata})
-
-    # Write.
     output_dir.mkdir(parents=True, exist_ok=True)
-    out_name = f"{stem}.parquet"
-    out_path = output_dir / out_name
+    out_path = output_dir / f"{stem}.parquet"
 
-    pq.write_table(table, str(out_path))
-    logger.info(
-        "gnaf: %s → %s (%d rows)",
-        psv_path.name, out_path.name, table.num_rows,
-    )
+    writer: pq.ParquetWriter | None = None
+    rows = 0
+    try:
+        with pcsv.open_csv(
+            str(psv_path),
+            read_options=read_opts,
+            parse_options=parse_opts,
+            convert_options=convert_opts,
+        ) as reader:
+            schema = reader.schema.with_metadata(metadata)
+            writer = pq.ParquetWriter(str(out_path), schema)
+            for batch in reader:
+                writer.write_batch(batch)
+                rows += batch.num_rows
+        writer.add_key_value_metadata({"gnaf.row_count": str(rows)})
+        writer.close()
+    except Exception as e:
+        logger.error("gnaf: failed to read %s: %s", psv_path.name, e)
+        if writer is not None:
+            try:
+                writer.close()
+            except Exception:
+                pass  # best-effort release before unlink
+        out_path.unlink(missing_ok=True)
+        return None
+
+    logger.info("gnaf: %s → %s (%d rows)", psv_path.name, out_path.name, rows)
     return out_path
 
 

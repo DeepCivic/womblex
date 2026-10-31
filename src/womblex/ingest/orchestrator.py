@@ -54,7 +54,7 @@ from womblex.ingest.views import table_to_element
 
 if TYPE_CHECKING:
     from womblex.ingest.layout_step import LayoutSettings, PageLayout
-    from womblex.ingest.pdf.types import Document, Page
+    from womblex.ingest.pdf.types import Document, Page, Rect
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +83,7 @@ def _apply_native_page(
     lang: str = "eng",
     engine: str = "paddleocr",
     engine_options: dict | None = None,
+    table_zone: Rect | None = None,
 ) -> None:
     """Extract a native text-layer page; also OCR sizable embedded image
     regions that aren't already covered by the text layer.
@@ -123,7 +124,14 @@ def _apply_native_page(
     accum.text = native_text
     accum.method = "native"
     accum.confidence = 95.0
-    accum.blocks.extend(_build_text_blocks(page))
+    # A ruled table is its own element: its text is not also a paragraph. A
+    # text-strategy hit keeps its prose, for the over-firing reason above.
+    # ``table_zone`` is the spreadsheet-print table's area, in the displayed frame.
+    accum.blocks.extend(_build_text_blocks(
+        page,
+        exclude_rects=ruled_rects,
+        displayed_rects=[table_zone] if table_zone else None,
+    ))
     accum.tables.extend(td for td, _rect, _cells in table_records)
     accum.forms.extend(_extract_forms(page))
     accum.images.extend(_extract_images_from_page(page))
@@ -395,11 +403,12 @@ def extract_with_plan(
     if sp_hints:
         sp_qualifier_kwargs["filename_hints"] = sp_hints
     spreadsheet_tables: list[TableData] = []
+    sp_zones: list[Rect | None] = []
     is_spreadsheet_print = False
     if doc_type in (DocumentType.STRUCTURED, DocumentType.NATIVE_WITH_STRUCTURED) and \
             qualify_for_spreadsheet_print(profiles, filename, **sp_qualifier_kwargs):
-        from womblex.ingest.spreadsheet_print import extract_spreadsheet_print
-        spreadsheet_tables, document_metadata = extract_spreadsheet_print(
+        from womblex.ingest.spreadsheet_print import extract_spreadsheet_print_zones
+        spreadsheet_tables, document_metadata, sp_zones = extract_spreadsheet_print_zones(
             doc, metadata_location=sp_loc,
         )
         is_spreadsheet_print = bool(spreadsheet_tables)
@@ -413,6 +422,7 @@ def extract_with_plan(
             _apply_native_page(
                 page, profile, accum,
                 dpi=dpi, lang=lang, engine=engine, engine_options=opts,
+                table_zone=sp_zones[page.number] if page.number < len(sp_zones) else None,
             )
         else:
             ocr_count += 1

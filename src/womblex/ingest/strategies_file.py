@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from womblex.ingest.elements import Cell, Element, ElementKind
 from womblex.ingest.extract import (
@@ -23,6 +23,8 @@ from womblex.ingest.extract import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from womblex.ingest.pdf.types import Document
 
 logger = logging.getLogger(__name__)
@@ -46,6 +48,8 @@ class DocxExtractor:
         try:
             from docx import Document
             from docx.oxml.ns import qn
+            from docx.table import Table
+            from docx.text.paragraph import Paragraph
         except ImportError:
             return _docx_error("python-docx not installed; cannot extract DOCX.")
 
@@ -54,18 +58,15 @@ class DocxExtractor:
         except Exception as e:
             return _docx_error(f"Failed to read DOCX: {e}")
 
-        # python-docx returns paragraphs and tables in separate collections.
-        # Look them up by their underlying XML element so body iteration can
-        # walk paragraphs and tables in true document order.
-        paras_by_xml = {p._element: p for p in doc.paragraphs}
-        tables_by_xml = {t._element: t for t in doc.tables}
-
+        # python-docx returns paragraphs and tables in separate collections
+        # that omit anything inside a content control, so the body is walked
+        # as XML (descending into ``w:sdtContent``) and each block wrapped.
         elements: list[Element] = []
         order = 0
-        for child in doc.element.body.iterchildren():
+        for child in _body_blocks(doc.element.body, qn):
             if child.tag == qn("w:p"):
-                para = paras_by_xml.get(child)
-                if para is None or not para.text.strip():
+                para = Paragraph(child, doc._body)
+                if not para.text.strip():
                     continue
                 kind = cast("ElementKind", (
                     "heading"
@@ -78,9 +79,7 @@ class DocxExtractor:
                 ))
                 order += 1
             elif child.tag == qn("w:tbl"):
-                tbl = tables_by_xml.get(child)
-                if tbl is None:
-                    continue
+                tbl = Table(child, doc._body)
                 cells: list[Cell] = []
                 for row_idx, row in enumerate(tbl.rows):
                     for col_idx, cell in enumerate(row.cells):
@@ -105,6 +104,17 @@ class DocxExtractor:
                 text_coverage=1.0 if page_text else 0.0,
             ),
         )
+
+
+def _body_blocks(parent: object, qn: object) -> Iterator[Any]:
+    """Paragraph and table XML elements under *parent*, in order, through content controls."""
+    sdt, content = qn("w:sdt"), qn("w:sdtContent")  # type: ignore[operator]
+    for child in parent.iterchildren():  # type: ignore[attr-defined]
+        if child.tag == sdt:
+            for inner in child.iterchildren(content):
+                yield from _body_blocks(inner, qn)
+        else:
+            yield child
 
 
 def _docx_header_rows(tbl: object, qn: object) -> list[int]:

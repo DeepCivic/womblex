@@ -24,11 +24,25 @@ CHECKPOINT_GLOB = "*_checkpoint.json"
 _MIN_RATE_SPAN_SECONDS = 1.0
 
 
+def relpath_key(path: Path, root: Path | None) -> str:
+    """*path* under *root* as a posix string, or its name when it is not under it."""
+    if root is not None:
+        try:
+            return path.relative_to(root).as_posix()
+        except ValueError:
+            pass
+    return path.name
+
+
 @dataclass
 class CheckpointState:
     """State of a pipeline run for resumability."""
 
     processed_ids: set[str] = field(default_factory=set)
+    #: Source paths relative to the ingest root, extension included. A
+    #: ``doc_id`` is the file stem, so ``report.pdf`` and ``report.docx`` share
+    #: one; resume tells them apart by this set. Empty in an older checkpoint.
+    processed_paths: set[str] = field(default_factory=set)
     total_processed: int = 0
     total_succeeded: int = 0
     total_failed: int = 0
@@ -39,6 +53,7 @@ class CheckpointState:
     def to_dict(self) -> dict:
         return {
             "processed_ids": list(self.processed_ids),
+            "processed_paths": sorted(self.processed_paths),
             "total_processed": self.total_processed,
             "total_succeeded": self.total_succeeded,
             "total_failed": self.total_failed,
@@ -51,6 +66,7 @@ class CheckpointState:
     def from_dict(cls, data: dict) -> CheckpointState:
         return cls(
             processed_ids=set(data.get("processed_ids", [])),
+            processed_paths=set(data.get("processed_paths", [])),
             total_processed=data.get("total_processed", 0),
             total_succeeded=data.get("total_succeeded", 0),
             total_failed=data.get("total_failed", 0),
@@ -168,9 +184,17 @@ class CheckpointManager:
             json.dump(self.state.to_dict(), f, indent=2)
         logger.debug("Saved checkpoint: %d processed", self.state.total_processed)
 
-    def update(self, doc_ids: list[str], succeeded: int, failed: int, batch_num: int) -> None:
+    def update(
+        self,
+        doc_ids: list[str],
+        succeeded: int,
+        failed: int,
+        batch_num: int,
+        paths: list[str] | None = None,
+    ) -> None:
         """Update checkpoint after a batch completes."""
         self.state.processed_ids.update(doc_ids)
+        self.state.processed_paths.update(paths or [])
         self.state.total_processed += len(doc_ids)
         self.state.total_succeeded += succeeded
         self.state.total_failed += failed
@@ -193,14 +217,31 @@ class CheckpointManager:
         if not to_drop:
             return
         self.state.processed_ids.difference_update(to_drop)
+        # A path shares its doc_id's stem; dropping by stem re-extracts a
+        # same-stem sibling too, which is safer than leaving one unextracted.
+        self.state.processed_paths = {
+            p for p in self.state.processed_paths if Path(p).stem not in to_drop
+        }
         self.state.total_processed = max(0, self.state.total_processed - len(to_drop))
         self.state.total_succeeded = max(0, self.state.total_succeeded - len(to_drop))
         self.save()
         logger.info("Checkpoint: dropped %d doc_id(s) for re-extraction", len(to_drop))
 
-    def filter_unprocessed(self, paths: list[Path]) -> list[Path]:
-        """Filter out already-processed documents."""
-        return [p for p in paths if p.stem not in self.state.processed_ids]
+    def filter_unprocessed(self, paths: list[Path], root: Path | None = None) -> list[Path]:
+        """Filter out already-processed documents.
+
+        A document is matched by its path under *root* (extension included)
+        when the checkpoint recorded paths for its stem; a checkpoint written
+        before paths were recorded falls back to the stem alone.
+        """
+        recorded_stems = {Path(p).stem for p in self.state.processed_paths}
+
+        def processed(path: Path) -> bool:
+            if path.stem in recorded_stems:
+                return relpath_key(path, root) in self.state.processed_paths
+            return path.stem in self.state.processed_ids
+
+        return [p for p in paths if not processed(p)]
 
     def clear(self) -> None:
         """Clear checkpoint state (for fresh runs)."""

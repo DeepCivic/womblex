@@ -23,6 +23,7 @@ from __future__ import annotations
 import logging
 import socket
 import time
+from typing import Any
 
 from womblex.cloud import dbos_app
 from womblex.cloud.stage_contracts import STAGE_CONTRACTS
@@ -49,6 +50,24 @@ logger = logging.getLogger(__name__)
 
 def default_worker_id() -> str:
     return socket.gethostname()
+
+
+class WorkerIdInUse(RuntimeError):
+    """A live worker already holds this executor id."""
+
+
+def _refuse_held_id(registry: Any, worker_id: str) -> None:
+    """Two workers on one executor id share DBOS recovery and each other's registry row.
+
+    A predecessor that died stops refreshing, so its row ages past the window
+    and a restart under the same id (which recovers its workflows) is allowed.
+    """
+    age = registry.refreshed_ago(worker_id)
+    if age is not None and age < 2 * HEARTBEAT_SECONDS:
+        raise WorkerIdInUse(
+            f"worker id {worker_id!r} refreshed its registry row {age:.0f}s ago; pass "
+            "--worker-id to run a second worker on this host, or retry once the first has stopped"
+        )
 
 
 def served_queues(
@@ -127,8 +146,15 @@ def run_worker(
     from dbos import DBOS
 
     from womblex.cloud import workflows
+    from womblex.cloud.worker_registry import WorkerRegistry
 
     worker_id = worker_id or default_worker_id()
+    registry = WorkerRegistry(dsn)
+    try:
+        _refuse_held_id(registry, worker_id)
+    except WorkerIdInUse:
+        registry.close()
+        raise
     store = RemoteStore.from_uri(store_uri)
     ingest = RemoteStore.from_uri(ingest_uri) if ingest_uri else store
     ingest_root = ingest_uri or store_uri
@@ -156,9 +182,6 @@ def run_worker(
                             on_conflict="always_update")
 
     names = list(served)
-    from womblex.cloud.worker_registry import WorkerRegistry
-
-    registry = WorkerRegistry(dsn)
     registry.record(worker_id, names)
     recorded_at = time.monotonic()
     baseline = _completed(names, worker_id)
@@ -190,4 +213,4 @@ def run_worker(
     return completed
 
 
-__all__ = ["default_worker_id", "run_worker", "served_queues"]
+__all__ = ["WorkerIdInUse", "default_worker_id", "run_worker", "served_queues"]

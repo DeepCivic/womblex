@@ -85,6 +85,25 @@ _HEADER_LOOKAHEAD_ROWS = 20
 _HEADER_WIDTH_RATIO = 0.6
 
 
+def _csv_encoding(path: Path) -> str:
+    """``utf-8`` when the whole file decodes as it, else ``cp1252``.
+
+    Government CSV exports are often Windows-1252; reading those as UTF-8
+    fails the file, and replacing the bad bytes loses ``é`` and ``’``.
+    """
+    import codecs
+
+    decoder = codecs.getincrementaldecoder("utf-8")()
+    try:
+        with open(path, "rb") as f:
+            while chunk := f.read(1 << 20):
+                decoder.decode(chunk)
+        decoder.decode(b"", final=True)
+    except UnicodeDecodeError:
+        return "cp1252"
+    return "utf-8"
+
+
 def read_csv_raw(path: Path, *, nrows: int | None = None) -> pd.DataFrame:
     """Read a CSV with no header inference, tolerating ragged leading rows.
 
@@ -101,13 +120,15 @@ def read_csv_raw(path: Path, *, nrows: int | None = None) -> pd.DataFrame:
 
     import pandas as pd
 
-    with open(path, newline="", encoding="utf-8", errors="replace") as f:
+    encoding = _csv_encoding(path)
+    with open(path, newline="", encoding=encoding, errors="replace") as f:
         reader = csv.reader(f)
         rows = islice(reader, nrows) if nrows is not None else reader
         max_fields = max((len(row) for row in rows), default=0)
     df = pd.read_csv(
         path, dtype=str, keep_default_na=False, header=None,
         names=range(max_fields), nrows=nrows,
+        encoding=encoding, encoding_errors="replace",
     )
     return df.fillna("")
 

@@ -59,8 +59,9 @@ def test_ingest_authority_code_psv(tmp_path: Path):
     assert meta[b"gnaf.schema_version"] == SCHEMA_VERSION.encode()
     assert meta[b"gnaf.table_name"] == b"ADDRESS_TYPE_AUT"
     assert b"gnaf.state" not in meta  # Authority Code has no state
-    assert meta[b"gnaf.row_count"] == b"2"
     assert b"gnaf.source_md5" in meta
+    # The count is known only when the stream ends, so it is in the file footer.
+    assert pq.read_metadata(str(result)).metadata[b"gnaf.row_count"] == b"2"
 
     # Zero semantic mutation: values preserved exactly.
     assert table.column("code").to_pylist() == ["R", "U"]
@@ -85,6 +86,23 @@ def test_ingest_standard_psv(tmp_path: Path):
     meta = table.schema.metadata
     assert meta[b"gnaf.state"] == b"ACT"
     assert meta[b"gnaf.table_name"] == b"STATE"
+
+
+def test_large_file_streams_in_blocks_and_leaves_no_partial_on_failure(tmp_path: Path):
+    """Rows beyond one 1 MB block round-trip; a mid-file failure removes the output."""
+    psv = tmp_path / "ACT_STATE_psv.psv"
+    n = 40_000
+    _write_psv(psv, [f"STATE{i}|2020-01-01||Australian Capital Territory|ACT" for i in range(n)])
+
+    result = ingest_psv(psv, tmp_path / "out")
+    assert result is not None
+    assert pq.read_metadata(str(result)).metadata[b"gnaf.row_count"] == str(n).encode()
+    assert pq.read_metadata(str(result)).num_rows == n
+
+    bad = tmp_path / "NSW_STATE_psv.psv"
+    _write_psv(bad, [f"STATE{i}|2020-01-01||X|NSW" for i in range(n)] + ["short|row"])
+    assert ingest_psv(bad, tmp_path / "out") is None
+    assert not (tmp_path / "out" / "NSW_STATE_psv.parquet").exists()
 
 
 def test_ingest_skips_header_row(tmp_path: Path):
