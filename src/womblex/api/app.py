@@ -31,6 +31,7 @@ from fastapi import Depends, FastAPI, HTTPException, Response, UploadFile
 
 from womblex.api import readers
 from womblex.api.auth import Caller, ClientRegistry, caller_dependency, require_scope
+from womblex.api.body_limit import BodyLimit
 from womblex.api.models import (
     DocumentText,
     Health,
@@ -72,6 +73,9 @@ logger = logging.getLogger(__name__)
 
 #: How many runs one caller's listing returns.
 RUN_LIMIT = 1000
+
+#: Multipart framing allowed on top of the cap when the body is cut off early.
+MULTIPART_SLACK_BYTES = 1 << 20
 
 #: The default cap on one upload request's total size.
 MAX_UPLOAD_BYTES = 256 * 1024 * 1024
@@ -158,6 +162,8 @@ def create_api_app(
         else location_options_from_env(ingest_uri),
     )
     app = FastAPI(title="Womblex API", version="1")
+    # Cut an oversized body off before the multipart parser spools it to disk.
+    app.add_middleware(BodyLimit, path="/v1/uploads", limit=max_upload_bytes + MULTIPART_SLACK_BYTES)
     get_caller = caller_dependency(registry)
     can_read = require_scope(get_caller, "read")
     can_submit = require_scope(get_caller, "submit")

@@ -210,6 +210,7 @@ womblex/
 │   │   └── workflow_runner.py  # Local multi-stage runner — a workflow's steps through the stage functions; refuse before work, record after
 │   ├── api/                    # Service API (`womblex serve`)
 │   │   ├── app.py              # create_api_app() — `/v1` health/ready, run submit, list/detail, manifest, files, document text, metrics; owner-scoped
+│   │   ├── body_limit.py       # ASGI cap on the upload body, enforced before the multipart parser spools it
 │   │   ├── routes_config.py    # /v1/stages and /v1/config/schema, validate, yaml
 │   │   ├── routes_queue.py     # /v1/queue — the queue in one read, owner-scoped
 │   │   ├── routes_inbound.py   # POST /v1/hooks/{workflow}/{hook} — inbound webhooks, HMAC-authenticated
