@@ -25,7 +25,7 @@ factories take no options key: they receive their config section instead.
 | Slot | Group | Config key | Factory receives | Factory returns |
 |---|---|---|---|---|
 | OCR engine | `womblex.models.ocr` | `extraction.ocr.engine` | `lang` plus `engine_options` | a reader with `read_page(img) -> OCRPageResult` |
-| Layout analyser | `womblex.models.layout` | `layout.model` | `layout.options` | an object with `analyze(img, conf_threshold) -> list[LayoutRegion]` |
+| Layout analyser | `womblex.models.layout` | `layout.model` | `layout.options` | an object with `analyze(img, conf_threshold) -> list[LayoutRegionResult]` |
 | PII context model | `womblex.models.pii-context` | `pii.model` | `model_options` | an object with `encode(texts) -> embeddings` |
 | Chunk tokeniser | `womblex.models.tokenizer` | `chunking.tokenizer` | `tokenizer_options` | a Hugging Face id string, or a `(str) -> int` token counter |
 | Spellfix dictionary | `womblex.models.spellfix-dictionary` | `spellfix.dict_name` | `dict_options` | an object with `lookup(word)`, as a Hunspell dictionary has |

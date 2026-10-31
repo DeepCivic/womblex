@@ -179,7 +179,7 @@ Terms the requirements use, as the code defines them.
 
 **TO-DO:**
 
-- **G-NAF and geospatial writes are not guarded against partial output (re: "discarding partial output without halting the directory ingest").** `gnaf.ingest_psv` calls `pq.write_table` unguarded, so a write failure propagates out of `ingest_gnaf_directory` and halts the directory ingest, possibly leaving a partial file. `geospatial.ingest_shapefile` catches a `to_parquet` failure and records it on the result but does not remove the partial file, and its follow-up provenance rewrite (`pq.read_table` / `pq.write_table`) is unguarded. Decide whether to (a) guard both writes and unlink partial output on failure, as `abn_bulk` does, or (b) narrow the criterion to read-failure isolation for these two ingests.
+- **Geospatial writes are not guarded against partial output (re: "discarding partial output without halting the directory ingest").** `geospatial.ingest_shapefile` catches a `to_parquet` failure and records it on the result but does not remove the partial file, and its follow-up provenance rewrite (`pq.read_table` / `pq.write_table`) is unguarded. Decide whether to (a) guard both writes and unlink partial output on failure, as `abn_bulk` and `gnaf.ingest_psv` do, or (b) narrow the criterion to read-failure isolation for this ingest.
 
 ## 8. Output Data Contract & Persistence Integrity
 
@@ -743,7 +743,7 @@ Requirements not yet fully met. The detail lives in the **TO-DO** block under ea
 - **Requirement 2 (Scale-Out):** `verify-shards --compare-to` does not compare `content_digest`; the enrichment paths have no Azure ML connection.
 - **Requirement 3 (Ingest-First Data Flow):** up-front composition check covers workflows (local and `dispatch-workflow`) and dispatch, not a lone `run-stage --store` (per-base `NotReady`).
 - **Requirement 6 (Native Office and Spreadsheet Extraction):** multi-row headers are emitted for DOCX only; spreadsheets and the legacy table view collapse to row 0, no per-cell header-row coordinate exists, and cell formulas are never captured.
-- **Requirement 7 (Standalone Reference Register Ingestion):** G-NAF and geospatial writes are not guarded against partial output.
+- **Requirement 7 (Standalone Reference Register Ingestion):** geospatial writes are not guarded against partial output.
 - **Requirement 9 (Redaction Handling):** no redaction `pipeline_point`, and the E2E `run` path writes no `*.redactions.parquet`.
 - **Requirement 13 (Money Annotation):** the money span row carries no merge extent or header-row coordinate.
 

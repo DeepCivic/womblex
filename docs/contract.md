@@ -157,7 +157,7 @@ or carrying no `sensitivity` key, stays inside the trust boundary.
 ## Python API
 
 `womblex.__all__` is the stable API, pinned by `tests/test_public_api.py`:
-`__version__`; `extract_text`; the `run_*` operations; the `*_shards` stage functions;
+`__version__`; `extract_text`; the `run_*` operations; the `*_shards` stage functions except `layout_shards`;
 `build_bundle`; `write_run_manifest`; `read_results` (reads the elements
 role); `CONTRACT_VERSION`. Names resolve lazily, so `import womblex` does not
 load the extraction stack. Anything not in `__all__` is internal and may change

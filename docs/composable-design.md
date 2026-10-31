@@ -51,6 +51,7 @@ pii (post_enrich.)   run_pii_cleaning       chunks + enrichment        chunk tex
 
 | Stage | Required inputs | Conditional inputs (config-derived) | Outputs |
 |---|---|---|---|
+| `layout` | `.elements`, `._manifest` (plus the source documents) | `.layout_regions` (its fingerprint decides the skip) | `.layout_regions`, replaced in place |
 | `normalise` | `.elements`, `.table_cells`, `._manifest` | — | `.normalised_text` |
 | `spellfix` | `.elements`, `.table_cells`, `._manifest` | `.normalised_text` (chains on it when present) | `.spellfix_text`, `.spellfix_corrections` |
 | `enrich` | `.elements`, `._manifest` | `text_source` overlay (strict); `.chunks` (adds mention→chunk edges) | `.enrichment_entities`, `.enrichment_meta`, `.graph_edges` (+ `.enrichment_doc` when `persist_document` or `chunking_model`) |
@@ -69,14 +70,14 @@ Every suffix is `*<suffix>.parquet`. `manifest` is not a stage: `womblex finaliz
 Stage order is a dependency DAG over the inputs above, not one fixed sequence. `PIPELINE_ORDER` (`pipeline_order.py`) declares the default full-run order — one valid topological sort:
 
 ```
-extract → normalise → spellfix → enrich → chunk → graph-refresh → embed → money → link → pii → quality
+extract → layout → normalise → spellfix → enrich → chunk → graph-refresh → embed → money → link → pii → quality
 ```
 
-Its two non-obvious edges are config-derived, so the contracts alone cannot express them: normalise and spellfix precede enrich and chunk because `processing.text_source` makes both reassemble from their overlays, and enrich precedes chunk so AI chunking reuses the persisted Document. `DOWNSTREAM_STAGES` is the subset a dispatcher (`enqueue-stages`, `POST /v1/runs`) may queue automatically — every stage except `extract` (the batch queue itself), `pii` (irreversible masking, always a deliberate act) and `quality` (run-scoped). Both remain reachable through `run-stage`.
+Its two non-obvious edges are config-derived, so the contracts alone cannot express them: normalise and spellfix precede enrich and chunk because `processing.text_source` makes both reassemble from their overlays, and enrich precedes chunk so AI chunking reuses the persisted Document. `DOWNSTREAM_STAGES` is the subset a dispatcher (`enqueue-stages`, `POST /v1/runs`) may queue automatically — every stage except `extract` (the batch queue itself), `layout` (a rerun is a deliberate act), `pii` (irreversible masking, always a deliberate act) and `quality` (run-scoped). The last three remain reachable through `run-stage` and as a workflow's steps.
 
 | After | Valid immediate next stages |
 |---|---|
-| `extract` (shards) | `normalise`, `spellfix`, `enrich`, `chunk`, `money`, `done` |
+| `extract` (shards) | `layout`, `normalise`, `spellfix`, `enrich`, `chunk`, `money`, `done` |
 | `extract` → `.txt` | `done` |
 | `normalise` | `spellfix`, `enrich`, `chunk`, `money`, `done` |
 | `spellfix` | `enrich`, `chunk`, `money`, `done` |

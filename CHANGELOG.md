@@ -8,6 +8,9 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 ## [Unreleased]
 
+### Fixed
+- **Docs agree with the code.** A QA pass over `docs/` corrected claims that had drifted: `dispatch-workflow` accepts `layout` and `quality` steps (only a firing refuses `quality`); a failed document is a `status: error` manifest row; a redelivery keeps the record it replaces as `<name>.<seq>.json`; webhook bodies carry `collection` and `at`; the `layout` stage is in the pipeline order, the contract table and the architecture diagram; Requirement 7's TO-DO now names the geospatial ingest only (G-NAF is guarded); and stale MuPDF-era calls, the Postgres pin, the run-record version for `deliveries` and the classification pseudocode.
+
 ## [0.6.1] - 2026-10-31
 
 ### Added

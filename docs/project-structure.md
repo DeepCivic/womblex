@@ -37,7 +37,7 @@ womblex/
 │   ├── config_tools.py     # A composed config: JSON Schema without paths, validation and YAML under a deployment's paths
 │   ├── presets.py          # Named partial configs (built-in DEFAULT-Isaacus + operator-saved): read, list, save, delete
 │   ├── batch.py            # process_batch() — shared per-batch pipeline body (extract → optional redaction detection; extraction only)
-│   ├── operations/         # Independent operations, one module each: extract, redact, chunk, pii, enrich — callers compose directly
+│   ├── operations/         # Independent operations, one module each: extract, redact, chunk, pii, enrich (plus models.py, the batch dataclasses, and persist.py, the Parquet writers) — callers compose directly
 │   │   ├── models.py       # DocumentResult / BatchResult dataclasses + PreconditionError
 │   │   └── persist.py      # write_batch_parquet / write_batch_enrichment
 │   ├── score.py            # womblex score subcommand — labels-vs-parquet CER scoring

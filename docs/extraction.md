@@ -247,7 +247,7 @@ For forms, replace `table_cells` with `form_fields` and `kind='form'`.
 
 ## Integrity
 
-`verify_shard_persistence` runs after every batch write and checks:
+`verify_shard_persistence` runs after every batch write of a local `womblex run` (`cli/pipeline.py`) and checks:
 
 - All four shard files exist and are non-empty.
 - `manifest` row count matches `expected_docs`.
