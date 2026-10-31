@@ -56,7 +56,7 @@ PaddleOCR is only invoked as a fallback when morphological signals (glyph regula
 if file is .docx → DOCX
 if file is .md/.markdown → MARKDOWN
 if file is .txt → TEXT
-if file is .csv/.xlsx → SPREADSHEET
+if file is .csv/.xlsx/.xls → SPREADSHEET
 if text_coverage >= 30%:
     if table_ratio >= 80% → STRUCTURED
     elif table_ratio >= table_signal_threshold (0.4) or has_images → NATIVE_WITH_STRUCTURED
