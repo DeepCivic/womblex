@@ -86,6 +86,20 @@ class WorkerRegistry:
         with self._engine.begin() as conn:
             conn.execute(sa.delete(self._table).where(self._table.c.worker_id == worker_id))
 
+    def refreshed_ago(self, worker_id: str) -> float | None:
+        """Seconds since *worker_id* last refreshed its row, or ``None`` if it has none."""
+        import sqlalchemy as sa
+
+        if self._unwritten or not sa.inspect(self._engine).has_table(_TABLE):
+            return None
+        with self._engine.connect() as conn:
+            row = conn.execute(
+                sa.select(self._table.c.updated_at).where(self._table.c.worker_id == worker_id)
+            ).first()
+        if row is None:
+            return None
+        return (datetime.now(UTC) - datetime.fromisoformat(row.updated_at)).total_seconds()
+
     def live_queues(self, within_seconds: float = LIVE_SECONDS) -> dict[str, list[str]]:
         """Each queue a worker refreshed within *within_seconds* serves -> those workers."""
         import sqlalchemy as sa

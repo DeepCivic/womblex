@@ -205,7 +205,7 @@ def _register_worker(p: argparse.ArgumentParser) -> None:
 
 
 def cmd_worker(args: argparse.Namespace) -> int:
-    from womblex.cloud.worker import run_worker
+    from womblex.cloud.worker import WorkerIdInUse, run_worker
     from womblex.config import load_config
 
     dsn = _resolve_dsn(args)
@@ -217,14 +217,18 @@ def cmd_worker(args: argparse.Namespace) -> int:
 
     config = load_config(args.config)
     apply_models_check(config, args)
-    completed = run_worker(
-        dsn, store_uri, config,
-        ingest_uri=ingest_uri,
-        worker_id=args.worker_id,
-        poll_interval=args.poll_interval,
-        once=args.once,
-        idle_timeout=args.idle_timeout,
-    )
+    try:
+        completed = run_worker(
+            dsn, store_uri, config,
+            ingest_uri=ingest_uri,
+            worker_id=args.worker_id,
+            poll_interval=args.poll_interval,
+            once=args.once,
+            idle_timeout=args.idle_timeout,
+        )
+    except WorkerIdInUse as e:
+        logger.error("%s", e)
+        return 1
     logger.info("worker exiting: %d job(s) completed", completed)
     return 0
 

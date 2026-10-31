@@ -9,6 +9,7 @@ Entries are terse by design; rationale lives in the PR/commit history.
 ## [Unreleased]
 
 ### Fixed
+- **A second worker on one executor id is refused.** Two `womblex worker` processes on a host both defaulted to the host name, so one stopping deleted the other's registry row and a restart recovered workflows the other was still running. A worker now refuses to start while its id's registry row was refreshed within two heartbeats (`WorkerIdInUse`, exit 1 from the CLI); a crashed predecessor's row ages out, so a restart under the same id still recovers its workflows.
 - **Resume tells `report.pdf` from `report.docx`.** The extraction checkpoint recorded only `doc_id` (the file stem), so resuming after `report.pdf`'s batch skipped `report.docx` unextracted; the checkpoint now also records each document's path under the ingest root (`processed_paths`) and `filter_unprocessed` matches by it, falling back to the stem for a checkpoint written before.
 - **DOCX content controls are extracted.** `DocxExtractor` walked only top-level `w:p` / `w:tbl`, so paragraphs and tables inside a `w:sdt` content control (titles, dates, decision text, classification banners) were dropped; the body walk now descends into `w:sdtContent` in order.
 - **A Windows-1252 CSV is read, not failed.** `read_csv_raw` sniffed columns with replacement but parsed as strict UTF-8, so a CSV holding `Café` / `O’Brien` in cp1252 became an error document; the encoding is now chosen once (UTF-8 if the whole file decodes, else cp1252) and used by both reads.
