@@ -9,6 +9,7 @@ Entries are terse by design; rationale lives in the PR/commit history.
 ## [Unreleased]
 
 ### Fixed
+- **`$10–20m` reads as a range.** The measurement false-positive class (metres) vetoed the whole range because the right-hand `20m` carries no symbol, leaving `$10` alone at 10; a range with a currency symbol on either end is now checked against the blocked classes other than measurement (`$0.5m–1m` and `$2m-3m` lost their upper bound the same way).
 - **Partly overlapping PII spans merge, not drop.** `PIICleaner.detect_spans` kept the first of two overlapping candidates and discarded the second, leaving its tail ("Smith" in "Jane Citizen Smith") unmasked in `*.clean_text.parquet`; overlapping candidates now become one span covering both, with the higher-scoring type and entity id.
 - **A generic mention no longer links at confidence 1.0.** `_token_set_ratio` scored a mention that was a strict subset of a register name ("Early Learning" against "Artemis Early Learning") as 1.0; a mention leaving a register word uncovered now scores the plain sorted ratio.
 - **Table detection no longer backtracks on long delimited lines.** The pipe and tab alternatives of `detect._TABLE_PATTERN` use `[^|\n]*` / `[^\t\n]*` instead of `.*`, so a long piped line is scanned in linear time.

@@ -162,6 +162,27 @@ def test_range_keeps_both_endpoints_and_shares_scale():
     assert (lo.range_role, hi.range_role) == ("lower", "upper")
 
 
+@pytest.mark.parametrize(
+    ("text", "lo", "hi"),
+    [
+        ("$10–20m", "10000000", "20000000"),
+        ("$10-20m", "10000000", "20000000"),
+        ("$1.5–2m", "1500000.0", "2000000"),
+        ("$1–2.5m", "1000000", "2500000.0"),
+        ("$0.5m–1m", "500000.0", "1000000"),
+        ("$2m-3m", "2000000", "3000000"),
+    ],
+)
+def test_compact_magnitude_range_keeps_both_endpoints(text, lo, hi):
+    spans = find_money(text)
+    assert [s.value for s in spans] == [Decimal(lo), Decimal(hi)]
+    assert spans[0].range_group == spans[1].range_group
+
+
+def test_measurement_range_without_a_symbol_stays_blocked():
+    assert find_money("a 10-20m road") == []
+
+
 def test_range_with_symbol_on_both_endpoints():
     lo, hi = find_money("$100-$150")
     assert (lo.value, hi.value) == (Decimal(100), Decimal(150))

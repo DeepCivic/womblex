@@ -441,6 +441,7 @@ def _scan_implicit(text: str, pats, opts: MoneyOptions) -> list[MoneySpan]:
 
 def _scan_ranges(
     text: str, pats, opts: MoneyOptions, blocked: IntervalIndex,
+    unmeasured: IntervalIndex,
 ) -> tuple[list[MoneySpan], list[tuple[int, int]]]:
     """Both endpoints, linked by ``range_group``; the whole span is claimed.
 
@@ -454,11 +455,11 @@ def _scan_ranges(
     group = 0
     for key in ("p7_between", "p7"):
         for m in pats[key].finditer(text):
-            if blocked.overlaps(m.start(), m.end()):
+            sym_a, sym_b = m.group("sym_a"), m.group("sym_b")
+            if (unmeasured if sym_a or sym_b else blocked).overlaps(m.start(), m.end()):
                 continue
             if any(m.start() < e and s < m.end() for s, e in claimed):
                 continue  # claimed ranges are few; a linear check is cheap here
-            sym_a, sym_b = m.group("sym_a"), m.group("sym_b")
             if not sym_a and not sym_b:
                 continue  # no evidence on either endpoint
             if any(_ambiguous_continuation(m, g, opts.international_numbers)
@@ -604,13 +605,16 @@ def find_money(text: str, options: MoneyOptions | None = None) -> list[MoneySpan
         return []
     opts = options or MoneyOptions()
     pats = _patterns(opts.international_numbers)
-    blocked = IntervalIndex([
-        (s, e) for s, e, _ in
+    all_blocked = (
         blocked_spans(text)
         + ambiguous_number_spans(text, international=opts.international_numbers)
-    ])
+    )
+    blocked = IntervalIndex([(s, e) for s, e, _ in all_blocked])
+    # A range with a currency symbol on either end owns its `20m`: the
+    # measurement class (metres) cannot veto an endpoint such a symbol vouches for.
+    unmeasured = IntervalIndex([(s, e) for s, e, n in all_blocked if n != "measurement"])
 
-    ranges, claimed = _scan_ranges(text, pats, opts, blocked)
+    ranges, claimed = _scan_ranges(text, pats, opts, blocked, unmeasured)
     claimed_index = IntervalIndex(claimed)
 
     candidates: list[MoneySpan] = []
