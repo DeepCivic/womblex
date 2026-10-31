@@ -8,6 +8,9 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 ## [Unreleased]
 
+### Fixed
+- **A release records its image digest.** `publish-images.yml`'s record job read the digest from `digests/digest-pipeline/pipeline`, but `download-artifact` extracts a single matched artefact straight into `digests/`, so the job failed on `v0.6.0` and `deploy/images.env` was never written. It now downloads with `merge-multiple: true` and reads `digests/pipeline`, the same path for one image or several.
+
 ## [0.6.0] - 2026-10-30
 
 ### Deprecated
