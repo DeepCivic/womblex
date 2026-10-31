@@ -152,9 +152,9 @@ def test_only_a_ruled_table_takes_the_page_prose(
     from womblex.ingest import orchestrator
     from womblex.ingest.elements import BBox
     from womblex.ingest.extract import TableData
-    from womblex.ingest.pdf.types import Rect
+    from womblex.ingest.pdf.types import Page, Rect
 
-    def whole_page(page):  # noqa: ANN001, ANN202
+    def whole_page(page: Page) -> list[tuple[TableData, Rect, list[list[str]]]]:
         table = TableData(headers=["a", "b"], rows=[["", ""]], position=BBox(0, 0, 1, 1), confidence=confidence)
         return [(table, Rect(0, 0, page.rect.width, page.rect.height), [["a", "b"], ["", ""]])]
 
