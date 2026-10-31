@@ -164,6 +164,13 @@ class TestMatcher:
         [link] = resolve([c], ref)
         assert link.matched and link.entity.entity_id == "SE-40002132"
 
+    @pytest.mark.parametrize("mention", ["Early Learning", "Learning"])
+    def test_generic_only_mention_unmatched(self, reference_config, mention):
+        # A mention lacking the brand word is not a subset-of-register match.
+        ref = self._ref(reference_config)
+        [link] = resolve([Candidate(mention, "corporate", "h1")], ref)
+        assert not link.matched and link.method == "unmatched"
+
     def test_below_threshold_unmatched(self, reference_config):
         ref = self._ref(reference_config)
         c = Candidate("Totally Unrelated Community Centre", "corporate", "h1")
