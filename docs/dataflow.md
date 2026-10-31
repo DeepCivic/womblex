@@ -12,7 +12,7 @@ geospatial SHP and ABN bulk extract XML take standalone paths that produce
 Parquet directly and never enter this flow.
 
 ```
-Raw files (PDF / DOCX / MD / CSV / XLSX)
+Raw files (PDF / page images / DOCX / MD / TXT / CSV / XLSX / XLS)
         │
         ▼
 ┌───────────────────┐
@@ -93,8 +93,8 @@ Raw files (PDF / DOCX / MD / CSV / XLSX)
         ▼
 ┌───────────────────┐
 │ verify_shard_     │  → cumulative on-disk size (raises
-│ persistence       │    ShardVerificationError on any anomaly)
-│ (store/output)    │
+│ persistence       │    ShardVerificationError on any anomaly;
+│ (store/output)    │    local `womblex run` only)
 └───────────────────┘
 ```
 
@@ -351,7 +351,7 @@ CLI: `womblex ingest-abn <file-or-dir> -o <output_dir>`
 
 The `womblex run` CLI command processes documents in batches (default: 100). After each batch:
 
-1. The batch's completed results are written as their own `batch-NNNN.*` shard set (elements, table_cells, form_fields, _manifest) — earlier shards are never appended to.
+1. The batch's results (a failed document as a `status: error` manifest row) are written as their own `batch-NNNN.*` shard set (elements, table_cells, form_fields, _manifest) — earlier shards are never appended to.
 2. A checkpoint record is written (`CheckpointManager` in `store/checkpoint.py`) noting processed document IDs, batch number, and success/failure counts.
 
 On resume (`--resume` flag), the CLI reads the checkpoint JSON and skips already-processed documents via `filter_unprocessed()`. Individual document errors are logged (with the document ID, in the console output and the batch log) and counted in the checkpoint's failure count without stopping the batch. A failed document is written as a `_manifest.parquet` row with `status: error` and no elements (`write_batch_parquet`), so every document a batch was given is accounted for.

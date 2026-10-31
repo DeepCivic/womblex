@@ -14,15 +14,16 @@ Each input format has its own ingest path. These are not interchangeable — the
 ```
 Input Format         Function                         Output
 ──────────────────── ──────────────────────────────── ────────────────────────────
-PDF/DOCX/TXT/MD      extract(path) → ExtractionResult  ExtractionResult (in memory)
-                     extract(path) → .txt file          single-file text (CLI only)
-                     extract(path) → .parquet file      Parquet (CLI or batch)
-Standalone image     extract(path) → ExtractionResult  as a one-page PDF (orchestrator OCR path)
-CSV / XLSX           extract(path) → ExtractionResult  ExtractionResult (in memory)
-                     extract(path) → .parquet file      Parquet (CLI or batch)
-PSV (G-NAF)          ingest_gnaf(dir) → .parquet files  one Parquet per PSV file
-XML (ABN bulk)       ingest_abn(file|dir) → .parquet    records + names Parquet per XML file
-SHP                  ingest_geo(dir) → .parquet files   one GeoParquet per SHP file
+PDF/DOCX/TXT/MD      extract_text(path)                 ExtractionResult (in memory)
+                     womblex extract → .txt file        single-file text (CLI only)
+                     womblex extract → .parquet file    Parquet (CLI or batch)
+Standalone image     extract_text(path)                 as a one-page document (orchestrator OCR path)
+CSV / XLSX / XLS     extract_text(path)                 ExtractionResult (in memory)
+                     womblex extract → .parquet file    Parquet (CLI or batch)
+PSV (G-NAF)          ingest_gnaf_directory(dir)         one Parquet per PSV file
+XML (ABN bulk)       ingest_abn_xml(file) /             records + names Parquet per XML file
+                     ingest_abn_directory(dir)
+SHP                  ingest_geospatial_directory(dir)   one GeoParquet per SHP file
 ```
 
 G-NAF, ABN bulk extract, and geospatial ingest are standalone — they produce Parquet directly and do not return `ExtractionResult`. They cannot be followed by transform operations (chunk, redact, PII, enrich). This is by design: structured relational data, registers, and geometry are not narrative text.
@@ -170,5 +171,5 @@ extraction sidecars, so shard discovery finds no batch bases.
 - `womblex redact --shards <dir> --pdfs <dir>` calls `redact.batch.annotate_redactions_for_shards()` and writes `*.redactions.parquet`; `womblex redact --config` extracts and redacts through `run_extraction` / `run_redaction`.
 - `womblex normalise`, `spellfix`, `enrich`, `graph-refresh`, `embed`, `money`, `link`, `pii` and `quality` each take `--shards <dir>` and call their stage function directly (`normalise_shards`, `spellfix_shards`, `enrich_shards`, `refresh_graph_edges`, `embed_shards`, `money_shards`, `link_shards`, `pii_shards`, `quality_shards`).
 - `womblex run-stage --stage <name>` runs one `StageContract` — over a local `--shards` directory or an object-store `--store` / `--run-id` prefix — with its preflight; ordering is the operator's.
-- `womblex enqueue-stages` writes queue rows for the run's `DOWNSTREAM_STAGES` that the config enables, in `PIPELINE_ORDER`, for the workers to claim; it runs nothing itself.
+- `womblex enqueue-stages` writes queue rows for the run's `DOWNSTREAM_STAGES` that the config enables, in `PIPELINE_ORDER`, as one coordinator workflow the workers run; it runs nothing itself.
 - `womblex ingest-gnaf`, `ingest-geo` and `ingest-abn` call `ingest_gnaf_directory()`, `ingest_geospatial_directory()` and `ingest_abn_xml()` / `ingest_abn_directory()` directly.
