@@ -142,3 +142,23 @@ def test_a_ruled_tables_text_is_not_also_a_paragraph() -> None:
     cells = [c.value for e in result.elements if e.kind == "table" for c in e.cells if len(c.value or "") > 6]
     assert cells
     assert not [v for v in cells if any(v in t for t in prose)]
+
+
+@pytest.mark.parametrize(("confidence", "kept"), [(0.6, True), (0.8, False)])
+def test_only_a_ruled_table_takes_the_page_prose(
+    confidence: float, kept: bool, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A text-strategy hit over-fires on multi-column prose, so its prose stays a paragraph."""
+    from womblex.ingest import orchestrator
+    from womblex.ingest.elements import BBox
+    from womblex.ingest.extract import TableData
+    from womblex.ingest.pdf.types import Rect
+
+    def whole_page(page):  # noqa: ANN001, ANN202
+        table = TableData(headers=["a", "b"], rows=[["", ""]], position=BBox(0, 0, 1, 1), confidence=confidence)
+        return [(table, Rect(0, 0, page.rect.width, page.rect.height), [["a", "b"], ["", ""]])]
+
+    monkeypatch.setattr(orchestrator, "_find_native_tables", whole_page)
+    result = extract_text(SPACING_PDF, detect_file_type(SPACING_PDF))[0]
+    prose = [e for e in result.elements if e.kind in ("paragraph", "heading")]
+    assert bool(prose) is kept
