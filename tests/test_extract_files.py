@@ -152,6 +152,15 @@ class TestSpreadsheetExtractor:
         sheet_meta = next(e for e in result.elements if e.kind == "sheet_meta")
         assert (sheet_meta.meta or {}).get("preamble") == "Contract Notice Export"
 
+    def test_windows_1252_csv_keeps_its_accents(self, tmp_path: Path) -> None:
+        path = tmp_path / "cp1252.csv"
+        path.write_bytes("Name,Place\nO’Brien,Café\n".encode("cp1252"))
+
+        result = SpreadsheetExtractor().extract_path(path)
+        assert result.error is None
+        values = [e.value for e in result.elements if e.kind == "sheet_cell"]
+        assert "O’Brien" in values and "Café" in values
+
     def test_two_column_key_value_sheet_keeps_row0_header(self, tmp_path: Path) -> None:
         """Uniformly narrow sheets are not mistaken for preamble + header."""
         path = tmp_path / "kv.csv"
