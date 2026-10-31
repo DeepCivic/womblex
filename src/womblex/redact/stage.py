@@ -278,18 +278,18 @@ def annotate_chunks(
 ) -> list[TextChunk]:
     """Mark chunks whose source pages contain redacted regions.
 
-    Sets ``chunk.has_redaction = True`` for any chunk overlapping an
-    affected page. Does not modify chunk text.
+    Sets ``chunk.has_redaction = True`` for any chunk whose
+    ``page_start..page_end`` range holds an affected page. Does not modify chunk text.
     """
     if not report.total:
         return chunks
 
     affected = set(report.affected_pages)
     for chunk in chunks:
-        if hasattr(chunk, "source_pages") and chunk.source_pages:
-            if any(p in affected for p in chunk.source_pages):
-                chunk.has_redaction = True
-        elif hasattr(chunk, "page_number") and chunk.page_number in affected:
+        if chunk.page_start is None:
+            continue
+        end = chunk.page_end if chunk.page_end is not None else chunk.page_start
+        if any(chunk.page_start <= p <= end for p in affected):
             chunk.has_redaction = True
 
     return chunks

@@ -135,60 +135,43 @@ class TestAnnotateChunks:
         assert chunks[0].has_redaction is False
         assert chunks[1].has_redaction is False
 
-    def test_flags_chunk_with_source_pages(self) -> None:
-        chunk = self._make_chunk(0, source_pages=[0, 1])
+    def test_flags_chunk_whose_range_holds_an_affected_page(self) -> None:
+        chunk = self._make_chunk(0, page_start=0, page_end=2)
         report = self._make_report({1: 1})
         annotate_chunks([chunk], report)
         assert chunk.has_redaction is True
 
-    def test_skips_chunk_with_unaffected_source_pages(self) -> None:
-        chunk = self._make_chunk(0, source_pages=[2, 3])
-        report = self._make_report({0: 1})
-        annotate_chunks([chunk], report)
-        assert chunk.has_redaction is False
-
-    def test_flags_chunk_with_page_number(self) -> None:
-        chunk = self._make_chunk(0, page_number=5)
+    def test_flags_single_page_chunk(self) -> None:
+        chunk = self._make_chunk(0, page_start=5, page_end=5)
         report = self._make_report({5: 2})
         annotate_chunks([chunk], report)
         assert chunk.has_redaction is True
 
-    def test_skips_chunk_with_unaffected_page_number(self) -> None:
-        chunk = self._make_chunk(0, page_number=3)
-        report = self._make_report({0: 1})
-        annotate_chunks([chunk], report)
-        assert chunk.has_redaction is False
-
-    def test_source_pages_takes_precedence_over_page_number(self) -> None:
-        """When both attributes exist, source_pages is checked first."""
-        chunk = self._make_chunk(0, source_pages=[0], page_number=5)
+    def test_open_ended_chunk_uses_its_start_page(self) -> None:
+        chunk = self._make_chunk(0, page_start=5)
         report = self._make_report({5: 1})
         annotate_chunks([chunk], report)
-        # source_pages=[0] doesn't overlap affected page 5, so no flag
+        assert chunk.has_redaction is True
+
+    def test_skips_chunk_outside_affected_pages(self) -> None:
+        chunk = self._make_chunk(0, page_start=2, page_end=3)
+        report = self._make_report({0: 1, 4: 1})
+        annotate_chunks([chunk], report)
         assert chunk.has_redaction is False
 
-    def test_chunk_without_page_attrs_is_skipped(self) -> None:
+    def test_chunk_without_pages_is_skipped(self) -> None:
         chunk = self._make_chunk(0)
         report = self._make_report({0: 1})
         annotate_chunks([chunk], report)
         assert chunk.has_redaction is False
 
     def test_mixed_chunks(self) -> None:
-        c0 = self._make_chunk(0, source_pages=[1])
-        c1 = self._make_chunk(1, page_number=2)
-        c2 = self._make_chunk(2, page_number=9)
+        c0 = self._make_chunk(0, page_start=1, page_end=1)
+        c1 = self._make_chunk(1, page_start=1, page_end=2)
+        c2 = self._make_chunk(2, page_start=9, page_end=9)
         report = self._make_report({1: 1, 2: 1})
         annotate_chunks([c0, c1, c2], report)
-        assert c0.has_redaction is True
-        assert c1.has_redaction is True
-        assert c2.has_redaction is False
-
-    def test_empty_source_pages_falls_through(self) -> None:
-        """source_pages=[] is falsy — should fall through to page_number."""
-        chunk = self._make_chunk(0, source_pages=[], page_number=0)
-        report = self._make_report({0: 1})
-        annotate_chunks([chunk], report)
-        assert chunk.has_redaction is True
+        assert [c.has_redaction for c in (c0, c1, c2)] == [True, True, False]
 
 
 # ---------------------------------------------------------------------------
