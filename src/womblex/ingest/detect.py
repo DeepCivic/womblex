@@ -85,8 +85,8 @@ _MIN_VECTOR_DRAWINGS = 30
 # Pattern for table-like structures: rows with repeated delimiters or whitespace alignment.
 _TABLE_PATTERN = re.compile(
     r"(?:"
-    r"(?:.*\|.*\|.*\n){2,}"  # pipe-delimited rows
-    r"|(?:.*\t.*\t.*\n){2,}"  # tab-delimited rows
+    r"(?:[^|\n]*\|[^|\n]*\|[^\n]*\n){2,}"  # pipe-delimited rows
+    r"|(?:[^\t\n]*\t[^\t\n]*\t[^\n]*\n){2,}"  # tab-delimited rows
     r"|(?:\s{2,}\S+\s{2,}\S+.*\n){3,}"  # whitespace-aligned columns
     r")",
     re.MULTILINE,
