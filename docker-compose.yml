@@ -1,0 +1,300 @@
+# Local distributed-run stack: Postgres (job queue) + MinIO (object store) +
+# scalable Womblex workers. Mirrors the Wayfinder quickstart shape so the two
+# projects can share infra.
+#
+# REQUIRES Docker Compose >= 2.20.0 (for the `required: false` dependency
+# flag the cloud path leans on — `docker compose version` to check). If you
+# are on an older engine, see "OLDER COMPOSE" at the foot of this header for
+# the one mechanical edit that makes the cloud path work without it.
+#
+# TWO DEPLOYMENTS. It is self-contained by default (bundled Postgres + MinIO),
+# and points at externally-provided Postgres + S3 the moment you set the
+# connection env vars — no code change. Which one you get is decided entirely
+# by whether those vars are set:
+#
+#   LOCAL (default) — bring the bundled backends up under the `local` profile.
+#   Name the override file FIRST: this file builds nothing, so a local stack
+#   that does not pass it pulls a published image instead of building your
+#   working tree. Exported once, every command below reads both files:
+#
+#     export COMPOSE_FILE=docker-compose.yml:docker-compose.local.override.yml
+#
+#     docker compose --profile local up -d postgres minio createbuckets init
+#     # upload source docs to the 'womblex' bucket under inbox/, then:
+#     docker compose run --rm womblex enqueue --config configs/example.yaml --create-schema
+#     docker compose up --scale worker=4 worker
+#     # once drained, consolidate the run manifest:
+#     docker compose run --rm womblex finalize --run-id <run_id>
+#     # optional /v1 service API at :8081 (needs a client registry file):
+#     WOMBLEX_API_CLIENTS_FILE=./clients.yaml docker compose --profile api up -d api
+#
+#   CLOUD — set the three connection vars (+ S3 creds) to external services and
+#   DO NOT start the bundled backends. `init`/`worker` do not wait on
+#   postgres/minio (their deps are `required: false`), so an absent bundled
+#   backend is not a missing dependency — it points at the external one instead:
+#
+#     export WOMBLEX_DB_DSN=postgresql://user:pass@db.example:5432/shared
+#     export WOMBLEX_STORE_URI=s3://shared/womblex     # own prefix of a shared bucket
+#     export WOMBLEX_INGEST_URI=s3://shared/womblex/inbox  # disjoint from the store's runs/
+#     export WOMBLEX_S3_ENDPOINT=                       # empty => real AWS S3
+#     export AWS_REGION=...
+#     # S3 store credentials go on the STORE-SPECIFIC vars, NOT AWS_ACCESS_KEY_ID:
+#     export WOMBLEX_S3_ACCESS_KEY_ID=...  WOMBLEX_S3_SECRET_ACCESS_KEY=...
+#
+#     Any other fsspec store, or a different account per location, is configuration
+#     only: each location takes its own fsspec options as one JSON object, and a
+#     secret is {"env": "NAME"}, the name of a variable set in the same container.
+#     (gs:// and az:// also need the gcsfs / adlfs package installed in the image.)
+#       Cloudflare R2 for the store, an Azure container for the ingest location:
+#         export WOMBLEX_STORE_URI=s3://womblex-runs
+#         export WOMBLEX_STORE_STORAGE_OPTIONS='{"key": "<access key id>", "secret": {"env": "R2_SECRET"},
+#           "client_kwargs": {"endpoint_url": "https://<account>.r2.cloudflarestorage.com"}}'
+#         export WOMBLEX_INGEST_URI=az://documents/inbox
+#         export WOMBLEX_INGEST_STORAGE_OPTIONS='{"account_name": "<account>",
+#           "account_key": {"env": "AZURE_STORAGE_KEY"}}'
+#     # Leave AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY UNSET. Setting them is
+#     # process-global and disables boto3's instance-role resolution for the
+#     # isaacus-sagemaker SigV4 signer, which then signs the store key against
+#     # SageMaker and 403s. Unset, SageMaker uses the EC2 instance role while
+#     # s3fs gets the store creds above. If the S3 store is reachable by the
+#     # SAME instance role (real AWS S3, not MinIO), leave the store vars unset
+#     # too and s3fs uses the role as well.
+#     docker compose run --rm init                     # create the DBOS system tables in the external DSN
+#     docker compose up --scale worker=4 worker
+#   See the README "Cloud deployment" section for the full walk-through.
+#
+#   # Want a sample corpus in the bucket (no workers)? Bring up the infra, then
+#   # seed the vendored demo run. Same COMPOSE_FILE export as the LOCAL path.
+#   docker compose --profile local up -d postgres minio createbuckets init
+#   docker compose --profile seed up seed-demo
+#
+# Inputs and outputs share the s3://womblex bucket, on disjoint prefixes:
+# source documents live under inbox/, shards land at runs/<run_id>/documents/.
+#
+# One image: the pipeline/worker/api services run the image built from the
+# plain `Dockerfile`.
+#
+# PUBLISHED OR BUILT — decided by which files you pass, not by editing one.
+# This file NAMES the image and builds none; the local override carries
+# the `build:` blocks. (Compose builds whenever a `build:` key is present, so
+# an `image:` beside one is not a switch — the blocks had to move.)
+#
+#   docker compose --env-file deploy/images.env up          # published artefact
+#   docker compose -f docker-compose.yml \
+#                  -f docker-compose.local.override.yml up  # built from the tree
+#
+# The references below are `${WOMBLEX_PIPELINE_IMAGE:-<latest tag>}`, so the digest a
+# release recorded in deploy/images.env overrides the tag with no file edit.
+# Every service's decision is enumerated in docs/deployment-images.md.
+#
+# OLDER COMPOSE (< 2.20.0, no `required: false`): the cloud path relies on
+# `required: false` to let `init`/`worker` come up without the bundled
+# `postgres`/`minio`. On an engine that rejects that key, make this one
+# mechanical edit for a cloud deployment and commit it to your fork:
+#   1. delete the `postgres`, `minio` and `createbuckets` services, AND
+#   2. delete every `depends_on:` block that names them (in `init`, `worker`,
+#      `womblex`, `seed-demo`, `api`).
+# Nothing else changes — the env vars still point every service at the
+# external Postgres + S3. (The local stack is unaffected; it needs 2.20.0
+# only if you keep the `required: false` keys, which are harmless there.)
+
+# Connection + credential surface, read from the environment with the bundled
+# local stack as the fallback. UNSET env == today's self-contained local stack,
+# byte-for-byte (the defaults below point at the bundled `postgres`/`minio`
+# services). SET env == external Postgres + external S3. This is the whole
+# local/cloud switch — there is no profile or flag to flip.
+x-cloud-env: &cloud-env
+  WOMBLEX_DB_DSN: ${WOMBLEX_DB_DSN:-postgresql://womblex:womblex@postgres:5432/womblex}
+  WOMBLEX_STORE_URI: ${WOMBLEX_STORE_URI:-s3://womblex}
+  # Source documents live on their own prefix of the same bucket, disjoint
+  # from the store's runs/ output — see assert_disjoint_locations.
+  WOMBLEX_INGEST_URI: ${WOMBLEX_INGEST_URI:-s3://womblex/inbox}
+  # Each location's own fsspec options (see the CLOUD example above); empty => none.
+  WOMBLEX_STORE_STORAGE_OPTIONS: ${WOMBLEX_STORE_STORAGE_OPTIONS:-}
+  WOMBLEX_INGEST_STORAGE_OPTIONS: ${WOMBLEX_INGEST_STORAGE_OPTIONS:-}
+  # Empty WOMBLEX_S3_ENDPOINT (the cloud case) => s3fs talks to real AWS S3;
+  # the bundled default points at MinIO.
+  WOMBLEX_S3_ENDPOINT: ${WOMBLEX_S3_ENDPOINT:-http://minio:9000}
+  # Store credentials for s3fs, read store-specifically so the ambient
+  # AWS_ACCESS_KEY_ID can stay UNSET. That matters in cloud: setting
+  # AWS_ACCESS_KEY_ID is process-global and disables boto3's instance-role
+  # resolution for the isaacus-sagemaker SigV4 signer too (it would sign the
+  # store key against SageMaker and 403). Leaving it unset lets SageMaker use
+  # the EC2 instance role while s3fs still gets these explicitly. The bundled
+  # default is MinIO's static key; a cloud deployment on an instance role can
+  # leave BOTH unset (s3fs then uses the instance role for S3 as well).
+  WOMBLEX_S3_ACCESS_KEY_ID: ${WOMBLEX_S3_ACCESS_KEY_ID:-minioadmin}
+  WOMBLEX_S3_SECRET_ACCESS_KEY: ${WOMBLEX_S3_SECRET_ACCESS_KEY:-minioadmin}
+  # Passed through only if the operator sets them; unset by default so the
+  # SageMaker signer resolves the instance role. AWS_REGION is safe to set
+  # (it is not a credential) and both the store and SageMaker read it.
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+  AWS_REGION: ${AWS_REGION:-us-east-1}
+  ISAACUS_API_KEY: ${ISAACUS_API_KEY:-}
+  # Which image the run is executing inside, for the run record. It has to be
+  # handed in: a digest is content-addressed after the push, so it cannot be
+  # baked into the image it names, and a container cannot read its own labels.
+  # Same value the services are pinned to, so the record names what compose
+  # actually ran. A tag here records no digest rather than a false one.
+  WOMBLEX_IMAGE_REF: ${WOMBLEX_PIPELINE_IMAGE:-ghcr.io/deepcivic/womblex:latest}
+
+services:
+  # Bundled local backends — Postgres (queue) + MinIO (object store). All three
+  # sit behind the `local` profile so a cloud deployment (external Postgres +
+  # external S3) does not start them: `docker compose up worker` brings up only
+  # the services with no profile, and the consumers below declare their deps on
+  # these as `required: false`, so an absent bundled backend is not a missing
+  # dependency. Start them explicitly for the local stack:
+  #   docker compose --profile local up -d postgres minio createbuckets init
+  postgres:
+    image: postgres:18.4@sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636
+    profiles: ["local"]
+    environment:
+      POSTGRES_USER: womblex
+      POSTGRES_PASSWORD: womblex
+      POSTGRES_DB: womblex
+    volumes:
+      # Postgres 18+ keeps its data in /var/lib/postgresql/18/docker, so the volume
+      # mounts at /var/lib/postgresql. A pgdata volume made by 16 holds 16 data that
+      # 18 does not read: recreate it for the local stack.
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U womblex"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio
+    profiles: ["local"]
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # console
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot: create the bucket the pipeline reads/writes. Local-stack only —
+  # a cloud deployment's bucket is provisioned externally (its prefix is set
+  # via WOMBLEX_STORE_URI, e.g. s3://shared/womblex).
+  createbuckets:
+    image: minio/mc
+    profiles: ["local"]
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc mb --ignore-existing local/womblex
+      "
+
+  # One-shot: create the DBOS system tables in whatever WOMBLEX_DB_DSN names
+  # (bundled Postgres locally, the external DSN in cloud mode). `required:
+  # false` so cloud mode does not wait on a bundled Postgres that was never
+  # started — the health gate only binds when the `local`-profile postgres is
+  # up. DBA-provisioned databases can run `dbos migrate` instead.
+  init:
+    image: ${WOMBLEX_PIPELINE_IMAGE:-ghcr.io/deepcivic/womblex:latest}
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+    environment: *cloud-env
+    command: ["jobs", "--create-schema"]
+
+  # General-purpose CLI entry (enqueue, run, manifest, ...). Use with `run`.
+  womblex:
+    image: ${WOMBLEX_PIPELINE_IMAGE:-ghcr.io/deepcivic/womblex:latest}
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+      minio:
+        condition: service_healthy
+        required: false
+    environment: *cloud-env
+    volumes:
+      - ./configs:/app/configs
+    profiles: ["cli"]
+
+  # Scale horizontally: docker compose up --scale worker=4 worker
+  # Depends on the two one-shots (`init` creates the table, `createbuckets`
+  # the bucket) only when they run — both are `required: false`, so a cloud
+  # deployment whose table/bucket are provisioned externally (run `init` once
+  # against the external DSN, or `dbos migrate`; the bucket is
+  # created out-of-band) does not wait on the bundled one-shots.
+  worker:
+    image: ${WOMBLEX_PIPELINE_IMAGE:-ghcr.io/deepcivic/womblex:latest}
+    depends_on:
+      init:
+        condition: service_completed_successfully
+        required: false
+      createbuckets:
+        condition: service_completed_successfully
+        required: false
+    environment: *cloud-env
+    volumes:
+      - ./configs:/app/configs
+    command: ["worker", "--config", "configs/example.yaml",
+              "--poll-interval", "5"]
+
+  # One-shot, opt-in: publish the vendored sample corpus (run-synthetic-demo)
+  # into the bucket so a fresh store holds a browsable run. Behind a profile so a real deployment does
+  # not seed a sample into its own store unasked; run it explicitly with
+  # `docker compose --profile seed up seed-demo`.
+  seed-demo:
+    image: ${WOMBLEX_PIPELINE_IMAGE:-ghcr.io/deepcivic/womblex:latest}
+    depends_on:
+      createbuckets:
+        condition: service_completed_successfully
+        required: false
+    environment: *cloud-env
+    command: ["seed-demo"]   # resolves WOMBLEX_STORE_URI -> s3://womblex
+    profiles: ["seed"]
+
+  # Opt-in: the `/v1` service API (`womblex serve`), at :8081. Integrations
+  # submit and read work here. Runs on
+  # the pipeline image (it installs the `[api]` extra) and reads the same
+  # store, queue and ingest location the workers use. The client registry is
+  # mounted read-only from WOMBLEX_API_CLIENTS_FILE; serve refuses to start
+  # without one. Private-network only — see docs/deployment-images.md.
+  #   womblex api-token --client <id> --scope submit --scope read  # add to the registry
+  #   WOMBLEX_API_CLIENTS_FILE=./clients.yaml docker compose --profile api up -d api
+  api:
+    image: ${WOMBLEX_PIPELINE_IMAGE:-ghcr.io/deepcivic/womblex:latest}
+    depends_on:
+      init:
+        condition: service_completed_successfully
+        required: false
+      minio:
+        condition: service_healthy
+        required: false
+      createbuckets:
+        condition: service_completed_successfully
+        required: false
+    environment:
+      <<: *cloud-env
+      WOMBLEX_API_CLIENTS: /run/womblex/clients.yaml
+    volumes:
+      - ${WOMBLEX_API_CLIENTS_FILE:-./clients.yaml}:/run/womblex/clients.yaml:ro
+    command: ["serve", "--host", "0.0.0.0", "--port", "8081"]
+    ports:
+      - "8081:8081"
+    read_only: true
+    tmpfs:
+      - /tmp
+    profiles: ["api"]
+
+volumes:
+  pgdata:
+  miniodata:

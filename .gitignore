@@ -1,0 +1,57 @@
+# Build stamp — generated at build time by the release workflow so a wheel can
+# name the commit it came from. Never committed: in a checkout the work tree is
+# the answer, and a stale stamp beside it would be the wrong one.
+src/womblex/_build_stamp.py
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Testing
+.coverage
+.pytest_cache/
+htmlcov/
+
+# Environment
+.env
+.venv/
+venv/
+
+# Local-only compose overrides (host-specific ports, etc.)
+docker-compose.local.yml
+docker-compose.override.yml
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Data — fetched datasets contain large binaries
+datasets/FUNSD/
+datasets/FUNSD_plus/
+raw_documents/
+
+# Test fixtures (see THIRD_PARTY_DATA.md): the suite runs on the synthetic set in
+# fixtures/synthetic/. A maintainer running the benchmark tests copies the
+# womblex-benchmark fixture set to fixtures/fixtures/, which is never committed.
+fixtures/fixtures/
+
+# DVC
+*.dvc
+.dvc/
+
+# OS
+.DS_Store
+
+# Local agent state
+.claude/
+
+# pytest logging (slow-test monitor + lib progress)
+pytest.log
+
+# Docs build output (mkdocs build)
+site/

@@ -1,0 +1,263 @@
+"""Offline tests for semchunk-4 AI-chunking enrichment reuse.
+
+Covers the Womblex-owned seams of the single-enrichment reuse design
+(``docs/decisions-dead-ends.md``) without a live Isaacus key:
+
+- ``store/enrichment_doc.py`` round-trips ``(source_hash, text_source,
+  document_json)``;
+- the byte-identity reuse guard in ``chunker._resolve_narrative_input`` /
+  ``chunk_batch`` honours a matching Document and falls back to the plain
+  string on any mismatch or absent sidecar;
+- ``WomblexConfig`` auto-enables ``enrichment.persist_document`` only when AI
+  chunking + enrich are both on.
+
+semchunk's actual handling of a real SDK Document is covered end-to-end by the
+live AI-chunking test (``tests/test_pipeline.py::TestAiChunkingLive``, real
+``kanon-2-enricher``, skips without a key) and the live verification gates
+recorded in ``docs/decisions-dead-ends.md``; a fake duck-typed Document cannot pass
+semchunk's ``isinstance`` check, so the ``chunk_batch`` wiring is exercised here
+with a recording fake chunker instead.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from pathlib import Path
+from typing import ClassVar
+
+from womblex.config import ChunkingConfig, EnrichmentConfig, WomblexConfig
+from womblex.process.chunker import ChunkInput, _resolve_narrative_input, chunk_batch
+from womblex.store.enrichment_doc import (
+    enrichment_doc_path_for,
+    read_enrichment_docs,
+    write_enrichment_doc_shard,
+)
+
+
+@dataclass
+class _FakeDoc:
+    """Duck-typed stand-in for an ILGS Document — only ``.text`` is read."""
+
+    text: str
+
+
+class _RecordingChunker:
+    """Fake semchunk chunker: records inputs, returns one chunk per item."""
+
+    def __init__(self) -> None:
+        self.received: list[object] | None = None
+        # A real semchunk.Chunker exposes the counter it budgeted with;
+        # chunk_batch reads it to stamp each chunk's token_count.
+        self.token_counter = lambda text: len(text.split())
+
+    def __call__(
+        self, texts, *, offsets=False, overlap=None, processes=1, progress=False,
+    ):
+        self.received = list(texts)
+        chunks, offs = [], []
+        for item in texts:
+            s = getattr(item, "text", item)
+            chunks.append([s])
+            offs.append([(0, len(s))])
+        return chunks, offs
+
+
+# ---------------------------------------------------------------------------
+# store/enrichment_doc.py
+# ---------------------------------------------------------------------------
+
+
+class TestEnrichmentDocStore:
+    def test_round_trip(self, tmp_path: Path) -> None:
+        base = tmp_path / "batch-0001.parquet"
+        rows = [
+            ("hashA", "elements", '{"text": "alpha"}'),
+            ("hashB", "spellfix", '{"text": "beta"}'),
+        ]
+        out = write_enrichment_doc_shard(rows, base)
+        assert out == enrichment_doc_path_for(base)
+        assert out.exists()
+
+        got = read_enrichment_docs(base)
+        assert got == {
+            "hashA": ("elements", '{"text": "alpha"}'),
+            "hashB": ("spellfix", '{"text": "beta"}'),
+        }
+
+    def test_empty_writes_schema_correct_file(self, tmp_path: Path) -> None:
+        base = tmp_path / "batch-0002.parquet"
+        write_enrichment_doc_shard([], base)
+        assert enrichment_doc_path_for(base).exists()
+        assert read_enrichment_docs(base) == {}
+
+    def test_missing_sidecar_returns_empty(self, tmp_path: Path) -> None:
+        base = tmp_path / "batch-0003.parquet"
+        assert read_enrichment_docs(base) == {}
+
+
+# ---------------------------------------------------------------------------
+# Byte-identity reuse guard
+# ---------------------------------------------------------------------------
+
+
+class TestReuseGuard:
+    def test_matching_text_uses_override(self) -> None:
+        doc = ChunkInput(source_hash="A", narrative="alpha beta gamma")
+        override = _FakeDoc(text="alpha beta gamma")
+        assert _resolve_narrative_input(doc, {"A": override}) is override
+
+    def test_mismatched_text_uses_the_string(self, caplog) -> None:
+        doc = ChunkInput(source_hash="A", narrative="alpha beta gamma")
+        override = _FakeDoc(text="alpha beta DIFFERENT")
+        with caplog.at_level(logging.WARNING):
+            result = _resolve_narrative_input(doc, {"A": override})
+        assert result == "alpha beta gamma"
+        assert "reuse guard" in caplog.text
+
+    def test_absent_override_uses_string(self) -> None:
+        doc = ChunkInput(source_hash="A", narrative="alpha beta")
+        assert _resolve_narrative_input(doc, {}) == "alpha beta"
+
+
+# ---------------------------------------------------------------------------
+# chunk_batch wiring
+# ---------------------------------------------------------------------------
+
+
+class TestChunkBatchReuse:
+    def test_override_reaches_chunker_only_on_match(self) -> None:
+        inputs = [
+            ChunkInput(source_hash="A", narrative="alpha beta"),
+            ChunkInput(source_hash="B", narrative="gamma delta"),
+        ]
+        overrides = {
+            "A": _FakeDoc(text="alpha beta"),       # matches → reused
+            "B": _FakeDoc(text="stale narrative"),  # mismatch → string
+        }
+        chunker = _RecordingChunker()
+        out = chunk_batch(inputs, chunker, narrative_overrides=overrides)
+
+        assert chunker.received is not None
+        assert chunker.received[0] is overrides["A"]
+        assert chunker.received[1] == "gamma delta"
+        # Both still produce chunks keyed by source_hash.
+        assert set(out) == {"A", "B"}
+
+    def test_tables_never_reach_an_ai_chunking_chunker(self) -> None:
+        """Table markdown chunks in token mode (docs/decisions-dead-ends.md), so AI chunking's paid
+        Enricher call is made for narratives alone."""
+        class _AIChunker(_RecordingChunker):
+            chunking_model, chunk_size = "kanon-2-enricher", 50
+
+            def __init__(self) -> None:
+                super().__init__()
+                self.calls: list[list[object]] = []
+
+            def __call__(self, texts, **kw):
+                self.calls.append(list(texts))
+                return super().__call__(texts, **kw)
+
+        chunker = _AIChunker()
+        table = "| a | b |\n|---|---|\n| 1 | 2 |"
+        out = chunk_batch([ChunkInput(source_hash="A", narrative="alpha beta", tables=[(None, 3, table)])], chunker)
+        assert chunker.calls == [["alpha beta"]]
+        assert [c.content_type for c in out["A"]] == ["narrative", "table"]
+
+    def test_no_overrides_passes_plain_strings(self) -> None:
+        inputs = [ChunkInput(source_hash="A", narrative="alpha beta")]
+        chunker = _RecordingChunker()
+        chunk_batch(inputs, chunker, narrative_overrides=None)
+        assert chunker.received == ["alpha beta"]
+
+
+# ---------------------------------------------------------------------------
+# Config auto-enable
+# ---------------------------------------------------------------------------
+
+
+class TestConfigAutoEnable:
+    _PATHS: ClassVar[dict[str, str]] = {
+        "input_root": "/tmp/i", "output_root": "/tmp/o", "checkpoint_dir": "/tmp/c",
+    }
+
+    def test_auto_enabled_when_ai_chunking_and_enrich(self) -> None:
+        cfg = WomblexConfig(
+            dataset={"name": "t"}, paths=self._PATHS,
+            chunking=ChunkingConfig(chunking_model="kanon-2-enricher"),
+            enrichment=EnrichmentConfig(enabled=True),
+        )
+        assert cfg.enrichment.persist_document is True
+
+    def test_off_by_default(self) -> None:
+        cfg = WomblexConfig(dataset={"name": "t"}, paths=self._PATHS)
+        assert cfg.enrichment.persist_document is False
+
+    def test_not_enabled_when_enrich_off(self) -> None:
+        cfg = WomblexConfig(
+            dataset={"name": "t"}, paths=self._PATHS,
+            chunking=ChunkingConfig(chunking_model="kanon-2-enricher"),
+            enrichment=EnrichmentConfig(enabled=False),
+        )
+        assert cfg.enrichment.persist_document is False
+
+
+# ---------------------------------------------------------------------------
+# AI chunking says when it pays: logged per document, counted in the footer
+# ---------------------------------------------------------------------------
+
+
+class _Sizer:
+    chunk_size = 3
+
+    @staticmethod
+    def token_counter(text: str) -> int:
+        return len(text.split())
+
+
+class TestEnricherCalls:
+    def test_a_call_is_counted_for_each_long_narrative_no_document_matches(self) -> None:
+        from womblex.process.chunk_stage import _enricher_calls
+
+        inputs = [
+            ChunkInput(source_hash="reused", narrative="one two three four"),
+            ChunkInput(source_hash="stale", narrative="one two three four five"),
+            ChunkInput(source_hash="short", narrative="one two"),
+            ChunkInput(source_hash="empty", narrative="  "),
+        ]
+        overrides = {"reused": _FakeDoc(text="one two three four"), "stale": _FakeDoc(text="other")}
+        calls, reused = _enricher_calls(inputs, overrides, _Sizer, None)
+        assert calls == {"stale": 1} and reused == {"reused"}  # "short" fits a chunk: semchunk splits nothing
+
+
+def test_the_chunk_stage_logs_each_enricher_call_and_counts_them_in_the_footer(tmp_path, monkeypatch, caplog) -> None:
+    import pyarrow.parquet as pq
+
+    from womblex.ingest.records import RecordFieldMapping, ingest_records
+    from womblex.process import chunk_stage
+    from womblex.store.output import AI_CHUNKING_CALLS_KEY
+
+    class _AiChunker(_RecordingChunker):
+        chunk_size = 3
+        chunking_model = "kanon-2-enricher"
+
+    shards = tmp_path / "documents"
+    ingest_records([{"version_id": "doc-1", "text": "one two three four five"}], shards,
+                   RecordFieldMapping(id_field="version_id", text_field="text"))
+    monkeypatch.setattr(chunk_stage, "resolve_tokenizer", lambda *a, **k: object())
+    monkeypatch.setattr(chunk_stage, "isaacus_available", lambda: True)
+    monkeypatch.setattr(chunk_stage, "make_ai_chunking_client", lambda model, deployment=None: None)
+    monkeypatch.setattr(chunk_stage, "create_chunker", lambda **k: _AiChunker())
+
+    with caplog.at_level(logging.INFO):
+        chunk_stage.chunk_shards(shards, ChunkingConfig(chunking_model="kanon-2-enricher", chunk_size=3))
+    footer = pq.read_metadata(str(next(shards.glob("*.chunks.parquet")))).metadata
+    assert footer[AI_CHUNKING_CALLS_KEY] == b"1"
+    assert "AI chunking calls the Enricher 1 time(s) for doc-1" in caplog.text
+    assert "fallback" not in caplog.text.lower()
+
+    other = tmp_path / "plain"
+    ingest_records([{"version_id": "doc-1", "text": "one two three four five"}], other,
+                   RecordFieldMapping(id_field="version_id", text_field="text"))
+    chunk_stage.chunk_shards(other, ChunkingConfig(chunk_size=3))
+    assert AI_CHUNKING_CALLS_KEY not in pq.read_metadata(str(next(other.glob("*.chunks.parquet")))).metadata

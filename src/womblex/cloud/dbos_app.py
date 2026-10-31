@@ -1,0 +1,157 @@
+"""DBOS wiring shared by the worker, the dispatchers and the read views.
+
+One system database holds every run's progress: Postgres when a DSN is given,
+a SQLite file otherwise, so a local run needs no database server. The names
+here are the contract between the process that enqueues work (it only writes
+workflow rows, through a :class:`dbos.DBOSClient`) and the worker that runs it.
+
+Queues carry the routing that the retired job table did with ``release``:
+an extraction queue is named for the ingest root it reads, and a stage queue
+for the stage, so a worker listens only to the queues whose location and
+models it can serve instead of claiming a job and handing it back.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import os
+import re
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from dbos import DBOSClient
+
+APP_NAME = "womblex"
+
+#: Workflow names, spelled once so the client enqueues what the worker registers.
+EXTRACT_WORKFLOW = "womblex.extract_batch"
+STAGE_WORKFLOW = "womblex.run_stage"
+DOWNSTREAM_WORKFLOW = "womblex.run_downstream"
+SCHEDULED_WORKFLOW = "womblex.run_scheduled"
+TRIGGER_WORKFLOW = "womblex.fire_trigger"
+
+#: Coordinators wait on a run's extraction, so they sit on their own queue and
+#: never hold a slot a batch or a stage needs.
+DOWNSTREAM_QUEUE = "womblex-downstream"
+
+#: Workflow kinds, carried as the ``kind`` attribute.
+KIND_BATCH, KIND_STAGE, KIND_DOWNSTREAM, KIND_TRIGGER = "batch", "stage", "downstream", "trigger"
+
+_LOCAL_DB_ENV = "WOMBLEX_DBOS_PATH"
+_LOCAL_DB_DEFAULT = ".womblex/dbos.sqlite"
+
+
+def local_database_path() -> Path:
+    """The SQLite file used when no DSN is given."""
+    return Path(os.environ.get(_LOCAL_DB_ENV, _LOCAL_DB_DEFAULT)).resolve()
+
+
+def system_database_url(dsn: str | None) -> str:
+    """The SQLAlchemy URL for *dsn*; a local SQLite file when there is none."""
+    if dsn:
+        # SQLAlchemy 2 refuses the `postgres://` spelling some platforms hand out.
+        return "postgresql://" + dsn[len("postgres://"):] if dsn.startswith("postgres://") else dsn
+    path = local_database_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return f"sqlite:///{path}"
+
+
+def _root(ingest_root: str) -> str:
+    return hashlib.sha256(ingest_root.rstrip("/").encode()).hexdigest()[:10]
+
+
+def extract_queue(ingest_root: str, models: str = "") -> str:
+    """The queue extraction batches reading *ingest_root* with the models keyed *models*
+    (`model_check.models_key`) are enqueued on."""
+    return f"womblex-extract-{_root(ingest_root)}" + (f"-{models}" if models else "")
+
+
+def firing_queue(ingest_root: str) -> str:
+    """The queue a scheduled firing of a workflow whose input store is *ingest_root* runs on."""
+    return f"womblex-fire-{_root(ingest_root)}"
+
+
+def stage_queue(stage: str, models: str = "") -> str:
+    """The queue *stage* is enqueued on when its work needs the models keyed *models*."""
+    return f"womblex-stage-{stage}" + (f"-{models}" if models else "")
+
+
+def batch_id(run_id: str, batch_num: int) -> str:
+    return f"{run_id}:batch:{batch_num:04d}"
+
+
+def trigger_id(run_id: str, firing: str) -> str:
+    """A scheduled firing's row on the board, under the run it appends to."""
+    return f"{run_id}:trigger:{firing}"
+
+
+def stage_scope(firing: str | None, workflow_digest: str | None) -> str | None:
+    """Whose stages these are: a scheduled firing's, a dispatched workflow's, or the run's own (`None`).
+
+    Scoped ids let a run hold a stage more than once, so a later firing or a changed workflow
+    runs its stages rather than attaching to an earlier dispatch's recorded result.
+    """
+    if firing:
+        return f"fire-{firing}"
+    return "wf-" + workflow_digest.removeprefix("sha256:")[:12] if workflow_digest else None
+
+
+def stage_id(run_id: str, stage: str, scope: str | None = None) -> str:
+    """A stage's first attempt in *scope* (`stage_scope`)."""
+    return f"{run_id}:{scope}:stage:{stage}" if scope else f"{run_id}:stage:{stage}"
+
+
+_STAGE_ATTEMPT = re.compile(r"^(?P<base>.+:stage:[^:]+)(?::retry:(?P<n>\d+))?$")
+
+
+def stage_retry_id(original: str, attempt: int) -> str:
+    """Attempt *attempt* (1 is the first retry) of the stage whose first attempt is *original*."""
+    return f"{original}:retry:{attempt}"
+
+
+def stage_attempt(workflow_id: str) -> tuple[str, int] | None:
+    """A stage workflow id as (the original attempt's id, attempt number; 0 is the original), else `None`."""
+    m = _STAGE_ATTEMPT.match(workflow_id)
+    return (m["base"], int(m["n"] or 0)) if m else None
+
+
+def downstream_id(
+    run_id: str, stages: list[str], workflow_digest: str | None = None, firing: str | None = None,
+) -> str:
+    """Identifies one dispatch; the same stage list (under the same workflow, in the same firing)
+    is the same coordinator."""
+    digest = hashlib.sha256(",".join([*stages, workflow_digest or "", firing or ""]).encode()).hexdigest()[:8]
+    return f"{run_id}:downstream:{digest}"
+
+
+def run_prefix(run_id: str) -> str:
+    return f"{run_id}:"
+
+
+def ensure_schema(dsn: str | None) -> None:
+    """Create or migrate the system database. Idempotent; writers call it, readers do not."""
+    from dbos import DBOS
+
+    DBOS.migrate(system_database_url(dsn))
+
+
+def open_client(dsn: str | None, *, connect_timeout: float | None = None) -> DBOSClient:
+    """A client for enqueueing and reading, which runs no workflow code.
+
+    ``connect_timeout`` bounds a Postgres connect, so a polled dashboard does
+    not hold a request thread on a routable-but-dead host until the OS gives up.
+    """
+    from dbos import DBOSClient
+
+    url = system_database_url(dsn)
+    if connect_timeout is not None and not url.startswith("sqlite"):
+        import sqlalchemy as sa
+
+        engine = sa.create_engine(
+            sa.make_url(url).set(drivername="postgresql+psycopg"),
+            connect_args={"connect_timeout": int(connect_timeout)},
+            pool_pre_ping=True,
+        )
+        return DBOSClient(system_database_engine=engine, application_name=APP_NAME)
+    return DBOSClient(system_database_url=url, application_name=APP_NAME)

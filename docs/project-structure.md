@@ -1,0 +1,261 @@
+# Project Structure
+
+A file-level map of the Womblex source tree. For the *why* behind the layout
+(per-page orchestrator, element-stream schema, per-stage shard commands), see
+[`architecture.md`](architecture.md), [`dataflow.md`](dataflow.md), and the
+module-responsibility table in [`../CLAUDE.md`](../CLAUDE.md).
+
+```
+womblex/
+├── configs/           # Dataset-specific configurations; workflows/ holds an example workflow file
+├── docs/              # Architecture docs, ADRs, accuracy reports, the deployment-image audit, the consumer contract (contract.md), the service API (service-api.md), the egress bundle (egress.md), workflow files (workflows.md), the design decisions by concern (decisions.md for the library, decisions-operations.md for operating it, decisions-dead-ends.md for dead-ends, limitations and the backlog)
+├── fixtures/synthetic/  # Generated test fixtures (generate.py + its committed output; see its README)
+├── models/            # Locally pre-downloaded models, resolved by utils/models.py (see models.md)
+├── src/womblex/
+│   ├── cli/                # CLI subpackage — per-topic modules
+│   │   ├── __init__.py     # main() + ALL_COMMANDS aggregation + dispatch
+│   │   ├── __main__.py     # `python -m womblex.cli` → main()
+│   │   ├── _shared.py      # Command NamedTuple, setup_logging, select_supported / discover_files, normalise_prefix, check_stage_models
+│   │   ├── pipeline.py     # run, extract, chunk, manifest subcommands
+│   │   ├── cloud.py        # enqueue / enqueue-stages / worker / finalize / run-stage / egress subcommands
+│   │   ├── jobs.py         # jobs subcommand (queue status)
+│   │   ├── retry.py        # retry-stage subcommand
+│   │   ├── serve.py        # serve subcommand (the `/v1` service API)
+│   │   ├── api_token.py    # api-token subcommand
+│   │   ├── redact.py       # redact, annotate-redactions, validate-redactions subcommands
+│   │   ├── link.py         # enrich, link, graph-refresh subcommands
+│   │   ├── embed.py, normalise.py, spellfix.py, quality.py, money.py, pii.py  # one subcommand each
+│   │   ├── ingest.py       # ingest-gnaf, ingest-geo, ingest-abn subcommands
+│   │   ├── score.py        # score subcommand
+│   │   ├── ground_truth.py # ground-truth subcommand (segment + render a shard dir into baselines + sidecars)
+│   │   ├── profile.py      # profile subcommand
+│   │   ├── demo.py         # seed-demo subcommand (publish the vendored demo run)
+│   │   ├── verify.py       # verify-shards, verify-evidence, resolve-source subcommands
+│   │   └── workflow.py     # run-workflow / validate / plan / dispatch-workflow / schedule-workflow / add-to-collection / rerun-collection / remove-workflow subcommands, each over a workflow file
+│   ├── config/             # Pydantic config models (__init__: YAML loader + WomblexConfig; process.py: process-stage models; models.py: the OCR, enrichment and embedding model-slot settings)
+│   ├── pipeline_order.py   # PIPELINE_ORDER — what runs when; enabled_downstream_stages(config)
+│   ├── config_tools.py     # A composed config: JSON Schema without paths, validation and YAML under a deployment's paths
+│   ├── presets.py          # Named partial configs (built-in DEFAULT-Isaacus + operator-saved): read, list, save, delete
+│   ├── batch.py            # process_batch() — shared per-batch pipeline body (extract → optional redaction detection; extraction only)
+│   ├── operations/         # Independent operations, one module each: extract, redact, chunk, pii, enrich — callers compose directly
+│   │   ├── models.py       # DocumentResult / BatchResult dataclasses + PreconditionError
+│   │   └── persist.py      # write_batch_parquet / write_batch_enrichment
+│   ├── score.py            # womblex score subcommand — labels-vs-parquet CER scoring
+│   ├── profile/            # womblex profile subcommand — column schema inference
+│   ├── ingest/
+│   │   ├── pdf/                 # The PDF seam — backend-neutral types the extractors are written against
+│   │   │   ├── __init__.py      # open_document(path) — the one entry point; imports the backend at call time
+│   │   │   ├── types.py         # Rect / Word / Span / Line / Block / FoundTable / Drawing / Widget / PageImage + the Page and Document protocols
+│   │   │   ├── _pdfium_doc.py   # The pypdfium2 backend: document, page geometry, render, images, drawings, widgets
+│   │   │   ├── _tables.py       # pdfium table finder: pdfplumber's TableFinder fed pdfium path edges and character boxes
+│   │   │   ├── _text.py         # pdfium text engine: characters rebuilt into lines, blocks, spans, words; effective size, page clip, bold detection
+│   │   │   └── _image.py        # Raster images through Pillow as image-only pages, one per frame, MuPDF's page-rect rule
+│   │   ├── detect.py            # Doc-level type classification (non-PDF dispatch + summary type for PDFs)
+│   │   ├── page_profile.py      # Per-page PageProfile + cheap qualifiers (e.g. spreadsheet-print)
+│   │   ├── orchestrator.py      # Plan-driven PDF extractor — walks per-page profiles, dispatches operations
+│   │   ├── elements.py          # Element model + kinds + Cell / FieldEntry / BBox (canonical)
+│   │   ├── views.py             # ExtractionResult + legacy view types (TableData / FormField / TextBlock / ImageData) as read-only projections over elements
+│   │   ├── extract.py           # extract_text() entry point + page-level primitives (re-exports views)
+│   │   ├── forms.py             # Form-pair extraction (AcroForm + spatial + line-based for OCR)
+│   │   ├── spreadsheet_print.py # Multi-page table extractor for spreadsheet-printed PDFs
+│   │   ├── table_grid.py        # Shared table-grid geometry (spans/columns, y-band binning, row assembly)
+│   │   ├── ocr_tables.py        # OCR table feeder: reconstruct_table() over OCR regions, behind precision gates
+│   │   ├── records.py           # Pre-extracted text records → element shards that feed the NLP pipeline
+│   │   ├── morphology.py        # Page-image morphology helpers (handwriting / glyph regularity), over `Page.render`
+│   │   ├── grid_projection.py   # Column-aware text reconstruction (block-aware paragraph emission)
+│   │   ├── strategies.py        # Re-export shim — path-based (non-PDF) extractors
+│   │   ├── strategies_scanned.py # OCR primitives (_ocr_page, _layout_blocks_and_tables)
+│   │   ├── strategies_file.py   # Non-PDF extractors (DOCX, plain text, non-textual)
+│   │   ├── markdown.py          # Markdown extractor — headings/lists/tables via markdown-it-py
+│   │   ├── interfaces/
+│   │   │   └── protocols.py     # Backend protocols (OCRReader, LayoutAnalyzer, Preprocessor)
+│   │   ├── paddle_ocr.py        # PaddleOCR wrapper via rapidocr-onnxruntime (det/rec/cls)
+│   │   ├── layout_step.py       # The batch's one layout step — page selection, one analyser call per page, normalised regions on ExtractionResult
+│   │   ├── layout_onnx.py       # PPDocLayoutAnalyzer — PP-DocLayout-M layout detection (onnxruntime; registered default `pp-doclayout-m`)
+│   │   ├── llm_ocr.py           # Re-export of the OCR readers in providers/; deprecated, removed in 0.7.0
+│   │   ├── spreadsheet.py       # CSV/Excel extraction — one ExtractionResult per workbook with cells as elements
+│   │   ├── gnaf.py              # G-NAF PSV → Parquet ingest (standalone)
+│   │   ├── gnaf_schema.py       # G-NAF table schemas — static column definitions
+│   │   ├── abn_bulk.py          # ABN bulk extract XML → Parquet ingest (standalone, streamed)
+│   │   ├── geospatial.py        # SHP → GeoParquet ingest (standalone)
+│   │   ├── redaction.py         # Backwards-compatible re-export of redact.detector
+│   │   ├── heuristics_cv2.py    # Image heuristics: skew, blur, table grids, contour analysis (OpenCV)
+│   │   └── heuristics_numpy.py  # Signal analysis: Otsu threshold bimodality (NumPy)
+│   ├── redact/
+│   │   ├── detector.py      # CV2 RedactionDetector — raster + vector-drawing redacted region detection and masking
+│   │   ├── stage.py         # Post-extraction redaction stage (vector-first, raster fallback): detect_redactions, apply_text_redaction, annotate_*
+│   │   ├── batch.py         # Batch redaction: annotate_redactions_for_shards, validate_redactions_against_labels
+│   │   └── utils.py         # Low-level pre-OCR masking helper (not used by extractors)
+│   ├── pii/
+│   │   ├── cleaner.py       # PII detection — PERSON + ADDRESS from graph spans (primary); regex/cosine backstop opt-in (pii.use_regex_backstop, default off) + masking
+│   │   ├── pii_stage.py     # pii_shards() over a shard dir — drives `womblex pii --shards`; writes pii_spans + clean_text
+│   │   └── stage.py         # In-memory PII helpers for the E2E `run` path
+│   ├── process/
+│   │   ├── chunker.py       # semchunk integration — chunk_batch engine + element-stream → ChunkInput helpers; repairs split <REDACTED> markers
+│   │   ├── chunk_stage.py   # chunk_shards() over a shard dir — drives `womblex chunk --shards`
+│   │   ├── normalise.py     # Pure text-cleaning transforms (normalise_text)
+│   │   ├── normalise_stage.py # normalise_shards() — drives `womblex normalise --shards`; writes *.normalised_text.parquet
+│   │   ├── spellfix.py      # OCR character-confusion repair transforms
+│   │   ├── spellfix_stage.py # spellfix_shards() — drives `womblex spellfix --shards`; writes *.spellfix_text.parquet + corrections
+│   │   ├── quality.py       # Chunk-quality annotation heuristics
+│   │   ├── quality_stage.py # quality_shards() — drives `womblex quality --shards`; writes *.chunk_quality.parquet
+│   │   ├── segmenter.py     # segment_elements() — contiguous element ranges under a token budget + page ceiling
+│   │   ├── renderer.py      # render_elements() / rendered_order() — segment → reviewer markdown (narrative + GFM tables + label:value forms, interleaved; reuses reassemble_narrative + table_to_markdown); RENDERER_VERSION + baseline_digest
+│   │   ├── ground_truth.py  # build_ground_truth() over a shard dir — segment → render → *.gt.md baseline + *.meta.json sidecar (identity from manifest, derivation from footer stamp + config, review unreviewed)
+│   │   ├── ground_truth_roundtrip.py  # split_rendered() / apply_corrections() — reverse of render_elements: corrected .gt.md → element-keyed corrections (narrative text, table cells, form fields), block-for-block on NARRATIVE_JOIN
+│   │   ├── money.py         # Self-evidencing money recognition (find_money) — patterns, FP blocking, exact Decimals
+│   │   ├── money_numbers.py # Number reading, currency symbol/ISO resolution, Australian false-positive blocking
+│   │   ├── money_words.py   # Worded amounts (find_worded_amounts, parse_number_words)
+│   │   ├── money_vocab.py   # Currency tiers / ISO 4217 / scale / false-positive / header vocabulary tables (data only)
+│   │   ├── money_columns.py # Column-evidenced money — classify_column + per-cell parsing
+│   │   ├── layout_stage.py  # layout_shards() — drives `run-stage layout --shards`; fingerprint-aware rerun of *.layout_regions.parquet from the source documents
+│   │   ├── evidence.py      # EvidenceIndex / EvidenceIndexes — build an evidence reference from the elements and check it at its level
+│   │   ├── money_stage.py   # money_shards() — drives `womblex money --shards`; writes *.money_spans.parquet + *.money_columns.parquet
+│   │   └── text_overlay.py  # Shared overlay read/merge helper for the offline text layers
+│   ├── link/
+│   │   ├── matcher.py       # Generic record-linkage: alias / address-exact / token-set name-fuzzy (stdlib difflib)
+│   │   ├── reference.py     # Reference-register → normalised ReferenceTable via corpus-declared column roles
+│   │   ├── normalise.py     # Minimal name/address normalisation for matching
+│   │   └── stage.py         # link_shards() over a shard dir — drives `womblex link --shards`; writes *.entity_links.parquet
+│   ├── analyse/
+│   │   ├── enrich.py        # Isaacus enrichment wrappers (kanon-2-enricher)
+│   │   ├── enrich_stage.py  # enrich_shards() — drives `womblex enrich --shards`; writes *.enrichment_entities.parquet
+│   │   ├── enrich_merge.py  # Stitch per-segment results of a split long document back into one
+│   │   ├── graph_refresh.py # refresh_graph_edges() — offline mention→chunk links (*.graph_links.parquet) after chunking
+│   │   ├── embed.py         # Thin wrapper over Isaacus embeddings.create (kanon-2-embedder)
+│   │   ├── embed_stage.py   # embed_shards() — drives `womblex embed --shards`; writes *.embeddings.parquet
+│   │   ├── graph.py         # build_document_graph() — entity graph construction from enrichment results
+│   │   ├── models.py        # ILGS data models (Span, Segment, Person, Location, Term, etc.)
+│   │   └── query.py         # Load enrichment graph from Parquet for PII masking and internal use
+│   ├── store/
+│   │   ├── redaction_regions_output.py # *.redaction_regions.parquet: withheld regions, bbox in PDF points
+│   │   ├── omitted_output.py # omitted.parquet at the run root: the files a run passes over, with a reason
+│   │   ├── manifest_rows.py # The manifest row a batch writes for one document, and the source-bytes hash that keys it
+│   │   ├── output.py        # Parquet output: elements + table_cells + form_fields + manifest + chunks sidecars + integrity checks
+│   │   ├── shard_audit.py   # Directory-level shard integrity + chunks-side audit + reconcile-with-checkpoint
+│   │   ├── enrichment_output.py  # Enrichment-specific output
+│   │   ├── enrichment_doc.py     # *.enrichment_doc.parquet — raw ILGS Document, for AI-chunking reuse
+│   │   ├── evidence.py      # The shared evidence-reference columns, anchor levels, `evidence_check` labels, `evidence()` builder, legacy back-fill
+│   │   ├── pii_output.py    # pii_spans + clean_text parquet schemas + IO
+│   │   ├── normalise_output.py   # *.normalised_text.parquet schema + IO
+│   │   ├── spellfix_output.py    # *.spellfix_text.parquet + *.spellfix_corrections.parquet schemas + IO
+│   │   ├── quality_output.py     # *.chunk_quality.parquet schema + IO
+│   │   ├── embed_output.py  # *.embeddings.parquet schema + IO
+│   │   ├── graph_links_output.py # *.graph_links.parquet schema + IO, chunks digest, matching-links read
+│   │   ├── entity_links_output.py # *.entity_links.parquet schema + IO (mention grain; doc grain derived on read)
+│   │   ├── layout_output.py # *.layout_regions.parquet schema + IO, LayoutFingerprint and its footer keys
+│   │   ├── money_output.py  # *.money_spans.parquet (decimal128 values) + *.money_columns.parquet schemas + IO
+│   │   ├── provenance_output.py  # *.provenance.parquet sidecar + manifest for pre-extracted-record corpora
+│   │   ├── ground_truth_output.py  # Ground-truth *.meta.json sidecar: schema, validation, unit-id, IO (JSON, not parquet)
+│   │   ├── source_provenance.py  # Ingest root + source relpath, and their womblex.* Parquet footer keys
+│   │   ├── source_resolver.py    # SourceResolver — resolve a published row's source_hash back to its source file
+│   │   ├── egress_output.py      # source_index.parquet schema + IO for the egress bundle (self-contained)
+│   │   ├── delivery_record.py    # <run>/deliveries/<destination>.json — one record per workflow destination, listed by the run record
+│   │   ├── egress_sources.py     # A bundle's raw sources, one outcome per source_hash — a local corpus (SourceResolver) or the object store the run was ingested from, by source_relpath
+│   │   ├── egress.py             # build_bundle() — export one finished run (local or in a store) store to store with its resolved raw sources, to any RemoteStore destination (contract: docs/egress.md; CLI verb `womblex egress`)
+│   │   ├── build_info.py    # BuildInfo — package version + source commit, or unavailable with a reason
+│   │   ├── run_stamp.py     # RunStamp — run id / version / commit / config digest / stage / preset (config name) / loaded models / slot models (distribution + version), as womblex.* footer keys; workflow_context → womblex.workflow_digest on a workflow step's sidecars and a scheduled firing's extraction files
+│   │   ├── storage_options.py # A location's own fsspec storage_options: env references resolved at use, secrets never as values
+│   │   ├── deployment_record.py # womblex.deployments footer key: the deployment each model ran on, plus its reader
+│   │   ├── endpoint_identity.py # A SageMaker endpoint's name and region with any AWS account id removed
+│   │   ├── content_digest.py # content_digest(elements): the manifest's determinism handle (kind / order / text / cells / fields / sheet cells / meta)
+│   │   ├── contract.py      # womblex.contract_version + womblex.sensitivity (raw / masked / none) + womblex.written_at footer keys, on every pipeline Parquet
+│   │   ├── document_versions.py # replaces / replaced_by / is_current on the run manifest — versions chained per source_relpath
+│   │   ├── run_manifest.py  # Consolidate per-batch manifests into a run-root manifest.parquet + the run record in its footer
+│   │   ├── run_reads.py     # Runs as the store or output root holds them: listing, stage presence, shard audit
+│   │   ├── document_detail.py # One document's chunks with its entities, PII spans, money and quality rows
+│   │   ├── run_logs.py      # A run's batch logs: list and read, names checked before any join
+│   │   ├── stage_progress.py # Each stage's checkpoint progress for one run, read from the run itself
+│   │   ├── lineage.py       # The run record as an OpenLineage 2-0-2 RunEvent (`manifest --lineage`)
+│   │   ├── register_manifest.py  # Manifest for standalone register ingests (G-NAF/ABN/geospatial)
+│   │   ├── demo_corpus.py   # Publish the vendored demo run into a run store (`womblex seed-demo`)
+│   │   ├── remote.py        # fsspec stage-in/stage-out object-storage adapter for distributed runs
+│   │   ├── remote_manifest.py # A stored run's document table read from an object store; `StoreUnreachable`, `open_store`
+│   │   ├── retention.py     # run_id-based retention policy + describe_run() (doc count, stages, timestamps) + is_safe_run_id (run-root join containment)
+│   │   └── checkpoint.py    # Per-stage CheckpointManager — JSON checkpoints for resumable batch runs
+│   ├── cloud/                  # Distributed run support — `womblex enqueue` / `enqueue-stages` / `worker` / `jobs` / `finalize` / `run-stage` / `egress`
+│   │   ├── dbos_app.py         # DBOS wiring — system database URL, queue/workflow names and ids, client
+│   │   ├── jobs.py             # RunBoard — enqueue + read runs over DBOS workflows; run `owner` scoping; stage attempts and the fork
+│   │   ├── destination_postgres.py # A workflow's Postgres destination — one row per embedded chunk, masked by default, upserted
+│   │   ├── webhook.py          # A workflow's webhook destination — eight run events, signed, resent under one id, recorded
+│   │   ├── run_events.py       # The run events a fleet worker sends, each a recorded DBOS step; extraction and unit progress
+│   │   ├── delivery.py         # Deliver a finished run to its workflow's destinations — checked before launch, bounded retries, recorded on the run
+│   │   ├── run_owner.py        # run_owners() / owned_rows() — a run is the owner its first row names
+│   │   ├── run_status.py       # run_sentence() — a run's status as one sentence from exact per-stage counts
+│   │   ├── finalize.py         # finalize_run() — a run's manifest.parquet in its store; `womblex finalize` and the coordinator's last step
+│   │   ├── retry.py            # retry_stage() — fork a failed stage from its first failed unit, refusing before the fork
+│   │   ├── workflows.py        # extract_batch / run_stage / run_downstream workflows; a dispatched workflow's stage runs under its overlay and digest
+│   │   ├── dispatch.py         # enqueue_extraction / enqueue_downstream_stages (owner=), downstream_stages gate + guard — shared by the service API and any other dispatcher
+│   │   ├── ingest_preview.py   # ingest_preflight() — what a run over a prefix would pick up, before enqueue
+│   │   ├── deployment.py       # DeploymentSettings (run source, queue, ingest, presets dir) + deployment_paths — fastapi-free
+│   │   ├── queue_snapshot.py   # queue_snapshot() — stats, jobs, workers, stale jobs, throughput in one read
+│   │   ├── resources.py        # deployment_resources() — store, ingest, queue, Isaacus, masked; check_store / check_ingest
+│   │   ├── reachability.py     # store_reachable / queue_reachable — the `/v1/ready` probes
+│   │   ├── worker.py           # run_worker() — launch DBOS, join the queues this process can serve (keyed by the models it checked)
+│   │   ├── worker_registry.py  # womblex_workers — the queues each live worker serves
+│   │   ├── stage_contracts.py  # Declarative StageContract per downstream stage (inputs/outputs/scope)
+│   │   ├── stage_graph.py      # stage_graph() — the contracts as nodes and required-input edges
+│   │   ├── stage_runner.py     # Execute a contract against an object store
+│   │   ├── unit_receipt.py     # A store-run unit's receipt; the fleet's skip rule for work already published
+│   │   ├── workflow_store.py   # Workflow object (preset ref, input binding, steps, triggers) — schema, validation, the scheduled copies' table
+│   │   ├── workflow_order.py   # Up-front step-order check — inputs on disk or produced earlier, stable refusal codes
+│   │   ├── workflow_file.py    # A workflow file — the master copy every workflow command reads (YAML, unknown keys refused)
+│   │   ├── collections.py      # Collections for the API — stored workflows that feed one, add and rerun through them
+│   │   ├── inbound.py          # An inbound webhook event — authenticate, record once, act
+│   │   ├── inbound_store.py    # womblex_inbound_events — insert-first dedupe of inbound webhook events
+│   │   ├── workflow_schedules.py # Standing triggers — a workflow's cron triggers as DBOS schedules (sync/list/remove)
+│   │   ├── workflow_dispatch.py # `dispatch-workflow` — a workflow file to the fleet; refuse before any row
+│   │   ├── workflow_plan.py    # `womblex plan` — steps to run or skip and exact enrich/embed token counts, offline
+│   │   ├── workflow_validate.py # `womblex validate` — the runner's pre-run checks, read-only, a JSON-able report
+│   │   └── workflow_runner.py  # Local multi-stage runner — a workflow's steps through the stage functions; refuse before work, record after
+│   ├── api/                    # Service API (`womblex serve`)
+│   │   ├── app.py              # create_api_app() — `/v1` health/ready, run submit, list/detail, manifest, files, document text, metrics; owner-scoped
+│   │   ├── routes_config.py    # /v1/stages and /v1/config/schema, validate, yaml
+│   │   ├── routes_queue.py     # /v1/queue — the queue in one read, owner-scoped
+│   │   ├── routes_inbound.py   # POST /v1/hooks/{workflow}/{hook} — inbound webhooks, HMAC-authenticated
+│   │   ├── routes_collections.py # /v1/collections — list, detail, add and rerun through a stored workflow, owner-scoped
+│   │   ├── routes_resources.py # /v1/resources and its live checks (admin)
+│   │   ├── routes_runs.py      # /v1/store/runs (admin), per-run stage presence, shard audit, document detail, logs, progress
+│   │   ├── routes_presets.py   # /v1/presets list, fetch (read), save, delete (admin)
+│   │   ├── readers.py          # Document text rows by layer (masked / chunks / elements), read in place with a source_hash filter
+│   │   ├── auth.py             # Service-token auth: client registry (WOMBLEX_API_CLIENTS), Caller + scopes, FastAPI dependencies
+│   │   └── models.py           # Pydantic response models — the OpenAPI surface
+│   ├── providers/            # One package per built-in vendor: client module beside one adapter module per slot
+│   │   ├── bedrock/
+│   │   │   ├── ocr.py           # Mistral Pixtral Large OCR via AWS Bedrock
+│   │   │   └── deployment.py    # The `bedrock` deployment
+│   │   ├── ollama/
+│   │   │   ├── ocr.py           # Local Ollama (OpenAI-compatible) OCR
+│   │   │   └── deployment.py    # The `ollama` deployment
+│   │   ├── openai_compat/
+│   │   │   ├── deployment.py    # The `openai-compatible` deployment (base URL, optional key, billed by its own setting)
+│   │   │   └── embedding.py     # OpenAI-compatible /v1/embeddings provider over httpx
+│   │   ├── _images.py           # Page-image PNG encoding shared by the OCR readers
+│   │   └── isaacus/
+│   │       ├── client.py        # Build the Isaacus SDK client (hosted API or private SageMaker)
+│   │       ├── deployment.py    # The `isaacus-api` and `isaacus-sagemaker` deployments
+│   │       ├── enrichment.py    # IsaacusEnrichment, the kanon-2-enricher adapter
+│   │       └── embedding.py     # IsaacusEmbedding, the kanon-2-embedder adapter
+│   └── utils/
+│       ├── metrics.py       # CER, WER, CER-s accuracy metrics (numpy-accelerated Levenshtein + spatial sort)
+│       ├── tabular_metrics.py # Tabular extraction accuracy (structural fidelity, data integrity)
+│       ├── model_check.py   # Pre-run model check: off/load/smoke per slot and scope, Isaacus connectivity at load and one warned, billed request per model at smoke, a ping per service-backed OCR model, remembered for the footer and run record
+│       ├── model_registry.py # Named model registry per slot (OCR, layout, PII context, tokeniser, spellfix dictionary): built-in names + `womblex.models.<slot>` entry-point plugins; records which entry each slot actually built, with its distribution and version
+│       ├── deployment_choice.py # Which deployment serves each model a config names; static `deployment:` refusals
+│       ├── deployment_check.py # Pre-run deployment checks: one free check per deployment, a warned billed smoke call per model
+│       ├── deployment_registry.py # Named deployment registry: env, billing, free check, smoke call, models served, client; built-ins + `womblex.deployments` entry-point plugins
+│       ├── models.py        # Local model path resolution (WOMBLEX_MODELS_DIR, _models/, models/ + HF snapshot layout) + load record with byte digests
+│       ├── checksum.py      # Streamed MD5 (register ingests) and SHA-256 (published run files) helpers
+│       ├── isaacus_client.py # Re-export of providers/isaacus/client.py; deprecated, removed in 0.7.0
+│       ├── run_log.py       # capture_batch_log() — tee a batch's womblex log lines to a file beside its shards
+│       ├── money_metrics.py # Money recall / precision / scale accuracy against typed transcript tags
+│       ├── log_format.py    # JsonFormatter + log_context for --log-format json (run_id/job_id/stage/source_hash)
+│       ├── token_packer.py  # TokenCounter, pack_by_tokens, split_on_boundaries for token-budgeted API batching
+│       └── availability.py  # isaacus_available() gates API stages (enrich/embed, AI chunking); tokenizer_available() gates offline token chunking on the vendored tokeniser
+├── tests/
+├── mkdocs.yml         # API reference site; pages generated by .github/scripts/gen_ref_pages.py (`uv run --group docs mkdocs build`)
+├── Dockerfile         # Pipeline/worker image (CLI, worker, per-stage commands)
+├── deploy/images.env  # The published image digests a release pinned (written by publish-images.yml)
+├── docker-compose.yml # Local + cloud stack; per-service image decisions in docs/deployment-images.md
+└── docker-compose.local.override.yml  # Pins the bundled-local stack's connection surface
+```

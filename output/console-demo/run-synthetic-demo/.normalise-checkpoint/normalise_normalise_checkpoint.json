@@ -1,0 +1,17 @@
+{
+  "processed_ids": [
+    "emu-spacing-variants",
+    "quokka-care-decision-notice_redacted",
+    "wombat-portfolio-budget-statements",
+    "bilby-foi-documents-index",
+    "koala-habitat-audit",
+    "bilby-schedule-of-documents",
+    "numbat-scanned-survey-page"
+  ],
+  "total_processed": 7,
+  "total_succeeded": 7,
+  "total_failed": 0,
+  "last_batch": 1,
+  "started_at": "2026-10-15T19:16:09.416824+00:00",
+  "updated_at": "2026-10-15T19:16:09.578643+00:00"
+}

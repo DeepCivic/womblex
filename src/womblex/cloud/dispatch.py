@@ -1,0 +1,474 @@
+"""Queue dispatch for the service API and any other dispatcher (`docs/service-api.md`).
+
+The two write actions that put work on the queue — plan an extraction run
+(:func:`enqueue_extraction`) and dispatch a run's downstream stages
+(:func:`enqueue_downstream_stages`) — plus the guard that refuses either when
+a deployment lacks the store, ingest location or DSN they need.
+
+Dispatch is always the queue. Nothing here shells out or runs a batch
+in-process: it writes queue rows, and the workers a platform brings up do the
+work. Execution needs both a remote store (to enqueue keys from and publish
+shards to) and a job queue (to dispatch through); :func:`execution_status`
+reports which piece is missing rather than half-working.
+"""
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, cast
+
+from womblex.cli._shared import Omitted, normalise_prefix, select_files
+from womblex.cloud.dbos_app import ensure_schema
+from womblex.cloud.deployment import DeploymentSettings, deployment_paths
+from womblex.store.retention import generate_run_id, is_safe_run_id
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from womblex.cloud.jobs import JobSpec
+    from womblex.store.remote import RemoteStore
+
+#: Seconds to wait for the queue connection before reporting it unreachable. A
+#: polled dashboard or a request thread would otherwise sit on a routable-but-dead
+#: host until the OS gave up.
+QUEUE_CONNECT_TIMEOUT = 5.0
+
+logger = logging.getLogger(__name__)
+
+class ExecutionDisabled(Exception):
+    """A write action was attempted on a deployment that cannot execute.
+
+    Carries a machine-readable ``reason`` the route maps to a 409 (store,
+    ingest or queue not configured), so a caller can tell which piece is
+    unwired without parsing a message.
+    """
+
+    def __init__(self, reason: str, detail: str):
+        super().__init__(detail)
+        self.reason = reason
+        self.detail = detail
+
+
+@dataclass(frozen=True)
+class ExecutionCapability:
+    """Whether this deployment can dispatch work, and if not, precisely why.
+
+    All three must hold: an output location a ``RemoteStore`` can publish
+    shards to, an ingest location to enqueue documents from, and a job queue
+    to dispatch through (see the module docstring). ``can_execute`` is their
+    conjunction; the individual flags are surfaced so a caller can name the
+    missing piece rather than a bare "disabled".
+
+    It reports no stage list. It used to carry ``STAGE_NAMES``, which read as
+    "the stages this deployment dispatches" while nothing here could dispatch
+    one — and no caller ever read it. The pipeline's shape is
+    ``STAGE_CONTRACTS``.
+    """
+
+    has_store: bool
+    has_ingest: bool
+    has_queue: bool
+    ingest_uri: str | None
+    output_uri: str | None
+
+    @property
+    def can_execute(self) -> bool:
+        return self.has_store and self.has_ingest and self.has_queue
+
+    def as_dict(self) -> dict:
+        return {
+            "can_execute": self.can_execute,
+            "has_store": self.has_store,
+            "has_ingest": self.has_ingest,
+            "has_queue": self.has_queue,
+            "ingest_uri": self.ingest_uri,
+            "output_uri": self.output_uri,
+        }
+
+
+def execution_status(settings: DeploymentSettings) -> ExecutionCapability:
+    """What this deployment is allowed and able to dispatch — a cheap, network-free read.
+
+    A caller uses this to decide whether to offer dispatch at all, and which
+    explanation to give when it cannot. No store or queue connection is made
+    here.
+    """
+    return ExecutionCapability(
+        has_store=settings.is_remote,
+        has_ingest=bool(settings.ingest_uri),
+        has_queue=bool(settings.db_dsn),
+        ingest_uri=settings.ingest_uri,
+        output_uri=settings.store_uri or (str(settings.output_root) if settings.output_root else None),
+    )
+
+
+def _guard(settings: DeploymentSettings, *, needs_ingest: bool = True) -> ExecutionCapability:
+    """Refuse any write action the deployment is not configured to perform.
+
+    Ordered so the operator sees the most actionable failure first: a missing
+    store, ingest location or queue is a wiring gap (409), checked in that
+    order. Every write path calls this before touching either.
+
+    *needs_ingest* is false for dispatching the downstream stages: they read
+    the shards extraction already published to the store and never look at the
+    ingest location, so a deployment whose ingest has since been unset can
+    still finish a run it started.
+    """
+    cap = execution_status(settings)
+    if not cap.has_store:
+        raise ExecutionDisabled(
+            "no_store",
+            "Execution dispatches through a shared object store; this console reads a "
+            "local output_root. Point it at a --store to enqueue work.",
+        )
+    if needs_ingest and not cap.has_ingest:
+        raise ExecutionDisabled(
+            "no_ingest",
+            "Execution enqueues documents from a configured ingest location; none is "
+            "set. Set one (--ingest / $WOMBLEX_INGEST_URI) to enqueue work.",
+        )
+    if not cap.has_queue:
+        raise ExecutionDisabled(
+            "no_queue",
+            "Execution dispatches through the job queue; no DSN is configured. Set one "
+            "(--dsn / $WOMBLEX_DB_DSN) to enqueue work.",
+        )
+    return cap
+
+
+def run_config(settings: DeploymentSettings, config: dict | None) -> dict:
+    """The config a run dispatched from *config* carries to every worker (Phase R, D7).
+
+    Built through the same construction `downstream_stages` validates with, so the workers run
+    the config *as the CLI would load it*; `{}` or `None` is the default config. Raises
+    ``pydantic.ValidationError`` on a config that would not load.
+    """
+    from womblex.cloud.workflow_runner import config_payload
+    from womblex.config import WomblexConfig
+
+    paths, _ = deployment_paths(settings)
+    return config_payload(WomblexConfig(**{"dataset": {"name": "console"}, **(config or {}), "paths": paths}))
+
+
+def check_served(
+    settings: DeploymentSettings, config: dict | None, stages: tuple[str, ...] = (), *, extraction: bool = False,
+) -> None:
+    """Refuse (`worker_registry.NoLiveWorker`, a ``ValueError``) a run under *config* whose
+    extraction or *stages* no live worker serves. Writes nothing, so a submit refuses before any row."""
+    from womblex.cloud.worker_registry import needed_queues, require_served
+    from womblex.cloud.workflow_runner import config_from_payload
+
+    validated = config_from_payload(run_config(settings, config), {"input_root": ".", "output_root": ".",
+                                                                    "checkpoint_dir": "."})
+    require_served(settings.db_dsn, needed_queues(validated, stages, settings.ingest_uri if extraction else None))
+
+
+def _supported_under(settings: DeploymentSettings, prefix: str) -> tuple[str, list[str], list[Omitted]]:
+    """The location *prefix* names, the store keys a run there would ingest, and the files it passes over.
+
+    One listing for both write and preview, so the count the composer shows is
+    the count its press enqueues rather than a second walk that agrees today.
+    Raises :class:`~womblex.cli._shared.NestedCorpusError` on a layout a run
+    refuses.
+    """
+    from womblex.store.remote import RemoteStore
+
+    ingest_uri = cast(str, settings.ingest_uri)
+    return ingest_listing(RemoteStore.from_uri(ingest_uri, explicit=settings.ingest_options), ingest_uri, prefix)
+
+
+def _record_omitted(settings: DeploymentSettings, output_prefix: str, omitted: list[Omitted]) -> None:
+    """Record the files the run passes over beside its shards (`store/omitted_output.py`)."""
+    from womblex.store.omitted_output import publish_omitted
+    from womblex.store.remote import RemoteStore
+
+    publish_omitted(omitted, RemoteStore.from_uri(cast(str, settings.store_uri), explicit=settings.store_options),
+                    output_prefix)
+
+
+def ingest_listing(ingest_store: RemoteStore, ingest_uri: str, prefix: str) -> tuple[str, list[str], list[Omitted]]:
+    """`(location, keys, omitted)`: what a run over *prefix* of *ingest_store* would ingest, and the
+    files under it that it passes over. Keys and omitted paths are both relative to the ingest root."""
+    location = f"{ingest_uri}/{prefix}".rstrip("/")
+    all_keys = ingest_store.list_files(prefix, "*", recursive=True)
+    # Store-relative keys: strip the prefix for the nesting check, restore after.
+    scope = f"{prefix}/" if prefix else ""
+    names, omitted = select_files((k.removeprefix(scope) for k in all_keys), location=location)
+    return location, [f"{scope}{n}" for n in names], [Omitted(f"{scope}{o.source_relpath}", o.reason) for o in omitted]
+
+
+def supported_keys(ingest_store: RemoteStore, ingest_uri: str, prefix: str) -> tuple[str, list[str]]:
+    """`(location, keys)`: what a run over *prefix* of *ingest_store* would ingest."""
+    location, keys, _ = ingest_listing(ingest_store, ingest_uri, prefix)
+    return location, keys
+
+
+class PrefixNotOwned(ValueError):
+    """An ingest prefix outside the owner's own `<owner>/` tree."""
+
+
+def owned_prefix(owner: str | None, input_prefix: str | None) -> str:
+    """*input_prefix* normalised; an owner (a non-admin caller) may name only its own `<owner>/` tree.
+
+    Raises `ValueError` for an unsafe prefix and `PrefixNotOwned` for another owner's.
+    """
+    prefix = normalise_prefix(input_prefix)
+    if owner is not None and prefix != owner and not prefix.startswith(f"{owner}/"):
+        raise PrefixNotOwned(f"input_prefix must be under {owner}/")
+    return prefix
+
+
+def batch_specs(
+    keys: list[str], *, shard_prefix: str, ingest_root: str, batch_size: int, max_attempts: int,
+    start: int = 1,
+) -> list[JobSpec]:
+    """*keys* split into `batch_size` extraction batches, numbered from *start*."""
+    from womblex.cloud.jobs import JobSpec
+
+    if batch_size < 1:
+        raise ValueError("batch_size must be >= 1")
+    return [
+        JobSpec(batch_num=n, input_keys=keys[i : i + batch_size], shard_prefix=shard_prefix,
+                max_attempts=max_attempts, ingest_root=ingest_root)
+        for n, i in enumerate(range(0, len(keys), batch_size), start=start)
+    ]
+
+
+@dataclass(frozen=True)
+class EnqueueResult:
+    """The outcome of an enqueue, for the screen to report and then poll.
+
+    ``newly_enqueued`` distinguishes a fresh run from a resume: enqueue is
+    idempotent on ``(run_id, batch_num)`` (`RunBoard.enqueue`), so
+    re-dispatching a run that partly ran inserts only its missing batches and
+    this counts them. ``run_id`` is what the Dashboard and Corpus Inspector
+    are then pointed at to watch it drain.
+    """
+
+    run_id: str
+    document_count: int
+    batch_count: int
+    newly_enqueued: int
+    shard_prefix: str
+
+    def as_dict(self) -> dict:
+        return {
+            "run_id": self.run_id,
+            "document_count": self.document_count,
+            "batch_count": self.batch_count,
+            "newly_enqueued": self.newly_enqueued,
+            "shard_prefix": self.shard_prefix,
+        }
+
+
+def enqueue_extraction(
+    settings: DeploymentSettings,
+    *,
+    input_prefix: str | None = None,
+    run_id: str | None = None,
+    batch_size: int = 50,
+    max_attempts: int = 3,
+    owner: str | None = None,
+    config: dict | None = None,
+) -> EnqueueResult:
+    """Plan an extraction run into the queue — the "configure-and-run" action.
+
+    The same three steps ``womblex enqueue`` does, against the configured
+    ingest location: list supported documents under *input_prefix* (the whole
+    ingest root when omitted), split them into ``batch_size`` batches, and
+    write one idempotent queue row each, stamped with the ingest root.
+
+    *input_prefix* is ingest-relative and goes through the listing
+    :func:`ingest_preflight` previews, so a prefix the operator saw a count for
+    enqueues that count.
+
+    *owner* is the service caller the run belongs to (``None`` for the CLI); see `RunBoard.enqueue`. *config* is what the batches extract under on
+    every worker (`run_config`; omitted, the default config).
+
+    Raises :class:`ExecutionDisabled` when the deployment cannot dispatch (a
+    route maps it to 409) and ``ValueError`` on bad input (→ 400) — an unsafe
+    run id or prefix, a nested layout, or no documents under the prefix.
+    """
+    _guard(settings)
+    if batch_size < 1:
+        raise ValueError("batch_size must be >= 1")
+    resolved_run_id = run_id or generate_run_id()
+    if not is_safe_run_id(resolved_run_id):
+        raise ValueError(f"unsafe run_id: {resolved_run_id!r}")
+
+    from womblex.cloud.jobs import RunBoard
+
+    payload = run_config(settings, config)
+    check_served(settings, config, extraction=True)
+    ingest_uri = cast(str, settings.ingest_uri)
+    location, keys, omitted = _supported_under(settings, normalise_prefix(input_prefix))
+    if not keys:
+        raise ValueError(f"no supported documents under {location}")
+
+    output_prefix = f"runs/{resolved_run_id}"
+    shard_prefix = f"{output_prefix}/documents"
+    specs = batch_specs(keys, shard_prefix=shard_prefix, ingest_root=ingest_uri,
+                        batch_size=batch_size, max_attempts=max_attempts)
+
+    ensure_schema(settings.db_dsn)
+    with RunBoard(settings.db_dsn, connect_timeout=QUEUE_CONNECT_TIMEOUT) as board:
+        newly = board.enqueue(resolved_run_id, specs, owner=owner, config=payload)
+    # Only once the run exists: a refused enqueue must leave no run directory in the store.
+    _record_omitted(settings, output_prefix, omitted)
+
+    logger.info(
+        "enqueue: run_id=%s, %d doc(s) -> %d batch(es), %d newly enqueued",
+        resolved_run_id, len(keys), len(specs), newly,
+    )
+    return EnqueueResult(
+        run_id=resolved_run_id,
+        document_count=len(keys),
+        batch_count=len(specs),
+        newly_enqueued=newly,
+        shard_prefix=shard_prefix,
+    )
+
+
+def downstream_stages(settings: DeploymentSettings, config: dict) -> tuple[str, ...]:
+    """The downstream stages *config* enables, in `PIPELINE_ORDER` — the shared gate.
+
+    Validates *config* before anything is written, so a caller that enqueues
+    extraction and stages together can refuse a bad config with no row on the
+    queue. Raises ``pydantic.ValidationError`` on a config that would not load,
+    and ``ValueError`` listing the known names when it names a model that is not
+    registered — registration only, since this host may not carry the models the
+    workers do. An empty result is the caller's to judge.
+    """
+    from womblex.config import WomblexConfig
+    from womblex.pipeline_order import enabled_downstream_stages
+    from womblex.utils.model_check import check_registered
+
+    # Built through the same `WomblexConfig(**{**raw, "paths": …})` construction
+    # the composer validates and renders YAML with, so the stage list dispatched
+    # is the one the config *as the CLI would load it* asks for — defaults and
+    # coercions applied, not whatever the browser happened to send.
+    #
+    # `dataset` is filled in only when absent, the way `cli.cloud._runner_config`
+    # does: `WomblexConfig` requires it but no stage gate reads it (stages run
+    # over a shard prefix, not a dataset), so a config posted without one is a
+    # dispatchable config, not an invalid one.
+    paths, _ = deployment_paths(settings)
+    raw = {"dataset": {"name": "console"}, **config, "paths": paths}
+    validated = WomblexConfig(**raw)
+    check_registered(validated)
+    return enabled_downstream_stages(validated)
+
+
+@dataclass(frozen=True)
+class StageDispatchResult:
+    """The outcome of dispatching a run's downstream stages.
+
+    ``stages`` is what the composed config asked for, in `PIPELINE_ORDER` —
+    reported back because the list is *derived*, not typed by the operator, and
+    a press that quietly dispatched nothing (or dispatched embed when they
+    thought embedding was off) should be visible on the screen that pressed it.
+
+    ``newly_enqueued`` separates a first press from a repeat the same way
+    :class:`EnqueueResult` does: `RunBoard.enqueue_stages` is idempotent
+    per ``(run_id, stage)``, so pressing twice re-dispatches nothing and this
+    reads 0.
+    """
+
+    run_id: str
+    stages: tuple[str, ...]
+    newly_enqueued: int
+    shard_prefix: str
+
+    def as_dict(self) -> dict:
+        return {
+            "run_id": self.run_id,
+            "stages": list(self.stages),
+            "newly_enqueued": self.newly_enqueued,
+            "shard_prefix": self.shard_prefix,
+        }
+
+
+def check_stage_order(
+    settings: DeploymentSettings, config: dict, stages: tuple[str, ...], run_id: str,
+) -> None:
+    """Refuse a stage list whose strict inputs no earlier stage or stored copy supplies.
+
+    Writes nothing, so a submit can refuse with no row on the queue. Raises
+    :class:`~womblex.cloud.workflow_order.StageOrderError` (a ``ValueError``, so 400).
+    """
+    from womblex.cloud.workflow_order import check_dispatch_order
+    from womblex.config import WomblexConfig
+    from womblex.store.remote import RemoteStore
+
+    paths, _ = deployment_paths(settings)
+    validated = WomblexConfig(**{"dataset": {"name": "console"}, **config, "paths": paths})
+    store = RemoteStore.from_uri(settings.store_uri, explicit=settings.store_options) if settings.store_uri else None
+    check_dispatch_order(stages, validated, store, f"runs/{run_id}/documents")
+
+
+def enqueue_downstream_stages(
+    settings: DeploymentSettings,
+    *,
+    run_id: str,
+    config: dict,
+    max_attempts: int = 3,
+    owner: str | None = None,
+    order_checked: bool = False,
+) -> StageDispatchResult:
+    """Dispatch *run_id*'s downstream stages — the second write action.
+
+    Exactly what ``womblex enqueue-stages --run-id … --config …`` does: the stages *config* enables
+    (:func:`~womblex.pipeline_order.enabled_downstream_stages`), written as
+    queue rows for the workers to claim, each run under *config* (`run_config`).
+    This only writes rows —
+    execution stays on the fleet, with its retry and crash recovery, and no
+    request here can become a command because there is no command.
+
+    Deliberately a separate press from :func:`enqueue_extraction`, per the same
+    reasoning the CLI split them: a worker will not start a stage until the
+    run's batches settle, but a *bad* extraction should not spend Isaacus
+    budget on enrich and embed either. The operator enqueues, watches it drain,
+    looks at it, then presses this.
+
+    *owner* is checked against the run's owner as in `RunBoard.enqueue_stages`. The stage
+    order is checked (:func:`check_stage_order`) unless the caller already did
+    (*order_checked*, the API's submit, which checks before writing any row).
+
+    ``pii`` and ``quality`` are never dispatched — that bound lives in
+    ``DOWNSTREAM_STAGES``, not here, so no caller can widen it. Both stay
+    reachable through ``womblex run-stage``.
+
+    Raises :class:`ExecutionDisabled` when the deployment cannot dispatch (→
+    409), ``pydantic.ValidationError`` on a config that would not load (→
+    400) and ``ValueError`` on an unsafe run id or a config that enables no
+    stage at all (→ 400).
+    """
+    _guard(settings, needs_ingest=False)
+    if not is_safe_run_id(run_id):
+        raise ValueError(f"unsafe run_id: {run_id!r}")
+
+    from womblex.cloud.jobs import RunBoard
+
+    stages = downstream_stages(settings, config)
+    if not stages:
+        raise ValueError(
+            "This config enables no downstream stages — nothing to dispatch. Turn on "
+            "a stage (chunking, enrichment, embedding, money, linking) and press again."
+        )
+
+    shard_prefix = f"runs/{run_id}/documents"
+    if not order_checked:
+        check_stage_order(settings, config, stages, run_id)
+    check_served(settings, config, stages)
+    ensure_schema(settings.db_dsn)
+    with RunBoard(settings.db_dsn, connect_timeout=QUEUE_CONNECT_TIMEOUT) as board:
+        newly = board.enqueue_stages(
+            run_id, list(stages), shard_prefix, max_attempts=max_attempts, owner=owner,
+            config=run_config(settings, config),
+        )
+
+    logger.info(
+        "stage dispatch: run_id=%s, stages %s, %d newly enqueued",
+        run_id, " -> ".join(stages), newly,
+    )
+    return StageDispatchResult(
+        run_id=run_id, stages=stages, newly_enqueued=newly, shard_prefix=shard_prefix,
+    )

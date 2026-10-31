@@ -1,0 +1,25 @@
+# An example workflow file (docs/workflows.md). Every workflow command takes a file like
+# this one; `womblex schedule-workflow` stores the copy its firings read.
+#
+#   womblex validate configs/workflows/nightly.yaml --shards DIR
+#   womblex plan configs/workflows/nightly.yaml --shards DIR
+#   womblex run-workflow configs/workflows/nightly.yaml --shards DIR
+#   womblex schedule-workflow configs/workflows/nightly.yaml --store s3://bucket
+
+name: nightly
+preset: DEFAULT-Isaacus         # a built-in preset, or one saved under --presets-dir
+config:                         # laid over the preset's config, key by key
+  chunking:
+    chunk_size: 512
+input_binding:
+  store: s3://inbox             # the input store; only workers on it run the firings
+  ingest_prefix: incoming       # the documents under it a firing extracts
+  batch_size: 50
+steps:                          # run in this order (dispatch-workflow needs pipeline order)
+  - stage: normalise
+  - stage: enrich
+  - stage: chunk
+  - stage: embed
+triggers:
+  - cron: "0 2 * * *"
+    timezone: Australia/Sydney

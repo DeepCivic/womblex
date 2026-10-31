@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      # Required for PyPI Trusted Publishing (no API token needed).
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Check the tag names the package version
+        # A tag that disagrees with pyproject.toml would publish one version
+        # under another's name; PyPI refuses to take either back.
+        run: |
+          python3 - <<'EOF'
+          import os
+          import re
+          import tomllib
+
+          tag = os.environ["GITHUB_REF_NAME"].removeprefix("v")
+          with open("pyproject.toml", "rb") as f:
+              project = tomllib.load(f)["project"]["version"]
+          with open("src/womblex/__init__.py") as f:
+              package = re.search(r'^__version__ = "([^"]+)"', f.read(), re.M).group(1)
+          if not tag == project == package:
+              raise SystemExit(f"tag {tag!r}, pyproject.toml {project!r}, __version__ {package!r}: they must match")
+          EOF
+
+      - name: Stamp the commit into the package
+        # Written before the build so the wheel carries it. A checkout resolves
+        # its commit from the work tree; an installed wheel has none, so this
+        # is the only moment the fact can be captured.
+        run: |
+          printf 'COMMIT = "%s"\n' "${GITHUB_SHA}" > src/womblex/_build_stamp.py
+
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+
+      - name: Check distributions
+        run: |
+          pip install twine
+          twine check dist/*
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3

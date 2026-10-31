@@ -1,0 +1,166 @@
+# Consumer contract — Womblex
+
+What a program reading Womblex output, or importing Womblex, may rely on.
+Two surfaces: the on-disk data contract (Parquet) and the Python API. The
+bundle that carries both to another system is in [egress.md](egress.md); the
+column-level schemas are in [extraction.md](extraction.md).
+
+## Contract version
+
+`womblex.contract_version` (currently `3.2`, `store/contract.CONTRACT_VERSION`)
+is in the footer of every pipeline Parquet and in `egress_manifest.json`. It is
+versioned apart from the package: a release that changes no schema leaves it
+alone.
+
+| Change to a schema | Bump | Obligation |
+|---|---|---|
+| Additive column | minor | Readers back-fill older files (`_MANIFEST_NULL_BACKFILL` style) |
+| Rename or removal | major | Reader shim as for `_CHUNKS_BACKFILL`, kept for the old major |
+| Retired file role | major | The role is no longer written; a file of that role an older major wrote keeps the `womblex.sensitivity` in its own footer |
+
+A file with no `contract_version` key was written before the contract existed
+and is read as `1.0`-compatible.
+
+`womblex.written_at` (UTC, to the second) rides beside it. It is a footer key and
+never a column, so it is not a schema change and the version is not bumped. It is
+part of the file's bytes: a rewrite of unchanged rows changes the file's checksum,
+so a published checksum records what was published and is not stable across reruns.
+To compare two files, compare their rows and footers without this key; determinism
+is the manifest's `content_digest`, which never covers a footer.
+
+## Files, join keys and sensitivity
+
+`womblex.sensitivity` is set per file role (`store/contract.ROLE_SENSITIVITY`,
+the single source). An unknown role reads as `raw`.
+
+| Role (`*.<role>.parquet`) | Joins on | Sensitivity |
+|---|---|---|
+| `elements` | `(source_hash, elem_order)` | raw |
+| `table_cells`, `form_fields` | `(source_hash, parent_elem_order)` to `elements`; `table_cells.bbox` (1.3) locates a cell on the page, null where the producer has no cell geometry | raw |
+| `_manifest` / run-root `manifest` | `source_hash` | none |
+| `normalised_text`, `spellfix_text`, `spellfix_corrections` | `(source_hash, elem_order)` | raw |
+| `chunks` | `(source_hash, chunk_index)`; table chunks anchor on `elem_order` | raw |
+| `embeddings`, `chunk_quality` | `(source_hash, chunk_index)` | none |
+| `enrichment_entities` | `(source_hash, entity_id)`; carries `chunk_index` to `chunks` (narrative mentions only; table mentions are `-1`) as enrich left it, `-1` where chunks did not yet exist: `graph-refresh` no longer rewrites it, so read the link through `graph_links` (`analyse/query.py` does). `text_layer` names the text `mention_start` / `mention_end` index: the narrative under its element-text layer, or `table_markdown` with the table named by `elem_order` or `sheet` (1.4; null on older files, read as narrative). `mention_text` is the text of that mention, which can differ from the entity's `name` (1.5; null on older files) | raw |
+| `graph_edges` | `source_hash` + `source_id` / `target_id` to `enrichment_entities.entity_id`; its `mentioned_in` edges are enrich's, present only where chunks existed when it ran; `graph-refresh` leaves the file as it is, and a reader derives those edges from `graph_links` while the links match | raw |
+| `graph_links` | `(source_hash, entity_id, mention_start, mention_end)` to `enrichment_entities`; `chunk_index` is the first overlapping narrative chunk (`-1` for none) and `chunk_indices` all of them. The footer key `womblex.chunks_digest` is the digest of the chunks it was computed against: a reader uses the links only while the `chunks` beside them hash to it. Written by `graph-refresh`; absent from earlier runs, which read as before | raw |
+| `enrichment_doc` | `source_hash` (one row per document) | raw |
+| `enrichment_meta` | `source_hash`; `table_count` is tables sent to the enricher on their own, null where none were (1.4); `status` is `enriched`, or `skipped_short` for a document whose narrative was under `enrichment.skip_short_documents` and so never sent (3.2; null on older files) | none |
+| `entity_links` | `source_hash` plus the evidence reference; its `entity_id` is the reference-register id and `mention_text` the enricher's text for the mention (null where the provider gave none) | raw |
+| `pii_spans` | `(source_hash, chunk_index)` plus the evidence reference; `entity_id` to `enrichment_entities` | raw |
+| `clean_text` | `(source_hash, chunk_index)`; `mask_status` is `masked`, `no_entity` or `not_masked` (verbatim, no candidate source covered the chunk); files written before contract 1.2 read back as `masked` where `n_masked` is above zero, null otherwise | masked |
+| `money_spans` | `source_hash` plus the evidence reference | none |
+| `money_columns` | `source_hash` plus `column_id` (`parent_elem_order` / `sheet`) | none |
+| `layout_regions` | `(source_hash, page)`; boxes are normalised like element `bbox` ([layout.md](layout.md)) | none |
+| `redactions`, `source_index` | `source_hash` | none |
+| `redaction_regions` | `(source_hash, page)`; `bbox_pt` is in PDF points, not normalised ([extraction.md](extraction.md)) | none |
+| `omitted` (run root) | `source_relpath` and `reason`; the files under the ingest location a run passes over. Not keyed by `source_hash`: nothing was read | none |
+| `provenance` | `source_hash` | raw |
+
+`none` is a claim about text, not derivation: embeddings come from unmasked
+chunks but carry no text.
+
+### Evidence reference (2.0)
+
+`money_spans`, `entity_links` and `pii_spans` locate each span with the same eleven
+columns (`store/evidence.py`), in place of the anchors each carried before:
+`elem_order`, `page`, `bbox`, `sheet`, `cell_row`, `cell_col`, `char_start`,
+`char_end`, `text_layer`, `anchor_level` and `evidence_check`. A row is never
+unlocated: it carries the most precise location that is reliable, and
+`anchor_level` says which and how the stage checked it before writing:
+
+| `anchor_level` | Located to | Check |
+|---|---|---|
+| `span` | `char_start:char_end` of the text `text_layer` names: the narrative under an element-text layer (`elements` / `normalised` / `spellfix`, the space chunks and mentions use), a table's markdown (`table_markdown`, with `elem_order` or `sheet`), or one cell's value (`cell`) | the source slice equals the text |
+| `element` | the element, or the cell (`cell_row` / `cell_col`, or `sheet`) | the text lies in it |
+| `chunk` | the chunk (`chunk_index` on `pii_spans`), its page and, for a table chunk, `elem_order` | the text lies in the chunk |
+| `document` | the document | the text lies in its narrative or a table markdown |
+
+`evidence_check` is the outcome of that check: `holds`, `fails`, or `unchecked`
+(no elements sidecar or chunk text to check against, no text to check, or a file
+written before contract 2.0). Nothing is refused: a `fails` or `unchecked` row is
+written with its label and the stage warns with a count, so a run always
+completes and says what it could not verify. A position is never searched for: a PII span in a
+chunk that is not the source's slice at its offsets is located to the document
+when its text is in the document and to the chunk when it is not, and one whose
+elements or table are missing to the chunk. An entity link whose slice is not
+the enricher's text for the mention is located to the document. Masking never depends on
+the receipt. The text a `span` row is checked against is `text` (`mention_text`
+on `entity_links`). `womblex verify-evidence <run>` recomputes every row's check
+over a finished run and reports the counts (exit 2 if any receipt fails).
+
+The 2.0 bump removed `start_char` / `end_char` / `text_source` / `parent_elem_order`
+/ `row` / `col` from `money_spans` (now `char_start`, `char_end`, `text_layer`,
+`elem_order`, `cell_row`, `cell_col`), `start` / `end` (chunk-relative) from
+`pii_spans`, and `mention_start` / `mention_end` from `entity_links`. Readers
+back-fill an older file: a money span keeps its narrative offsets (`span`) or its
+cell (`element`); a PII span reads as `chunk`; a link reads as `span` when its shard has the elements and no text-layer overlay (the offsets can then only be the verbatim narrative's) and as `document` otherwise. A PII
+span's position in its chunk is `char_start - chunk.start_char` for a `span` row.
+
+
+The 3.0 bump retired the `conditions` role (Phase R, D3): no `*.conditions.parquet` is
+written, and `manifest.parquet` holds every column a condition labelled. A file of that
+role a 2.x run wrote keeps `womblex.sensitivity: none` in its own footer.
+
+The 3.1 bump added `replaces`, `replaced_by` and `is_current` to the manifest. The run-root
+`manifest.parquet` fills them when it is consolidated (`store/document_versions.py`): versions are
+chained per `source_relpath` in batch order, never by time. A per-batch manifest is never
+rewritten, so it carries them null, as does a shard written before the columns.
+
+The 3.2 bump added `enrichment_meta.status` (`enriched` or `skipped_short`; older files read it as null), and
+the `omitted` file role (`omitted.parquet`, at the run root).
+
+## Determinism
+
+For a given `source_hash` + `womblex.version` + `config_digest` +
+`womblex.models` + `womblex.slot_models`, extraction content and row order are
+stable, so the manifest's `content_digest` matches. File bytes and
+`extracted_at_iso` are not guaranteed. A mismatch is explained by the stamped
+version, config and model digests and never blocks output.
+
+## Model provenance
+
+The run stamp is five footer keys (`womblex.run_id`, `version`, `commit`,
+`config_digest`, `stage`), plus `womblex.preset` (the config's `dataset.name`)
+when the config names one. `commit` is `unavailable:<reason>` when neither the
+work tree nor a build stamp answers. A downstream sidecar inherits `run_id`,
+`config_digest` and `preset` from the batch it annotates, preferring the
+elements shard or manifest, then any sibling; a sidecar whose siblings carry no
+run, or disagree, is written unstamped. Further keys name what produced a file:
+`womblex.models` names loaded local model *artefacts* by digest
+(`store/run_stamp.read_footer_models`); `womblex.slot_models` names which
+swappable-slot model (`docs/model-plugins.md`) each slot actually built, by
+slot, name, and the distribution and version that supplied it
+(`read_footer_slot_models`); `womblex.deployments` names the deployment each model ran on, as slot, model, deployment, the distribution and version that supplied the deployment, and where it ran where the deployment may say (an endpoint name and region, an ARN reduced to those; never a key or an account id) (`store/deployment_record.read_footer_deployments`); `womblex.model_check` records the pre-run model
+check's result (`read_footer_model_check`); `womblex.workflow_digest` names the
+workflow whose step wrote a sidecar (locally through `run-workflow`, or on a worker for a stage dispatched with the workflow) and `womblex.workflow` holds that workflow's name and full spec as JSON (`read_footer_stamp`),
+and the same two keys are on every file a scheduled firing's extraction batches write (the four extraction files and the layout sidecar beside them); they are absent from other extraction files and from sidecars written outside a workflow; `womblex.ai_chunking_calls` on a chunks file counts the Kanon-2 Enricher calls AI chunking made for that batch, and is absent when `chunking.chunking_model` was not set. Each is written only when it has a
+value — a process that loaded, built or checked nothing writes no key — and
+all are additive metadata, so a reader that ignores them reads the file
+unchanged. No column is added for any.
+
+The run record in `manifest.parquet`'s footer can be exported as an OpenLineage
+2-0-2 `RunEvent` (`womblex manifest --shards DIR --lineage OUT`). It carries the
+record's own facts, with the run id, file keys and digests, models and services
+in `womblex_*` facets, and no document text. With `--dsn` the event type follows the
+run's outcome on the job queue (`COMPLETE`, `FAIL` or `ABORT`); without it the event is
+`COMPLETE` and its `status` facet is `unknown`.
+
+## Safe to hand onward
+
+Only files whose footer says `sensitivity=masked` or `none`. Anything `raw`,
+or carrying no `sensitivity` key, stays inside the trust boundary.
+
+## Python API
+
+`womblex.__all__` is the stable API, pinned by `tests/test_public_api.py`:
+`__version__`; `extract_text`; the `run_*` operations; the `*_shards` stage functions;
+`build_bundle`; `write_run_manifest`; `read_results` (reads the elements
+role); `CONTRACT_VERSION`. Names resolve lazily, so `import womblex` does not
+load the extraction stack. Anything not in `__all__` is internal and may change
+in any release.
+
+### Deprecation policy
+
+The deprecation window for these names, and how a breaking change is
+announced, are in [STABILITY.md](https://github.com/DeepCivic/womblex/blob/main/STABILITY.md).

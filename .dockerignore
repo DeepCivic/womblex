@@ -1,0 +1,36 @@
+.git
+.github
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+pytest.log
+# The release pin, kept OUT of the artefact it names. A digest is recorded
+# after the push, so an image built at one release would carry the digests of
+# the previous one — a file inside the artefact making a stale claim about
+# which artefact it is. A run reads its image from WOMBLEX_IMAGE_REF, injected
+# by the deployment; nothing in the image reads this file.
+deploy/
+output/
+# ...but keep the vendored demo corpus: `womblex seed-demo` publishes it into a
+# fresh store, and the Dockerfile relies on `COPY . /app` carrying it
+# to /app/output/console-demo (see store/demo_corpus.py).
+!output/console-demo/
+.venv/
+venv/
+# Local development virtualenvs (e.g. `.venv-312`, `.venv-test`). Never belong
+# in the image and, unignored, dominate the build context (multi-GB) — the
+# same reason `.venv/` above is excluded. Kept broad so any `.venv*` variant a
+# contributor creates stays out.
+.venv*/
+**/.venv*/
+# Test fixtures (synthetic, and any local benchmark copy) are not needed at runtime.
+fixtures/
+docs/accuracy/
+*.egg-info/
+# A stamp left by a local `python -m build` names whatever commit that build
+# saw. The image writes its own after install (or honestly reports none), so
+# keeping a work tree's out of the context is what stops a stale commit riding
+# in and being believed.
+src/womblex/_build_stamp.py

@@ -1,0 +1,89 @@
+# Injection sinks — SQL and shell.
+#
+# Vendored from DeepCivic/runwAI at f67a2c5a8e2289817d7a65e1920fa5d67953d3e6
+# (Apache-2.0), controls/rules/injection.yaml. The JS/TS rules in the upstream
+# file are dropped — womblex is Python only. Rule IDs are kept verbatim so a
+# finding here can be traced back to the upstream rule it came from.
+#
+# These match the *sink*, not the taint path: a query or command assembled by
+# interpolation, wherever the pieces came from. That keeps verdicts stable and
+# the scan fast, at the cost of not knowing whether the interpolated value was
+# ever attacker-controlled. Broad taint analysis would, at a false-positive
+# budget nothing here has agreed to.
+#
+# Womblex's live exposure is `cloud/queue.py` — the Postgres job queue is the
+# only SQL in the tree, and it is parameterised (`%s`) with its fragments built
+# from module constants. These rules exist so that stays true.
+#
+# KNOWN FALSE-POSITIVE CLASSES
+#
+#   Interpolated identifier that is a module constant
+#     The sink match ignores provenance — `f"SELECT {_COLS} FROM womblex_jobs"`
+#     is this shape and is safe. Suppress with a reason.
+#   A local function named exec that is not subprocess
+#     Suppress with a reason naming what the function is.
+#
+# Suppress individually, with a reason after `--`, never blanket:
+#
+#   # nosemgrep: runwai-python-sql-string-building -- column list is a module constant
+#
+# A bare `# nosemgrep` with no justification should fail review.
+rules:
+  - id: runwai-python-sql-string-building
+    languages: [python]
+    severity: ERROR
+    message: >-
+      SQL built by string interpolation reaches execute(). Use a parameterised
+      query: cursor.execute("SELECT ... WHERE id = %s", (value,)).
+    metadata:
+      category: security
+      confidence: HIGH
+      source: runwAI controls/rules/injection.yaml (RWA-0021 / ISM-1276)
+    patterns:
+      - pattern-either:
+          - pattern: $CUR.execute("..." % ...)
+          - pattern: $CUR.execute("..." + $X)
+          - pattern: $CUR.execute("...".format(...))
+          - pattern: $CUR.execute(f"...")
+          - pattern: $CUR.executemany("..." % ...)
+          - pattern: $CUR.executemany(f"...")
+
+  - id: runwai-python-sql-string-building-indirect
+    languages: [python]
+    severity: ERROR
+    message: >-
+      SQL string is assembled by interpolation before execution. Parameterise the
+      query instead of building it.
+    metadata:
+      category: security
+      confidence: MEDIUM
+      source: runwAI controls/rules/injection.yaml (RWA-0021 / ISM-1276)
+    patterns:
+      - pattern-either:
+          - pattern: |
+              $Q = f"...{$X}..."
+              ...
+              $CUR.execute($Q, ...)
+          - pattern: |
+              $Q = f"...{$X}..."
+              ...
+              $CUR.execute($Q)
+
+  - id: runwai-python-shell-injection
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Shell command built by interpolation with shell=True. Pass an argument list
+      and leave shell disabled.
+    metadata:
+      category: security
+      confidence: HIGH
+      source: runwAI controls/rules/injection.yaml (RWA-0020 / ISM-1240)
+    patterns:
+      - pattern-either:
+          - pattern: subprocess.$F(f"...", ..., shell=True, ...)
+          - pattern: subprocess.$F("..." % ..., ..., shell=True, ...)
+          - pattern: subprocess.$F("..." + $X, ..., shell=True, ...)
+          - pattern: os.system(f"...")
+          - pattern: os.system("..." % ...)
+          - pattern: os.system("..." + $X)
