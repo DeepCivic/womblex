@@ -223,3 +223,51 @@ class TestMetadataLocation:
                 extract_spreadsheet_print(doc, metadata_location="invalid")
         finally:
             doc.close()
+
+
+class TestLaterPageHeaderZone:
+    """The header zone is per page: page 0's height must not clip later pages."""
+
+    _HEADERS = ("Ref", "Title", "Date", "Status")
+    _XS = (50.0, 200.0, 350.0, 500.0)
+
+    def _row(self, y: float, values: list[str]):
+        from womblex.ingest.table_grid import Span
+
+        return [
+            Span(y_top=y, y_bottom=y + 8, x_left=x, x_right=x + 40, text=v)
+            for x, v in zip(self._XS, values, strict=False)
+        ]
+
+    def _page(self, rows: list[tuple[float, list[str]]]):
+        from womblex.ingest.spreadsheet_print import _PageData
+
+        spans = [s for y, vals in rows for s in self._row(y, vals)]
+        return _PageData(spans=spans, width=600.0, height=800.0)
+
+    def _extract(self, monkeypatch, pages):
+        from womblex.ingest import spreadsheet_print as sp
+
+        monkeypatch.setattr(sp, "_collect_pages", lambda doc: pages)
+        tables, _ = extract_spreadsheet_print(object())  # type: ignore[arg-type]
+        return tables[0].rows
+
+    def _first_page(self):
+        meta = (30.0, ["Agency", "Example"])
+        header = (150.0, list(self._HEADERS))
+        data = [(170.0 + 20 * i, [f"A{i}", f"t{i}", "2026", "ok"]) for i in range(5)]
+        return [meta, header, *data]
+
+    def test_a_later_page_with_no_header_keeps_rows_above_page_zeros_header(self, monkeypatch) -> None:
+        later = [(40.0 + 20 * i, [f"B{i}", f"t{i}", "2026", "ok"]) for i in range(5)]
+        rows = self._extract(monkeypatch, [self._page(self._first_page()), self._page(later)])
+        refs = [r[0] for r in rows]
+        assert refs == [f"A{i}" for i in range(5)] + [f"B{i}" for i in range(5)]
+
+    def test_a_repeated_header_on_a_later_page_is_dropped_not_its_rows(self, monkeypatch) -> None:
+        later = [(40.0, list(self._HEADERS))] + [
+            (60.0 + 20 * i, [f"B{i}", f"t{i}", "2026", "ok"]) for i in range(5)
+        ]
+        rows = self._extract(monkeypatch, [self._page(self._first_page()), self._page(later)])
+        refs = [r[0] for r in rows]
+        assert refs == [f"A{i}" for i in range(5)] + [f"B{i}" for i in range(5)]

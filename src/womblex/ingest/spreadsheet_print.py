@@ -118,10 +118,16 @@ def extract_spreadsheet_print(
     # Column boundaries derived from DATA spans (below header zone), not
     # header spans. Many spreadsheets centre header text within a wider
     # cell; using header positions misaligns left-anchored data.
+    # Page 0's header zone is measured; a later page has its own: where the
+    # header repeats (matched by its text), or none at all.
+    header_texts = {_norm_text(s.text) for s in header_spans}
+    zone_bottoms = [header_zone_bottom] + [
+        _repeated_header_bottom(page, header_texts) for page in pages[1:]
+    ]
     data_spans: list[Span] = []
-    for page in pages:
+    for page, bottom in zip(pages, zone_bottoms, strict=True):
         for s in page.spans:
-            if s.y_top > header_zone_bottom:
+            if s.y_top > bottom:
                 data_spans.append(s)
     expected_k = _distinct_header_columns(header_spans)
     columns = columns_from_data(data_spans, page0.width, expected_k=expected_k)
@@ -135,13 +141,10 @@ def extract_spreadsheet_print(
     bbox_min_y = header_y
     bbox_max_y = 0.0
 
-    for page_idx, page in enumerate(pages):
+    for page, bottom in zip(pages, zone_bottoms, strict=True):
         bands = bin_y_bands(page.spans)
         # Drop bands inside the header zone — frozen headers repeat per page.
-        body_bands = [
-            (by, bs) for by, bs in bands
-            if by > header_zone_bottom
-        ]
+        body_bands = [(by, bs) for by, bs in bands if by > bottom]
         column_rows = bands_to_rows(body_bands, columns)
         all_rows.extend(drop_blank_rows(column_rows))
         if body_bands:
@@ -208,6 +211,27 @@ def _collect_pages(doc: Document) -> list[_PageData]:
                     ))
         pages.append(_PageData(spans=spans, width=page.rect.width, height=page.rect.height))
     return pages
+
+
+def _norm_text(text: str) -> str:
+    return " ".join(text.lower().split())
+
+
+def _repeated_header_bottom(page: _PageData, header_texts: set[str]) -> float:
+    """Bottom of the header this page repeats, or ``-inf`` when it repeats none.
+
+    A band is the repeated header when at least two of its spans, and at least
+    60% of them, carry page 0's header texts. A page without one has no header
+    zone, so every band on it is body — a data row sitting higher than page
+    0's header is not discarded.
+    """
+    bands = bin_y_bands(page.spans)
+    for by, bs in bands:
+        hits = sum(_norm_text(s.text) in header_texts for s in bs)
+        if hits >= 2 and hits >= 0.6 * len(bs):
+            merged = _merge_multi_line_header(bands, by)
+            return max(s.y_top for s in merged) + ROW_BAND_PT
+    return float("-inf")
 
 
 def _find_header_band(
