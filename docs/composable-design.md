@@ -79,6 +79,7 @@ Its two non-obvious edges are config-derived, so the contracts alone cannot expr
 |---|---|
 | `extract` (shards) | `layout`, `normalise`, `spellfix`, `enrich`, `chunk`, `money`, `done` |
 | `extract` → `.txt` | `done` |
+| `layout` | `normalise`, `spellfix`, `enrich`, `chunk`, `money`, `done` |
 | `normalise` | `spellfix`, `enrich`, `chunk`, `money`, `done` |
 | `spellfix` | `enrich`, `chunk`, `money`, `done` |
 | `enrich` | `chunk` (reuses `.enrichment_doc` under `chunking_model`), `link`, `money`, `done` |
