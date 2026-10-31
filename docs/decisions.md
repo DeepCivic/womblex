@@ -320,7 +320,7 @@ addresses before enabling it.
 ### Redaction detection — vector-first, raster fallback
 `redact/stage.py` enumerates `page.drawings()` for near-black filled
 rectangles first (native PDFs; no area threshold) and falls back to raster
-contour detection on scanned pages. Filters surfaced during validation:
+contour detection on any page with none (scanned pages among them). Filters surfaced during validation:
 near-black RGB/CMYK fill; `min_width ≥ 3pt` (excludes narrow column
 separators); `min_height ≥ 8pt` (excludes glyph-rendering small filled rects on
 PDFs that draw text as filled-path glyphs). Raster-path layout exclusion

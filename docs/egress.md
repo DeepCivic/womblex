@@ -98,7 +98,7 @@ refused before anything is written.
 
 Resolution is non-fatal per document. Each `source_index.parquet` row carries a
 status drawn from the existing `SourceResolver` vocabulary — `resolved`,
-`hash_mismatch`, `not_found`, `unsupported_basis` — plus one `egress.py` adds
+`hash_mismatch`, `not_found`, `unsupported_basis` — plus one `store/egress_sources.py` adds
 of its own, `upload_failed`, for a source that resolved but whose copy to the
 destination raised; each is isolated per source, so one failed upload never
 aborts the export. A records-ingested document (hashed over id and text, not

@@ -8,8 +8,8 @@ callers compose them directly.
 ```
 Input File
 │
-├─ Narrative (PDF/DOCX/TXT/MD) ──► Extract Text ──► [.txt or .parquet]
-├─ Tabular (CSV/XLSX) ────────► Transform Rows ──► [.parquet]
+├─ Narrative (PDF/images/DOCX/TXT/MD) ─► Extract Text ──► [.txt or .parquet]
+├─ Tabular (CSV/XLSX/XLS) ────► Transform Rows ──► [.parquet]
 ├─ Tabular (PSV/G-NAF) ──────► Standalone Ingest ──► [.parquet]
 ├─ Register (XML/ABN) ───────► Standalone Ingest ──► [.parquet]
 └─ Geospatial (SHP) ─────────► Transform Geometry ──► [GeoParquet]
@@ -132,7 +132,7 @@ The ingest reads each PSV via `pyarrow.csv` (streamed, constant memory), applies
 
 - **Zero semantic mutation:** All columns stored as strings. No type coercion, no null inference. Empty strings remain `""`.
 - **Provenance metadata:** Each Parquet file carries `gnaf.schema_version`, `gnaf.table_name`, `gnaf.state`, `gnaf.source_file`, `gnaf.row_count`, and `gnaf.source_md5` as key-value metadata.
-- **Fail-fast on schema mismatch:** Column count is validated against the static schema. Unrecognised filenames or unknown table names are skipped with a warning.
+- **Per-file failure isolation:** A row whose column count differs from the static schema fails the read; the file is logged, its partial output removed, and the directory ingest continues. Unrecognised filenames or unknown table names are skipped with a warning.
 
 CLI: `womblex ingest-gnaf <input_dir> -o <output_dir> [--no-md5]`
 

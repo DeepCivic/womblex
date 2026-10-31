@@ -20,6 +20,8 @@ is the canonical structural unit. An `ExtractionResult` carries:
 | `elements: list[Element]` | the ordered structural stream — what the parquet writer serialises |
 | `pages: list[PageResult]` | per-page concatenated text; mutable so downstream PII / redaction can rewrite `page.text` |
 | `metadata` | document-level capture metadata (strategy, confidence, page count, content mix) |
+| `method`, `document_metadata` | the doc-level type (PDFs, images) or extractor name; document-level key/value metadata |
+| `layout` | the layout step's regions per selected page, written to `*.layout_regions.parquet` |
 | `warnings`, `error`, `document_id`, `redaction_report` | provenance and status |
 
 The legacy view properties `.text_blocks` / `.tables` / `.forms` /
