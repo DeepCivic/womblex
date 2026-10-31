@@ -153,7 +153,7 @@ resident set.
 | `womblex extract`, one native PDF | 1.8 s | 324 MiB |
 | `womblex extract`, one scanned page image | 4.4 s | 832 MiB |
 | `womblex run`, 18 documents (one batch) | 44 s | 1.19 GiB |
-| `womblex run`, 90 documents (four batches of 25) | 2 min 47 s | 1.34 GiB |
+| `womblex run`, 90 documents (four batches of up to 25) | 2 min 47 s | 1.34 GiB |
 | `normalise`, `spellfix`, `money` over the 90 | 1–2 s each | 209–254 MiB |
 | `chunk` over the 90 | 6.9 s | 974 MiB |
 | `pii` over the 90, regex backstop on (loads the PII context model) | 37 s | 1.38 GiB |
