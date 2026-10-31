@@ -358,14 +358,19 @@ def _centre_in_any(box: Rect, rects: Sequence[Rect]) -> bool:
 
 
 def _build_text_blocks(
-    page: Page, *, exclude_rects: Sequence[Rect] | None = None,
+    page: Page,
+    *,
+    exclude_rects: Sequence[Rect] | None = None,
+    displayed_rects: Sequence[Rect] | None = None,
 ) -> list[TextBlock]:
     """Extract text blocks with positional data and type classification.
 
     A block whose centre falls inside an ``exclude_rects`` rect (a table the
     page emits as its own element) is left out, so table text is not also a
-    paragraph.
+    paragraph. ``displayed_rects`` are the same in the page's rotated, displayed
+    frame, so a block is rotated into it before the test.
     """
+    matrix = page.rotation_matrix if page.rotation else None
     blocks: list[TextBlock] = []
     pw, ph = page.rect.width, page.rect.height
 
@@ -374,6 +379,10 @@ def _build_text_blocks(
             continue
         if exclude_rects and _centre_in_any(block.bbox, exclude_rects):
             continue
+        if displayed_rects:
+            shown = block.bbox if matrix is None else block.bbox.transform(matrix)
+            if _centre_in_any(shown, displayed_rects):
+                continue
         pos = _normalise_bbox(block.bbox.as_tuple(), pw, ph)
 
         # Collect text + typography signals from spans

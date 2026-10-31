@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from womblex.ingest.extract import TableData, _normalise_bbox
+from womblex.ingest.pdf.types import Rect
 from womblex.ingest.table_grid import (
     COLUMN_X_TOLERANCE_PT,
     ROW_BAND_PT,
@@ -74,6 +75,24 @@ def extract_spreadsheet_print(
 ) -> tuple[list[TableData], dict[str, str]]:
     """Extract a spreadsheet-print PDF as one multi-page table + metadata.
 
+    See :func:`extract_spreadsheet_print_zones`; this drops the page zones.
+    """
+    tables, metadata, _ = extract_spreadsheet_print_zones(doc, metadata_location=metadata_location)
+    return tables, metadata
+
+
+def extract_spreadsheet_print_zones(
+    doc: Document,
+    *,
+    metadata_location: str = "both",
+) -> tuple[list[TableData], dict[str, str], list[Rect | None]]:
+    """:func:`extract_spreadsheet_print` plus where the table sits on each page.
+
+    The third element holds, per page, the rectangle (in the displayed frame,
+    the one the spans were read in) covering the header and body the table
+    took, or ``None`` for a page that contributed nothing. A caller that also
+    emits the page's text as paragraphs leaves out what lies inside it.
+
     Returns ``(tables, document_metadata)``. The list contains a single
     ``TableData`` whose ``rows`` accumulate across all pages of the doc.
     Whether the metadata block populates the table's ``context`` and/or
@@ -88,7 +107,7 @@ def extract_spreadsheet_print(
 
     pages = _collect_pages(doc)
     if not pages:
-        return [], {}
+        return [], {}, []
 
     # Locate header band on page 0 — wide-spread band with most spans is the
     # canonical anchor. Multi-line header lines (e.g. "Subsection \n code",
@@ -96,13 +115,13 @@ def extract_spreadsheet_print(
     page0 = pages[0]
     header_anchor = _find_header_band(page0.spans, page0.width)
     if header_anchor is None:
-        return [], {}
+        return [], {}, []
     header_y, _ = header_anchor
 
     bands_p0 = bin_y_bands(page0.spans)
     header_spans = _merge_multi_line_header(bands_p0, header_y)
     if len(header_spans) < MIN_COLUMNS:
-        return [], {}
+        return [], {}, []
 
     # Header zone vertical range — bands inside this range are the (possibly
     # multi-line) header itself and must be excluded from body extraction on
@@ -121,9 +140,8 @@ def extract_spreadsheet_print(
     # Page 0's header zone is measured; a later page has its own: where the
     # header repeats (matched by its text), or none at all.
     header_texts = {_norm_text(s.text) for s in header_spans}
-    zone_bottoms = [header_zone_bottom] + [
-        _repeated_header_bottom(page, header_texts) for page in pages[1:]
-    ]
+    later_zones = [_repeated_header_zone(page, header_texts) for page in pages[1:]]
+    zone_bottoms = [header_zone_bottom] + [z[1] if z else float("-inf") for z in later_zones]
     data_spans: list[Span] = []
     for page, bottom in zip(pages, zone_bottoms, strict=True):
         for s in page.spans:
@@ -132,7 +150,7 @@ def extract_spreadsheet_print(
     expected_k = _distinct_header_columns(header_spans)
     columns = columns_from_data(data_spans, page0.width, expected_k=expected_k)
     if len(columns) < MIN_COLUMNS:
-        return [], {}
+        return [], {}, []
     headers = _header_text_from_spans(header_spans, columns)
 
     all_rows: list[list[str]] = []
@@ -151,7 +169,7 @@ def extract_spreadsheet_print(
             bbox_max_y = max(bbox_max_y, body_bands[-1][0])
 
     if not headers:
-        return [], {}
+        return [], {}, []
 
     # Build position from union bbox. Falls back to page-0 dimensions.
     pw, ph = pages[0].width, pages[0].height
@@ -161,6 +179,13 @@ def extract_spreadsheet_print(
     pos = _normalise_bbox(
         (bbox_min_x, bbox_min_y, bbox_max_x, bbox_max_y), pw, ph
     )
+
+    zone_tops = [header_zone_top] + [z[0] if z else 0.0 for z in later_zones]
+    x0, x1 = columns[0].x_left, columns[-1].x_right
+    page_rects: list[Rect | None] = [
+        Rect(x0, top, x1, page.height) if any(s.y_top > bottom for s in page.spans) else None
+        for page, top, bottom in zip(pages, zone_tops, zone_bottoms, strict=True)
+    ]
 
     table_context = metadata if metadata_location in ("table", "both") else {}
     doc_metadata = metadata if metadata_location in ("document", "both") else {}
@@ -172,7 +197,7 @@ def extract_spreadsheet_print(
         confidence=0.7,
         context=table_context,
     )
-    return [table], doc_metadata
+    return [table], doc_metadata, page_rects
 
 
 # ---------------------------------------------------------------------------
@@ -217,8 +242,8 @@ def _norm_text(text: str) -> str:
     return " ".join(text.lower().split())
 
 
-def _repeated_header_bottom(page: _PageData, header_texts: set[str]) -> float:
-    """Bottom of the header this page repeats, or ``-inf`` when it repeats none.
+def _repeated_header_zone(page: _PageData, header_texts: set[str]) -> tuple[float, float] | None:
+    """``(top, bottom)`` of the header this page repeats, or ``None`` when it repeats none.
 
     A band is the repeated header when at least two of its spans, and at least
     60% of them, carry page 0's header texts. A page without one has no header
@@ -230,8 +255,11 @@ def _repeated_header_bottom(page: _PageData, header_texts: set[str]) -> float:
         hits = sum(_norm_text(s.text) in header_texts for s in bs)
         if hits >= 2 and hits >= 0.6 * len(bs):
             merged = _merge_multi_line_header(bands, by)
-            return max(s.y_top for s in merged) + ROW_BAND_PT
-    return float("-inf")
+            return (
+                min(s.y_top for s in merged) - HEADER_MERGE_PX,
+                max(s.y_top for s in merged) + ROW_BAND_PT,
+            )
+    return None
 
 
 def _find_header_band(

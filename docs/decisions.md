@@ -408,6 +408,18 @@ The subtraction is an element-stream concern; page text feeds `_text_coverage`
 and the accuracy suite's CER, which compare against a transcript of the whole
 page, and chunking reads `elements` rather than `pages[i].text`.
 
+### A native page's table text is not also a paragraph
+The native path had the same double-count the OCR path was fixed for:
+`_build_text_blocks` emitted every text block on the page as a paragraph,
+including the blocks inside a detected table, so money, enrichment (billed per
+token) and PII counted a table twice. A block whose centre lies inside a table
+the page emits (`_find_native_tables`, ruled or text-strategy) is left out of
+the paragraphs. On a spreadsheet-print document the same rule uses the manifest
+table's area on each page (`extract_spreadsheet_print_zones`: the header and
+body the table took, in the displayed frame, so a rotated page's blocks are
+rotated into it first); the metadata lines above the header stay narrative.
+`PageResult.text` is untouched, as for OCR.
+
 ### The ground-truth preset name rides the run stamp, not a helper argument
 
 A ground-truth unit's sidecar records both `preset_digest` (which configuration,
