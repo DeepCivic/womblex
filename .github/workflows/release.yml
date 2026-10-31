@@ -57,3 +57,9 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          # A tag pushed again (as v0.6.0 was after the history squash) rebuilds
+          # a version PyPI already holds, and PyPI refuses a second upload of a
+          # file. Skip the files already there rather than fail the run; PyPI
+          # keeps the first upload either way.
+          skip-existing: true
