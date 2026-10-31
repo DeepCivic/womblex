@@ -183,8 +183,7 @@ Approaches tried and abandoned, library-general limitations, and the deferred ba
   synthetic set at F1, and the MuPDF values they measured are pinned in
   `tests/test_pdf_block_parity.py` and `tests/test_pdf_text.py`. Left open:
   multi-column reading order, Phase 0's divergence tail, which no synthetic page
-  reproduces (the ASX-page investigation is in
-  [plan-post-gt-baseline.md](plan-post-gt-baseline.md)).
+  reproduces; reproducing it needs the ASX pages in womblex-collection.
   - **Behaviour changes from the swap.** Calling `extract_text` directly can no
     longer open XPS, EPUB, MOBI, CBZ or SVG, nor an image format MuPDF decodes
     and Pillow does not; PDF and the common image formats remain, and WebP and
