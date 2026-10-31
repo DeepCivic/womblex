@@ -416,3 +416,25 @@ class TestEnrichmentAddress:
         assert count >= 1
         assert "<ADDRESS>" in chunk.text
         assert "George Street" not in chunk.text
+
+
+class TestOverlappingSpans:
+    def test_partial_overlap_merges_into_one_span(self) -> None:
+        text = "Signed by Ms Jane Citizen Smith of Fyshwick"
+        cleaner = PIICleaner(context_similarity_threshold=0.5)
+        spans = cleaner.detect_spans(
+            text,
+            [(13, 25, "PERSON", "e1"), (18, 31, "PERSON", "e1")],
+            use_regex=False,
+        )
+        assert [(s.start, s.end) for s in spans] == [(13, 31)]
+        assert text[spans[0].start : spans[0].end] == "Jane Citizen Smith"
+
+    def test_adjacent_spans_stay_separate(self) -> None:
+        cleaner = PIICleaner(context_similarity_threshold=0.5)
+        spans = cleaner.detect_spans(
+            "Jane Smith",
+            [(0, 4, "PERSON", "e1"), (4, 10, "PERSON", "e2")],
+            use_regex=False,
+        )
+        assert [(s.start, s.end) for s in spans] == [(0, 4), (4, 10)]

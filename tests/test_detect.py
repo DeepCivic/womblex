@@ -48,6 +48,15 @@ class TestHasTableStructure:
     def test_empty_string(self) -> None:
         assert _has_table_structure("") is False
 
+    @pytest.mark.parametrize("sep", ["|", "\t"])
+    def test_long_delimited_line_is_linear(self, sep: str) -> None:
+        import time
+
+        text = f"x {sep} y {sep} z " * 600
+        start = time.perf_counter()
+        _has_table_structure(text)
+        assert time.perf_counter() - start < 1.0
+
 
 # ---------------------------------------------------------------------------
 # _classify

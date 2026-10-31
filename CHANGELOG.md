@@ -9,6 +9,9 @@ Entries are terse by design; rationale lives in the PR/commit history.
 ## [Unreleased]
 
 ### Fixed
+- **Partly overlapping PII spans merge, not drop.** `PIICleaner.detect_spans` kept the first of two overlapping candidates and discarded the second, leaving its tail ("Smith" in "Jane Citizen Smith") unmasked in `*.clean_text.parquet`; overlapping candidates now become one span covering both, with the higher-scoring type and entity id.
+- **A generic mention no longer links at confidence 1.0.** `_token_set_ratio` scored a mention that was a strict subset of a register name ("Early Learning" against "Artemis Early Learning") as 1.0; a mention leaving a register word uncovered now scores the plain sorted ratio.
+- **Table detection no longer backtracks on long delimited lines.** The pipe and tab alternatives of `detect._TABLE_PATTERN` use `[^|\n]*` / `[^\t\n]*` instead of `.*`, so a long piped line is scanned in linear time.
 - **A release records its image digest.** `publish-images.yml`'s record job read the digest from `digests/digest-pipeline/pipeline`, but `download-artifact` extracts a single matched artefact straight into `digests/`, so the job failed on `v0.6.0` and `deploy/images.env` was never written. It now downloads with `merge-multiple: true` and reads `digests/pipeline`, the same path for one image or several.
 
 ## [0.6.0] - 2026-10-30

@@ -136,7 +136,8 @@ def _token_set_ratio(a: str, b: str) -> float:
     """Token-set similarity over whitespace tokens (rapidfuzz-style, stdlib only).
 
     Scores the sorted token *intersection* against each side's
-    intersection+remainder and takes the best ratio. A token superset
+    intersection+remainder and takes the best ratio. A mention missing a
+    register word scores only the plain sorted ratio. A token superset
     (``"artemis early learning fyshwick"`` vs ``"artemis early learning"``)
     scores 1.0; the distinctive brand token still dominates over generic
     shared tokens. Falls back to a plain ratio when there is no overlap.
@@ -145,6 +146,12 @@ def _token_set_ratio(a: str, b: str) -> float:
     inter = sorted(ta & tb)
     if not inter:
         return SequenceMatcher(None, a, b).ratio()
+    if tb - ta:
+        # The mention leaves a register word uncovered: a subset of the register
+        # name (a generic "early learning") must not score as the whole name.
+        return SequenceMatcher(
+            None, " ".join(sorted(ta)), " ".join(sorted(tb))
+        ).ratio()
     s_inter = " ".join(inter)
     s_a = " ".join(inter + sorted(ta - tb)).strip()
     s_b = " ".join(inter + sorted(tb - ta)).strip()
