@@ -159,6 +159,7 @@ womblex/
 │   │   ├── deployment_record.py # womblex.deployments footer key: the deployment each model ran on, plus its reader
 │   │   ├── endpoint_identity.py # A SageMaker endpoint's name and region with any AWS account id removed
 │   │   ├── content_digest.py # content_digest(elements): the manifest's determinism handle (kind / order / text / cells / fields / sheet cells / meta)
+│   │   ├── element_fingerprint.py # fingerprints(elements): elements.fingerprint, 8 bytes over content_digest's payload without order; occurrences(); read_shard_elements() to recompute one
 │   │   ├── contract.py      # womblex.contract_version + womblex.sensitivity (raw / masked / none) + womblex.written_at footer keys, on every pipeline Parquet
 │   │   ├── document_versions.py # replaces / replaced_by / is_current on the run manifest — versions chained per source_relpath
 │   │   ├── run_manifest.py  # Consolidate per-batch manifests into a run-root manifest.parquet + the run record in its footer

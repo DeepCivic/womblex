@@ -31,7 +31,7 @@ from typing import Literal
 
 from womblex.store.source_provenance import NAMESPACE
 
-CONTRACT_VERSION = "3.2"
+CONTRACT_VERSION = "3.3"
 CONTRACT_VERSION_KEY = f"{NAMESPACE}.contract_version"
 SENSITIVITY_KEY = f"{NAMESPACE}.sensitivity"
 WRITTEN_AT_KEY = f"{NAMESPACE}.written_at"

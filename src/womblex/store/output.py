@@ -62,6 +62,7 @@ import pyarrow.parquet as pq
 
 from womblex.ingest.extract import ExtractionResult
 from womblex.store.contract import contract_footer
+from womblex.store.element_fingerprint import fingerprints
 from womblex.store.manifest_rows import _source_hash, manifest_row, unreadable_hash
 from womblex.store.run_stamp import RunStamp, sidecar_footer, workflow_footer
 from womblex.store.source_provenance import IngestProvenance
@@ -102,6 +103,7 @@ ELEMENT_SCHEMA = pa.schema([
     ("number_format", pa.string()),
     ("merge_range", pa.string()),
     ("meta", pa.map_(pa.string(), pa.string())),
+    ("fingerprint", pa.binary(8)),
 ])
 
 TABLE_CELLS_SCHEMA = pa.schema([
@@ -163,10 +165,15 @@ _MANIFEST_NULL_BACKFILL: tuple[str, ...] = ("content_digest", "replaces", "repla
 # has no recorded geometry.
 _TABLE_CELLS_NULL_BACKFILL: tuple[str, ...] = ("bbox",)
 
+# `elements.fingerprint` (contract 3.3) back-fills as null; it is recomputable
+# from the shard (`element_fingerprint.read_shard_elements`).
+_ELEMENTS_NULL_BACKFILL: tuple[str, ...] = ("fingerprint",)
+
 # Per role: (columns back-filled with "", columns back-filled with null).
 _BACKFILL: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "manifest": (_MANIFEST_BACKFILL, _MANIFEST_NULL_BACKFILL),
     "table_cells": ((), _TABLE_CELLS_NULL_BACKFILL),
+    "elements": ((), _ELEMENTS_NULL_BACKFILL),
 }
 
 CHUNKS_SCHEMA = pa.schema([
@@ -298,6 +305,7 @@ def write_results(
         hashes.append(src_hash)
         tc_count = 0
         ff_count = 0
+        prints = fingerprints(res.elements)
 
         for e in res.elements:
             elements_rows.append({
@@ -321,6 +329,7 @@ def write_results(
                 "number_format": e.number_format,
                 "merge_range": e.merge_range,
                 "meta": _meta_pairs(e.meta),
+                "fingerprint": prints[e.order],
             })
             if e.kind == "table" and e.cells:
                 for c in e.cells:

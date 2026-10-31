@@ -44,6 +44,7 @@ from pathlib import Path
 
 from womblex.ingest.elements import Element
 from womblex.store.content_digest import content_digest
+from womblex.store.element_fingerprint import fingerprints
 from womblex.store.output import (
     ELEMENT_SCHEMA,
     FORM_FIELDS_SCHEMA,
@@ -118,7 +119,7 @@ def _record_to_elements(text: str) -> list[Element]:
     ]
 
 
-def _element_row(source_hash: str, collection_id: str, elem: Element) -> dict:
+def _element_row(source_hash: str, collection_id: str, elem: Element, fingerprint: bytes | None) -> dict:
     """Project an Element onto ELEMENT_SCHEMA (text kinds only — no cells/geometry)."""
     return {
         "source_hash": source_hash,
@@ -141,6 +142,7 @@ def _element_row(source_hash: str, collection_id: str, elem: Element) -> dict:
         "number_format": None,
         "merge_range": None,
         "meta": [],
+        "fingerprint": fingerprint,
     }
 
 
@@ -181,10 +183,11 @@ def _write_batch(
         text = str(rec.get(mapping.text_field, "") or "")
         source_hash = records_source_hash(doc_id, text)
         elements = _record_to_elements(text)
+        prints = fingerprints(elements)
         if not elements:
             empty_docs += 1
         for elem in elements:
-            element_rows.append(_element_row(source_hash, mapping.collection_id, elem))
+            element_rows.append(_element_row(source_hash, mapping.collection_id, elem, prints[elem.order]))
         manifest_rows.append({
             "source_hash": source_hash,
             "collection_id": mapping.collection_id,
