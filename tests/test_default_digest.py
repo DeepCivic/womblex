@@ -38,7 +38,7 @@ _PINNED = {
     "documents/quokka-care-decision-notice_redacted.pdf":
         "208ece89afd781bc4f11f4d6f146cd43c4b40527ef18faea6b56dac3443fda50",
     "documents/koala-habitat-audit.pdf":
-        "2ee1b87e67415a50981f49123816ecba2eefd1b8741336c8b29231fce3d6a06d",
+        "09ca3a44c15f54c420e44b8c9d22f8c8556c1fafa7a67df316423523a856c4e0",
     "documents/numbat-scanned-survey-page.pdf":
         "8b3c633cd73cfd3024cc7e6294b7d3abf2f19f5df027e38b6d03fe2be1012473",
 }
