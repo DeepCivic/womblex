@@ -111,6 +111,12 @@ class TestIngestRecords:
         # \n\n-delimited source → reassembled narrative is byte-identical.
         assert narrative == "First paragraph of the judgment.\n\nSecond paragraph here."
 
+    def test_elements_carry_fingerprints(self, tmp_path):
+        out = tmp_path / "documents"
+        ingest_records(_records()[:1], out, _MAPPING)
+        prints = read_elements(out / "batch-0001.parquet").column("fingerprint")
+        assert len(prints) > 0 and prints.null_count == 0
+
     def test_source_hash_joins_elements_and_provenance(self, tmp_path):
         out = tmp_path / "documents"
         ingest_records(_records(), out, _MAPPING)

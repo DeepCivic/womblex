@@ -105,6 +105,7 @@ batch-0001._manifest.parquet    # one row per source file
 | `sheet`, `row`, `col` | string / int32 | spreadsheet location |
 | `value`, `value_type`, `formula`, `number_format`, `merge_range` | string | spreadsheet cell payload; `merge_range` is set on a merge's anchor cell only; `formula` is in the schema but never set by ingest (always null) |
 | `meta` | map&lt;string,string&gt; | parser-specific overflow |
+| `fingerprint` | binary(8) | the first 8 bytes of SHA-256 over the element's `content_digest` payload without `order` (`store/element_fingerprint.py`), so an insert leaves every other element's fingerprint alone. A table's covers its cells and a form's its fields; a sheet's is on its `sheet_meta` row, over that row and its `sheet_cell` rows in (row, col) order; `sheet_cell` rows carry null. Identical elements share one: `occurrences()` derives each one's ordinal among its kind and fingerprint in `elem_order`. Not keyed. An `image`'s covers its alt text and meta, not its pixels |
 
 ### table_cells.parquet
 

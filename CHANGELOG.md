@@ -8,6 +8,9 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 ## [Unreleased]
 
+### Added
+- **Element fingerprints.** `elements` gains `fingerprint` (`binary(8)`, contract 3.3): the first 8 bytes of SHA-256 over an element's `content_digest` payload without `order` (`store/element_fingerprint.py`), so another system can tell which elements changed between versions of a document. One per element, a table's and a form's covering their cells and fields; a sheet's on its `sheet_meta` row; `sheet_cell` rows null. `occurrences()` derives the ordinal among repeats; an older shard reads the column as null and `read_shard_elements` recomputes it. `content_digest` is unchanged.
+
 ### Fixed
 - **A spreadsheet-print manifest's rows are no longer also paragraphs.** The per-page paragraphs kept every cell of the manifest the combined table was then appended for (659 of 659 cells of the FOI index fixture, 118 of 118 of the schedule). `extract_spreadsheet_print_zones` returns the area the table took on each page and the native path leaves blocks inside it out; `extract_spreadsheet_print` keeps its signature.
 - **A native table's text is no longer also a paragraph.** `_build_text_blocks` turned every text block on a native page into a paragraph, including those inside a detected table, so money, enrichment (billed per token) and PII counted the table twice (a person in a table got two mask numbers); a block whose centre lies inside a ruled table (confidence ≥ 0.8) the page emits is now left out, as the OCR path's `_table_aware_text` already does. A text-strategy hit keeps its prose as paragraphs: it over-fires on multi-column prose and can be empty.

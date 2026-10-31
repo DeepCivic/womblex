@@ -18,10 +18,9 @@ from collections.abc import Iterable
 from womblex.ingest.elements import Element
 
 
-def _element_payload(e: Element) -> list[object]:
+def content_fields(e: Element) -> list[object]:
+    """An element's content fields, without kind or order; shared with its fingerprint."""
     return [
-        e.kind,
-        e.order,
         e.text,
         [[c.row, c.col, c.value, c.rowspan, c.colspan, c.value_type] for c in e.cells or ()],
         e.header_rows,
@@ -30,6 +29,10 @@ def _element_payload(e: Element) -> list[object]:
         [e.sheet, e.row, e.col, e.value, e.value_type, e.formula, e.number_format, e.merge_range],
         sorted(e.meta.items()),
     ]
+
+
+def _element_payload(e: Element) -> list[object]:
+    return [e.kind, e.order, *content_fields(e)]
 
 
 def content_digest(elements: Iterable[Element]) -> str:
@@ -42,4 +45,4 @@ def content_digest(elements: Iterable[Element]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-__all__ = ["content_digest"]
+__all__ = ["content_digest", "content_fields"]
