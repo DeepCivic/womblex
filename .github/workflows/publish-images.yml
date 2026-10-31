@@ -153,11 +153,15 @@ jobs:
         with:
           path: digests
           pattern: digest-*
-          merge-multiple: false
+          # Merged, so every image's file lands flat in digests/ under its matrix
+          # name. Unmerged, the action adds a per-artefact directory only when
+          # the pattern matches more than one artefact — with one image it
+          # extracted straight into digests/, and the path below did not exist.
+          merge-multiple: true
 
       - name: Write deploy/images.env
         run: |
-          pipeline=$(cat digests/digest-pipeline/pipeline)
+          pipeline=$(cat digests/pipeline)
           cat > deploy/images.env <<EOF
           # Written by .github/workflows/publish-images.yml when a release is cut.
           # Edit the workflow, not this file — a release overwrites it.

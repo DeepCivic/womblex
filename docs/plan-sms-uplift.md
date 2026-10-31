@@ -40,6 +40,9 @@ removed from this plan in the same merge.
 
 ## Phase E — Spikes, then clean-up
 
+Results: [sms-phase-e-spikes.md](sms-phase-e-spikes.md). The builds that follow from their review
+are planned in [plan-sms-phase-e-adjustments.md](plan-sms-phase-e-adjustments.md).
+
 **E1. Element evidence and fingerprint spike.**
 - Prototype, on a throwaway branch, two new columns on `ELEMENT_SCHEMA`, `TABLE_CELLS` and `FORM_FIELDS`: SHA-256 over `content_digest._element_payload`, and the element's own evidence reference.
 - Measure over the synthetic fixtures:
