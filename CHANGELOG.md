@@ -8,6 +8,8 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-31
+
 ### Added
 - **Element fingerprints.** `elements` gains `fingerprint` (`binary(8)`, contract 3.3): the first 8 bytes of SHA-256 over an element's `content_digest` payload without `order` (`store/element_fingerprint.py`), so another system can tell which elements changed between versions of a document. One per element, a table's and a form's covering their cells and fields; a sheet's on its `sheet_meta` row; `sheet_cell` rows null. `occurrences()` derives the ordinal among repeats; an older shard reads the column as null and `read_shard_elements` recomputes it. `content_digest` is unchanged.
 
