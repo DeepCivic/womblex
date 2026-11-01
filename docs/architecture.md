@@ -262,7 +262,7 @@ The chain is walkable in both directions. `store/source_resolver.py` is the retu
 
 Three mechanisms. None of them scores quality — each checks that what was written is intact and attributable:
 
-- **Per-batch integrity** — `verify_shard_persistence()` (`store/output.py`) runs *during* a run, after every batch write from `cli/pipeline.py`, checking row counts and sidecar joinability. It is the only one that runs before a run is finished.
+- **Per-batch integrity** — `verify_shard_persistence()` (`store/output.py`) runs *during* a run, after every batch write from `cli/pipeline.py`, checking row counts and sidecar joinability. It is the only one that runs before a run is finished. A failure is recorded, not raised: the batch is checkpointed as failed (re-extracted on `--resume`), named in the run record's `partial`, and the run carries on and exits 1.
 - **Directory-level audit** — `womblex verify-shards` (`cli/verify.py`) uses `store/shard_audit.py` (`audit_shard_directory` / `scan_shard_directory`) over a finished shard directory, optionally diffing across runs and, with `--input-dir`, comparing the manifest against the count of documents a run would ingest from the source directory — counted through `discover_files`, the same rule the run used, so the comparison cannot report drift that is only a disagreement about what counts as a document.
 - **Source resolution** — `womblex resolve-source` (`cli/verify.py`) uses `store/source_resolver.py` to take a run's rows back out to the corpus and verify the bytes.
 

@@ -260,9 +260,15 @@ For forms, replace `table_cells` with `form_fields` and `kind='form'`.
 - The cumulative shard-directory size has not shrunk relative to
   prior batches (catches the canonical overwrite-bug signature).
 
-A failure raises `ShardVerificationError`, which `womblex run` re-raises: the run stops there, before
-that batch's checkpoint, the later batches and the run manifest. That is an exception to "A run is
-an arrow" ([decisions-operations.md](decisions-operations.md)). A fleet batch (`process_batch`) runs
-no such check.
+A failure raises `ShardVerificationError`. `womblex run` catches it, logs it with the batch number
+and shard path, and carries on, as "A run is an arrow" ([decisions-operations.md](decisions-operations.md))
+requires: the batch is checkpointed, the later batches run and the run manifest is written. The
+failure is recorded in two places. The checkpoint lists the batch in `failed_batches`, with its
+documents left out of the processed set, so `--resume` archives the batch's shards (`.corrupt`) and
+re-extracts them; the resume scan alone cannot see a row-count, shrink or orphan-reference failure.
+The run record's `partial` names the batch and its error, since its rows are in the manifest but
+unverified. The run then exits 1. The size the shrink check compares against stays at its last good
+value. A manifest regenerated later with `womblex manifest` does not know about the failure, which
+only the run saw. A fleet batch (`process_batch`) runs no such check.
 
 ---
