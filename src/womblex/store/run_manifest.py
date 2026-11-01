@@ -91,8 +91,6 @@ RUN_MANIFEST_FILENAME = "manifest.parquet"
 #: ``womblex.workflow`` key its files carry; ``null`` for files written before that key.
 #: Version 8 adds ``deliveries`` — one record per workflow destination delivered to
 #: (`store/delivery_record.py`) — so an empty list means no delivery was made.
-#: Version 9 adds delivery sequences: each ``deliveries`` entry carries ``seq``, ``replaces``,
-#: ``replaced_by`` and ``documents_changed``, so a redelivery is listed beside the one it replaced.
 #: Version 10 adds ``deployments`` — the deployment each model ran on, read from the
 #: ``womblex.deployments`` key (`store/deployment_record.py`) — so an empty list means no
 #: model ran on a deployment, not a record that predates the key. From version 10 a hosted-API

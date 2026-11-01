@@ -260,6 +260,9 @@ For forms, replace `table_cells` with `form_fields` and `kind='form'`.
 - The cumulative shard-directory size has not shrunk relative to
   prior batches (catches the canonical overwrite-bug signature).
 
-Failures raise `ShardVerificationError` and halt the batch run.
+A failure raises `ShardVerificationError`, which `womblex run` re-raises: the run stops there, before
+that batch's checkpoint, the later batches and the run manifest. That is an exception to "A run is
+an arrow" ([decisions-operations.md](decisions-operations.md)). A fleet batch (`process_batch`) runs
+no such check.
 
 ---
