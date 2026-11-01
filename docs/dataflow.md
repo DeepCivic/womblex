@@ -94,7 +94,8 @@ Raw files (PDF / page images / DOCX / MD / TXT / CSV / XLSX / XLS)
 ┌───────────────────┐
 │ verify_shard_     │  → cumulative on-disk size (raises
 │ persistence       │    ShardVerificationError on any anomaly;
-│ (store/output)    │    local `womblex run` only)
+│ (store/output)    │    local `womblex run` only, which records
+│                   │    the batch as failed and carries on)
 └───────────────────┘
 ```
 

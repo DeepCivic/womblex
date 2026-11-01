@@ -64,7 +64,11 @@ def cmd_run(args: argparse.Namespace) -> int:
     from womblex.store.output import ShardVerificationError, verify_shard_persistence
     from womblex.store.retention import apply_retention, generate_run_id, most_recent_run
     from womblex.store.run_stamp import RunStamp
-    from womblex.store.shard_audit import reconcile_checkpoint_with_shards
+    from womblex.store.shard_audit import (
+        ARCHIVE_SUFFIX,
+        _archive_batch,
+        reconcile_checkpoint_with_shards,
+    )
     from womblex.store.source_provenance import IngestProvenance
     from womblex.utils.log_format import log_context
     from womblex.utils.run_log import capture_batch_log
@@ -159,11 +163,22 @@ def cmd_run(args: argparse.Namespace) -> int:
                     "Resume integrity scan: dropped %d doc(s) with corrupted shards; "
                     "they will be re-extracted.", len(dropped),
                 )
-                # Recompute cumulative size after archive renames so the
-                # post-write shrink check doesn't trip on the archived files.
-                cumulative_shard_size = sum(
-                    s.stat().st_size for s in shard_dir.glob("*.parquet")
-                )
+        # A batch that failed its post-write check was never marked processed,
+        # so its documents are re-extracted; archive its shards so they are not
+        # read twice. The resume scan cannot see every such failure itself.
+        for failed in checkpoint_mgr.state.failed_batches:
+            if failed.get("shard"):
+                _archive_batch(Path(failed["shard"]), ARCHIVE_SUFFIX)
+            logger.warning(
+                "Resume: batch %s failed its integrity check (%s); re-extracting its %d doc(s)",
+                failed.get("batch"), failed.get("error"), len(failed.get("doc_ids") or []),
+            )
+        if checkpoint_mgr.state.failed_batches:
+            checkpoint_mgr.state.failed_batches = []
+            checkpoint_mgr.save()
+        # Recompute cumulative size after archive renames so the post-write
+        # shrink check doesn't trip on the archived files.
+        cumulative_shard_size = sum(s.stat().st_size for s in shard_dir.glob("*.parquet"))
         batch_num_offset = checkpoint_mgr.state.last_batch
         all_files = checkpoint_mgr.filter_unprocessed(all_files, input_root)
         logger.info("Resuming: %d documents remaining (next batch=%d)", len(all_files), batch_num_offset + 1)
@@ -188,6 +203,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     total_files = len(all_files)
     total_succeeded = 0
     total_failed = 0
+    integrity_failures: list[str] = []
     start_time = time.time()
 
     # `run` is extraction only; redaction detection is the one true-to-source
@@ -235,19 +251,29 @@ def cmd_run(args: argparse.Namespace) -> int:
         total_succeeded += batch.succeeded
         total_failed += batch.failed
 
+        # A failed check is recorded, not raised (A run is an arrow): the batch
+        # is checkpointed as failed, the later batches run, and the run record
+        # and exit code say so. The size stays at its last good value.
+        integrity_error: str | None = None
         if outcome.rows_written > 0:
             try:
                 cumulative_shard_size = verify_shard_persistence(
                     outcome.shard_path, outcome.rows_written, cumulative_shard_size,
                 )
             except ShardVerificationError as e:
-                logger.error("[Batch %d] integrity check failed: %s", batch_num, e)
-                raise
+                integrity_error = str(e)
+                integrity_failures.append(f"batch {batch_num} ({outcome.shard_path.name}): {e}")
+                logger.error(
+                    "[Batch %d] integrity check failed for %s: %s; carrying on, "
+                    "its documents will be re-extracted on --resume",
+                    batch_num, outcome.shard_path, e,
+                )
 
         doc_ids = [r.doc_id for r in batch.results]
         checkpoint_mgr.update(
             doc_ids, batch.succeeded, batch.failed, batch_num,
             paths=[relpath_key(r.path, input_root) for r in batch.results],
+            integrity_error=integrity_error, shard=str(outcome.shard_path),
         )
 
         batch_elapsed = time.time() - batch_start
@@ -263,13 +289,19 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     from womblex.store.run_manifest import write_run_manifest
 
-    manifest_path = write_run_manifest(shard_dir)
+    manifest_path = write_run_manifest(shard_dir, failed_batches=integrity_failures)
 
     total_elapsed = time.time() - start_time
     logger.info(
         "Done in %s: %d succeeded, %d failed. Output: %s (manifest: %s)",
         format_eta(total_elapsed), total_succeeded, total_failed, output_root, manifest_path,
     )
+    if integrity_failures:
+        logger.error(
+            "%d batch(es) failed the shard integrity check (listed in the run record's "
+            "`partial`): %s", len(integrity_failures), "; ".join(integrity_failures),
+        )
+        return 1
     return 0
 
 

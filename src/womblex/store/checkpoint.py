@@ -49,6 +49,10 @@ class CheckpointState:
     last_batch: int = 0
     started_at: str = ""
     updated_at: str = ""
+    #: Batches whose shards failed the post-write integrity check: batch number,
+    #: shard path, error, and the doc ids and paths left out of the processed
+    #: sets so `--resume` re-extracts them. Empty in an older checkpoint.
+    failed_batches: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -60,6 +64,7 @@ class CheckpointState:
             "last_batch": self.last_batch,
             "started_at": self.started_at,
             "updated_at": self.updated_at,
+            "failed_batches": self.failed_batches,
         }
 
     @classmethod
@@ -76,6 +81,7 @@ class CheckpointState:
             # crash anything that parses it.
             started_at=data.get("started_at") or "",
             updated_at=data.get("updated_at") or "",
+            failed_batches=list(data.get("failed_batches") or []),
         )
 
 
@@ -191,11 +197,24 @@ class CheckpointManager:
         failed: int,
         batch_num: int,
         paths: list[str] | None = None,
+        *,
+        integrity_error: str | None = None,
+        shard: str | None = None,
     ) -> None:
-        """Update checkpoint after a batch completes."""
-        self.state.processed_ids.update(doc_ids)
-        self.state.processed_paths.update(paths or [])
-        self.state.total_processed += len(doc_ids)
+        """Update checkpoint after a batch completes.
+
+        With *integrity_error* the batch is recorded in ``failed_batches`` and
+        its documents are not marked processed, so `--resume` re-extracts them.
+        """
+        if integrity_error is not None:
+            self.state.failed_batches.append({
+                "batch": batch_num, "shard": shard, "error": integrity_error,
+                "doc_ids": list(doc_ids), "paths": list(paths or []),
+            })
+        else:
+            self.state.processed_ids.update(doc_ids)
+            self.state.processed_paths.update(paths or [])
+            self.state.total_processed += len(doc_ids)
         self.state.total_succeeded += succeeded
         self.state.total_failed += failed
         self.state.last_batch = batch_num
