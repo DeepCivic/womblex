@@ -104,7 +104,7 @@ one of five commands on the same image unavailable.
 ## The third-party finding, recorded not fixed
 
 Two of the three third-party references carry no tag, so they resolve to
-whatever the registry currently serves. `postgres` is pinned to the 16.15
+whatever the registry currently serves. `postgres` is pinned to the 18.4
 release and its digest, which Dependabot moves.
 
 This is recorded rather than corrected because it is a different change with a

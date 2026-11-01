@@ -31,13 +31,13 @@ womblex/
 │   │   ├── profile.py      # profile subcommand
 │   │   ├── demo.py         # seed-demo subcommand (publish the vendored demo run)
 │   │   ├── verify.py       # verify-shards, verify-evidence, resolve-source subcommands
-│   │   └── workflow.py     # run-workflow / validate / plan / dispatch-workflow / schedule-workflow / add-to-collection / rerun-collection / remove-workflow subcommands, each over a workflow file
+│   │   └── workflow.py     # run-workflow / validate / plan / dispatch-workflow / schedule-workflow / add-to-collection / rerun-collection / remove-workflow / deliver subcommands, each over a workflow file
 │   ├── config/             # Pydantic config models (__init__: YAML loader + WomblexConfig; process.py: process-stage models; models.py: the OCR, enrichment and embedding model-slot settings)
 │   ├── pipeline_order.py   # PIPELINE_ORDER — what runs when; enabled_downstream_stages(config)
 │   ├── config_tools.py     # A composed config: JSON Schema without paths, validation and YAML under a deployment's paths
 │   ├── presets.py          # Named partial configs (built-in DEFAULT-Isaacus + operator-saved): read, list, save, delete
 │   ├── batch.py            # process_batch() — shared per-batch pipeline body (extract → optional redaction detection; extraction only)
-│   ├── operations/         # Independent operations, one module each: extract, redact, chunk, pii, enrich — callers compose directly
+│   ├── operations/         # Independent operations, one module each: extract, redact, chunk, pii, enrich (plus models.py, the batch dataclasses, and persist.py, the Parquet writers) — callers compose directly
 │   │   ├── models.py       # DocumentResult / BatchResult dataclasses + PreconditionError
 │   │   └── persist.py      # write_batch_parquet / write_batch_enrichment
 │   ├── score.py            # womblex score subcommand — labels-vs-parquet CER scoring

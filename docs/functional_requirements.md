@@ -157,7 +157,7 @@ Terms the requirements use, as the code defines them.
 **TO-DO:**
 
 - **Multi-row / hierarchical headers are emitted for DOCX only; spreadsheets and the legacy table view still collapse to row 0.** `DocxExtractor` (`strategies_file.py`) now populates `header_rows` with the full leading run of `w:tblHeader`-declared rows, so a multi-row Word table header is preserved. Two producers remain single-row: spreadsheet headers are hard-coded to row 0 by the producer (`ingest/spreadsheet.py`: `split_preamble` picks one header row and `_emit_sheet` keeps it at row 0; `_sheet_rows` in `process/money_stage.py` is a consumer that inherits it), so a genuine multi-row header is collapsed by pandas into one row and the extra header rows become data rows; and `table_to_element` (`views.py`) reconstructs a legacy `TableData`, whose flat `headers` list cannot carry more than one header row. No **cell-level** header-row coordinate is carried yet — `header_rows` lives on the table element, not on each `Cell`. Decide whether to (a) detect and emit multi-row headers from the spreadsheet layout too and add a per-cell header-row coordinate (a `Cell`/sidecar schema change), or (b) document single-row-header as the intended contract for the spreadsheet and legacy-view producers.
-- **`formula` is never captured.** The element schema carries `formula`, but no spreadsheet producer sets it, so it is always null. The XLSX openpyxl pass in `ingest/spreadsheet.py` already loads formulas (no `data_only`), so it can carry them alongside pandas' cached values.
+- **`formula` is never captured.** The element schema carries `formula`, but no spreadsheet producer sets it, so it is always null. Both openpyxl passes in `ingest/spreadsheet.py` open the workbook with `data_only=True` (cached values), so carrying formulas needs a pass without it, beside pandas' cached values.
 
 ## 7. Standalone Reference Register Ingestion
 
@@ -179,7 +179,7 @@ Terms the requirements use, as the code defines them.
 
 **TO-DO:**
 
-- **G-NAF and geospatial writes are not guarded against partial output (re: "discarding partial output without halting the directory ingest").** `gnaf.ingest_psv` calls `pq.write_table` unguarded, so a write failure propagates out of `ingest_gnaf_directory` and halts the directory ingest, possibly leaving a partial file. `geospatial.ingest_shapefile` catches a `to_parquet` failure and records it on the result but does not remove the partial file, and its follow-up provenance rewrite (`pq.read_table` / `pq.write_table`) is unguarded. Decide whether to (a) guard both writes and unlink partial output on failure, as `abn_bulk` does, or (b) narrow the criterion to read-failure isolation for these two ingests.
+- **Geospatial writes are not guarded against partial output (re: "discarding partial output without halting the directory ingest").** `geospatial.ingest_shapefile` catches a `to_parquet` failure and records it on the result but does not remove the partial file, and its follow-up provenance rewrite (`pq.read_table` / `pq.write_table`) is unguarded. Decide whether to (a) guard both writes and unlink partial output on failure, as `abn_bulk` and `gnaf.ingest_psv` do, or (b) narrow the criterion to read-failure isolation for this ingest.
 
 ## 8. Output Data Contract & Persistence Integrity
 
@@ -743,7 +743,7 @@ Requirements not yet fully met. The detail lives in the **TO-DO** block under ea
 - **Requirement 2 (Scale-Out):** `verify-shards --compare-to` does not compare `content_digest`; the enrichment paths have no Azure ML connection.
 - **Requirement 3 (Ingest-First Data Flow):** up-front composition check covers workflows (local and `dispatch-workflow`) and dispatch, not a lone `run-stage --store` (per-base `NotReady`).
 - **Requirement 6 (Native Office and Spreadsheet Extraction):** multi-row headers are emitted for DOCX only; spreadsheets and the legacy table view collapse to row 0, no per-cell header-row coordinate exists, and cell formulas are never captured.
-- **Requirement 7 (Standalone Reference Register Ingestion):** G-NAF and geospatial writes are not guarded against partial output.
+- **Requirement 7 (Standalone Reference Register Ingestion):** geospatial writes are not guarded against partial output.
 - **Requirement 9 (Redaction Handling):** no redaction `pipeline_point`, and the E2E `run` path writes no `*.redactions.parquet`.
 - **Requirement 13 (Money Annotation):** the money span row carries no merge extent or header-row coordinate.
 

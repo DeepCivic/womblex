@@ -12,7 +12,7 @@ geospatial SHP and ABN bulk extract XML take standalone paths that produce
 Parquet directly and never enter this flow.
 
 ```
-Raw files (PDF / DOCX / MD / CSV / XLSX)
+Raw files (PDF / page images / DOCX / MD / TXT / CSV / XLSX / XLS)
         │
         ▼
 ┌───────────────────┐
@@ -34,7 +34,7 @@ Raw files (PDF / DOCX / MD / CSV / XLSX)
 │  (ingest/orchestrator)                    │    elements: list[Element]
 │   ├── profile_pages → list[PageProfile]   │    (paragraph / heading / table /
 │   ├── run_layout_step (PP-DocLayout)      │     form / image / sheet_cell / …)
-│   ├── _apply_native_page (page.get_text)  │    + legacy view properties
+│   ├── _apply_native_page (text layer)     │    + legacy view properties
 │   └── _apply_ocr_page   (OCR + regions)   │      (.pages / .text_blocks / .tables /
 │                                           │       .forms / .images) as read-only
 │  Non-PDF: strategy.extract                │      derivations over elements.
@@ -93,8 +93,8 @@ Raw files (PDF / DOCX / MD / CSV / XLSX)
         ▼
 ┌───────────────────┐
 │ verify_shard_     │  → cumulative on-disk size (raises
-│ persistence       │    ShardVerificationError on any anomaly)
-│ (store/output)    │
+│ persistence       │    ShardVerificationError on any anomaly;
+│ (store/output)    │    local `womblex run` only)
 └───────────────────┘
 ```
 
@@ -177,6 +177,7 @@ that single result.
 | `warnings` | `list[str]` | Blank page warnings, redaction annotations |
 | `document_id` | `str \| None` | Source identifier used as `doc_id` |
 | `redaction_report` | `RedactionReport \| None` | Set by redaction stage |
+| `layout` | `LayoutOutcome \| None` | The layout step's regions per selected page, written to `*.layout_regions.parquet` |
 
 Derived read-only views (compat for downstream callers that haven't
 migrated to the element stream): `.text_blocks`, `.tables`, `.forms`,
@@ -350,7 +351,7 @@ CLI: `womblex ingest-abn <file-or-dir> -o <output_dir>`
 
 The `womblex run` CLI command processes documents in batches (default: 100). After each batch:
 
-1. The batch's completed results are written as their own `batch-NNNN.*` shard set (elements, table_cells, form_fields, _manifest) — earlier shards are never appended to.
+1. The batch's results (a failed document as a `status: error` manifest row) are written as their own `batch-NNNN.*` shard set (elements, table_cells, form_fields, _manifest) — earlier shards are never appended to.
 2. A checkpoint record is written (`CheckpointManager` in `store/checkpoint.py`) noting processed document IDs, batch number, and success/failure counts.
 
-On resume (`--resume` flag), the CLI reads the checkpoint JSON and skips already-processed documents via `filter_unprocessed()`. Individual document errors are logged (with the document ID, in the console output and the batch log) and counted in the checkpoint's failure count without stopping the batch. Failed documents are excluded from the shards — `write_batch_parquet` writes completed results only — so they have no `_manifest.parquet` row.
+On resume (`--resume` flag), the CLI reads the checkpoint JSON and skips already-processed documents via `filter_unprocessed()`. Individual document errors are logged (with the document ID, in the console output and the batch log) and counted in the checkpoint's failure count without stopping the batch. A failed document is written as a `_manifest.parquet` row with `status: error` and no elements (`write_batch_parquet`), so every document a batch was given is accounted for.

@@ -20,6 +20,8 @@ is the canonical structural unit. An `ExtractionResult` carries:
 | `elements: list[Element]` | the ordered structural stream — what the parquet writer serialises |
 | `pages: list[PageResult]` | per-page concatenated text; mutable so downstream PII / redaction can rewrite `page.text` |
 | `metadata` | document-level capture metadata (strategy, confidence, page count, content mix) |
+| `method`, `document_metadata` | the doc-level type (PDFs, images) or extractor name; document-level key/value metadata |
+| `layout` | the layout step's regions per selected page, written to `*.layout_regions.parquet` |
 | `warnings`, `error`, `document_id`, `redaction_report` | provenance and status |
 
 The legacy view properties `.text_blocks` / `.tables` / `.forms` /
@@ -247,7 +249,7 @@ For forms, replace `table_cells` with `form_fields` and `kind='form'`.
 
 ## Integrity
 
-`verify_shard_persistence` runs after every batch write and checks:
+`verify_shard_persistence` runs after every batch write of a local `womblex run` (`cli/pipeline.py`) and checks:
 
 - All four shard files exist and are non-empty.
 - `manifest` row count matches `expected_docs`.
@@ -258,6 +260,9 @@ For forms, replace `table_cells` with `form_fields` and `kind='form'`.
 - The cumulative shard-directory size has not shrunk relative to
   prior batches (catches the canonical overwrite-bug signature).
 
-Failures raise `ShardVerificationError` and halt the batch run.
+A failure raises `ShardVerificationError`, which `womblex run` re-raises: the run stops there, before
+that batch's checkpoint, the later batches and the run manifest. That is an exception to "A run is
+an arrow" ([decisions-operations.md](decisions-operations.md)). A fleet batch (`process_batch`) runs
+no such check.
 
 ---

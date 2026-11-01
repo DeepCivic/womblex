@@ -318,9 +318,9 @@ blanket address mask is usually wrong; distinguish residential from business
 addresses before enabling it.
 
 ### Redaction detection — vector-first, raster fallback
-`redact/stage.py` enumerates `page.get_drawings()` for near-black filled
+`redact/stage.py` enumerates `page.drawings()` for near-black filled
 rectangles first (native PDFs; no area threshold) and falls back to raster
-contour detection on scanned pages. Filters surfaced during validation:
+contour detection on any page with none (scanned pages among them). Filters surfaced during validation:
 near-black RGB/CMYK fill; `min_width ≥ 3pt` (excludes narrow column
 separators); `min_height ≥ 8pt` (excludes glyph-rendering small filled rects on
 PDFs that draw text as filled-path glyphs). Raster-path layout exclusion
@@ -561,7 +561,10 @@ be re-derivable, and the first pass's were not.
   fixture PDFs), which is why it has never shown up. Fixing it is its own
   change — image elements feed `content_digest`, so it re-pins
   `tests/test_default_digest.py` — and P5 must not port the quadratic loop
-  across to pypdfium2's differently-shaped image-object API.
+  across to pypdfium2's differently-shaped image-object API. *Since fixed:*
+  the seam's `page.images()` returns one `PageImage` per drawn instance
+  (`ingest/pdf/types.py`), and `_extract_images_from_page` emits one element
+  per instance.
 - **pypdfium2 needs disciplined object closing; thread safety is the
   caller's job, not the library's.** A 300-odd-document open/close sweep in
   one process threw a spurious "Data format error" re-opening a file that

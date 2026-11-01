@@ -8,20 +8,27 @@ callers compose them directly.
 ```
 Input File
 │
-├─ Narrative (PDF/DOCX/TXT/MD) ──► Extract Text ──► [.txt or .parquet]
-├─ Tabular (CSV/XLSX) ────────► Transform Rows ──► [.parquet]
+├─ Narrative (PDF/images/DOCX/TXT/MD) ─► Extract Text ──► [.txt or .parquet]
+├─ Tabular (CSV/XLSX/XLS) ────► Transform Rows ──► [.parquet]
 ├─ Tabular (PSV/G-NAF) ──────► Standalone Ingest ──► [.parquet]
 ├─ Register (XML/ABN) ───────► Standalone Ingest ──► [.parquet]
 └─ Geospatial (SHP) ─────────► Transform Geometry ──► [GeoParquet]
         │
         ▼  (Downstream stages over the shard dir — `run-stage` / `enqueue-stages`, in PIPELINE_ORDER)
-        ├─ enrich        — Isaacus enrichment (needs elements + manifest; chunks optional)
+        ├─ layout        — rerun layout analysis, replacing *.layout_regions.parquet (deliberate, never dispatched by config)
+        ├─ normalise     — text-cleaning overlay
+        ├─ spellfix      — OCR character-confusion repair overlay
+        ├─ enrich        — enrichment provider (needs elements + manifest; chunks optional)
         ├─ chunk         — split text into token-bounded chunks
         ├─ graph-refresh — offline mention→chunk links (own sidecar)
-        └─ pii           — mask graph PII spans as numbered <PERSON_n> tags in *.clean_text.parquet (terminal, after enrich + embed)
+        ├─ embed         — chunk embeddings
+        ├─ money         — money-span annotation
+        ├─ link          — record linkage against a reference register
+        ├─ pii           — mask graph PII spans as numbered <PERSON_n> tags in *.clean_text.parquet (terminal, after enrich + embed)
+        └─ quality       — chunk-quality annotation (run-scoped)
 ```
 
-`womblex run` is extraction-only (`batch.process_batch`); downstream stages run per shard directory via `womblex <stage> --shards`, `run-stage` or `enqueue-stages`, ordered by `PIPELINE_ORDER` in `pipeline_order.py` (enrich runs before chunk so AI chunking can reuse the enrichment). Each stage's inputs are declared by its `StageContract` in `cloud/stage_contracts.py`: chunk needs an extraction; enrich needs only elements + manifest; graph-refresh needs enrichment entities, graph edges and chunks; pii needs chunks (enrichment entities are a config-derived conditional input). Redaction detection is optional inside `process_batch` and otherwise runs via `womblex redact --shards`. The in-memory graph is built by `build_document_graph` in `analyse/graph.py`.
+`womblex run` is extraction-only (`batch.process_batch`); downstream stages run per shard directory via `womblex <stage> --shards`, `run-stage` or `enqueue-stages`, ordered by `PIPELINE_ORDER` in `pipeline_order.py` (enrich runs before chunk so AI chunking can reuse the enrichment). Each stage's inputs are declared by its `StageContract` in `cloud/stage_contracts.py`: chunk needs an extraction; enrich needs only elements + manifest; graph-refresh needs enrichment entities and chunks; pii needs chunks (enrichment entities are a config-derived conditional input). Redaction detection is optional inside `process_batch` and otherwise runs via `womblex redact --shards`. The in-memory graph is built by `build_document_graph` in `analyse/graph.py`.
 
 ## Stage Detail
 
@@ -48,10 +55,11 @@ PaddleOCR is only invoked as a fallback when morphological signals (glyph regula
 ```
 if file is .docx → DOCX
 if file is .md/.markdown → MARKDOWN
-if file is .csv/.xlsx → SPREADSHEET
+if file is .txt → TEXT
+if file is .csv/.xlsx/.xls → SPREADSHEET
 if text_coverage >= 30%:
     if table_ratio >= 80% → STRUCTURED
-    elif has_tables or has_images → NATIVE_WITH_STRUCTURED
+    elif table_ratio >= table_signal_threshold (0.4) or has_images → NATIVE_WITH_STRUCTURED
     else → NATIVE_NARRATIVE
 elif 10% < text_coverage < 30% and has_text and has_images:
     → HYBRID (mixed native + scanned pages)
@@ -84,7 +92,7 @@ Defensive classification: uncertain documents route to `UNKNOWN` rather than a w
 | `SPREADSHEET` | CSV or Excel |
 | `TEXT` | Plain text file (passthrough) |
 | `MARKDOWN` | Markdown file (headings/lists/tables) |
-| `IMAGE` | Photo / diagram — flagged for review |
+| `IMAGE` | Photo format; no detection path produces it (images take the orchestrator's OCR path) |
 | `UNKNOWN` | Detection failed |
 
 ### 2. Ingest — Extraction
@@ -116,7 +124,7 @@ The orchestrator's OCR per-page path (`_apply_ocr_page`) drives `_ocr_page()` wh
 
 ### 3. Ingest — G-NAF (Standalone)
 
-`ingest/gnaf.py` provides a standalone ingest path for the [G-NAF](https://data.gov.au/data/dataset/geocoded-national-address-file-g-naf) national address dataset. G-NAF is pure structured relational data distributed as headerless pipe-delimited (`.psv`) files — NLP operations (redaction, chunking, PII, enrichment) are irrelevant and bypassed entirely.
+`ingest/gnaf.py` provides a standalone ingest path for the [G-NAF](https://data.gov.au/data/dataset/geocoded-national-address-file-g-naf) national address dataset. G-NAF is pure structured relational data distributed as pipe-delimited (`.psv`) files (a header row, where present, is detected and skipped) — NLP operations (redaction, chunking, PII, enrichment) are irrelevant and bypassed entirely.
 
 `ingest/gnaf_schema.py` provides static, versioned column definitions for all 35 G-NAF table types (16 Authority Code lookup tables + 19 Standard tables), derived from the official `GNAF_TableCreation_Scripts` SQL.
 
@@ -124,7 +132,7 @@ The ingest reads each PSV via `pyarrow.csv` (streamed, constant memory), applies
 
 - **Zero semantic mutation:** All columns stored as strings. No type coercion, no null inference. Empty strings remain `""`.
 - **Provenance metadata:** Each Parquet file carries `gnaf.schema_version`, `gnaf.table_name`, `gnaf.state`, `gnaf.source_file`, `gnaf.row_count`, and `gnaf.source_md5` as key-value metadata.
-- **Fail-fast on schema mismatch:** Column count is validated against the static schema. Unrecognised filenames or unknown table names are skipped with a warning.
+- **Per-file failure isolation:** A row whose column count differs from the static schema fails the read; the file is logged, its partial output removed, and the directory ingest continues. Unrecognised filenames or unknown table names are skipped with a warning.
 
 CLI: `womblex ingest-gnaf <input_dir> -o <output_dir> [--no-md5]`
 
@@ -242,7 +250,7 @@ Every Parquet on the pipeline path also carries provenance in its footer key-val
 
 Three more keys, from `store/contract.py`, ride on every pipeline Parquet whether or not its run can be named: `womblex.written_at` (when the file was written, UTC to the second; a footer key and never a column, so rows and `content_digest` are untouched, but every rewrite changes the file's bytes, ETag and published checksum), `womblex.contract_version` (the on-disk contract, versioned apart from the package) and `womblex.sensitivity` — `raw` for a file carrying unmasked document text, `masked` for `clean_text`, `none` for one carrying no document text. They are written by `_write_rows`, the one writer every sidecar shares, from the file's role; an unclassified role reads as `raw`. The manifest additionally carries a per-document `content_digest` (`store/content_digest.py`): the stable-content handle, since file bytes and `extracted_at_iso` differ between runs while extraction content under one version, config digest and model set does not. Each element row carries a `fingerprint` (`store/element_fingerprint.py`): 8 bytes over the same per-element payload without `order`, so a consumer can tell which elements changed between two versions of a document without an insert shifting the rest.
 
-At the finalisation moments — the end of `womblex run`, the coordinator's last step on the fleet, and `womblex finalize`, both through `cloud/finalize.py` — `store/run_manifest.py` consolidates those per-file facts into a **run record** in the run manifest's own footer (`womblex.run_record`). Footer rather than columns because the record is run grain and the manifest is document grain. Everything in it is observed rather than declared: the stages come from the run stamps the files carry, so a stage that was configured and never ran is absent while one that ran and produced nothing is present with no rows; the workflows (`workflows`) are likewise the digests the files carry, each with its name, full spec and the stages that wrote under it, never the workflows merely stored; the local models are the union of what each file recorded loading, each with a digest that recomputes from the model files alone; the documents, extraction methods and statuses are counted off the consolidated rows. Nothing is read from a configuration file, because `womblex manifest` regenerates the record from the shard directory alone and may be re-run long after the run. `cloud/finalize.finalize_run` (the coordinator and `womblex finalize`) is the one caller that supplies its own observations rather than having them read from a directory: a distributed run's shards stay in object storage and only the manifests are staged in, so it reads each shard's footer in place (`RemoteStore.read_parquet_footer`, a ranged read rather than a download) and hands them to the record — otherwise every downstream stage would be missing from it, indistinguishable from one that never ran. The record also lists a `files` entry — the SHA-256 of every output file, taken from the local file as the publish step uploads it and returned with its key by the DBOS extraction and stage workflows (`RunBoard.file_checksums` reads them back, taking a failed or unfinished workflow's completed steps), so `womblex finalize --dsn` records them and a whole run is auditable without opening each file; a job that may have published a file without a digest (failed, unfinished, or recorded before checksums) is named in `partial`; without a DSN, or for a local `womblex run`, the record carries none and `partial` says so. The record also lists `deliveries` (record version 9): one entry per workflow destination, read from the run's `deliveries/<destination>.json` records (`store/delivery_record.py`), so an empty list means no delivery was made. What cannot be established is named in a `partial` list rather than omitted — a run finalised before the stamps existed produces a record that says so instead of one quietly claiming the run had no stages. `womblex manifest --lineage OUT` also writes the record as an OpenLineage 2-0-2 `RunEvent` (`store/lineage.py`): a mapping of the record, never of config, with Womblex's detail in `womblex_run` / `womblex_job` / `womblex_corpus` / `womblex_file` facets, `runId` a UUID5 of the run id, and the event type taken from the run's state on the board when `--dsn` is given (`COMPLETE`, `FAIL`, `ABORT`; `COMPLETE` with status `unknown` otherwise); a record that names no run is refused. Nothing is sent anywhere.
+At the finalisation moments — the end of `womblex run`, the coordinator's last step on the fleet, and `womblex finalize`, both through `cloud/finalize.py` — `store/run_manifest.py` consolidates those per-file facts into a **run record** in the run manifest's own footer (`womblex.run_record`). Footer rather than columns because the record is run grain and the manifest is document grain. Everything in it is observed rather than declared: the stages come from the run stamps the files carry, so a stage that was configured and never ran is absent while one that ran and produced nothing is present with no rows; the workflows (`workflows`) are likewise the digests the files carry, each with its name, full spec and the stages that wrote under it, never the workflows merely stored; the local models are the union of what each file recorded loading, each with a digest that recomputes from the model files alone; the documents, extraction methods and statuses are counted off the consolidated rows. Nothing is read from a configuration file, because `womblex manifest` regenerates the record from the shard directory alone and may be re-run long after the run. `cloud/finalize.finalize_run` (the coordinator and `womblex finalize`) is the one caller that supplies its own observations rather than having them read from a directory: a distributed run's shards stay in object storage and only the manifests are staged in, so it reads each shard's footer in place (`RemoteStore.read_parquet_footer`, a ranged read rather than a download) and hands them to the record — otherwise every downstream stage would be missing from it, indistinguishable from one that never ran. The record also lists a `files` entry — the SHA-256 of every output file, taken from the local file as the publish step uploads it and returned with its key by the DBOS extraction and stage workflows (`RunBoard.file_checksums` reads them back, taking a failed or unfinished workflow's completed steps), so `womblex finalize --dsn` records them and a whole run is auditable without opening each file; a job that may have published a file without a digest (failed, unfinished, or recorded before checksums) is named in `partial`; without a DSN, or for a local `womblex run`, the record carries none and `partial` says so. The record also lists `deliveries` (record version 8): one entry per workflow destination, read from the run's `deliveries/<destination>.json` records (`store/delivery_record.py`), so an empty list means no delivery was made. What cannot be established is named in a `partial` list rather than omitted — a run finalised before the stamps existed produces a record that says so instead of one quietly claiming the run had no stages. `womblex manifest --lineage OUT` also writes the record as an OpenLineage 2-0-2 `RunEvent` (`store/lineage.py`): a mapping of the record, never of config, with Womblex's detail in `womblex_run` / `womblex_job` / `womblex_corpus` / `womblex_file` facets, `runId` a UUID5 of the run id, and the event type taken from the run's state on the board when `--dsn` is given (`COMPLETE`, `FAIL`, `ABORT`; `COMPLETE` with status `unknown` otherwise); a record that names no run is refused. Nothing is sent anywhere.
 
 The record also names **the container image the run executed inside** (`image`: whether it was containerised, the reference, the digest). That one is *supplied*, not observed: a digest is content-addressed after the push, so it cannot be baked into the image it names, and a container cannot read its own labels from inside — compose injects `WOMBLEX_IMAGE_REF` from the same value it pins each service to, and the local override empties it because those services build. So it is operator-honest rather than self-verifying, and `partial` says so even when the digest is present, the same way the declared services already describe the environment the record was written in rather than one observed during the run. A tag is never recorded as a digest: it is a pointer that can be moved, so it identifies no bytes.
 
