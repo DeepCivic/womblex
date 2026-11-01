@@ -136,7 +136,7 @@ def _footer_from_columns(table: pa.Table) -> dict[bytes, bytes] | None:
 def _merged_footer(
     shard_dir: Path, table: pa.Table, footers: FooterList | None = None,
     checksums: dict[str, str] | None = None, undigested: list[str] | None = None,
-    deliveries: list[dict] | None = None,
+    deliveries: list[dict] | None = None, failed_batches: list[str] | None = None,
 ) -> dict[bytes, bytes] | None:
     """Where the corpus came from, which run, and the record of what that run did.
 
@@ -156,7 +156,7 @@ def _merged_footer(
         RUN_RECORD_KEY.encode(): json.dumps(
             build_run_record(
                 shard_dir, table, footers=footers, checksums=checksums, undigested=undigested,
-                deliveries=deliveries,
+                deliveries=deliveries, failed_batches=failed_batches,
             ),
             sort_keys=True,
         ).encode(),
@@ -489,7 +489,7 @@ def _partial(
 def build_run_record(
     shard_dir: Path, table: pa.Table, *, footers: FooterList | None = None,
     checksums: dict[str, str] | None = None, undigested: list[str] | None = None,
-    deliveries: list[dict] | None = None,
+    deliveries: list[dict] | None = None, failed_batches: list[str] | None = None,
 ) -> dict:
     """Assemble the run record for *shard_dir*, whose rows are *table*.
 
@@ -510,6 +510,10 @@ def build_run_record(
 
     *deliveries* are the run's delivery records; without them they are read from
     ``<run_root>/deliveries/`` beside *shard_dir* (`store/delivery_record.py`).
+
+    *failed_batches* names the batches whose shards failed `womblex run`'s
+    post-write integrity check (`verify_shard_persistence`); ``partial`` lists
+    them, since their documents' rows are present but unverified.
 
     Deterministic apart from ``generated_at``: every collection is sorted, the
     stages by pipeline position and the rest by name, so re-running over an
@@ -570,6 +574,11 @@ def build_run_record(
             f"predate checksums, so files they published may carry no digest: "
             f"{', '.join(sorted(undigested))}",
         )
+    if failed_batches:
+        record["partial"].append(
+            f"shard integrity: {len(failed_batches)} batch(es) failed the post-write check, "
+            f"so their documents' rows are unverified: {'; '.join(sorted(failed_batches))}",
+        )
     return record
 
 
@@ -604,6 +613,7 @@ def write_run_manifest(
     checksums: dict[str, str] | None = None,
     undigested: list[str] | None = None,
     deliveries: list[dict] | None = None,
+    failed_batches: list[str] | None = None,
 ) -> Path:
     """Consolidate all ``*._manifest.parquet`` in ``shard_dir`` into one parquet.
 
@@ -612,10 +622,11 @@ def write_run_manifest(
     empty-but-schema-correct file so downstream reads are safe.
 
     *footers*, *checksums*, *undigested* and *deliveries* are passed through to :func:`build_run_record` for
-    a caller whose shards are not all in *shard_dir* — see that function.
+    a caller whose shards are not all in *shard_dir* — see that function. So is *failed_batches*, which
+    only the run that saw the failures can supply.
     """
     table = add_versions(read_manifest(shard_dir))
-    footer = _merged_footer(shard_dir, table, footers, checksums, undigested, deliveries)
+    footer = _merged_footer(shard_dir, table, footers, checksums, undigested, deliveries, failed_batches)
     target = output_path or run_manifest_path_for(shard_dir)
     table = table.replace_schema_metadata({**(footer or {}), **contract_footer(target, role="manifest")})
     target.parent.mkdir(parents=True, exist_ok=True)
