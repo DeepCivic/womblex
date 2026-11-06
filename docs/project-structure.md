@@ -8,7 +8,7 @@ module-responsibility table in [`../CLAUDE.md`](../CLAUDE.md).
 ```
 womblex/
 ├── configs/           # Dataset-specific configurations; workflows/ holds an example workflow file
-├── docs/              # Architecture docs, ADRs, accuracy reports, the deployment-image audit, the consumer contract (contract.md), the service API (service-api.md) and its OpenAPI / Swagger descriptions (interfaces.md, interfaces/), the egress bundle (egress.md), workflow files (workflows.md), the design decisions by concern (decisions.md for the library, decisions-operations.md for operating it, decisions-dead-ends.md for dead-ends, limitations and the backlog)
+├── docs/              # Architecture docs, ADRs, accuracy reports, the deployment-image audit, the consumer contract (contract.md), the service API (service-api.md) and its OpenAPI / Swagger / provisional MCP and A2A descriptions (interfaces.md, interfaces/), the egress bundle (egress.md), workflow files (workflows.md), the design decisions by concern (decisions.md for the library, decisions-operations.md for operating it, decisions-dead-ends.md for dead-ends, limitations and the backlog)
 ├── fixtures/synthetic/  # Generated test fixtures (generate.py + its committed output; see its README)
 ├── models/            # Locally pre-downloaded models, resolved by utils/models.py (see models.md)
 ├── src/womblex/

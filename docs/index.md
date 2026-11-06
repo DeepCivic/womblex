@@ -6,7 +6,7 @@ Reference documentation for the `womblex` package.
   the Python names covered by the stability policy.
 - [Service API](service-api.md): the `/v1` HTTP API served by `womblex serve`.
 - [Interface descriptions](interfaces.md): that API as OpenAPI 3.2.0 and Swagger 2.0
-  documents, generated from the code.
+  documents, and as a provisional MCP tool list and A2A Agent Card, generated from the code.
 - [Python API](reference/womblex/index.md): every public module, generated from
   its docstrings.
 

@@ -104,8 +104,8 @@ that submitted them.
 
 `POST /v1/runs`, `POST /v1/uploads` and `POST /v1/presets` answer 201; the collection actions answer 202. Pydantic models generate the OpenAPI spec; a test
 pins its operation and model surface so breaking changes show in review. The committed
-OpenAPI 3.2.0 and Swagger 2.0 documents, with each operation's scope, are in
-[interfaces.md](interfaces.md).
+OpenAPI 3.2.0 and Swagger 2.0 documents, with each operation's scope, and the provisional
+MCP tool list and A2A Agent Card are in [interfaces.md](interfaces.md).
 
 ### Uploads
 
