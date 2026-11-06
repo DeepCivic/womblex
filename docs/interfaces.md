@@ -14,6 +14,7 @@ uv run python -m womblex.api.interface_docs
 | OpenAPI | 3.2.0 | [`interfaces/openapi.json`](interfaces/openapi.json) | As is |
 | Swagger | 2.0 | [`interfaces/swagger.json`](interfaces/swagger.json) | As is |
 | MCP | 2026-07-28 | [`interfaces/mcp-tools.json`](interfaces/mcp-tools.json) | Provisional, for review: no MCP server exists |
+| A2A | 1.0 (release 1.0.1) | [`interfaces/agent-card.json`](interfaces/agent-card.json) | Provisional, for review: no A2A endpoint exists |
 
 ## OpenAPI 3.2.0
 
@@ -101,3 +102,32 @@ For review:
 - **Sources.** The `Tool`, `ToolAnnotations` and `tools/list` result shapes were read from
   the revision's `schema.ts` in the `modelcontextprotocol/modelcontextprotocol` repository;
   the specification pages were not reachable when this was written.
+
+## A2A 1.0 (provisional)
+
+Womblex serves no A2A endpoint and no Agent Card. `agent-card.json` is the card a service
+fronting the `/v1` API would publish, for review (`src/womblex/api/interface_a2a.py`):
+
+- **Interface.** One `supportedInterfaces` entry: binding `HTTP+JSON`, `protocolVersion`
+  `1.0`. Its `url` is `https://womblex.invalid/a2a/v1`; the `.invalid` name (RFC 2606) says no
+  endpoint exists. `capabilities` are all `false`: no streaming, no A2A push notifications
+  (a workflow's webhooks are declared in its file, not registered by a client), no extended card.
+- **Skills.** One per OpenAPI tag (`collections`, `config`, `hooks`, `presets`, `runs`,
+  `uploads`), its description listing the operations behind it, and its
+  `securityRequirements` the scopes they need. The `ops` tag (probes and resource checks) is
+  not a skill, and the inbound hook (another system's HMAC) is left out of `hooks`.
+- **Security.** `bearerAuth` as an `httpAuthSecurityScheme` with scheme `Bearer`.
+- **Modes.** Input: JSON plus the media type of every file type the service ingests (held
+  to `SUPPORTED_EXTENSIONS` by the test). Output: JSON.
+- **Version.** The card's `version` is the package version, so a release that bumps it
+  regenerates the card.
+
+For review:
+
+- **Tasks.** A2A's unit of work is a task. Today's nearest equivalent is a run
+  (submitted, polled by id); the card does not describe how one would map to the other.
+- **Sources.** Field names and requiredness were read from `a2a.proto` at the `v1.0.1` tag of
+  the `a2aproject/A2A` repository and written in protobuf JSON form (lowerCamelCase, a
+  `oneof` security scheme as its member's key). The specification site was not reachable, so
+  the JSON form and the discovery path (`/.well-known/agent-card.json`, from the 0.3.0
+  release notes) were not checked against its examples.

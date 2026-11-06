@@ -1,0 +1,178 @@
+{
+  "name": "Womblex",
+  "description": "Extracts text, tables and forms from government document releases (scanned, redacted and mixed PDFs, DOCX, spreadsheets, images), chunks it and prepares it for semantic analysis. Provisional: describes the /v1 service API; no A2A endpoint is served.",
+  "supportedInterfaces": [
+    {
+      "url": "https://womblex.invalid/a2a/v1",
+      "protocolBinding": "HTTP+JSON",
+      "protocolVersion": "1.0"
+    }
+  ],
+  "provider": {
+    "organization": "DeepCivic",
+    "url": "https://github.com/DeepCivic/womblex"
+  },
+  "version": "0.6.1",
+  "documentationUrl": "https://github.com/DeepCivic/womblex/blob/main/docs/service-api.md",
+  "capabilities": {
+    "streaming": false,
+    "pushNotifications": false,
+    "extendedAgentCard": false
+  },
+  "securitySchemes": {
+    "bearerAuth": {
+      "httpAuthSecurityScheme": {
+        "scheme": "Bearer",
+        "description": "A service token from the client registry (WOMBLEX_API_CLIENTS)."
+      }
+    }
+  },
+  "securityRequirements": [
+    {
+      "schemes": {
+        "bearerAuth": {
+          "list": []
+        }
+      }
+    }
+  ],
+  "defaultInputModes": [
+    "application/json",
+    "application/pdf",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "image/bmp",
+    "image/gif",
+    "image/jp2",
+    "image/jpeg",
+    "image/png",
+    "image/tiff",
+    "text/csv",
+    "text/markdown"
+  ],
+  "defaultOutputModes": [
+    "application/json"
+  ],
+  "skills": [
+    {
+      "id": "collections",
+      "name": "Collections",
+      "description": "The `collections` operations of the /v1 API: List Collections (`GET /v1/collections`); Get Collection (`GET /v1/collections/{name}`); Add To Collection (`POST /v1/collections/{name}/add`); Rerun Collection (`POST /v1/collections/{name}/rerun`).",
+      "tags": [
+        "collections"
+      ],
+      "securityRequirements": [
+        {
+          "schemes": {
+            "bearerAuth": {
+              "list": [
+                "read",
+                "submit"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "config",
+      "name": "Config",
+      "description": "The `config` operations of the /v1 API: Get Stages (`GET /v1/stages`); Get Schema (`GET /v1/config/schema`); Validate (`POST /v1/config/validate`); To Yaml (`POST /v1/config/yaml`).",
+      "tags": [
+        "config"
+      ],
+      "securityRequirements": [
+        {
+          "schemes": {
+            "bearerAuth": {
+              "list": [
+                "read"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "hooks",
+      "name": "Hooks",
+      "description": "The `hooks` operations of the /v1 API: List Events (`GET /v1/workflows/{workflow}/inbound-events`).",
+      "tags": [
+        "hooks"
+      ],
+      "securityRequirements": [
+        {
+          "schemes": {
+            "bearerAuth": {
+              "list": [
+                "read"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "presets",
+      "name": "Presets",
+      "description": "The `presets` operations of the /v1 API: List Presets (`GET /v1/presets`); Save Preset (`POST /v1/presets`); Get Preset (`GET /v1/presets/{name}`); Delete Preset (`DELETE /v1/presets/{name}`).",
+      "tags": [
+        "presets"
+      ],
+      "securityRequirements": [
+        {
+          "schemes": {
+            "bearerAuth": {
+              "list": [
+                "admin",
+                "read"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "runs",
+      "name": "Runs",
+      "description": "The `runs` operations of the /v1 API: Get Queue (`GET /v1/queue`); List Stored Runs (`GET /v1/store/runs`); Get Stage Presence (`GET /v1/runs/{run_id}/stages/{stage}`); Get Audit (`GET /v1/runs/{run_id}/audit`); Get Document Detail (`GET /v1/runs/{run_id}/documents/{source_hash}/detail`); List Logs (`GET /v1/runs/{run_id}/logs`); Read Log (`GET /v1/runs/{run_id}/logs/{name}`); Get Progress (`GET /v1/runs/{run_id}/progress`); List Runs (`GET /v1/runs`); Submit Run (`POST /v1/runs`); Get Run (`GET /v1/runs/{run_id}`); Get Manifest (`GET /v1/runs/{run_id}/manifest`); Get Files (`GET /v1/runs/{run_id}/files`); Get Document Text (`GET /v1/runs/{run_id}/documents/{source_hash}/text`); Get Metrics (`GET /v1/runs/{run_id}/metrics`).",
+      "tags": [
+        "runs"
+      ],
+      "securityRequirements": [
+        {
+          "schemes": {
+            "bearerAuth": {
+              "list": [
+                "admin",
+                "read",
+                "read_raw",
+                "submit"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "uploads",
+      "name": "Uploads",
+      "description": "The `uploads` operations of the /v1 API: Preview Ingest (`GET /v1/ingest`); Upload (`POST /v1/uploads`).",
+      "tags": [
+        "uploads"
+      ],
+      "securityRequirements": [
+        {
+          "schemes": {
+            "bearerAuth": {
+              "list": [
+                "submit"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

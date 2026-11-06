@@ -216,8 +216,17 @@ def _mcp_tools() -> dict[str, Any]:
     return mcp_tools_document()
 
 
+def _agent_card() -> dict[str, Any]:
+    from womblex.api.interface_a2a import agent_card_document
+
+    return agent_card_document()
+
+
 #: Committed file name -> builder.
-DOCUMENTS = {"openapi.json": openapi_document, "swagger.json": swagger_document, "mcp-tools.json": _mcp_tools}
+DOCUMENTS = {
+    "openapi.json": openapi_document, "swagger.json": swagger_document,
+    "mcp-tools.json": _mcp_tools, "agent-card.json": _agent_card,
+}
 
 
 def write_documents(out_dir: Path) -> list[Path]:

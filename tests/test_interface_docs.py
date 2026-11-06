@@ -81,3 +81,20 @@ def test_mcp_tools_are_provisional_and_cover_every_mapped_operation(built: dict[
         assert tool["inputSchema"]["type"] == "object"
         assert "#/components/" not in json.dumps(tool)
         assert tool["annotations"]["readOnlyHint"] == (tool["_meta"]["womblex/http"]["method"] == "GET")
+
+
+def test_agent_card_is_provisional_and_ingests_every_supported_type(built: dict[str, str]) -> None:
+    from womblex.api.interface_a2a import A2A_PROTOCOL_VERSION, MEDIA_TYPES, PLACEHOLDER_URL
+    from womblex.cli._shared import SUPPORTED_EXTENSIONS
+
+    card = json.loads(built["agent-card.json"])
+    assert card["supportedInterfaces"] == [
+        {"url": PLACEHOLDER_URL, "protocolBinding": "HTTP+JSON", "protocolVersion": A2A_PROTOCOL_VERSION},
+    ]
+    assert "Provisional" in card["description"]
+    assert set(MEDIA_TYPES) == set(SUPPORTED_EXTENSIONS)
+    for required in ("name", "description", "version", "capabilities", "defaultInputModes",
+                     "defaultOutputModes", "skills"):
+        assert card[required]
+    for skill in card["skills"]:
+        assert {"id", "name", "description", "tags"} <= set(skill)
