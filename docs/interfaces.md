@@ -13,6 +13,7 @@ uv run python -m womblex.api.interface_docs
 |---|---|---|---|
 | OpenAPI | 3.2.0 | [`interfaces/openapi.json`](interfaces/openapi.json) | As is |
 | Swagger | 2.0 | [`interfaces/swagger.json`](interfaces/swagger.json) | As is |
+| MCP | 2026-07-28 | [`interfaces/mcp-tools.json`](interfaces/mcp-tools.json) | Provisional, for review: no MCP server exists |
 
 ## OpenAPI 3.2.0
 
@@ -64,3 +65,39 @@ The OpenAPI 3.2.0 document converted to Swagger 2.0, for tools that take only 2.
   in `x-womblex-scope`.
 
 It was checked against the archived Swagger 2.0 JSON Schema with no errors when written.
+
+## MCP 2026-07-28 (provisional)
+
+Womblex serves no MCP endpoint. `mcp-tools.json` is what a server fronting the `/v1` API
+would list, shaped as a `tools/list` result, so the mapping can be reviewed before anything
+serves it (`src/womblex/api/interface_mcp.py`). Its `_meta` marks it `provisional` and names
+the revision. Every value is derived from the OpenAPI document; nothing is chosen per tool:
+
+- **One tool per operation.** `name` is the operation's summary in snake case, `title` the
+  summary, and `description` the route's own description followed by the method, path and
+  scope it calls. `_meta["womblex/http"]` carries the method, path and scope.
+- **`inputSchema`** is an object whose properties are the operation's path and query
+  parameters, plus `body` for a JSON body. **`outputSchema`** is the success response's
+  model, where it is one; a plain-text or untyped response has none. Each schema is
+  self-contained: the models it references are copied under `$defs`, in the JSON Schema
+  2020-12 dialect MCP assumes. All 31 were checked as valid 2020-12 schemas when written.
+- **`annotations`** follow the HTTP method only: `GET` is `readOnlyHint: true`; `DELETE` is
+  destructive and idempotent; other writes are neither. `openWorldHint` is left out, so it
+  reads as MCP's default (`true`).
+- **Result fields.** `cacheScope` is `private`, since what a caller sees is scoped to its
+  token; `ttlMs` is `0`; `resultType` is `complete`.
+
+Not mapped: `GET /v1/health` and `GET /v1/ready` (transport probes), `POST /v1/uploads` (a
+multipart file body; MCP tool arguments are JSON) and `POST /v1/hooks/{workflow}/{hook}`
+(signed by another system's HMAC).
+
+For review:
+
+- **Names.** Three summaries give vague names: `validate` (config), `to_yaml` (config) and
+  `test` (a resource check).
+- **Authorisation.** The `/v1` API takes service tokens. How a server would carry them
+  under MCP's own authorisation rules is not described here; that part of the
+  specification was not read (see Sources).
+- **Sources.** The `Tool`, `ToolAnnotations` and `tools/list` result shapes were read from
+  the revision's `schema.ts` in the `modelcontextprotocol/modelcontextprotocol` repository;
+  the specification pages were not reachable when this was written.

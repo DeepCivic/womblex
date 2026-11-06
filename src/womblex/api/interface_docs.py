@@ -210,8 +210,14 @@ def render(document: dict[str, Any]) -> str:
     return json.dumps(document, indent=2, ensure_ascii=False) + "\n"
 
 
+def _mcp_tools() -> dict[str, Any]:
+    from womblex.api.interface_mcp import mcp_tools_document
+
+    return mcp_tools_document()
+
+
 #: Committed file name -> builder.
-DOCUMENTS = {"openapi.json": openapi_document, "swagger.json": swagger_document}
+DOCUMENTS = {"openapi.json": openapi_document, "swagger.json": swagger_document, "mcp-tools.json": _mcp_tools}
 
 
 def write_documents(out_dir: Path) -> list[Path]:

@@ -1,0 +1,2483 @@
+{
+  "_meta": {
+    "womblex/status": "provisional",
+    "womblex/mcpProtocolVersion": "2026-07-28"
+  },
+  "resultType": "complete",
+  "ttlMs": 0,
+  "cacheScope": "private",
+  "tools": [
+    {
+      "name": "get_stages",
+      "title": "Get Stages",
+      "description": "Get Stages\n\nCalls `GET /v1/stages` (scope `read`).",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {}
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$ref": "#/$defs/StageGraph",
+        "$defs": {
+          "StageGraph": {
+            "properties": {
+              "nodes": {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array",
+                "title": "Nodes"
+              },
+              "edges": {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array",
+                "title": "Edges"
+              }
+            },
+            "type": "object",
+            "required": [
+              "nodes",
+              "edges"
+            ],
+            "title": "StageGraph",
+            "description": "The pipeline's nodes (one per stage, plus ``extract``) and its required-input edges."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "_meta": {
+        "womblex/http": {
+          "method": "GET",
+          "path": "/v1/stages",
+          "scope": "read"
+        }
+      }
+    },
+    {
+      "name": "get_schema",
+      "title": "Get Schema",
+      "description": "`WomblexConfig`'s JSON Schema; ``paths`` is the deployment's and is left out.\n\nCalls `GET /v1/config/schema` (scope `read`).",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "_meta": {
+        "womblex/http": {
+          "method": "GET",
+          "path": "/v1/config/schema",
+          "scope": "read"
+        }
+      }
+    },
+    {
+      "name": "validate",
+      "title": "Validate",
+      "description": "Validate\n\nCalls `POST /v1/config/validate` (scope `read`).",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "body": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Raw"
+          }
+        },
+        "required": [
+          "body"
+        ]
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$ref": "#/$defs/ConfigValidation",
+        "$defs": {
+          "ConfigValidation": {
+            "properties": {
+              "valid": {
+                "type": "boolean",
+                "title": "Valid"
+              },
+              "errors": {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array",
+                "title": "Errors"
+              }
+            },
+            "type": "object",
+            "required": [
+              "valid",
+              "errors"
+            ],
+            "title": "ConfigValidation",
+            "description": "Whether a posted config builds a `WomblexConfig`, with Pydantic's own errors."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      },
+      "_meta": {
+        "womblex/http": {
+          "method": "POST",
+          "path": "/v1/config/validate",
+          "scope": "read"
+        }
+      }
+    },
+    {
+      "name": "to_yaml",
+      "title": "To Yaml",
+      "description": "The config as a YAML file `womblex run --config` reads; 422 with the validation errors otherwise.\n\nCalls `POST /v1/config/yaml` (scope `read`).",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "body": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Raw"
+          }
+        },
+        "required": [
+          "body"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      },
+      "_meta": {
+        "womblex/http": {
+          "method": "POST",
+          "path": "/v1/config/yaml",
+          "scope": "read"
+        }
+      }
+    },
+    {
+      "name": "list_presets",
+      "title": "List Presets",
+      "description": "List Presets\n\nCalls `GET /v1/presets` (scope `read`).",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {}
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$ref": "#/$defs/PresetList",
+        "$defs": {
+          "PresetList": {
+            "properties": {
+              "presets": {
+                "items": {
+                  "$ref": "#/$defs/PresetOut"
+                },
+                "type": "array",
+                "title": "Presets"
+              }
+            },
+            "type": "object",
+            "required": [
+              "presets"
+            ],
+            "title": "PresetList"
+          },
+          "PresetOut": {
+            "properties": {
+              "name": {
+                "type": "string",
+                "title": "Name"
+              },
+              "description": {
+                "type": "string",
+                "title": "Description"
+              },
+              "formats": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "title": "Formats"
+              },
+              "config": {
+                "additionalProperties": true,
+                "type": "object",
+                "title": "Config"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "builtin",
+                  "saved"
+                ],
+                "title": "Source"
+              }
+            },
+            "type": "object",
+            "required": [
+              "name",
+              "description",
+              "formats",
+              "config",
+              "source"
+            ],
+            "title": "PresetOut",
+            "description": "A named partial config; ``source`` is ``builtin`` (code, never deleted) or ``saved``."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "_meta": {
+        "womblex/http": {
+          "method": "GET",
+          "path": "/v1/presets",
+          "scope": "read"
+        }
+      }
+    },
+    {
+      "name": "save_preset",
+      "title": "Save Preset",
+      "description": "Save or replace a preset; 400 on an unsafe name or a config that would not load.\n\nCalls `POST /v1/presets` (scope `admin`).",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "body": {
+            "$ref": "#/$defs/PresetSave"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "$defs": {
+          "PresetSave": {
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "title": "Name"
+              },
+              "description": {
+                "type": "string",
+                "title": "Description",
+                "default": ""
+              },
+              "formats": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "title": "Formats"
+              },
+              "config": {
+                "additionalProperties": true,
+                "type": "object",
+                "title": "Config"
+              }
+            },
+            "type": "object",
+            "required": [
+              "name"
+            ],
+            "title": "PresetSave",
+            "description": "A preset to save; ``dataset`` and ``paths`` in ``config`` are dropped (a preset is an overlay)."
+          }
+        }
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$ref": "#/$defs/PresetOut",
+        "$defs": {
+          "PresetOut": {
+            "properties": {
+              "name": {
+                "type": "string",
+                "title": "Name"
+              },
+              "description": {
+                "type": "string",
+                "title": "Description"
+              },
+              "formats": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "title": "Formats"
+              },
+              "config": {
+                "additionalProperties": true,
+                "type": "object",
+                "title": "Config"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "builtin",
+                  "saved"
+                ],
+                "title": "Source"
+              }
+            },
+            "type": "object",
+            "required": [
+              "name",
+              "description",
+              "formats",
+              "config",
+              "source"
+            ],
+            "title": "PresetOut",
+            "description": "A named partial config; ``source`` is ``builtin`` (code, never deleted) or ``saved``."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      },
+      "_meta": {
+        "womblex/http": {
+          "method": "POST",
+          "path": "/v1/presets",
+          "scope": "admin"
+        }
+      }
+    },
+    {
+      "name": "get_preset",
+      "title": "Get Preset",
+      "description": "Get Preset\n\nCalls `GET /v1/presets/{name}` (scope `read`).",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$ref": "#/$defs/PresetOut",
+        "$defs": {
+          "PresetOut": {
+            "properties": {
+              "name": {
+                "type": "string",
+                "title": "Name"
+              },
+              "description": {
+                "type": "string",
+                "title": "Description"
+              },
+              "formats": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "title": "Formats"
+              },
+              "config": {
+                "additionalProperties": true,
+                "type": "object",
+                "title": "Config"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "builtin",
+                  "saved"
+                ],
+                "title": "Source"
+              }
+            },
+            "type": "object",
+            "required": [
+              "name",
+              "description",
+              "formats",
+              "config",
+              "source"
+            ],
+            "title": "PresetOut",
+            "description": "A named partial config; ``source`` is ``builtin`` (code, never deleted) or ``saved``."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "_meta": {
+        "womblex/http": {
+          "method": "GET",
+          "path": "/v1/presets/{name}",
+          "scope": "read"
+        }
+      }
+    },
+    {
+      "name": "delete_preset",
+      "title": "Delete Preset",
+      "description": "404 when no saved preset has *name*; a built-in is code and is never deleted.\n\nCalls `DELETE /v1/presets/{name}` (scope `admin`).",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$ref": "#/$defs/PresetDeleted",
+        "$defs": {
+          "PresetDeleted": {
+            "properties": {
+              "deleted": {
+                "type": "string",
+                "title": "Deleted"
+              }
+            },
+            "type": "object",
+            "required": [
+              "deleted"
+            ],
+            "title": "PresetDeleted"
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true
+      },
+      "_meta": {
+        "womblex/http": {
+          "method": "DELETE",
+          "path": "/v1/presets/{name}",
+          "scope": "admin"
+        }
+      }
+    },
+    {
+      "name": "get_queue",
+      "title": "Get Queue",
+      "description": "Get Queue\n\nCalls `GET /v1/queue` (scope `read`).",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "stale_after": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "default": 900.0,
+            "title": "Stale After"
+          },
+          "window_seconds": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "default": 3600.0,
+            "title": "Window Seconds"
+          },
+          "job_limit": {
+            "type": "integer",
+            "maximum": 1000,
+            "minimum": 1,
+            "default": 200,
+            "title": "Job Limit"
+          }
+        }
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$ref": "#/$defs/QueueSnapshot",
+        "$defs": {
+          "QueueSnapshot": {
+            "properties": {
+              "run_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Run Id"
+              },
+              "stale_after_seconds": {
+                "type": "number",
+                "title": "Stale After Seconds"
+              },
+              "stats": {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object",
+                "title": "Stats"
+              },
+              "total": {
+                "type": "integer",
+                "title": "Total"
+              },
+              "summary": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Summary"
+              },
+              "jobs": {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array",
+                "title": "Jobs"
+              },
+              "workers": {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array",
+                "title": "Workers"
+              },
+              "stale": {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array",
+                "title": "Stale"
+              },
+              "throughput": {
+                "additionalProperties": true,
+                "type": "object",
+                "title": "Throughput"
+              }
+            },
+            "type": "object",
+            "required": [
+              "run_id",
+              "stale_after_seconds",
+              "stats",
+              "total",
+              "summary",
+              "jobs",
+              "workers",
+              "stale",
+              "throughput"
+            ],
+            "title": "QueueSnapshot",
+            "description": "The queue in one read, scoped to the caller's runs (and to ``run_id`` when given)."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "_meta": {
+        "womblex/http": {
+          "method": "GET",
+          "path": "/v1/queue",
+          "scope": "read"
+        }
+      }
+    },
+    {
+      "name": "list_collections",
+      "title": "List Collections",
+      "description": "List Collections\n\nCalls `GET /v1/collections` (scope `read`).",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {}
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$ref": "#/$defs/CollectionList",
+        "$defs": {
+          "CollectionList": {
+            "properties": {
+              "collections": {
+                "items": {
+                  "$ref": "#/$defs/CollectionSummary"
+                },
+                "type": "array",
+                "title": "Collections"
+              }
+            },
+            "type": "object",
+            "required": [
+              "collections"
+            ],
+            "title": "CollectionList"
+          },
+          "CollectionSummary": {
+            "properties": {
+              "name": {
+                "type": "string",
+                "title": "Name"
+              },
+              "workflows": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "title": "Workflows"
+              }
+            },
+            "type": "object",
+            "required": [
+              "name",
+              "workflows"
+            ],
+            "title": "CollectionSummary"
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "_meta": {
+        "womblex/http": {
+          "method": "GET",
+          "path": "/v1/collections",
+          "scope": "read"
+        }
+      }
+    },
+    {
+      "name": "get_collection",
+      "title": "Get Collection",
+      "description": "Get Collection\n\nCalls `GET /v1/collections/{name}` (scope `read`).",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$ref": "#/$defs/CollectionDetail",
+        "$defs": {
+          "CollectionDetail": {
+            "properties": {
+              "name": {
+                "type": "string",
+                "title": "Name"
+              },
+              "workflows": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "title": "Workflows"
+              },
+              "documents": {
+                "type": "integer",
+                "title": "Documents"
+              },
+              "current_documents": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Current Documents"
+              },
+              "written_by": {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array",
+                "title": "Written By"
+              }
+            },
+            "type": "object",
+            "required": [
+              "name",
+              "workflows",
+              "documents",
+              "written_by"
+            ],
+            "title": "CollectionDetail",
+            "description": "A collection: the stored workflows that feed it, its document count and the workflows its files record."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "_meta": {
+        "womblex/http": {
+          "method": "GET",
+          "path": "/v1/collections/{name}",
+          "scope": "read"
+        }
+      }
+    },
+    {
+      "name": "add_to_collection",
+      "title": "Add To Collection",
+      "description": "Add To Collection\n\nCalls `POST /v1/collections/{name}/add` (scope `submit`).",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "body": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/CollectionAction"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "$defs": {
+          "CollectionAction": {
+            "properties": {
+              "workflow": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Workflow"
+              }
+            },
+            "type": "object",
+            "title": "CollectionAction",
+            "description": "Which workflow to act through; needed only when several feed the collection."
+          }
+        }
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$ref": "#/$defs/CollectionAdded",
+        "$defs": {
+          "CollectionAdded": {
+            "properties": {
+              "name": {
+                "type": "string",
+                "title": "Name"
+              },
+              "workflow": {
+                "type": "string",
+                "title": "Workflow"
+              },
+              "firing": {
+                "type": "string",
+                "title": "Firing"
+              }
+            },
+            "type": "object",
+            "required": [
+              "name",
+              "workflow",
+              "firing"
+            ],
+            "title": "CollectionAdded"
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      },
+      "_meta": {
+        "womblex/http": {
+          "method": "POST",
+          "path": "/v1/collections/{name}/add",
+          "scope": "submit"
+        }
+      }
+    },
+    {
+      "name": "rerun_collection",
+      "title": "Rerun Collection",
+      "description": "Rerun Collection\n\nCalls `POST /v1/collections/{name}/rerun` (scope `submit`).",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "body": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/CollectionAction"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "$defs": {
+          "CollectionAction": {
+            "properties": {
+              "workflow": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Workflow"
+              }
+            },
+            "type": "object",
+            "title": "CollectionAction",
+            "description": "Which workflow to act through; needed only when several feed the collection."
+          }
+        }
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$ref": "#/$defs/CollectionRerun",
+        "$defs": {
+          "CollectionRerun": {
+            "properties": {
+              "name": {
+                "type": "string",
+                "title": "Name"
+              },
+              "workflow": {
+                "type": "string",
+                "title": "Workflow"
+              },
+              "stages": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "title": "Stages"
+              },
+              "newly_dispatched": {
+                "type": "integer",
+                "title": "Newly Dispatched"
+              }
+            },
+            "type": "object",
+            "required": [
+              "name",
+              "workflow",
+              "stages",
+              "newly_dispatched"
+            ],
+            "title": "CollectionRerun"
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      },
+      "_meta": {
+        "womblex/http": {
+          "method": "POST",
+          "path": "/v1/collections/{name}/rerun",
+          "scope": "submit"
+        }
+      }
+    },
+    {
+      "name": "list_events",
+      "title": "List Events",
+      "description": "The workflow's inbound events, newest first, owner-scoped: another owner's workflow is 404.\n\nCalls `GET /v1/workflows/{workflow}/inbound-events` (scope `read`).",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "workflow": {
+            "type": "string",
+            "title": "Workflow"
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 1000,
+            "minimum": 1,
+            "default": 100,
+            "title": "Limit"
+          }
+        },
+        "required": [
+          "workflow"
+        ]
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$ref": "#/$defs/InboundEventList",
+        "$defs": {
+          "InboundEventList": {
+            "properties": {
+              "workflow": {
+                "type": "string",
+                "title": "Workflow"
+              },
+              "events": {
+                "items": {
+                  "$ref": "#/$defs/InboundEventOut"
+                },
+                "type": "array",
+                "title": "Events"
+              }
+            },
+            "type": "object",
+            "required": [
+              "workflow",
+              "events"
+            ],
+            "title": "InboundEventList"
+          },
+          "InboundEventOut": {
+            "properties": {
+              "event_id": {
+                "type": "string",
+                "title": "Event Id"
+              },
+              "hook": {
+                "type": "string",
+                "title": "Hook"
+              },
+              "event": {
+                "type": "string",
+                "title": "Event"
+              },
+              "received_at": {
+                "type": "string",
+                "title": "Received At"
+              },
+              "outcome": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Outcome"
+              }
+            },
+            "type": "object",
+            "required": [
+              "event_id",
+              "hook",
+              "event",
+              "received_at",
+              "outcome"
+            ],
+            "title": "InboundEventOut",
+            "description": "One inbound event: the sender's id, and the outcome it was given (null while it is being handled)."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "_meta": {
+        "womblex/http": {
+          "method": "GET",
+          "path": "/v1/workflows/{workflow}/inbound-events",
+          "scope": "read"
+        }
+      }
+    },
+    {
+      "name": "get_resources",
+      "title": "Get Resources",
+      "description": "The store, ingest location, queue and Isaacus deployment, read without a network call.\n\nCalls `GET /v1/resources` (scope `admin`).",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {}
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$ref": "#/$defs/Resources",
+        "$defs": {
+          "Resources": {
+            "properties": {
+              "store": {
+                "additionalProperties": true,
+                "type": "object",
+                "title": "Store"
+              },
+              "ingest": {
+                "additionalProperties": true,
+                "type": "object",
+                "title": "Ingest"
+              },
+              "queue": {
+                "additionalProperties": true,
+                "type": "object",
+                "title": "Queue"
+              },
+              "isaacus": {
+                "additionalProperties": true,
+                "type": "object",
+                "title": "Isaacus"
+              },
+              "deployments": {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array",
+                "title": "Deployments",
+                "default": []
+              }
+            },
+            "type": "object",
+            "required": [
+              "store",
+              "ingest",
+              "queue",
+              "isaacus"
+            ],
+            "title": "Resources",
+            "description": "What the deployment is wired to, credentials masked."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "_meta": {
+        "womblex/http": {
+          "method": "GET",
+          "path": "/v1/resources",
+          "scope": "admin"
+        }
+      }
+    },
+    {
+      "name": "test",
+      "title": "Test",
+      "description": "Test\n\nCalls `POST /v1/resources/test/{target}` (scope `admin`).",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "target": {
+            "enum": [
+              "store",
+              "ingest",
+              "queue"
+            ],
+            "type": "string",
+            "title": "Target"
+          }
+        },
+        "required": [
+          "target"
+        ]
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$ref": "#/$defs/Reachability",
+        "$defs": {
+          "Reachability": {
+            "properties": {
+              "target": {
+                "type": "string",
+                "enum": [
+                  "store",
+                  "ingest",
+                  "queue"
+                ],
+                "title": "Target"
+              },
+              "reachable": {
+                "type": "boolean",
+                "title": "Reachable"
+              },
+              "error": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Error"
+              }
+            },
+            "type": "object",
+            "required": [
+              "target",
+              "reachable",
+              "error"
+            ],
+            "title": "Reachability"
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      },
+      "_meta": {
+        "womblex/http": {
+          "method": "POST",
+          "path": "/v1/resources/test/{target}",
+          "scope": "admin"
+        }
+      }
+    },
+    {
+      "name": "list_stored_runs",
+      "title": "List Stored Runs",
+      "description": "List Stored Runs\n\nCalls `GET /v1/store/runs` (scope `admin`).",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {}
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$ref": "#/$defs/StoredRunList",
+        "$defs": {
+          "StoredRun": {
+            "properties": {
+              "run_id": {
+                "type": "string",
+                "title": "Run Id"
+              },
+              "document_count": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Document Count"
+              },
+              "stages": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "title": "Stages"
+              },
+              "created_at": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Created At"
+              },
+              "updated_at": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Updated At"
+              }
+            },
+            "type": "object",
+            "required": [
+              "run_id",
+              "document_count",
+              "stages",
+              "created_at",
+              "updated_at"
+            ],
+            "title": "StoredRun",
+            "description": "A run the store holds; ``document_count`` is null before any manifest landed."
+          },
+          "StoredRunList": {
+            "properties": {
+              "runs": {
+                "items": {
+                  "$ref": "#/$defs/StoredRun"
+                },
+                "type": "array",
+                "title": "Runs"
+              }
+            },
+            "type": "object",
+            "required": [
+              "runs"
+            ],
+            "title": "StoredRunList"
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "_meta": {
+        "womblex/http": {
+          "method": "GET",
+          "path": "/v1/store/runs",
+          "scope": "admin"
+        }
+      }
+    },
+    {
+      "name": "get_stage_presence",
+      "title": "Get Stage Presence",
+      "description": "The documents *stage* wrote a sidecar row for; 400 for a stage with no sidecar of its own.\n\nCalls `GET /v1/runs/{run_id}/stages/{stage}` (scope `read`).",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "stage": {
+            "type": "string",
+            "title": "Stage"
+          }
+        },
+        "required": [
+          "run_id",
+          "stage"
+        ]
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$ref": "#/$defs/StagePresence",
+        "$defs": {
+          "StagePresence": {
+            "properties": {
+              "run_id": {
+                "type": "string",
+                "title": "Run Id"
+              },
+              "stage": {
+                "type": "string",
+                "title": "Stage"
+              },
+              "source_hashes": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "title": "Source Hashes"
+              }
+            },
+            "type": "object",
+            "required": [
+              "run_id",
+              "stage",
+              "source_hashes"
+            ],
+            "title": "StagePresence",
+            "description": "The documents with a row in the stage's sidecar."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "_meta": {
+        "womblex/http": {
+          "method": "GET",
+          "path": "/v1/runs/{run_id}/stages/{stage}",
+          "scope": "read"
+        }
+      }
+    },
+    {
+      "name": "get_audit",
+      "title": "Get Audit",
+      "description": "`verify-shards`' cross-batch structural audit of the run's extraction shards.\n\nCalls `GET /v1/runs/{run_id}/audit` (scope `read`).",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          }
+        },
+        "required": [
+          "run_id"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "_meta": {
+        "womblex/http": {
+          "method": "GET",
+          "path": "/v1/runs/{run_id}/audit",
+          "scope": "read"
+        }
+      }
+    },
+    {
+      "name": "get_document_detail",
+      "title": "Get Document Detail",
+      "description": "The document's chunks, entities, PII spans, narrative money and quality rows.\n\nCalls `GET /v1/runs/{run_id}/documents/{source_hash}/detail` (scope `read_raw`).",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "source_hash": {
+            "type": "string",
+            "title": "Source Hash"
+          }
+        },
+        "required": [
+          "run_id",
+          "source_hash"
+        ]
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$ref": "#/$defs/DocumentDetail",
+        "$defs": {
+          "DocumentDetail": {
+            "properties": {
+              "run_id": {
+                "type": "string",
+                "title": "Run Id"
+              },
+              "source_hash": {
+                "type": "string",
+                "title": "Source Hash"
+              },
+              "chunks": {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array",
+                "title": "Chunks"
+              },
+              "entities": {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array",
+                "title": "Entities"
+              },
+              "pii_spans": {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array",
+                "title": "Pii Spans"
+              },
+              "money_spans": {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array",
+                "title": "Money Spans"
+              },
+              "quality": {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array",
+                "title": "Quality"
+              }
+            },
+            "type": "object",
+            "required": [
+              "run_id",
+              "source_hash",
+              "chunks",
+              "entities",
+              "pii_spans",
+              "money_spans",
+              "quality"
+            ],
+            "title": "DocumentDetail",
+            "description": "One document's chunks and the rows each stage annotated on them (raw text: ``read_raw``)."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "_meta": {
+        "womblex/http": {
+          "method": "GET",
+          "path": "/v1/runs/{run_id}/documents/{source_hash}/detail",
+          "scope": "read_raw"
+        }
+      }
+    },
+    {
+      "name": "list_logs",
+      "title": "List Logs",
+      "description": "List Logs\n\nCalls `GET /v1/runs/{run_id}/logs` (scope `read`).",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          }
+        },
+        "required": [
+          "run_id"
+        ]
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$ref": "#/$defs/RunLogs",
+        "$defs": {
+          "RunLog": {
+            "properties": {
+              "name": {
+                "type": "string",
+                "title": "Name"
+              },
+              "size": {
+                "type": "integer",
+                "title": "Size"
+              },
+              "modified": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Modified"
+              }
+            },
+            "type": "object",
+            "required": [
+              "name",
+              "size",
+              "modified"
+            ],
+            "title": "RunLog"
+          },
+          "RunLogs": {
+            "properties": {
+              "run_id": {
+                "type": "string",
+                "title": "Run Id"
+              },
+              "logs": {
+                "items": {
+                  "$ref": "#/$defs/RunLog"
+                },
+                "type": "array",
+                "title": "Logs"
+              }
+            },
+            "type": "object",
+            "required": [
+              "run_id",
+              "logs"
+            ],
+            "title": "RunLogs",
+            "description": "The run's batch logs, newest first; empty for a run written before logs were published."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "_meta": {
+        "womblex/http": {
+          "method": "GET",
+          "path": "/v1/runs/{run_id}/logs",
+          "scope": "read"
+        }
+      }
+    },
+    {
+      "name": "read_log",
+      "title": "Read Log",
+      "description": "One log as text (``?download=true`` names it as a file).\n\nA name that is not a log's and an absent log give the same 404 with the\nlogs there are, so the route cannot probe outside the run's ``logs/``.\n\nCalls `GET /v1/runs/{run_id}/logs/{name}` (scope `read`).",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "download": {
+            "type": "boolean",
+            "default": false,
+            "title": "Download"
+          }
+        },
+        "required": [
+          "run_id",
+          "name"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "_meta": {
+        "womblex/http": {
+          "method": "GET",
+          "path": "/v1/runs/{run_id}/logs/{name}",
+          "scope": "read"
+        }
+      }
+    },
+    {
+      "name": "get_progress",
+      "title": "Get Progress",
+      "description": "Each stage's checkpoint, read from the run itself, so it answers without a queue too.\n\nCalls `GET /v1/runs/{run_id}/progress` (scope `read`).",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          }
+        },
+        "required": [
+          "run_id"
+        ]
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$ref": "#/$defs/StageProgress",
+        "$defs": {
+          "StageProgress": {
+            "properties": {
+              "run_id": {
+                "type": "string",
+                "title": "Run Id"
+              },
+              "stages": {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array",
+                "title": "Stages"
+              }
+            },
+            "type": "object",
+            "required": [
+              "run_id",
+              "stages"
+            ],
+            "title": "StageProgress",
+            "description": "Each stage's checkpoint for the run, in pipeline order; a stage that has not run is absent."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "_meta": {
+        "womblex/http": {
+          "method": "GET",
+          "path": "/v1/runs/{run_id}/progress",
+          "scope": "read"
+        }
+      }
+    },
+    {
+      "name": "list_runs",
+      "title": "List Runs",
+      "description": "List Runs\n\nCalls `GET /v1/runs` (scope `read`).",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {}
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$ref": "#/$defs/RunList",
+        "$defs": {
+          "RunList": {
+            "properties": {
+              "runs": {
+                "items": {
+                  "$ref": "#/$defs/RunStatus"
+                },
+                "type": "array",
+                "title": "Runs"
+              }
+            },
+            "type": "object",
+            "required": [
+              "runs"
+            ],
+            "title": "RunList"
+          },
+          "RunStatus": {
+            "properties": {
+              "run_id": {
+                "type": "string",
+                "title": "Run Id"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "running",
+                  "done",
+                  "failed",
+                  "cancelled"
+                ],
+                "title": "State"
+              },
+              "counts": {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object",
+                "title": "Counts"
+              },
+              "total": {
+                "type": "integer",
+                "title": "Total"
+              },
+              "created_at": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Created At"
+              },
+              "updated_at": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Updated At"
+              },
+              "orphaned": {
+                "type": "boolean",
+                "title": "Orphaned",
+                "default": false
+              },
+              "summary": {
+                "type": "string",
+                "title": "Summary"
+              }
+            },
+            "type": "object",
+            "required": [
+              "run_id",
+              "state",
+              "counts",
+              "total",
+              "summary"
+            ],
+            "title": "RunStatus",
+            "description": "One run's queue rollup. ``state`` is derived from ``counts``; ``orphaned`` marks extraction\na failed firing queued with no stages dispatched. ``summary`` is the status sentence the CLI\nshows, built from the exact per-stage counts."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "_meta": {
+        "womblex/http": {
+          "method": "GET",
+          "path": "/v1/runs",
+          "scope": "read"
+        }
+      }
+    },
+    {
+      "name": "submit_run",
+      "title": "Submit Run",
+      "description": "Submit Run\n\nCalls `POST /v1/runs` (scope `submit`).",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "body": {
+            "$ref": "#/$defs/RunRequest"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "$defs": {
+          "RunRequest": {
+            "properties": {
+              "input_prefix": {
+                "type": "string",
+                "title": "Input Prefix"
+              },
+              "preset": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Preset"
+              },
+              "config": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Config"
+              },
+              "batch_size": {
+                "type": "integer",
+                "minimum": 1.0,
+                "title": "Batch Size",
+                "default": 50
+              }
+            },
+            "type": "object",
+            "required": [
+              "input_prefix"
+            ],
+            "title": "RunRequest",
+            "description": "A run submission. ``preset`` or ``config`` picks the downstream stages; neither is extraction only."
+          }
+        }
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$ref": "#/$defs/RunSubmitted",
+        "$defs": {
+          "RunSubmitted": {
+            "properties": {
+              "run_id": {
+                "type": "string",
+                "title": "Run Id"
+              },
+              "document_count": {
+                "type": "integer",
+                "title": "Document Count"
+              },
+              "batch_count": {
+                "type": "integer",
+                "title": "Batch Count"
+              },
+              "stages": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "title": "Stages"
+              }
+            },
+            "type": "object",
+            "required": [
+              "run_id",
+              "document_count",
+              "batch_count",
+              "stages"
+            ],
+            "title": "RunSubmitted"
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      },
+      "_meta": {
+        "womblex/http": {
+          "method": "POST",
+          "path": "/v1/runs",
+          "scope": "submit"
+        }
+      }
+    },
+    {
+      "name": "preview_ingest",
+      "title": "Preview Ingest",
+      "description": "What a submission naming *input_prefix* would run, before it is submitted.\n\nCalls `GET /v1/ingest` (scope `submit`).",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "input_prefix": {
+            "type": "string",
+            "default": "",
+            "title": "Input Prefix"
+          }
+        }
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$ref": "#/$defs/IngestPreview",
+        "$defs": {
+          "IngestPreview": {
+            "properties": {
+              "uri": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Uri"
+              },
+              "input_prefix": {
+                "type": "string",
+                "title": "Input Prefix"
+              },
+              "kind": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "local",
+                      "remote"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Kind"
+              },
+              "reachable": {
+                "type": "boolean",
+                "title": "Reachable"
+              },
+              "document_count": {
+                "type": "integer",
+                "title": "Document Count"
+              },
+              "sample": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "title": "Sample"
+              },
+              "subdirectories": {
+                "items": {
+                  "$ref": "#/$defs/IngestSubdirectory"
+                },
+                "type": "array",
+                "title": "Subdirectories"
+              },
+              "error": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Error"
+              }
+            },
+            "type": "object",
+            "required": [
+              "uri",
+              "input_prefix",
+              "kind",
+              "reachable",
+              "document_count",
+              "sample",
+              "subdirectories",
+              "error"
+            ],
+            "title": "IngestPreview",
+            "description": "What ``POST /v1/runs`` would pick up under ``input_prefix``; ``error`` says why it would not."
+          },
+          "IngestSubdirectory": {
+            "properties": {
+              "name": {
+                "type": "string",
+                "title": "Name"
+              },
+              "input_prefix": {
+                "type": "string",
+                "title": "Input Prefix"
+              },
+              "document_count": {
+                "type": "integer",
+                "title": "Document Count"
+              }
+            },
+            "type": "object",
+            "required": [
+              "name",
+              "input_prefix",
+              "document_count"
+            ],
+            "title": "IngestSubdirectory"
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "_meta": {
+        "womblex/http": {
+          "method": "GET",
+          "path": "/v1/ingest",
+          "scope": "submit"
+        }
+      }
+    },
+    {
+      "name": "get_run",
+      "title": "Get Run",
+      "description": "Get Run\n\nCalls `GET /v1/runs/{run_id}` (scope `read`).",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          }
+        },
+        "required": [
+          "run_id"
+        ]
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$ref": "#/$defs/RunStatus",
+        "$defs": {
+          "RunStatus": {
+            "properties": {
+              "run_id": {
+                "type": "string",
+                "title": "Run Id"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "running",
+                  "done",
+                  "failed",
+                  "cancelled"
+                ],
+                "title": "State"
+              },
+              "counts": {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object",
+                "title": "Counts"
+              },
+              "total": {
+                "type": "integer",
+                "title": "Total"
+              },
+              "created_at": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Created At"
+              },
+              "updated_at": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Updated At"
+              },
+              "orphaned": {
+                "type": "boolean",
+                "title": "Orphaned",
+                "default": false
+              },
+              "summary": {
+                "type": "string",
+                "title": "Summary"
+              }
+            },
+            "type": "object",
+            "required": [
+              "run_id",
+              "state",
+              "counts",
+              "total",
+              "summary"
+            ],
+            "title": "RunStatus",
+            "description": "One run's queue rollup. ``state`` is derived from ``counts``; ``orphaned`` marks extraction\na failed firing queued with no stages dispatched. ``summary`` is the status sentence the CLI\nshows, built from the exact per-stage counts."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "_meta": {
+        "womblex/http": {
+          "method": "GET",
+          "path": "/v1/runs/{run_id}",
+          "scope": "read"
+        }
+      }
+    },
+    {
+      "name": "get_manifest",
+      "title": "Get Manifest",
+      "description": "Get Manifest\n\nCalls `GET /v1/runs/{run_id}/manifest` (scope `read`).",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          }
+        },
+        "required": [
+          "run_id"
+        ]
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$ref": "#/$defs/RunManifest",
+        "$defs": {
+          "RunManifest": {
+            "properties": {
+              "run_id": {
+                "type": "string",
+                "title": "Run Id"
+              },
+              "documents": {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array",
+                "title": "Documents"
+              }
+            },
+            "type": "object",
+            "required": [
+              "run_id",
+              "documents"
+            ],
+            "title": "RunManifest"
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "_meta": {
+        "womblex/http": {
+          "method": "GET",
+          "path": "/v1/runs/{run_id}/manifest",
+          "scope": "read"
+        }
+      }
+    },
+    {
+      "name": "get_files",
+      "title": "Get Files",
+      "description": "Get Files\n\nCalls `GET /v1/runs/{run_id}/files` (scope `read`).",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          }
+        },
+        "required": [
+          "run_id"
+        ]
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$ref": "#/$defs/RunFiles",
+        "$defs": {
+          "RunFile": {
+            "properties": {
+              "key": {
+                "type": "string",
+                "title": "Key"
+              },
+              "rows": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Rows"
+              },
+              "contract_version": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Contract Version"
+              },
+              "sensitivity": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Sensitivity"
+              }
+            },
+            "type": "object",
+            "required": [
+              "key"
+            ],
+            "title": "RunFile",
+            "description": "One object under the run. Contract keys are null for a non-Parquet or pre-contract file."
+          },
+          "RunFiles": {
+            "properties": {
+              "run_id": {
+                "type": "string",
+                "title": "Run Id"
+              },
+              "files": {
+                "items": {
+                  "$ref": "#/$defs/RunFile"
+                },
+                "type": "array",
+                "title": "Files"
+              }
+            },
+            "type": "object",
+            "required": [
+              "run_id",
+              "files"
+            ],
+            "title": "RunFiles"
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "_meta": {
+        "womblex/http": {
+          "method": "GET",
+          "path": "/v1/runs/{run_id}/files",
+          "scope": "read"
+        }
+      }
+    },
+    {
+      "name": "get_document_text",
+      "title": "Get Document Text",
+      "description": "Get Document Text\n\nCalls `GET /v1/runs/{run_id}/documents/{source_hash}/text` (scope `read`).",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "source_hash": {
+            "type": "string",
+            "title": "Source Hash"
+          },
+          "layer": {
+            "enum": [
+              "masked",
+              "chunks",
+              "elements"
+            ],
+            "type": "string",
+            "default": "masked",
+            "title": "Layer"
+          }
+        },
+        "required": [
+          "run_id",
+          "source_hash"
+        ]
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$ref": "#/$defs/DocumentText",
+        "$defs": {
+          "DocumentText": {
+            "properties": {
+              "run_id": {
+                "type": "string",
+                "title": "Run Id"
+              },
+              "source_hash": {
+                "type": "string",
+                "title": "Source Hash"
+              },
+              "layer": {
+                "type": "string",
+                "enum": [
+                  "masked",
+                  "chunks",
+                  "elements"
+                ],
+                "title": "Layer"
+              },
+              "sensitivity": {
+                "type": "string",
+                "enum": [
+                  "raw",
+                  "masked",
+                  "none"
+                ],
+                "title": "Sensitivity"
+              },
+              "rows": {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array",
+                "title": "Rows"
+              }
+            },
+            "type": "object",
+            "required": [
+              "run_id",
+              "source_hash",
+              "layer",
+              "sensitivity",
+              "rows"
+            ],
+            "title": "DocumentText",
+            "description": "One document's text in one layer; ``rows`` carry that layer's columns."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "_meta": {
+        "womblex/http": {
+          "method": "GET",
+          "path": "/v1/runs/{run_id}/documents/{source_hash}/text",
+          "scope": "read"
+        }
+      }
+    },
+    {
+      "name": "get_metrics",
+      "title": "Get Metrics",
+      "description": "Get Metrics\n\nCalls `GET /v1/runs/{run_id}/metrics` (scope `read`).",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          }
+        },
+        "required": [
+          "run_id"
+        ]
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$ref": "#/$defs/RunMetrics",
+        "$defs": {
+          "RunMetrics": {
+            "properties": {
+              "run_id": {
+                "type": "string",
+                "title": "Run Id"
+              },
+              "stats": {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object",
+                "title": "Stats"
+              },
+              "workers": {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array",
+                "title": "Workers"
+              },
+              "throughput": {
+                "additionalProperties": true,
+                "type": "object",
+                "title": "Throughput"
+              }
+            },
+            "type": "object",
+            "required": [
+              "run_id",
+              "stats",
+              "workers",
+              "throughput"
+            ],
+            "title": "RunMetrics"
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "_meta": {
+        "womblex/http": {
+          "method": "GET",
+          "path": "/v1/runs/{run_id}/metrics",
+          "scope": "read"
+        }
+      }
+    }
+  ]
+}

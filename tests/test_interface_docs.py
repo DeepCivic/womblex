@@ -66,3 +66,18 @@ def test_the_running_service_is_unchanged() -> None:
     spec, _ = interface_docs._app_spec()
     assert spec["openapi"].startswith("3.1")
     assert "securitySchemes" not in spec.get("components", {})
+
+
+def test_mcp_tools_are_provisional_and_cover_every_mapped_operation(built: dict[str, str]) -> None:
+    from womblex.api.interface_mcp import MCP_PROTOCOL_VERSION, NOT_MAPPED
+
+    doc = json.loads(built["mcp-tools.json"])
+    assert doc["_meta"] == {"womblex/status": "provisional", "womblex/mcpProtocolVersion": MCP_PROTOCOL_VERSION}
+    ops = _operations(json.loads(built["openapi.json"])["paths"])
+    called = {f"{t['_meta']['womblex/http']['method']} {t['_meta']['womblex/http']['path']}" for t in doc["tools"]}
+    skipped = {f"{m.upper()} {p}" for m, p in NOT_MAPPED}
+    assert called | skipped == set(ops) and not called & skipped
+    for tool in doc["tools"]:
+        assert tool["inputSchema"]["type"] == "object"
+        assert "#/components/" not in json.dumps(tool)
+        assert tool["annotations"]["readOnlyHint"] == (tool["_meta"]["womblex/http"]["method"] == "GET")
