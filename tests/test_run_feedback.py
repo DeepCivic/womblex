@@ -76,3 +76,12 @@ class TestLogNoise:
             second = WomblexConfig(**kwargs)
         assert first.enrichment.persist_document and second.enrichment.persist_document
         assert len([r for r in caplog.records if "persist_document" in r.getMessage()]) == 1
+
+    def test_layout_model_loads_without_onnx_runtime_warnings(
+        self, capfd: pytest.CaptureFixture[str],
+    ) -> None:
+        # ONNX Runtime writes these from C++ to stderr, not through logging.
+        from womblex.ingest.layout_onnx import PPDocLayoutAnalyzer
+
+        PPDocLayoutAnalyzer()._ensure_loaded()
+        assert "CleanUnusedInitializersAndNodeArgs" not in capfd.readouterr().err
