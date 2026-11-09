@@ -108,6 +108,7 @@ For each file processed via the `operations` package:
       └── spreadsheets also populate DocumentProfile.sheet_meta: list[SheetInfo]
 
 2. get_extractor(profile) → SpreadsheetExtractor | DocxExtractor | TextExtractor | MarkdownExtractor
+                           | HtmlExtractor
       (path-based formats only; every seam-openable input goes to the orchestrator)
 
 3. extract_text(path, profile) → list[ExtractionResult]  (single-element list per source)

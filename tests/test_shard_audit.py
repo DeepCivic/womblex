@@ -157,17 +157,17 @@ class TestAudit:
     def test_source_count_uses_the_rule_a_run_ingests_by(self, tmp_path, budget_extraction):
         # The count is compared against the manifest, so it has to be what a run
         # would ingest. It once used its own extension list, which counted .txt
-        # and .html a run passes over and missed the .xls a run takes -- drift
-        # reported in both directions on a corpus a run handled perfectly.
+        # a run passes over and missed the .xls a run takes -- drift reported in
+        # both directions on a corpus a run handled perfectly.
         _write_batch(tmp_path, 1, budget_extraction, "doc-a")
         src = tmp_path / "src"
         src.mkdir()
-        for name in ("a.pdf", "b.xls", "c.docx"):
+        for name in ("a.pdf", "b.xls", "c.docx", "d.html"):
             (src / name).write_bytes(b"x")
-        for name in ("readme.txt", "index.html", "notes.rst"):
+        for name in ("readme.txt", "data.json", "notes.rst"):
             (src / name).write_text("not a document a run ingests")
         report = audit_shard_directory(tmp_path, input_dir=src)
-        assert report.source_count == 3
+        assert report.source_count == 4
 
     def test_source_count_is_none_for_a_corpus_a_run_would_refuse(
         self, tmp_path, budget_extraction,

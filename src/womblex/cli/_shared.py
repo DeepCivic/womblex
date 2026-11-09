@@ -15,7 +15,7 @@ logger = logging.getLogger("womblex")
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif", ".jp2"}
 
 SUPPORTED_EXTENSIONS = {
-    ".pdf", ".csv", ".xlsx", ".xls", ".docx", ".md", ".markdown", *IMAGE_EXTENSIONS,
+    ".pdf", ".csv", ".xlsx", ".xls", ".docx", ".md", ".markdown", ".html", ".htm", *IMAGE_EXTENSIONS,
 }
 
 
