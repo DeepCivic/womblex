@@ -49,12 +49,24 @@ def test_openapi_is_3_2_and_every_operation_names_its_access(built: dict[str, st
                 assert requirement["bearerAuth"], f"{name}: no scope found"
 
 
+def _null_types(node: object) -> list[object]:
+    if isinstance(node, dict):
+        found = [node] if node.get("type") == "null" else []
+        return found + [n for v in node.values() for n in _null_types(v)]
+    if isinstance(node, list):
+        return [n for v in node for n in _null_types(v)]
+    return []
+
+
 def test_swagger_is_2_0_with_no_openapi_3_constructs(built: dict[str, str]) -> None:
     text = built["swagger.json"]
     spec = json.loads(text)
     assert spec["swagger"] == "2.0"
-    for construct in ('"#/components/', '"anyOf"', '"requestBody"', '"const"', '{"type": "null"}'):
+    for construct in ('"#/components/', '"anyOf"', '"requestBody"', '"const"'):
         assert construct not in text
+    # Searched in the parsed document: rendered with an indent, a null type never
+    # appears as the one-line text '{"type": "null"}'.
+    assert not _null_types(spec)
     upload = spec["paths"]["/v1/uploads"]["post"]
     assert upload["consumes"] == ["multipart/form-data"]
     assert upload["parameters"][0]["type"] == "file"
