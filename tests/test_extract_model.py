@@ -450,5 +450,5 @@ class TestGetExtractor:
         assert isinstance(ext, MarkdownExtractor)
 
     def test_pdf_type_raises(self) -> None:
-        with pytest.raises(ValueError, match="only handles SPREADSHEET/DOCX/TEXT/MARKDOWN"):
+        with pytest.raises(ValueError, match="only handles SPREADSHEET/DOCX/TEXT/MARKDOWN/HTML"):
             get_extractor(self._make_profile(DocumentType.NATIVE_NARRATIVE))

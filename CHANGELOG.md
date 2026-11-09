@@ -8,6 +8,9 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 ## [Unreleased]
 
+### Added
+- **HTML ingest.** `.html` and `.htm` files are read as headings, paragraphs, list items, preformatted blocks and tables in document order, with the standard-library parser (no new dependency). `womblex run` picks them up.
+
 ### Fixed
 - **Docs agree with the code.** A QA pass over `docs/` corrected claims that had drifted: `dispatch-workflow` accepts `layout` and `quality` steps (only a firing refuses `quality`); a failed document is a `status: error` manifest row; a redelivery keeps the record it replaces as `<name>.<seq>.json`; webhook bodies carry `collection` and `at`; the `layout` stage is in the pipeline order, the contract table and the architecture diagram; Requirement 7's TO-DO now names the geospatial ingest only (G-NAF is guarded); and stale MuPDF-era calls, the Postgres pin, the run-record version for `deliveries` and the classification pseudocode. A second pass covered every remaining doc and CLAUDE.md: redaction has no pipeline point, the `pii` stage writes `*.clean_text.parquet`, the workflow commands `rerun-collection` and `deliver`, `storage_options` on an object-store destination, the layout filter for raster redaction, the synthetic test fixtures `evaluation.md` names, and the G-NAF per-file failure isolation. The docs also record one incoherence they do not fix: local extraction's integrity check still stops a launched `womblex run`, against "A run is an arrow".
 - **`womblex run` no longer stops at a batch that fails its integrity check.** A `ShardVerificationError` from `verify_shard_persistence` is logged with the batch and shard, the batch is checkpointed in `failed_batches` (its documents re-extracted on `--resume`), the later batches run, the run record's `partial` names it, and the run exits 1.

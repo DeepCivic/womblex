@@ -41,6 +41,7 @@ class DocumentType(Enum):
     SPREADSHEET = "spreadsheet"                      # CSV/Excel (may have narrative rows)
     TEXT = "text"                                     # Plain text file (passthrough)
     MARKDOWN = "markdown"                             # Markdown file (headings/lists/tables)
+    HTML = "html"                                     # HTML file (headings/lists/tables)
     
     UNKNOWN = "unknown"                              # failed detection
 
@@ -554,6 +555,27 @@ def _detect_markdown(path: Path) -> DocumentProfile:
     )
 
 
+def _detect_html(path: Path) -> DocumentProfile:
+    """Detect HTML file characteristics: table signal only, no OCR path."""
+    from womblex.ingest.html_doc import html_elements, read_html
+
+    elements = html_elements(read_html(path))
+    has_text = any(e.text for e in elements)
+    return DocumentProfile(
+        doc_type=DocumentType.HTML,
+        page_count=1,
+        has_text_layer=True,
+        text_coverage=1.0 if has_text else 0.0,
+        has_images=False,
+        has_tables=any(e.kind == "table" for e in elements),
+        has_handwriting_signals=False,
+        ocr_confidence=None,
+        glyph_regularity=None,
+        stroke_consistency=None,
+        confidence=1.0,
+    )
+
+
 def detect_file_type(
     path: Path,
     config: DetectionConfig | None = None,
@@ -580,6 +602,8 @@ def detect_file_type(
         return _detect_spreadsheet(path)
     elif suffix in (".md", ".markdown"):
         return _detect_markdown(path)
+    elif suffix in (".html", ".htm"):
+        return _detect_html(path)
     elif suffix == ".txt":
         return DocumentProfile(
             doc_type=DocumentType.TEXT,
