@@ -91,6 +91,7 @@ class PPDocLayoutAnalyzer:
         opts = ort.SessionOptions()
         opts.intra_op_num_threads = get_inference_threads()
         opts.inter_op_num_threads = 1
+        opts.log_severity_level = 3  # errors only; load-time warnings need no action
         self._session = ort.InferenceSession(
             str(onnx_path), opts, providers=["CPUExecutionProvider"],
         )

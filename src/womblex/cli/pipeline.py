@@ -183,6 +183,14 @@ def cmd_run(args: argparse.Namespace) -> int:
         all_files = checkpoint_mgr.filter_unprocessed(all_files, input_root)
         logger.info("Resuming: %d documents remaining (next batch=%d)", len(all_files), batch_num_offset + 1)
     else:
+        held = len(list(shard_dir.glob("batch-*.elements.parquet")))
+        if held:
+            logger.warning(
+                "Run %s already holds %d extraction batch(es) and this run was not started "
+                "with --resume: the checkpoint is cleared and every document is extracted "
+                "again. To add new files and skip those already extracted, pass --resume.",
+                run_id, held,
+            )
         checkpoint_mgr.clear()
 
     if not all_files:

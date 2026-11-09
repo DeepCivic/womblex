@@ -128,6 +128,10 @@ def _record_bundled_v4() -> None:
     )
 
 
+#: onnxruntime severity 3: errors only (2 is warnings).
+_ORT_LOG_ERROR = 3
+
+
 class PaddleOCRReader:
     """OCR reader backed by rapidocr-onnxruntime.
 
@@ -183,7 +187,12 @@ class PaddleOCRReader:
         thread_opts = {
             f"{m}_{opt}": v
             for m in ("det", "cls", "rec")
-            for opt, v in (("intra_op_num_threads", n), ("inter_op_num_threads", 1))
+            for opt, v in (
+                ("intra_op_num_threads", n), ("inter_op_num_threads", 1),
+                # ORT warns about unused initialisers on every model load; it is a
+                # property of the shipped model files, not something a run can act on.
+                ("log_severity_level", _ORT_LOG_ERROR),
+            )
         }
 
         v5 = self._resolve_v5_paths()

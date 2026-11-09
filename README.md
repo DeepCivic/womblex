@@ -185,7 +185,7 @@ womblex extract report.pdf -o output/
 womblex extract register.xlsx -o output/ --format parquet
 
 # A corpus described by a config: copy configs/example.yaml and set paths.input_root
-womblex run --config my-dataset.yaml            # add --resume to continue after a failure
+womblex run --config my-dataset.yaml            # add --resume to continue after a failure, or to add new files to this run
 ```
 
 `womblex run` does extraction only. Every other stage is its own command over
