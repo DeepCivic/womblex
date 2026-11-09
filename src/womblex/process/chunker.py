@@ -69,6 +69,7 @@ import semchunk
 from womblex.ingest.elements import TEXT_KINDS, Element
 from womblex.ingest.views import _element_to_table_data, _sheets_to_table_data
 from womblex.utils.model_registry import SLOT_TOKENIZER, record_use, register, resolve
+from womblex.utils.token_packer import quiet_length_warning
 
 logger = logging.getLogger(__name__)
 
@@ -202,6 +203,7 @@ def create_chunker(
             ``None`` = unbounded.
         max_token_chars: Max chars per token estimate for optimisation.
     """
+    quiet_length_warning()  # semchunk counts tokens; a long text is not an error
     if isinstance(tokenizer, str):
         # Prefer a vendored copy (e.g. _models/kanon-2-tokenizer) so chunking is
         # offline — no Hugging Face round-trip; fall back to the hub id when not
