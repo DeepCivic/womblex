@@ -72,3 +72,27 @@ class TestHtml:
         path.write_bytes("<p>caf\xe9</p>".encode("latin-1"))
         profile = detect_file_type(path, DetectionConfig())
         assert extract_text(path, profile)[0].elements[0].text == "café"
+
+    def test_omitted_cell_and_row_end_tags_keep_every_cell(self, tmp_path: Path) -> None:
+        # </td>, </th> and </tr> are optional in HTML; an unclosed cell must not
+        # be overwritten by the next one.
+        body = "<table><tr><th>Site<th>Count<tr><td>North<td>12</table>"
+        table = next(e for e in _extract(tmp_path, body) if e.kind == "table")
+        assert [(c.row, c.col, c.value) for c in table.cells] == [
+            (0, 0, "Site"), (0, 1, "Count"), (1, 0, "North"), (1, 1, "12"),
+        ]
+        assert table.header_rows == [0]
+
+    def test_nested_table_text_stays_in_its_outer_cell(self, tmp_path: Path) -> None:
+        # A layout table inside a cell once restarted the outer table, dropping
+        # the rows read before it and the cells after it.
+        body = (
+            "<table><tr><td>Before</td></tr>"
+            "<tr><td>Outer <table><tr><td>inner a</td><td>inner b</td></tr></table> tail</td>"
+            "<td>Next</td></tr></table><p>After.</p>"
+        )
+        got = _extract(tmp_path, body)
+        assert [e.kind for e in got] == ["table", "paragraph"]
+        assert [(c.row, c.col, c.value) for c in got[0].cells] == [
+            (0, 0, "Before"), (1, 0, "Outer inner a inner b tail"), (1, 1, "Next"),
+        ]

@@ -55,6 +55,9 @@ class _Collector(HTMLParser):
         self._header_rows: list[int] = []
         self._cell: list[str] | None = None
         self._row_is_header = False
+        # Tables inside a cell (layout tables) are flattened into that cell's
+        # text: restarting the table would drop the rows already read.
+        self._nested = 0
 
     # -- helpers -----------------------------------------------------------
     def _flush(self) -> None:
@@ -78,13 +81,23 @@ class _Collector(HTMLParser):
             self._skip += 1
         if self._skip:
             return
-        if tag == "table":
+        if tag == "table" and self._table is not None:
+            self._nested += 1
+            self._spaced()
+        elif self._nested:
+            if tag in ("tr", "td", "th", "br"):
+                self._spaced()
+        elif tag == "table":
             self._flush()
             self._table, self._header_rows = [], []
         elif tag == "tr" and self._table is not None:
+            self._end_cell()  # </td> and </tr> may be omitted
             self._table.append([])
             self._row_is_header = False
         elif tag in ("td", "th") and self._table is not None:
+            self._end_cell()
+            if not self._table:
+                self._table.append([])  # a cell before any <tr>
             self._cell = []
             self._row_is_header = self._row_is_header or tag == "th"
         elif self._table is not None:
@@ -110,11 +123,12 @@ class _Collector(HTMLParser):
             return
         if self._skip:
             return
-        if tag in ("td", "th") and self._cell is not None and self._table:
-            self._table[-1].append(_WS.sub(" ", "".join(self._cell)).strip())
-            self._cell = None
-            if self._row_is_header and len(self._table) - 1 not in self._header_rows:
-                self._header_rows.append(len(self._table) - 1)
+        if self._nested:
+            if tag == "table":
+                self._nested -= 1
+            self._spaced()
+        elif tag in ("td", "th"):
+            self._end_cell()
         elif tag == "table" and self._table is not None:
             self._finish_table()
         elif self._table is not None:
@@ -136,7 +150,20 @@ class _Collector(HTMLParser):
                 self._kind = "paragraph"  # text outside any block tag
             self._buf.append(data)
 
+    def _spaced(self) -> None:
+        if self._cell is not None:
+            self._cell.append(" ")
+
+    def _end_cell(self) -> None:
+        if self._cell is None or not self._table:
+            return
+        self._table[-1].append(_WS.sub(" ", "".join(self._cell)).strip())
+        self._cell = None
+        if self._row_is_header and len(self._table) - 1 not in self._header_rows:
+            self._header_rows.append(len(self._table) - 1)
+
     def _finish_table(self) -> None:
+        self._end_cell()
         rows = self._table or []
         cells = [
             Cell(row=r, col=c, value=value)
@@ -147,12 +174,10 @@ class _Collector(HTMLParser):
                 order=len(self.elements), kind="table", extractor="html",
                 cells=cells, header_rows=self._header_rows, confidence=0.85,
             ))
-        self._table, self._header_rows, self._cell = None, [], None
+        self._table, self._header_rows, self._cell, self._nested = None, [], None, 0
 
     def close(self) -> None:
         super().close()
-        if self._cell is not None and self._table:
-            self._table[-1].append(_WS.sub(" ", "".join(self._cell)).strip())
         if self._table is not None:
             self._finish_table()
         self._flush()
