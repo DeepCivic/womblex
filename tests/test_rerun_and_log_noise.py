@@ -1,4 +1,4 @@
-"""Run-time behaviour from the ism-au feedback: re-run guidance and log noise."""
+"""Re-run guidance for a populated run, and warnings that need no action kept out of the log."""
 
 import argparse
 import logging
