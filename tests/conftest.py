@@ -157,3 +157,12 @@ def _fresh_deployment_clients():
     reset_clients()
     yield
     reset_clients()
+
+
+@pytest.fixture(autouse=True)
+def _fresh_reuse_warning():
+    """The AI-chunking reuse warning is once per process; each test sees it afresh."""
+    import womblex.config as cfg
+
+    cfg._ai_chunking_reuse_warned.clear()
+    yield
