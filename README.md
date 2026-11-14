@@ -132,7 +132,7 @@ Limits worth knowing before you start:
   through the bundled `s3fs`).
 - **PostgreSQL** for the job queue (DBOS's system database) once more than one
   host takes part. Without `--dsn` the queue is a local SQLite file only that
-  host can see. The Compose stack runs PostgreSQL 18.4.
+  host can see. The Compose stack runs PostgreSQL 18.6.
 - **Optional:** the `[api]` extra for `womblex serve`; the `[pgvector]` extra and
   the `vector` extension for a workflow's PostgreSQL destination; outbound
   network access and credentials for any hosted model you configure (the
