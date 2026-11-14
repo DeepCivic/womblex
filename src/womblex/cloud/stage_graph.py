@@ -26,6 +26,7 @@ CONFIG_SECTION: dict[str, str] = {
     "spellfix": "spellfix",
     "chunk": "chunking",
     "money": "money",
+    "stats": "stats",
     "enrich": "enrichment",
     "embed": "embedding",
     "link": "linking",

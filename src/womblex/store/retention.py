@@ -41,6 +41,7 @@ from womblex.store.pii_output import PII_SPANS_SUFFIX
 from womblex.store.quality_output import CHUNK_QUALITY_SUFFIX
 from womblex.store.run_manifest import RUN_MANIFEST_FILENAME
 from womblex.store.spellfix_output import SPELLFIX_TEXT_SUFFIX
+from womblex.store.stats_output import STAT_SPANS_SUFFIX
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,7 @@ STAGE_SUFFIXES: dict[str, str] = sort_by_pipeline({
     "chunk": CHUNKS_SUFFIX,
     "quality": CHUNK_QUALITY_SUFFIX,
     "money": MONEY_SPANS_SUFFIX,
+    "stats": STAT_SPANS_SUFFIX,
     "pii": PII_SPANS_SUFFIX,
     "link": ENTITY_LINKS_SUFFIX,
     "enrich": ENRICHMENT_ENTITIES_SUFFIX,

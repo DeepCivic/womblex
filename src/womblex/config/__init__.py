@@ -17,6 +17,9 @@ from womblex.config.process import (
     QualityConfig,
     SegmentationConfig,
     SpellfixConfig,
+    StatsConfig,
+    StatsMeasureConfig,
+    StatsVocabulary,
     StrictModel,
 )
 
@@ -471,6 +474,7 @@ class WomblexConfig(StrictModel):
     segmentation: SegmentationConfig = SegmentationConfig()
     quality: QualityConfig = QualityConfig()
     money: MoneyConfig = MoneyConfig()
+    stats: StatsConfig = StatsConfig()
     enrichment: EnrichmentConfig = EnrichmentConfig()
     embedding: EmbeddingConfig = EmbeddingConfig()
     linking: LinkingConfig = LinkingConfig()
@@ -546,6 +550,9 @@ __all__ = [
     "SegmentationConfig",
     "SpellfixConfig",
     "SpreadsheetPrintConfig",
+    "StatsConfig",
+    "StatsMeasureConfig",
+    "StatsVocabulary",
     "WomblexConfig",
     "load_config",
 ]

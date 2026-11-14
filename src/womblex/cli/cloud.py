@@ -35,7 +35,7 @@ logger = logging.getLogger("womblex")
 #: asserts this equals `stage_contracts.STAGE_NAMES`, so it cannot drift.
 #: `manifest` is absent by design — `womblex finalize` already covers it.
 RUN_STAGE_CHOICES = (
-    "layout", "normalise", "spellfix", "chunk", "money", "enrich",
+    "layout", "normalise", "spellfix", "chunk", "money", "stats", "enrich",
     "embed", "link", "pii", "graph-refresh", "quality",
 )
 
@@ -43,7 +43,8 @@ RUN_STAGE_CHOICES = (
 #: spelled here for the same reason as above (`--help` must not import the
 #: contract table). `test_pipeline_order.py` pins the two together.
 DISPATCHABLE_STAGES = (
-    "normalise", "spellfix", "enrich", "chunk", "graph-refresh", "embed", "money", "link",
+    "normalise", "spellfix", "enrich", "chunk", "graph-refresh", "embed", "money", "stats",
+    "link",
 )
 
 

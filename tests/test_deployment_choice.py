@@ -17,7 +17,7 @@ from womblex.utils.deployment_choice import choice_problems, deployment_of, pick
 from womblex.utils.model_check import SCOPE_CHUNK, SCOPE_EMBED, SCOPE_ENRICH, check_models, check_registered
 
 #: The digest of a config that sets no `deployment`, from before the setting existed.
-DEFAULT_DIGEST = "sha256:74e7b29907377b9156752567f8dfc3fb9054979bf46353a4dd86f93df82fa612"
+DEFAULT_DIGEST = "sha256:3d70b14e6d190cd4d86012243f3b86740798b4dcf0b1542d20e22faec407deb3"
 
 
 def _default() -> WomblexConfig:

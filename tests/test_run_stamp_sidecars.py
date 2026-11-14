@@ -55,6 +55,7 @@ from womblex.store.spellfix_output import (
     write_spellfix_corrections,
     write_spellfix_text,
 )
+from womblex.store.stats_output import write_stat_spans
 
 # Every sidecar writer, and the stage each writes as. One entry per writer:
 # the enumeration case below fails when a writer exists that is in neither
@@ -72,6 +73,7 @@ SIDECAR_WRITERS: list[tuple[object, str]] = [
     (write_embeddings, "embed"),
     (write_money_spans, "money"),
     (write_money_columns, "money"),
+    (write_stat_spans, "stats"),
     (write_entity_links, "link"),
     (write_pii_spans, "pii"),
     (write_clean_text, "pii"),

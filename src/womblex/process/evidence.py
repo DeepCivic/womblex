@@ -358,7 +358,7 @@ def _lookup_in(indexes: EvidenceIndexes) -> IndexLookup:
 
 
 def verify_shards(shard_dir: Path) -> EvidenceReport:
-    """Re-check every money, entity-link and PII receipt in ``shard_dir`` against its source.
+    """Re-check every money, stat, entity-link and PII receipt in ``shard_dir`` against its source.
 
     Each row's check is recomputed, so a file written before ``evidence_check``
     existed, or whose source has changed since, is judged afresh. A receipt whose
@@ -368,9 +368,11 @@ def verify_shards(shard_dir: Path) -> EvidenceReport:
     from womblex.store.money_output import read_money_spans
     from womblex.store.output import read_chunks
     from womblex.store.pii_output import read_pii_spans
+    from womblex.store.stats_output import read_stat_spans
 
     readers: tuple[tuple[str, str, Callable[[Path], Any]], ...] = (
         ("money_spans", "text", read_money_spans),
+        ("stat_spans", "text", read_stat_spans),
         ("entity_links", "mention_text", read_entity_links),
         ("pii_spans", "text", read_pii_spans),
     )

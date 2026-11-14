@@ -127,6 +127,29 @@ money:
     # extra_header_terms: []     # Corpus money headers, added to the built-in set.
     # extra_veto_terms: []       # Corpus headers that suppress a column (whole-word).
 
+# Statistical figure annotation (`womblex stats --shards`). Offline, API-free,
+# annotation only — writes `*.stat_spans.parquet`: reference periods, the
+# measures declared below, the figures stated beside them, and calculation /
+# source / gap / forecast cues, each row carrying its heading path. The library
+# holds no measure of its own. See docs/stats-extraction.md.
+stats:
+  enabled: false
+  # vocabulary: vocab/measures.yaml   # YAML with the same `measures` / `cues` keys; merged.
+  # measures:
+  #   - id: median_income             # -> measure_id
+  #     label: Median income          # -> measure_label
+  #     terms: [median income, median weekly income]
+  #   - id: population
+  #     terms: [population]
+  #     unit: persons                 # unit of a bare number beside this measure
+  # cues:                             # extra phrases per cue type, added to the built-ins
+  #   source: [regional insights]
+  # narrative: true                   # Scan narrative text.
+  # tables: true                      # Read table rows / columns that name a measure.
+  # default_currency: AUD
+  # context_chars: 160
+  # text_source: null                 # null = inherit processing.text_source.
+
 # PII cleaning uses regex pattern recognisers (Presidio-style) validated by
 # a Sentence Transformers context model (all-MiniLM-L6-v2, 22M params).
 #

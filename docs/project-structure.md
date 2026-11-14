@@ -24,7 +24,7 @@ womblex/
 │   │   ├── api_token.py    # api-token subcommand
 │   │   ├── redact.py       # redact, annotate-redactions, validate-redactions subcommands
 │   │   ├── link.py         # enrich, link, graph-refresh subcommands
-│   │   ├── embed.py, normalise.py, spellfix.py, quality.py, money.py, pii.py  # one subcommand each
+│   │   ├── embed.py, normalise.py, spellfix.py, quality.py, money.py, stats.py, pii.py  # one subcommand each
 │   │   ├── ingest.py       # ingest-gnaf, ingest-geo, ingest-abn subcommands
 │   │   ├── score.py        # score subcommand
 │   │   ├── ground_truth.py # ground-truth subcommand (segment + render a shard dir into baselines + sidecars)
@@ -112,6 +112,10 @@ womblex/
 │   │   ├── layout_stage.py  # layout_shards() — drives `run-stage layout --shards`; fingerprint-aware rerun of *.layout_regions.parquet from the source documents
 │   │   ├── evidence.py      # EvidenceIndex / EvidenceIndexes — build an evidence reference from the elements and check it at its level
 │   │   ├── money_stage.py   # money_shards() — drives `womblex money --shards`; writes *.money_spans.parquet + *.money_columns.parquet
+│   │   ├── stats.py         # Statistical figure recognition (find_stats, read_cell_figure) — a number is a figure only beside a measure
+│   │   ├── stats_periods.py # Reference-period grammar (find_periods): financial years, quarters, halves, calendar years, months, dates
+│   │   ├── stats_vocab.py   # Corpus-declared measures + built-in and corpus cues (Vocabulary, load_vocabulary, vocabulary_digest)
+│   │   ├── stats_stage.py   # stats_shards() — drives `womblex stats --shards`; heading path per row; writes *.stat_spans.parquet
 │   │   └── text_overlay.py  # Shared overlay read/merge helper for the offline text layers
 │   ├── link/
 │   │   ├── matcher.py       # Generic record-linkage: alias / address-exact / token-set name-fuzzy (stdlib difflib)
@@ -148,6 +152,7 @@ womblex/
 │   │   ├── money_output.py  # *.money_spans.parquet (decimal128 values) + *.money_columns.parquet schemas + IO
 │   │   ├── provenance_output.py  # *.provenance.parquet sidecar + manifest for pre-extracted-record corpora
 │   │   ├── ground_truth_output.py  # Ground-truth *.meta.json sidecar: schema, validation, unit-id, IO (JSON, not parquet)
+│   │   ├── stats_output.py  # *.stat_spans.parquet schema + IO; footer names the vocabulary digest
 │   │   ├── source_provenance.py  # Ingest root + source relpath, and their womblex.* Parquet footer keys
 │   │   ├── source_resolver.py    # SourceResolver — resolve a published row's source_hash back to its source file
 │   │   ├── egress_output.py      # source_index.parquet schema + IO for the egress bundle (self-contained)

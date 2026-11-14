@@ -1,6 +1,7 @@
-"""Process-stage config models: chunking, normalise, spellfix, segmentation, quality, money."""
+"""Process-stage config models: chunking, normalise, spellfix, segmentation, quality, money, stats."""
 
 import re
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -356,6 +357,97 @@ class MoneyConfig(StrictModel):
         if not re.fullmatch(r"[A-Z]{3}", v):
             raise ValueError(f"default_currency must be a 3-letter ISO 4217 code, got {v!r}")
         return v
+
+    @field_validator("text_source")
+    @classmethod
+    def _check_text_source(cls, v: str | None) -> str | None:
+        if v is not None and v not in ("elements", "normalised", "spellfix"):
+            raise ValueError(f"text_source must be elements|normalised|spellfix, got {v!r}")
+        return v
+
+
+CUE_TYPES: tuple[str, ...] = ("calculation", "source", "gap", "forecast")
+
+
+class StatsMeasureConfig(StrictModel):
+    """One measure the ``stats`` op looks for, with every way a document names it."""
+
+    id: str = Field(min_length=1, description="Stable identifier written to `measure_id`.")
+    label: str = Field(default="", description="Display name; the id where empty.")
+    terms: list[str] = Field(
+        min_length=1,
+        description="Phrases that name the measure, matched whole-word, case-insensitive.",
+    )
+    unit: str | None = Field(
+        default=None,
+        description="Unit a bare number beside this measure is in (e.g. `persons`). "
+                    "A figure that states its own unit (`$`, `%`) keeps it.",
+    )
+
+
+class StatsVocabulary(StrictModel):
+    """What a corpus asks the ``stats`` op to recognise. Also a vocabulary file's shape."""
+
+    measures: list[StatsMeasureConfig] = Field(default_factory=list)
+    cues: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="Extra cue phrases per cue type (calculation | source | gap | forecast), "
+                    "added to the built-in set.",
+    )
+
+    @field_validator("cues")
+    @classmethod
+    def _check_cue_types(cls, v: dict[str, list[str]]) -> dict[str, list[str]]:
+        unknown = sorted(set(v) - set(CUE_TYPES))
+        if unknown:
+            raise ValueError(f"unknown cue type(s) {unknown}; known: {list(CUE_TYPES)}")
+        return v
+
+    @model_validator(mode="after")
+    def _check_unique_ids(self) -> "StatsVocabulary":
+        ids = [m.id for m in self.measures]
+        repeated = sorted({i for i in ids if ids.count(i) > 1})
+        if repeated:
+            raise ValueError(f"measure id(s) declared more than once: {repeated}")
+        return self
+
+
+class StatsConfig(StatsVocabulary):
+    """Statistical figure annotation op (``womblex stats``).
+
+    Reads ``*.elements.parquet`` + ``*.table_cells.parquet`` and writes a
+    ``*.stat_spans.parquet`` sidecar: reference periods, the measures a
+    vocabulary names, the figures stated beside them, and the cues that say how
+    a figure was calculated, where it came from, that it is missing, or that it
+    is a forecast. Offline, API-free, annotation only. The library holds no
+    measure of its own: a corpus supplies them here or in ``vocabulary``. See
+    ``docs/stats-extraction.md``.
+    """
+
+    enabled: bool = Field(default=False, description="Run the stats stage.")
+    vocabulary: Path | None = Field(
+        default=None,
+        description="YAML file of `measures` and `cues`, in the shape of this section's "
+                    "own two keys and merged with them. Read from the local filesystem.",
+    )
+    narrative: bool = Field(default=True, description="Scan narrative text.")
+    tables: bool = Field(
+        default=True,
+        description="Read table rows whose label cell names a measure: the row's other "
+                    "cells are its figures, and a column header gives each its period.",
+    )
+    default_currency: str = Field(
+        default="AUD", description="Currency a bare `$` means, as for the money op.",
+    )
+    context_chars: int = Field(
+        default=160, ge=0,
+        description="Characters of surrounding text stored with each narrative span.",
+    )
+    text_source: str | None = Field(
+        default=None,
+        description="Element-text layer the narrative offsets index. Null inherits "
+                    "processing.text_source.",
+    )
 
     @field_validator("text_source")
     @classmethod

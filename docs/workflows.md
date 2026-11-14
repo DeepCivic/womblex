@@ -102,7 +102,7 @@ It replaces the bundle and writes the next record.
 step reads a required input that is missing, produced only by a later step, or
 rewritten by a later step. `dispatch-workflow` also needs pipeline order, since the
 coordinator runs stages in that order: `layout`, `normalise`, `spellfix`, `enrich`, `chunk`,
-`graph-refresh`, `embed`, `money`, `link`, `pii`, `quality`. `layout`, `pii` and `quality` run on the
+`graph-refresh`, `embed`, `money`, `stats`, `link`, `pii`, `quality`. `layout`, `pii` and `quality` run on the
 fleet only as a workflow's steps: a run dispatched without a workflow never re-lays out, masks or
 deduplicates. A firing covers its own batches only, so it refuses the run-scoped `quality`; run it
 with `rerun-collection` or `dispatch-workflow` without `--firing`.

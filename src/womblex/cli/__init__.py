@@ -16,6 +16,7 @@ Usage:
     womblex manifest             --shards <dir> [-o PATH]
     womblex money                --shards <dir> [--config configs/example.yaml]
     womblex normalise            --shards <dir> [--config configs/example.yaml]
+    womblex stats                --shards <dir> [--config configs/example.yaml]
     womblex redact               --shards <dir> --pdfs <dir> [--checkpoint PATH]
     womblex redact               --config configs/example.yaml
     womblex annotate-redactions  <shards> <pdfs> [--checkpoint PATH]   (deprecated alias)
@@ -59,6 +60,7 @@ from womblex.cli import (
     score,
     serve,
     spellfix,
+    stats,
     verify,
     workflow,
 )
@@ -80,6 +82,7 @@ ALL_COMMANDS = [
     *spellfix.COMMANDS,
     *quality.COMMANDS,
     *money.COMMANDS,
+    *stats.COMMANDS,
     *pii.COMMANDS,
     *ingest.COMMANDS,
     *score.COMMANDS,

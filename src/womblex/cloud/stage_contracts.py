@@ -11,8 +11,8 @@ Two things are deliberately *functions of config*, not of stage name:
 
 - :attr:`StageContract.conditional_inputs` — ``chunk`` reads
   ``*.enrichment_doc.parquet`` only when ``chunking.chunking_model`` is set;
-  ``chunk`` / ``enrich`` / ``money`` read a text-overlay sidecar chosen by
-  ``processing.text_source`` (and ``money.text_source`` outranks it).
+  ``chunk`` / ``enrich`` / ``money`` / ``stats`` read a text-overlay sidecar chosen by
+  ``processing.text_source`` (and ``money.text_source`` / ``stats.text_source`` outrank it).
 - :attr:`StageContract.outputs` — ``pii`` writes ``*.clean_text.parquet`` only
   when ``write_clean_text``; ``enrich`` writes ``*.enrichment_doc.parquet``
   only when ``persist_document``.
@@ -57,6 +57,7 @@ from womblex.store.output import _SHARD_ROLES, _SHARD_SUFFIX, CHUNKS_SUFFIX
 from womblex.store.pii_output import CLEAN_TEXT_SUFFIX, PII_SPANS_SUFFIX
 from womblex.store.quality_output import CHUNK_QUALITY_SUFFIX
 from womblex.store.spellfix_output import SPELLFIX_CORRECTIONS_SUFFIX, SPELLFIX_TEXT_SUFFIX
+from womblex.store.stats_output import STAT_SPANS_SUFFIX
 from womblex.utils.deployment_registry import deployments_for
 from womblex.utils.model_registry import SLOT_EMBEDDING, SLOT_ENRICHMENT, resolve
 
@@ -226,6 +227,10 @@ def _money_conditional(config: WomblexConfig) -> tuple[ConditionalInput, ...]:
     return _overlay_input(config.money.text_source or config.processing.text_source)
 
 
+def _stats_conditional(config: WomblexConfig) -> tuple[ConditionalInput, ...]:
+    return _overlay_input(config.stats.text_source or config.processing.text_source)
+
+
 def _enrich_conditional(config: WomblexConfig) -> tuple[ConditionalInput, ...]:
     # Chunks are optional: present, they add mention->chunk edges to the graph.
     return _overlay_input(config.processing.text_source) + (
@@ -327,6 +332,13 @@ def _link_preflight(config: WomblexConfig) -> None:
         )
 
 
+def _stats_preflight(config: WomblexConfig) -> None:
+    """The vocabulary is a worker-local file, read and validated before any batch."""
+    from womblex.process.stats_vocab import load_vocabulary
+
+    load_vocabulary(config.stats)
+
+
 # ---------------------------------------------------------------------------
 # Stage bodies — each calls the unchanged `*_shards()` function
 # ---------------------------------------------------------------------------
@@ -359,6 +371,16 @@ def _run_money(shard_dir: Path, config: WomblexConfig, ctx: RunContext) -> None:
 
     money_shards(
         shard_dir, config.money,
+        text_source=config.processing.text_source,
+        checkpoint_mgr=ctx.checkpoint_mgr,
+    )
+
+
+def _run_stats(shard_dir: Path, config: WomblexConfig, ctx: RunContext) -> None:
+    from womblex.process.stats_stage import stats_shards
+
+    stats_shards(
+        shard_dir, config.stats,
         text_source=config.processing.text_source,
         checkpoint_mgr=ctx.checkpoint_mgr,
     )
@@ -487,6 +509,17 @@ STAGE_CONTRACTS: dict[str, StageContract] = {
         outputs=lambda _c: (MONEY_SPANS_SUFFIX, MONEY_COLUMNS_SUFFIX),
         run=_run_money,
         checkpoint_dirname=".money-checkpoint",
+    ),
+    "stats": StageContract(
+        name="stats",
+        scope=StageScope.PER_BATCH,
+        mutation=MutationMode.SIDECAR,
+        required_inputs=_ELEMENT_INPUTS,
+        conditional_inputs=_stats_conditional,
+        outputs=lambda _c: (STAT_SPANS_SUFFIX,),
+        run=_run_stats,
+        checkpoint_dirname=".stats-checkpoint",
+        preflight=_stats_preflight,
     ),
     "enrich": StageContract(
         name="enrich",

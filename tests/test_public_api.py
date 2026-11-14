@@ -29,6 +29,7 @@ PINNED = [
     "run_pii_cleaning",
     "run_redaction",
     "spellfix_shards",
+    "stats_shards",
     "write_run_manifest",
 ]
 

@@ -9,6 +9,7 @@ Entries are terse by design; rationale lives in the PR/commit history.
 ## [Unreleased]
 
 ### Added
+- **`stats` stage.** `womblex stats --shards` writes `*.stat_spans.parquet` (contract 3.4): reference periods (`2019–20`, `FY20`, `2025-Q1`, `March quarter 2025`, `2026-H1`, `CY2025`), the measures a corpus declares in `stats.measures` or a `stats.vocabulary` file, the figures stated beside them, and calculation / source / gap / forecast cues, over narrative and table cells. Each row carries its heading path, and a figure with no period in its sentence takes its headings'. Offline, no model, depends on no other stage; off by default. See `docs/stats-extraction.md`.
 - **HTML ingest.** `.html` and `.htm` files are read as headings, paragraphs, list items, preformatted blocks and tables in document order, with the standard-library parser (no new dependency). `womblex run` picks them up.
 
 ### Changed

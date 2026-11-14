@@ -23,7 +23,8 @@ Input File
         ├─ graph-refresh — offline mention→chunk links (own sidecar)
         ├─ embed         — chunk embeddings
         ├─ money         — money-span annotation
-        ├─ link          — record linkage against a reference register
+        ├─ stats         — statistical figure annotation (periods, measures, figures, cues)
+        ├─ link          — record linkage against reference registers (enrichment mentions, or names found in the text)
         ├─ pii           — mask graph PII spans as numbered <PERSON_n> tags in *.clean_text.parquet (terminal, after enrich + embed)
         └─ quality       — chunk-quality annotation (run-scoped)
 ```
@@ -279,10 +280,11 @@ Later stages follow the same `<stage>_shards()` over a shard dir + `womblex <sta
 - **spellfix** (`process/spellfix_stage.py`) — Hunspell-gated OCR character-confusion repair, writes `*.spellfix_text.parquet` + `*.spellfix_corrections.parquet` (audit)
 - **quality** (`process/quality_stage.py`) — chunk-quality annotation heuristics, writes `*.chunk_quality.parquet`
 - **money** (`process/money_stage.py`) — money-span recognition across narrative/table/sheet loci, writes `*.money_spans.parquet` + `*.money_columns.parquet`
-- **link** (`link/stage.py`) — record-linkage against a reference register, writes `*.entity_links.parquet`
+- **stats** (`process/stats_stage.py`) — reference periods, corpus-declared measures, the figures stated beside them and their calculation / source / gap / forecast cues, across narrative and table cells, each row carrying its heading path; writes `*.stat_spans.parquet`. See [stats-extraction.md](stats-extraction.md)
+- **link** (`link/stage.py`) — record-linkage against one or more reference registers (CSV or Parquet, many names per entity), with candidates from the enrichment mentions or, under `linking.candidate_source: text`, from the registers' names found in the narrative; writes `*.entity_links.parquet`. See [entity-linking.md](entity-linking.md)
 - **pii** (`pii/pii_stage.py`) — graph-driven PII masking, writes `*.pii_spans.parquet` + `*.clean_text.parquet`
 
-The money, link and pii sidecars locate every span with one **evidence reference** (`store/evidence.py`): the element, page and box, the sheet and cell for a cell, and `char_start` / `char_end` into the text named by `text_layer`, labelled by `anchor_level` (`span`, `element`, `chunk` or `document`). `process/evidence.py` builds the reference from the elements and checks each level at its own precision: each row's `evidence_check` records `holds`, `fails` or `unchecked` (source absent), and the stage warns about the last two. Nothing is refused: the run completes and says what it could not verify. `womblex verify-evidence <run>` (`process/evidence.verify_shards`) recomputes every check over a finished run, beside `verify-shards`.
+The money, stats, link and pii sidecars locate every span with one **evidence reference** (`store/evidence.py`): the element, page and box, the sheet and cell for a cell, and `char_start` / `char_end` into the text named by `text_layer`, labelled by `anchor_level` (`span`, `element`, `chunk` or `document`). `process/evidence.py` builds the reference from the elements and checks each level at its own precision: each row's `evidence_check` records `holds`, `fails` or `unchecked` (source absent), and the stage warns about the last two. Nothing is refused: the run completes and says what it could not verify. `womblex verify-evidence <run>` (`process/evidence.verify_shards`) recomputes every check over a finished run, beside `verify-shards`.
 
 ## Workflows and distributed execution
 

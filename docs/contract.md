@@ -7,7 +7,7 @@ column-level schemas are in [extraction.md](extraction.md).
 
 ## Contract version
 
-`womblex.contract_version` (currently `3.3`, `store/contract.CONTRACT_VERSION`)
+`womblex.contract_version` (currently `3.4`, `store/contract.CONTRACT_VERSION`)
 is in the footer of every pipeline Parquet and in `egress_manifest.json`. It is
 versioned apart from the package: a release that changes no schema leaves it
 alone.
@@ -51,6 +51,7 @@ the single source). An unknown role reads as `raw`.
 | `clean_text` | `(source_hash, chunk_index)`; `mask_status` is `masked`, `no_entity` or `not_masked` (verbatim, no candidate source covered the chunk); files written before contract 1.2 read back as `masked` where `n_masked` is above zero, null otherwise | masked |
 | `money_spans` | `source_hash` plus the evidence reference | none |
 | `money_columns` | `source_hash` plus `column_id` (`parent_elem_order` / `sheet`) | none |
+| `stat_spans` (3.4) | `source_hash` plus the evidence reference; `kind` is `period`, `measure`, `cue` or `figure`; `heading_elem_orders` to `elements`; the footer key `womblex.stats_vocabulary` is the digest of the measures and cues it was read with ([stats-extraction.md](stats-extraction.md)) | raw |
 | `layout_regions` | `(source_hash, page)`; boxes are normalised like element `bbox` ([layout.md](layout.md)) | none |
 | `redactions`, `source_index` | `source_hash` | none |
 | `redaction_regions` | `(source_hash, page)`; `bbox_pt` is in PDF points, not normalised ([extraction.md](extraction.md)) | none |
@@ -62,7 +63,7 @@ chunks but carry no text.
 
 ### Evidence reference (2.0)
 
-`money_spans`, `entity_links` and `pii_spans` locate each span with the same eleven
+`money_spans`, `stat_spans`, `entity_links` and `pii_spans` locate each span with the same eleven
 columns (`store/evidence.py`), in place of the anchors each carried before:
 `elem_order`, `page`, `bbox`, `sheet`, `cell_row`, `cell_col`, `char_start`,
 `char_end`, `text_layer`, `anchor_level` and `evidence_check`. A row is never
@@ -112,6 +113,10 @@ the `omitted` file role (`omitted.parquet`, at the run root).
 
 The 3.3 bump added `elements.fingerprint`, 8 bytes per element (null on `sheet_cell` rows and on older
 files, where it can be recomputed with `store/element_fingerprint.read_shard_elements`).
+
+The 3.4 bump added the `stat_spans` file role and `entity_links.match_detail` (null in older files).
+`entity_links.match_method` gains `name_exact` and `ambiguous`, and `candidate_kind` gains `text`,
+all written only under `linking.candidate_source: text`.
 
 ## Determinism
 
