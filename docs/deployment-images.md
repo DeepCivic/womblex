@@ -77,7 +77,7 @@ enumerated like any other.
 | `worker` | base | published | `${WOMBLEX_PIPELINE_IMAGE:-ghcr.io/deepcivic/womblex:latest}` | — | Published — pipeline image |
 | `seed-demo` | base | published | `${WOMBLEX_PIPELINE_IMAGE:-ghcr.io/deepcivic/womblex:latest}` | `seed` | Published — pipeline image |
 | `api` | base | published | `${WOMBLEX_PIPELINE_IMAGE:-ghcr.io/deepcivic/womblex:latest}` | `api` | Published — pipeline image |
-| `postgres` | base | image | `postgres:18.4@sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636` | `local` | Third party — tag and digest pinned |
+| `postgres` | base | image | `postgres:18.6@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42` | `local` | Third party — tag and digest pinned |
 | `minio` | base | image | `minio/minio` | `local` | Third party — tag unpinned |
 | `createbuckets` | base | image | `minio/mc` | `local` | Third party — tag unpinned |
 | `init` | override | build | `Dockerfile` | — | Built locally — the development path |
@@ -104,7 +104,7 @@ one of five commands on the same image unavailable.
 ## The third-party finding, recorded not fixed
 
 Two of the three third-party references carry no tag, so they resolve to
-whatever the registry currently serves. `postgres` is pinned to the 18.4
+whatever the registry currently serves. `postgres` is pinned to the 18.6
 release and its digest, which Dependabot moves.
 
 This is recorded rather than corrected because it is a different change with a
