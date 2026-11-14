@@ -12,6 +12,7 @@ enrichment sidecar.
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from womblex.config import ReferenceConfig
 from womblex.link.matcher import Candidate, resolve
@@ -92,13 +93,11 @@ class TestReferenceLoad:
         assert artemis.exact_key == "11 cessnock street fyshwick 2609"
         assert "artemis education pty ltd" in artemis.fuzzy_keys
 
-    def test_unimplemented_format_raises(self, tmp_path):
-        cfg = ReferenceConfig(
-            path=tmp_path / "x.shp", format="shapefile",
-            id_col="id", name_col="name",
-        )
-        with pytest.raises(NotImplementedError):
-            load_reference(cfg)
+    def test_unknown_format_is_refused_when_the_config_loads(self, tmp_path):
+        with pytest.raises(ValidationError, match="'csv' or 'parquet'"):
+            ReferenceConfig(
+                path=tmp_path / "x.shp", format="shapefile", id_col="id", name_col="name",
+            )
 
 
 # --- matcher -----------------------------------------------------------------

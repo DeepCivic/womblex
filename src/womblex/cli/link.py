@@ -137,7 +137,8 @@ def cmd_enrich(args: argparse.Namespace) -> int:
 def _register_link(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--shards", type=Path, required=True,
-        help="Shard dir with `*.enrichment_entities.parquet`; writes "
+        help="Shard dir with `*.enrichment_entities.parquet` (or, under "
+             "`linking.candidate_source: text`, `*.elements.parquet`); writes "
              "`*.entity_links.parquet` in place.",
     )
     p.add_argument(
@@ -155,7 +156,7 @@ def _register_link(p: argparse.ArgumentParser) -> None:
 
 
 def cmd_link(args: argparse.Namespace) -> int:
-    """Match enrichment candidates to a reference register (per-stage, offline)."""
+    """Match mentions to the reference registers (per-stage, offline)."""
     from womblex.config import load_config
     from womblex.link.stage import link_shards
     from womblex.process.text_overlay import MissingOverlayError
@@ -167,17 +168,20 @@ def cmd_link(args: argparse.Namespace) -> int:
     if not shard_dir.is_dir():
         logger.error("--shards path is not a directory: %s", shard_dir)
         return 1
-    if not any(shard_dir.glob("*.enrichment_entities.parquet")):
-        logger.error(
-            "--shards directory has no `*.enrichment_entities.parquet` — run "
-            "`womblex enrich --shards` first: %s", shard_dir,
-        )
-        return 1
-
     full_config = load_config(args.config)
     linking_config = full_config.linking
-    if linking_config.reference is None:
+    registers = linking_config.registers()
+    if not registers:
         logger.error("config `linking.reference` is required to run the link stage")
+        return 1
+    # Text candidates read the elements; only enrichment candidates need the enrich stage.
+    from_text = linking_config.candidate_source == "text"
+    needed = "*.elements.parquet" if from_text else "*.enrichment_entities.parquet"
+    if not any(shard_dir.glob(needed)):
+        logger.error(
+            "--shards directory has no `%s` — run %s first: %s", needed,
+            "extraction" if from_text else "`womblex enrich --shards`", shard_dir,
+        )
         return 1
 
     checkpoint_root = args.checkpoint_dir or shard_dir.parent / ".link-checkpoint"
@@ -193,13 +197,17 @@ def cmd_link(args: argparse.Namespace) -> int:
                 logger.warning("Resume integrity scan: dropped %d doc(s) with corrupted "
                                "entity_links shards; they will be re-linked.", len(dropped))
 
-    logger.info("link --shards: dir=%s reference=%s", shard_dir, linking_config.reference.path)
+    logger.info(
+        "link --shards: dir=%s candidates=%s references=%s", shard_dir,
+        linking_config.candidate_source, [str(r.path) for r in registers],
+    )
     try:
         result = link_shards(
             shard_dir, linking_config,
             text_source=full_config.processing.text_source, checkpoint_mgr=ckpt,
         )
-    except MissingOverlayError as e:
+    except (MissingOverlayError, OSError, ValueError) as e:
+        # A register that cannot be read refuses the stage before any batch is written.
         logger.error("link --shards: refused: %s", e)
         return 1
     logger.info(

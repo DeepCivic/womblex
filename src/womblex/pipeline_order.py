@@ -43,8 +43,8 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 #: onto the chunks `chunk` just wrote, `embed` vectorises those chunks, `link`
 #: matches the entities `enrich` wrote, and `pii` is terminal — its masking is
 #: irreversible and must not precede the stages that need the raw text.
-#: `money` reads only extraction output, so its position is free; it sits with
-#: the other offline stages. `quality` is last because it is the one
+#: `money` and `stats` read only extraction output, so their position is free;
+#: they sit with the other offline stages. `quality` is last because it is the one
 #: run-scoped stage: its duplicate-cluster ids are corpus-wide, so it is
 #: meaningful only over a drained run.
 PIPELINE_ORDER: tuple[str, ...] = (
@@ -57,6 +57,7 @@ PIPELINE_ORDER: tuple[str, ...] = (
     "graph-refresh",
     "embed",
     "money",
+    "stats",
     "link",
     "pii",
     "quality",
@@ -109,6 +110,7 @@ DOWNSTREAM_STAGES: tuple[str, ...] = (
     "graph-refresh",
     "embed",
     "money",
+    "stats",
     "link",
 )
 
@@ -129,13 +131,17 @@ def _normalise_wanted(config: WomblexConfig) -> bool:
     `NormaliseConfig` has no `enabled` flag — its toggles are transforms, all
     on by default — so the real gate is whether a consumer selects the layer it
     writes. `processing.text_source` is that selector for chunk and enrich;
-    `money.text_source` overrides it for the money stage alone. Dispatching
+    `money.text_source` and `stats.text_source` override it for those stages alone. Dispatching
     normalise with no reader writes an overlay nothing opens; skipping it with
     one silently falls back to verbatim text, which is the failure that reads
     as a broken config setting.
     """
     overlays = ("normalised", "spellfix")
-    return config.processing.text_source in overlays or config.money.text_source in overlays
+    return (
+        config.processing.text_source in overlays
+        or config.money.text_source in overlays
+        or (config.stats.enabled and config.stats.text_source in overlays)
+    )
 
 
 def enabled_downstream_stages(config: WomblexConfig) -> tuple[str, ...]:
@@ -159,6 +165,7 @@ def enabled_downstream_stages(config: WomblexConfig) -> tuple[str, ...]:
         "graph-refresh": ai_chunking and config.enrichment.enabled,
         "embed": config.embedding.enabled,
         "money": config.money.enabled,
+        "stats": config.stats.enabled,
         "link": config.linking.enabled,
     }
     return tuple(s for s in DOWNSTREAM_STAGES if wanted[s])

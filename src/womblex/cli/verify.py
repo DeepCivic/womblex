@@ -176,7 +176,7 @@ def _register_verify_evidence(p: argparse.ArgumentParser) -> None:
 
 
 def cmd_verify_evidence(args: argparse.Namespace) -> int:
-    """Re-check every money, entity-link and PII receipt against the source it points at."""
+    """Re-check every money, stat, entity-link and PII receipt against the source it points at."""
     from womblex.process.evidence import verify_shards
 
     shard_dir = _resolve_shard_dir(args.run_dir)

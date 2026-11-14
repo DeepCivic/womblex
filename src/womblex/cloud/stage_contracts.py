@@ -11,8 +11,8 @@ Two things are deliberately *functions of config*, not of stage name:
 
 - :attr:`StageContract.conditional_inputs` — ``chunk`` reads
   ``*.enrichment_doc.parquet`` only when ``chunking.chunking_model`` is set;
-  ``chunk`` / ``enrich`` / ``money`` read a text-overlay sidecar chosen by
-  ``processing.text_source`` (and ``money.text_source`` outranks it).
+  ``chunk`` / ``enrich`` / ``money`` / ``stats`` read a text-overlay sidecar chosen by
+  ``processing.text_source`` (and ``money.text_source`` / ``stats.text_source`` outrank it).
 - :attr:`StageContract.outputs` — ``pii`` writes ``*.clean_text.parquet`` only
   when ``write_clean_text``; ``enrich`` writes ``*.enrichment_doc.parquet``
   only when ``persist_document``.
@@ -57,6 +57,7 @@ from womblex.store.output import _SHARD_ROLES, _SHARD_SUFFIX, CHUNKS_SUFFIX
 from womblex.store.pii_output import CLEAN_TEXT_SUFFIX, PII_SPANS_SUFFIX
 from womblex.store.quality_output import CHUNK_QUALITY_SUFFIX
 from womblex.store.spellfix_output import SPELLFIX_CORRECTIONS_SUFFIX, SPELLFIX_TEXT_SUFFIX
+from womblex.store.stats_output import STAT_SPANS_SUFFIX
 from womblex.utils.deployment_registry import deployments_for
 from womblex.utils.model_registry import SLOT_EMBEDDING, SLOT_ENRICHMENT, resolve
 
@@ -226,6 +227,10 @@ def _money_conditional(config: WomblexConfig) -> tuple[ConditionalInput, ...]:
     return _overlay_input(config.money.text_source or config.processing.text_source)
 
 
+def _stats_conditional(config: WomblexConfig) -> tuple[ConditionalInput, ...]:
+    return _overlay_input(config.stats.text_source or config.processing.text_source)
+
+
 def _enrich_conditional(config: WomblexConfig) -> tuple[ConditionalInput, ...]:
     # Chunks are optional: present, they add mention->chunk edges to the graph.
     return _overlay_input(config.processing.text_source) + (
@@ -252,6 +257,22 @@ def _evidence_inputs(config: WomblexConfig) -> tuple[ConditionalInput, ...]:
         ConditionalInput(suffix, strict=False, reason="locates spans in the source (evidence)")
         for suffix in (ELEMENTS_SUFFIX, TABLE_CELLS_SUFFIX)
     )
+
+
+def _link_conditional(config: WomblexConfig) -> tuple[ConditionalInput, ...]:
+    """The candidates' source is the one input link cannot run without.
+
+    Enrichment mentions by default; under ``linking.candidate_source: text`` the
+    elements, and no enrichment at all.
+    """
+    if config.linking.candidate_source == "text":
+        source = ConditionalInput(
+            ELEMENTS_SUFFIX, strict=True, reason="linking.candidate_source='text'")
+    else:
+        source = ConditionalInput(
+            ENRICHMENT_ENTITIES_SUFFIX, strict=True,
+            reason="linking.candidate_source='enrichment'")
+    return (source, *(c for c in _evidence_inputs(config) if c.suffix != source.suffix))
 
 
 def _pii_conditional(config: WomblexConfig) -> tuple[ConditionalInput, ...]:
@@ -309,22 +330,33 @@ def _persist_document(config: WomblexConfig) -> bool:
 
 
 def _link_preflight(config: WomblexConfig) -> None:
-    """The reference register is a worker-local file, not a store object."""
-    reference = config.linking.reference
-    if reference is None:
+    """Every reference register is a worker-local file, not a store object."""
+    registers = config.linking.registers()
+    if not registers:
         raise ValueError(
             "link requires linking.reference in the config (the reference register "
             "declaration); none is set."
         )
-    if not Path(reference.path).exists():
-        raise FileNotFoundError(
-            f"linking.reference.path does not resolve on this host: {reference.path}. "
-            "The reference register is read from the local filesystem, not the store."
-        )
-    if reference.alias_table is not None and not Path(reference.alias_table).exists():
-        raise FileNotFoundError(
-            f"linking.reference.alias_table does not resolve on this host: {reference.alias_table}"
-        )
+    for reference in registers:
+        if not Path(reference.path).exists():
+            raise FileNotFoundError(
+                f"linking.reference.path does not resolve on this host: {reference.path}. "
+                "The reference register is read from the local filesystem, not the store."
+            )
+        for label, path in (
+            ("alias_table", reference.alias_table),
+            ("names.path", reference.names.path if reference.names else None),
+        ):
+            if path is not None and not Path(path).exists():
+                raise FileNotFoundError(
+                    f"linking.reference.{label} does not resolve on this host: {path}")
+
+
+def _stats_preflight(config: WomblexConfig) -> None:
+    """The vocabulary is a worker-local file, read and validated before any batch."""
+    from womblex.process.stats_vocab import load_vocabulary
+
+    load_vocabulary(config.stats)
 
 
 # ---------------------------------------------------------------------------
@@ -359,6 +391,16 @@ def _run_money(shard_dir: Path, config: WomblexConfig, ctx: RunContext) -> None:
 
     money_shards(
         shard_dir, config.money,
+        text_source=config.processing.text_source,
+        checkpoint_mgr=ctx.checkpoint_mgr,
+    )
+
+
+def _run_stats(shard_dir: Path, config: WomblexConfig, ctx: RunContext) -> None:
+    from womblex.process.stats_stage import stats_shards
+
+    stats_shards(
+        shard_dir, config.stats,
         text_source=config.processing.text_source,
         checkpoint_mgr=ctx.checkpoint_mgr,
     )
@@ -488,6 +530,17 @@ STAGE_CONTRACTS: dict[str, StageContract] = {
         run=_run_money,
         checkpoint_dirname=".money-checkpoint",
     ),
+    "stats": StageContract(
+        name="stats",
+        scope=StageScope.PER_BATCH,
+        mutation=MutationMode.SIDECAR,
+        required_inputs=_ELEMENT_INPUTS,
+        conditional_inputs=_stats_conditional,
+        outputs=lambda _c: (STAT_SPANS_SUFFIX,),
+        run=_run_stats,
+        checkpoint_dirname=".stats-checkpoint",
+        preflight=_stats_preflight,
+    ),
     "enrich": StageContract(
         name="enrich",
         scope=StageScope.PER_BATCH,
@@ -518,8 +571,8 @@ STAGE_CONTRACTS: dict[str, StageContract] = {
         name="link",
         scope=StageScope.PER_BATCH,
         mutation=MutationMode.SIDECAR,
-        required_inputs=(ENRICHMENT_ENTITIES_SUFFIX, MANIFEST_SUFFIX),
-        conditional_inputs=_evidence_inputs,
+        required_inputs=(MANIFEST_SUFFIX,),
+        conditional_inputs=_link_conditional,
         outputs=lambda _c: (ENTITY_LINKS_SUFFIX,),
         run=_run_link,
         checkpoint_dirname=".link-checkpoint",

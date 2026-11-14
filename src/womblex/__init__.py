@@ -24,6 +24,7 @@ _EXPORTS: dict[str, str] = {
     "spellfix_shards": "womblex.process.spellfix_stage",
     "chunk_shards": "womblex.process.chunk_stage",
     "money_shards": "womblex.process.money_stage",
+    "stats_shards": "womblex.process.stats_stage",
     "quality_shards": "womblex.process.quality_stage",
     "enrich_shards": "womblex.analyse.enrich_stage",
     "embed_shards": "womblex.analyse.embed_stage",
@@ -54,6 +55,7 @@ __all__ = [
     "run_pii_cleaning",
     "run_redaction",
     "spellfix_shards",
+    "stats_shards",
     "write_run_manifest",
 ]
 

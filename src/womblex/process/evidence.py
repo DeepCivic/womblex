@@ -117,6 +117,10 @@ class EvidenceIndex:
         return self._located(
             ELEMENT, elem, sheet=sheet, cell=cell, bbox=self._cell_box(elem, cell))
 
+    def kind_spans(self, kind: str) -> list[tuple[int, int]]:
+        """``[start, end)`` in the narrative of every element of *kind*."""
+        return [(s, e) for order, s, e in self._spans if self._by_order[order].kind == kind]
+
     def document_ref(self) -> dict[str, Any]:
         """Document evidence: the span lies somewhere in this document."""
         return evidence(DOCUMENT, text_layer=self.text_layer)
@@ -223,6 +227,10 @@ class EvidenceIndexes:
             self._elements = {}
         self._overlays: dict[str, dict[tuple[str, int], str] | None] = {}
         self._cache: dict[tuple[str, str], EvidenceIndex] = {}
+
+    @property
+    def source_hashes(self) -> list[str]:
+        return list(self._elements)
 
     def get(self, source_hash: str, layer: str | None = None) -> EvidenceIndex | None:
         layer = layer or self.text_source
@@ -358,7 +366,7 @@ def _lookup_in(indexes: EvidenceIndexes) -> IndexLookup:
 
 
 def verify_shards(shard_dir: Path) -> EvidenceReport:
-    """Re-check every money, entity-link and PII receipt in ``shard_dir`` against its source.
+    """Re-check every money, stat, entity-link and PII receipt in ``shard_dir`` against its source.
 
     Each row's check is recomputed, so a file written before ``evidence_check``
     existed, or whose source has changed since, is judged afresh. A receipt whose
@@ -368,9 +376,11 @@ def verify_shards(shard_dir: Path) -> EvidenceReport:
     from womblex.store.money_output import read_money_spans
     from womblex.store.output import read_chunks
     from womblex.store.pii_output import read_pii_spans
+    from womblex.store.stats_output import read_stat_spans
 
     readers: tuple[tuple[str, str, Callable[[Path], Any]], ...] = (
         ("money_spans", "text", read_money_spans),
+        ("stat_spans", "text", read_stat_spans),
         ("entity_links", "mention_text", read_entity_links),
         ("pii_spans", "text", read_pii_spans),
     )

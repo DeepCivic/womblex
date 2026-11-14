@@ -7,7 +7,7 @@ column-level schemas are in [extraction.md](extraction.md).
 
 ## Contract version
 
-`womblex.contract_version` (currently `3.3`, `store/contract.CONTRACT_VERSION`)
+`womblex.contract_version` (currently `3.4`, `store/contract.CONTRACT_VERSION`)
 is in the footer of every pipeline Parquet and in `egress_manifest.json`. It is
 versioned apart from the package: a release that changes no schema leaves it
 alone.
@@ -46,11 +46,12 @@ the single source). An unknown role reads as `raw`.
 | `graph_links` | `(source_hash, entity_id, mention_start, mention_end)` to `enrichment_entities`; `chunk_index` is the first overlapping narrative chunk (`-1` for none) and `chunk_indices` all of them. The footer key `womblex.chunks_digest` is the digest of the chunks it was computed against: a reader uses the links only while the `chunks` beside them hash to it. Written by `graph-refresh`; absent from earlier runs, which read as before | raw |
 | `enrichment_doc` | `source_hash` (one row per document) | raw |
 | `enrichment_meta` | `source_hash`; `table_count` is tables sent to the enricher on their own, null where none were (1.4); `status` is `enriched`, or `skipped_short` for a document whose narrative was under `enrichment.skip_short_documents` and so never sent (3.2; null on older files) | none |
-| `entity_links` | `source_hash` plus the evidence reference; its `entity_id` is the reference-register id and `mention_text` the enricher's text for the mention (null where the provider gave none) | raw |
+| `entity_links` | `source_hash` plus the evidence reference; its `entity_id` is the reference-register id and `mention_text` the enricher's text for the mention (null where the provider gave none); `match_detail` (3.4, null in older files) says why a mention read from the text was or was not linked ([entity-linking.md](entity-linking.md)) | raw |
 | `pii_spans` | `(source_hash, chunk_index)` plus the evidence reference; `entity_id` to `enrichment_entities` | raw |
 | `clean_text` | `(source_hash, chunk_index)`; `mask_status` is `masked`, `no_entity` or `not_masked` (verbatim, no candidate source covered the chunk); files written before contract 1.2 read back as `masked` where `n_masked` is above zero, null otherwise | masked |
 | `money_spans` | `source_hash` plus the evidence reference | none |
 | `money_columns` | `source_hash` plus `column_id` (`parent_elem_order` / `sheet`) | none |
+| `stat_spans` (3.4) | `source_hash` plus the evidence reference; `kind` is `period`, `measure`, `cue` or `figure`; `heading_elem_orders` to `elements`; the footer key `womblex.stats_vocabulary` is the digest of the measures and cues it was read with ([stats-extraction.md](stats-extraction.md)) | raw |
 | `layout_regions` | `(source_hash, page)`; boxes are normalised like element `bbox` ([layout.md](layout.md)) | none |
 | `redactions`, `source_index` | `source_hash` | none |
 | `redaction_regions` | `(source_hash, page)`; `bbox_pt` is in PDF points, not normalised ([extraction.md](extraction.md)) | none |
@@ -62,7 +63,7 @@ chunks but carry no text.
 
 ### Evidence reference (2.0)
 
-`money_spans`, `entity_links` and `pii_spans` locate each span with the same eleven
+`money_spans`, `stat_spans`, `entity_links` and `pii_spans` locate each span with the same eleven
 columns (`store/evidence.py`), in place of the anchors each carried before:
 `elem_order`, `page`, `bbox`, `sheet`, `cell_row`, `cell_col`, `char_start`,
 `char_end`, `text_layer`, `anchor_level` and `evidence_check`. A row is never
@@ -112,6 +113,10 @@ the `omitted` file role (`omitted.parquet`, at the run root).
 
 The 3.3 bump added `elements.fingerprint`, 8 bytes per element (null on `sheet_cell` rows and on older
 files, where it can be recomputed with `store/element_fingerprint.read_shard_elements`).
+
+The 3.4 bump added the `stat_spans` file role and `entity_links.match_detail` (null in older files).
+`entity_links.match_method` gains `name_exact` and `ambiguous`, and `candidate_kind` gains `text`,
+all written only under `linking.candidate_source: text`.
 
 ## Determinism
 

@@ -31,7 +31,7 @@ from typing import Literal
 
 from womblex.store.source_provenance import NAMESPACE
 
-CONTRACT_VERSION = "3.3"
+CONTRACT_VERSION = "3.4"
 CONTRACT_VERSION_KEY = f"{NAMESPACE}.contract_version"
 SENSITIVITY_KEY = f"{NAMESPACE}.sensitivity"
 WRITTEN_AT_KEY = f"{NAMESPACE}.written_at"
@@ -72,6 +72,8 @@ ROLE_SENSITIVITY: dict[str, Sensitivity] = {
     "omitted": "none",
     "money_spans": "none",
     "money_columns": "none",
+    # Each row carries the text around its span and the headings above it.
+    "stat_spans": "raw",
     "layout_regions": "none",
 }
 
