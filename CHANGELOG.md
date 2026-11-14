@@ -10,6 +10,7 @@ Entries are terse by design; rationale lives in the PR/commit history.
 
 ### Added
 - **HTML ingest.** `.html` and `.htm` files are read as headings, paragraphs, list items, preformatted blocks and tables in document order, with the standard-library parser (no new dependency). `womblex run` picks them up.
+- **The `/v1` API as OpenAPI 3.2.0 and Swagger 2.0 documents.** `docs/interfaces/openapi.json` and `swagger.json`, generated from the app by `python -m womblex.api.interface_docs` (`api/interface_docs.py`) and held to it by `tests/test_interface_docs.py`. Both declare the bearer scheme with the scope each operation checks, and the inbound hook's signature header; `docs/interfaces.md` says what each covers and what it leaves out. `/openapi.json` is unchanged.
 
 ### Changed
 - **Quieter logs.** The AI-chunking reuse warning (`chunking_model` with enrichment on) is logged once per process, not on every config load; transformers' "Token indices sequence length is longer" message is dropped for counting-only tokeniser use; the PP-DocLayout-M ONNX Runtime session loads at error severity, which drops its `CleanUnusedInitializersAndNodeArgs` warnings (rapidocr already loads the OCR sessions at fatal severity).

@@ -1,0 +1,2678 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "Womblex API",
+    "version": "1",
+    "description": "The Womblex service API (`womblex serve`), described as it is. Bearer tokens are service tokens from the client registry (`WOMBLEX_API_CLIENTS`); each operation names the scope it requires (`read`, `submit`, `read_raw` or `admin`). See docs/service-api.md."
+  },
+  "paths": {
+    "/v1/stages": {
+      "get": {
+        "tags": [
+          "config"
+        ],
+        "summary": "Get Stages",
+        "operationId": "get_stages_v1_stages_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "schema": {
+              "$ref": "#/definitions/StageGraph"
+            }
+          }
+        },
+        "produces": [
+          "application/json"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-womblex-scope": "read"
+      }
+    },
+    "/v1/config/schema": {
+      "get": {
+        "tags": [
+          "config"
+        ],
+        "summary": "Get Schema",
+        "description": "`WomblexConfig`'s JSON Schema; ``paths`` is the deployment's and is left out.",
+        "operationId": "get_schema_v1_config_schema_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "schema": {
+              "additionalProperties": true,
+              "type": "object",
+              "title": "Response Get Schema V1 Config Schema Get"
+            }
+          }
+        },
+        "produces": [
+          "application/json"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-womblex-scope": "read"
+      }
+    },
+    "/v1/config/validate": {
+      "post": {
+        "tags": [
+          "config"
+        ],
+        "summary": "Validate",
+        "operationId": "validate_v1_config_validate_post",
+        "consumes": [
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "in": "body",
+            "name": "body",
+            "required": true,
+            "schema": {
+              "additionalProperties": true,
+              "type": "object",
+              "title": "Raw"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "schema": {
+              "$ref": "#/definitions/ConfigValidation"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "schema": {
+              "$ref": "#/definitions/HTTPValidationError"
+            }
+          }
+        },
+        "produces": [
+          "application/json"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-womblex-scope": "read"
+      }
+    },
+    "/v1/config/yaml": {
+      "post": {
+        "tags": [
+          "config"
+        ],
+        "summary": "To Yaml",
+        "description": "The config as a YAML file `womblex run --config` reads; 422 with the validation errors otherwise.",
+        "operationId": "to_yaml_v1_config_yaml_post",
+        "consumes": [
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "in": "body",
+            "name": "body",
+            "required": true,
+            "schema": {
+              "additionalProperties": true,
+              "type": "object",
+              "title": "Raw"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "schema": {
+              "$ref": "#/definitions/HTTPValidationError"
+            }
+          }
+        },
+        "produces": [
+          "application/json"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-womblex-scope": "read"
+      }
+    },
+    "/v1/presets": {
+      "get": {
+        "tags": [
+          "presets"
+        ],
+        "summary": "List Presets",
+        "operationId": "list_presets_v1_presets_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "schema": {
+              "$ref": "#/definitions/PresetList"
+            }
+          }
+        },
+        "produces": [
+          "application/json"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-womblex-scope": "read"
+      },
+      "post": {
+        "tags": [
+          "presets"
+        ],
+        "summary": "Save Preset",
+        "description": "Save or replace a preset; 400 on an unsafe name or a config that would not load.",
+        "operationId": "save_preset_v1_presets_post",
+        "consumes": [
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "in": "body",
+            "name": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/PresetSave"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "schema": {
+              "$ref": "#/definitions/PresetOut"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "schema": {
+              "$ref": "#/definitions/HTTPValidationError"
+            }
+          }
+        },
+        "produces": [
+          "application/json"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-womblex-scope": "admin"
+      }
+    },
+    "/v1/presets/{name}": {
+      "get": {
+        "tags": [
+          "presets"
+        ],
+        "summary": "Get Preset",
+        "operationId": "get_preset_v1_presets__name__get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "schema": {
+              "$ref": "#/definitions/PresetOut"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "schema": {
+              "$ref": "#/definitions/HTTPValidationError"
+            }
+          }
+        },
+        "produces": [
+          "application/json"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-womblex-scope": "read"
+      },
+      "delete": {
+        "tags": [
+          "presets"
+        ],
+        "summary": "Delete Preset",
+        "description": "404 when no saved preset has *name*; a built-in is code and is never deleted.",
+        "operationId": "delete_preset_v1_presets__name__delete",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "schema": {
+              "$ref": "#/definitions/PresetDeleted"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "schema": {
+              "$ref": "#/definitions/HTTPValidationError"
+            }
+          }
+        },
+        "produces": [
+          "application/json"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-womblex-scope": "admin"
+      }
+    },
+    "/v1/queue": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Get Queue",
+        "operationId": "get_queue_v1_queue_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "stale_after",
+            "in": "query",
+            "required": false,
+            "type": "number",
+            "minimum": 0,
+            "exclusiveMinimum": true,
+            "default": 900.0
+          },
+          {
+            "name": "window_seconds",
+            "in": "query",
+            "required": false,
+            "type": "number",
+            "minimum": 0,
+            "exclusiveMinimum": true,
+            "default": 3600.0
+          },
+          {
+            "name": "job_limit",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "maximum": 1000,
+            "minimum": 1,
+            "default": 200
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "schema": {
+              "$ref": "#/definitions/QueueSnapshot"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "schema": {
+              "$ref": "#/definitions/HTTPValidationError"
+            }
+          }
+        },
+        "produces": [
+          "application/json"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-womblex-scope": "read"
+      }
+    },
+    "/v1/collections": {
+      "get": {
+        "tags": [
+          "collections"
+        ],
+        "summary": "List Collections",
+        "operationId": "list_collections_v1_collections_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "schema": {
+              "$ref": "#/definitions/CollectionList"
+            }
+          }
+        },
+        "produces": [
+          "application/json"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-womblex-scope": "read"
+      }
+    },
+    "/v1/collections/{name}": {
+      "get": {
+        "tags": [
+          "collections"
+        ],
+        "summary": "Get Collection",
+        "operationId": "get_collection_v1_collections__name__get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "schema": {
+              "$ref": "#/definitions/CollectionDetail"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "schema": {
+              "$ref": "#/definitions/HTTPValidationError"
+            }
+          }
+        },
+        "produces": [
+          "application/json"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-womblex-scope": "read"
+      }
+    },
+    "/v1/collections/{name}/add": {
+      "post": {
+        "tags": [
+          "collections"
+        ],
+        "summary": "Add To Collection",
+        "operationId": "add_to_collection_v1_collections__name__add_post",
+        "consumes": [
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "body",
+            "name": "body",
+            "required": false,
+            "schema": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/CollectionAction"
+                }
+              ],
+              "x-nullable": true,
+              "title": "Body"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "schema": {
+              "$ref": "#/definitions/CollectionAdded"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "schema": {
+              "$ref": "#/definitions/HTTPValidationError"
+            }
+          }
+        },
+        "produces": [
+          "application/json"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-womblex-scope": "submit"
+      }
+    },
+    "/v1/collections/{name}/rerun": {
+      "post": {
+        "tags": [
+          "collections"
+        ],
+        "summary": "Rerun Collection",
+        "operationId": "rerun_collection_v1_collections__name__rerun_post",
+        "consumes": [
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "body",
+            "name": "body",
+            "required": false,
+            "schema": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/CollectionAction"
+                }
+              ],
+              "x-nullable": true,
+              "title": "Body"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "schema": {
+              "$ref": "#/definitions/CollectionRerun"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "schema": {
+              "$ref": "#/definitions/HTTPValidationError"
+            }
+          }
+        },
+        "produces": [
+          "application/json"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-womblex-scope": "submit"
+      }
+    },
+    "/v1/hooks/{workflow}/{hook}": {
+      "post": {
+        "tags": [
+          "hooks"
+        ],
+        "summary": "Receive",
+        "operationId": "receive_v1_hooks__workflow___hook__post",
+        "parameters": [
+          {
+            "name": "workflow",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "hook",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "schema": {}
+          },
+          "422": {
+            "description": "Validation Error",
+            "schema": {
+              "$ref": "#/definitions/HTTPValidationError"
+            }
+          }
+        },
+        "produces": [
+          "application/json"
+        ],
+        "security": [
+          {
+            "hookSignature": []
+          }
+        ]
+      }
+    },
+    "/v1/workflows/{workflow}/inbound-events": {
+      "get": {
+        "tags": [
+          "hooks"
+        ],
+        "summary": "List Events",
+        "description": "The workflow's inbound events, newest first, owner-scoped: another owner's workflow is 404.",
+        "operationId": "list_events_v1_workflows__workflow__inbound_events_get",
+        "parameters": [
+          {
+            "name": "workflow",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "maximum": 1000,
+            "minimum": 1,
+            "default": 100
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "schema": {
+              "$ref": "#/definitions/InboundEventList"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "schema": {
+              "$ref": "#/definitions/HTTPValidationError"
+            }
+          }
+        },
+        "produces": [
+          "application/json"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-womblex-scope": "read"
+      }
+    },
+    "/v1/resources": {
+      "get": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "Get Resources",
+        "description": "The store, ingest location, queue and Isaacus deployment, read without a network call.",
+        "operationId": "get_resources_v1_resources_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "schema": {
+              "$ref": "#/definitions/Resources"
+            }
+          }
+        },
+        "produces": [
+          "application/json"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-womblex-scope": "admin"
+      }
+    },
+    "/v1/resources/test/{target}": {
+      "post": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "Test",
+        "operationId": "test_v1_resources_test__target__post",
+        "parameters": [
+          {
+            "name": "target",
+            "in": "path",
+            "required": true,
+            "enum": [
+              "store",
+              "ingest",
+              "queue"
+            ],
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "schema": {
+              "$ref": "#/definitions/Reachability"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "schema": {
+              "$ref": "#/definitions/HTTPValidationError"
+            }
+          }
+        },
+        "produces": [
+          "application/json"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-womblex-scope": "admin"
+      }
+    },
+    "/v1/store/runs": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "List Stored Runs",
+        "operationId": "list_stored_runs_v1_store_runs_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "schema": {
+              "$ref": "#/definitions/StoredRunList"
+            }
+          }
+        },
+        "produces": [
+          "application/json"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-womblex-scope": "admin"
+      }
+    },
+    "/v1/runs/{run_id}/stages/{stage}": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Get Stage Presence",
+        "description": "The documents *stage* wrote a sidecar row for; 400 for a stage with no sidecar of its own.",
+        "operationId": "get_stage_presence_v1_runs__run_id__stages__stage__get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "stage",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "schema": {
+              "$ref": "#/definitions/StagePresence"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "schema": {
+              "$ref": "#/definitions/HTTPValidationError"
+            }
+          }
+        },
+        "produces": [
+          "application/json"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-womblex-scope": "read"
+      }
+    },
+    "/v1/runs/{run_id}/audit": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Get Audit",
+        "description": "`verify-shards`' cross-batch structural audit of the run's extraction shards.",
+        "operationId": "get_audit_v1_runs__run_id__audit_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "schema": {
+              "type": "object",
+              "additionalProperties": true,
+              "title": "Response Get Audit V1 Runs  Run Id  Audit Get"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "schema": {
+              "$ref": "#/definitions/HTTPValidationError"
+            }
+          }
+        },
+        "produces": [
+          "application/json"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-womblex-scope": "read"
+      }
+    },
+    "/v1/runs/{run_id}/documents/{source_hash}/detail": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Get Document Detail",
+        "description": "The document's chunks, entities, PII spans, narrative money and quality rows.",
+        "operationId": "get_document_detail_v1_runs__run_id__documents__source_hash__detail_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "source_hash",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "schema": {
+              "$ref": "#/definitions/DocumentDetail"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "schema": {
+              "$ref": "#/definitions/HTTPValidationError"
+            }
+          }
+        },
+        "produces": [
+          "application/json"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-womblex-scope": "read_raw"
+      }
+    },
+    "/v1/runs/{run_id}/logs": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "List Logs",
+        "operationId": "list_logs_v1_runs__run_id__logs_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "schema": {
+              "$ref": "#/definitions/RunLogs"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "schema": {
+              "$ref": "#/definitions/HTTPValidationError"
+            }
+          }
+        },
+        "produces": [
+          "application/json"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-womblex-scope": "read"
+      }
+    },
+    "/v1/runs/{run_id}/logs/{name}": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Read Log",
+        "description": "One log as text (``?download=true`` names it as a file).\n\nA name that is not a log's and an absent log give the same 404 with the\nlogs there are, so the route cannot probe outside the run's ``logs/``.",
+        "operationId": "read_log_v1_runs__run_id__logs__name__get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "download",
+            "in": "query",
+            "required": false,
+            "type": "boolean",
+            "default": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "schema": {
+              "$ref": "#/definitions/HTTPValidationError"
+            }
+          }
+        },
+        "produces": [
+          "text/plain",
+          "application/json"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-womblex-scope": "read"
+      }
+    },
+    "/v1/runs/{run_id}/progress": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Get Progress",
+        "description": "Each stage's checkpoint, read from the run itself, so it answers without a queue too.",
+        "operationId": "get_progress_v1_runs__run_id__progress_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "schema": {
+              "$ref": "#/definitions/StageProgress"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "schema": {
+              "$ref": "#/definitions/HTTPValidationError"
+            }
+          }
+        },
+        "produces": [
+          "application/json"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-womblex-scope": "read"
+      }
+    },
+    "/v1/health": {
+      "get": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "Health",
+        "operationId": "health_v1_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "schema": {
+              "$ref": "#/definitions/Health"
+            }
+          }
+        },
+        "produces": [
+          "application/json"
+        ],
+        "security": []
+      }
+    },
+    "/v1/ready": {
+      "get": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "Ready",
+        "operationId": "ready_v1_ready_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "schema": {
+              "$ref": "#/definitions/Ready"
+            }
+          }
+        },
+        "produces": [
+          "application/json"
+        ],
+        "security": []
+      }
+    },
+    "/v1/runs": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "List Runs",
+        "operationId": "list_runs_v1_runs_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "schema": {
+              "$ref": "#/definitions/RunList"
+            }
+          }
+        },
+        "produces": [
+          "application/json"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-womblex-scope": "read"
+      },
+      "post": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Submit Run",
+        "operationId": "submit_run_v1_runs_post",
+        "consumes": [
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "in": "body",
+            "name": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/RunRequest"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "schema": {
+              "$ref": "#/definitions/RunSubmitted"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "schema": {
+              "$ref": "#/definitions/HTTPValidationError"
+            }
+          }
+        },
+        "produces": [
+          "application/json"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-womblex-scope": "submit"
+      }
+    },
+    "/v1/ingest": {
+      "get": {
+        "tags": [
+          "uploads"
+        ],
+        "summary": "Preview Ingest",
+        "description": "What a submission naming *input_prefix* would run, before it is submitted.",
+        "operationId": "preview_ingest_v1_ingest_get",
+        "parameters": [
+          {
+            "name": "input_prefix",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "default": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "schema": {
+              "$ref": "#/definitions/IngestPreview"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "schema": {
+              "$ref": "#/definitions/HTTPValidationError"
+            }
+          }
+        },
+        "produces": [
+          "application/json"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-womblex-scope": "submit"
+      }
+    },
+    "/v1/uploads": {
+      "post": {
+        "tags": [
+          "uploads"
+        ],
+        "summary": "Upload",
+        "operationId": "upload_v1_uploads_post",
+        "consumes": [
+          "multipart/form-data"
+        ],
+        "parameters": [
+          {
+            "name": "files",
+            "in": "formData",
+            "required": true,
+            "type": "file",
+            "description": "Repeat this field once per file."
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "schema": {
+              "$ref": "#/definitions/UploadAccepted"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "schema": {
+              "$ref": "#/definitions/HTTPValidationError"
+            }
+          }
+        },
+        "produces": [
+          "application/json"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-womblex-scope": "submit"
+      }
+    },
+    "/v1/runs/{run_id}": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Get Run",
+        "operationId": "get_run_v1_runs__run_id__get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "schema": {
+              "$ref": "#/definitions/RunStatus"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "schema": {
+              "$ref": "#/definitions/HTTPValidationError"
+            }
+          }
+        },
+        "produces": [
+          "application/json"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-womblex-scope": "read"
+      }
+    },
+    "/v1/runs/{run_id}/manifest": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Get Manifest",
+        "operationId": "get_manifest_v1_runs__run_id__manifest_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "schema": {
+              "$ref": "#/definitions/RunManifest"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "schema": {
+              "$ref": "#/definitions/HTTPValidationError"
+            }
+          }
+        },
+        "produces": [
+          "application/json"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-womblex-scope": "read"
+      }
+    },
+    "/v1/runs/{run_id}/files": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Get Files",
+        "operationId": "get_files_v1_runs__run_id__files_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "schema": {
+              "$ref": "#/definitions/RunFiles"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "schema": {
+              "$ref": "#/definitions/HTTPValidationError"
+            }
+          }
+        },
+        "produces": [
+          "application/json"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-womblex-scope": "read"
+      }
+    },
+    "/v1/runs/{run_id}/documents/{source_hash}/text": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Get Document Text",
+        "operationId": "get_document_text_v1_runs__run_id__documents__source_hash__text_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "source_hash",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "layer",
+            "in": "query",
+            "required": false,
+            "enum": [
+              "masked",
+              "chunks",
+              "elements"
+            ],
+            "type": "string",
+            "default": "masked"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "schema": {
+              "$ref": "#/definitions/DocumentText"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "schema": {
+              "$ref": "#/definitions/HTTPValidationError"
+            }
+          }
+        },
+        "produces": [
+          "application/json"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-womblex-scope": "read"
+      }
+    },
+    "/v1/runs/{run_id}/metrics": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Get Metrics",
+        "operationId": "get_metrics_v1_runs__run_id__metrics_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "schema": {
+              "$ref": "#/definitions/RunMetrics"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "schema": {
+              "$ref": "#/definitions/HTTPValidationError"
+            }
+          }
+        },
+        "produces": [
+          "application/json"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-womblex-scope": "read"
+      }
+    }
+  },
+  "securityDefinitions": {
+    "bearerAuth": {
+      "type": "apiKey",
+      "in": "header",
+      "name": "Authorization",
+      "description": "`Bearer <token>`: a service token from the client registry."
+    },
+    "hookSignature": {
+      "type": "apiKey",
+      "in": "header",
+      "name": "X-Womblex-Signature",
+      "description": "`sha256=<hex>`: HMAC-SHA256 of the raw body under the hook's secret."
+    }
+  },
+  "definitions": {
+    "Body_upload_v1_uploads_post": {
+      "properties": {
+        "files": {
+          "items": {
+            "type": "string",
+            "format": "binary"
+          },
+          "type": "array",
+          "title": "Files"
+        }
+      },
+      "type": "object",
+      "required": [
+        "files"
+      ],
+      "title": "Body_upload_v1_uploads_post"
+    },
+    "CollectionAction": {
+      "properties": {
+        "workflow": {
+          "x-nullable": true,
+          "type": "string",
+          "title": "Workflow"
+        }
+      },
+      "type": "object",
+      "title": "CollectionAction",
+      "description": "Which workflow to act through; needed only when several feed the collection."
+    },
+    "CollectionAdded": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "title": "Name"
+        },
+        "workflow": {
+          "type": "string",
+          "title": "Workflow"
+        },
+        "firing": {
+          "type": "string",
+          "title": "Firing"
+        }
+      },
+      "type": "object",
+      "required": [
+        "name",
+        "workflow",
+        "firing"
+      ],
+      "title": "CollectionAdded"
+    },
+    "CollectionDetail": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "title": "Name"
+        },
+        "workflows": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "title": "Workflows"
+        },
+        "documents": {
+          "type": "integer",
+          "title": "Documents"
+        },
+        "current_documents": {
+          "x-nullable": true,
+          "type": "integer",
+          "title": "Current Documents"
+        },
+        "written_by": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array",
+          "title": "Written By"
+        }
+      },
+      "type": "object",
+      "required": [
+        "name",
+        "workflows",
+        "documents",
+        "written_by"
+      ],
+      "title": "CollectionDetail",
+      "description": "A collection: the stored workflows that feed it, its document count and the workflows its files record."
+    },
+    "CollectionList": {
+      "properties": {
+        "collections": {
+          "items": {
+            "$ref": "#/definitions/CollectionSummary"
+          },
+          "type": "array",
+          "title": "Collections"
+        }
+      },
+      "type": "object",
+      "required": [
+        "collections"
+      ],
+      "title": "CollectionList"
+    },
+    "CollectionRerun": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "title": "Name"
+        },
+        "workflow": {
+          "type": "string",
+          "title": "Workflow"
+        },
+        "stages": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "title": "Stages"
+        },
+        "newly_dispatched": {
+          "type": "integer",
+          "title": "Newly Dispatched"
+        }
+      },
+      "type": "object",
+      "required": [
+        "name",
+        "workflow",
+        "stages",
+        "newly_dispatched"
+      ],
+      "title": "CollectionRerun"
+    },
+    "CollectionSummary": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "title": "Name"
+        },
+        "workflows": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "title": "Workflows"
+        }
+      },
+      "type": "object",
+      "required": [
+        "name",
+        "workflows"
+      ],
+      "title": "CollectionSummary"
+    },
+    "ConfigValidation": {
+      "properties": {
+        "valid": {
+          "type": "boolean",
+          "title": "Valid"
+        },
+        "errors": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array",
+          "title": "Errors"
+        }
+      },
+      "type": "object",
+      "required": [
+        "valid",
+        "errors"
+      ],
+      "title": "ConfigValidation",
+      "description": "Whether a posted config builds a `WomblexConfig`, with Pydantic's own errors."
+    },
+    "DocumentDetail": {
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "title": "Run Id"
+        },
+        "source_hash": {
+          "type": "string",
+          "title": "Source Hash"
+        },
+        "chunks": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array",
+          "title": "Chunks"
+        },
+        "entities": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array",
+          "title": "Entities"
+        },
+        "pii_spans": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array",
+          "title": "Pii Spans"
+        },
+        "money_spans": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array",
+          "title": "Money Spans"
+        },
+        "quality": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array",
+          "title": "Quality"
+        }
+      },
+      "type": "object",
+      "required": [
+        "run_id",
+        "source_hash",
+        "chunks",
+        "entities",
+        "pii_spans",
+        "money_spans",
+        "quality"
+      ],
+      "title": "DocumentDetail",
+      "description": "One document's chunks and the rows each stage annotated on them (raw text: ``read_raw``)."
+    },
+    "DocumentText": {
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "title": "Run Id"
+        },
+        "source_hash": {
+          "type": "string",
+          "title": "Source Hash"
+        },
+        "layer": {
+          "type": "string",
+          "enum": [
+            "masked",
+            "chunks",
+            "elements"
+          ],
+          "title": "Layer"
+        },
+        "sensitivity": {
+          "type": "string",
+          "enum": [
+            "raw",
+            "masked",
+            "none"
+          ],
+          "title": "Sensitivity"
+        },
+        "rows": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array",
+          "title": "Rows"
+        }
+      },
+      "type": "object",
+      "required": [
+        "run_id",
+        "source_hash",
+        "layer",
+        "sensitivity",
+        "rows"
+      ],
+      "title": "DocumentText",
+      "description": "One document's text in one layer; ``rows`` carry that layer's columns."
+    },
+    "HTTPValidationError": {
+      "properties": {
+        "detail": {
+          "items": {
+            "$ref": "#/definitions/ValidationError"
+          },
+          "type": "array",
+          "title": "Detail"
+        }
+      },
+      "type": "object",
+      "title": "HTTPValidationError"
+    },
+    "Health": {
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "ok"
+          ],
+          "title": "Status",
+          "default": "ok"
+        }
+      },
+      "type": "object",
+      "title": "Health"
+    },
+    "InboundEventList": {
+      "properties": {
+        "workflow": {
+          "type": "string",
+          "title": "Workflow"
+        },
+        "events": {
+          "items": {
+            "$ref": "#/definitions/InboundEventOut"
+          },
+          "type": "array",
+          "title": "Events"
+        }
+      },
+      "type": "object",
+      "required": [
+        "workflow",
+        "events"
+      ],
+      "title": "InboundEventList"
+    },
+    "InboundEventOut": {
+      "properties": {
+        "event_id": {
+          "type": "string",
+          "title": "Event Id"
+        },
+        "hook": {
+          "type": "string",
+          "title": "Hook"
+        },
+        "event": {
+          "type": "string",
+          "title": "Event"
+        },
+        "received_at": {
+          "type": "string",
+          "title": "Received At"
+        },
+        "outcome": {
+          "x-nullable": true,
+          "additionalProperties": true,
+          "type": "object",
+          "title": "Outcome"
+        }
+      },
+      "type": "object",
+      "required": [
+        "event_id",
+        "hook",
+        "event",
+        "received_at",
+        "outcome"
+      ],
+      "title": "InboundEventOut",
+      "description": "One inbound event: the sender's id, and the outcome it was given (null while it is being handled)."
+    },
+    "IngestPreview": {
+      "properties": {
+        "uri": {
+          "x-nullable": true,
+          "type": "string",
+          "title": "Uri"
+        },
+        "input_prefix": {
+          "type": "string",
+          "title": "Input Prefix"
+        },
+        "kind": {
+          "x-nullable": true,
+          "type": "string",
+          "enum": [
+            "local",
+            "remote"
+          ],
+          "title": "Kind"
+        },
+        "reachable": {
+          "type": "boolean",
+          "title": "Reachable"
+        },
+        "document_count": {
+          "type": "integer",
+          "title": "Document Count"
+        },
+        "sample": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "title": "Sample"
+        },
+        "subdirectories": {
+          "items": {
+            "$ref": "#/definitions/IngestSubdirectory"
+          },
+          "type": "array",
+          "title": "Subdirectories"
+        },
+        "error": {
+          "x-nullable": true,
+          "type": "string",
+          "title": "Error"
+        }
+      },
+      "type": "object",
+      "required": [
+        "uri",
+        "input_prefix",
+        "kind",
+        "reachable",
+        "document_count",
+        "sample",
+        "subdirectories",
+        "error"
+      ],
+      "title": "IngestPreview",
+      "description": "What ``POST /v1/runs`` would pick up under ``input_prefix``; ``error`` says why it would not."
+    },
+    "IngestSubdirectory": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "title": "Name"
+        },
+        "input_prefix": {
+          "type": "string",
+          "title": "Input Prefix"
+        },
+        "document_count": {
+          "type": "integer",
+          "title": "Document Count"
+        }
+      },
+      "type": "object",
+      "required": [
+        "name",
+        "input_prefix",
+        "document_count"
+      ],
+      "title": "IngestSubdirectory"
+    },
+    "PresetDeleted": {
+      "properties": {
+        "deleted": {
+          "type": "string",
+          "title": "Deleted"
+        }
+      },
+      "type": "object",
+      "required": [
+        "deleted"
+      ],
+      "title": "PresetDeleted"
+    },
+    "PresetList": {
+      "properties": {
+        "presets": {
+          "items": {
+            "$ref": "#/definitions/PresetOut"
+          },
+          "type": "array",
+          "title": "Presets"
+        }
+      },
+      "type": "object",
+      "required": [
+        "presets"
+      ],
+      "title": "PresetList"
+    },
+    "PresetOut": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "title": "Name"
+        },
+        "description": {
+          "type": "string",
+          "title": "Description"
+        },
+        "formats": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "title": "Formats"
+        },
+        "config": {
+          "additionalProperties": true,
+          "type": "object",
+          "title": "Config"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "builtin",
+            "saved"
+          ],
+          "title": "Source"
+        }
+      },
+      "type": "object",
+      "required": [
+        "name",
+        "description",
+        "formats",
+        "config",
+        "source"
+      ],
+      "title": "PresetOut",
+      "description": "A named partial config; ``source`` is ``builtin`` (code, never deleted) or ``saved``."
+    },
+    "PresetSave": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "title": "Name"
+        },
+        "description": {
+          "type": "string",
+          "title": "Description",
+          "default": ""
+        },
+        "formats": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "title": "Formats"
+        },
+        "config": {
+          "additionalProperties": true,
+          "type": "object",
+          "title": "Config"
+        }
+      },
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "title": "PresetSave",
+      "description": "A preset to save; ``dataset`` and ``paths`` in ``config`` are dropped (a preset is an overlay)."
+    },
+    "QueueSnapshot": {
+      "properties": {
+        "run_id": {
+          "x-nullable": true,
+          "type": "string",
+          "title": "Run Id"
+        },
+        "stale_after_seconds": {
+          "type": "number",
+          "title": "Stale After Seconds"
+        },
+        "stats": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "type": "object",
+          "title": "Stats"
+        },
+        "total": {
+          "type": "integer",
+          "title": "Total"
+        },
+        "summary": {
+          "x-nullable": true,
+          "type": "string",
+          "title": "Summary"
+        },
+        "jobs": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array",
+          "title": "Jobs"
+        },
+        "workers": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array",
+          "title": "Workers"
+        },
+        "stale": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array",
+          "title": "Stale"
+        },
+        "throughput": {
+          "additionalProperties": true,
+          "type": "object",
+          "title": "Throughput"
+        }
+      },
+      "type": "object",
+      "required": [
+        "run_id",
+        "stale_after_seconds",
+        "stats",
+        "total",
+        "summary",
+        "jobs",
+        "workers",
+        "stale",
+        "throughput"
+      ],
+      "title": "QueueSnapshot",
+      "description": "The queue in one read, scoped to the caller's runs (and to ``run_id`` when given)."
+    },
+    "Reachability": {
+      "properties": {
+        "target": {
+          "type": "string",
+          "enum": [
+            "store",
+            "ingest",
+            "queue"
+          ],
+          "title": "Target"
+        },
+        "reachable": {
+          "type": "boolean",
+          "title": "Reachable"
+        },
+        "error": {
+          "x-nullable": true,
+          "type": "string",
+          "title": "Error"
+        }
+      },
+      "type": "object",
+      "required": [
+        "target",
+        "reachable",
+        "error"
+      ],
+      "title": "Reachability"
+    },
+    "Ready": {
+      "properties": {
+        "ready": {
+          "type": "boolean",
+          "title": "Ready"
+        },
+        "store": {
+          "type": "boolean",
+          "title": "Store"
+        },
+        "queue": {
+          "type": "boolean",
+          "title": "Queue"
+        }
+      },
+      "type": "object",
+      "required": [
+        "ready",
+        "store",
+        "queue"
+      ],
+      "title": "Ready"
+    },
+    "Resources": {
+      "properties": {
+        "store": {
+          "additionalProperties": true,
+          "type": "object",
+          "title": "Store"
+        },
+        "ingest": {
+          "additionalProperties": true,
+          "type": "object",
+          "title": "Ingest"
+        },
+        "queue": {
+          "additionalProperties": true,
+          "type": "object",
+          "title": "Queue"
+        },
+        "isaacus": {
+          "additionalProperties": true,
+          "type": "object",
+          "title": "Isaacus"
+        },
+        "deployments": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array",
+          "title": "Deployments",
+          "default": []
+        }
+      },
+      "type": "object",
+      "required": [
+        "store",
+        "ingest",
+        "queue",
+        "isaacus"
+      ],
+      "title": "Resources",
+      "description": "What the deployment is wired to, credentials masked."
+    },
+    "RunFile": {
+      "properties": {
+        "key": {
+          "type": "string",
+          "title": "Key"
+        },
+        "rows": {
+          "x-nullable": true,
+          "type": "integer",
+          "title": "Rows"
+        },
+        "contract_version": {
+          "x-nullable": true,
+          "type": "string",
+          "title": "Contract Version"
+        },
+        "sensitivity": {
+          "x-nullable": true,
+          "type": "string",
+          "title": "Sensitivity"
+        }
+      },
+      "type": "object",
+      "required": [
+        "key"
+      ],
+      "title": "RunFile",
+      "description": "One object under the run. Contract keys are null for a non-Parquet or pre-contract file."
+    },
+    "RunFiles": {
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "title": "Run Id"
+        },
+        "files": {
+          "items": {
+            "$ref": "#/definitions/RunFile"
+          },
+          "type": "array",
+          "title": "Files"
+        }
+      },
+      "type": "object",
+      "required": [
+        "run_id",
+        "files"
+      ],
+      "title": "RunFiles"
+    },
+    "RunList": {
+      "properties": {
+        "runs": {
+          "items": {
+            "$ref": "#/definitions/RunStatus"
+          },
+          "type": "array",
+          "title": "Runs"
+        }
+      },
+      "type": "object",
+      "required": [
+        "runs"
+      ],
+      "title": "RunList"
+    },
+    "RunLog": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "title": "Name"
+        },
+        "size": {
+          "type": "integer",
+          "title": "Size"
+        },
+        "modified": {
+          "x-nullable": true,
+          "type": "string",
+          "title": "Modified"
+        }
+      },
+      "type": "object",
+      "required": [
+        "name",
+        "size",
+        "modified"
+      ],
+      "title": "RunLog"
+    },
+    "RunLogs": {
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "title": "Run Id"
+        },
+        "logs": {
+          "items": {
+            "$ref": "#/definitions/RunLog"
+          },
+          "type": "array",
+          "title": "Logs"
+        }
+      },
+      "type": "object",
+      "required": [
+        "run_id",
+        "logs"
+      ],
+      "title": "RunLogs",
+      "description": "The run's batch logs, newest first; empty for a run written before logs were published."
+    },
+    "RunManifest": {
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "title": "Run Id"
+        },
+        "documents": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array",
+          "title": "Documents"
+        }
+      },
+      "type": "object",
+      "required": [
+        "run_id",
+        "documents"
+      ],
+      "title": "RunManifest"
+    },
+    "RunMetrics": {
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "title": "Run Id"
+        },
+        "stats": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "type": "object",
+          "title": "Stats"
+        },
+        "workers": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array",
+          "title": "Workers"
+        },
+        "throughput": {
+          "additionalProperties": true,
+          "type": "object",
+          "title": "Throughput"
+        }
+      },
+      "type": "object",
+      "required": [
+        "run_id",
+        "stats",
+        "workers",
+        "throughput"
+      ],
+      "title": "RunMetrics"
+    },
+    "RunRequest": {
+      "properties": {
+        "input_prefix": {
+          "type": "string",
+          "title": "Input Prefix"
+        },
+        "preset": {
+          "x-nullable": true,
+          "type": "string",
+          "title": "Preset"
+        },
+        "config": {
+          "x-nullable": true,
+          "additionalProperties": true,
+          "type": "object",
+          "title": "Config"
+        },
+        "batch_size": {
+          "type": "integer",
+          "minimum": 1.0,
+          "title": "Batch Size",
+          "default": 50
+        }
+      },
+      "type": "object",
+      "required": [
+        "input_prefix"
+      ],
+      "title": "RunRequest",
+      "description": "A run submission. ``preset`` or ``config`` picks the downstream stages; neither is extraction only."
+    },
+    "RunStatus": {
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "title": "Run Id"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "running",
+            "done",
+            "failed",
+            "cancelled"
+          ],
+          "title": "State"
+        },
+        "counts": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "type": "object",
+          "title": "Counts"
+        },
+        "total": {
+          "type": "integer",
+          "title": "Total"
+        },
+        "created_at": {
+          "x-nullable": true,
+          "type": "string",
+          "title": "Created At"
+        },
+        "updated_at": {
+          "x-nullable": true,
+          "type": "string",
+          "title": "Updated At"
+        },
+        "orphaned": {
+          "type": "boolean",
+          "title": "Orphaned",
+          "default": false
+        },
+        "summary": {
+          "type": "string",
+          "title": "Summary"
+        }
+      },
+      "type": "object",
+      "required": [
+        "run_id",
+        "state",
+        "counts",
+        "total",
+        "summary"
+      ],
+      "title": "RunStatus",
+      "description": "One run's queue rollup. ``state`` is derived from ``counts``; ``orphaned`` marks extraction\na failed firing queued with no stages dispatched. ``summary`` is the status sentence the CLI\nshows, built from the exact per-stage counts."
+    },
+    "RunSubmitted": {
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "title": "Run Id"
+        },
+        "document_count": {
+          "type": "integer",
+          "title": "Document Count"
+        },
+        "batch_count": {
+          "type": "integer",
+          "title": "Batch Count"
+        },
+        "stages": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "title": "Stages"
+        }
+      },
+      "type": "object",
+      "required": [
+        "run_id",
+        "document_count",
+        "batch_count",
+        "stages"
+      ],
+      "title": "RunSubmitted"
+    },
+    "StageGraph": {
+      "properties": {
+        "nodes": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array",
+          "title": "Nodes"
+        },
+        "edges": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array",
+          "title": "Edges"
+        }
+      },
+      "type": "object",
+      "required": [
+        "nodes",
+        "edges"
+      ],
+      "title": "StageGraph",
+      "description": "The pipeline's nodes (one per stage, plus ``extract``) and its required-input edges."
+    },
+    "StagePresence": {
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "title": "Run Id"
+        },
+        "stage": {
+          "type": "string",
+          "title": "Stage"
+        },
+        "source_hashes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "title": "Source Hashes"
+        }
+      },
+      "type": "object",
+      "required": [
+        "run_id",
+        "stage",
+        "source_hashes"
+      ],
+      "title": "StagePresence",
+      "description": "The documents with a row in the stage's sidecar."
+    },
+    "StageProgress": {
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "title": "Run Id"
+        },
+        "stages": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array",
+          "title": "Stages"
+        }
+      },
+      "type": "object",
+      "required": [
+        "run_id",
+        "stages"
+      ],
+      "title": "StageProgress",
+      "description": "Each stage's checkpoint for the run, in pipeline order; a stage that has not run is absent."
+    },
+    "StoredRun": {
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "title": "Run Id"
+        },
+        "document_count": {
+          "x-nullable": true,
+          "type": "integer",
+          "title": "Document Count"
+        },
+        "stages": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "title": "Stages"
+        },
+        "created_at": {
+          "x-nullable": true,
+          "type": "string",
+          "title": "Created At"
+        },
+        "updated_at": {
+          "x-nullable": true,
+          "type": "string",
+          "title": "Updated At"
+        }
+      },
+      "type": "object",
+      "required": [
+        "run_id",
+        "document_count",
+        "stages",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "StoredRun",
+      "description": "A run the store holds; ``document_count`` is null before any manifest landed."
+    },
+    "StoredRunList": {
+      "properties": {
+        "runs": {
+          "items": {
+            "$ref": "#/definitions/StoredRun"
+          },
+          "type": "array",
+          "title": "Runs"
+        }
+      },
+      "type": "object",
+      "required": [
+        "runs"
+      ],
+      "title": "StoredRunList"
+    },
+    "UploadAccepted": {
+      "properties": {
+        "upload_id": {
+          "type": "string",
+          "title": "Upload Id"
+        },
+        "input_prefix": {
+          "type": "string",
+          "title": "Input Prefix"
+        },
+        "files": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "title": "Files"
+        },
+        "bytes": {
+          "type": "integer",
+          "title": "Bytes"
+        }
+      },
+      "type": "object",
+      "required": [
+        "upload_id",
+        "input_prefix",
+        "files",
+        "bytes"
+      ],
+      "title": "UploadAccepted",
+      "description": "Stored documents; ``input_prefix`` is what ``POST /v1/runs`` takes to run them."
+    },
+    "ValidationError": {
+      "properties": {
+        "loc": {
+          "items": {
+            "x-anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ]
+          },
+          "type": "array",
+          "title": "Location"
+        },
+        "msg": {
+          "type": "string",
+          "title": "Message"
+        },
+        "type": {
+          "type": "string",
+          "title": "Error Type"
+        },
+        "input": {
+          "title": "Input"
+        },
+        "ctx": {
+          "type": "object",
+          "title": "Context"
+        }
+      },
+      "type": "object",
+      "required": [
+        "loc",
+        "msg",
+        "type"
+      ],
+      "title": "ValidationError"
+    }
+  }
+}
