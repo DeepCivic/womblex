@@ -452,6 +452,10 @@ class LinkingConfig(StrictModel):
     )
 
 
+#: Set once the AI-chunking reuse warning has been logged in this process.
+_ai_chunking_reuse_warned: list[bool] = []
+
+
 class WomblexConfig(StrictModel):
     """Complete configuration for Womblex operations."""
 
@@ -485,13 +489,17 @@ class WomblexConfig(StrictModel):
         """
         if self.chunking.chunking_model and self.enrichment.enabled:
             self.enrichment.persist_document = True
-            logging.getLogger(__name__).warning(
-                "chunking.chunking_model=%r + enrichment.enabled: auto-enabled "
-                "enrichment.persist_document so chunk reuses the enrich stage's "
-                "Document. Run `enrich` BEFORE `chunk` — otherwise the reuse "
-                "sidecar is absent and chunk calls the Enricher itself (double cost).",
-                self.chunking.chunking_model,
-            )
+            # The validator runs on every config construction (each stage call), so say
+            # it once per process rather than on every chunk call.
+            if not _ai_chunking_reuse_warned:
+                _ai_chunking_reuse_warned.append(True)
+                logging.getLogger(__name__).warning(
+                    "chunking.chunking_model=%r + enrichment.enabled: auto-enabled "
+                    "enrichment.persist_document so chunk reuses the enrich stage's "
+                    "Document. Run `enrich` BEFORE `chunk` — otherwise the reuse "
+                    "sidecar is absent and chunk calls the Enricher itself (double cost).",
+                    self.chunking.chunking_model,
+                )
         return self
 
 

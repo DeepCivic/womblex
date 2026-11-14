@@ -33,6 +33,24 @@ logger = logging.getLogger(__name__)
 DEFAULT_TOKENIZER = "isaacus/kanon-2-tokenizer"
 
 
+class _LengthWarningFilter(logging.Filter):
+    """Drops transformers' "sequence length is longer than the maximum" message."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "Token indices sequence length is longer" not in record.getMessage()
+
+
+def quiet_length_warning() -> None:
+    """Silence the over-``model_max_length`` warning for counting-only tokeniser use.
+
+    Womblex tokenises to count, never to feed a model, so a text past the
+    tokeniser's maximum is normal and the warning reads like an error. Idempotent.
+    """
+    lg = logging.getLogger("transformers.tokenization_utils_base")
+    if not any(isinstance(f, _LengthWarningFilter) for f in lg.filters):
+        lg.addFilter(_LengthWarningFilter())
+
+
 class TokenCounter:
     """Exact local token counting via the kanon-2 (or any HF) tokenizer.
 
@@ -49,6 +67,8 @@ class TokenCounter:
     def _tokenizer(self) -> object:
         if self._tok is None:
             from transformers import AutoTokenizer
+
+            quiet_length_warning()
 
             from womblex.utils.models import resolve_local_model_path
 

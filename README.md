@@ -62,6 +62,7 @@ fleet of workers.
 | Word documents | `.docx` | Paragraphs, headings and tables in document order |
 | Spreadsheets | `.csv`, `.xlsx` | One element per cell, with header detection and merged ranges |
 | Markdown | `.md`, `.markdown` | Headings, lists and tables |
+| HTML | `.html`, `.htm` | Headings, paragraphs, lists, preformatted blocks and tables in document order; script and style content is skipped |
 | Plain text | `.txt` | `womblex extract` only; `womblex run` does not pick up `.txt` files |
 | Reference registers: G-NAF addresses, the ABN bulk extract, shapefiles | `.psv`, `.xml`, `.shp` | Their own ingest commands, straight to Parquet or GeoParquet, outside the document pipeline |
 
@@ -184,7 +185,7 @@ womblex extract report.pdf -o output/
 womblex extract register.xlsx -o output/ --format parquet
 
 # A corpus described by a config: copy configs/example.yaml and set paths.input_root
-womblex run --config my-dataset.yaml            # add --resume to continue after a failure
+womblex run --config my-dataset.yaml            # add --resume to continue after a failure, or to add new files to this run
 ```
 
 `womblex run` does extraction only. Every other stage is its own command over

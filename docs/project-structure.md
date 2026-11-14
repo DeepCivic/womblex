@@ -67,6 +67,7 @@ womblex/
 │   │   ├── strategies_scanned.py # OCR primitives (_ocr_page, _layout_blocks_and_tables)
 │   │   ├── strategies_file.py   # Non-PDF extractors (DOCX, plain text, non-textual)
 │   │   ├── markdown.py          # Markdown extractor — headings/lists/tables via markdown-it-py
+│   │   ├── html_doc.py          # HTML extractor — headings/paragraphs/lists/tables via html.parser
 │   │   ├── interfaces/
 │   │   │   └── protocols.py     # Backend protocols (OCRReader, LayoutAnalyzer, Preprocessor)
 │   │   ├── paddle_ocr.py        # PaddleOCR wrapper via rapidocr-onnxruntime (det/rec/cls)

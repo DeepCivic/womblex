@@ -418,7 +418,7 @@ def _build_text_blocks(
 def get_extractor(profile: DocumentProfile) -> PathExtractionStrategy:
     """Select the legacy extractor for the path-based, non-orchestrator types.
 
-    Only SPREADSHEET, DOCX, TEXT and MARKDOWN reach here — exactly the set
+    Only SPREADSHEET, DOCX, TEXT, MARKDOWN and HTML reach here — exactly the set
     ``extract_text`` routes to this function. Everything else, **IMAGE
     included**, is opened through the PDF seam and dispatched through
     ``extract_pdf_with_plan`` (per-page profile + orchestrator): the PDF seam
@@ -427,6 +427,7 @@ def get_extractor(profile: DocumentProfile) -> PathExtractionStrategy:
     same layout pass, table reconstruction and form extraction a scanned
     PDF page gets.
     """
+    from womblex.ingest.html_doc import HtmlExtractor
     from womblex.ingest.markdown import MarkdownExtractor
     from womblex.ingest.spreadsheet import SpreadsheetExtractor
     from womblex.ingest.strategies_file import DocxExtractor, TextExtractor
@@ -440,9 +441,11 @@ def get_extractor(profile: DocumentProfile) -> PathExtractionStrategy:
             return TextExtractor()
         case DocumentType.MARKDOWN:
             return MarkdownExtractor()
+        case DocumentType.HTML:
+            return HtmlExtractor()
         case _:
             raise ValueError(
-                f"get_extractor() only handles SPREADSHEET/DOCX/TEXT/MARKDOWN; got "
+                f"get_extractor() only handles SPREADSHEET/DOCX/TEXT/MARKDOWN/HTML; got "
                 f"{profile.doc_type}. Everything else routes through "
                 "extract_pdf_with_plan."
             )
@@ -485,6 +488,7 @@ def extract_text(
     # standalone image opens as a one-page document.
     if profile.doc_type in (
         DocumentType.SPREADSHEET, DocumentType.DOCX, DocumentType.TEXT, DocumentType.MARKDOWN,
+        DocumentType.HTML,
     ):
         extractor: PathExtractionStrategy = get_extractor(profile)
         logger.info(
