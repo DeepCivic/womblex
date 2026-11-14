@@ -78,7 +78,11 @@ class _Headings:
                 self.section = [elem]
             self._in_run = True
         else:
-            self._in_run = self._title_open = False
+            self.end_run()
+
+    def end_run(self) -> None:
+        """Content follows: the next heading starts a new run."""
+        self._in_run = self._title_open = False
 
     @property
     def path(self) -> list[Element]:
@@ -170,6 +174,8 @@ def _document_rows(
     offsets = {order: end for order, _start, end in element_spans(elements)}
     headings = _Headings()
     for elem in elements:
+        if elem.kind in ("table", "form"):
+            headings.end_run()  # the heading above a table is not a parent of the next one
         if elem.kind == "table" and elem.cells and config.tables:
             for span, where, period_source in _table_spans(elem, index, config, vocab, headings):
                 rows.append(_row(source_hash, span, "table_cell", where, headings,

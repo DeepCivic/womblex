@@ -98,6 +98,17 @@ def test_rows_that_repeat_an_id_are_one_entity(tmp_path: Path):
     assert table.entity_by_id("E1").name == "Numbat Pty Ltd", "the first row names the entity"
 
 
+def test_every_row_of_a_repeated_id_keeps_its_address(tmp_path: Path):
+    path = tmp_path / "sites.csv"
+    path.write_text("id,name,addr\nE1,Numbat Care,1 First St Dubbo\nE1,Numbat Care,2 Second St Young\n")
+    table = load_reference(ReferenceConfig(
+        path=path, id_col="id", name_col="name", match_fuzzy_cols=["name"],
+        match_exact_cols=["addr"]))
+    for address in ("1 First St Dubbo", "2 Second St Young"):
+        (link,) = resolve([Candidate(address, "address", DOC)], table)
+        assert (link.method, link.entity.entity_id) == ("address_exact", "E1"), address
+
+
 def test_a_declared_column_the_file_lacks_is_refused(tmp_path: Path, register):
     with pytest.raises(ValueError, match=r"no column\(s\) \['trading_name'\]"):
         load_reference(register.model_copy(update={"match_fuzzy_cols": ["trading_name"]}))
@@ -160,6 +171,7 @@ def _found(book: PhraseBook, text: str, **kwargs) -> list[tuple[str, str, str | 
 @pytest.mark.parametrize(("text", "detail"), [
     ("Services in Young were reviewed.", "cue:in"),
     ("Young NSW 2594 was surveyed.", "cue:state"),
+    ("Young, 2594 was surveyed.", "cue:state"),
     ("The Young district grew.", "cue:district"),
     ("The City of Young met.", "cue:of"),
 ])
@@ -173,6 +185,8 @@ def test_a_one_word_place_links_beside_a_cue(gazetteer, text, detail):
     ("A report by Grant Thornton was tabled in Grant Thornton offices.", "person:name"),
     ("Young people were surveyed.", "uncued"),
     ("The use of Grant funds was audited.", "uncued"),
+    ("Young (2019) found otherwise.", "uncued"),                 # an author-year citation
+    ("As argued by Young, 2019, outcomes vary.", "uncued"),
 ])
 def test_a_one_word_place_that_reads_as_a_person_or_a_word_is_not_linked(gazetteer, text, detail):
     found = _found(_book(gazetteer), text)

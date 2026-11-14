@@ -76,7 +76,7 @@ writes no figure.
 | `year_range` | `2019–21`, `2019–2020` | `2019-21`, `2019-2020` |
 
 A financial year is the Australian one, 1 July to 30 June, and `FY20` names the
-year it ends in. A quarter is a calendar quarter named by its last month, as the
+year it ends in; two digits from 69 up are read as 19xx (`FY99` is 1998-99). A quarter is a calendar quarter named by its last month, as the
 ABS names them; `April quarter` is not a period. `period_start` and `period_end`
 are null where the text does not fix them: a quarter written without its year,
 and a `year_range`, which may be calendar or financial years (`2019–2020` is
@@ -116,6 +116,9 @@ Each figure row carries:
 Money amounts are read by the money recogniser, so every spelling it reads
 (`$33.1 million`, `A$5`, `two million dollars`) is a figure here too.
 
+A hyphen, minus sign or en dash that opens a number makes it negative (`–0.3%`);
+between two numbers it is a range and no sign is read.
+
 Numbers that are deliberately not figures: a bare `2021` in running text (a year
 or a count; the text does not say); a number that opens a line before a
 capitalised word (a paragraph number); a number run on to a full stop, colon,
@@ -145,7 +148,8 @@ Elements record no heading level, so the path is built from order alone:
 
 - the **title run**: the headings that open the document, before any other text;
 - the **current run**: the most recent heading, with any headings directly
-  after it.
+  after it. A table or form ends a run, so the heading over one table is not
+  carried onto the next.
 
 `heading_path` is the title run followed by the current run, outermost first,
 and `heading_elem_orders` their elements. A figure with no period in its

@@ -194,3 +194,13 @@ def test_a_unitless_number_beside_its_measure_is_a_figure(vocab, text, value):
 def test_a_footnote_marker_does_not_unmake_a_dated_period(vocab):
     spans = find_stats("Costs were waived until 31 March 2020.56 Before then", vocab)
     assert [s.period.label for s in _kind(spans, "period")] == ["2020-03-31"]
+
+
+@pytest.mark.parametrize(("text", "values"), [
+    ("The unemployment rate moved –0.3% over the year.", ["-0.3"]),   # en dash: a minus
+    ("The unemployment rate was 4–5% over the year.", ["5"]),         # between numbers: a range
+    ("Median income changed by –12.5 in real terms.", ["-12.5"]),
+])
+def test_an_en_dash_that_opens_a_number_is_a_minus_sign(vocab, text, values):
+    assert [f.value for f in _kind(find_stats(text, vocab), "figure")] == [Decimal(v) for v in values]
+    assert read_cell_figure("–3.2").value == Decimal("-3.2")

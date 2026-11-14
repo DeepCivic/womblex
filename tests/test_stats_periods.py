@@ -108,3 +108,8 @@ def test_periods_come_back_in_order_with_their_offsets():
 
 def test_a_period_never_spans_two_lines():
     assert [p.label for p in find_periods("March\nquarter 2025")] == []
+
+
+@pytest.mark.parametrize(("text", "label"), [("FY99", "1998-99"), ("FY 69", "1968-69"), ("FY68", "2067-68")])
+def test_a_two_digit_financial_year_takes_its_century_from_the_year(text: str, label: str):
+    assert _one(text).label == label

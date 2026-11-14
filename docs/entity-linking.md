@@ -50,7 +50,8 @@ An entity has a legal name, trading names and aliases. Names accumulate from
 three places, and every one is scored as a name of the one entity:
 
 1. each `match_fuzzy_cols` column of its row;
-2. each further row that repeats its id (a long-format register);
+2. each further row that repeats its id (a long-format register); such a row's
+   `match_exact_cols` are kept too, so an entity matches at every address it lists;
 3. each row of the `names` table that carries its id.
 
 A `names` row whose id the register does not hold is ignored and counted in a
@@ -123,6 +124,9 @@ Under `cued`, `match_detail` records what decided it:
 | `person:honorific` | `Mr Young` | no |
 | `person:name` | `Peter Young`, `Grant Thornton` | no |
 | `uncued` | `Young people were surveyed` | no |
+
+A four-digit number in brackets, or a year after a comma, is read as an
+author-year citation (`Young (2019)`, `Young, 2019`) and is not a `cue:state`.
 
 The built-in cue words before a name are `in`, `at`, `near`, `from`, `to`,
 `around`, `across`, `between`, `within`, `outside`, `throughout`, and `of` after

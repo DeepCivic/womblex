@@ -40,6 +40,8 @@ class ReferenceEntity:
     parent_id: str
     exact_key: str          # normalised concat of match_exact_cols (e.g. address)
     fuzzy_keys: list[str]    # normalised names: legal, trading, aliases — every one it goes by
+    # exact_key of every further row that repeats this id (a second address)
+    more_exact_keys: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -74,17 +76,20 @@ def load_reference(config: ReferenceConfig) -> ReferenceTable:
             continue
         names = [normalise_name(r.get(c)) for c in config.match_fuzzy_cols]
         entity = by_id.get(entity_id)
+        exact_parts = [r.get(c, "") or "" for c in config.match_exact_cols]
+        exact_key = normalise_address(" ".join(p for p in exact_parts if p))
         if entity is None:
-            exact_parts = [r.get(c, "") or "" for c in config.match_exact_cols]
             entity = by_id[entity_id] = ReferenceEntity(
                 entity_id=entity_id,
                 name=(r.get(config.name_col) or "").strip(),
                 entity_type=config.entity_type,
                 parent_id=(
                     (r.get(config.parent_id_col) or "").strip() if config.parent_id_col else ""),
-                exact_key=normalise_address(" ".join(p for p in exact_parts if p)),
+                exact_key=exact_key,
                 fuzzy_keys=[],
             )
+        elif exact_key and exact_key != entity.exact_key and exact_key not in entity.more_exact_keys:
+            entity.more_exact_keys.append(exact_key)
         _add_names(entity, names)
 
     if config.names is not None:

@@ -112,7 +112,8 @@ def _read_fy(m: re.Match[str]) -> _Resolved | None:
 
 def _read_fy_short(m: re.Match[str]) -> _Resolved | None:
     raw = m["y"]
-    end = int(raw) if len(raw) == 4 else 2000 + int(raw)
+    # Two digits pivot as POSIX `%y` does: FY99 ends in 1999, FY20 in 2020.
+    end = int(raw) if len(raw) == 4 else (1900 if int(raw) >= 69 else 2000) + int(raw)
     return ("financial_year", *_financial_year(end - 1))
 
 

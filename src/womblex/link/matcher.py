@@ -100,8 +100,9 @@ class Matcher:
         self.narrow_to = narrow_to
         self._exact: dict[str, ReferenceEntity] = {}
         for e in reference.entities:
-            if e.exact_key:
-                self._exact.setdefault(e.exact_key, e)
+            for key in (e.exact_key, *e.more_exact_keys):
+                if key:
+                    self._exact.setdefault(key, e)
         self._index = NameIndex(reference.entities) if reference.name_count > narrow_above else None
         # One mention text recurs across a corpus; its best name does not change.
         self._scored: dict[str, tuple[ReferenceEntity | None, float]] = {}

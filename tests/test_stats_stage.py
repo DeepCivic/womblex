@@ -271,3 +271,27 @@ def test_cli_runs_with_a_vocabulary_file_and_refuses_a_missing_one(tmp_path: Pat
     assert _cli("--shards", str(shards), "--vocabulary", str(vocab)) == 0
     assert [r["measure_id"] for r in _rows(base, "figure")] == ["population"]
     assert _cli("--shards", str(shards), "--text-source", "normalised", "--no-resume") == 1
+
+
+def test_a_table_ends_a_run_of_headings(tmp_path: Path):
+    """The heading over one table is not a parent of the heading over the next."""
+    base = _build_shard(tmp_path, [
+        _element(0, "heading", text="Regional profile"),
+        _element(1, "paragraph", text="Introduction to the region."),
+        _element(2, "heading", text="Table 1: 2016 Census"),
+        _element(3, "table", header_rows=[0]),
+        _element(4, "heading", text="Table 2: Outlook"),
+        _element(5, "table", header_rows=[0]),
+    ], [
+        _cell(3, 0, 0, "Item"), _cell(3, 0, 1, "Value"),
+        _cell(3, 1, 0, "Population"), _cell(3, 1, 1, "1,000"),
+        _cell(5, 0, 0, "Item"), _cell(5, 0, 1, "Value"),
+        _cell(5, 1, 0, "Population"), _cell(5, 1, 1, "2,000"),
+    ])
+    stats_shards(tmp_path, CONFIG)
+
+    first, second = _rows(base, "figure")
+    assert (first["heading_path"], first["period"]) == (
+        ["Regional profile", "Table 1: 2016 Census"], "2016")
+    assert (second["heading_path"], second["period"]) == (
+        ["Regional profile", "Table 2: Outlook"], None)

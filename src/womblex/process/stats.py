@@ -40,7 +40,9 @@ from womblex.process.stats_periods import Period, find_periods
 from womblex.process.stats_vocab import Found, Measure, Vocabulary
 
 _OWS = r"[^\S\n]*"
-_NEG = "[-−]"
+# An en dash is the minus sign of a statistical table (`–0.3`). Between two numbers
+# it is a range, and the lookbehinds below never read a sign there.
+_NEG = "[-−–]"
 _SCALE = r"(?P<scale>thousand|million|billion|trillion|mn|bn)"
 _PERCENT_RE = re.compile(
     rf"(?<![\w.,$/])(?P<neg>{_NEG})?(?P<num>{NUM_AU}){_OWS}"

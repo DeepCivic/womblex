@@ -56,8 +56,11 @@ _PLACE_TYPES = frozenset({
     "shire", "council", "city", "town", "township", "region", "district", "area",
     "municipality", "electorate", "lga", "suburb", "valley",
 })
+# A postcode in brackets, or a year after a comma, is an author-year citation
+# (`Young (2019)`, `Young, 2019`), not a place.
 _STATE_RE = re.compile(
-    r"[^\S\n]*,?[^\S\n]*\(?(?:NSW|VIC|Vic|QLD|Qld|SA|WA|TAS|Tas|NT|ACT|\d{4})\b")
+    r"[^\S\n]*,?[^\S\n]*\(?(?:NSW|VIC|Vic|QLD|Qld|SA|WA|TAS|Tas|NT|ACT)\b"
+    r"|[^\S\n]*\d{4}\b|[^\S\n]*,[^\S\n]*(?!(?:19|20)\d{2})\d{4}\b")
 _SENTENCE_END = frozenset(".!?:;")
 
 
