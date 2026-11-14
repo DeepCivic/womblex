@@ -1,9 +1,18 @@
 """Per-stage entity linking over an existing shard directory.
 
-Consumes ``*.enrichment_entities.parquet`` (written by the enrich stage),
-selects candidate mentions by configured kind, resolves them against a
-reference register, and writes ``*.entity_links.parquet`` siblings at
-mention/span grain. Mirrors :mod:`womblex.process.chunk_stage`.
+Resolves mentions against one or more reference registers and writes
+``*.entity_links.parquet`` siblings at mention/span grain. Where the mentions
+come from is ``linking.candidate_source``:
+
+- ``enrichment`` — the mentions the enrich stage wrote
+  (``*.enrichment_entities.parquet``), selected by kind and matched exactly or
+  fuzzily (:mod:`womblex.link.matcher`);
+- ``text`` — the registers' own names found in the narrative
+  (:mod:`womblex.link.text_candidates`). It reads the elements only, so it runs
+  on a corpus that was never enriched.
+
+Either way a mention links to the first register, in the order declared, that
+matches it. Mirrors :mod:`womblex.process.chunk_stage`.
 """
 
 from __future__ import annotations
@@ -13,9 +22,10 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
-from womblex.config import LinkingConfig
-from womblex.link.matcher import Candidate, Link, resolve
-from womblex.link.reference import load_reference
+from womblex.config import LinkingConfig, ReferenceConfig
+from womblex.link.matcher import Candidate, Link, Matcher
+from womblex.link.reference import ReferenceTable, load_reference
+from womblex.link.text_candidates import PhraseBook
 from womblex.process.chunk_stage import _batch_bases
 from womblex.process.evidence import EvidenceIndexes, stamp_evidence
 from womblex.process.text_overlay import require_overlays
@@ -52,7 +62,8 @@ def link_shards(
     """
     if not shard_dir.is_dir():
         raise FileNotFoundError(f"shard directory not found: {shard_dir}")
-    if linking_config.reference is None:
+    registers = linking_config.registers()
+    if not registers:
         raise ValueError("linking.reference must be configured to run the link stage")
 
     bases = _batch_bases(shard_dir)
@@ -61,9 +72,12 @@ def link_shards(
         return LinkStageResult(0, 0, 0, 0)
 
     require_overlays(bases, text_source)
-    reference = load_reference(linking_config.reference)
-    logger.info("link_shards: reference loaded — %d entities, %d aliases",
-                len(reference.entities), len(reference.aliases))
+    loaded = [(r, load_reference(r)) for r in registers]
+    for register, table in loaded:
+        logger.info("link_shards: reference %s loaded — %d entities, %d names, %d aliases",
+                    register.path, len(table.entities), table.name_count, len(table.aliases))
+    from_text = linking_config.candidate_source == "text"
+    linker = _TextLinker(loaded) if from_text else _MentionLinker(loaded, linking_config)
 
     batches_written = 0
     docs_linked = 0
@@ -75,18 +89,10 @@ def link_shards(
             logger.info("link_shards: skipping %s (all docs checkpointed)", base.stem)
             continue
 
-        candidates_by_hash = _candidates_for_batch(base, linking_config.candidate_kinds)
         indexes = EvidenceIndexes(base, text_source)
         rows: list[dict] = []
         linked_now = 0
-        for source_hash, cands in candidates_by_hash.items():
-            links = resolve(
-                cands, reference,
-                name_threshold=linking_config.name_threshold,
-                address_kinds=tuple(
-                    k for k in linking_config.candidate_kinds if k == "address"
-                ) or ("address",),
-            )
+        for source_hash, links in linker.links(base, indexes).items():
             rows.extend(_link_to_row(source_hash, lk, indexes) for lk in links)
             if any(lk.matched for lk in links):
                 linked_now += 1
@@ -119,6 +125,64 @@ def link_shards(
         total_links=total_links,
         matched_links=matched_links,
     )
+
+
+class _MentionLinker:
+    """Enrichment mentions, each tried against the registers that take its kind."""
+
+    def __init__(
+        self, loaded: list[tuple[ReferenceConfig, ReferenceTable]], config: LinkingConfig,
+    ) -> None:
+        self._matchers: list[tuple[frozenset[str], Matcher]] = []
+        for register, table in loaded:
+            kinds = frozenset(register.candidate_kinds or config.candidate_kinds)
+            self._matchers.append((kinds, Matcher(
+                table, name_threshold=config.name_threshold,
+                address_kinds=tuple(k for k in kinds if k == "address") or ("address",),
+                narrow_above=config.narrow_above, narrow_to=config.narrow_to,
+            )))
+        self._kinds = sorted(set().union(*(k for k, _ in self._matchers)))
+
+    def links(self, base: Path, _indexes: EvidenceIndexes) -> dict[str, list[Link]]:
+        out: dict[str, list[Link]] = {}
+        for source_hash, candidates in _candidates_for_batch(base, self._kinds).items():
+            try:
+                out[source_hash] = [self._match(c) for c in candidates]
+            except Exception as e:  # one document must not stop the batch
+                logger.warning("link_shards: %s failed (%s)", source_hash, e)
+        return out
+
+    def _match(self, candidate: Candidate) -> Link:
+        link = Link(candidate, None, 0.0, "unmatched")
+        for kinds, matcher in self._matchers:
+            if candidate.kind in kinds:
+                link = matcher.match(candidate)
+                if link.matched:
+                    break
+        return link
+
+
+class _TextLinker:
+    """The registers' names, found in each document's narrative."""
+
+    def __init__(self, loaded: list[tuple[ReferenceConfig, ReferenceTable]]) -> None:
+        self._book = PhraseBook(loaded)
+        logger.info("link_shards: matching %d distinct names in the text", len(self._book))
+
+    def links(self, _base: Path, indexes: EvidenceIndexes) -> dict[str, list[Link]]:
+        out: dict[str, list[Link]] = {}
+        for source_hash in indexes.source_hashes:
+            index = indexes.get(source_hash)
+            if index is None or not index.narrative:
+                continue
+            try:
+                out[source_hash] = self._book.find(
+                    index.narrative, source_hash, text_layer=index.text_layer,
+                    heading_spans=index.kind_spans("heading"),
+                )
+            except Exception as e:  # one document must not stop the batch
+                logger.warning("link_shards: %s failed (%s)", source_hash, e)
+        return out
 
 
 # ---------------------------------------------------------------------------
@@ -197,6 +261,7 @@ def _link_to_row(source_hash: str, link: Link, indexes: EvidenceIndexes) -> dict
         "confidence": float(link.confidence),
         "match_method": link.method,
         "matched": link.matched,
+        "match_detail": link.detail,
     }
 
 

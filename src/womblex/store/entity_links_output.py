@@ -42,8 +42,9 @@ ENTITY_LINKS_SCHEMA = pa.schema([
     ("canonical_name", pa.string()),    # reference display name; "" if unmatched
     ("parent_entity_id", pa.string()),  # hierarchy FK (e.g. service -> provider); "" if none
     ("confidence", pa.float32()),
-    ("match_method", pa.string()),      # address_exact | name_fuzzy | alias | unmatched
+    ("match_method", pa.string()),      # address_exact | name_fuzzy | name_exact | alias | ambiguous | unmatched
     ("matched", pa.bool_()),
+    ("match_detail", pa.string()),      # text candidates: the cue that linked a one-word name, or why not
 ])
 
 
@@ -131,8 +132,9 @@ def _read_entity_links_shard(path: Path) -> pa.Table:
     # text; the evidence columns replace them. A file with no elements beside it
     # reads as document-located; see `_reanchor_legacy`.
     raw = _reanchor_legacy(backfill_evidence(pq.read_table(str(path)), level=DOCUMENT), path)
-    if "mention_text" not in raw.schema.names:
-        raw = raw.append_column("mention_text", pa.nulls(raw.num_rows, pa.string()))
+    for added in ("mention_text", "match_detail"):  # contract 2.0, 3.4: null in an older file
+        if added not in raw.schema.names:
+            raw = raw.append_column(added, pa.nulls(raw.num_rows, pa.string()))
     missing = [f.name for f in ENTITY_LINKS_SCHEMA if f.name not in raw.schema.names]
     if missing:
         raise ValueError(

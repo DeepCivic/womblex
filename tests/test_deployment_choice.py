@@ -16,8 +16,10 @@ from womblex.utils import model_check
 from womblex.utils.deployment_choice import choice_problems, deployment_of, pick_deployment
 from womblex.utils.model_check import SCOPE_CHUNK, SCOPE_EMBED, SCOPE_ENRICH, check_models, check_registered
 
-#: The digest of a config that sets no `deployment`, from before the setting existed.
-DEFAULT_DIGEST = "sha256:3d70b14e6d190cd4d86012243f3b86740798b4dcf0b1542d20e22faec407deb3"
+#: The digest of a config that sets no `deployment`. A setting that changes what a run
+#: writes moves it (the `stats` section and the `linking` register fields last did); an
+#: unset `deployment` must not.
+DEFAULT_DIGEST = "sha256:d2063d967c890adc4d973eddd550500dd827920036ce4909b3355e28559dfb01"
 
 
 def _default() -> WomblexConfig:

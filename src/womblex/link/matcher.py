@@ -10,7 +10,8 @@ were declared exact vs fuzzy at load time) plus a similarity threshold:
 2. **address_exact** — for address-kind candidates, normalised equality
    against the entity's ``exact_key`` → 1.0 (OCR-robust primary key).
 3. **name_fuzzy** — for name-kind candidates, best ``difflib`` ratio over
-   the entity's ``fuzzy_keys`` ≥ threshold → ratio.
+   the entity's ``fuzzy_keys`` (every name it goes by) ≥ threshold → ratio.
+   A large register is narrowed first (:mod:`womblex.link.blocking`).
 4. otherwise **unmatched** (still emitted, ``matched=False``).
 
 Fuzzy matching uses the stdlib :class:`difflib.SequenceMatcher` — no new
@@ -22,6 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 
+from womblex.link.blocking import NameIndex
 from womblex.link.normalise import normalise_address, normalise_name
 from womblex.link.reference import ReferenceEntity, ReferenceTable
 
@@ -51,7 +53,8 @@ class Link:
     candidate: Candidate
     entity: ReferenceEntity | None
     confidence: float
-    method: str          # alias | address_exact | name_fuzzy | unmatched
+    method: str          # alias | address_exact | name_fuzzy | name_exact | ambiguous | unmatched
+    detail: str | None = None   # why a text mention was, or was not, linked
 
     @property
     def matched(self) -> bool:
@@ -64,52 +67,86 @@ def resolve(
     *,
     name_threshold: float = 0.85,
     address_kinds: tuple[str, ...] = ("address",),
+    narrow_above: int = 2000,
+    narrow_to: int = 64,
 ) -> list[Link]:
     """Resolve every candidate to at most one reference entity."""
-    exact_index: dict[str, ReferenceEntity] = {}
-    for e in reference.entities:
-        if e.exact_key:
-            exact_index.setdefault(e.exact_key, e)
-    return [
-        _match_one(c, reference, exact_index, name_threshold, address_kinds)
-        for c in candidates
-    ]
+    return Matcher(
+        reference, name_threshold=name_threshold, address_kinds=address_kinds,
+        narrow_above=narrow_above, narrow_to=narrow_to,
+    ).resolve(candidates)
 
 
-def _match_one(
-    c: Candidate,
-    reference: ReferenceTable,
-    exact_index: dict[str, ReferenceEntity],
-    threshold: float,
-    address_kinds: tuple[str, ...],
-) -> Link:
-    # 1. alias override (on the normalised name form)
-    alias_id = reference.aliases.get(normalise_name(c.text))
-    if alias_id:
-        ent = reference.entity_by_id(alias_id)
-        if ent is not None:
-            return Link(c, ent, 1.0, "alias")
+class Matcher:
+    """One register, indexed once and reused across every batch of a stage run.
 
-    # 2. address-kind candidate → exact normalised-address equality
-    if c.kind in address_kinds:
-        ent = exact_index.get(normalise_address(c.text))
-        if ent is not None:
-            return Link(c, ent, 1.0, "address_exact")
+    A register with more than ``narrow_above`` names is scored through a
+    :class:`NameIndex` (the ``narrow_to`` closest names per mention); a smaller
+    one is scored in full.
+    """
+
+    def __init__(
+        self,
+        reference: ReferenceTable,
+        *,
+        name_threshold: float = 0.85,
+        address_kinds: tuple[str, ...] = ("address",),
+        narrow_above: int = 2000,
+        narrow_to: int = 64,
+    ) -> None:
+        self.reference = reference
+        self.threshold = name_threshold
+        self.address_kinds = address_kinds
+        self.narrow_to = narrow_to
+        self._exact: dict[str, ReferenceEntity] = {}
+        for e in reference.entities:
+            if e.exact_key:
+                self._exact.setdefault(e.exact_key, e)
+        self._index = NameIndex(reference.entities) if reference.name_count > narrow_above else None
+        # One mention text recurs across a corpus; its best name does not change.
+        self._scored: dict[str, tuple[ReferenceEntity | None, float]] = {}
+
+    def resolve(self, candidates: list[Candidate]) -> list[Link]:
+        return [self.match(c) for c in candidates]
+
+    def match(self, c: Candidate) -> Link:
+        # 1. alias override (on the normalised name form)
+        alias_id = self.reference.aliases.get(normalise_name(c.text))
+        if alias_id:
+            ent = self.reference.entity_by_id(alias_id)
+            if ent is not None:
+                return Link(c, ent, 1.0, "alias")
+
+        # 2. address-kind candidate → exact normalised-address equality
+        if c.kind in self.address_kinds:
+            ent = self._exact.get(normalise_address(c.text))
+            if ent is not None:
+                return Link(c, ent, 1.0, "address_exact")
+            return Link(c, None, 0.0, "unmatched")
+
+        # 3. name-kind candidate → fuzzy over the entity's names
+        query = normalise_name(c.text)
+        if query not in self._scored:
+            self._scored[query] = self._best_name(query)
+        best_ent, best_score = self._scored[query]
+        if best_ent is not None and best_score >= self.threshold:
+            return Link(c, best_ent, best_score, "name_fuzzy")
         return Link(c, None, 0.0, "unmatched")
 
-    # 3. name-kind candidate → fuzzy over fuzzy_keys
-    query = normalise_name(c.text)
-    best_ent: ReferenceEntity | None = None
-    best_score = 0.0
-    if query:
-        for e in reference.entities:
-            for fk in e.fuzzy_keys:
-                score = _name_similarity(query, fk)
-                if score > best_score:
-                    best_score, best_ent = score, e
-    if best_ent is not None and best_score >= threshold:
-        return Link(c, best_ent, best_score, "name_fuzzy")
-    return Link(c, None, 0.0, "unmatched")
+    def _best_name(self, query: str) -> tuple[ReferenceEntity | None, float]:
+        best_ent: ReferenceEntity | None = None
+        best_score = 0.0
+        if not query:
+            return best_ent, best_score
+        names = (
+            self._index.nearest(query, self.narrow_to) if self._index is not None
+            else ((fk, e) for e in self.reference.entities for fk in e.fuzzy_keys)
+        )
+        for fk, e in names:
+            score = _name_similarity(query, fk)
+            if score > best_score:
+                best_score, best_ent = score, e
+        return best_ent, best_score
 
 
 # Per-token character-similarity floor for treating an (OCR-noisy) query token

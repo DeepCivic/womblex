@@ -117,6 +117,10 @@ class EvidenceIndex:
         return self._located(
             ELEMENT, elem, sheet=sheet, cell=cell, bbox=self._cell_box(elem, cell))
 
+    def kind_spans(self, kind: str) -> list[tuple[int, int]]:
+        """``[start, end)`` in the narrative of every element of *kind*."""
+        return [(s, e) for order, s, e in self._spans if self._by_order[order].kind == kind]
+
     def document_ref(self) -> dict[str, Any]:
         """Document evidence: the span lies somewhere in this document."""
         return evidence(DOCUMENT, text_layer=self.text_layer)
@@ -223,6 +227,10 @@ class EvidenceIndexes:
             self._elements = {}
         self._overlays: dict[str, dict[tuple[str, int], str] | None] = {}
         self._cache: dict[tuple[str, str], EvidenceIndex] = {}
+
+    @property
+    def source_hashes(self) -> list[str]:
+        return list(self._elements)
 
     def get(self, source_hash: str, layer: str | None = None) -> EvidenceIndex | None:
         layer = layer or self.text_source

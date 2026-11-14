@@ -188,12 +188,17 @@ enrichment:
   #                             # AI-chunking reuse. Auto-enabled when chunking.chunking_model
   #                             # is set; off otherwise (the blob is large).
 
-# Entity linking (`womblex enrich --shards` then `womblex link --shards`).
-# Resolves document mentions to canonical reference-register entities. The
-# library is corpus-agnostic: the corpus declares which register columns play
-# which role. Below is the ACT childcare register mapping as a worked example.
+# Entity linking (`womblex link --shards`). Resolves document mentions to
+# canonical reference-register entities. The library is corpus-agnostic: the
+# corpus declares which register columns play which role. Below is the ACT
+# childcare register mapping as a worked example. See docs/entity-linking.md.
 linking:
   enabled: false
+  # candidate_source: enrichment   # 'enrichment': the mentions `womblex enrich` wrote.
+  #                                # 'text': the registers' own names found in the narrative —
+  #                                # no enrichment, nothing sent anywhere.
+  # narrow_above: 2000             # Names in a register above which fuzzy matching scores only
+  # narrow_to: 64                  # the `narrow_to` names closest by shared trigrams.
   # candidate_kinds: enrichment entity_type values treated as link candidates
   # (pass-through to the Kanon-2 taxonomy — corporate persons + address locations).
   candidate_kinds:
@@ -202,7 +207,7 @@ linking:
   name_threshold: 0.85        # min difflib similarity for a name match
   reference:
     path: Registers/Education-services-act-export.csv
-    format: csv               # only csv implemented (bundle/geospatial seam reserved)
+    # format: csv             # csv | parquet; read from the file's suffix when omitted
     id_col: ServiceApprovalNumber          # canonical id -> entity_id (SE-*)
     name_col: ServiceName                  # canonical display name
     entity_type: service                   # constant tag for matches
@@ -215,6 +220,14 @@ linking:
       - ServiceName
       - ProviderLegalName
     # alias_table: aliases.csv             # optional: alias,entity_id overrides (prior trustees)
+    # names:                               # optional long-format names table: every row adds a
+    #   path: Registers/names.parquet      # name (legal, trading, alias) to the entity its id names
+    #   id_col: abn
+    #   name_col: name_text
+    # candidate_kinds: [corporate]         # enrichment kinds this register answers (null: the above)
+    # single_word: accept                  # text candidates: accept | cued | skip a one-word name
+    # cue_words: []                        # extra words that locate a one-word name before it
+  # references: []                         # further registers, tried in order after `reference`
 
 # Embedding (`womblex embed --shards`) — vectorise chunks for retrieval/analysis.
 # Thin pass-through to the Kanon-2 embedder; consumes *.chunks.parquet.

@@ -392,6 +392,21 @@ class ProcessingConfig(StrictModel):
         return v
 
 
+class ReferenceNamesConfig(StrictModel):
+    """A long-format names table: one row per name an entity goes by.
+
+    The shape a register takes when an entity has a legal name, trading names
+    and aliases: many rows per id, each adding one name the matcher scores.
+    """
+
+    path: Path = Field(description="Names table file (CSV or Parquet).")
+    format: Literal["csv", "parquet"] | None = Field(
+        default=None, description="File format. Null reads it from the file's suffix.",
+    )
+    id_col: str = Field(description="Column holding the entity id the name belongs to.")
+    name_col: str = Field(description="Column holding the name.")
+
+
 class ReferenceConfig(StrictModel):
     """Declares how a corpus reference register maps onto the generic matcher.
 
@@ -404,10 +419,15 @@ class ReferenceConfig(StrictModel):
       columns; concatenated + normalised, it survives OCR noise on names.
     - ``match_fuzzy_cols`` — difflib similarity; best ``>= name_threshold``
       matches. Typically the legal/trading/service name columns.
+
+    Rows that share an ``id_col`` value are one entity, and their names
+    accumulate; ``names`` adds more from a separate long-format table.
     """
 
-    path: Path = Field(description="Reference table file (CSV for v1).")
-    format: str = Field(default="csv", description="Reference format. Only 'csv' implemented.")
+    path: Path = Field(description="Reference table file (CSV or Parquet).")
+    format: Literal["csv", "parquet"] | None = Field(
+        default=None, description="File format. Null reads it from the file's suffix.",
+    )
     id_col: str = Field(description="Column holding the canonical entity id (e.g. SE-/PR-).")
     name_col: str = Field(description="Column holding the canonical display name.")
     entity_type: str = Field(
@@ -424,6 +444,11 @@ class ReferenceConfig(StrictModel):
     match_fuzzy_cols: list[str] = Field(
         default_factory=list, description="Columns scored by normalised fuzzy similarity.",
     )
+    names: ReferenceNamesConfig | None = Field(
+        default=None,
+        description="Optional long-format names table: every row adds a name to the "
+                    "entity its id names (legal, trading and alias names of one entity).",
+    )
     alias_table: Path | None = Field(
         default=None,
         description=(
@@ -432,6 +457,33 @@ class ReferenceConfig(StrictModel):
             "Columns: alias, entity_id."
         ),
     )
+    candidate_kinds: list[str] | None = Field(
+        default=None,
+        description="Enrichment entity_type values this register answers. Null takes "
+                    "`linking.candidate_kinds`. Lets a place gazetteer and an entity "
+                    "register each see only the mentions that could be theirs.",
+    )
+    single_word: Literal["accept", "cued", "skip"] = Field(
+        default="accept",
+        description="`candidate_source: text` only — how a one-word name found in the "
+                    "text is treated. 'accept' links it; 'cued' links it only beside a "
+                    "locating cue (`in Young`, `Young NSW`, `Young Shire`, a heading) and "
+                    "never where it reads as a person's name (`Mr Young`, `Peter Young`); "
+                    "'skip' never links one. A gazetteer wants 'cued': `Grant` and `Young` "
+                    "are towns and surnames.",
+    )
+    cue_words: list[str] = Field(
+        default_factory=list,
+        description="Extra words that locate a one-word name when they come directly "
+                    "before it, added to the built-in set (in, at, near, …).",
+    )
+
+    def file_format(self) -> str:
+        return self.format or _format_of(self.path)
+
+
+def _format_of(path: Path) -> str:
+    return "parquet" if Path(path).suffix.lower() in (".parquet", ".pq") else "csv"
 
 
 class LinkingConfig(StrictModel):
@@ -440,6 +492,19 @@ class LinkingConfig(StrictModel):
     enabled: bool = Field(default=False, description="Run the entity-link stage")
     reference: ReferenceConfig | None = Field(
         default=None, description="Reference register mapping (required when enabled).",
+    )
+    references: list[ReferenceConfig] = Field(
+        default_factory=list,
+        description="Further registers, tried after `reference` in the order given (e.g. "
+                    "an entity register, then a place gazetteer). A mention links to the "
+                    "first register that matches it.",
+    )
+    candidate_source: Literal["enrichment", "text"] = Field(
+        default="enrichment",
+        description="Where link candidates come from. 'enrichment': the mentions the "
+                    "enrich stage wrote (`*.enrichment_entities.parquet`), matched exactly "
+                    "or fuzzily. 'text': the registers' own names found in the narrative "
+                    "by exact phrase match, with no enrichment and nothing sent anywhere.",
     )
     candidate_kinds: list[str] = Field(
         default_factory=lambda: ["corporate", "address"],
@@ -453,6 +518,20 @@ class LinkingConfig(StrictModel):
         default=0.85, ge=0.0, le=1.0,
         description="Minimum normalised fuzzy similarity for a name match.",
     )
+    narrow_above: int = Field(
+        default=2000, ge=0,
+        description="Register size (names) above which fuzzy matching scores only the "
+                    "names that share character trigrams with the mention, not every "
+                    "name. A small register is scored in full, as before.",
+    )
+    narrow_to: int = Field(
+        default=64, ge=1,
+        description="How many of the closest names by shared trigrams are scored.",
+    )
+
+    def registers(self) -> list[ReferenceConfig]:
+        """Every declared register, `reference` first."""
+        return ([self.reference] if self.reference is not None else []) + list(self.references)
 
 
 #: Set once the AI-chunking reuse warning has been logged in this process.
@@ -546,6 +625,7 @@ __all__ = [
     "QualityConfig",
     "RedactionConfig",
     "ReferenceConfig",
+    "ReferenceNamesConfig",
     "RetentionConfig",
     "SegmentationConfig",
     "SpellfixConfig",

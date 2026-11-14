@@ -177,7 +177,7 @@ embedding:
 # Entity links: match the corporate/address entities enrich found to a corpus
 # reference register (a canonical id/name table), so mentions resolve to stable
 # entity ids across documents. Generic — the corpus supplies the register: set
-# linking.reference to your own CSV (path + id_col/name_col + match columns) or
+# linking.reference to your own CSV or Parquet (path + id_col/name_col + match columns) or
 # the stage warns and no-ops. Runs AFTER enrich (it reads the enrichment
 # entities). See ReferenceConfig in config.py for the mapping fields.
 linking:

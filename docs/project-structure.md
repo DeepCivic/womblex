@@ -118,8 +118,10 @@ womblex/
 │   │   ├── stats_stage.py   # stats_shards() — drives `womblex stats --shards`; heading path per row; writes *.stat_spans.parquet
 │   │   └── text_overlay.py  # Shared overlay read/merge helper for the offline text layers
 │   ├── link/
-│   │   ├── matcher.py       # Generic record-linkage: alias / address-exact / token-set name-fuzzy (stdlib difflib)
-│   │   ├── reference.py     # Reference-register → normalised ReferenceTable via corpus-declared column roles
+│   │   ├── matcher.py       # Generic record-linkage: alias / address-exact / token-set name-fuzzy (stdlib difflib); Matcher holds one register's index for a stage run
+│   │   ├── blocking.py      # NameIndex — trigram narrowing of fuzzy candidates for a large register
+│   │   ├── reference.py     # Reference register (CSV / Parquet) → ReferenceTable via corpus-declared column roles; many names per entity
+│   │   ├── text_candidates.py # PhraseBook — register names found in the narrative (no enrichment); one-word name cues
 │   │   ├── normalise.py     # Minimal name/address normalisation for matching
 │   │   └── stage.py         # link_shards() over a shard dir — drives `womblex link --shards`; writes *.entity_links.parquet
 │   ├── analyse/
@@ -150,9 +152,9 @@ womblex/
 │   │   ├── entity_links_output.py # *.entity_links.parquet schema + IO (mention grain; doc grain derived on read)
 │   │   ├── layout_output.py # *.layout_regions.parquet schema + IO, LayoutFingerprint and its footer keys
 │   │   ├── money_output.py  # *.money_spans.parquet (decimal128 values) + *.money_columns.parquet schemas + IO
+│   │   ├── stats_output.py  # *.stat_spans.parquet schema + IO; footer names the vocabulary digest
 │   │   ├── provenance_output.py  # *.provenance.parquet sidecar + manifest for pre-extracted-record corpora
 │   │   ├── ground_truth_output.py  # Ground-truth *.meta.json sidecar: schema, validation, unit-id, IO (JSON, not parquet)
-│   │   ├── stats_output.py  # *.stat_spans.parquet schema + IO; footer names the vocabulary digest
 │   │   ├── source_provenance.py  # Ingest root + source relpath, and their womblex.* Parquet footer keys
 │   │   ├── source_resolver.py    # SourceResolver — resolve a published row's source_hash back to its source file
 │   │   ├── egress_output.py      # source_index.parquet schema + IO for the egress bundle (self-contained)
