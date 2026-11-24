@@ -49,7 +49,7 @@ dependencies = [
     # The PDF backend (ingest/pdf/_pdfium_doc.py). pdfplumber is pinned exactly:
     # its TableFinder is the table engine and its output moves with the release.
     "pypdfium2>=4.30",
-    "pdfplumber==0.11.10",
+    "pdfplumber==0.11.11",
     "pillow>=10.0",
     "rapidocr-onnxruntime>=1.4",
     "onnxruntime>=1.20",
